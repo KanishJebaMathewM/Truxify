@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
-import '../widgets/map_placeholder.dart';
 
 class LiveTrackingScreen extends StatefulWidget {
   const LiveTrackingScreen({super.key, required this.orderId});
@@ -170,6 +172,45 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
     );
   }
 
+  static const LatLng _pickupPoint = LatLng(21.1702, 72.8311);
+  static const LatLng _dropPoint = LatLng(26.9124, 75.7873);
+  static const List<double> _truckOffsets = <double>[0.44, 0.31];
+
+  LatLng _interpolatePoint(double t) {
+    return LatLng(
+      _pickupPoint.latitude + ((_dropPoint.latitude - _pickupPoint.latitude) * t),
+      _pickupPoint.longitude + ((_dropPoint.longitude - _pickupPoint.longitude) * t),
+    );
+  }
+
+  List<Marker> _buildTruckMarkers(double animationProgress) {
+    return List<Marker>.generate(mockLiveTrackers.length, (index) {
+      final offset = _truckOffsets[index % _truckOffsets.length];
+      final progress = (offset + (animationProgress * 0.08)).clamp(0.05, 0.95);
+      final point = _interpolatePoint(progress);
+      final isSelected = index == _selectedTruckIndex;
+
+      return Marker(
+        point: point,
+        width: 54,
+        height: 54,
+        child: Container(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isSelected ? FreightFairColors.accentDark : Colors.white,
+            border: Border.all(color: Colors.white, width: 2),
+            boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 8, offset: Offset(0, 3))],
+          ),
+          child: Icon(
+            Icons.local_shipping_rounded,
+            color: isSelected ? Colors.white : FreightFairColors.accentDark,
+            size: 26,
+          ),
+        ),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final truck = mockLiveTrackers[_selectedTruckIndex];
@@ -181,11 +222,46 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
             child: AnimatedBuilder(
               animation: _truckController,
               builder: (context, child) {
-                return MapPlaceholder(
-                  progress: _truckController.value,
-                  pickup: 'Surat',
-                  drop: 'Jaipur',
-                  currentLocation: truck.location,
+                return FlutterMap(
+                  options: const MapOptions(
+                    initialCenter: LatLng(24.25, 74.40),
+                    initialZoom: 6.2,
+                    minZoom: 5,
+                    maxZoom: 16,
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      tileProvider: CancellableNetworkTileProvider(),
+                      userAgentPackageName: 'com.freightfair.customer',
+                    ),
+                    PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: const [_pickupPoint, _dropPoint],
+                          strokeWidth: 4,
+                          color: FreightFairColors.accentDark,
+                        ),
+                      ],
+                    ),
+                    MarkerLayer(
+                      markers: [
+                        const Marker(
+                          point: _pickupPoint,
+                          width: 30,
+                          height: 30,
+                          child: Icon(Icons.trip_origin_rounded, color: Colors.blue, size: 22),
+                        ),
+                        const Marker(
+                          point: _dropPoint,
+                          width: 34,
+                          height: 34,
+                          child: Icon(Icons.place_rounded, color: Colors.redAccent, size: 26),
+                        ),
+                        ..._buildTruckMarkers(_truckController.value),
+                      ],
+                    ),
+                  ],
                 );
               },
             ),

@@ -2,7 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
+import 'about_screen.dart';
+import 'edit_profile_screen.dart';
+import 'help_support_screen.dart';
+import 'language_screen.dart';
 import 'login_screen.dart';
+import 'my_documents_screen.dart';
+import 'payment_methods_screen.dart';
+import 'saved_addresses_screen.dart';
 
 class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
@@ -10,10 +17,6 @@ class ProfileScreen extends StatelessWidget {
   static const _profileName = 'Karthik Murugan';
   static const _companyName = 'Sri Murugan Textiles';
   static const _phoneNumber = '+91 98765 43210';
-
-  void _showComingSoon(BuildContext context, String title) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$title coming soon')));
-  }
 
   void _logout(BuildContext context) {
     Navigator.of(context).pushAndRemoveUntil(
@@ -29,75 +32,74 @@ class ProfileScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
-              decoration: const BoxDecoration(
-                color: FreightFairColors.accent,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 72,
-                    height: 72,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 3),
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text(
-                      'KM',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w500,
-                        color: FreightFairColors.accent,
-                      ),
-                    ),
+            Stack(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
+                  decoration: const BoxDecoration(
+                    color: FreightFairColors.accent,
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    _profileName,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
                           color: Colors.white,
-                          fontWeight: FontWeight.w500,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 3),
                         ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _companyName,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.75),
-                          fontSize: 13,
+                        alignment: Alignment.center,
+                        child: const Text(
+                          'KM',
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w500,
+                            color: FreightFairColors.accent,
+                          ),
                         ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        _profileName,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _companyName,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.75),
+                              fontSize: 13,
+                            ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _phoneNumber,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.white.withValues(alpha: 0.6),
+                              fontSize: 12,
+                            ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _phoneNumber,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.white.withValues(alpha: 0.6),
-                          fontSize: 12,
-                        ),
+                ),
+                Positioned(
+                  top: 20,
+                  right: 20,
+                  child: IconButton(
+                    onPressed: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const EditProfileScreen())),
+                    icon: const Icon(Icons.edit_rounded, color: Colors.white, size: 24),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    splashRadius: 20,
                   ),
-                  const SizedBox(height: 14),
-                  OutlinedButton.icon(
-                    onPressed: () => _showComingSoon(context, 'Edit Profile'),
-                    icon: const Icon(Icons.edit_rounded, size: 16),
-                    label: const Text('Edit Profile'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: BorderSide(color: Colors.white.withValues(alpha: 0.4)),
-                      backgroundColor: Colors.white.withValues(alpha: 0.15),
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
-                      minimumSize: const Size(0, 0),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                      textStyle: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w500, fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
             Transform.translate(
               offset: const Offset(0, -18),
@@ -116,18 +118,18 @@ class ProfileScreen extends StatelessWidget {
                   _MenuItem(
                     icon: Icons.credit_card_rounded,
                     label: 'Payment Methods',
-                    onTap: () => _showComingSoon(context, 'Payment Methods'),
+                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const PaymentMethodsScreen())),
                   ),
                   _MenuItem(
                     icon: Icons.description_rounded,
                     label: 'My Documents',
-                    onTap: () => _showComingSoon(context, 'My Documents'),
+                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const MyDocumentsScreen())),
                   ),
                   _MenuItem(
                     icon: Icons.location_on_rounded,
                     label: 'Saved Addresses',
                     showDivider: false,
-                    onTap: () => _showComingSoon(context, 'Saved Addresses'),
+                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const SavedAddressesScreen())),
                   ),
                 ],
               ),
@@ -143,18 +145,18 @@ class ProfileScreen extends StatelessWidget {
                     icon: Icons.language_rounded,
                     label: 'Language',
                     trailing: 'English',
-                    onTap: () => _showComingSoon(context, 'Language'),
+                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const LanguageScreen())),
                   ),
                   _MenuItem(
                     icon: Icons.help_outline_rounded,
                     label: 'Help & Support',
-                    onTap: () => _showComingSoon(context, 'Help & Support'),
+                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const HelpSupportScreen())),
                   ),
                   _MenuItem(
                     icon: Icons.info_outline_rounded,
-                    label: 'About Truxify',
+                    label: 'About Truckify',
                     showDivider: false,
-                    onTap: () => _showComingSoon(context, 'About Truxify'),
+                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const AboutScreen())),
                   ),
                 ],
               ),

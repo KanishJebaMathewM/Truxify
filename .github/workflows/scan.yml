@@ -31,7 +31,7 @@ jobs:
       - name: Install Dependencies
         run: flutter pub get
 
-      # ── 3. Flutter analyze (catches real errors) ──────────────────────────
+      # ── 3. Flutter analyze ────────────────────────────────────────────────
       - name: Run Flutter Analyze
         run: flutter analyze 2>&1 | tee flutter_analyze.txt || true
 
@@ -73,13 +73,42 @@ jobs:
           echo "### FILE: pubspec.yaml" >> full_report.txt
           cat pubspec.yaml >> full_report.txt
 
+          # Truncate safely at 55000 bytes
           head -c 55000 full_report.txt > full_report_safe.txt
           mv full_report_safe.txt full_report.txt
 
           echo "Report size: $(wc -c < full_report.txt) bytes"
           echo "Dart files: $(grep -c '### FILE:' full_report.txt || echo 0)"
 
-      # ── 5. Try Gemini first, fall back to Groq ────────────────────────────
+      # ── 5. Ensure required labels exist ───────────────────────────────────
+      - name: Ensure Labels Exist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = [
+              { name: 'flutter-ai-analysis', color: '0075ca', description: 'Flagged by Flutter AI scanner' },
+              { name: 'ai-generated',        color: 'e4e669', description: 'Created by AI analysis'       },
+              { name: 'critical',            color: 'd73a4a', description: 'Critical severity'            },
+              { name: 'high',                color: 'e99695', description: 'High severity'                },
+              { name: 'medium',              color: 'f9d0c4', description: 'Medium severity'              },
+              { name: 'low',                 color: 'cfd3d7', description: 'Low severity'                 },
+            ];
+            for (const label of labels) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  ...label,
+                });
+                console.log(`Created label: ${label.name}`);
+              } catch (err) {
+                // 422 = label already exists — safe to ignore
+                if (err.status !== 422) throw err;
+                console.log(`Label already exists: ${label.name}`);
+              }
+            }
+
+      # ── 6. Try Gemini first, fall back to Groq ────────────────────────────
       - name: AI Analysis
         id: ai_analysis
         env:
@@ -133,10 +162,10 @@ jobs:
             -d "$GEMINI_PAYLOAD")
 
           if [ "$GEMINI_STATUS" = "200" ]; then
-            AI_TEXT=$(cat gemini_response.json | jq -r '.candidates[0].content.parts[0].text // ""')
+            AI_TEXT=$(jq -r '.candidates[0].content.parts[0].text // ""' gemini_response.json)
             if [ -n "$AI_TEXT" ]; then
               echo "$AI_TEXT" > ai_analysis.txt
-              echo "AI_PROVIDER=Gemini 2.5 Flash" >> $GITHUB_ENV
+              echo "AI_PROVIDER=Gemini 2.5 Flash" >> "$GITHUB_ENV"
               echo "✅ Gemini succeeded"
               exit 0
             fi
@@ -160,24 +189,27 @@ jobs:
             -d "$GROQ_PAYLOAD")
 
           if [ "$GROQ_STATUS" = "200" ]; then
-            AI_TEXT=$(cat groq_response.json | jq -r '.choices[0].message.content // ""')
+            AI_TEXT=$(jq -r '.choices[0].message.content // ""' groq_response.json)
             if [ -n "$AI_TEXT" ]; then
               echo "$AI_TEXT" > ai_analysis.txt
-              echo "AI_PROVIDER=Groq (Llama 3.3 70B)" >> $GITHUB_ENV
+              echo "AI_PROVIDER=Groq (Llama 3.3 70B)" >> "$GITHUB_ENV"
               echo "✅ Groq fallback succeeded"
               exit 0
             fi
           fi
 
           echo "Both Gemini and Groq failed"
-          echo "API_FAILED=true" >> $GITHUB_ENV
+          echo "API_FAILED=true" >> "$GITHUB_ENV"
 
-      # ── 6. Create/update GitHub issue ────────────────────────────────────
-      - name: Create GitHub Issue
+      # ── 7. Create individual GitHub issues ───────────────────────────────
+      - name: Create Individual GitHub Issues
         if: env.API_FAILED != 'true'
         uses: actions/github-script@v7
         env:
           AI_PROVIDER: ${{ env.AI_PROVIDER }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
         with:
           script: |
             const fs = require('fs');
@@ -188,104 +220,152 @@ jobs:
             }
 
             const analysisText = fs.readFileSync('ai_analysis.txt', 'utf8');
-            const issueBlocks = [...analysisText.matchAll(/ISSUE_START([\s\S]*?)ISSUE_END/g)];
-            const summaryMatch = analysisText.match(/SUMMARY_START([\s\S]*?)SUMMARY_END/);
-            const summary = summaryMatch ? summaryMatch[1].trim() : 'No summary generated.';
-            const provider = process.env.AI_PROVIDER || 'AI';
+            const issueBlocks  = [...analysisText.matchAll(/ISSUE_START([\s\S]*?)ISSUE_END/g)];
+            const provider     = process.env.AI_PROVIDER  || 'AI';
+            const commitSha    = process.env.COMMIT_SHA   || 'unknown';
+            const repo         = process.env.REPO         || '';
+            const runId        = process.env.RUN_ID       || '';
 
-            // No issues found — auto close any open issue
+            // ── No issues found: auto-close any open ones ─────────────────
             if (issueBlocks.length === 0) {
-              console.log('No issues found.');
+              console.log('No issues found — closing any open AI issues.');
               const existing = await github.rest.issues.listForRepo({
-                owner: context.repo.owner, repo: context.repo.repo,
-                state: 'open', labels: 'flutter-ai-analysis'
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                state: 'open',
+                labels: 'flutter-ai-analysis',
+                per_page: 100,
               });
               for (const issue of existing.data) {
                 await github.rest.issues.createComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
                   issue_number: issue.number,
-                  body: `✅ Re-analysis on \`${{ github.sha }}\` found **no issues**. Closing automatically.\n\n_Analyzed by ${provider}_`
+                  body: `✅ Fixed and verified clean on \`${commitSha}\`. Closing automatically.\n\n_Scanned by ${provider}_`,
                 });
                 await github.rest.issues.update({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  issue_number: issue.number, state: 'closed'
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed',
                 });
               }
               return;
             }
 
-            // Parse all issues
             const sevEmoji = { critical: '🔴', high: '🟠', medium: '🟡', low: '🔵' };
-            const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+
+            // ── Parse all issues from AI response ─────────────────────────
             const parsed = issueBlocks.map(block => {
-              const t = block[1];
-              const get = k => { const m = t.match(new RegExp(`${k}:\\s*(.+)`)); return m ? m[1].trim() : 'Unknown'; };
+              const t   = block[1];
+              const get = k => {
+                const m = t.match(new RegExp(`${k}:\\s*(.+)`));
+                return m ? m[1].trim() : 'Unknown';
+              };
               const sev = get('severity').toLowerCase();
-              if (sev in counts) counts[sev]++;
               return {
-                title: get('title'), severity: sev,
-                category: get('category'), file: get('file'),
-                description: get('description'), suggestion: get('suggestion')
+                title:       get('title'),
+                severity:    sev,
+                category:    get('category'),
+                file:        get('file'),
+                description: get('description'),
+                suggestion:  get('suggestion'),
               };
             });
 
-            // Build issue body
-            let body = `## 🤖 Flutter AI Code Analysis Report\n\n`;
-            body += `> ⚠️ **Note:** AI-generated suggestions. Review each one before acting — AI can occasionally flag false positives.\n\n`;
-            body += `| | |\n|---|---|\n`;
-            body += `| **Commit** | \`${{ github.sha }}\` |\n`;
-            body += `| **Branch** | \`${{ github.ref_name }}\` |\n`;
-            body += `| **Analyzed by** | ${provider} |\n`;
-            body += `| **Workflow run** | [View logs](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}) |\n\n`;
-            body += `---\n\n### 📋 Overall Summary\n\n${summary}\n\n---\n\n`;
-            body += `### 📊 Issue Breakdown\n\n`;
-            body += `| Severity | Count |\n|---|---|\n`;
-            body += `| 🔴 Critical | ${counts.critical} |\n`;
-            body += `| 🟠 High | ${counts.high} |\n`;
-            body += `| 🟡 Medium | ${counts.medium} |\n`;
-            body += `| 🔵 Low | ${counts.low} |\n`;
-            body += `| **Total** | **${parsed.length}** |\n\n---\n\n`;
-            body += `### 🔍 Detailed Issues\n\n`;
+            // ── Fetch open AI issues to check for duplicates ──────────────
+            const openIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+              labels: 'flutter-ai-analysis',
+              per_page: 100,
+            });
+            const openTitles = openIssues.data.map(i => i.title.toLowerCase());
 
-            for (const issue of parsed) {
-              const emoji = sevEmoji[issue.severity] || '⚪';
-              body += `<details>\n`;
-              body += `<summary>${emoji} <strong>[${issue.severity.toUpperCase()}] ${issue.title}</strong> &nbsp;·&nbsp; <code>${issue.file}</code></summary>\n\n`;
-              body += `**Category:** \`${issue.category}\`\n\n`;
-              body += `**Problem:**\n${issue.description}\n\n`;
-              body += `**Suggested fix:**\n${issue.suggestion}\n\n`;
-              body += `</details>\n\n`;
-            }
-
-            body += `---\n_Report generated: ${new Date().toUTCString()}_`;
-
-            // Check for existing open issue
-            const existing = await github.rest.issues.listForRepo({
-              owner: context.repo.owner, repo: context.repo.repo,
-              state: 'open', labels: 'flutter-ai-analysis'
+            // ── Auto-close issues no longer detected ──────────────────────
+            const newTitles = parsed.map(p => {
+              const emoji = sevEmoji[p.severity] || '⚪';
+              return `${emoji} [${p.severity.toUpperCase()}] ${p.title}`.toLowerCase();
             });
 
-            if (existing.data.length > 0) {
-              // Update existing — add comment
-              const num = existing.data[0].number;
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: num,
-                body: `### 🔄 New scan on \`${{ github.sha }}\`\n\n${body}`
-              });
-              await github.rest.issues.update({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: num,
-                title: `🤖 Flutter AI Analysis: ${parsed.length} issue(s) found`
-              });
-              console.log(`Updated existing issue #${num}`);
-            } else {
-              // Create fresh issue
-              await github.rest.issues.create({
-                owner: context.repo.owner, repo: context.repo.repo,
-                title: `🤖 Flutter AI Analysis: ${parsed.length} issue(s) found`,
-                body: body,
-                labels: ['flutter-ai-analysis', 'ai-generated']
-              });
-              console.log('Created new issue');
+            for (const openIssue of openIssues.data) {
+              if (!newTitles.includes(openIssue.title.toLowerCase())) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  issue_number: openIssue.number,
+                  body: `✅ This issue was not detected in the latest scan on \`${commitSha}\`. Closing automatically.\n\n_Scanned by ${provider}_`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo:  context.repo.repo,
+                  issue_number: openIssue.number,
+                  state: 'closed',
+                });
+                console.log(`Auto-closed resolved issue: ${openIssue.title}`);
+              }
             }
+
+            // ── Create new issues (skip duplicates) ───────────────────────
+            let created = 0;
+            let skipped = 0;
+
+            for (const issue of parsed) {
+              const emoji      = sevEmoji[issue.severity] || '⚪';
+              const issueTitle = `${emoji} [${issue.severity.toUpperCase()}] ${issue.title}`;
+
+              if (openTitles.includes(issueTitle.toLowerCase())) {
+                console.log(`Skipping duplicate: ${issueTitle}`);
+                skipped++;
+                continue;
+              }
+
+              const body = [
+                `## ${emoji} ${issue.title}`,
+                ``,
+                `> ⚠️ AI-generated suggestion — verify before acting.`,
+                ``,
+                `| | |`,
+                `|---|---|`,
+                `| **Severity** | \`${issue.severity.toUpperCase()}\` |`,
+                `| **Category** | \`${issue.category}\` |`,
+                `| **File** | \`${issue.file}\` |`,
+                `| **Commit** | \`${commitSha}\` |`,
+                `| **Analyzed by** | ${provider} |`,
+                `| **Workflow run** | [View logs](https://github.com/${repo}/actions/runs/${runId}) |`,
+                ``,
+                `---`,
+                ``,
+                `### 🐛 Problem`,
+                issue.description,
+                ``,
+                `---`,
+                ``,
+                `### 💡 Suggested Fix`,
+                issue.suggestion,
+                ``,
+                `---`,
+                ``,
+                `### ✅ How to close this`,
+                `Fix the problem above, push to main, and this issue will be **auto-closed** by the next scan if the problem is gone.`,
+                ``,
+                `_Generated: ${new Date().toUTCString()}_`,
+              ].join('\n');
+
+              await github.rest.issues.create({
+                owner:  context.repo.owner,
+                repo:   context.repo.repo,
+                title:  issueTitle,
+                body:   body,
+                labels: ['flutter-ai-analysis', 'ai-generated', issue.severity],
+              });
+
+              created++;
+              console.log(`Created: ${issueTitle}`);
+
+              // Respect GitHub API rate limit
+              await new Promise(r => setTimeout(r, 500));
+            }
+
+            console.log(`Done — Created: ${created}, Skipped (duplicates): ${skipped}`);

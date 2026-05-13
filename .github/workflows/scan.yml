@@ -139,7 +139,14 @@ jobs:
           file: <file path or project-wide>
           description: <specific evidence you can see in the code>
           suggestion: <concrete actionable fix>
+          extra_label: <choose ONLY one from: bug|enhancement|good first issue|help wanted>
           ISSUE_END
+
+          Guidelines for extra_label:
+          - bug: something is broken, incorrect behavior, crash risk, or security hole
+          - enhancement: improvement to existing code, performance, or structure
+          - good first issue: simple fix, easy for a newcomer (e.g. adding const, renaming)
+          - help wanted: complex refactor or architectural change needing significant effort
 
           After all issues add:
           SUMMARY_START
@@ -226,6 +233,9 @@ jobs:
             const repo         = process.env.REPO         || '';
             const runId        = process.env.RUN_ID       || '';
 
+            // Valid extra labels that already exist in the repo
+            const validExtraLabels = ['bug', 'enhancement', 'good first issue', 'help wanted'];
+
             // ── No issues found: auto-close any open ones ─────────────────
             if (issueBlocks.length === 0) {
               console.log('No issues found — closing any open AI issues.');
@@ -262,7 +272,9 @@ jobs:
                 const m = t.match(new RegExp(`${k}:\\s*(.+)`));
                 return m ? m[1].trim() : 'Unknown';
               };
-              const sev = get('severity').toLowerCase();
+              const sev        = get('severity').toLowerCase();
+              const extraRaw   = get('extra_label').toLowerCase();
+              const extraLabel = validExtraLabels.includes(extraRaw) ? extraRaw : null;
               return {
                 title:       get('title'),
                 severity:    sev,
@@ -270,6 +282,7 @@ jobs:
                 file:        get('file'),
                 description: get('description'),
                 suggestion:  get('suggestion'),
+                extraLabel,
               };
             });
 
@@ -284,10 +297,7 @@ jobs:
             const openTitles = openIssues.data.map(i => i.title.toLowerCase());
 
             // ── Auto-close issues no longer detected ──────────────────────
-            const newTitles = parsed.map(p => {
-              const emoji = sevEmoji[p.severity] || '⚪';
-              return `${emoji} [${p.severity.toUpperCase()}] ${p.title}`.toLowerCase();
-            });
+            const newTitles = parsed.map(p => p.title.toLowerCase());
 
             for (const openIssue of openIssues.data) {
               if (!newTitles.includes(openIssue.title.toLowerCase())) {
@@ -313,13 +323,17 @@ jobs:
 
             for (const issue of parsed) {
               const emoji      = sevEmoji[issue.severity] || '⚪';
-              const issueTitle = `${emoji} [${issue.severity.toUpperCase()}] ${issue.title}`;
+              const issueTitle = issue.title;
 
               if (openTitles.includes(issueTitle.toLowerCase())) {
                 console.log(`Skipping duplicate: ${issueTitle}`);
                 skipped++;
                 continue;
               }
+
+              // Base labels + extra label if AI provided a valid one
+              const labels = ['flutter-ai-analysis', 'ai-generated', issue.severity];
+              if (issue.extraLabel) labels.push(issue.extraLabel);
 
               const body = [
                 `## ${emoji} ${issue.title}`,
@@ -358,11 +372,11 @@ jobs:
                 repo:   context.repo.repo,
                 title:  issueTitle,
                 body:   body,
-                labels: ['flutter-ai-analysis', 'ai-generated', issue.severity],
+                labels: labels,
               });
 
               created++;
-              console.log(`Created: ${issueTitle}`);
+              console.log(`Created: ${issueTitle} [labels: ${labels.join(', ')}]`);
 
               // Respect GitHub API rate limit
               await new Promise(r => setTimeout(r, 500));

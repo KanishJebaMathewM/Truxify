@@ -118,19 +118,19 @@ class AboutScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            _ContactRow(
+            const _ContactRow(
               icon: Icons.email_rounded,
               label: 'Email',
               value: 'support@truckify.com',
             ),
             const SizedBox(height: 12),
-            _ContactRow(
+            const _ContactRow(
               icon: Icons.phone_rounded,
               label: 'Phone',
               value: '+91 1800-TRUCK-1',
             ),
             const SizedBox(height: 12),
-            _ContactRow(
+            const _ContactRow(
               icon: Icons.public_rounded,
               label: 'Website',
               value: 'www.truckify.com',

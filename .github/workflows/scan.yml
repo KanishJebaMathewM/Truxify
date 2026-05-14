@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 10
 
     permissions:
-      contents: read
+      contents: write
       issues: write
 
     steps:
@@ -80,6 +80,35 @@ jobs:
           echo "Report size: $(wc -c < full_report.txt) bytes"
           echo "Dart files: $(grep -c '### FILE:' full_report.txt || echo 0)"
 
+      # ── 4b. Check if source has changed since last scan ──────────────────
+      - name: Check Source Hash
+        id: source_hash
+        run: |
+          # Hash all dart files + pubspec to detect real changes
+          HASH=$(
+            (find lib test -name "*.dart" \
+              ! -name "*.g.dart" ! -name "*.freezed.dart" \
+              ! -name "*.gen.dart" ! -name "*.mocks.dart" \
+              2>/dev/null | sort | xargs cat
+             cat pubspec.yaml
+            ) | sha256sum | cut -d' ' -f1
+          )
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "Source hash: $HASH"
+
+          # Compare with last saved hash
+          if [ -f .github/last_scan_hash.txt ]; then
+            LAST=$(cat .github/last_scan_hash.txt)
+            if [ "$HASH" = "$LAST" ]; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              echo "⏭️ Source unchanged since last scan — skipping AI analysis"
+            else
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
       # ── 5. Ensure required labels exist ───────────────────────────────────
       - name: Ensure Labels Exist
         uses: actions/github-script@v7
@@ -111,6 +140,7 @@ jobs:
       # ── 6. Try Gemini first, fall back to Groq ────────────────────────────
       - name: AI Analysis
         id: ai_analysis
+        if: steps.source_hash.outputs.changed == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -132,8 +162,23 @@ jobs:
 
           For EACH real issue found, use this EXACT format (no exceptions):
 
+          For the title field, you MUST follow this exact format:
+          [CATEGORY_CODE:FILE_SLUG] Short description
+
+          Where:
+          - CATEGORY_CODE is exactly one of: CQ, ST, AR, NA, PE, SE, MA
+            (Code Quality, Structure, Architecture, Naming, Performance, Security, Maintainability)
+          - FILE_SLUG is the filename only, no path, no extension (e.g. main, home_screen, auth_service)
+            Use "project" if the issue is project-wide
+          - Short description is 3-5 words max, no punctuation
+
+          Examples:
+          [PE:home_screen] Missing const constructors
+          [SE:main] Hardcoded API key
+          [CQ:project] Dead code in utils
+
           ISSUE_START
-          title: <short clear title>
+          title: [CATEGORY_CODE:FILE_SLUG] Short description (3-5 words, no punctuation)
           severity: critical|high|medium|low
           category: <Code Quality|Structure|Architecture|Naming|Performance|Security|Maintainability>
           file: <file path or project-wide>
@@ -210,7 +255,7 @@ jobs:
 
       # ── 7. Create individual GitHub issues ───────────────────────────────
       - name: Create Individual GitHub Issues
-        if: env.API_FAILED != 'true'
+        if: env.API_FAILED != 'true' && steps.source_hash.outputs.changed == 'true'
         uses: actions/github-script@v7
         env:
           AI_PROVIDER: ${{ env.AI_PROVIDER }}
@@ -238,13 +283,12 @@ jobs:
 
             // ── Build a fingerprint from file + title ────────
             // Stable against AI category/severity drift
-            const makeFingerprint = (file, title) => {
-              const normalizedFile  = file.replace(/^\.\//, '').toLowerCase().trim();
-              const normalizedTitle = title.toLowerCase()
-                .replace(/[^a-z0-9\s]/g, '')   // strip punctuation
-                .replace(/\s+/g, ' ')          // collapse spaces
+            const makeFingerprint = (title) => {
+              const m = title.match(/\[([A-Z]{2}:[a-z0-9_]+)\]/);
+              return m ? m[1].toLowerCase() : title.toLowerCase()
+                .replace(/[^a-z0-9\s]/g, '')
+                .replace(/\s+/g, ' ')
                 .trim();
-              return `${normalizedFile}::${normalizedTitle}`;
             };
 
             // ── Extract fingerprint from an existing issue body ────────────
@@ -281,7 +325,7 @@ jobs:
                 description: get('description'),
                 suggestion:  get('suggestion'),
                 extraLabel,
-                fingerprint: makeFingerprint(file, get('title')),
+                fingerprint: makeFingerprint(get('title')),
               };
             });
 
@@ -377,3 +421,15 @@ jobs:
             }
 
             console.log(`Done — Created: ${created}, Skipped (already exists): ${skipped}`);
+
+      # ── 8. Save Source Hash ──────────────────────────────────────────────
+      - name: Save Source Hash
+        if: steps.source_hash.outputs.changed == 'true' && env.API_FAILED != 'true'
+        run: |
+          mkdir -p .github
+          echo "${{ steps.source_hash.outputs.hash }}" > .github/last_scan_hash.txt
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/last_scan_hash.txt
+          git commit -m "chore: update last scan hash [skip ci]" || echo "No changes to commit"
+          git push

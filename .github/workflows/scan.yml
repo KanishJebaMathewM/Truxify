@@ -236,10 +236,16 @@ jobs:
             // Valid extra labels that already exist in the repo
             const validExtraLabels = ['bug', 'enhancement', 'good first issue', 'help wanted'];
 
-            // ── Build a fingerprint from file + category + severity ────────
-            // Stable across AI title rephrasing
-            const makeFingerprint = (file, category, severity) =>
-              `${file}::${category}::${severity}`.toLowerCase().trim();
+            // ── Build a fingerprint from file + title ────────
+            // Stable against AI category/severity drift
+            const makeFingerprint = (file, title) => {
+              const normalizedFile  = file.replace(/^\.\//, '').toLowerCase().trim();
+              const normalizedTitle = title.toLowerCase()
+                .replace(/[^a-z0-9\s]/g, '')   // strip punctuation
+                .replace(/\s+/g, ' ')          // collapse spaces
+                .trim();
+              return `${normalizedFile}::${normalizedTitle}`;
+            };
 
             // ── Extract fingerprint from an existing issue body ────────────
             const extractFingerprint = body => {
@@ -275,40 +281,36 @@ jobs:
                 description: get('description'),
                 suggestion:  get('suggestion'),
                 extraLabel,
-                fingerprint: makeFingerprint(file, category, sev),
+                fingerprint: makeFingerprint(file, get('title')),
               };
             });
 
-            // ── Fetch all open AI issues ───────────────────────────────────
-            const openIssues = await github.rest.issues.listForRepo({
+            // ── Fetch all AI issues (open and closed) ──────────────────────
+            const allIssues = await github.paginate(github.rest.issues.listForRepo, {
               owner: context.repo.owner,
               repo:  context.repo.repo,
-              state: 'open',
+              state: 'all',
               labels: 'flutter-ai-analysis',
               per_page: 100,
             });
 
-            // ── Extract fingerprints from open issues ──────────────────────
-            // Each open issue has a hidden <!-- fp:... --> comment in its body
-            const openFingerprints = new Map(); // fingerprint -> issue
-            for (const issue of openIssues.data) {
+            // ── Extract fingerprints from existing issues ──────────────────
+            // Each AI issue has a hidden <!-- fp:... --> comment in its body
+            const existingFingerprints = new Set();
+            for (const issue of allIssues) {
               const fp = extractFingerprint(issue.body || '');
-              if (fp) openFingerprints.set(fp, issue);
+              if (fp) existingFingerprints.add(fp);
             }
 
-            // New scan fingerprints
-            const newFingerprints = new Set(parsed.map(p => p.fingerprint));
-
-
-
-            // ── Step 2: Create new issues, skip if fingerprint already open
+            // ── Step 2: Create new issues, skip if fingerprint already exists
             let created = 0;
             let skipped = 0;
 
             for (const issue of parsed) {
-              // Skip if an open issue with the same fingerprint already exists
-              if (openFingerprints.has(issue.fingerprint)) {
-                console.log(`Skipping — fingerprint already open: ${issue.fingerprint}`);
+              // Skip if an issue with the same fingerprint already exists (even if closed)
+              // or if we already created it in this run
+              if (existingFingerprints.has(issue.fingerprint)) {
+                console.log(`Skipping — fingerprint already exists: ${issue.fingerprint}`);
                 skipped++;
                 continue;
               }
@@ -363,6 +365,9 @@ jobs:
                 body:   body,
                 labels: labels,
               });
+              
+              // Add fingerprint to set to prevent duplicates in the same run
+              existingFingerprints.add(issue.fingerprint);
 
               created++;
               console.log(`Created: ${issueTitle} [fp: ${issue.fingerprint}] [labels: ${labels.join(', ')}]`);
@@ -371,4 +376,4 @@ jobs:
               await new Promise(r => setTimeout(r, 500));
             }
 
-            console.log(`Done — Created: ${created}, Skipped (already open): ${skipped}`);
+            console.log(`Done — Created: ${created}, Skipped (already exists): ${skipped}`);

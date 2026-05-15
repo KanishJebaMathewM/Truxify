@@ -414,7 +414,14 @@ jobs:
 
           echo "Both APIs failed"
           echo "API_FAILED=true" >> "$GITHUB_ENV"
-
+      # ── DEBUG (temporary) ────────────────────────────────────────────────
+      - name: Debug API Response
+        if: always()
+        run: |
+          echo "=== GEMINI RESPONSE ==="
+          cat gemini_response.json || echo "no gemini response file"
+          echo "=== GROQ RESPONSE ==="
+          cat groq_response.json || echo "no groq response file"
       # ── 8. Create GitHub issues ──────────────────────────────────────────
       - name: Create GitHub Issues
         if: >

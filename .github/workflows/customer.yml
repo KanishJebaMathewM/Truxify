@@ -9,9 +9,8 @@ on:
       - 'apps/customer/**'
   workflow_dispatch:
 
-# ── Prevent overlapping runs with driver workflow ────────────────────────────
 concurrency:
-  group: truxify-ai-analysis
+  group: truxify-ai-analysis-customer
   cancel-in-progress: false
 
 jobs:
@@ -35,44 +34,83 @@ jobs:
         with:
           channel: stable
 
-      - name: Install Customer App Dependencies
+      - name: Install Dependencies
         working-directory: apps/customer
         run: flutter pub get
 
       # ── 3. Flutter analyze ─────────────────────────────────────────────
-      - name: Analyze Customer App
+      - name: Flutter Analyze
         working-directory: apps/customer
         run: flutter analyze 2>&1 |
           tee "$GITHUB_WORKSPACE/customer_analyze.txt" || true
 
-      # ── 4. Collect customer files ──────────────────────────────────────
-      - name: Collect Customer App Files
+      # ── 4. Check source hash ───────────────────────────────────────────
+      - name: Check Source Hash
+        id: source_hash
+        working-directory: apps/customer
         run: |
-          echo "# Truxify — Customer App Analysis" > report.txt
+          HASH=$(
+            (
+              find lib -name "*.dart" \
+                ! -name "*.g.dart" \
+                ! -name "*.freezed.dart" \
+                ! -name "*.gen.dart" \
+                2>/dev/null | sort | xargs cat
+              cat pubspec.yaml 2>/dev/null || true
+            ) | sha256sum | cut -d' ' -f1
+          )
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "Source hash: $HASH"
+
+          HASH_FILE="$GITHUB_WORKSPACE/.github/last_scan_hash_customer.txt"
+          if [ -f "$HASH_FILE" ]; then
+            LAST=$(cat "$HASH_FILE")
+            if [ "$HASH" = "$LAST" ]; then
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+              echo "Customer app unchanged since last scan — skipping AI"
+            else
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+              echo "Customer app changed — will run AI analysis"
+            fi
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "No previous hash found — first scan"
+          fi
+
+      # ── 5. Collect files ───────────────────────────────────────────────
+      - name: Collect Customer App Files
+        if: steps.source_hash.outputs.changed == 'true'
+        run: |
+          echo "# Truxify — Customer App Full Analysis" > report.txt
+          echo "Generated: $(date -u)" >> report.txt
           echo "" >> report.txt
 
+          # Flutter analyze output
           echo "## Flutter Analyze Output" >> report.txt
           cat customer_analyze.txt >> report.txt
           echo "" >> report.txt
 
-          echo "## Project Structure (customer)" >> report.txt
-          find apps/customer \
+          # pubspec
+          echo "## pubspec.yaml" >> report.txt
+          echo '```yaml' >> report.txt
+          cat apps/customer/pubspec.yaml >> report.txt
+          echo '```' >> report.txt
+          echo "" >> report.txt
+
+          # Project structure
+          echo "## Project Structure" >> report.txt
+          echo '```' >> report.txt
+          find apps/customer/lib \
             -not -path '*/build/*' \
             -not -path '*/.dart_tool/*' \
-            -not -path '*/android/*' \
-            -not -path '*/ios/*' \
-            -not -path '*/linux/*' \
-            -not -path '*/windows/*' \
-            -not -path '*/macos/*' \
             | sort >> report.txt
+          echo '```' >> report.txt
           echo "" >> report.txt
 
-          echo "## pubspec.yaml" >> report.txt
-          cat apps/customer/pubspec.yaml >> report.txt
-          echo "" >> report.txt
-
-          echo "## Dart Files" >> report.txt
-          find apps/customer/lib apps/customer/test \
+          # Every dart file — full content
+          echo "## Dart Source Files" >> report.txt
+          DART_COUNT=0
+          find apps/customer/lib \
             -name "*.dart" \
             ! -name "*.g.dart" \
             ! -name "*.freezed.dart" \
@@ -85,43 +123,23 @@ jobs:
               echo '```' >> report.txt
           done
 
-          # ── Cap at 28000 bytes to stay within Groq free tier ──────────
-          head -c 28000 report.txt > report_safe.txt
+          # Debug stats
+          TOTAL=$(find apps/customer/lib -name "*.dart" \
+            ! -name "*.g.dart" 2>/dev/null | wc -l)
+          SIZE=$(wc -c < report.txt)
+          echo "" >> report.txt
+          echo "## Scan Stats" >> report.txt
+          echo "Total dart files: $TOTAL" >> report.txt
+          echo "Report size: $SIZE bytes" >> report.txt
+
+          echo "=== COLLECTION COMPLETE ==="
+          echo "Dart files found: $TOTAL"
+          echo "Report size: $SIZE bytes"
+
+          # Cap at 55000 bytes for API limits
+          head -c 55000 report.txt > report_safe.txt
           mv report_safe.txt report.txt
-
-          echo "Report size: $(wc -c < report.txt) bytes"
-          echo "Dart files: $(grep -c '### FILE:' report.txt || echo 0)"
-
-      # ── 5. Check source hash ───────────────────────────────────────────
-      - name: Check Source Hash
-        id: source_hash
-        run: |
-          HASH=$(
-            (
-              find apps/customer/lib apps/customer/test \
-                -name "*.dart" \
-                ! -name "*.g.dart" \
-                ! -name "*.freezed.dart" \
-                ! -name "*.gen.dart" \
-                2>/dev/null | sort | xargs cat
-              cat apps/customer/pubspec.yaml 2>/dev/null || true
-            ) | sha256sum | cut -d' ' -f1
-          )
-          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
-          echo "Source hash: $HASH"
-
-          HASH_FILE=".github/last_scan_hash_customer.txt"
-          if [ -f "$HASH_FILE" ]; then
-            LAST=$(cat "$HASH_FILE")
-            if [ "$HASH" = "$LAST" ]; then
-              echo "changed=false" >> "$GITHUB_OUTPUT"
-              echo "Customer app unchanged — skipping"
-            else
-              echo "changed=true" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
+          echo "Final report size: $(wc -c < report.txt) bytes"
 
       # ── 6. Ensure labels exist ─────────────────────────────────────────
       - name: Ensure Labels Exist
@@ -130,7 +148,7 @@ jobs:
           script: |
             const labels = [
               { name: 'flutter-ai-analysis', color: '0075ca',
-                description: 'Flagged by Flutter AI scanner' },
+                description: 'Flagged by AI code scanner' },
               { name: 'ai-generated',        color: 'e4e669',
                 description: 'Created by AI analysis' },
               { name: 'critical',            color: 'd73a4a',
@@ -144,7 +162,7 @@ jobs:
               { name: 'flutter',             color: '54C5F8',
                 description: 'Flutter related' },
               { name: 'customer-app',        color: '0052cc',
-                description: 'Customer app' },
+                description: 'Customer app specific' },
             ];
             for (const label of labels) {
               try {
@@ -153,10 +171,10 @@ jobs:
                   repo:  context.repo.repo,
                   ...label,
                 });
-                console.log(`Created: ${label.name}`);
+                console.log(`Created label: ${label.name}`);
               } catch (err) {
                 if (err.status !== 422) throw err;
-                console.log(`Exists: ${label.name}`);
+                console.log(`Label already exists: ${label.name}`);
               }
             }
 
@@ -166,61 +184,111 @@ jobs:
         if: steps.source_hash.outputs.changed == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GROQ_API_KEY:   ${{ secrets.GROQ_API_KEY }}
         run: |
           PROJECT_DATA=$(cat report.txt)
 
-          PROMPT="You are a senior Flutter engineer auditing
-          the Truxify customer Flutter app (apps/customer).
+          PROMPT="You are a senior Flutter engineer doing
+          a thorough file-by-file code review of the
+          Truxify customer Flutter web app (apps/customer).
 
-          This is a freight marketplace customer-facing app.
-          Analyze ONLY the files provided. Do NOT invent
-          problems that are not visible in the code.
+          This app is a freight marketplace customer interface
+          built with Flutter web, DM Sans font, peacock green
+          theme (#00897B), and mock data only (no backend yet).
 
-          Review these areas:
-          1. Code Quality — dead code, hardcoded values,
-             missing null safety
-          2. Project Structure — folder organization,
-             feature separation
-          3. Architecture — broken patterns, tight coupling,
-             god widgets/classes
-          4. Naming — files not following Dart conventions
-          5. Performance — unnecessary rebuilds, missing
-             const constructors, heavy build() methods
-          6. Security — hardcoded secrets, insecure HTTP,
-             missing input validation
-          7. Maintainability — duplicated code, unclear
-             widget responsibilities
+          I am giving you the COMPLETE source code of every
+          file. Read each file carefully and find REAL
+          specific issues with file names and line numbers.
 
-          For EACH real issue use this EXACT format:
+          For EVERY dart file check ALL of the following:
+
+          PERFORMANCE:
+          - Widgets missing const constructors where all
+            parameters are compile-time constants
+          - setState() calls that rebuild more of the tree
+            than necessary — should use smaller StatefulWidgets
+          - Heavy build() methods over 100 lines that need
+            splitting into smaller widgets
+          - Missing keys on list items in ListView.builder
+
+          MEMORY LEAKS:
+          - TextEditingController not disposed in dispose()
+          - AnimationController not disposed in dispose()
+          - ScrollController not disposed in dispose()
+          - StreamSubscription not cancelled in dispose()
+          - FocusNode not disposed in dispose()
+
+          CODE QUALITY:
+          - Hardcoded color values like Color(0xFF00897B)
+            instead of using kPrimary from app_colors.dart
+          - Hardcoded strings that should be constants
+          - Magic numbers that should be named constants
+          - Dead code — variables declared but never used
+          - Commented out code blocks left in files
+          - print() statements left in production code
+
+          SAFETY:
+          - async functions missing try/catch error handling
+          - List or Map access without null or bounds check
+          - Navigator operations without null safety
+          - Missing mounted check after async gaps in widgets
+
+          STRUCTURE:
+          - Widget files over 200 lines that need splitting
+          - Logic mixed into UI widgets that belongs in
+            a separate service or helper class
+          - Duplicate code appearing in multiple files
+          - Import statements that are unused
+
+          NAMING:
+          - Files not following snake_case convention
+          - Classes not following PascalCase convention
+          - Private variables not starting with underscore
+            where they should be private
+
+          Report ONLY issues you can actually see in the
+          provided code. Do NOT invent issues.
+          Include exact file path and line number for every
+          issue where possible.
+
+          Use this EXACT format for each issue — no exceptions:
 
           ISSUE_START
-          title: [CODE:slug] Short description
+          title: [CODE:file_slug] Short description max 6 words
           severity: critical|high|medium|low
           category: <full category name>
-          file: <file path or project-wide>
-          layer: flutter
-          description: <specific evidence seen in the code>
-          suggestion: <concrete actionable fix>
+          file: <exact file path from root>
+          line: <line number or range, e.g. 45 or 45-67>
+          description: <exact description of what you see
+          in the code — quote the problematic code if short>
+          suggestion: <specific fix, include corrected code
+          snippet if helpful>
           extra_label: <bug|enhancement|good first issue|help wanted>
           ISSUE_END
 
-          CODE options:
-          CQ=Code Quality, ST=Structure, AR=Architecture,
-          NA=Naming, PE=Performance, SE=Security, MA=Maintainability
+          CODE must be exactly one of:
+          PE = Performance
+          ML = Memory Leak
+          CQ = Code Quality
+          SE = Security / Safety
+          ST = Structure
+          NA = Naming
+          MA = Maintainability
 
-          FILE_SLUG: filename only, no path, no extension.
-          Use 'project' if project-wide.
+          file_slug = filename only, no path, no extension.
+          Use 'project' only if truly project-wide.
 
-          After all issues add:
+          After ALL issues write:
           SUMMARY_START
-          <2-3 paragraph honest assessment of the customer
-          app. Be specific. Say clearly if it is well written.>
+          List every dart file reviewed and one line
+          saying whether it is clean or has issues.
+          Then write 2-3 sentences overall assessment.
           SUMMARY_END
 
-          Project data:
+          COMPLETE SOURCE CODE BELOW:
           $PROJECT_DATA"
 
+          # ── Try Gemini first ───────────────────────────────────────────
           echo "Trying Gemini 2.5 Flash..."
           GEMINI_PAYLOAD=$(jq -n --arg text "$PROMPT" \
             '{contents: [{parts: [{text: $text}]}]}')
@@ -232,28 +300,31 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$GEMINI_PAYLOAD")
 
-          echo "Gemini status: $GEMINI_STATUS"
+          echo "Gemini HTTP status: $GEMINI_STATUS"
 
           if [ "$GEMINI_STATUS" = "200" ]; then
             AI_TEXT=$(jq -r \
               '.candidates[0].content.parts[0].text // ""' \
               gemini_response.json)
-            if [ -n "$AI_TEXT" ]; then
+            if [ -n "$AI_TEXT" ] && [ "$AI_TEXT" != "null" ]; then
               echo "$AI_TEXT" > ai_analysis.txt
               echo "AI_PROVIDER=Gemini 2.5 Flash" >> "$GITHUB_ENV"
               echo "Gemini succeeded"
               exit 0
             fi
+            echo "Gemini returned empty response"
           fi
 
-          echo "Gemini failed (status: $GEMINI_STATUS), trying Groq..."
-          cat gemini_response.json
+          echo "Gemini failed — trying Groq..."
+          cat gemini_response.json | head -20
 
+          # ── Fallback to Groq ───────────────────────────────────────────
           GROQ_PAYLOAD=$(jq -n --arg text "$PROMPT" \
             '{
               model: "llama-3.3-70b-versatile",
               max_tokens: 4096,
-              messages: [{role:"user", content:$text}]
+              temperature: 0.1,
+              messages: [{role: "user", content: $text}]
             }')
 
           GROQ_STATUS=$(curl -s -w "%{http_code}" \
@@ -264,22 +335,23 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$GROQ_PAYLOAD")
 
-          echo "Groq status: $GROQ_STATUS"
+          echo "Groq HTTP status: $GROQ_STATUS"
 
           if [ "$GROQ_STATUS" = "200" ]; then
             AI_TEXT=$(jq -r \
               '.choices[0].message.content // ""' \
               groq_response.json)
-            if [ -n "$AI_TEXT" ]; then
+            if [ -n "$AI_TEXT" ] && [ "$AI_TEXT" != "null" ]; then
               echo "$AI_TEXT" > ai_analysis.txt
               echo "AI_PROVIDER=Groq (Llama 3.3 70B)" >> "$GITHUB_ENV"
               echo "Groq succeeded"
               exit 0
             fi
+            echo "Groq returned empty response"
           fi
 
           echo "Both APIs failed"
-          cat groq_response.json
+          cat groq_response.json | head -20
           echo "API_FAILED=true" >> "$GITHUB_ENV"
 
       # ── 8. Create GitHub Issues ────────────────────────────────────────
@@ -290,19 +362,22 @@ jobs:
         uses: actions/github-script@v7
         env:
           AI_PROVIDER: ${{ env.AI_PROVIDER }}
-          COMMIT_SHA: ${{ github.sha }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA:  ${{ github.sha }}
+          REPO:        ${{ github.repository }}
+          RUN_ID:      ${{ github.run_id }}
         with:
           script: |
             const fs = require('fs');
+
             if (!fs.existsSync('ai_analysis.txt')) {
-              console.log('No analysis file.');
+              console.log('No analysis file found — skipping.');
               return;
             }
 
             const analysisText =
               fs.readFileSync('ai_analysis.txt', 'utf8');
+
+            // Extract all issue blocks
             const issueBlocks = [
               ...analysisText.matchAll(
                 /ISSUE_START([\s\S]*?)ISSUE_END/g)
@@ -318,51 +393,63 @@ jobs:
               'good first issue', 'help wanted'
             ];
 
-            const makeFingerprint = title => {
-              const m = title.match(/\[([A-Z]{2}:[a-z0-9_]+)\]/);
-              return m
-                ? `customer:${m[1].toLowerCase()}`
-                : `customer:${title.toLowerCase()
+            // Fingerprint = "customer:" + [CODE:slug] from title
+            // Stable across re-runs — same issue = same fingerprint
+            const makeFingerprint = (title) => {
+              const m = title.match(/\[([A-Z]{2}:[a-z0-9_]+)\]/i);
+              const key = m
+                ? m[1].toLowerCase()
+                : title.toLowerCase()
                     .replace(/[^a-z0-9\s]/g, '')
-                    .replace(/\s+/g, ' ').trim()}`;
+                    .replace(/\s+/g, '-')
+                    .trim()
+                    .substring(0, 60);
+              return `customer:${key}`;
             };
 
-            const extractFingerprint = body => {
-              const m = body.match(/<!--\s*fp:([^>]+)-->/);
+            const extractFingerprint = (body) => {
+              const m = (body || '').match(/<!--fp:([^>]+)-->/);
               return m ? m[1].trim() : null;
             };
 
+            const get = (text, key) => {
+              const m = text.match(
+                new RegExp(`${key}:\\s*([^\\n]+)`));
+              return m ? m[1].trim() : 'Unknown';
+            };
+
             if (issueBlocks.length === 0) {
-              console.log('No issues found — code looks clean.');
+              console.log('No ISSUE_START blocks found — code is clean or format mismatch.');
+              console.log('First 500 chars of analysis:');
+              console.log(analysisText.substring(0, 500));
               return;
             }
 
-            const sevEmoji = {
-              critical: '🔴', high: '🟠',
-              medium: '🟡', low: '🔵'
-            };
+            console.log(`Found ${issueBlocks.length} issue blocks`);
 
-            const parsed = issueBlocks.map(block => {
+            // Parse all issues
+            const parsed = issueBlocks.map((block, idx) => {
               const t = block[1];
-              const get = k => {
-                const m = t.match(new RegExp(`${k}:\\s*(.+)`));
-                return m ? m[1].trim() : 'Unknown';
-              };
-              const sev      = get('severity').toLowerCase();
-              const extraRaw = get('extra_label').toLowerCase();
+              const title      = get(t, 'title');
+              const sev        = get(t, 'severity').toLowerCase();
+              const extraRaw   = get(t, 'extra_label').toLowerCase();
               return {
-                title:       get('title'),
-                severity:    sev,
-                category:    get('category'),
-                file:        get('file'),
-                description: get('description'),
-                suggestion:  get('suggestion'),
+                title,
+                severity:    ['critical','high','medium','low']
+                               .includes(sev) ? sev : 'low',
+                category:    get(t, 'category'),
+                file:        get(t, 'file'),
+                line:        get(t, 'line'),
+                description: get(t, 'description'),
+                suggestion:  get(t, 'suggestion'),
                 extraLabel:  validExtraLabels.includes(extraRaw)
                                ? extraRaw : null,
-                fingerprint: makeFingerprint(get('title')),
+                fingerprint: makeFingerprint(title),
               };
             });
 
+            // Fetch ALL existing AI issues (open + closed)
+            // to prevent any duplicates across runs
             const allIssues = await github.paginate(
               github.rest.issues.listForRepo, {
                 owner:    context.repo.owner,
@@ -373,22 +460,36 @@ jobs:
               }
             );
 
+            // Build set of existing fingerprints
             const existingFPs = new Set();
             for (const issue of allIssues) {
               const fp = extractFingerprint(issue.body || '');
-              if (fp) existingFPs.add(fp);
+              if (fp) {
+                existingFPs.add(fp);
+                console.log(`Existing FP: ${fp}`);
+              }
             }
 
-            let created = 0, skipped = 0;
+            console.log(`Existing fingerprints: ${existingFPs.size}`);
+
+            const sevEmoji = {
+              critical: '🔴', high: '🟠',
+              medium: '🟡', low: '🔵'
+            };
+
+            let created = 0;
+            let skipped = 0;
 
             for (const issue of parsed) {
+              // Skip if fingerprint already exists (any state)
               if (existingFPs.has(issue.fingerprint)) {
-                console.log(`Skip (duplicate): ${issue.fingerprint}`);
+                console.log(`SKIP duplicate: ${issue.fingerprint}`);
                 skipped++;
                 continue;
               }
 
               const emoji = sevEmoji[issue.severity] || '⚪';
+
               const labels = [
                 'flutter-ai-analysis',
                 'ai-generated',
@@ -399,57 +500,77 @@ jobs:
               if (issue.extraLabel) labels.push(issue.extraLabel);
 
               const body = [
-                `<!-- fp:${issue.fingerprint} -->`,
+                `<!--fp:${issue.fingerprint}-->`,
                 ``,
                 `## ${emoji} ${issue.title}`,
                 ``,
                 `> ⚠️ AI-generated suggestion — verify before acting.`,
                 ``,
-                `| | |`,
+                `| Field | Value |`,
                 `|---|---|`,
                 `| **App** | \`customer\` |`,
                 `| **Severity** | \`${issue.severity.toUpperCase()}\` |`,
-                `| **Category** | \`${issue.category}\` |`,
+                `| **Category** | ${issue.category} |`,
                 `| **File** | \`${issue.file}\` |`,
-                `| **Commit** | \`${commitSha}\` |`,
+                `| **Line** | \`${issue.line}\` |`,
+                `| **Commit** | \`${commitSha.substring(0,7)}\` |`,
                 `| **Analyzed by** | ${provider} |`,
-                `| **Workflow run** | [View logs](https://github.com/${repo}/actions/runs/${runId}) |`,
+                `| **Workflow** | [View run](https://github.com/${repo}/actions/runs/${runId}) |`,
                 ``,
                 `---`,
                 ``,
                 `### 🐛 Problem`,
+                ``,
                 issue.description,
                 ``,
                 `---`,
                 ``,
                 `### 💡 Suggested Fix`,
+                ``,
                 issue.suggestion,
                 ``,
                 `---`,
                 ``,
                 `### ✅ How to close this`,
+                ``,
                 `Fix the problem above and push to main.`,
-                `The next scan will skip this issue if the`,
-                `fingerprint is no longer matched. Close manually.`,
+                `The next scan will detect the fix and`,
+                `skip creating this issue again.`,
+                `Close this issue manually once resolved.`,
                 ``,
                 `_Generated: ${new Date().toUTCString()}_`,
               ].join('\n');
 
-              await github.rest.issues.create({
-                owner:  context.repo.owner,
-                repo:   context.repo.repo,
-                title:  issue.title,
-                body:   body,
-                labels: labels,
-              });
+              try {
+                await github.rest.issues.create({
+                  owner:  context.repo.owner,
+                  repo:   context.repo.repo,
+                  title:  issue.title,
+                  body:   body,
+                  labels: labels,
+                });
 
-              existingFPs.add(issue.fingerprint);
-              created++;
-              console.log(`Created: ${issue.title}`);
-              await new Promise(r => setTimeout(r, 500));
+                // Add to set immediately to prevent
+                // duplicates within the same run
+                existingFPs.add(issue.fingerprint);
+                created++;
+                console.log(`CREATED: ${issue.title}`);
+                console.log(`  FP: ${issue.fingerprint}`);
+
+                // Respect GitHub API rate limit
+                await new Promise(r => setTimeout(r, 600));
+
+              } catch (err) {
+                console.error(`Failed to create: ${issue.title}`);
+                console.error(err.message);
+              }
             }
 
-            console.log(`Done — Created: ${created}, Skipped: ${skipped}`);
+            console.log('');
+            console.log(`=== DONE ===`);
+            console.log(`Created: ${created}`);
+            console.log(`Skipped (already exist): ${skipped}`);
+            console.log(`Total blocks found: ${issueBlocks.length}`);
 
       # ── 9. Save source hash ────────────────────────────────────────────
       - name: Save Source Hash
@@ -460,10 +581,11 @@ jobs:
           mkdir -p .github
           echo "${{ steps.source_hash.outputs.hash }}" \
             > .github/last_scan_hash_customer.txt
-          git config user.name "github-actions[bot]"
+          git config user.name  "github-actions[bot]"
           git config user.email \
             "github-actions[bot]@users.noreply.github.com"
           git add .github/last_scan_hash_customer.txt
-          git commit -m "chore: update customer scan hash [skip ci]" \
+          git commit \
+            -m "chore: update customer scan hash [skip ci]" \
             || echo "Nothing to commit"
           git push

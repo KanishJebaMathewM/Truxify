@@ -455,7 +455,7 @@ class _DarkModeMenuItem extends StatelessWidget {
               Switch(
                 value: isDark,
                 onChanged: (_) => controller.toggleDarkMode(),
-                activeColor: FreightFairColors.accent,
+                activeThumbColor: FreightFairColors.accent,
               ),
             ],
           ),

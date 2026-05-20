@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
@@ -37,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isOnline = true;
   bool _isRefreshingLocation = false;
   String? _currentLocationText = _currentLocationLabel;
+  bool _isTripStarted = false;
 
   @override
   void dispose() {
@@ -123,6 +125,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onMapTap(ll.LatLng point) {
+    if (!_isOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please go online to set destinations')),
+      );
+      return;
+    }
     if (!_isDestinationExpanded) return;
     setState(() {
       _destination = DestinationPickResult(address: 'Pinned location', point: point);
@@ -136,6 +144,12 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openDestinationPicker() async {
+    if (!_isOnline) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please go online to search destinations')),
+      );
+      return;
+    }
     final query = _searchController.text.trim();
     final result = await Navigator.of(context, rootNavigator: true).pushNamed(
       AppRoutes.destinationPicker,
@@ -166,6 +180,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _destination = null;
       _routeFuture = null;
       _isSearchExpanded = false;
+      _isTripStarted = false;
       _searchController.clear();
     });
   }
@@ -173,57 +188,122 @@ class _HomeScreenState extends State<HomeScreen> {
   void _completeRide() {
     _clearDestination();
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ride marked as completed')),
+      SnackBar(
+        content: Text('Trip completed! Net earnings added to wallet.'),
+        backgroundColor: TruxifyColors.success,
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF7F3F3),
       body: SafeArea(
         bottom: false,
         child: Stack(
           children: [
+            // Map
             Positioned.fill(
               child: _buildMapBody(
                 context,
                 showDestinationChip: _destination != null,
               ),
             ),
+
+            // Top Bar
             Positioned(
               left: 12,
               right: 12,
               top: 12,
               child: SafeArea(
                 bottom: false,
-                child: _buildSearchCard(context),
+                child: _isTripStarted
+                    ? _buildActiveNavigationHeader(context)
+                    : _buildSearchCard(context),
               ),
             ),
+
+            // Recenter FAB (floated above bottom cards)
             Positioned(
               right: 16,
-              bottom: 16,
+              bottom: 235,
               child: FloatingActionButton(
                 heroTag: 'driver-home-recenter',
                 onPressed: _centerMapOnCurrentLocation,
-                backgroundColor: TruxifyColors.white,
+                backgroundColor: Colors.white,
                 foregroundColor: TruxifyColors.accent,
                 elevation: 4,
                 shape: const CircleBorder(),
                 child: const Icon(Icons.my_location_rounded),
               ),
             ),
-            if (_destination == null)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: SafeArea(
-                  top: false,
-                  child: _buildBottomSheet(context),
-                ),
+
+            // Bottom Controller Card
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 12,
+              child: SafeArea(
+                top: false,
+                child: _destination == null
+                    ? _buildBottomSheet(context)
+                    : _buildActiveTripSheet(context),
               ),
+            ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildActiveNavigationHeader(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: TruxifyColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 18,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          const LivePulseDot(color: TruxifyColors.success, size: 10),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'NAVIGATION ACTIVE',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: TruxifyColors.success,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                Text(
+                  'Heading to ${_destination?.address ?? "Destination"}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.dmSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: TruxifyColors.primaryText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -260,18 +340,9 @@ class _HomeScreenState extends State<HomeScreen> {
     if (day == null || year == null) return null;
 
     final monthMap = <String, int>{
-      'jan': 1,
-      'feb': 2,
-      'mar': 3,
-      'apr': 4,
-      'may': 5,
-      'jun': 6,
-      'jul': 7,
-      'aug': 8,
-      'sep': 9,
-      'oct': 10,
-      'nov': 11,
-      'dec': 12,
+      'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4,
+      'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
+      'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
     };
     final month = monthMap[parts[1].toLowerCase()];
     if (month == null) return null;
@@ -279,8 +350,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return DateTime(year, month, day);
   }
 
-  Widget _buildMapBody(BuildContext context,
-      {required bool showDestinationChip}) {
+  Widget _buildMapBody(BuildContext context, {required bool showDestinationChip}) {
     if (_destination == null) {
       return FlutterMap(
         mapController: _mapController,
@@ -302,8 +372,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     return FutureBuilder<List<ll.LatLng>>(
-      future: _routeFuture ??
-          Future.value(<ll.LatLng>[_currentLocation, _destination!.point]),
+      future: _routeFuture ?? Future.value(<ll.LatLng>[_currentLocation, _destination!.point]),
       builder: (context, snap) {
         final routePoints = (snap.connectionState == ConnectionState.done &&
                 snap.hasData &&
@@ -315,105 +384,67 @@ class _HomeScreenState extends State<HomeScreen> {
         final zoom = _routeZoom(routePoints);
         final checkpoints = _buildCheckpointPoints(routePoints);
 
-        return Stack(
+        return FlutterMap(
+          mapController: _mapController,
+          key: ValueKey(_destination!.address),
+          options: MapOptions(
+            initialCenter: center,
+            initialZoom: zoom,
+            interactionOptions: const InteractionOptions(
+              flags: InteractiveFlag.all,
+            ),
+          ),
           children: [
-            FlutterMap(
-              mapController: _mapController,
-              key: ValueKey(_destination!.address),
-              options: MapOptions(
-                initialCenter: center,
-                initialZoom: zoom,
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.all,
-                ),
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.truxify.driver',
-                ),
-                PolylineLayer(
-                  polylines: [
-                    Polyline(
-                      points: routePoints,
-                      strokeWidth: 5.0,
-                      color: TruxifyColors.accentDark,
-                      borderStrokeWidth: 2.0,
-                      borderColor: Colors.white.withValues(alpha: 0.8),
-                    ),
-                  ],
-                ),
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: _currentLocation,
-                      width: 54,
-                      height: 54,
-                      alignment: Alignment.center,
-                      child: const _RouteMarker(
-                        icon: Icons.my_location_rounded,
-                        fillColor: TruxifyColors.success,
-                        shadowColor: TruxifyColors.success,
-                      ),
-                    ),
-                    ...checkpoints.asMap().entries.map(
-                          (entry) => Marker(
-                            point: entry.value,
-                            width: 34,
-                            height: 34,
-                            alignment: Alignment.center,
-                            child: _RouteCheckpointMarker(
-                                label: '${entry.key + 1}'),
-                          ),
-                        ),
-                    Marker(
-                      point: _destination!.point,
-                      width: 54,
-                      height: 54,
-                      alignment: Alignment.center,
-                      child: const _RouteMarker(
-                        icon: Icons.location_on_rounded,
-                        fillColor: TruxifyColors.error,
-                        shadowColor: TruxifyColors.error,
-                      ),
-                    ),
-                  ],
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.truxify.driver',
+            ),
+            PolylineLayer(
+              polylines: [
+                Polyline(
+                  points: routePoints,
+                  strokeWidth: 5.0,
+                  color: TruxifyColors.accent,
+                  borderStrokeWidth: 2.0,
+                  borderColor: Colors.white.withOpacity(0.8),
                 ),
               ],
             ),
-            if (_destination != null)
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 16,
-                child: SafeArea(
-                  top: false,
-                  child: Center(
-                    child: SizedBox(
-                      width: 140,
-                      height: 48,
-                      child: Material(
-                        color: TruxifyColors.success,
-                        borderRadius: BorderRadius.circular(999),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(999),
-                          onTap: _completeRide,
-                          child: const Center(
-                            child: Text(
-                              'Start',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: _currentLocation,
+                  width: 54,
+                  height: 54,
+                  alignment: Alignment.center,
+                  child: const _RouteMarker(
+                    icon: Icons.my_location_rounded,
+                    fillColor: TruxifyColors.success,
+                    shadowColor: TruxifyColors.success,
                   ),
                 ),
-              ),
+                ...checkpoints.asMap().entries.map(
+                      (entry) => Marker(
+                        point: entry.value,
+                        width: 34,
+                        height: 34,
+                        alignment: Alignment.center,
+                        child: _RouteCheckpointMarker(label: '${entry.key + 1}'),
+                      ),
+                    ),
+                Marker(
+                  point: _destination!.point,
+                  width: 54,
+                  height: 54,
+                  alignment: Alignment.center,
+                  child: const _RouteMarker(
+                    icon: Icons.location_on_rounded,
+                    fillColor: TruxifyColors.errorRed,
+                    shadowColor: TruxifyColors.errorRed,
+                  ),
+                ),
+              ],
+            ),
           ],
         );
       },
@@ -451,8 +482,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final totalSegments = routePoints.length - 1;
     final indexes = <int>{};
     for (var step = 1; step <= 3; step++) {
-      final index =
-          ((totalSegments * step) / 4).round().clamp(1, totalSegments - 1);
+      final index = ((totalSegments * step) / 4).round().clamp(1, totalSegments - 1);
       indexes.add(index);
     }
 
@@ -460,67 +490,50 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSearchCard(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      elevation: 8,
-      shadowColor: Colors.black.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(24),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(24),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 18,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 4, 10, 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 26,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.start,
-                  children: [
-                    const _PulsingLocationDot(),
-                    const SizedBox(height: 2),
-                    SizedBox(
-                      height: 28,
-                      child: CustomPaint(
-                        painter: _DashedLinePainter(color: TruxifyColors.border),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Container(
-                      width: 16,
-                      height: 16,
-                      decoration: BoxDecoration(
-                        color: TruxifyColors.error.withValues(alpha: 0.14),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Center(
-                        child: Icon(
-                          Icons.location_pin,
-                          size: 10,
-                          color: TruxifyColors.error,
-                        ),
-                      ),
-                    ),
-                  ],
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: TruxifyColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const _PulsingLocationDot(),
+                Container(
+                  width: 1,
+                  height: 12,
+                  color: TruxifyColors.border,
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  children: [
-                    _SearchFieldPill(
-                      backgroundColor: Colors.grey.shade100,
-                      onTap: _fetchCurrentLocation,
+                const Icon(
+                  Icons.location_on_rounded,
+                  size: 14,
+                  color: TruxifyColors.errorRed,
+                ),
+              ],
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GestureDetector(
+                    onTap: _fetchCurrentLocation,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
                       child: Row(
                         children: [
                           Expanded(
@@ -528,136 +541,53 @@ class _HomeScreenState extends State<HomeScreen> {
                               _currentLocationText ?? _currentLocationLabel,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: Material(
-                              color: TruxifyColors.white,
-                              shape: const CircleBorder(),
-                              child: InkWell(
-                                customBorder: const CircleBorder(),
-                                onTap: _centerMapOnCurrentLocation,
-                                child: _isRefreshingLocation
-                                    ? const Padding(
-                                        padding: EdgeInsets.all(4.0),
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                          color: TruxifyColors.accent,
-                                        ),
-                                      )
-                                    : const Icon(
-                                        Icons.my_location_rounded,
-                                        size: 18,
-                                        color: TruxifyColors.accent,
-                                      ),
+                              style: GoogleFonts.dmSans(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: TruxifyColors.primaryText,
                               ),
                             ),
                           ),
+                          _isRefreshingLocation
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 1.5,
+                                    color: TruxifyColors.accent,
+                                  ),
+                                )
+                              : const Icon(
+                                  Icons.refresh_rounded,
+                                  size: 16,
+                                  color: TruxifyColors.hintText,
+                                ),
                         ],
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 220),
-                      switchInCurve: Curves.easeOut,
-                      switchOutCurve: Curves.easeIn,
-                      child: _isDestinationExpanded
-                          ? _SearchFieldPill(
-                              key: const ValueKey('destination-expanded'),
-                              backgroundColor: Colors.grey.shade100,
-                              onTap: _searchFocusNode.requestFocus,
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.location_on_rounded,
-                                    color: TruxifyColors.error,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: TextField(
-                                      controller: _searchController,
-                                      focusNode: _searchFocusNode,
-                                      textInputAction: TextInputAction.search,
-                                      onSubmitted: (_) => _openDestinationPicker(),
-                                      decoration: InputDecoration(
-                                        hintText: 'Where to?',
-                                        border: InputBorder.none,
-                                        isDense: true,
-                                        hintStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                              color: TruxifyColors.tertiaryText,
-                                            ),
-                                      ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    onPressed: () => setState(() {
-                                      _isDestinationExpanded = false;
-                                      _searchController.clear();
-                                    }),
-                                    icon: const Icon(
-                                      Icons.expand_less_rounded,
-                                      color: TruxifyColors.tertiaryText,
-                                    ),
-                                    splashRadius: 18,
-                                  ),
-                                ],
-                              ),
-                            )
-                          : _SearchFieldPill(
-                              key: const ValueKey('destination-collapsed'),
-                              backgroundColor: Colors.grey.shade100,
-                              onTap: _openDestinationPicker,
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.location_on_rounded,
-                                    color: TruxifyColors.error,
-                                    size: 18,
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      _destination?.address ?? 'Where to?',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                    ),
-                                  ),
-                                  IconButton(
-                                    onPressed: () {
-                                      setState(() {
-                                        _isDestinationExpanded = true;
-                                      });
-                                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                                        if (mounted) {
-                                          _searchFocusNode.requestFocus();
-                                        }
-                                      });
-                                    },
-                                    icon: const Icon(
-                                      Icons.expand_more_rounded,
-                                      color: TruxifyColors.tertiaryText,
-                                    ),
-                                    splashRadius: 18,
-                                  ),
-                                ],
-                              ),
-                            ),
+                  ),
+                  const Divider(height: 12, color: TruxifyColors.border),
+                  GestureDetector(
+                    onTap: _openDestinationPicker,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Text(
+                        _destination?.address ?? 'Where are you heading?',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          fontWeight: _destination == null ? FontWeight.normal : FontWeight.w600,
+                          color: _destination == null ? TruxifyColors.hintText : TruxifyColors.primaryText,
+                        ),
+                      ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -667,52 +597,100 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: TruxifyColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 18,
-            offset: const Offset(0, -4),
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+      padding: const EdgeInsets.all(16),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 44,
-            height: 5,
-            decoration: BoxDecoration(
-              color: TruxifyColors.border,
-              borderRadius: BorderRadius.circular(999),
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: TruxifyColors.border,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
           ),
           const SizedBox(height: 12),
+          // Shift Info Row
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: _MetricCard(metric: _driverMetricCards()[0]),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _MetricCard(metric: _driverMetricCards()[1]),
+              Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: TruxifyColors.success,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: TruxifyColors.success.withValues(alpha: 0.4),
+                          blurRadius: 6,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Online & Ready',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: TruxifyColors.primaryText,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
+          Text(
+            'Radar active. Looking for load assignments near Surat Yard...',
+            style: GoogleFonts.dmSans(
+              fontSize: 11,
+              color: TruxifyColors.secondaryText,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Stats Row
           Row(
             children: [
               Expanded(
-                child: _MetricCard(metric: _driverMetricCards()[2]),
+                child: _buildShiftMetric(
+                  icon: Icons.account_balance_wallet_outlined,
+                  value: '₹4,800',
+                  label: 'Today\'s Pay',
+                ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
-                child: _MetricCard(metric: _driverMetricCards()[3]),
+                child: _buildShiftMetric(
+                  icon: Icons.timer_outlined,
+                  value: '6.2 hrs',
+                  label: 'Shift Hours',
+                ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
               Expanded(
-                child: _MetricCard(metric: _driverMetricCards()[4]),
+                child: _buildShiftMetric(
+                  icon: Icons.star_border_rounded,
+                  value: '4.85',
+                  label: 'Rating',
+                ),
               ),
             ],
           ),
@@ -721,44 +699,305 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  List<_DriverMetric> _driverMetricCards() {
-    return <_DriverMetric>[
-      const _DriverMetric(
-        label: 'Earnings today',
-        value: driverEarningsMonth,
-        subtitle: 'Today\'s earnings',
-        icon: Icons.account_balance_wallet_rounded,
-        iconColor: TruxifyColors.accent,
+  Widget _buildShiftMetric({required IconData icon, required String value, required String label}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9F7F7),
+        border: Border.all(color: TruxifyColors.border),
+        borderRadius: BorderRadius.circular(12),
       ),
-      _DriverMetric(
-        label: 'Last trip',
-        value: _formatTimeSinceLastTrip(),
-        subtitle: 'Since last trip',
-        icon: Icons.schedule_rounded,
-        iconColor: TruxifyColors.accent,
+      child: Column(
+        children: [
+          Icon(icon, size: 16, color: TruxifyColors.accent),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: GoogleFonts.dmSans(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: TruxifyColors.primaryText,
+            ),
+          ),
+          Text(
+            label,
+            style: GoogleFonts.dmSans(
+              fontSize: 9,
+              color: TruxifyColors.hintText,
+            ),
+          ),
+        ],
       ),
-      const _DriverMetric(
-        label: 'Active jobs',
-        value: '--',
-        subtitle: 'Active jobs',
-        icon: Icons.work_outline_rounded,
-        iconColor: TruxifyColors.accent,
+    );
+  }
+
+  Widget _buildActiveTripSheet(BuildContext context) {
+    final routeStr = _destination?.address ?? 'Destination';
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: TruxifyColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      const _DriverMetric(
-        label: 'Rating',
-        value: driverRating,
-        subtitle: 'Your rating',
-        icon: Icons.star_rounded,
-        iconColor: TruxifyColors.accent,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _isTripStarted ? const Color(0xFFEAFCEE) : TruxifyColors.accentLight,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  _isTripStarted ? 'EN-ROUTE' : 'ASSIGNED LOAD',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: _isTripStarted ? TruxifyColors.success : TruxifyColors.accent,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'GJ-05-BY-9898 · Tata Signa',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 11,
+                    color: TruxifyColors.hintText,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Surat Yard → $routeStr',
+            style: GoogleFonts.dmSans(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: TruxifyColors.primaryText,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // Estimated Stats
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildTripSpec('Distance', '420 km'),
+              _buildTripSpec('Est. Duration', '8.5 hrs'),
+              _buildTripSpec('Est. Payout', '₹8,200'),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_isTripStarted) ...[
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Next: Dhule Plaza in 42 km',
+                  style: GoogleFonts.dmSans(fontSize: 11, color: TruxifyColors.secondaryText),
+                ),
+                Text(
+                  '25% complete',
+                  style: GoogleFonts.dmSans(fontSize: 11, fontWeight: FontWeight.bold, color: TruxifyColors.success),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: const LinearProgressIndicator(
+                value: 0.25,
+                backgroundColor: TruxifyColors.border,
+                valueColor: AlwaysStoppedAnimation<Color>(TruxifyColors.success),
+                minHeight: 6,
+              ),
+            ),
+            const SizedBox(height: 16),
+            SlideToConfirmButton(
+              label: 'Slide to Complete Trip',
+              backgroundColor: TruxifyColors.success,
+              onConfirmed: _completeRide,
+            ),
+          ] else ...[
+            SlideToConfirmButton(
+              label: 'Slide to Start Trip',
+              backgroundColor: TruxifyColors.accent,
+              onConfirmed: () {
+                setState(() {
+                  _isTripStarted = true;
+                });
+              },
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: InkWell(
+                onTap: _clearDestination,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    'Cancel Assignment',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: TruxifyColors.hintText,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
-      const _DriverMetric(
-        label: 'Online hours',
-        value: '--',
-        subtitle: 'Hours online',
-        icon: Icons.timer_outlined,
-        iconColor: TruxifyColors.accent,
-      ),
-    ];
+    );
+  }
+
+  Widget _buildTripSpec(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.dmSans(
+            fontSize: 10,
+            color: TruxifyColors.hintText,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: GoogleFonts.dmSans(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: TruxifyColors.primaryText,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class SlideToConfirmButton extends StatefulWidget {
+  const SlideToConfirmButton({
+    super.key,
+    required this.label,
+    required this.onConfirmed,
+    this.backgroundColor = TruxifyColors.accent,
+    this.foregroundColor = Colors.white,
+  });
+
+  final String label;
+  final VoidCallback onConfirmed;
+  final Color backgroundColor;
+  final Color foregroundColor;
+
+  @override
+  State<SlideToConfirmButton> createState() => _SlideToConfirmButtonState();
+}
+
+class _SlideToConfirmButtonState extends State<SlideToConfirmButton> {
+  double _dragProgress = 0.0;
+  bool _confirmed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double maxDragWidth = constraints.maxWidth - 50; // button width helper
+        return Container(
+          height: 52,
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: widget.backgroundColor.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: widget.backgroundColor.withOpacity(0.2)),
+          ),
+          child: Stack(
+            children: [
+              Center(
+                child: Opacity(
+                  opacity: (1.0 - _dragProgress).clamp(0.2, 1.0),
+                  child: Text(
+                    widget.label,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: widget.backgroundColor,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: _dragProgress * maxDragWidth + 3,
+                top: 3,
+                bottom: 3,
+                child: GestureDetector(
+                  onHorizontalDragUpdate: (details) {
+                    if (_confirmed) return;
+                    setState(() {
+                      _dragProgress = (_dragProgress + (details.delta.dx / maxDragWidth)).clamp(0.0, 1.0);
+                    });
+                  },
+                  onHorizontalDragEnd: (details) {
+                    if (_confirmed) return;
+                    if (_dragProgress >= 0.9) {
+                      setState(() {
+                        _dragProgress = 1.0;
+                        _confirmed = true;
+                      });
+                      widget.onConfirmed();
+                      Future.delayed(const Duration(milliseconds: 500), () {
+                        if (mounted) {
+                          setState(() {
+                            _dragProgress = 0.0;
+                            _confirmed = false;
+                          });
+                        }
+                      });
+                    } else {
+                      setState(() {
+                        _dragProgress = 0.0;
+                      });
+                    }
+                  },
+                  child: Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: widget.backgroundColor,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: widget.backgroundColor.withOpacity(0.3),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      _confirmed ? Icons.check_rounded : Icons.chevron_right_rounded,
+                      color: widget.foregroundColor,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -776,21 +1015,30 @@ class _RouteMarker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 42,
-      height: 42,
       decoration: BoxDecoration(
-        color: fillColor,
+        color: Colors.white,
         shape: BoxShape.circle,
-        border: Border.all(color: Colors.white, width: 2.5),
         boxShadow: [
           BoxShadow(
-            color: shadowColor.withValues(alpha: 0.35),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            color: shadowColor.withValues(alpha: 0.3),
+            blurRadius: 8,
+            spreadRadius: 2,
           ),
         ],
       ),
-      child: Icon(icon, color: Colors.white, size: 20),
+      padding: const EdgeInsets.all(4),
+      child: Container(
+        decoration: BoxDecoration(
+          color: fillColor,
+          shape: BoxShape.circle,
+        ),
+        padding: const EdgeInsets.all(6),
+        child: Icon(
+          icon,
+          color: Colors.white,
+          size: 16,
+        ),
+      ),
     );
   }
 }
@@ -803,183 +1051,26 @@ class _RouteCheckpointMarker extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 28,
-      height: 28,
       decoration: BoxDecoration(
         color: Colors.white,
         shape: BoxShape.circle,
-        border: Border.all(color: TruxifyColors.accentDark, width: 2),
+        border: Border.all(color: TruxifyColors.accent, width: 2),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 4,
           ),
         ],
       ),
-      child: Center(
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: TruxifyColors.accentDark,
-                fontWeight: FontWeight.w800,
-              ),
-        ),
-      ),
-    );
-  }
-}
-
-class _OverviewStatCard extends StatelessWidget {
-  const _OverviewStatCard({
-    required this.label,
-    required this.value,
-    required this.icon,
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      color: Colors.white,
-      border: Border.all(color: TruxifyColors.border),
-      padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: TruxifyColors.accentLight,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: TruxifyColors.accentDark, size: 18),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.2,
-                ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: TruxifyColors.adaptiveSecondaryText(context),
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DriverMetric {
-  const _DriverMetric({
-    required this.label,
-    required this.value,
-    required this.subtitle,
-    required this.icon,
-    required this.iconColor,
-  });
-
-  final String label;
-  final String value;
-  final String subtitle;
-  final IconData icon;
-  final Color iconColor;
-}
-
-class _MetricCard extends StatelessWidget {
-  const _MetricCard({required this.metric});
-
-  final _DriverMetric metric;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 160,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: metric.iconColor.withValues(alpha: 0.1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(metric.icon, color: metric.iconColor, size: 18),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            metric.value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.2,
-                ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            metric.subtitle,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: TruxifyColors.adaptiveSecondaryText(context),
-                ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SearchFieldPill extends StatelessWidget {
-  const _SearchFieldPill({
-    super.key,
-    required this.child,
-    required this.onTap,
-    required this.backgroundColor,
-  });
-
-  final Widget child;
-  final VoidCallback onTap;
-  final Color backgroundColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: backgroundColor,
-      borderRadius: BorderRadius.circular(24),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          child: child,
+      width: 24,
+      height: 24,
+      alignment: Alignment.center,
+      child: Text(
+        label,
+        style: GoogleFonts.dmSans(
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+          color: TruxifyColors.accentDark,
         ),
       ),
     );
@@ -993,12 +1084,17 @@ class _PulsingLocationDot extends StatefulWidget {
   State<_PulsingLocationDot> createState() => _PulsingLocationDotState();
 }
 
-class _PulsingLocationDotState extends State<_PulsingLocationDot>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1400),
-  )..repeat(reverse: true);
+class _PulsingLocationDotState extends State<_PulsingLocationDot> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+  }
 
   @override
   void dispose() {
@@ -1010,20 +1106,16 @@ class _PulsingLocationDotState extends State<_PulsingLocationDot>
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _controller,
-      builder: (_, __) {
-        final pulseScale = 1.0 + (_controller.value * 0.18);
+      builder: (context, child) {
         return Stack(
           alignment: Alignment.center,
           children: [
-            Transform.scale(
-              scale: pulseScale,
-              child: Container(
-                width: 18,
-                height: 18,
-                decoration: BoxDecoration(
-                  color: TruxifyColors.success.withValues(alpha: 0.18),
-                  shape: BoxShape.circle,
-                ),
+            Container(
+              width: 14 + (16 * _controller.value),
+              height: 14 + (16 * _controller.value),
+              decoration: BoxDecoration(
+                color: TruxifyColors.success.withValues(alpha: 1.0 - _controller.value),
+                shape: BoxShape.circle,
               ),
             ),
             Container(
@@ -1038,38 +1130,5 @@ class _PulsingLocationDotState extends State<_PulsingLocationDot>
         );
       },
     );
-  }
-}
-
-class _DashedLinePainter extends CustomPainter {
-  const _DashedLinePainter({required this.color});
-
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 1.4
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    const dashHeight = 4.0;
-    const gapHeight = 4.0;
-    var currentY = 0.0;
-
-    while (currentY < size.height) {
-      canvas.drawLine(
-        Offset(size.width / 2, currentY),
-        Offset(size.width / 2, math.min(currentY + dashHeight, size.height)),
-        paint,
-      );
-      currentY += dashHeight + gapHeight;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashedLinePainter oldDelegate) {
-    return oldDelegate.color != color;
   }
 }

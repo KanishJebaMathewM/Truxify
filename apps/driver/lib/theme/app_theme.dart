@@ -32,6 +32,12 @@ class TruxifyColors {
   static const subtleBorder = Color(0xFFF0E8E8);
   static const strongBorder = Color(0xFFD4BFBF);
 
+  // Extended palette for Trips / Earnings screens
+  static const errorRed = Color(0xFFE53935);
+  static const errorLight = Color(0xFFFCEAEA);
+  static const hintText = Color(0xFF999999);
+  static const navInactive = Color(0xFFCCBBBB);
+
   // Dark mode equivalents (kept simple, mapped to light variants)
   static const darkBackground = Color(0xFF121212);
   static const darkSecondaryBackground = Color(0xFF1E1E1E);

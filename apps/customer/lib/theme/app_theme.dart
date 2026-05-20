@@ -129,15 +129,15 @@ class FreightFairTheme {
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: FreightFairColors.background,
         indicatorColor: FreightFairColors.accentLight,
-        iconTheme: MaterialStateProperty.resolveWith((states) {
-          final selected = states.contains(MaterialState.selected);
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
           return IconThemeData(
             size: 22,
             color: selected ? FreightFairColors.accentDark : FreightFairColors.secondaryText,
           );
         }),
-        labelTextStyle: MaterialStateProperty.resolveWith((states) {
-          final selected = states.contains(MaterialState.selected);
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
           return TextStyle(
             fontSize: 10,
             color: selected ? FreightFairColors.accentDark : FreightFairColors.secondaryText,
@@ -257,15 +257,15 @@ class FreightFairTheme {
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: FreightFairColors.darkSecondaryBackground,
         indicatorColor: FreightFairColors.darkAccentLight,
-        iconTheme: MaterialStateProperty.resolveWith((states) {
-          final selected = states.contains(MaterialState.selected);
+        iconTheme: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
           return IconThemeData(
             size: 22,
             color: selected ? FreightFairColors.accent : FreightFairColors.darkSecondaryText,
           );
         }),
-        labelTextStyle: MaterialStateProperty.resolveWith((states) {
-          final selected = states.contains(MaterialState.selected);
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
           return TextStyle(
             fontSize: 10,
             color: selected ? FreightFairColors.accent : FreightFairColors.darkSecondaryText,

@@ -5,15 +5,16 @@ import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
 import 'home_screen.dart';
-import 'coming_soon_screen.dart';
 import 'documents_screen.dart';
 import 'destination_picker_screen.dart';
+import 'earnings_screen.dart';
 import 'load_detail_screen.dart';
 import 'load_point_detail_screen.dart';
 import 'profile_screen.dart';
+import 'trip_detail_screen.dart';
 import 'trip_history_screen.dart';
+import 'trips_screen.dart';
 import 'my_truck_screen.dart';
-import 'earnings_screen.dart';
 
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
@@ -42,7 +43,9 @@ class _ShellScreenState extends State<ShellScreen> {
         return truxifyPageRoute((context) => const MyTruckScreen());
       case AppRoutes.earnings:
         return truxifyPageRoute((context) => const EarningsScreen());
-      
+      case AppRoutes.tripDetail:
+        final trip = settings.arguments as Trip;
+        return truxifyPageRoute((context) => TripDetailScreen(trip: trip));
       case AppRoutes.tripHistory:
         return truxifyPageRoute((context) => const TripHistoryScreen());
       case AppRoutes.documents:
@@ -70,13 +73,14 @@ class _ShellScreenState extends State<ShellScreen> {
                   index: currentIndex,
                   children: [
                     const HomeScreen(),
-                    const ComingSoonScreen(label: 'Loads'),
-                    const ComingSoonScreen(label: 'Active Trip'),
+                    const TripsScreen(),
+                    const EarningsScreen(),
                     ProfileScreen(
                       onOpenTripHistory: () => _navigatorKey.currentState?.pushNamed(AppRoutes.tripHistory),
                       onOpenDocuments: () => _navigatorKey.currentState?.pushNamed(AppRoutes.documents),
                       onOpenMyTruck: () => _navigatorKey.currentState?.pushNamed(AppRoutes.myTruck),
                       onOpenEarnings: () => _navigatorKey.currentState?.pushNamed(AppRoutes.earnings),
+                      onSelectTab: _openTab,
                     ),
                   ],
                 );
@@ -114,14 +118,14 @@ class _ShellScreenState extends State<ShellScreen> {
                     onTap: () => _openTab(0),
                   ),
                   _NavItem(
-                    icon: Icons.inventory_2_rounded,
-                    label: 'Loads',
+                    icon: Icons.route_rounded,
+                    label: 'Trips',
                     selected: currentIndex == 1,
                     onTap: () => _openTab(1),
                   ),
                   _NavItem(
-                    icon: Icons.local_shipping_rounded,
-                    label: 'Active Trip',
+                    icon: Icons.account_balance_wallet_outlined,
+                    label: 'Earnings',
                     selected: currentIndex == 2,
                     onTap: () => _openTab(2),
                   ),

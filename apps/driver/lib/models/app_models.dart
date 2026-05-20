@@ -238,3 +238,133 @@ class DocumentRecord {
   final String validUntil;
   final String ctaLabel;
 }
+
+// ──────────────────────────────────────────────────
+// Trips & Earnings models
+// ──────────────────────────────────────────────────
+
+enum TripStatusType { active, completed, cancelled }
+
+class Trip {
+  const Trip({
+    required this.route,
+    required this.date,
+    required this.items,
+    required this.itemCount,
+    required this.distance,
+    required this.earnings,
+    required this.status,
+    required this.tripId,
+    required this.hash,
+    this.duration = '',
+    this.endTime = '',
+    this.paymentBreakdown,
+    this.tripItems = const [],
+  });
+
+  final String route;
+  final String date;
+  final List<String> items; // e.g. ["Textile 3t", "Electronics 2t"]
+  final String itemCount; // e.g. "2 items · 612 km"
+  final String distance;
+  final String earnings;
+  final TripStatusType status;
+  final String tripId;
+  final String hash;
+  final String duration;
+  final String endTime;
+  final PaymentBreakdown? paymentBreakdown;
+  final List<TripItem> tripItems;
+}
+
+class TripItem {
+  const TripItem({
+    required this.customerName,
+    required this.goods,
+    required this.destination,
+    required this.earnings,
+    required this.delivered,
+  });
+
+  final String customerName;
+  final String goods;
+  final String destination;
+  final String earnings;
+  final bool delivered;
+}
+
+class PaymentBreakdown {
+  const PaymentBreakdown({
+    required this.baseFreight,
+    required this.fuelDeducted,
+    required this.tollDeducted,
+    required this.platformFee,
+    required this.netEarnings,
+  });
+
+  final String baseFreight;
+  final String fuelDeducted;
+  final String tollDeducted;
+  final String platformFee;
+  final String netEarnings;
+}
+
+class EarningDay {
+  const EarningDay({
+    required this.day,
+    required this.amount,
+    required this.tripCount,
+  });
+
+  final String day;
+  final int amount;
+  final int tripCount;
+}
+
+class Milestone {
+  const Milestone({
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.iconBg,
+    required this.iconColor,
+    required this.achieved,
+    this.progress,
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color iconBg;
+  final Color iconColor;
+  final bool achieved;
+  final double? progress; // 0.0-1.0, null if achieved
+}
+
+class PendingPayment {
+  const PendingPayment({
+    required this.customerName,
+    required this.route,
+    required this.amount,
+    required this.note,
+  });
+
+  final String customerName;
+  final String route;
+  final String amount;
+  final String note;
+}
+
+class EarningsBreakdownRow {
+  const EarningsBreakdownRow({
+    required this.label,
+    required this.amount,
+    required this.percentage,
+    required this.color,
+  });
+
+  final String label;
+  final String amount;
+  final double percentage;
+  final Color color;
+}

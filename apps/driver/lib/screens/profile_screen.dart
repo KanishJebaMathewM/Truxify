@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
@@ -11,23 +12,225 @@ class ProfileScreen extends StatefulWidget {
     this.onOpenDocuments,
     this.onOpenMyTruck,
     this.onOpenEarnings,
+    this.onSelectTab,
   });
 
   final VoidCallback? onOpenTripHistory;
   final VoidCallback? onOpenDocuments;
   final VoidCallback? onOpenMyTruck;
   final VoidCallback? onOpenEarnings;
+  final ValueChanged<int>? onSelectTab;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  Future<void> _showInfoSheet(BuildContext context, String title, String subtitle) async {
+  String _driverName = driverName;
+  String _driverPhone = '+91 98765 43210';
+  String _driverEmail = 'kanish.jeba@truxify.com';
+  String _currentLanguage = 'English';
+
+  Future<void> _showEditProfileSheet(BuildContext context) async {
+    final nameController = TextEditingController(text: _driverName);
+    final phoneController = TextEditingController(text: _driverPhone);
+    final emailController = TextEditingController(text: _driverEmail);
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: TruxifyColors.cardBackground,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const BottomSheetHandle(),
+              const SizedBox(height: 16),
+              Text(
+                'Edit Profile',
+                style: GoogleFonts.dmSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: TruxifyColors.primaryText,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: nameController,
+                style: GoogleFonts.dmSans(fontSize: 14, color: TruxifyColors.primaryText),
+                decoration: InputDecoration(
+                  labelText: 'Full Name',
+                  labelStyle: GoogleFonts.dmSans(color: TruxifyColors.secondaryText),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: TruxifyColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: TruxifyColors.accent),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: phoneController,
+                style: GoogleFonts.dmSans(fontSize: 14, color: TruxifyColors.primaryText),
+                decoration: InputDecoration(
+                  labelText: 'Phone Number',
+                  labelStyle: GoogleFonts.dmSans(color: TruxifyColors.secondaryText),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: TruxifyColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: TruxifyColors.accent),
+                  ),
+                ),
+                keyboardType: TextInputType.phone,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: emailController,
+                style: GoogleFonts.dmSans(fontSize: 14, color: TruxifyColors.primaryText),
+                decoration: InputDecoration(
+                  labelText: 'Email Address',
+                  labelStyle: GoogleFonts.dmSans(color: TruxifyColors.secondaryText),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: TruxifyColors.border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: TruxifyColors.accent),
+                  ),
+                ),
+                keyboardType: TextInputType.emailAddress,
+              ),
+              const SizedBox(height: 20),
+              PrimaryButton(
+                label: 'Save Changes',
+                onPressed: () {
+                  setState(() {
+                    _driverName = nameController.text.trim();
+                    _driverPhone = phoneController.text.trim();
+                    _driverEmail = emailController.text.trim();
+                  });
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Profile updated successfully'),
+                      backgroundColor: TruxifyColors.success,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showLanguageSheet(BuildContext context) async {
+    String selectedLang = _currentLanguage;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const BottomSheetHandle(),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Select Language',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: TruxifyColors.primaryText,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ...['English', 'Hindi (हिंदी)', 'Gujarati (ગુજરાતી)'].map((lang) {
+                    final isSelected = lang.startsWith(selectedLang);
+                    return GestureDetector(
+                      onTap: () {
+                        setSheetState(() => selectedLang = lang.split(' ')[0]);
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isSelected ? TruxifyColors.accentLight : Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSelected ? TruxifyColors.accent : Colors.grey.shade200,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              lang,
+                              style: GoogleFonts.dmSans(
+                                fontSize: 14,
+                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                color: TruxifyColors.primaryText,
+                              ),
+                            ),
+                            if (isSelected)
+                              const Icon(Icons.check_circle_rounded, color: TruxifyColors.accent),
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                  const SizedBox(height: 16),
+                  PrimaryButton(
+                    label: 'Apply Language',
+                    onPressed: () {
+                      setState(() {
+                        _currentLanguage = selectedLang;
+                      });
+                      Navigator.of(context).pop();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Language switched to $_currentLanguage'),
+                          backgroundColor: TruxifyColors.success,
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _showHelpSheet(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -40,11 +243,175 @@ class _ProfileScreenState extends State<ProfileScreen> {
             children: [
               const BottomSheetHandle(),
               const SizedBox(height: 16),
-              Text(title, style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                'Help & Support',
+                style: GoogleFonts.dmSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: TruxifyColors.primaryText,
+                ),
+              ),
               const SizedBox(height: 16),
-              PrimaryButton(label: 'Done', onPressed: () => Navigator.of(context).pop()),
+              _buildHelpOption(
+                icon: Icons.phone_in_talk_rounded,
+                title: 'Call Support Hotline',
+                subtitle: 'Direct connection to 24/7 emergency dispatch',
+                color: TruxifyColors.success,
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Calling support hotline at +91 1800-TRUXIFY...')),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+              _buildHelpOption(
+                icon: Icons.chat_bubble_outline_rounded,
+                title: 'Live Chat Assistant',
+                subtitle: 'Chat directly with support representatives',
+                color: TruxifyColors.accent,
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Connecting to Truxify support agent...')),
+                  );
+                },
+              ),
+              const SizedBox(height: 10),
+              _buildHelpOption(
+                icon: Icons.help_outline_rounded,
+                title: 'Browse FAQs',
+                subtitle: 'Instant answers to common driver questions',
+                color: TruxifyColors.hintText,
+                onTap: () {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Opening help center database...')),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildHelpOption({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          border: Border.all(color: TruxifyColors.border),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: TruxifyColors.primaryText,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 11,
+                      color: TruxifyColors.secondaryText,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, color: TruxifyColors.hintText),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showAboutSheet(BuildContext context) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const BottomSheetHandle(),
+              const SizedBox(height: 16),
+              Container(
+                width: 60,
+                height: 60,
+                decoration: BoxDecoration(
+                  color: TruxifyColors.accentLight,
+                  shape: BoxShape.circle,
+                ),
+                child: const Center(
+                  child: Icon(Icons.local_shipping_rounded, color: TruxifyColors.accentDark, size: 32),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Truxify Driver App',
+                style: GoogleFonts.dmSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: TruxifyColors.primaryText,
+                ),
+              ),
+              Text(
+                'v2.1.0-driver-prod',
+                style: GoogleFonts.robotoMono(
+                  fontSize: 12,
+                  color: TruxifyColors.hintText,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Truxify is a driver-first freight marketplace designed to empower drivers with transparent pricing, instant blockchain receipts, and direct loading solutions.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.dmSans(
+                  fontSize: 13,
+                  color: TruxifyColors.secondaryText,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 20),
+              PrimaryButton(
+                label: 'Close',
+                onPressed: () => Navigator.pop(context),
+              ),
             ],
           ),
         );
@@ -54,52 +421,112 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 110),
         children: [
-          // Header
+          // Header - Premium Gradient Card
           Container(
             decoration: BoxDecoration(
-              color: TruxifyColors.accent,
-              borderRadius: BorderRadius.circular(12),
+              gradient: const LinearGradient(
+                colors: [TruxifyColors.accent, TruxifyColors.accentDark],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: TruxifyColors.accent.withOpacity(0.15),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
             ),
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             child: Row(
               children: [
-                CircleAvatar(
-                  radius: 32,
-                  backgroundColor: TruxifyColors.cardBackground,
-                  child: Text(driverInitials, style: textTheme.titleLarge?.copyWith(color: TruxifyColors.accent)),
+                Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white.withOpacity(0.2), width: 3),
+                  ),
+                  child: CircleAvatar(
+                    radius: 30,
+                    backgroundColor: Colors.white,
+                    child: Text(
+                      _driverName.isNotEmpty
+                          ? _driverName.substring(0, 1) +
+                              (_driverName.contains(' ') ? _driverName.split(' ')[1].substring(0, 1) : '')
+                          : 'JD',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: TruxifyColors.accentDark,
+                      ),
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 16),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(driverName, style: textTheme.headlineSmall?.copyWith(color: TruxifyColors.white, fontWeight: FontWeight.w700)),
+                      Text(
+                        _driverName,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
                       const SizedBox(height: 4),
-                      Text('$driverTruck · $driverTruckNumber', style: textTheme.bodyMedium?.copyWith(color: TruxifyColors.white.withValues(alpha: 0.95))),
+                      Text(
+                        '$driverTruck · $driverTruckNumber',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          color: Colors.white.withOpacity(0.85),
+                        ),
+                      ),
                       const SizedBox(height: 8),
-                      Text('⭐ $driverRating • $driverTrips trips', style: textTheme.bodySmall?.copyWith(color: TruxifyColors.white.withValues(alpha: 0.95))),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.15),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.star_rounded, color: Colors.amber, size: 14),
+                            const SizedBox(width: 4),
+                            Text(
+                              '$driverRating · $driverTrips trips',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 Column(
                   children: [
                     IconButton(
-                      onPressed: () => _showInfoSheet(context, 'Edit Profile', 'Edit profile is not available in demo.'),
-                      icon: const Icon(Icons.edit_rounded, color: TruxifyColors.white),
-                      tooltip: 'Edit',
+                      onPressed: () => _showEditProfileSheet(context),
+                      icon: const Icon(Icons.edit_rounded, color: Colors.white),
+                      tooltip: 'Edit Profile',
                     ),
                     IconButton(
                       onPressed: () => widget.onOpenTripHistory?.call(),
-                      icon: const Icon(Icons.history_rounded, color: TruxifyColors.white),
+                      icon: const Icon(Icons.history_rounded, color: Colors.white),
                       tooltip: 'Trip History',
                     ),
                   ],
-                )
+                ),
               ],
             ),
           ),
@@ -108,14 +535,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           // Metrics
           AppCard(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
             child: Row(
               children: [
-                Expanded(child: _MetricColumn(label: 'Earned', value: driverEarningsMonth)),
-                const Separator(),
-                Expanded(child: _MetricColumn(label: 'Trips', value: driverTrips)),
-                const Separator(),
-                Expanded(child: _MetricColumn(label: 'Completion', value: driverCompletion)),
+                Expanded(
+                  child: _MetricColumn(
+                    label: 'Earned',
+                    value: driverEarningsMonth,
+                  ),
+                ),
+                Container(width: 1, height: 32, color: TruxifyColors.border),
+                Expanded(
+                  child: _MetricColumn(
+                    label: 'Total Trips',
+                    value: driverTrips,
+                  ),
+                ),
+                Container(width: 1, height: 32, color: TruxifyColors.border),
+                Expanded(
+                  child: _MetricColumn(
+                    label: 'Completion Rate',
+                    value: driverCompletion,
+                  ),
+                ),
               ],
             ),
           ),
@@ -135,7 +577,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 _QuickAction(
                   icon: Icons.payments_rounded,
                   label: 'Earnings',
-                  onTap: () => widget.onOpenEarnings?.call(),
+                  onTap: () {
+                    if (widget.onSelectTab != null) {
+                      widget.onSelectTab!(2); // index 2 is Earnings in bottom nav
+                    } else {
+                      widget.onOpenEarnings?.call();
+                    }
+                  },
                 ),
                 _QuickAction(
                   icon: Icons.description_rounded,
@@ -146,34 +594,73 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
 
-          const SizedBox(height: 18),
+          const SizedBox(height: 20),
 
           const SectionLabel(label: 'SETTINGS'),
           AppCard(
             child: Column(
               children: [
                 ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  title: Text('Language', style: Theme.of(context).textTheme.titleMedium),
-                  subtitle: Text('English', style: Theme.of(context).textTheme.bodyMedium),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  title: Text(
+                    'Language',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: TruxifyColors.primaryText,
+                    ),
+                  ),
+                  subtitle: Text(
+                    _currentLanguage,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: TruxifyColors.secondaryText,
+                    ),
+                  ),
                   trailing: const Icon(Icons.chevron_right_rounded, color: TruxifyColors.secondaryText),
-                  onTap: () => _showInfoSheet(context, 'Language', 'Language switching will be connected to localization settings.'),
+                  onTap: () => _showLanguageSheet(context),
                 ),
-                const Divider(height: 1),
+                const Divider(height: 1, color: TruxifyColors.border),
                 ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  title: Text('Help & Support', style: Theme.of(context).textTheme.titleMedium),
-                  subtitle: Text('FAQs, chat, and emergency help', style: Theme.of(context).textTheme.bodyMedium),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  title: Text(
+                    'Help & Support',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: TruxifyColors.primaryText,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '24/7 hotline, chat assistant, and FAQs',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: TruxifyColors.secondaryText,
+                    ),
+                  ),
                   trailing: const Icon(Icons.chevron_right_rounded, color: TruxifyColors.secondaryText),
-                  onTap: () => _showInfoSheet(context, 'Help & Support', 'Help and support can be routed to chat, call, or FAQ endpoints.'),
+                  onTap: () => _showHelpSheet(context),
                 ),
-                const Divider(height: 1),
+                const Divider(height: 1, color: TruxifyColors.border),
                 ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  title: Text('About Truxify', style: Theme.of(context).textTheme.titleMedium),
-                  subtitle: Text('Driver-first freight marketplace', style: Theme.of(context).textTheme.bodyMedium),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  title: Text(
+                    'About Truxify',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: TruxifyColors.primaryText,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Version and application info',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: TruxifyColors.secondaryText,
+                    ),
+                  ),
                   trailing: const Icon(Icons.chevron_right_rounded, color: TruxifyColors.secondaryText),
-                  onTap: () => _showInfoSheet(context, 'About Truxify', 'Truxify is a driver-first freight marketplace demo.'),
+                  onTap: () => _showAboutSheet(context),
                 ),
               ],
             ),
@@ -182,13 +669,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 18),
           AppCard(
             onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logout tapped')));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Logged out successfully'),
+                  backgroundColor: TruxifyColors.success,
+                ),
+              );
             },
             child: Row(
               children: [
                 const Icon(Icons.logout_rounded, color: TruxifyColors.error),
                 const SizedBox(width: 12),
-                Text('Logout', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: TruxifyColors.error, fontWeight: FontWeight.w600)),
+                Text(
+                  'Logout',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 14,
+                    color: TruxifyColors.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ],
             ),
           ),
@@ -208,9 +707,23 @@ class _MetricColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(value, style: Theme.of(context).textTheme.titleLarge?.copyWith(color: TruxifyColors.primaryText, fontWeight: FontWeight.w700)),
+        Text(
+          value,
+          style: GoogleFonts.dmSans(
+            fontSize: 18,
+            color: TruxifyColors.primaryText,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
         const SizedBox(height: 4),
-        Text(label, style: Theme.of(context).textTheme.bodyMedium),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          style: GoogleFonts.dmSans(
+            fontSize: 11,
+            color: TruxifyColors.secondaryText,
+          ),
+        ),
       ],
     );
   }
@@ -229,19 +742,27 @@ class _QuickAction extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         child: Column(
           children: [
             Container(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: TruxifyColors.secondaryBackground,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: TruxifyColors.border),
               ),
-              child: Icon(icon, color: TruxifyColors.accentDark),
+              child: Icon(icon, color: TruxifyColors.accentDark, size: 22),
             ),
             const SizedBox(height: 8),
-            Text(label, style: Theme.of(context).textTheme.bodySmall),
+            Text(
+              label,
+              style: GoogleFonts.dmSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: TruxifyColors.primaryText,
+              ),
+            ),
           ],
         ),
       ),

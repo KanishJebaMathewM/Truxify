@@ -12,7 +12,6 @@ import 'load_detail_screen.dart';
 import 'load_point_detail_screen.dart';
 import 'profile_screen.dart';
 import 'trip_detail_screen.dart';
-import 'trip_history_screen.dart';
 import 'trips_screen.dart';
 import 'my_truck_screen.dart';
 
@@ -46,8 +45,7 @@ class _ShellScreenState extends State<ShellScreen> {
       case AppRoutes.tripDetail:
         final trip = settings.arguments as Trip;
         return truxifyPageRoute((context) => TripDetailScreen(trip: trip));
-      case AppRoutes.tripHistory:
-        return truxifyPageRoute((context) => const TripHistoryScreen());
+
       case AppRoutes.documents:
         return truxifyPageRoute((context) => const DocumentsScreen());
       case AppRoutes.loadDetail:
@@ -76,10 +74,7 @@ class _ShellScreenState extends State<ShellScreen> {
                     const TripsScreen(),
                     const EarningsScreen(),
                     ProfileScreen(
-                      onOpenTripHistory: () => _navigatorKey.currentState?.pushNamed(AppRoutes.tripHistory),
                       onOpenDocuments: () => _navigatorKey.currentState?.pushNamed(AppRoutes.documents),
-                      onOpenMyTruck: () => _navigatorKey.currentState?.pushNamed(AppRoutes.myTruck),
-                      onOpenEarnings: () => _navigatorKey.currentState?.pushNamed(AppRoutes.earnings),
                       onSelectTab: _openTab,
                     ),
                   ],

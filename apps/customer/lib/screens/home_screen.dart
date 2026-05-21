@@ -107,11 +107,11 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 24),
             Row(
               children: [
-                StatCard(title: mockQuickStats[0].title, value: mockQuickStats[0].value, icon: mockQuickStats[0].icon),
+                Expanded(child: StatCard(title: mockQuickStats[0].title, value: mockQuickStats[0].value, icon: mockQuickStats[0].icon)),
                 const SizedBox(width: 10),
-                StatCard(title: mockQuickStats[1].title, value: mockQuickStats[1].value, icon: mockQuickStats[1].icon),
+                Expanded(child: StatCard(title: mockQuickStats[1].title, value: mockQuickStats[1].value, icon: mockQuickStats[1].icon)),
                 const SizedBox(width: 10),
-                StatCard(title: mockQuickStats[2].title, value: mockQuickStats[2].value, icon: mockQuickStats[2].icon),
+                Expanded(child: StatCard(title: mockQuickStats[2].title, value: mockQuickStats[2].value, icon: mockQuickStats[2].icon)),
               ],
             ),
             const SizedBox(height: 24),

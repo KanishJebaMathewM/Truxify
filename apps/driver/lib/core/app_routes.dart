@@ -6,7 +6,6 @@ class AppRoutes {
   static const loadDetail = '/load-detail';
   static const loadPointDetail = '/load-point-detail';
   static const destinationPicker = '/destination-picker';
-  static const tripHistory = '/trip-history';
   static const documents = '/documents';
   static const myTruck = '/my-truck';
   static const earnings = '/earnings';

@@ -121,27 +121,25 @@ class StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: elevatedSurfaceDecoration(
-          color: isDark ? FreightFairColors.darkAccentLight : FreightFairColors.accentLight,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: isDark ? FreightFairColors.accent : FreightFairColors.accentDark, size: 20),
-            const SizedBox(height: 12),
-            Text(value, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: isDark ? FreightFairColors.darkSecondaryText : FreightFairColors.secondaryText,
-              ),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: elevatedSurfaceDecoration(
+        color: isDark ? FreightFairColors.darkAccentLight : FreightFairColors.accentLight,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: isDark ? FreightFairColors.accent : FreightFairColors.accentDark, size: 20),
+          const SizedBox(height: 12),
+          Text(value, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: isDark ? FreightFairColors.darkSecondaryText : FreightFairColors.secondaryText,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

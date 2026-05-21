@@ -9,7 +9,6 @@ import 'screens/login_screen.dart';
 import 'screens/otp_screen.dart';
 import 'screens/shell_screen.dart';
 import 'screens/splash_screen.dart';
-import 'screens/trip_history_screen.dart';
 import 'models/app_models.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_page_route.dart';
@@ -35,8 +34,6 @@ class TruxifyApp extends StatelessWidget {
             return truxifyPageRoute((context) => OtpScreen(phone: phone));
           case AppRoutes.shell:
             return truxifyPageRoute((context) => const ShellScreen());
-          case AppRoutes.tripHistory:
-            return truxifyPageRoute((context) => const TripHistoryScreen());
           case AppRoutes.documents:
             return truxifyPageRoute((context) => const DocumentsScreen());
           case AppRoutes.loadDetail:

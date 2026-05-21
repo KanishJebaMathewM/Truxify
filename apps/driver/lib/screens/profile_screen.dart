@@ -8,17 +8,11 @@ import '../widgets/common_widgets.dart';
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
     super.key,
-    this.onOpenTripHistory,
     this.onOpenDocuments,
-    this.onOpenMyTruck,
-    this.onOpenEarnings,
     this.onSelectTab,
   });
 
-  final VoidCallback? onOpenTripHistory;
   final VoidCallback? onOpenDocuments;
-  final VoidCallback? onOpenMyTruck;
-  final VoidCallback? onOpenEarnings;
   final ValueChanged<int>? onSelectTab;
 
   @override
@@ -513,19 +507,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
-                Column(
-                  children: [
-                    IconButton(
-                      onPressed: () => _showEditProfileSheet(context),
-                      icon: const Icon(Icons.edit_rounded, color: Colors.white),
-                      tooltip: 'Edit Profile',
-                    ),
-                    IconButton(
-                      onPressed: () => widget.onOpenTripHistory?.call(),
-                      icon: const Icon(Icons.history_rounded, color: Colors.white),
-                      tooltip: 'Trip History',
-                    ),
-                  ],
+                IconButton(
+                  onPressed: () => _showEditProfileSheet(context),
+                  icon: const Icon(Icons.edit_rounded, color: Colors.white),
+                  tooltip: 'Edit Profile',
                 ),
               ],
             ),
@@ -564,42 +549,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           const SizedBox(height: 16),
 
-          // Quick actions
-          AppCard(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                _QuickAction(
-                  icon: Icons.local_shipping_rounded,
-                  label: 'My Truck',
-                  onTap: () => widget.onOpenMyTruck?.call(),
-                ),
-                _QuickAction(
-                  icon: Icons.payments_rounded,
-                  label: 'Earnings',
-                  onTap: () {
-                    if (widget.onSelectTab != null) {
-                      widget.onSelectTab!(2); // index 2 is Earnings in bottom nav
-                    } else {
-                      widget.onOpenEarnings?.call();
-                    }
-                  },
-                ),
-                _QuickAction(
-                  icon: Icons.description_rounded,
-                  label: 'Documents',
-                  onTap: () => widget.onOpenDocuments?.call(),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
           const SectionLabel(label: 'SETTINGS'),
           AppCard(
             child: Column(
               children: [
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  title: Text(
+                    'Documents',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: TruxifyColors.primaryText,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Driver license, permit, and vehicle papers',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: TruxifyColors.secondaryText,
+                    ),
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded, color: TruxifyColors.secondaryText),
+                  onTap: () => widget.onOpenDocuments?.call(),
+                ),
+                const Divider(height: 1, color: TruxifyColors.border),
                 ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
@@ -729,43 +703,3 @@ class _MetricColumn extends StatelessWidget {
   }
 }
 
-class _QuickAction extends StatelessWidget {
-  const _QuickAction({required this.icon, required this.label, required this.onTap});
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: TruxifyColors.secondaryBackground,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: TruxifyColors.border),
-              ),
-              child: Icon(icon, color: TruxifyColors.accentDark, size: 22),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              style: GoogleFonts.dmSans(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: TruxifyColors.primaryText,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

@@ -21,6 +21,14 @@ class _LoadPointDetailScreenState extends State<LoadPointDetailScreen> {
   }
 
   @override
+  void didUpdateWidget(covariant LoadPointDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.point != widget.point) {
+      _point = widget.point;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(_point.title), backgroundColor: TruxifyColors.secondaryBackground),
@@ -37,6 +45,10 @@ class _LoadPointDetailScreenState extends State<LoadPointDetailScreen> {
               Row(
                 children: [
                   ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size(120, 44),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                    ),
                     onPressed: () {
                       setState(() {
                         _point = _point.copyWith(claimed: !_point.claimed);

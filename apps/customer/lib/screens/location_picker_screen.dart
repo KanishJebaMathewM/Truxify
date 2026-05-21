@@ -58,6 +58,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
 
   @override
   void dispose() {
+    _mapController.dispose();
     _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -91,7 +92,13 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     );
 
     try {
-      final response = await http.get(uri, headers: const <String, String>{'Accept': 'application/json'});
+      final response = await http.get(
+        uri,
+        headers: const <String, String>{
+          'Accept': 'application/json',
+          'User-Agent': 'Truxify Customer App',
+        },
+      );
       if (response.statusCode != 200) {
         throw Exception('Search failed');
       }
@@ -158,7 +165,13 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     );
 
     try {
-      final response = await http.get(uri, headers: const <String, String>{'Accept': 'application/json'});
+      final response = await http.get(
+        uri,
+        headers: const <String, String>{
+          'Accept': 'application/json',
+          'User-Agent': 'Truxify Customer App',
+        },
+      );
       if (response.statusCode != 200) {
         throw Exception('Reverse lookup failed');
       }

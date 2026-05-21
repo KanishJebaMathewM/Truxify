@@ -37,12 +37,14 @@ class TruxifyApp extends StatelessWidget {
           case AppRoutes.documents:
             return truxifyPageRoute((context) => const DocumentsScreen());
           case AppRoutes.loadDetail:
-            final load = settings.arguments as LoadOffer;
+            final load = settings.arguments as LoadOffer?;
+            if (load == null) return null;
             return truxifyPageRoute(
               (context) => LoadDetailScreen(load: load),
             );
           case AppRoutes.loadPointDetail:
-            final point = settings.arguments as RouteMapPoint;
+            final point = settings.arguments as RouteMapPoint?;
+            if (point == null) return null;
             return truxifyPageRoute(
               (context) => LoadPointDetailScreen(point: point),
             );

@@ -177,13 +177,22 @@ class TruxifyTheme {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         backgroundColor: TruxifyColors.cardBackground,
         selectedColor: TruxifyColors.accent,
-        labelStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w600, color: TruxifyColors.white),
+        labelStyle: GoogleFonts.dmSans(
+          fontWeight: FontWeight.w600,
+          color: WidgetStateColor.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return TruxifyColors.white;
+            }
+            return TruxifyColors.primaryText;
+          }),
+        ),
         side: const BorderSide(color: TruxifyColors.border),
       ),
       tabBarTheme: TabBarThemeData(
         labelColor: TruxifyColors.accent,
         unselectedLabelColor: TruxifyColors.tertiaryText,
         indicator: UnderlineTabIndicator(borderSide: BorderSide(color: TruxifyColors.accent, width: 2)),
+        indicatorColor: TruxifyColors.accent,
         labelStyle: GoogleFonts.dmSans(fontSize: 13, fontWeight: FontWeight.w600),
         unselectedLabelStyle: GoogleFonts.dmSans(fontSize: 13, fontWeight: FontWeight.w400),
       ),

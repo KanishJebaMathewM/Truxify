@@ -16,6 +16,8 @@ void main() {
     expect(DriverMetrics.tryParseInrAmount(''), isNull);
     expect(DriverMetrics.tryParseInrAmount('₹1,24,800'), 124800);
     expect(DriverMetrics.tryParseInrAmount('₹1.2L'), 120000);
+    expect(DriverMetrics.tryParseInrAmount('1,50,000'), 150000);
+    expect(DriverMetrics.tryParseInrAmount('₹ 1,50,000'), 150000);
     expect(DriverMetrics.tryParseInrAmount('unknown'), isNull);
   });
 

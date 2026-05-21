@@ -59,9 +59,7 @@ class DriverMetrics {
       return (amount * multiplier).round();
     }
 
-    final match = RegExp(r'(\d[\d,]*)').firstMatch(normalized);
-    if (match == null) return null;
-    final digits = (match.group(1) ?? '').replaceAll(',', '');
+    final digits = normalized.replaceAll(RegExp(r'[^0-9]'), '');
     return int.tryParse(digits);
   }
 
@@ -140,7 +138,7 @@ class DriverMetrics {
     if (diff.inDays < 7) return '${diff.inDays}d ago';
     final weeks = (diff.inDays / 7).floor();
     if (weeks < 5) return '${weeks}w ago';
-    final months = (diff.inDays / 30).floor();
+    final months = (diff.inDays / 30.44).floor();
     if (months < 12) return '${months}mo ago';
     final years = (diff.inDays / 365).floor();
     return '${years}y ago';

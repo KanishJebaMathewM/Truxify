@@ -70,6 +70,7 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
 
   @override
   void dispose() {
+    _mapController.dispose();
     _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -105,7 +106,10 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
     try {
       final response = await http.get(
         uri,
-        headers: const <String, String>{'Accept': 'application/json'},
+        headers: const <String, String>{
+          'Accept': 'application/json',
+          'User-Agent': 'Truxify Driver App',
+        },
       );
       if (response.statusCode != 200) {
         throw Exception('Search failed');
@@ -136,7 +140,7 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
       setState(() {
         _suggestions = suggestions;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) {
         return;
       }
@@ -144,6 +148,9 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
       setState(() {
         _suggestions = const <_SearchSuggestion>[];
       });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Search error: $e')),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -178,7 +185,10 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
     try {
       final response = await http.get(
         uri,
-        headers: const <String, String>{'Accept': 'application/json'},
+        headers: const <String, String>{
+          'Accept': 'application/json',
+          'User-Agent': 'Truxify Driver App',
+        },
       );
       if (response.statusCode != 200) {
         throw Exception('Reverse lookup failed');

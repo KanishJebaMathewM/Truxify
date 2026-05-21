@@ -22,6 +22,12 @@ class TripDetailScreen extends StatefulWidget {
 class _TripDetailScreenState extends State<TripDetailScreen> {
   final MapController _mapController = MapController();
 
+  @override
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
+  }
+
   void _showBlockchainBottomSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -180,14 +186,6 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   Widget build(BuildContext context) {
     final trip = widget.trip;
     final breakdown = trip.paymentBreakdown;
-
-    // Extract start and end cities
-    final cities = trip.route.split('→');
-    final startCity = cities.isNotEmpty ? cities[0].trim() : 'Start';
-    final endCity = cities.length > 1 ? cities[1].trim() : 'End';
-
-    final startLetter = startCity.isNotEmpty ? startCity[0] : 'S';
-    final endLetter = endCity.isNotEmpty ? endCity[0] : 'D';
 
     return Scaffold(
       backgroundColor: const Color(0xFFF7F3F3),

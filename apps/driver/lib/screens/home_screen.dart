@@ -43,6 +43,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _mapController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
@@ -94,7 +95,10 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final response = await http.get(
         uri,
-        headers: const <String, String>{'Accept': 'application/json'},
+        headers: const <String, String>{
+          'Accept': 'application/json',
+          'User-Agent': 'Truxify Driver App',
+        },
       );
 
       if (response.statusCode != 200) {

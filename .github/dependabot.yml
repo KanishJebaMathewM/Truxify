@@ -1,24 +1,42 @@
 version: 2
 
 updates:
+  # Flutter Customer App
   - package-ecosystem: "pub"
     directory: "/apps/customer"
     schedule:
       interval: "weekly"
-
     labels:
       - "dependencies"
-
     commit-message:
       prefix: "build"
 
+  # Flutter Driver App
   - package-ecosystem: "pub"
     directory: "/apps/driver"
     schedule:
       interval: "weekly"
-
     labels:
       - "dependencies"
-
     commit-message:
       prefix: "build"
+
+  # Node.js Backend API
+  - package-ecosystem: "npm"
+    directory: "/backend/api"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+
+  # GitHub Actions Workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"

@@ -12,11 +12,11 @@
     "@supabase/supabase-js": "^2.43.4",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2",
+    "express": "^5.2.1",
     "firebase-admin": "^12.1.1",
-    "ioredis": "^5.4.1",
+    "ioredis": "^5.11.0",
     "mongodb": "^6.7.0",
-    "ws": "^8.17.0"
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.2"

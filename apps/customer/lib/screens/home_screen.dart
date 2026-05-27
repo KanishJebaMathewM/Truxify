@@ -13,6 +13,13 @@ import 'live_tracking_screen.dart';
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
+  static String _greetingFor(DateTime time) {
+    final hour = time.hour;
+    if (hour < 12) return 'Good morning';
+    if (hour < 17) return 'Good afternoon';
+    return 'Good evening';
+  }
+
   RouteDraft _draftForRoute(RouteCardData route) {
     return RouteDraft(
       pickup: route.pickup,
@@ -35,7 +42,7 @@ class HomeScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = FreightFairScope.of(context);
     final now = DateTime.now();
-    final greeting = now.hour < 12 ? 'Good morning' : now.hour < 17 ? 'Good afternoon' : 'Good evening';
+    final greeting = _greetingFor(now);
 
     return Scaffold(
       appBar: AppBar(

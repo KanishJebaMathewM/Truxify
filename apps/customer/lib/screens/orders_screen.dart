@@ -19,6 +19,26 @@ class OrdersScreen extends StatefulWidget {
 class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderStateMixin {
   TabController? _tabController;
   FreightFairController? _controller;
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+
+  List<ActiveOrderData> get _filteredActiveOrders {
+    final query = _searchController.text.toLowerCase().trim();
+    if (query.isEmpty) return mockActiveOrders;
+    return mockActiveOrders.where((o) =>
+      o.orderId.toLowerCase().contains(query) ||
+      o.route.toLowerCase().contains(query)
+    ).toList();
+  }
+
+  List<HistoryOrderData> get _filteredHistoryOrders {
+    final query = _searchController.text.toLowerCase().trim();
+    if (query.isEmpty) return mockHistoryOrders;
+    return mockHistoryOrders.where((o) =>
+      o.orderId.toLowerCase().contains(query) ||
+      o.route.toLowerCase().contains(query)
+    ).toList();
+  }
 
   @override
   void didChangeDependencies() {
@@ -40,25 +60,55 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
   @override
   void dispose() {
     _tabController?.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _isSearching = !_isSearching;
+      if (!_isSearching) {
+        _searchController.clear();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final tabController = _tabController!;
+    final activeOrders = _filteredActiveOrders;
+    final historyOrders = _filteredHistoryOrders;
 
     return SafeArea(
       child: Column(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            child: Row(
-              children: [
-                Text('Orders', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-                const Spacer(),
-                IconButton(onPressed: () {}, icon: const Icon(Icons.search_rounded)),
-              ],
-            ),
+            child: _isSearching
+                ? TextField(
+                    controller: _searchController,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: 'Search by order ID or route…',
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: _toggleSearch,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  )
+                : Row(
+                    children: [
+                      Text('Orders', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+                      const Spacer(),
+                      IconButton(onPressed: _toggleSearch, icon: const Icon(Icons.search_rounded)),
+                    ],
+                  ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
@@ -73,10 +123,10 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
               children: [
                 ListView.separated(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                  itemCount: mockActiveOrders.length,
+                  itemCount: activeOrders.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
-                    final order = mockActiveOrders[index];
+                    final order = activeOrders[index];
                     return _ActiveOrderCard(
                       order: order,
                       onTap: () => Navigator.of(context).push(
@@ -87,10 +137,10 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                 ),
                 ListView.separated(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                  itemCount: mockHistoryOrders.length,
+                  itemCount: historyOrders.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
-                    final order = mockHistoryOrders[index];
+                    final order = historyOrders[index];
                     return _HistoryOrderCard(
                       order: order,
                       onTap: () => Navigator.of(context).push(

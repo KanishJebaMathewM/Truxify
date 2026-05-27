@@ -166,7 +166,7 @@ router.post('/wallet/withdraw', authenticate, requireRole(['driver']), async (re
       .from('driver_details')
       .update({
         wallet_confirmed: details.wallet_confirmed - amount,
-        wallet_pending: details.wallet_confirmed + amount, // Mark as pending payout
+        wallet_pending: (details.wallet_pending || 0) + amount, // Mark as pending payout
         updated_at: new Date().toISOString()
       })
       .eq('user_id', req.user.id);
@@ -190,6 +190,7 @@ router.post('/wallet/withdraw', authenticate, requireRole(['driver']), async (re
 
     if (txnErr) {
       console.error('Withdrawal transaction log failure:', txnErr.message);
+      return res.status(500).json({ error: 'Failed to record withdrawal transaction.', details: txnErr.message });
     }
 
     res.status(200).json({

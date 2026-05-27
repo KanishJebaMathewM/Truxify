@@ -86,7 +86,7 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
       .insert({
         order_display_id: orderDisplayId,
         customer_id: req.user.id,
-        customer_name: req.user.fullName,
+        customer_name: req.user.fullName || 'Customer',
         route_label: `${pickup_address.split(',')[0]} → ${drop_address.split(',')[0]}`,
         route_subtitle: `${weight_tonnes} tonnes • ${goods_type}`,
         pickup_address, pickup_lat, pickup_lng,
@@ -95,8 +95,8 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
         weight: `${weight_tonnes} tonnes`,
         freight_value: base_freight,
         fuel_cost: Math.round(base_freight * 0.45), // Mock calculation
-        toll_cost: toll_estimate,
-        net_profit: Math.round(base_freight * 0.55) - toll_estimate,
+        toll_cost: toll_estimate || 0,
+        net_profit: Math.round(base_freight * 0.55) - (toll_estimate || 0),
         status: 'available'
       });
 

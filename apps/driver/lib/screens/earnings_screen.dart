@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../theme/app_theme.dart';
 import '../data/mock_data.dart';
@@ -264,7 +265,7 @@ class _EarningsScreenState extends State<EarningsScreen>
             ),
             const SizedBox(height: 16),
             Text(
-              'Oops!',
+              'Something went wrong',
               style: Theme.of(context)
                   .textTheme
                   .titleLarge
@@ -414,11 +415,12 @@ class _EarningsScreenState extends State<EarningsScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'TOTAL EARNED',
+              'Total earned',
             style: textTheme.labelSmall?.copyWith(
               color: Colors.white.withValues(alpha: 0.6),
               fontWeight: FontWeight.bold,
               letterSpacing: 1.0,
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
           const SizedBox(height: 8),
@@ -429,6 +431,7 @@ class _EarningsScreenState extends State<EarningsScreen>
                   style: textTheme.displaySmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 )
               : TweenAnimationBuilder<int>(
@@ -441,6 +444,7 @@ class _EarningsScreenState extends State<EarningsScreen>
                       style: textTheme.displaySmall?.copyWith(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     );
                   },
@@ -719,6 +723,7 @@ class _EarningsScreenState extends State<EarningsScreen>
               style: textTheme.bodyMedium?.copyWith(
                 fontWeight: FontWeight.bold,
                 color: color,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ],
@@ -787,7 +792,7 @@ class _EarningsScreenState extends State<EarningsScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'WITH TRUXIFY',
+                        'With Truxify',
                         style: textTheme.labelSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: TruxifyColors.hintText,
@@ -799,6 +804,7 @@ class _EarningsScreenState extends State<EarningsScreen>
                         style: textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: TruxifyColors.accent,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -826,7 +832,7 @@ class _EarningsScreenState extends State<EarningsScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'OLD BROKER SYSTEM',
+                        'Old broker system',
                         style: textTheme.labelSmall?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: TruxifyColors.hintText,
@@ -839,6 +845,7 @@ class _EarningsScreenState extends State<EarningsScreen>
                           fontWeight: FontWeight.w500,
                           color: TruxifyColors.hintText,
                           decoration: TextDecoration.lineThrough,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -865,6 +872,7 @@ class _EarningsScreenState extends State<EarningsScreen>
                   style: textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w500,
                     color: TruxifyColors.accent,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
                 const SizedBox(width: 6),
@@ -1018,10 +1026,11 @@ class _EarningsScreenState extends State<EarningsScreen>
                       ? _formatAmount(_totalPendingAmount).replaceFirst('₹', '')
                       : '4,700'
                 }',
-                style: textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w500,
-                  color: TruxifyColors.accent,
-                ),
+                  style: textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w500,
+                    color: TruxifyColors.accent,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
               ),
             ],
           ),
@@ -1083,6 +1092,7 @@ class _EarningsScreenState extends State<EarningsScreen>
                       style: textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: TruxifyColors.accent,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                     ),
                   ],
@@ -1243,10 +1253,11 @@ class _AnimatedBarState extends State<_AnimatedBar>
                   _getCompactAmount(widget.amount.toDouble()),
                   style: widget.textTheme.labelSmall?.copyWith(
                     fontWeight: FontWeight.bold,
-                    color: TruxifyColors.accent,
-                  ),
-                )
-              : null,
+                      color: TruxifyColors.accent,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                  )
+                : null,
         ),
         const SizedBox(height: 4),
         // Bar with touch target
@@ -1254,7 +1265,10 @@ class _AnimatedBarState extends State<_AnimatedBar>
           label:
               'Earning of ${widget.amount} rupees on ${widget.day}',
           child: GestureDetector(
-            onTap: () => widget.onTap(widget.index),
+            onTap: () {
+              HapticFeedback.lightImpact();
+              widget.onTap(widget.index);
+            },
             behavior: HitTestBehavior.opaque,
             child: SizedBox(
               width: 44, // min WCAG touch target

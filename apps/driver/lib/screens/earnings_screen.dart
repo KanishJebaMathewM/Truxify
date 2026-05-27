@@ -5,7 +5,6 @@ import '../theme/app_theme.dart';
 import '../data/mock_data.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/shimmer_loading.dart';
-import '../widgets/status_badge.dart';
 import '../services/earnings_data_service.dart';
 import '../models/app_models.dart';
 
@@ -142,15 +141,6 @@ class _EarningsScreenState extends State<EarningsScreen>
           ? _earningsData[_selectedBarIndex]
           : null;
 
-  int get _totalPendingAmount {
-    int total = 0;
-    for (final p in pendingPayments) {
-      final cleaned = p.amount.replaceAll(RegExp(r'[₹,\s]'), '');
-      total += int.tryParse(cleaned) ?? 0;
-    }
-    return total;
-  }
-
   // ── Build ────────────────────────────────────────────────────
 
   @override
@@ -240,12 +230,12 @@ class _EarningsScreenState extends State<EarningsScreen>
       child: Column(
         children: const [
           HeroShimmer(),
-          SizedBox(height: 24),
+          SizedBox(height: 32),
           SectionShimmer(),
-          SizedBox(height: 24),
+          SizedBox(height: 32),
           SectionShimmer(height: 160),
-          SizedBox(height: 24),
-          SectionShimmer(height: 200),
+          SizedBox(height: 32),
+          SectionShimmer(height: 150),
         ],
       ),
     );
@@ -343,34 +333,22 @@ class _EarningsScreenState extends State<EarningsScreen>
             reduceMotion: reduceMotion,
             child: _buildHeroCard(textTheme, reduceMotion),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
           _AnimatedSection(
             delay: const Duration(milliseconds: 100),
             reduceMotion: reduceMotion,
             child:
                 _buildEarningsChartCard(context, textTheme, reduceMotion),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
           _AnimatedSection(
             delay: const Duration(milliseconds: 200),
             reduceMotion: reduceMotion,
-            child: _buildBreakdownCard(textTheme),
-          ),
-          const SizedBox(height: 24),
-          _AnimatedSection(
-            delay: const Duration(milliseconds: 300),
-            reduceMotion: reduceMotion,
-            child: _buildSavingsCard(context, textTheme),
-          ),
-          const SizedBox(height: 24),
-          _AnimatedSection(
-            delay: const Duration(milliseconds: 400),
-            reduceMotion: reduceMotion,
             child: _buildMilestonesCard(textTheme),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
           _AnimatedSection(
-            delay: const Duration(milliseconds: 500),
+            delay: const Duration(milliseconds: 300),
             reduceMotion: reduceMotion,
             child: _buildPendingPaymentsCard(textTheme),
           ),
@@ -508,45 +486,71 @@ class _EarningsScreenState extends State<EarningsScreen>
           Row(
             children: [
               Expanded(
-                child: _buildHeroStat(
-                    textTheme, '$totalTrips', 'Trips'),
+                child: Column(
+                  children: [
+                    Text(
+                      '$totalTrips',
+                      style: textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Trips',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const Separator(height: 28),
               Expanded(
-                child: _buildHeroStat(
-                    textTheme, '₹${avgPerTrip.toInt()}', 'Avg/trip'),
+                child: Column(
+                  children: [
+                    Text(
+                      '₹${avgPerTrip.toInt()}',
+                      style: textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Avg/trip',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const Separator(height: 28),
               Expanded(
-                child: _buildHeroStat(
-                    textTheme, '${totalHours}h', 'Hours'),
+                child: Column(
+                  children: [
+                    Text(
+                      '${totalHours}h',
+                      style: textTheme.titleSmall?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Hours',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildHeroStat(
-      TextTheme textTheme, String value, String label) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: textTheme.titleSmall?.copyWith(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: textTheme.labelSmall?.copyWith(
-            color: Colors.white.withValues(alpha: 0.5),
-          ),
-        ),
-      ],
     );
   }
 
@@ -565,15 +569,9 @@ class _EarningsScreenState extends State<EarningsScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Your week at a glance',
+            'This Week',
             style:
                 textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            "Tap any bar to see that day's details",
-            style: textTheme.labelSmall
-                ?.copyWith(color: TruxifyColors.hintText),
           ),
           const SizedBox(height: 20),
           // Chart
@@ -662,231 +660,7 @@ class _EarningsScreenState extends State<EarningsScreen>
     );
   }
 
-  // ── 3. Breakdown Card ────────────────────────────────────────
-
-  Widget _buildBreakdownCard(TextTheme textTheme) {
-    return AppCard(
-      elevation: 1,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Where your money comes from',
-            style:
-                textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          _buildBreakdownRow(
-            textTheme,
-            'Long haul (>400km)',
-            60,
-            '₹${_stats != null ? ((_stats!.totalAmount * 60 / 100).round()).toString() : '11,040'}',
-            TruxifyColors.accent,
-          ),
-          const SizedBox(height: 12),
-          _buildBreakdownRow(
-            textTheme,
-            'Short haul (<400km)',
-            30,
-            '₹${_stats != null ? ((_stats!.totalAmount * 30 / 100).round()).toString() : '5,520'}',
-            TruxifyColors.warning,
-          ),
-          const SizedBox(height: 12),
-          _buildBreakdownRow(
-            textTheme,
-            'Multi-customer loads',
-            10,
-            '₹${_stats != null ? ((_stats!.totalAmount * 10 / 100).round()).toString() : '1,840'}',
-            TruxifyColors.success,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBreakdownRow(
-    TextTheme textTheme,
-    String label,
-    int percentage,
-    String amount,
-    Color color,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: textTheme.bodyMedium),
-            Text(
-              amount,
-              style: textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: color,
-                fontFeatures: const [FontFeature.tabularFigures()],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Container(
-          height: 6,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: TruxifyColors.border,
-            borderRadius: BorderRadius.circular(3),
-          ),
-          child: FractionallySizedBox(
-            alignment: Alignment.centerLeft,
-            widthFactor: percentage / 100,
-            child: Container(
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(3),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '$percentage% of earnings',
-          style: textTheme.labelSmall
-              ?.copyWith(color: TruxifyColors.hintText),
-        ),
-      ],
-    );
-  }
-
-  // ── 4. Savings Comparison Card ───────────────────────────────
-
-  Widget _buildSavingsCard(BuildContext context, TextTheme textTheme) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final stats = _stats;
-    final truxifyAmount = stats?.totalAmount ?? 18400;
-    final brokerAmount = (truxifyAmount * 0.7).round();
-    final savedAmount = truxifyAmount - brokerAmount;
-
-    return AppCard(
-      elevation: 1,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'You vs broker system',
-            style:
-                textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? TruxifyColors.darkAccentLight
-                        : TruxifyColors.accentLight,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'With Truxify',
-                        style: textTheme.labelSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: TruxifyColors.hintText,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _formatAmount(truxifyAmount),
-                        style: textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: TruxifyColors.accent,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      StatusBadge(
-                        label: 'You keep 100%',
-                        backgroundColor: TruxifyColors.successLight,
-                        foregroundColor: TruxifyColors.success,
-                        icon: Icons.check_circle_rounded,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? TruxifyColors.darkSecondaryBackground
-                        : TruxifyColors.secondaryBackground,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Old broker system',
-                        style: textTheme.labelSmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: TruxifyColors.hintText,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _formatAmount(brokerAmount),
-                        style: textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w500,
-                          color: TruxifyColors.hintText,
-                          decoration: TextDecoration.lineThrough,
-                          fontFeatures: const [FontFeature.tabularFigures()],
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        "You'd lose ${_formatAmount(savedAmount)}",
-                        style: textTheme.labelSmall?.copyWith(
-                          color: TruxifyColors.errorRed,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Saved ${_formatAmount(savedAmount)} this week by going broker-free',
-                  style: textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w500,
-                    color: TruxifyColors.accent,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Icon(Icons.check_circle_rounded,
-                    size: 14, color: TruxifyColors.success),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ── 5. Milestones Card ───────────────────────────────────────
+  // ── 3. Milestones Card ───────────────────────────────────────
 
   Widget _buildMilestonesCard(TextTheme textTheme) {
     return AppCard(
@@ -1003,10 +777,15 @@ class _EarningsScreenState extends State<EarningsScreen>
     );
   }
 
-  // ── 6. Pending Payments Card ─────────────────────────────────
+  // ── 4. Pending Payments Card ─────────────────────────────────
 
   Widget _buildPendingPaymentsCard(TextTheme textTheme) {
     final isDarkPending = Theme.of(context).brightness == Brightness.dark;
+    int totalPending = 0;
+    for (final p in pendingPayments) {
+      final cleaned = p.amount.replaceAll(RegExp(r'[₹,\s]'), '');
+      totalPending += int.tryParse(cleaned) ?? 0;
+    }
     return AppCard(
       elevation: 1,
       child: Column(
@@ -1021,11 +800,7 @@ class _EarningsScreenState extends State<EarningsScreen>
                     ?.copyWith(fontWeight: FontWeight.bold),
               ),
               Text(
-                '₹${
-                  _totalPendingAmount > 0
-                      ? _formatAmount(_totalPendingAmount).replaceFirst('₹', '')
-                      : '4,700'
-                }',
+                '₹${totalPending > 0 ? _formatAmount(totalPending).replaceFirst('₹', '') : '4,700'}',
                   style: textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w500,
                     color: TruxifyColors.accent,
@@ -1278,28 +1053,16 @@ class _AnimatedBarState extends State<_AnimatedBar>
                   curve: Curves.easeInOut,
                   height: animatedHeight,
                   width: 36,
-                  decoration: widget.isSelected
-                      ? BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [
-                              TruxifyColors.accent,
-                              TruxifyColors.accentDark,
-                            ],
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                          ),
-                          borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(6),
-                          ),
-                        )
-                      : BoxDecoration(
-                          color: widget.isHighest
-                              ? TruxifyColors.accent
-                              : TruxifyColors.accentLight,
-                          borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(6),
-                          ),
-                        ),
+                  decoration: BoxDecoration(
+                    color: widget.isSelected
+                        ? TruxifyColors.accentDark
+                        : widget.isHighest
+                            ? TruxifyColors.accent
+                            : TruxifyColors.accentLight,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(6),
+                    ),
+                  ),
                 ),
               ),
             ),

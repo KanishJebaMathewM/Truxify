@@ -348,9 +348,13 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                     onPressed: _selectedPoint == null || _selectedAddress == null
                         ? null
                         : () {
-                            Navigator.of(context).pop(
-                              LocationPickResult(address: _selectedAddress!, point: _selectedPoint!),
-                            );
+                            final point = _selectedPoint;
+                            final addr = _selectedAddress;
+                            if (point != null && addr != null) {
+                              Navigator.of(context).pop(
+                                LocationPickResult(address: addr, point: point),
+                              );
+                            }
                           },
                   ),
                 ],

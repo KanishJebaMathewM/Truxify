@@ -24,13 +24,6 @@ name: Truxify Multi-Layer Code Analysis
 # ═══════════════════════════════════════════════════════════════════════════════
 
 on:
-  push:
-    branches: [main, master]
-    paths:
-      - 'apps/customer/**'
-      - 'apps/driver/**'
-  schedule:
-    - cron: '0 2 * * 1'
   workflow_dispatch:
     inputs:
       app:

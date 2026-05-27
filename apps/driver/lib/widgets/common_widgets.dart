@@ -24,14 +24,22 @@ class AppCard extends StatelessWidget {
   final BoxBorder? border;
   final double elevation;
 
+  Color _resolveColor(BuildContext context) {
+    if (color != TruxifyColors.cardBackground) return color;
+    return Theme.of(context).brightness == Brightness.dark
+        ? TruxifyColors.darkCardBackground
+        : TruxifyColors.cardBackground;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final resolvedColor = _resolveColor(context);
     final card = Container(
       margin: margin,
       decoration: BoxDecoration(
-        color: color,
+        color: resolvedColor,
         borderRadius: BorderRadius.circular(14),
-        border: border ?? Border.all(color: color == TruxifyColors.cardBackground ? TruxifyColors.border : Colors.transparent),
+        border: border ?? Border.all(color: resolvedColor == TruxifyColors.cardBackground ? TruxifyColors.border : Colors.transparent),
         boxShadow: elevation > 0
             ? [BoxShadow(color: TruxifyColors.accent.withValues(alpha: 0.06), blurRadius: math.max(2, elevation), offset: const Offset(0, 2))]
             : null,
@@ -338,11 +346,13 @@ class CountBadge extends StatelessWidget {
 }
 
 class Separator extends StatelessWidget {
-  const Separator({super.key});
+  const Separator({super.key, this.height});
+
+  final double? height;
 
   @override
   Widget build(BuildContext context) {
-    return Container(width: 1, height: 32, color: TruxifyColors.border);
+    return Container(width: 1, height: height ?? 32, color: TruxifyColors.border);
   }
 }
 

@@ -306,48 +306,63 @@ router.get('/:id/bids', authenticate, requireRole(['customer']), async (req, res
     }
 
     // Populate profile and truck data
-    const enrichedBids = await Promise.all(bids.map(async (bid) => {
-      // Driver profile
-      const { data: profile } = await supabase
+    // Batch fetch all driver IDs at once
+    const driverIds = bids.map(b => b.driver_id);
+
+    const [profilesRes, detailsRes] = await Promise.all([
+      supabase
         .from('profiles')
-        .select('full_name, avatar_url, phone')
-        .eq('id', bid.driver_id)
-        .maybeSingle();
-
-      // Driver rating
-      const { data: details } = await supabase
+        .select('id, full_name, avatar_url, phone')
+        .in('id', driverIds),
+      supabase
         .from('driver_details')
-        .select('rating, total_trips, completion_rate, truck_id')
-        .eq('user_id', bid.driver_id)
-        .maybeSingle();
+        .select('user_id, rating, total_trips, completion_rate, truck_id')
+        .in('user_id', driverIds)
+    ]);
 
-      // Truck details
-      let truckInfo = null;
-      if (details && details.truck_id) {
-        const { data: truck } = await supabase
+    const profiles = profilesRes.data || [];
+    const details  = detailsRes.data || [];
+
+    // Batch fetch all trucks
+    const truckIds = details
+      .map(d => d.truck_id)
+      .filter(Boolean);
+
+    const trucksRes = truckIds.length > 0
+      ? await supabase
           .from('trucks')
-          .select('name, number_plate')
-          .eq('id', details.truck_id)
-          .maybeSingle();
-        truckInfo = truck;
-      }
+          .select('id, name, number_plate')
+          .in('id', truckIds)
+      : { data: [] };
+
+    const trucks = trucksRes.data || [];
+
+    // Map into lookup objects
+    const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
+    const detailMap  = Object.fromEntries(details.map(d => [d.user_id, d]));
+    const truckMap   = Object.fromEntries(trucks.map(t => [t.id, t]));
+
+    const enrichedBids = bids.map(bid => {
+      const profile = profileMap[bid.driver_id] || {};
+      const detail  = detailMap[bid.driver_id]  || {};
+      const truck   = detail.truck_id ? truckMap[detail.truck_id] : null;
 
       return {
-        id: bid.id,
+        id:         bid.id,
         bid_amount: bid.bid_amount,
         created_at: bid.created_at,
         driver: {
-          id: bid.driver_id,
-          name: profile?.full_name || 'Anonymous Driver',
-          avatar: profile?.avatar_url,
-          phone: profile?.phone,
-          rating: details?.rating || 0.00,
-          trips: details?.total_trips || 0,
-          completion_rate: details?.completion_rate || 100.00
+          id:              bid.driver_id,
+          name:            profile.full_name       || 'Anonymous Driver',
+          avatar:          profile.avatar_url,
+          phone:           profile.phone,
+          rating:          detail.rating           || 0.00,
+          trips:           detail.total_trips      || 0,
+          completion_rate: detail.completion_rate  || 100.00
         },
-        truck: truckInfo
+        truck
       };
-    }));
+    });
 
     res.json(enrichedBids);
 
@@ -409,46 +424,28 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
         .then(res => res.data);
     }
 
-    // 6.4 Perform transactional updates:
-    // Update Accepted Bid
-    await supabase.from('load_bids').update({ status: 'accepted', updated_at: new Date().toISOString() }).eq('id', bidId);
-    // Reject other bids for this load
-    await supabase.from('load_bids').update({ status: 'rejected', updated_at: new Date().toISOString() }).eq('load_id', bid.load_id).neq('id', bidId);
-    // Claim load offer
-    await supabase.from('load_offers').update({ status: 'claimed', updated_at: new Date().toISOString() }).eq('id', bid.load_id);
+    // 6.4 Execute atomically via Supabase RPC
+    const { error: rpcErr } = await supabase.rpc('accept_bid_tx', {
+      p_bid_id:           bidId,
+      p_order_id:         orderId,
+      p_load_id:          bid.load_id,
+      p_driver_id:        bid.driver_id,
+      p_truck_id:         truckInfo?.id || null,
+      p_driver_name:      profile?.full_name || 'Assigned Driver',
+      p_driver_rating:    details?.rating || 0.00,
+      p_truck_number:     truckInfo?.number_plate || 'N/A',
+      p_bid_amount:       bid.bid_amount,
+      p_order_display_id: order.order_display_id
+    });
 
-    // Assign driver and truck to order
-    const { data: updatedOrder, error: updateErr } = await supabase
-      .from('orders')
-      .update({
-        driver_id: bid.driver_id,
-        truck_id: truckInfo?.id || null,
-        status: 'truck_assigned',
-        driver_name: profile?.full_name || 'Assigned Driver',
-        driver_rating: details?.rating || 0.00,
-        truck_number: truckInfo?.number_plate || 'N/A',
-        total_amount: bid.bid_amount, // Bind final contract amount
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', orderId)
-      .select('*')
-      .single();
-
-    if (updateErr) {
-      return res.status(500).json({ error: 'Failed to assign driver to order.', details: updateErr.message });
+    if (rpcErr) {
+      return res.status(500).json({
+        error: 'Failed to accept bid atomically.',
+        details: rpcErr.message
+      });
     }
 
-    // Update milestone on order timeline
-    await supabase
-      .from('order_timeline')
-      .update({ completed: true, milestone_time: new Date().toISOString() })
-      .eq('order_display_id', order.order_display_id)
-      .eq('milestone', 'Truck Assigned');
-
-    res.json({
-      message: 'Bid accepted successfully. Driver and truck assigned.',
-      order: updatedOrder
-    });
+    res.json({ message: 'Bid accepted. Driver and truck assigned.' });
 
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });

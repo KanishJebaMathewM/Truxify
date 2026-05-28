@@ -1,6 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { mongoDb, redisClient } from '../config/db.js';
-import url from 'url';
+import { mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 
 // In-memory mapping of active client subscriptions
 // Key: order_display_id or driver_id
@@ -15,7 +14,7 @@ export function initWebSocketServer(server) {
 
   // Handle upgrade event manually to allow authentication or path matching
   server.on('upgrade', (request, socket, head) => {
-    const pathname = url.parse(request.url).pathname;
+    const pathname = new URL(request.url, 'http://localhost').pathname;
 
     if (pathname === '/ws/tracking') {
       wss.handleUpgrade(request, socket, head, (ws) => {
@@ -26,7 +25,31 @@ export function initWebSocketServer(server) {
     }
   });
 
-  wss.on('connection', (ws, req) => {
+  wss.on('connection', async (ws, req) => {
+    // Replace legacy url.parse with new URL
+    const reqUrl = new URL(req.url, 'http://localhost');
+    const token    = reqUrl.searchParams.get('token');
+    const bypassAuth = process.env.BYPASS_AUTH === 'true';
+
+    if (bypassAuth) {
+      ws.driverId = reqUrl.searchParams.get('driver_id') || 'test_driver';
+      console.log(`🔓 WS Auth bypassed for driver: ${ws.driverId}`);
+    } else {
+      if (!token) {
+        ws.close(4001, 'Unauthorized: No token provided');
+        return;
+      }
+      try {
+        const decoded = await firebaseAdmin.auth().verifyIdToken(token);
+        ws.driverId = decoded.uid;
+        console.log(`✅ WS Authenticated driver: ${ws.driverId}`);
+      } catch (e) {
+        console.error('WS Auth failed:', e.message);
+        ws.close(4001, 'Unauthorized: Invalid token');
+        return;
+      }
+    }
+
     console.log('🔌 New WebSocket connection established on /ws/tracking');
     ws.isAlive = true;
 

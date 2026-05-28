@@ -12,8 +12,8 @@ import { initWebSocketServer } from './sockets/tracker.js';
 import orderRoutes from './routes/orderRoutes.js';
 import driverRoutes from './routes/driverRoutes.js';
 
-// Configuration load from root folder
-dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
+// Configuration load from root folder is handled in db.js
+
 
 const app = express();
 const server = http.createServer(app);

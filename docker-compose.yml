@@ -1,10 +1,32 @@
 version: '3.8'
+
 services:
   api:
-    build: ./backend/api
+    build:
+      context: ./backend/api
+      target: development
     ports:
-      - "3000:3000"
-  ml:
-    build: ./backend/ml
+      - "5000:5000"
+    env_file:
+      - .env
+    volumes:
+      - ./backend/api:/app
+      - /app/node_modules
+    depends_on:
+      - mongo
+      - redis
+
+  mongo:
+    image: mongo:6-jammy
     ports:
-      - "8001:8001"
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  mongo_data:

@@ -7,6 +7,7 @@ import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/app_page_route.dart';
+import '../widgets/shipment_card.dart';
 import '../widgets/common_widgets.dart';
 import 'live_tracking_screen.dart';
 
@@ -93,7 +94,7 @@ class HomeScreen extends StatelessWidget {
                 separatorBuilder: (_, __) => const SizedBox(width: 14),
                 itemBuilder: (context, index) {
                   final shipment = mockActiveShipments[index];
-                  return _ShipmentCard(
+                  return ShipmentCard(
                     shipment: shipment,
                     onTap: () {
                       Navigator.of(context).push(
@@ -131,52 +132,6 @@ class HomeScreen extends StatelessWidget {
               label: 'Book a Truck 🚛',
               onPressed: () => controller.openFindTrucks(draft: mockDefaultRouteDraft),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ShipmentCard extends StatelessWidget {
-  const _ShipmentCard({required this.shipment, required this.onTap});
-
-  final ShipmentCardData shipment;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 290,
-        padding: const EdgeInsets.all(16),
-        decoration: elevatedSurfaceDecoration(color: Theme.of(context).colorScheme.surface),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(shipment.route, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                ),
-                if (shipment.isLive) const LiveDot(),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(shipment.driver, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
-            const Spacer(),
-            Row(
-              children: [
-                StatusBadge(label: shipment.status, color: shipment.statusColor, filled: true),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text('ETA: ${shipment.eta}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text('Truck ${shipment.truckNumber}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
           ],
         ),
       ),

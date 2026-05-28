@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-
+import 'package:flutter/services.dart';
 import '../core/app_routes.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
@@ -14,7 +14,7 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _phoneController = TextEditingController(text: '98765 43210');
+  final TextEditingController _phoneController = TextEditingController(text: '9876543210');
   bool _loading = false;
 
   @override
@@ -24,13 +24,29 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _sendOtp() async {
+    final phone = _phoneController.text.replaceAll(' ', '').trim();
+
+  if (phone.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please enter phone number')),
+    );
+    return;
+  }
+
+  if (phone.length != 10 || int.tryParse(phone) == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Enter a valid 10-digit phone number')),
+    );
+    return;
+  }
+
     setState(() => _loading = true);
     await Future<void>.delayed(const Duration(milliseconds: 400));
     if (!mounted) {
       return;
     }
     setState(() => _loading = false);
-    Navigator.of(context).pushNamed(AppRoutes.otp, arguments: _phoneController.text.trim());
+    Navigator.of(context).pushNamed(AppRoutes.otp,  arguments: phone);
   }
 
   @override
@@ -59,10 +75,14 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 10),
               TextField(
                 controller: _phoneController,
+                maxLength: 10,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
                 keyboardType: TextInputType.phone,
                 decoration: const InputDecoration(
                   prefixText: '+91  ',
-                  hintText: '98765 43210',
+                  hintText: '9876543210',
                 ),
               ),
               const SizedBox(height: 20),

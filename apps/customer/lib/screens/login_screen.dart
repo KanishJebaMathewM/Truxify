@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-
+import 'package:flutter/services.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
@@ -34,6 +34,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
   void _sendOtp() {
     FocusScope.of(context).unfocus();
+    final phone = _phoneController.text.replaceAll(' ', '').trim();
+
+  if (phone.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Please enter phone number')),
+    );
+    return;
+  }
+
+  if (phone.length != 10 || int.tryParse(phone) == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Enter a valid 10-digit phone number')),
+    );
+    return;
+  }
     setState(() => _showOtp = true);
   }
 
@@ -89,7 +104,11 @@ class _LoginScreenState extends State<LoginScreen> {
         const SizedBox(height: 12),
         TextField(
           controller: _phoneController,
+          maxLength: 10,
           keyboardType: TextInputType.phone,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+     ],
           decoration: InputDecoration(
             prefixIcon: Container(
               alignment: Alignment.center,
@@ -100,7 +119,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               child: const Text('+91', style: TextStyle(fontWeight: FontWeight.w700)),
             ),
-            hintText: '98765 43210',
+            hintText: '9876543210',
           ),
         ),
         const SizedBox(height: 18),

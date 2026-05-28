@@ -49,8 +49,9 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
                           ? Colors.white
                           : Theme.of(context).brightness == Brightness.dark
                               ? Colors.white70
-                              : FreightFairColors.primaryText,
+                              : Colors.black87,
                       fontWeight: FontWeight.w600,
+                      fontSize: 15,
                     ),
                   ),
                   selected: selected,
@@ -58,18 +59,23 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
                   selectedColor: FreightFairColors.accent,
                   backgroundColor:
                       Theme.of(context).brightness == Brightness.dark
-                          ? const Color(0xFF2A2A2A)
+                          ? FreightFairColors.darkBackground
                           : Colors.white,
                   side: BorderSide(
                     color: selected
                         ? FreightFairColors.accent
-                        : FreightFairColors.border,
+                        : Colors.grey.shade300,
+                    width: 1.2,
                   ),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  showCheckmark: false,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  showCheckmark: true,
+                  checkmarkColor: Colors.white,
                 );
               },
             ),

@@ -301,28 +301,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
             ),
           ),
 
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed:
-                    _isFetchingCurrentLocation ? null : _useCurrentLocation,
-                icon: _isFetchingCurrentLocation
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.my_location_rounded),
-                label: Text(
-                  _isFetchingCurrentLocation
-                      ? 'Fetching location...'
-                      : 'Use Current Location',
-                ),
-              ),
-            ),
-          ),
+
           if (_suggestions.isNotEmpty)
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -357,7 +336,9 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
-                child: FlutterMap(
+                child: Stack(
+                  children:[
+                FlutterMap(
                   mapController: _mapController,
                   options: MapOptions(
                     initialCenter: center,
@@ -385,9 +366,34 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                       ),
                   ],
                 ),
+                 Positioned(
+                      right: 16,
+                      bottom: 16,
+                      child: FloatingActionButton(
+                        mini: true,
+                        backgroundColor:
+                            Theme.of(context).colorScheme.surface,
+                        foregroundColor: FreightFairColors.accentDark,
+                        onPressed: _isFetchingCurrentLocation
+                            ? null
+                            : _useCurrentLocation,
+                        child: _isFetchingCurrentLocation
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.my_location_rounded),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
+          
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             child: InfoCard(

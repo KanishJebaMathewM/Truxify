@@ -146,7 +146,7 @@ class ProfileScreen extends StatelessWidget {
                   _MenuItem(
                     icon: Icons.language_rounded,
                     label: 'Language',
-                    trailing: 'English',
+                    trailing: FreightFairScope.of(context).selectedLanguageName,
                     onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const LanguageScreen())),
                   ),
                   _MenuItem(

@@ -7,11 +7,37 @@ class FreightFairController extends ChangeNotifier {
   int ordersTabIndex = 0;
   RouteDraft? pendingRouteDraft;
   bool _isDarkMode = false;
+  String _selectedLanguageCode = 'en';
 
   bool get isDarkMode => _isDarkMode;
+  String get selectedLanguageCode => _selectedLanguageCode;
+
+  String get selectedLanguageName {
+    switch (_selectedLanguageCode) {
+      case 'hi':
+        return 'Hindi';
+      case 'gu':
+        return 'Gujarati';
+      case 'mr':
+        return 'Marathi';
+      case 'ta':
+        return 'Tamil';
+      case 'te':
+        return 'Telugu';
+      case 'en':
+      default:
+        return 'English';
+    }
+  }
 
   void toggleDarkMode() {
     _isDarkMode = !_isDarkMode;
+    notifyListeners();
+  }
+
+  void changeLanguage(String code) {
+    if (_selectedLanguageCode == code) return;
+    _selectedLanguageCode = code;
     notifyListeners();
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../controllers/app_controller.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 
@@ -12,6 +13,31 @@ class LanguageScreen extends StatefulWidget {
 
 class _LanguageScreenState extends State<LanguageScreen> {
   int _selectedLanguageIndex = 0;
+  bool _isInitialized = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_isInitialized) {
+      final controller = FreightFairScope.of(context);
+      final index = _languages.indexWhere((lang) => lang['code'] == controller.selectedLanguageCode);
+      if (index != -1) {
+        _selectedLanguageIndex = index;
+      }
+      _isInitialized = true;
+    }
+  }
+
+  void _applyLanguage() {
+    final controller = FreightFairScope.of(context);
+    final selectedLanguage = _languages[_selectedLanguageIndex];
+    controller.changeLanguage(selectedLanguage['code']!);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Language changed to ${selectedLanguage['name']}')),
+    );
+    Navigator.of(context).pop();
+  }
 
   final List<Map<String, String>> _languages = [
     {'code': 'en', 'name': 'English', 'native': 'English'},
@@ -91,12 +117,7 @@ class _LanguageScreenState extends State<LanguageScreen> {
             const SizedBox(height: 32),
             PrimaryButton(
               label: 'Apply',
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Language changed to ${_languages[_selectedLanguageIndex]['name']}')),
-                );
-                Navigator.of(context).pop();
-              },
+              onPressed: _applyLanguage,
             ),
           ],
         ),

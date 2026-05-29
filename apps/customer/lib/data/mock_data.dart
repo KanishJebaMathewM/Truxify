@@ -22,6 +22,7 @@ const mockDefaultRouteDraft = RouteDraft(
 
 const mockActiveShipments = <ShipmentCardData>[
   ShipmentCardData(
+    orderId: '#FF20241205',
     route: 'Surat → Jaipur',
     driver: 'Ramesh Kumar | TN 45 AB 1234',
     truckNumber: 'TN 45 AB 1234',
@@ -31,6 +32,7 @@ const mockActiveShipments = <ShipmentCardData>[
     isLive: true,
   ),
   ShipmentCardData(
+    orderId: '#FF20241198',
     route: 'Mumbai → Delhi',
     driver: 'Suresh Patel | MH 12 CD 5678',
     truckNumber: 'MH 12 CD 5678',

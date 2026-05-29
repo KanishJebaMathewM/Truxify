@@ -26,6 +26,7 @@ class RouteDraft {
 
 class ShipmentCardData {
   const ShipmentCardData({
+    required this.orderId,
     required this.route,
     required this.driver,
     required this.truckNumber,
@@ -35,6 +36,7 @@ class ShipmentCardData {
     required this.isLive,
   });
 
+  final String orderId;
   final String route;
   final String driver;
   final String truckNumber;

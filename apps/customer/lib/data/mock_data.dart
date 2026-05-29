@@ -207,6 +207,6 @@ const mockProfileMenu = <ProfileMenuData>[
   ProfileMenuData(icon: Icons.description_rounded, title: 'My Documents'),
   ProfileMenuData(icon: Icons.language_rounded, title: 'Language', subtitle: 'English / हिंदी / தமிழ்'),
   ProfileMenuData(icon: Icons.help_outline_rounded, title: 'Help & Support'),
-  ProfileMenuData(icon: Icons.info_outline_rounded, title: 'About FreightFair'),
+  ProfileMenuData(icon: Icons.info_outline_rounded, title: 'About Truxify'),
   ProfileMenuData(icon: Icons.logout_rounded, title: 'Logout', isDanger: true),
 ];

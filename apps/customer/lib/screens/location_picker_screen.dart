@@ -6,6 +6,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
@@ -45,6 +46,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   bool _isResolvingAddress = false;
   LatLng? _selectedPoint;
   String? _selectedAddress;
+  bool _isFetchingCurrentLocation = false;
 
   @override
   void initState() {
@@ -222,6 +224,56 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     _searchController.text = address;
   }
 
+  Future<void> _useCurrentLocation() async {
+  setState(() {
+    _isFetchingCurrentLocation = true;
+  });
+
+  try {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+
+    if (!serviceEnabled) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enable location service')),
+      );
+      return;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Location permission denied')),
+      );
+      return;
+    }
+
+    final position = await Geolocator.getCurrentPosition();
+
+    final point = LatLng(position.latitude, position.longitude);
+
+    await _setLocation(point);
+  } catch (_) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Unable to fetch current location')),
+    );
+  } finally {
+    if (mounted) {
+      setState(() {
+        _isFetchingCurrentLocation = false;
+      });
+    }
+  }
+}
+
   @override
   Widget build(BuildContext context) {
     final center = _selectedPoint ?? _defaultCenter;
@@ -251,6 +303,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
               ),
             ),
           ),
+
+
           if (_suggestions.isNotEmpty)
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -285,7 +339,9 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
-                child: FlutterMap(
+                child: Stack(
+                  children:[
+                FlutterMap(
                   mapController: _mapController,
                   options: MapOptions(
                     initialCenter: center,
@@ -313,9 +369,34 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                       ),
                   ],
                 ),
+                 Positioned(
+                      right: 16,
+                      bottom: 16,
+                      child: FloatingActionButton(
+                        mini: true,
+                        backgroundColor:
+                            Theme.of(context).colorScheme.surface,
+                        foregroundColor: FreightFairColors.accentDark,
+                        onPressed: _isFetchingCurrentLocation
+                            ? null
+                            : _useCurrentLocation,
+                        child: _isFetchingCurrentLocation
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.my_location_rounded),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
+          
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
             child: InfoCard(

@@ -156,7 +156,7 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   _MenuItem(
                     icon: Icons.info_outline_rounded,
-                    label: 'About FreightFair',
+                    label: 'About Truxify',
                     showDivider: false,
                     onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const AboutScreen())),
                   ),

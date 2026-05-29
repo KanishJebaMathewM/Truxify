@@ -14,6 +14,7 @@ import '../data/mock_data.dart';
 import '../services/route_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/map_markers.dart';
 import 'destination_picker_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -462,7 +463,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   width: 54,
                   height: 54,
                   alignment: Alignment.center,
-                  child: const _RouteMarker(
+                  child: const RouteMarker(
                     icon: Icons.my_location_rounded,
                     fillColor: TruxifyColors.success,
                     shadowColor: TruxifyColors.success,
@@ -474,8 +475,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         width: 34,
                         height: 34,
                         alignment: Alignment.center,
-                        child:
-                            _RouteCheckpointMarker(label: '${entry.key + 1}'),
+                        child: RouteCheckpointMarker(label: '${entry.key + 1}'),
                       ),
                     ),
                 Marker(
@@ -483,7 +483,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   width: 54,
                   height: 54,
                   alignment: Alignment.center,
-                  child: const _RouteMarker(
+                  child: const RouteMarker(
                     icon: Icons.location_on_rounded,
                     fillColor: TruxifyColors.errorRed,
                     shadowColor: TruxifyColors.errorRed,
@@ -1056,82 +1056,7 @@ class _SlideToConfirmButtonState extends State<SlideToConfirmButton> {
       },
     );
   }
-}
 
-class _RouteMarker extends StatelessWidget {
-  const _RouteMarker({
-    required this.icon,
-    required this.fillColor,
-    required this.shadowColor,
-  });
-
-  final IconData icon;
-  final Color fillColor;
-  final Color shadowColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: shadowColor.withValues(alpha: 0.3),
-            blurRadius: 8,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(4),
-      child: Container(
-        decoration: BoxDecoration(
-          color: fillColor,
-          shape: BoxShape.circle,
-        ),
-        padding: const EdgeInsets.all(6),
-        child: Icon(
-          icon,
-          color: Colors.white,
-          size: 16,
-        ),
-      ),
-    );
-  }
-}
-
-class _RouteCheckpointMarker extends StatelessWidget {
-  const _RouteCheckpointMarker({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-        border: Border.all(color: TruxifyColors.accent, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 4,
-          ),
-        ],
-      ),
-      width: 24,
-      height: 24,
-      alignment: Alignment.center,
-      child: Text(
-        label,
-        style: GoogleFonts.dmSans(
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          color: TruxifyColors.accentDark,
-        ),
-      ),
-    );
-  }
 }
 
 class _PulsingLocationDot extends StatefulWidget {

@@ -9,7 +9,7 @@ class AboutScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('About Truckify'),
+        title: const Text('About Truxify'),
         centerTitle: true,
         elevation: 0,
       ),
@@ -38,7 +38,7 @@ class AboutScreen extends StatelessWidget {
               child: Column(
                 children: [
                   Text(
-                    'Truckify',
+                    'Truxify',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.w700,
                           color: FreightFairColors.accent,
@@ -73,7 +73,7 @@ class AboutScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Truckify is a modern freight management platform connecting shippers with verified truck owners. We simplify logistics with real-time tracking, transparent pricing, and reliable service.',
+                    'Truxify is a modern freight management platform connecting shippers with verified truck owners. We simplify logistics with real-time tracking, transparent pricing, and reliable service.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: FreightFairColors.adaptiveSecondaryText(context),
                           height: 1.6,
@@ -121,7 +121,7 @@ class AboutScreen extends StatelessWidget {
             _ContactRow(
               icon: Icons.email_rounded,
               label: 'Email',
-              value: 'support@truckify.com',
+              value: 'support@truxify.com',
             ),
             const SizedBox(height: 12),
             _ContactRow(
@@ -133,7 +133,7 @@ class AboutScreen extends StatelessWidget {
             _ContactRow(
               icon: Icons.public_rounded,
               label: 'Website',
-              value: 'www.truckify.com',
+              value: 'www.truxify.com',
             ),
             const SizedBox(height: 24),
             Row(
@@ -149,7 +149,7 @@ class AboutScreen extends StatelessWidget {
             const SizedBox(height: 24),
             Center(
               child: Text(
-                '© 2024 Truckify. All rights reserved.',
+                '© 2024 Truxify. All rights reserved.',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: FreightFairColors.adaptiveSecondaryText(context),
                     ),

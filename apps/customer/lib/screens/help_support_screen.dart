@@ -13,26 +13,27 @@ class _FaqItem {
 class HelpSupportScreen extends StatelessWidget {
   const HelpSupportScreen({super.key});
 
+  static const List<_FaqItem> _faqs = [
+    _FaqItem(
+      question: 'How do I book a truck?',
+      answer: 'To book a truck, go to Home, enter your pickup and drop locations, select a truck, and confirm your booking.',
+    ),
+    _FaqItem(
+      question: 'What payment methods are accepted?',
+      answer: 'We accept UPI, credit cards, debit cards, and net banking for all your transactions.',
+    ),
+    _FaqItem(
+      question: 'Can I cancel my order?',
+      answer: 'You can cancel your order before the truck is assigned. After assignment, a cancellation fee may apply.',
+    ),
+    _FaqItem(
+      question: 'How do I track my shipment?',
+      answer: 'You can track your shipment in real-time from the Orders section using the live tracking feature.',
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    const faqs = [
-      _FaqItem(
-        question: 'How do I book a truck?',
-        answer: 'To book a truck, go to Home, enter your pickup and drop locations, select a truck, and confirm your booking.',
-      ),
-      _FaqItem(
-        question: 'What payment methods are accepted?',
-        answer: 'We accept UPI, credit cards, debit cards, and net banking for all your transactions.',
-      ),
-      _FaqItem(
-        question: 'Can I cancel my order?',
-        answer: 'You can cancel your order before the truck is assigned. After assignment, a cancellation fee may apply.',
-      ),
-      _FaqItem(
-        question: 'How do I track my shipment?',
-        answer: 'You can track your shipment in real-time from the Orders section using the live tracking feature.',
-      ),
-    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -99,10 +100,10 @@ class HelpSupportScreen extends StatelessWidget {
             ListView.separated(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: faqs.length,
+              itemCount: _faqs.length,
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (context, index) {
-                final faq = faqs[index];
+                final faq = _faqs[index];
                 return Theme(
                   data: Theme.of(context).copyWith(
                     dividerColor: Colors.transparent,

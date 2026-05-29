@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
@@ -31,6 +32,25 @@ class _LoginScreenState extends State<LoginScreen> {
     }
     super.dispose();
   }
+
+  @override
+void initState() {
+  super.initState();
+  for (int i = 0; i < 4; i++) {
+    final index = i;
+    _otpFocusNodes[index].onKeyEvent = (node, event) {
+      if (event is KeyDownEvent &&
+          event.logicalKey == LogicalKeyboardKey.backspace &&
+          _otpControllers[index].text.isEmpty &&
+          index > 0) {
+        _otpFocusNodes[index - 1].requestFocus();
+        _otpControllers[index - 1].clear();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
+  }
+}
 
   void _sendOtp() {
     FocusScope.of(context).unfocus();
@@ -151,17 +171,6 @@ class _LoginScreenState extends State<LoginScreen> {
                     if (value.isEmpty && index > 0) {
                       _otpFocusNodes[index - 1].requestFocus();
                     }
-                  },
-                  onKeyEvent: (node, event) {
-                    if (event is KeyDownEvent &&
-                        event.logicalKey == LogicalKeyboardKey.backspace &&
-                        _otpControllers[index].text.isEmpty &&
-                        index > 0) {
-                      _otpFocusNodes[index - 1].requestFocus();
-                      _otpControllers[index - 1].clear();
-                      return KeyEventResult.handled;
-                    }
-                    return KeyEventResult.ignored;
                   },
                 ),
               ),

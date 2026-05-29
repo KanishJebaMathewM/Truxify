@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/route_hero_card.dart';
+import '../widgets/accept_bottom_sheet.dart';
 
 // ---------------------------------------------------------------------------
 // LoadDetailScreen — full details of a load offer for the driver
@@ -20,7 +21,7 @@ class LoadDetailScreen extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => _AcceptBottomSheet(load: load),
+      builder: (ctx) => AcceptBottomSheet(load: load),
     );
     if (accepted == true && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -54,7 +55,7 @@ class LoadDetailScreen extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
           children: [
             // ── Route hero card ──────────────────────────────────────────
-            _RouteHeroCard(load: load),
+            RouteHeroCard(load: load),
             const SizedBox(height: 14),
 
             // ── Pickup schedule ──────────────────────────────────────────
@@ -242,170 +243,6 @@ class LoadDetailScreen extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Accept bottom sheet
-// ---------------------------------------------------------------------------
-class _AcceptBottomSheet extends StatelessWidget {
-  const _AcceptBottomSheet({required this.load});
-
-  final LoadOffer load;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const BottomSheetHandle(),
-          const SizedBox(height: 16),
-          Text('Accept this load?', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-          const SizedBox(height: 4),
-          Text(load.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.secondaryText)),
-          const SizedBox(height: 16),
-          AppCard(
-            color: TruxifyColors.accentVeryLight,
-            child: Column(
-              children: [
-                _SheetLine(label: 'Freight value', value: load.freightValue),
-                _SheetLine(label: 'Fuel cost', value: '- ${load.fuelCost}', valueColor: TruxifyColors.error),
-                _SheetLine(label: 'Toll cost', value: '- ${load.tollCost}', valueColor: TruxifyColors.error),
-                const Divider(height: 24),
-                _SheetLine(
-                  label: 'Net profit',
-                  value: load.netProfit,
-                  bold: true,
-                  valueColor: TruxifyColors.accentDark,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          PrimaryButton(
-            label: 'Confirm & Accept',
-            onPressed: () => Navigator.of(context).pop(true),
-          ),
-          const SizedBox(height: 8),
-          TextActionButton(
-            label: 'Cancel',
-            onPressed: () => Navigator.of(context).pop(false),
-            color: TruxifyColors.secondaryText,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Route hero card
-// ---------------------------------------------------------------------------
-class _RouteHeroCard extends StatelessWidget {
-  const _RouteHeroCard({required this.load});
-
-  final LoadOffer load;
-
-  @override
-  Widget build(BuildContext context) {
-    final parts = load.route.split('→');
-    final from = parts.isNotEmpty ? parts.first.trim() : load.route;
-    final to = parts.length > 1 ? parts.last.trim() : '';
-
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // From → To visual
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('FROM', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: TruxifyColors.tertiaryText, letterSpacing: 0.8)),
-                    const SizedBox(height: 4),
-                    Text(from, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: TruxifyColors.accentVeryLight,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: TruxifyColors.border),
-                ),
-                child: const Icon(Icons.arrow_forward_rounded, size: 18, color: TruxifyColors.accent),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('TO', style: Theme.of(context).textTheme.labelSmall?.copyWith(color: TruxifyColors.tertiaryText, letterSpacing: 0.8)),
-                    const SizedBox(height: 4),
-                    Text(to, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800), textAlign: TextAlign.end),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          const Divider(height: 1),
-          const SizedBox(height: 14),
-          // Quick stats row
-          Row(
-            children: [
-              _QuickStat(icon: Icons.straighten_rounded, label: load.routeDistance),
-              const _StatDivider(),
-              _QuickStat(icon: Icons.timer_rounded, label: load.routeDuration),
-              const _StatDivider(),
-              _QuickStat(icon: Icons.account_balance_wallet_rounded, label: load.netProfit, highlight: true),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _QuickStat extends StatelessWidget {
-  const _QuickStat({required this.icon, required this.label, this.highlight = false});
-
-  final IconData icon;
-  final String label;
-  final bool highlight;
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        children: [
-          Icon(icon, size: 18, color: highlight ? TruxifyColors.accentDark : TruxifyColors.secondaryText),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: highlight ? TruxifyColors.accentDark : TruxifyColors.primaryText,
-                ),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatDivider extends StatelessWidget {
-  const _StatDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(width: 1, height: 32, color: TruxifyColors.border);
   }
 }
 
@@ -811,42 +648,6 @@ class _BadgePill extends StatelessWidget {
               color: TruxifyColors.accentDark,
               fontWeight: FontWeight.w700,
             ),
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Sheet line (used in accept bottom sheet)
-// ---------------------------------------------------------------------------
-class _SheetLine extends StatelessWidget {
-  const _SheetLine({required this.label, required this.value, this.valueColor, this.bold = false});
-
-  final String label;
-  final String value;
-  final Color? valueColor;
-  final bool bold;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.secondaryText),
-            ),
-          ),
-          Text(
-            value,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: valueColor ?? TruxifyColors.primaryText,
-                  fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
-                ),
-          ),
-        ],
       ),
     );
   }

@@ -79,3 +79,42 @@ server.listen(PORT, () => {
   console.log(`🔌 WebSocket URL: ws://localhost:${PORT}/ws/tracking`);
   console.log(`================================================================`);
 });
+
+// ============================================================================
+// GRACEFUL SHUTDOWN
+// ============================================================================
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+
+async function shutdown(signal) {
+  console.log(`\n[shutdown] ${signal} received — draining connections...`);
+
+  const forceExit = setTimeout(() => {
+    console.error('[shutdown] Timeout exceeded — forcing exit.');
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+
+  forceExit.unref(); // Don't let this timer keep the process alive
+
+  try {
+    // 1. Stop accepting new HTTP requests; wait for in-flight ones to finish
+    await new Promise((resolve, reject) =>
+      server.close(err => (err ? reject(err) : resolve()))
+    );
+    console.log('[shutdown] HTTP server closed.');
+
+    // 2. Your WebSocket server likely exposes a .close() — call it here
+    // await closeWebSocketServer();
+
+    // 3. Close DB connections, flush queues, etc.
+    // await db.end();
+
+    console.log('[shutdown] Clean exit.');
+    process.exit(0);
+  } catch (err) {
+    console.error('[shutdown] Error during shutdown:', err);
+    process.exit(1);
+  }
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM')); // Docker / Kubernetes stop
+process.on('SIGINT',  () => shutdown('SIGINT'));  // Ctrl+C in dev

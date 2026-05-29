@@ -10,6 +10,8 @@ import 'package:latlong2/latlong.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/timeline_connector.dart';
+import '../widgets/timeline_milestone.dart';
 
 class LiveTrackingScreen extends StatefulWidget {
   const LiveTrackingScreen({super.key, required this.orderId});
@@ -503,19 +505,19 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                           scrollDirection: Axis.horizontal,
                           child: Row(
                             children: const [
-                              _MilestoneItem(label: 'Order Placed', done: true),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'Truck Assigned', done: true),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'Picked Up', done: true),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'In Transit', done: true, current: true),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'Arriving', done: false),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'Delivered', done: false),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'Payment Released', done: false),
+                              TimelineMilestone(label: 'Order Placed', done: true),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'Truck Assigned', done: true),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'Picked Up', done: true),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'In Transit', done: true, current: true),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'Arriving', done: false),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'Delivered', done: false),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'Payment Released', done: false),
                             ],
                           ),
                         ),
@@ -544,48 +546,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
         ],
       ),
     );
-  }
-}
-
-class _MilestoneItem extends StatelessWidget {
-  const _MilestoneItem({required this.label, required this.done, this.current = false});
-
-  final String label;
-  final bool done;
-  final bool current;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = current ? FreightFairColors.accent : done ? FreightFairColors.accentDark : FreightFairColors.border;
-    return Column(
-      children: [
-        Container(
-          width: 18,
-          height: 18,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            boxShadow: current
-                ? [BoxShadow(color: FreightFairColors.accent.withValues(alpha: 0.3), blurRadius: 8, spreadRadius: 1)]
-                : const [],
-          ),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: 70,
-          child: Text(label, textAlign: TextAlign.center, style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700, color: color)),
-        ),
-      ],
-    );
-  }
-}
-
-class _MilestoneConnector extends StatelessWidget {
-  const _MilestoneConnector();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(width: 28, height: 2, color: FreightFairColors.border);
   }
 }
 

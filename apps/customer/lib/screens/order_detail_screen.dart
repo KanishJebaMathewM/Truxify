@@ -5,6 +5,7 @@ import '../data/mock_data.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/timeline_row.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   const OrderDetailScreen({super.key, required this.order});
@@ -117,7 +118,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ...widget.order.timeline.map(
             (step) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: _TimelineRow(step: step),
+              child: TimelineRow(step: step),
             ),
           ),
           const SizedBox(height: 4),
@@ -187,47 +188,3 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 }
 
-class _TimelineRow extends StatelessWidget {
-  const _TimelineRow({required this.step});
-
-  final TimelineStepData step;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 14,
-              height: 14,
-              decoration: BoxDecoration(
-                color: step.completed ? FreightFairColors.accentDark : FreightFairColors.border,
-                shape: BoxShape.circle,
-              ),
-            ),
-            Container(width: 2, height: 42, color: FreightFairColors.border),
-          ],
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(top: 0),
-            child: InfoCard(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(step.title, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800)),
-                  ),
-                  Text(step.timestamp, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}

@@ -46,7 +46,7 @@ class ShipmentCard extends StatelessWidget {
               shipment.driver,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color:
-                        FreightFairColors.adaptiveSecondaryText(context),
+                        TruxifyColors.adaptiveSecondaryText(context),
                   ),
             ),
             const Spacer(),
@@ -74,7 +74,7 @@ class ShipmentCard extends StatelessWidget {
               'Truck ${shipment.truckNumber}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color:
-                        FreightFairColors.adaptiveSecondaryText(context),
+                        TruxifyColors.adaptiveSecondaryText(context),
                   ),
             ),
           ],

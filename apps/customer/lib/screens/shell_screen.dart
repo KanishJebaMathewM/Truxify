@@ -37,7 +37,7 @@ class _FreightFairShellScreenState extends State<FreightFairShellScreen> {
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Theme.of(context).navigationBarTheme.backgroundColor,
-          border: Border(top: BorderSide(color: (Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border), width: 1)),
+          border: Border(top: BorderSide(color: (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border), width: 1)),
         ),
         child: NavigationBar(
           selectedIndex: controller.currentTab,
@@ -63,3 +63,4 @@ class _FreightFairShellScreenState extends State<FreightFairShellScreen> {
     );
   }
 }
+

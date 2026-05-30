@@ -257,7 +257,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: (Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border)),
+                border: Border.all(color: (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border)),
               ),
               constraints: const BoxConstraints(maxHeight: 200),
               child: ListView.separated(
@@ -268,7 +268,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                   final suggestion = _suggestions[index];
                   return ListTile(
                     dense: true,
-                    leading: const Icon(Icons.place_rounded, color: FreightFairColors.accentDark),
+                    leading: const Icon(Icons.place_rounded, color: TruxifyColors.accentDark),
                     title: Text(
                       suggestion.address,
                       maxLines: 2,
@@ -326,7 +326,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                   Text(
                     'Selected Address',
                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                          color: FreightFairColors.adaptiveSecondaryText(context),
+                          color: TruxifyColors.adaptiveSecondaryText(context),
                           fontWeight: FontWeight.w700,
                         ),
                   ),
@@ -373,3 +373,4 @@ class _SearchSuggestion {
   final String address;
   final LatLng point;
 }
+

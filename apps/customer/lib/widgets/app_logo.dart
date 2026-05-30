@@ -18,10 +18,10 @@ class AppLogo extends StatelessWidget {
           width: iconSize + 10,
           height: iconSize + 10,
           decoration: BoxDecoration(
-            color: FreightFairColors.accentLight,
+            color: TruxifyColors.accentLight,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(Icons.local_shipping_rounded, color: FreightFairColors.accentDark, size: iconSize),
+          child: Icon(Icons.local_shipping_rounded, color: TruxifyColors.accentDark, size: iconSize),
         ),
         const SizedBox(width: 10),
         Text(
@@ -35,3 +35,4 @@ class AppLogo extends StatelessWidget {
     return Center(child: logo);
   }
 }
+

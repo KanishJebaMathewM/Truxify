@@ -127,15 +127,15 @@ class _ActiveOrderCard extends StatelessWidget {
                 Expanded(
                   child: Text(order.orderId, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                 ),
-                StatusBadge(label: order.milestone, color: FreightFairColors.accent, filled: true),
+                StatusBadge(label: order.milestone, color: TruxifyColors.accent, filled: true),
               ],
             ),
             const SizedBox(height: 10),
-            Text(order.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+            Text(order.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
             const SizedBox(height: 8),
             Text('Driver: ${order.driver}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
             const SizedBox(height: 4),
-            Text('ETA: ${order.eta}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+            Text('ETA: ${order.eta}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
             const SizedBox(height: 14),
             PrimaryButton(label: 'Track Live', onPressed: onTap),
           ],
@@ -153,7 +153,7 @@ class _HistoryOrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = order.status == 'Delivered' ? FreightFairColors.accentDark : FreightFairColors.error;
+    final statusColor = order.status == 'Delivered' ? TruxifyColors.accentDark : TruxifyColors.error;
     return GestureDetector(
       onTap: onTap,
       child: InfoCard(
@@ -165,7 +165,7 @@ class _HistoryOrderCard extends StatelessWidget {
                 Expanded(
                   child: Text(order.route, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                 ),
-                Text(order.date, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                Text(order.date, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
               ],
             ),
             const SizedBox(height: 10),
@@ -174,15 +174,15 @@ class _HistoryOrderCard extends StatelessWidget {
                 Text(order.amount, style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w800,
                   color: Theme.of(context).brightness == Brightness.dark
-                      ? FreightFairColors.accent
-                      : FreightFairColors.accentDark,
+                      ? TruxifyColors.accent
+                      : TruxifyColors.accentDark,
                 )),
                 const SizedBox(width: 10),
                 StatusBadge(label: order.status == 'Delivered' ? '✅ Delivered' : '❌ Cancelled', color: statusColor, filled: true),
               ],
             ),
             const SizedBox(height: 12),
-            Text('Driver: ${order.driver}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+            Text('Driver: ${order.driver}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
             const SizedBox(height: 14),
             Align(
               alignment: Alignment.centerRight,
@@ -198,3 +198,4 @@ class _HistoryOrderCard extends StatelessWidget {
     );
   }
 }
+

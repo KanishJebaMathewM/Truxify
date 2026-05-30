@@ -59,13 +59,13 @@ class HomeScreen extends StatelessWidget {
                   color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(
-                    color: Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border,
+                    color: Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border,
                   ),
                 ),
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.place_rounded, size: 16, color: FreightFairColors.accentDark),
+                    Icon(Icons.place_rounded, size: 16, color: TruxifyColors.accentDark),
                     SizedBox(width: 6),
                     Text('Surat, Gujarat', style: TextStyle(fontWeight: FontWeight.w700)),
                   ],
@@ -88,7 +88,7 @@ class HomeScreen extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               DateFormat('EEEE, d MMMM yyyy').format(now),
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context)),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
             ),
             const SizedBox(height: 26),
             SectionHeader(title: 'Active Shipments', actionLabel: 'See all', onActionTap: () => _showComingSoon(context, 'All shipments')),
@@ -157,7 +157,7 @@ class _RecentRouteCard extends StatelessWidget {
     return InfoCard(
       child: Row(
         children: [
-          const Icon(Icons.route_rounded, color: FreightFairColors.accentDark),
+          const Icon(Icons.route_rounded, color: TruxifyColors.accentDark),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -165,7 +165,7 @@ class _RecentRouteCard extends StatelessWidget {
               children: [
                 Text(route.route, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 4),
-                Text('${route.pickup} to ${route.drop}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                Text('${route.pickup} to ${route.drop}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
               ],
             ),
           ),
@@ -191,3 +191,4 @@ class _RecentRouteAction extends StatelessWidget {
     );
   }
 }
+

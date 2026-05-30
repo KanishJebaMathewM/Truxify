@@ -91,7 +91,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen> w
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    const Icon(Icons.lock_rounded, color: FreightFairColors.accentDark, size: 18),
+                    const Icon(Icons.lock_rounded, color: TruxifyColors.accentDark, size: 18),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -102,7 +102,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen> w
                   ],
                 ),
                 const SizedBox(height: 6),
-                Text('Released only on delivery', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                Text('Released only on delivery', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
               ],
             ),
           ),
@@ -147,7 +147,7 @@ class _SummaryRow extends StatelessWidget {
         children: [
           SizedBox(
             width: 88,
-            child: Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+            child: Text(label, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
           ),
           Expanded(child: Text(value, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700))),
         ],
@@ -173,17 +173,17 @@ class _SuccessPanel extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
             decoration: BoxDecoration(
-              color: FreightFairColors.accentLight,
+              color: TruxifyColors.accentLight,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: FreightFairColors.accent.withValues(alpha: 0.2)),
+              border: Border.all(color: TruxifyColors.accent.withValues(alpha: 0.2)),
             ),
             child: Column(
               children: [
-                const Icon(Icons.check_circle_rounded, color: FreightFairColors.accentDark, size: 58),
+                const Icon(Icons.check_circle_rounded, color: TruxifyColors.accentDark, size: 58),
                 const SizedBox(height: 10),
                 Text('Booking Confirmed! 🎉', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 4),
-                Text('Order ID: #FF20241205', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                Text('Order ID: #FF20241205', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
               ],
             ),
           ),
@@ -192,3 +192,4 @@ class _SuccessPanel extends StatelessWidget {
     );
   }
 }
+

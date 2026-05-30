@@ -23,12 +23,12 @@ class AboutScreen extends StatelessWidget {
                 width: 100,
                 height: 100,
                 decoration: BoxDecoration(
-                  color: FreightFairColors.accentLight,
+                  color: TruxifyColors.accentLight,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: const Icon(
                   Icons.local_shipping_rounded,
-                  color: FreightFairColors.accent,
+                  color: TruxifyColors.accent,
                   size: 50,
                 ),
               ),
@@ -41,14 +41,14 @@ class AboutScreen extends StatelessWidget {
                     'Truxify',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.w700,
-                          color: FreightFairColors.accent,
+                          color: TruxifyColors.accent,
                         ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'Version 1.0.0',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: FreightFairColors.adaptiveSecondaryText(context),
+                          color: TruxifyColors.adaptiveSecondaryText(context),
                         ),
                   ),
                 ],
@@ -68,14 +68,14 @@ class AboutScreen extends StatelessWidget {
                     'About Us',
                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: FreightFairColors.accent,
+                          color: TruxifyColors.accent,
                         ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Truxify is a modern freight management platform connecting shippers with verified truck owners. We simplify logistics with real-time tracking, transparent pricing, and reliable service.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: FreightFairColors.adaptiveSecondaryText(context),
+                          color: TruxifyColors.adaptiveSecondaryText(context),
                           height: 1.6,
                         ),
                   ),
@@ -96,14 +96,14 @@ class AboutScreen extends StatelessWidget {
                     'Our Mission',
                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: FreightFairColors.accent,
+                          color: TruxifyColors.accent,
                         ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'To revolutionize the logistics industry by making freight transportation safe, affordable, and sustainable for everyone.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: FreightFairColors.adaptiveSecondaryText(context),
+                          color: TruxifyColors.adaptiveSecondaryText(context),
                           height: 1.6,
                         ),
                   ),
@@ -151,7 +151,7 @@ class AboutScreen extends StatelessWidget {
               child: Text(
                 '© 2024 Truxify. All rights reserved.',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: FreightFairColors.adaptiveSecondaryText(context),
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
               ),
             ),
@@ -181,10 +181,10 @@ class _ContactRow extends StatelessWidget {
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: FreightFairColors.accentLight,
+            color: TruxifyColors.accentLight,
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(icon, color: FreightFairColors.accent, size: 18),
+          child: Icon(icon, color: TruxifyColors.accent, size: 18),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -194,7 +194,7 @@ class _ContactRow extends StatelessWidget {
               Text(
                 label,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: FreightFairColors.adaptiveSecondaryText(context),
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
               ),
               const SizedBox(height: 2),
@@ -223,10 +223,11 @@ class _SocialIcon extends StatelessWidget {
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: FreightFairColors.accentLight,
+        color: TruxifyColors.accentLight,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Icon(icon, color: FreightFairColors.accent, size: 18),
+      child: Icon(icon, color: TruxifyColors.accent, size: 18),
     );
   }
 }
+

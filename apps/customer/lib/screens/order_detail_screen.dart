@@ -73,13 +73,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               children: [
                 Text(widget.order.orderId, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 8),
-                Text(widget.order.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                Text(widget.order.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                 const SizedBox(height: 8),
                 Text('Date: ${widget.order.date}', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 8),
                 StatusBadge(
                   label: widget.order.status == 'Delivered' ? '✅ Delivered' : '❌ Cancelled',
-                  color: delivered ? FreightFairColors.accentDark : FreightFairColors.error,
+                  color: delivered ? TruxifyColors.accentDark : TruxifyColors.error,
                   filled: true,
                 ),
               ],
@@ -92,8 +92,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 Container(
                   width: 54,
                   height: 54,
-                  decoration: const BoxDecoration(color: FreightFairColors.accentLight, shape: BoxShape.circle),
-                  child: const Icon(Icons.person_rounded, color: FreightFairColors.accentDark),
+                  decoration: const BoxDecoration(color: TruxifyColors.accentLight, shape: BoxShape.circle),
+                  child: const Icon(Icons.person_rounded, color: TruxifyColors.accentDark),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -102,9 +102,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     children: [
                       Text(widget.order.driver, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                       const SizedBox(height: 4),
-                      Text('⭐ 4.8', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                      Text('⭐ 4.8', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                       const SizedBox(height: 4),
-                      Text(widget.order.truckNumber, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                      Text(widget.order.truckNumber, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                     ],
                   ),
                 ),
@@ -203,11 +203,11 @@ class _TimelineRow extends StatelessWidget {
               width: 14,
               height: 14,
               decoration: BoxDecoration(
-                color: step.completed ? FreightFairColors.accentDark : FreightFairColors.border,
+                color: step.completed ? TruxifyColors.accentDark : TruxifyColors.border,
                 shape: BoxShape.circle,
               ),
             ),
-            Container(width: 2, height: 42, color: FreightFairColors.border),
+            Container(width: 2, height: 42, color: TruxifyColors.border),
           ],
         ),
         const SizedBox(width: 12),
@@ -221,7 +221,7 @@ class _TimelineRow extends StatelessWidget {
                   Expanded(
                     child: Text(step.title, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800)),
                   ),
-                  Text(step.timestamp, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                  Text(step.timestamp, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                 ],
               ),
             ),
@@ -231,3 +231,4 @@ class _TimelineRow extends StatelessWidget {
     );
   }
 }
+

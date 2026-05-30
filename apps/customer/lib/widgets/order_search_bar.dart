@@ -10,7 +10,7 @@ class OrderSearchBar extends StatelessWidget {
   final String hintText;
 
   const OrderSearchBar({
-    Key? key,
+    super.key,
     required this.title,
     required this.isSearching,
     required this.onToggle,
@@ -18,7 +18,7 @@ class OrderSearchBar extends StatelessWidget {
     required this.onChanged,
     required this.searchQuery,
     this.hintText = 'Search',
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

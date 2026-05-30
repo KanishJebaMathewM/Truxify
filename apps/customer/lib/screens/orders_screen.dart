@@ -3,6 +3,7 @@ import 'package:freightfair/widgets/order_card.dart';
 
 import '../controllers/app_controller.dart';
 import '../data/mock_data.dart';
+import '../models/app_models.dart';
 import '../widgets/app_page_route.dart';
 import '../widgets/order_search_bar.dart';
 import 'live_tracking_screen.dart';

@@ -281,8 +281,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                 final isSelected = index == _selectedBarIndex;
                                 final isHighest = item.amount.toDouble() == maxAmount;
 
-                                // Height proportion calculation (max height is 80px)
-                                final double barHeight = (item.amount.toDouble() / maxAmount) * 80;
+                                // Responsive bar height calculation based on screen size.
+                                final double barHeight = (item.amount.toDouble() / maxAmount) * (MediaQuery.sizeOf(context).height/14.1);
 
                                 return Expanded(
                                   child: Column(

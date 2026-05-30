@@ -17,7 +17,12 @@ class MapPlaceholder extends StatelessWidget {
   final String pickup;
   final String drop;
   final String currentLocation;
-
+  Offset _calculateTruckPosition(BoxConstraints constraints) {
+    final x = constraints.maxWidth * (0.18 + (0.60 * progress));
+    final y = constraints.maxHeight * (0.64 - 0.18 * math.sin(progress * math.pi));
+    return Offset(x, y);
+  }
+  
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
@@ -60,14 +65,13 @@ class MapPlaceholder extends StatelessWidget {
           Positioned.fill(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final x = constraints.maxWidth * (0.18 + (0.60 * progress));
-                final y = constraints.maxHeight * (0.64 - 0.18 * math.sin(progress * math.pi));
+                final position = _calculateTruckPosition(constraints);
 
                 return Stack(
                   children: [
                     Positioned(
-                      left: x - 20,
-                      top: y - 20,
+                      left: position.dx - 20,
+                      top: position.dy - 20,
                       child: Container(
                         width: 42,
                         height: 42,

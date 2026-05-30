@@ -173,13 +173,21 @@ class _SuccessPanel extends StatelessWidget {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
             decoration: BoxDecoration(
-              color: TruxifyColors.accentLight,
+              color: Theme.of(context).brightness == Brightness.dark
+        ? FreightFairColors.darkAccentLight
+        : FreightFairColors.accentLight,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: TruxifyColors.accent.withValues(alpha: 0.2)),
             ),
             child: Column(
               children: [
-                const Icon(Icons.check_circle_rounded, color: TruxifyColors.accentDark, size: 58),
+                Icon(
+  Icons.check_circle_rounded,
+  color: Theme.of(context).brightness == Brightness.dark
+      ? FreightFairColors.accent
+      : FreightFairColors.accentDark,
+  size: 58,
+),
                 const SizedBox(height: 10),
                 Text('Booking Confirmed! 🎉', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 4),

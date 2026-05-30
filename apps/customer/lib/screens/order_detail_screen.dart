@@ -5,6 +5,7 @@ import '../data/mock_data.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/timeline_row.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   const OrderDetailScreen({super.key, required this.order});
@@ -117,7 +118,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ...widget.order.timeline.map(
             (step) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: _TimelineRow(step: step),
+              child: TimelineRow(step: step),
             ),
           ),
           const SizedBox(height: 4),
@@ -148,11 +149,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           PrimaryButton(
             label: 'Rebook This Route',
             onPressed: () {
+              final routeParts = widget.order.route.split(' → ');
+              final pickup = routeParts.length == 2 ? routeParts.first : widget.order.route;
+              final drop = routeParts.length == 2 ? routeParts.last : widget.order.route;
+
               FreightFairScope.of(context).openFindTrucks(
                 draft: RouteDraft(
-                  pickup: 'Surat, Gujarat',
-                  drop: 'Pune, Maharashtra',
-                  dateLabel: 'Tomorrow, 6:00 AM',
+                  pickup: pickup,
+                  drop: drop,
+                  dateLabel: widget.order.date,
                   goodsType: 'Textile',
                   weightTonnes: '3',
                   dimensions: '12 × 6 × 6',
@@ -183,51 +188,6 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ],
         ],
       ),
-    );
-  }
-}
-
-class _TimelineRow extends StatelessWidget {
-  const _TimelineRow({required this.step});
-
-  final TimelineStepData step;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 14,
-              height: 14,
-              decoration: BoxDecoration(
-                color: step.completed ? TruxifyColors.accentDark : TruxifyColors.border,
-                shape: BoxShape.circle,
-              ),
-            ),
-            Container(width: 2, height: 42, color: TruxifyColors.border),
-          ],
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(top: 0),
-            child: InfoCard(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(step.title, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800)),
-                  ),
-                  Text(step.timestamp, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

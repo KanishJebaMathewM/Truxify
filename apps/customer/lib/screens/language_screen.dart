@@ -65,14 +65,14 @@ class _LanguageScreenState extends State<LanguageScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                language['name']!,
+                                language['name'] ?? '',
                                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                                       fontWeight: FontWeight.w600,
                                     ),
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                language['native']!,
+                                language['native'] ?? '',
                                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                       color: TruxifyColors.adaptiveSecondaryText(context),
                                     ),

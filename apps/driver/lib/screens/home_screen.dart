@@ -14,7 +14,9 @@ import '../data/mock_data.dart';
 import '../services/route_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/map_markers.dart';
 import 'destination_picker_screen.dart';
+import '../widgets/pulsing_location_dot.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -462,7 +464,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   width: 54,
                   height: 54,
                   alignment: Alignment.center,
-                  child: const _RouteMarker(
+                  child: const RouteMarker(
                     icon: Icons.my_location_rounded,
                     fillColor: TruxifyColors.success,
                     shadowColor: TruxifyColors.success,
@@ -474,8 +476,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         width: 34,
                         height: 34,
                         alignment: Alignment.center,
-                        child:
-                            _RouteCheckpointMarker(label: '${entry.key + 1}'),
+                        child: RouteCheckpointMarker(label: '${entry.key + 1}'),
                       ),
                     ),
                 Marker(
@@ -483,7 +484,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   width: 54,
                   height: 54,
                   alignment: Alignment.center,
-                  child: const _RouteMarker(
+                  child: const RouteMarker(
                     icon: Icons.location_on_rounded,
                     fillColor: TruxifyColors.errorRed,
                     shadowColor: TruxifyColors.errorRed,
@@ -558,7 +559,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const _PulsingLocationDot(),
+                const PulsingLocationDot(),
                 Container(
                   width: 1,
                   height: 12,
@@ -1056,138 +1057,5 @@ class _SlideToConfirmButtonState extends State<SlideToConfirmButton> {
       },
     );
   }
-}
 
-class _RouteMarker extends StatelessWidget {
-  const _RouteMarker({
-    required this.icon,
-    required this.fillColor,
-    required this.shadowColor,
-  });
-
-  final IconData icon;
-  final Color fillColor;
-  final Color shadowColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: shadowColor.withValues(alpha: 0.3),
-            blurRadius: 8,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(4),
-      child: Container(
-        decoration: BoxDecoration(
-          color: fillColor,
-          shape: BoxShape.circle,
-        ),
-        padding: const EdgeInsets.all(6),
-        child: Icon(
-          icon,
-          color: Colors.white,
-          size: 16,
-        ),
-      ),
-    );
-  }
-}
-
-class _RouteCheckpointMarker extends StatelessWidget {
-  const _RouteCheckpointMarker({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        shape: BoxShape.circle,
-        border: Border.all(color: TruxifyColors.accent, width: 2),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
-            blurRadius: 4,
-          ),
-        ],
-      ),
-      width: 24,
-      height: 24,
-      alignment: Alignment.center,
-      child: Text(
-        label,
-        style: GoogleFonts.dmSans(
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          color: TruxifyColors.accentDark,
-        ),
-      ),
-    );
-  }
-}
-
-class _PulsingLocationDot extends StatefulWidget {
-  const _PulsingLocationDot();
-
-  @override
-  State<_PulsingLocationDot> createState() => _PulsingLocationDotState();
-}
-
-class _PulsingLocationDotState extends State<_PulsingLocationDot>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: 14 + (16 * _controller.value),
-              height: 14 + (16 * _controller.value),
-              decoration: BoxDecoration(
-                color: TruxifyColors.success
-                    .withValues(alpha: 1.0 - _controller.value),
-                shape: BoxShape.circle,
-              ),
-            ),
-            Container(
-              width: 10,
-              height: 10,
-              decoration: const BoxDecoration(
-                color: TruxifyColors.success,
-                shape: BoxShape.circle,
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
 }

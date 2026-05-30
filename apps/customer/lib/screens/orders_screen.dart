@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:freightfair/widgets/order_card.dart';
 
 import '../controllers/app_controller.dart';
 import '../data/mock_data.dart';
 import '../models/app_models.dart';
-import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
-import '../widgets/common_widgets.dart';
+import '../widgets/order_search_bar.dart';
 import 'live_tracking_screen.dart';
 import 'order_detail_screen.dart';
 
@@ -19,6 +19,9 @@ class OrdersScreen extends StatefulWidget {
 class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderStateMixin {
   TabController? _tabController;
   FreightFairController? _controller;
+  final TextEditingController _searchController = TextEditingController();
+  bool _isSearching = false;
+  String _searchQuery = '';
 
   @override
   void didChangeDependencies() {
@@ -40,25 +43,83 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
   @override
   void dispose() {
     _tabController?.dispose();
+    _searchController.dispose();
     super.dispose();
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _isSearching = !_isSearching;
+      if (!_isSearching) {
+        _searchQuery = '';
+        _searchController.clear();
+      }
+    });
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() {
+      _searchQuery = value;
+    });
+  }
+
+  List<ActiveOrderData> get _filteredActiveOrders {
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) {
+      return mockActiveOrders;
+    }
+    return mockActiveOrders.where((order) {
+      return _orderMatches(query, [
+        order.orderId,
+        order.route,
+        order.driver,
+        order.milestone,
+        order.status,
+        order.eta,
+      ]);
+    }).toList();
+  }
+
+  List<HistoryOrderData> get _filteredHistoryOrders {
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isEmpty) {
+      return mockHistoryOrders;
+    }
+    return mockHistoryOrders.where((order) {
+      return _orderMatches(query, [
+        order.orderId,
+        order.route,
+        order.driver,
+        order.date,
+        order.amount,
+        order.status,
+        order.truckNumber,
+      ]);
+    }).toList();
+  }
+
+  bool _orderMatches(String query, List<String> fields) {
+    return fields.any((value) => value.toLowerCase().contains(query));
   }
 
   @override
   Widget build(BuildContext context) {
-    final tabController = _tabController!;
+    final tabController = _tabController;
+    if (tabController == null) {
+      return const SizedBox.shrink();
+    }
 
     return SafeArea(
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            child: Row(
-              children: [
-                Text('Orders', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-                const Spacer(),
-                IconButton(onPressed: () {}, icon: const Icon(Icons.search_rounded)),
-              ],
-            ),
+          OrderSearchBar(
+            title: 'Orders',
+            isSearching: _isSearching,
+            onToggle: _toggleSearch,
+            controller: _searchController,
+            onChanged: _onSearchChanged,
+            searchQuery: _searchQuery,
+            hintText: 'Search by order ID, route, driver or status',
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
@@ -73,11 +134,11 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
               children: [
                 ListView.separated(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                  itemCount: mockActiveOrders.length,
+                  itemCount: _filteredActiveOrders.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
-                    final order = mockActiveOrders[index];
-                    return _ActiveOrderCard(
+                    final order = _filteredActiveOrders[index];
+                    return ActiveOrderCard(
                       order: order,
                       onTap: () => Navigator.of(context).push(
                         AppPageRoute(builder: (_) => LiveTrackingScreen(orderId: order.orderId)),
@@ -87,11 +148,11 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
                 ),
                 ListView.separated(
                   padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                  itemCount: mockHistoryOrders.length,
+                  itemCount: _filteredHistoryOrders.length,
                   separatorBuilder: (_, __) => const SizedBox(height: 14),
                   itemBuilder: (context, index) {
-                    final order = mockHistoryOrders[index];
-                    return _HistoryOrderCard(
+                    final order = _filteredHistoryOrders[index];
+                    return HistoryOrderCard(
                       order: order,
                       onTap: () => Navigator.of(context).push(
                         AppPageRoute(builder: (_) => OrderDetailScreen(order: order)),
@@ -107,95 +168,3 @@ class _OrdersScreenState extends State<OrdersScreen> with SingleTickerProviderSt
     );
   }
 }
-
-class _ActiveOrderCard extends StatelessWidget {
-  const _ActiveOrderCard({required this.order, required this.onTap});
-
-  final ActiveOrderData order;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: InfoCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(order.orderId, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                ),
-                StatusBadge(label: order.milestone, color: TruxifyColors.accent, filled: true),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(order.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
-            const SizedBox(height: 8),
-            Text('Driver: ${order.driver}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            Text('ETA: ${order.eta}', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
-            const SizedBox(height: 14),
-            PrimaryButton(label: 'Track Live', onPressed: onTap),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _HistoryOrderCard extends StatelessWidget {
-  const _HistoryOrderCard({required this.order, required this.onTap});
-
-  final HistoryOrderData order;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final statusColor = order.status == 'Delivered' ? TruxifyColors.accentDark : TruxifyColors.error;
-    return GestureDetector(
-      onTap: onTap,
-      child: InfoCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(order.route, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                ),
-                Text(order.date, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Text(order.amount, style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? TruxifyColors.accent
-                      : TruxifyColors.accentDark,
-                )),
-                const SizedBox(width: 10),
-                StatusBadge(label: order.status == 'Delivered' ? '✅ Delivered' : '❌ Cancelled', color: statusColor, filled: true),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text('Driver: ${order.driver}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
-            const SizedBox(height: 14),
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton(
-                onPressed: onTap,
-                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 42), padding: const EdgeInsets.symmetric(horizontal: 14)),
-                child: const Text('View Details'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-

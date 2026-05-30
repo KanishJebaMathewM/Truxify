@@ -20,7 +20,7 @@ class TimelineMilestone extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = current ? FreightFairColors.accent : done ? FreightFairColors.accentDark : FreightFairColors.border;
+    final color = current ? TruxifyColors.accent : done ? TruxifyColors.accentDark : TruxifyColors.border;
 
     return Column(
       children: [
@@ -31,7 +31,7 @@ class TimelineMilestone extends StatelessWidget {
             color: color,
             shape: BoxShape.circle,
             boxShadow: current
-                ? [BoxShadow(color: FreightFairColors.accent.withValues(alpha: 0.3), blurRadius: 8, spreadRadius: 1)]
+                ? [BoxShadow(color: TruxifyColors.accent.withValues(alpha: 0.3), blurRadius: 8, spreadRadius: 1)]
                 : const [],
           ),
         ),
@@ -48,3 +48,4 @@ class TimelineMilestone extends StatelessWidget {
     );
   }
 }
+

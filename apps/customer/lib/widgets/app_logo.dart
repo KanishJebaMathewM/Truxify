@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+
 class AppLogo extends StatelessWidget {
   const AppLogo({super.key, this.centered = false, this.textStyle, this.iconSize = 22});
 

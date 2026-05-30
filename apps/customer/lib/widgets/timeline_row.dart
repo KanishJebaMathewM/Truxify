@@ -10,7 +10,7 @@ class TimelineRow extends StatelessWidget {
     super.key,
     required this.step,
     this.indicatorSize = 14,
-    this.connectorColor = FreightFairColors.border,
+    this.connectorColor = TruxifyColors.border,
     this.connectorLength = 42,
     this.connectorThickness = 2,
   });
@@ -23,7 +23,7 @@ class TimelineRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = step.completed ? FreightFairColors.accentDark : FreightFairColors.border;
+    final color = step.completed ? TruxifyColors.accentDark : TruxifyColors.border;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -62,7 +62,7 @@ class TimelineRow extends StatelessWidget {
                   Text(
                     step.timestamp,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: FreightFairColors.adaptiveSecondaryText(context),
+                          color: TruxifyColors.adaptiveSecondaryText(context),
                         ),
                   ),
                 ],
@@ -74,3 +74,4 @@ class TimelineRow extends StatelessWidget {
     );
   }
 }
+

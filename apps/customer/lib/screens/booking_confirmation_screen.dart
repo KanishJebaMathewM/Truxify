@@ -174,8 +174,8 @@ class _SuccessPanel extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
             decoration: BoxDecoration(
               color: Theme.of(context).brightness == Brightness.dark
-        ? FreightFairColors.darkAccentLight
-        : FreightFairColors.accentLight,
+        ? TruxifyColors.darkAccentLight
+        : TruxifyColors.accentLight,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: TruxifyColors.accent.withValues(alpha: 0.2)),
             ),
@@ -184,8 +184,8 @@ class _SuccessPanel extends StatelessWidget {
                 Icon(
   Icons.check_circle_rounded,
   color: Theme.of(context).brightness == Brightness.dark
-      ? FreightFairColors.accent
-      : FreightFairColors.accentDark,
+      ? TruxifyColors.accent
+      : TruxifyColors.accentDark,
   size: 58,
 ),
                 const SizedBox(height: 10),

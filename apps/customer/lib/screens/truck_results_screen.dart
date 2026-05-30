@@ -56,14 +56,14 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
                   ),
                   selected: selected,
                   onSelected: (_) => setState(() => _selectedSort = index),
-                  selectedColor: FreightFairColors.accent,
+                  selectedColor: TruxifyColors.accent,
                   backgroundColor:
                       Theme.of(context).brightness == Brightness.dark
-                          ? FreightFairColors.darkBackground
+                          ? TruxifyColors.darkBackground
                           : Colors.white,
                   side: BorderSide(
                     color: selected
-                        ? FreightFairColors.accent
+                        ? TruxifyColors.accent
                         : Colors.grey.shade300,
                     width: 1.2,
                   ),
@@ -100,3 +100,4 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
     );
   }
 }
+

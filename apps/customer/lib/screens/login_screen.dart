@@ -121,7 +121,7 @@ void initState() {
               Text(
                 'Sign in to manage your freight bookings offline with mock data.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: FreightFairColors.adaptiveSecondaryText(context)),
+                    color: TruxifyColors.adaptiveSecondaryText(context)),
               ),
               const SizedBox(height: 28),
               AnimatedSwitcher(
@@ -162,7 +162,7 @@ void initState() {
               margin: const EdgeInsets.only(right: 8),
               decoration: const BoxDecoration(
                 border:
-                    Border(right: BorderSide(color: FreightFairColors.border)),
+                    Border(right: BorderSide(color: TruxifyColors.border)),
               ),
               child: const Text('+91',
                   style: TextStyle(fontWeight: FontWeight.w700)),
@@ -177,13 +177,13 @@ void initState() {
           child: Row(
             children: [
               const Icon(Icons.lock_rounded,
-                  color: FreightFairColors.accentDark),
+                  color: TruxifyColors.accentDark),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   'Mock verification is enabled. Use 1234 on the next screen.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: FreightFairColors.adaptiveSecondaryText(context)),
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
                 ),
               ),
             ],
@@ -244,4 +244,5 @@ void initState() {
     );
   }
 }
+
 

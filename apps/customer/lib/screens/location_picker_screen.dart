@@ -319,7 +319,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                         mini: true,
                         backgroundColor:
                             Theme.of(context).colorScheme.surface,
-                        foregroundColor: FreightFairColors.accentDark,
+                        foregroundColor: TruxifyColors.accentDark,
                         onPressed: _isFetchingCurrentLocation
                             ? null
                             : _useCurrentLocation,
@@ -390,3 +390,4 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     );
   }
 }
+

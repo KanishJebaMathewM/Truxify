@@ -1,5 +1,5 @@
 -- ============================================================================
--- TRUXIFY / FREIGHTFAIR — SUPABASE DATABASE SCHEMA
+-- TRUXIFY — SUPABASE DATABASE SCHEMA
 -- ============================================================================
 --
 -- DESIGN PRINCIPLES:

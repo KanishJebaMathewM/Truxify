@@ -20,7 +20,7 @@ class RecentRouteCard extends StatelessWidget {
     return InfoCard(
       child: Row(
         children: [
-          const Icon(Icons.route_rounded, color: FreightFairColors.accentDark),
+          const Icon(Icons.route_rounded, color: TruxifyColors.accentDark),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -30,7 +30,7 @@ class RecentRouteCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   '${route.pickup} to ${route.drop}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context)),
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
                 ),
               ],
             ),

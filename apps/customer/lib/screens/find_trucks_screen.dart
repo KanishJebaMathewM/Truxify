@@ -77,7 +77,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final controller = FreightFairScope.of(context);
+    final controller = TruxifyScope.of(context);
     final draft = controller.consumePendingRouteDraft();
     if (draft != null) {
       _pickupController.text = draft.pickup;
@@ -299,7 +299,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                     const SizedBox(height: 2),
                     Text(
                       'ML powered matching',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context)),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
                     ),
                   ],
                 ),
@@ -308,12 +308,12 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                   width: 48,
                   height: 48,
                   decoration: BoxDecoration(
-                    color: FreightFairColors.accentLight,
+                    color: TruxifyColors.accentLight,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: IconButton(
                     onPressed: () {},
-                    icon: const Icon(Icons.filter_list_rounded, color: FreightFairColors.accentDark),
+                    icon: const Icon(Icons.filter_list_rounded, color: TruxifyColors.accentDark),
                   ),
                 ),
               ],
@@ -325,7 +325,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
               'ROUTE',
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: FreightFairColors.adaptiveSecondaryText(context),
+                    color: TruxifyColors.adaptiveSecondaryText(context),
                     letterSpacing: 0.5,
                   ),
             ),
@@ -340,11 +340,11 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                     onTap: () => _openLocationPicker(isPickup: true),
                     decoration: InputDecoration(
                       labelText: 'Pickup Location',
-                      prefixIcon: const Icon(Icons.location_on_rounded, color: FreightFairColors.accentDark),
+                      prefixIcon: const Icon(Icons.location_on_rounded, color: TruxifyColors.accentDark),
                       prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                       suffixIcon: IconButton(
                         onPressed: () => _openLocationPicker(isPickup: true),
-                        icon: const Icon(Icons.map_rounded, color: FreightFairColors.accentDark),
+                        icon: const Icon(Icons.map_rounded, color: TruxifyColors.accentDark),
                       ),
                     ),
                   ),
@@ -363,7 +363,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                             prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                             suffixIcon: IconButton(
                               onPressed: () => _openLocationPicker(isPickup: false),
-                              icon: const Icon(Icons.map_rounded, color: FreightFairColors.accentDark),
+                              icon: const Icon(Icons.map_rounded, color: TruxifyColors.accentDark),
                             ),
                           ),
                         ),
@@ -373,13 +373,13 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                         width: 48,
                         height: 48,
                         decoration: BoxDecoration(
-                          color: FreightFairColors.accentLight,
+                          color: TruxifyColors.accentLight,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: FreightFairColors.border),
+                          border: Border.all(color: TruxifyColors.border),
                         ),
                         child: IconButton(
                           onPressed: _swapLocations,
-                          icon: const Icon(Icons.swap_vert_rounded, color: FreightFairColors.accentDark),
+                          icon: const Icon(Icons.swap_vert_rounded, color: TruxifyColors.accentDark),
                         ),
                       ),
                     ],
@@ -395,7 +395,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                           onTap: _pickDate,
                           decoration: InputDecoration(
                             labelText: 'Date',
-                            prefixIcon: const Icon(Icons.calendar_today_rounded, color: FreightFairColors.accentDark),
+                            prefixIcon: const Icon(Icons.calendar_today_rounded, color: TruxifyColors.accentDark),
                             prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                           ),
                         ),
@@ -408,7 +408,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                           onTap: _pickTime,
                           decoration: InputDecoration(
                             labelText: 'Time',
-                            prefixIcon: const Icon(Icons.access_time_rounded, color: FreightFairColors.accentDark),
+                            prefixIcon: const Icon(Icons.access_time_rounded, color: TruxifyColors.accentDark),
                             prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                           ),
                         ),
@@ -425,7 +425,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
               'GOODS DETAILS',
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: FreightFairColors.adaptiveSecondaryText(context),
+                    color: TruxifyColors.adaptiveSecondaryText(context),
                     letterSpacing: 0.5,
                   ),
             ),
@@ -449,7 +449,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                       decoration: const InputDecoration(
                         labelText: 'Describe your goods',
                         hintText: 'e.g. Chemicals, Scrap metal…',
-                        prefixIcon: Icon(Icons.edit_note_rounded, color: FreightFairColors.accentDark),
+                        prefixIcon: Icon(Icons.edit_note_rounded, color: TruxifyColors.accentDark),
                         prefixIconConstraints: BoxConstraints(minWidth: 40, minHeight: 40),
                       ),
                     ),
@@ -542,7 +542,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                       'Special requirements',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             fontWeight: FontWeight.w600,
-                            color: FreightFairColors.adaptiveSecondaryText(context),
+                            color: TruxifyColors.adaptiveSecondaryText(context),
                           ),
                     ),
                   ),
@@ -572,29 +572,29 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                             decoration: BoxDecoration(
                               color: selected
                                   ? (Theme.of(context).brightness == Brightness.dark
-                                      ? FreightFairColors.darkAccentLight
-                                      : FreightFairColors.accentLight)
+                                      ? TruxifyColors.darkAccentLight
+                                      : TruxifyColors.accentLight)
                                   : Theme.of(context).colorScheme.surfaceContainerHighest,
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
-                                color: selected ? Colors.transparent : (Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border),
+                                color: selected ? Colors.transparent : (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border),
                               ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (selected)
-                                  Icon(Icons.check_rounded, color: FreightFairColors.accentDark, size: 16)
+                                  Icon(Icons.check_rounded, color: TruxifyColors.accentDark, size: 16)
                                 else
-                                  Icon(Icons.add_rounded, color: FreightFairColors.adaptiveSecondaryText(context), size: 16),
+                                  Icon(Icons.add_rounded, color: TruxifyColors.adaptiveSecondaryText(context), size: 16),
                                 const SizedBox(width: 6),
                                 Text(
                                   label,
                                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                                         fontWeight: FontWeight.w600,
                                         color: selected
-                                            ? FreightFairColors.accentDark
-                                            : FreightFairColors.adaptiveSecondaryText(context),
+                                            ? TruxifyColors.accentDark
+                                            : TruxifyColors.adaptiveSecondaryText(context),
                                       ),
                                 ),
                               ],
@@ -616,7 +616,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surface,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: (Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border)),
+                    border: Border.all(color: (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border)),
                     boxShadow: [
                       BoxShadow(
                         color: Colors.black.withOpacity(0.05),
@@ -639,13 +639,13 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: FreightFairColors.accentLight,
+                              color: TruxifyColors.accentLight,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
                               'Stable this week',
                               style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: FreightFairColors.accentDark,
+                                    color: TruxifyColors.accentDark,
                                     fontWeight: FontWeight.w600,
                                   ),
                             ),
@@ -658,14 +658,14 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                         style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                               fontWeight: FontWeight.w800,
                               color: Theme.of(context).brightness == Brightness.dark
-                                  ? FreightFairColors.accent
-                                  : FreightFairColors.accentDark,
+                                  ? TruxifyColors.accent
+                                  : TruxifyColors.accentDark,
                             ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         'Based on current demand + route',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context)),
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
                       ),
                     ],
                   ),
@@ -677,7 +677,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                   child: Container(
                     width: 4,
                     decoration: BoxDecoration(
-                      color: FreightFairColors.accentDark,
+                      color: TruxifyColors.accentDark,
                       borderRadius: const BorderRadius.only(
                         topLeft: Radius.circular(16),
                         bottomLeft: Radius.circular(16),
@@ -736,11 +736,11 @@ class _ColorToggleButton extends StatelessWidget {
           height: 56,
           decoration: BoxDecoration(
             color: isSelected
-                ? FreightFairColors.accentDark
+                ? TruxifyColors.accentDark
                 : Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected ? FreightFairColors.accentDark : (Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border),
+              color: isSelected ? TruxifyColors.accentDark : (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border),
             ),
           ),
           child: Row(
@@ -748,7 +748,7 @@ class _ColorToggleButton extends StatelessWidget {
             children: [
               Icon(
                 icon,
-                color: isSelected ? Colors.white : FreightFairColors.adaptiveSecondaryText(context),
+                color: isSelected ? Colors.white : TruxifyColors.adaptiveSecondaryText(context),
                 size: 24,
               ),
               if (label != null) ...[
@@ -757,7 +757,7 @@ class _ColorToggleButton extends StatelessWidget {
                   label!,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: isSelected ? Colors.white : FreightFairColors.adaptiveSecondaryText(context),
+                        color: isSelected ? Colors.white : TruxifyColors.adaptiveSecondaryText(context),
                       ),
                 ),
               ],

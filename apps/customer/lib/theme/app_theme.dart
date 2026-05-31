@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-class FreightFairColors {
+class TruxifyColors {
   // Light mode
   static const background = Color(0xFFFFFFFF);
   static const secondaryBackground = Color(0xFFF5F5F5);
@@ -37,66 +37,66 @@ class FreightFairColors {
   }
 }
 
-class FreightFairTheme {
+class TruxifyTheme {
   static ThemeData light() {
     final base = ThemeData(
       useMaterial3: true,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: FreightFairColors.accent,
+        seedColor: TruxifyColors.accent,
         brightness: Brightness.light,
-        primary: FreightFairColors.accent,
-        secondary: FreightFairColors.accentDark,
-        surface: FreightFairColors.background,
-        surfaceContainerHighest: FreightFairColors.secondaryBackground,
-        outlineVariant: FreightFairColors.border,
+        primary: TruxifyColors.accent,
+        secondary: TruxifyColors.accentDark,
+        surface: TruxifyColors.background,
+        surfaceContainerHighest: TruxifyColors.secondaryBackground,
+        outlineVariant: TruxifyColors.border,
       ),
     );
 
     return base.copyWith(
-      scaffoldBackgroundColor: FreightFairColors.secondaryBackground,
+      scaffoldBackgroundColor: TruxifyColors.secondaryBackground,
       textTheme: GoogleFonts.dmSansTextTheme(base.textTheme).apply(
-        bodyColor: FreightFairColors.primaryText,
-        displayColor: FreightFairColors.primaryText,
+        bodyColor: TruxifyColors.primaryText,
+        displayColor: TruxifyColors.primaryText,
       ),
       cardTheme: CardThemeData(
-        color: FreightFairColors.background,
+        color: TruxifyColors.background,
         elevation: 0,
         shadowColor: Colors.black.withValues(alpha: 0.06),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
       ),
-      dividerTheme: const DividerThemeData(color: FreightFairColors.border, thickness: 1),
+      dividerTheme: const DividerThemeData(color: TruxifyColors.border, thickness: 1),
       appBarTheme: const AppBarTheme(
-        backgroundColor: FreightFairColors.background,
-        foregroundColor: FreightFairColors.primaryText,
+        backgroundColor: TruxifyColors.background,
+        foregroundColor: TruxifyColors.primaryText,
         elevation: 0,
         centerTitle: false,
-        surfaceTintColor: FreightFairColors.background,
-        shape: Border(bottom: BorderSide(color: FreightFairColors.border, width: 1)),
+        surfaceTintColor: TruxifyColors.background,
+        shape: Border(bottom: BorderSide(color: TruxifyColors.border, width: 1)),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: FreightFairColors.background,
-        hintStyle: const TextStyle(color: FreightFairColors.secondaryText),
-        labelStyle: const TextStyle(color: FreightFairColors.secondaryText),
+        fillColor: TruxifyColors.background,
+        hintStyle: const TextStyle(color: TruxifyColors.secondaryText),
+        labelStyle: const TextStyle(color: TruxifyColors.secondaryText),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: FreightFairColors.border),
+          borderSide: const BorderSide(color: TruxifyColors.border),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: FreightFairColors.border),
+          borderSide: const BorderSide(color: TruxifyColors.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: FreightFairColors.accent, width: 1.4),
+          borderSide: const BorderSide(color: TruxifyColors.accent, width: 1.4),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: FreightFairColors.accent,
+          backgroundColor: TruxifyColors.accent,
           foregroundColor: Colors.white,
           elevation: 0,
           minimumSize: const Size.fromHeight(52),
@@ -106,8 +106,8 @@ class FreightFairTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: FreightFairColors.accentDark,
-          side: const BorderSide(color: FreightFairColors.border),
+          foregroundColor: TruxifyColors.accentDark,
+          side: const BorderSide(color: TruxifyColors.border),
           minimumSize: const Size.fromHeight(52),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w700, fontSize: 16),
@@ -115,50 +115,50 @@ class FreightFairTheme {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: FreightFairColors.accentDark,
+          foregroundColor: TruxifyColors.accentDark,
           textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w700),
         ),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: FreightFairColors.background,
-        selectedItemColor: FreightFairColors.accent,
-        unselectedItemColor: FreightFairColors.secondaryText,
+        backgroundColor: TruxifyColors.background,
+        selectedItemColor: TruxifyColors.accent,
+        unselectedItemColor: TruxifyColors.secondaryText,
         type: BottomNavigationBarType.fixed,
         elevation: 10,
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: FreightFairColors.background,
-        indicatorColor: FreightFairColors.accentLight,
+        backgroundColor: TruxifyColors.background,
+        indicatorColor: TruxifyColors.accentLight,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return IconThemeData(
             size: 22,
-            color: selected ? FreightFairColors.accentDark : FreightFairColors.secondaryText,
+            color: selected ? TruxifyColors.accentDark : TruxifyColors.secondaryText,
           );
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return TextStyle(
             fontSize: 10,
-            color: selected ? FreightFairColors.accentDark : FreightFairColors.secondaryText,
+            color: selected ? TruxifyColors.accentDark : TruxifyColors.secondaryText,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
           );
         }),
       ),
       chipTheme: base.chipTheme.copyWith(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-        backgroundColor: FreightFairColors.secondaryBackground,
-        selectedColor: FreightFairColors.accentLight,
+        backgroundColor: TruxifyColors.secondaryBackground,
+        selectedColor: TruxifyColors.accentLight,
         labelStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w600),
-        side: const BorderSide(color: FreightFairColors.border),
+        side: const BorderSide(color: TruxifyColors.border),
       ),
       tabBarTheme: const TabBarThemeData(
-        labelColor: FreightFairColors.accentDark,
-        unselectedLabelColor: FreightFairColors.secondaryText,
-        indicatorColor: FreightFairColors.accent,
-        dividerColor: FreightFairColors.border,
+        labelColor: TruxifyColors.accentDark,
+        unselectedLabelColor: TruxifyColors.secondaryText,
+        indicatorColor: TruxifyColors.accent,
+        dividerColor: TruxifyColors.border,
       ),
-      iconTheme: const IconThemeData(color: FreightFairColors.primaryText),
+      iconTheme: const IconThemeData(color: TruxifyColors.primaryText),
     );
   }
 
@@ -166,25 +166,25 @@ class FreightFairTheme {
     final base = ThemeData(
       useMaterial3: true,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: FreightFairColors.accent,
+        seedColor: TruxifyColors.accent,
         brightness: Brightness.dark,
-        primary: FreightFairColors.accent,
-        secondary: FreightFairColors.accent,
-        surface: FreightFairColors.darkCardBackground,
-        surfaceContainerHighest: FreightFairColors.darkSecondaryBackground,
-        onSurface: FreightFairColors.darkPrimaryText,
-        outlineVariant: FreightFairColors.darkBorder,
+        primary: TruxifyColors.accent,
+        secondary: TruxifyColors.accent,
+        surface: TruxifyColors.darkCardBackground,
+        surfaceContainerHighest: TruxifyColors.darkSecondaryBackground,
+        onSurface: TruxifyColors.darkPrimaryText,
+        outlineVariant: TruxifyColors.darkBorder,
       ),
     );
 
     return base.copyWith(
-      scaffoldBackgroundColor: FreightFairColors.darkBackground,
+      scaffoldBackgroundColor: TruxifyColors.darkBackground,
       textTheme: GoogleFonts.dmSansTextTheme(base.textTheme).apply(
-        bodyColor: FreightFairColors.darkPrimaryText,
-        displayColor: FreightFairColors.darkPrimaryText,
+        bodyColor: TruxifyColors.darkPrimaryText,
+        displayColor: TruxifyColors.darkPrimaryText,
       ),
       cardTheme: CardThemeData(
-        color: FreightFairColors.darkCardBackground,
+        color: TruxifyColors.darkCardBackground,
         elevation: 0,
         shadowColor: Colors.black.withValues(alpha: 0.4),
         shape: RoundedRectangleBorder(
@@ -192,39 +192,39 @@ class FreightFairTheme {
         ),
       ),
       dividerTheme: const DividerThemeData(
-        color: FreightFairColors.darkBorder,
+        color: TruxifyColors.darkBorder,
         thickness: 1,
       ),
       appBarTheme: const AppBarTheme(
-        backgroundColor: FreightFairColors.darkSecondaryBackground,
-        foregroundColor: FreightFairColors.darkPrimaryText,
+        backgroundColor: TruxifyColors.darkSecondaryBackground,
+        foregroundColor: TruxifyColors.darkPrimaryText,
         elevation: 0,
         centerTitle: false,
         surfaceTintColor: Colors.transparent,
-        shape: Border(bottom: BorderSide(color: FreightFairColors.darkBorder, width: 1)),
+        shape: Border(bottom: BorderSide(color: TruxifyColors.darkBorder, width: 1)),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: FreightFairColors.darkSecondaryBackground,
-        hintStyle: const TextStyle(color: FreightFairColors.darkSecondaryText),
-        labelStyle: const TextStyle(color: FreightFairColors.darkSecondaryText),
+        fillColor: TruxifyColors.darkSecondaryBackground,
+        hintStyle: const TextStyle(color: TruxifyColors.darkSecondaryText),
+        labelStyle: const TextStyle(color: TruxifyColors.darkSecondaryText),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: FreightFairColors.darkBorder),
+          borderSide: const BorderSide(color: TruxifyColors.darkBorder),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: FreightFairColors.darkBorder),
+          borderSide: const BorderSide(color: TruxifyColors.darkBorder),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: FreightFairColors.accent, width: 1.4),
+          borderSide: const BorderSide(color: TruxifyColors.accent, width: 1.4),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: FreightFairColors.accent,
+          backgroundColor: TruxifyColors.accent,
           foregroundColor: Colors.white,
           elevation: 0,
           minimumSize: const Size.fromHeight(52),
@@ -234,8 +234,8 @@ class FreightFairTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: FreightFairColors.accent,
-          side: const BorderSide(color: FreightFairColors.darkBorder),
+          foregroundColor: TruxifyColors.accent,
+          side: const BorderSide(color: TruxifyColors.darkBorder),
           minimumSize: const Size.fromHeight(52),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w700, fontSize: 16),
@@ -243,55 +243,55 @@ class FreightFairTheme {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          foregroundColor: FreightFairColors.accent,
+          foregroundColor: TruxifyColors.accent,
           textStyle: GoogleFonts.dmSans(fontWeight: FontWeight.w700),
         ),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: FreightFairColors.darkSecondaryBackground,
-        selectedItemColor: FreightFairColors.accent,
-        unselectedItemColor: FreightFairColors.darkSecondaryText,
+        backgroundColor: TruxifyColors.darkSecondaryBackground,
+        selectedItemColor: TruxifyColors.accent,
+        unselectedItemColor: TruxifyColors.darkSecondaryText,
         type: BottomNavigationBarType.fixed,
         elevation: 0,
       ),
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: FreightFairColors.darkSecondaryBackground,
-        indicatorColor: FreightFairColors.darkAccentLight,
+        backgroundColor: TruxifyColors.darkSecondaryBackground,
+        indicatorColor: TruxifyColors.darkAccentLight,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return IconThemeData(
             size: 22,
-            color: selected ? FreightFairColors.accent : FreightFairColors.darkSecondaryText,
+            color: selected ? TruxifyColors.accent : TruxifyColors.darkSecondaryText,
           );
         }),
         labelTextStyle: WidgetStateProperty.resolveWith((states) {
           final selected = states.contains(WidgetState.selected);
           return TextStyle(
             fontSize: 10,
-            color: selected ? FreightFairColors.accent : FreightFairColors.darkSecondaryText,
+            color: selected ? TruxifyColors.accent : TruxifyColors.darkSecondaryText,
             fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
           );
         }),
       ),
       chipTheme: base.chipTheme.copyWith(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-        backgroundColor: FreightFairColors.darkSecondaryBackground,
-        selectedColor: FreightFairColors.darkAccentLight,
+        backgroundColor: TruxifyColors.darkSecondaryBackground,
+        selectedColor: TruxifyColors.darkAccentLight,
         labelStyle: GoogleFonts.dmSans(
           fontWeight: FontWeight.w600,
-          color: FreightFairColors.darkPrimaryText,
+          color: TruxifyColors.darkPrimaryText,
         ),
-        side: const BorderSide(color: FreightFairColors.darkBorder),
+        side: const BorderSide(color: TruxifyColors.darkBorder),
       ),
       tabBarTheme: const TabBarThemeData(
-        labelColor: FreightFairColors.accent,
-        unselectedLabelColor: FreightFairColors.darkSecondaryText,
-        indicatorColor: FreightFairColors.accent,
-        dividerColor: FreightFairColors.darkBorder,
+        labelColor: TruxifyColors.accent,
+        unselectedLabelColor: TruxifyColors.darkSecondaryText,
+        indicatorColor: TruxifyColors.accent,
+        dividerColor: TruxifyColors.darkBorder,
         labelStyle: TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
         unselectedLabelStyle: TextStyle(fontWeight: FontWeight.w500, fontSize: 14),
       ),
-      iconTheme: const IconThemeData(color: FreightFairColors.darkPrimaryText),
+      iconTheme: const IconThemeData(color: TruxifyColors.darkPrimaryText),
     );
   }
 }

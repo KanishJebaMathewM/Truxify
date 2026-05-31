@@ -17,7 +17,12 @@ class MapPlaceholder extends StatelessWidget {
   final String pickup;
   final String drop;
   final String currentLocation;
-
+  Offset _calculateTruckPosition(BoxConstraints constraints) {
+    final x = constraints.maxWidth * (0.18 + (0.60 * progress));
+    final y = constraints.maxHeight * (0.64 - 0.18 * math.sin(progress * math.pi));
+    return Offset(x, y);
+  }
+  
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
@@ -50,33 +55,32 @@ class MapPlaceholder extends StatelessWidget {
           Positioned(
             left: 18,
             top: 18,
-            child: _MapPin(label: pickup, color: FreightFairColors.accentDark, icon: Icons.my_location_rounded),
+            child: _MapPin(label: pickup, color: TruxifyColors.accentDark, icon: Icons.my_location_rounded),
           ),
           Positioned(
             right: 18,
             bottom: 96,
-            child: _MapPin(label: drop, color: FreightFairColors.warning, icon: Icons.place_rounded),
+            child: _MapPin(label: drop, color: TruxifyColors.warning, icon: Icons.place_rounded),
           ),
           Positioned.fill(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final x = constraints.maxWidth * (0.18 + (0.60 * progress));
-                final y = constraints.maxHeight * (0.64 - 0.18 * math.sin(progress * math.pi));
+                final position = _calculateTruckPosition(constraints);
 
                 return Stack(
                   children: [
                     Positioned(
-                      left: x - 20,
-                      top: y - 20,
+                      left: position.dx - 20,
+                      top: position.dy - 20,
                       child: Container(
                         width: 42,
                         height: 42,
                         decoration: BoxDecoration(
-                          color: FreightFairColors.accent,
+                          color: TruxifyColors.accent,
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: FreightFairColors.accent.withValues(alpha: 0.25),
+                              color: TruxifyColors.accent.withValues(alpha: 0.25),
                               blurRadius: 18,
                               spreadRadius: 2,
                             ),
@@ -100,7 +104,7 @@ class MapPlaceholder extends StatelessWidget {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.gps_fixed_rounded, color: FreightFairColors.accentDark, size: 18),
+                            const Icon(Icons.gps_fixed_rounded, color: TruxifyColors.accentDark, size: 18),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
@@ -180,7 +184,7 @@ class _RoutePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final pathPaint = Paint()
-      ..color = FreightFairColors.accentDark.withValues(alpha: 0.28)
+      ..color = TruxifyColors.accentDark.withValues(alpha: 0.28)
       ..strokeWidth = 4
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
@@ -191,7 +195,7 @@ class _RoutePainter extends CustomPainter {
     canvas.drawPath(path, pathPaint);
 
     final dashPaint = Paint()
-      ..color = FreightFairColors.accent.withValues(alpha: 0.55)
+      ..color = TruxifyColors.accent.withValues(alpha: 0.55)
       ..strokeWidth = 2
       ..style = PaintingStyle.stroke;
 

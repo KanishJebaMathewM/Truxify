@@ -1,5 +1,5 @@
 -- ============================================================================
--- TRUXIFY / FREIGHTFAIR — SUPABASE / POSTGRESQL REFERENCE QUERIES
+-- TRUXIFY — SUPABASE / POSTGRESQL REFERENCE QUERIES
 -- ============================================================================
 --
 -- DESIGN PATTERN REMINDER:

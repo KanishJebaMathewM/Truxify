@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/app_models.dart';
 
-class FreightFairController extends ChangeNotifier {
+class TruxifyController extends ChangeNotifier {
   int currentTab = 0;
   int ordersTabIndex = 0;
   RouteDraft? pendingRouteDraft;
@@ -46,16 +46,16 @@ class FreightFairController extends ChangeNotifier {
   }
 }
 
-class FreightFairScope extends InheritedNotifier<FreightFairController> {
-  const FreightFairScope({
+class TruxifyScope extends InheritedNotifier<TruxifyController> {
+  const TruxifyScope({
     super.key,
-    required FreightFairController controller,
+    required TruxifyController controller,
     required super.child,
   }) : super(notifier: controller);
 
-  static FreightFairController of(BuildContext context) {
-    final scope = context.dependOnInheritedWidgetOfExactType<FreightFairScope>();
-    assert(scope != null, 'FreightFairScope not found in widget tree.');
+  static TruxifyController of(BuildContext context) {
+    final scope = context.dependOnInheritedWidgetOfExactType<TruxifyScope>();
+    assert(scope != null, 'TruxifyScope not found in widget tree.');
     return scope!.notifier!;
   }
 }

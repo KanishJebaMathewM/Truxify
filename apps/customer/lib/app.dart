@@ -4,20 +4,20 @@ import 'controllers/app_controller.dart';
 import 'screens/splash_screen.dart';
 import 'theme/app_theme.dart';
 
-class FreightFairApp extends StatefulWidget {
-  const FreightFairApp({super.key});
+class TruxifyApp extends StatefulWidget {
+  const TruxifyApp({super.key});
 
   @override
-  State<FreightFairApp> createState() => _FreightFairAppState();
+  State<TruxifyApp> createState() => _TruxifyAppState();
 }
 
-class _FreightFairAppState extends State<FreightFairApp> {
-  late final FreightFairController _controller;
+class _TruxifyAppState extends State<TruxifyApp> {
+  late final TruxifyController _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = FreightFairController();
+    _controller = TruxifyController();
     _controller.addListener(_onControllerChanged);
   }
 
@@ -34,13 +34,13 @@ class _FreightFairAppState extends State<FreightFairApp> {
 
   @override
   Widget build(BuildContext context) {
-    return FreightFairScope(
+    return TruxifyScope(
       controller: _controller,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'FreightFair',
-        theme: FreightFairTheme.light(),
-        darkTheme: FreightFairTheme.dark(),
+        title: 'Truxify',
+        theme: TruxifyTheme.light(),
+        darkTheme: TruxifyTheme.dark(),
         themeMode: _controller.isDarkMode ? ThemeMode.dark : ThemeMode.light,
         home: const SplashScreen(),
       ),

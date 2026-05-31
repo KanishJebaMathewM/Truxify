@@ -1,7 +1,7 @@
 {
   "name": "truxify-backend-api",
   "version": "1.0.0",
-  "description": "Truxify / FreightFair Backend API - Node.js, Express, WebSockets",
+  "description": "Truxify Backend API - Node.js, Express, WebSockets",
   "main": "src/index.js",
   "type": "module",
   "scripts": {

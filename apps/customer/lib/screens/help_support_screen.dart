@@ -48,8 +48,8 @@ class HelpSupportScreen extends StatelessWidget {
             Container(
               decoration: BoxDecoration(
                 color: Theme.of(context).brightness == Brightness.dark
-                    ? FreightFairColors.darkAccentLight
-                    : FreightFairColors.accentLight.withValues(alpha: 0.5),
+                    ? TruxifyColors.darkAccentLight
+                    : TruxifyColors.accentLight.withValues(alpha: 0.5),
                 borderRadius: BorderRadius.circular(12),
               ),
               padding: const EdgeInsets.all(16),
@@ -59,10 +59,10 @@ class HelpSupportScreen extends StatelessWidget {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: FreightFairColors.accentLight,
+                      color: TruxifyColors.accentLight,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.help_outline_rounded, color: FreightFairColors.accent, size: 20),
+                    child: const Icon(Icons.help_outline_rounded, color: TruxifyColors.accent, size: 20),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -79,7 +79,7 @@ class HelpSupportScreen extends StatelessWidget {
                         Text(
                           'Contact our support team',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: FreightFairColors.adaptiveSecondaryText(context),
+                                color: TruxifyColors.adaptiveSecondaryText(context),
                               ),
                         ),
                       ],
@@ -120,7 +120,7 @@ class HelpSupportScreen extends StatelessWidget {
                         child: Text(
                           faq.answer,
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: FreightFairColors.adaptiveSecondaryText(context),
+                                color: TruxifyColors.adaptiveSecondaryText(context),
                               ),
                         ),
                       ),

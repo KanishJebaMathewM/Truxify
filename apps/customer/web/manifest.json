@@ -1,6 +1,6 @@
 {
-    "name": "freightfair",
-    "short_name": "freightfair",
+    "name": "truxify_customer",
+    "short_name": "truxify_customer",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

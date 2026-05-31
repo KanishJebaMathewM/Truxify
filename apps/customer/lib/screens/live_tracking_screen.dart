@@ -10,6 +10,8 @@ import 'package:latlong2/latlong.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/timeline_connector.dart';
+import '../widgets/timeline_milestone.dart';
 
 class LiveTrackingScreen extends StatefulWidget {
   const LiveTrackingScreen({super.key, required this.orderId});
@@ -53,16 +55,16 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(width: 46, height: 5, decoration: BoxDecoration(color: FreightFairColors.border, borderRadius: BorderRadius.circular(999))),
+              Container(width: 46, height: 5, decoration: BoxDecoration(color: TruxifyColors.border, borderRadius: BorderRadius.circular(999))),
               const SizedBox(height: 18),
-              const CircleAvatar(radius: 34, backgroundColor: FreightFairColors.accentLight, child: Icon(Icons.mic_rounded, color: FreightFairColors.accentDark, size: 34)),
+              const CircleAvatar(radius: 34, backgroundColor: TruxifyColors.accentLight, child: Icon(Icons.mic_rounded, color: TruxifyColors.accentDark, size: 34)),
               const SizedBox(height: 16),
               Text('Voice AI', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
               Text(
                 'Your truck is near Vadodara, expected by 4:30 PM today',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context)),
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
               ),
               const SizedBox(height: 20),
               const SizedBox(
@@ -91,11 +93,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 8),
-              const Icon(Icons.call_rounded, color: FreightFairColors.accentDark, size: 42),
+              const Icon(Icons.call_rounded, color: TruxifyColors.accentDark, size: 42),
               const SizedBox(height: 10),
               Text('Calling ${mockLiveTrackers[_selectedTruckIndex].driver}', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: 4),
-              Text(mockLiveTrackers[_selectedTruckIndex].truckNumber, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+              Text(mockLiveTrackers[_selectedTruckIndex].truckNumber, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
               const SizedBox(height: 18),
               PrimaryButton(label: 'End Call', onPressed: () => Navigator.of(context).pop()),
             ],
@@ -131,7 +133,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                 InfoCard(
                   child: Row(
                     children: [
-                      const Icon(Icons.attach_money_rounded, color: FreightFairColors.accentDark),
+                      const Icon(Icons.attach_money_rounded, color: TruxifyColors.accentDark),
                       const SizedBox(width: 10),
                       Expanded(child: Text('New estimated price: ₹7,120', style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700))),
                     ],
@@ -162,13 +164,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.warning_amber_rounded, color: FreightFairColors.warning, size: 42),
+              const Icon(Icons.warning_amber_rounded, color: TruxifyColors.warning, size: 42),
               const SizedBox(height: 10),
               Text('Cancellation fee ₹680', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: 6),
-              Text('This fee is charged for cancelling after assignment.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+              Text('This fee is charged for cancelling after assignment.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
               const SizedBox(height: 18),
-              PrimaryButton(label: 'Confirm Cancel', backgroundColor: FreightFairColors.error, onPressed: () => Navigator.of(context).pop()),
+              PrimaryButton(label: 'Confirm Cancel', backgroundColor: TruxifyColors.error, onPressed: () => Navigator.of(context).pop()),
             ],
           ),
         );
@@ -275,13 +277,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
         child: Container(
           decoration: BoxDecoration(
             shape: BoxShape.circle,
-            color: isSelected ? FreightFairColors.accentDark : Colors.white,
+            color: isSelected ? TruxifyColors.accentDark : Colors.white,
             border: Border.all(color: Colors.white, width: 2),
             boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 8, offset: Offset(0, 3))],
           ),
           child: Icon(
             Icons.local_shipping_rounded,
-            color: isSelected ? Colors.white : FreightFairColors.accentDark,
+            color: isSelected ? Colors.white : TruxifyColors.accentDark,
             size: 26,
           ),
         ),
@@ -311,14 +313,14 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                     TileLayer(
                       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       tileProvider: CancellableNetworkTileProvider(),
-                      userAgentPackageName: 'com.freightfair.customer',
+                      userAgentPackageName: 'com.truxify.customer',
                     ),
                     PolylineLayer(
                       polylines: [
                         Polyline(
                           points: _routePoints,
                           strokeWidth: 4,
-                          color: FreightFairColors.accentDark,
+                          color: TruxifyColors.accentDark,
                         ),
                       ],
                     ),
@@ -370,8 +372,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                         icon: Icon(
                           Icons.arrow_back_rounded,
                           color: Theme.of(context).brightness == Brightness.dark
-                              ? FreightFairColors.darkPrimaryText
-                              : FreightFairColors.accentDark,
+                              ? TruxifyColors.darkPrimaryText
+                              : TruxifyColors.accentDark,
                         ),
                       ),
                     ),
@@ -407,7 +409,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                                   Row(
                                     children: [
                                       const LiveDot(
-                                        color: FreightFairColors.accent,
+                                        color: TruxifyColors.accent,
                                         size: 8,
                                       ),
                                       const SizedBox(width: 6),
@@ -415,7 +417,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                                         'Live',
                                         style: TextStyle(
                                           fontSize: 12,
-                                          color: FreightFairColors.accent,
+                                          color: TruxifyColors.accent,
                                           fontWeight: FontWeight.w700,
                                         ),
                                       ),
@@ -429,8 +431,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                               icon: Icon(
                                 Icons.more_vert_rounded,
                                 color: Theme.of(context).brightness == Brightness.dark
-                                    ? FreightFairColors.darkPrimaryText
-                                    : FreightFairColors.accentDark,
+                                    ? TruxifyColors.darkPrimaryText
+                                    : TruxifyColors.accentDark,
                               ),
                             ),
                           ],
@@ -465,7 +467,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                           child: Container(
                             width: 46,
                             height: 5,
-                            decoration: BoxDecoration(color: FreightFairColors.border, borderRadius: BorderRadius.circular(999)),
+                            decoration: BoxDecoration(color: TruxifyColors.border, borderRadius: BorderRadius.circular(999)),
                           ),
                         ),
                         const SizedBox(height: 14),
@@ -489,33 +491,33 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                         Row(
                           children: [
                             Expanded(child: Text(truck.driver, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800))),
-                            StatusBadge(label: '⭐ ${truck.rating.toStringAsFixed(1)}', color: FreightFairColors.accentDark, filled: true),
+                            StatusBadge(label: '⭐ ${truck.rating.toStringAsFixed(1)}', color: TruxifyColors.accentDark, filled: true),
                           ],
                         ),
                         const SizedBox(height: 6),
-                        Text(truck.truckNumber, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                        Text(truck.truckNumber, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                         const SizedBox(height: 6),
                         Text('ETA: ${truck.eta}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
                         const SizedBox(height: 6),
-                        Text('Current location: ${truck.location}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                        Text('Current location: ${truck.location}', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                         const SizedBox(height: 18),
                         SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
                           child: Row(
                             children: const [
-                              _MilestoneItem(label: 'Order Placed', done: true),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'Truck Assigned', done: true),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'Picked Up', done: true),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'In Transit', done: true, current: true),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'Arriving', done: false),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'Delivered', done: false),
-                              _MilestoneConnector(),
-                              _MilestoneItem(label: 'Payment Released', done: false),
+                              TimelineMilestone(label: 'Order Placed', done: true),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'Truck Assigned', done: true),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'Picked Up', done: true),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'In Transit', done: true, current: true),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'Arriving', done: false),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'Delivered', done: false),
+                              TimelineConnector(),
+                              TimelineMilestone(label: 'Payment Released', done: false),
                             ],
                           ),
                         ),
@@ -531,7 +533,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                             _ActionTile(icon: Icons.mic_rounded, label: 'Voice AI', onTap: _showVoiceAi),
                             _ActionTile(icon: Icons.call_rounded, label: 'Call Driver', onTap: _showCallDriver),
                             _ActionTile(icon: Icons.edit_location_alt_rounded, label: 'Change Drop', onTap: _showChangeDrop),
-                            _ActionTile(icon: Icons.close_rounded, label: 'Cancel', color: FreightFairColors.error, onTap: _showCancel),
+                            _ActionTile(icon: Icons.close_rounded, label: 'Cancel', color: TruxifyColors.error, onTap: _showCancel),
                           ],
                         ),
                       ],
@@ -547,50 +549,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
   }
 }
 
-class _MilestoneItem extends StatelessWidget {
-  const _MilestoneItem({required this.label, required this.done, this.current = false});
-
-  final String label;
-  final bool done;
-  final bool current;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = current ? FreightFairColors.accent : done ? FreightFairColors.accentDark : FreightFairColors.border;
-    return Column(
-      children: [
-        Container(
-          width: 18,
-          height: 18,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-            boxShadow: current
-                ? [BoxShadow(color: FreightFairColors.accent.withValues(alpha: 0.3), blurRadius: 8, spreadRadius: 1)]
-                : const [],
-          ),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: 70,
-          child: Text(label, textAlign: TextAlign.center, style: Theme.of(context).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700, color: color)),
-        ),
-      ],
-    );
-  }
-}
-
-class _MilestoneConnector extends StatelessWidget {
-  const _MilestoneConnector();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(width: 28, height: 2, color: FreightFairColors.border);
-  }
-}
-
 class _ActionTile extends StatelessWidget {
-  const _ActionTile({required this.icon, required this.label, required this.onTap, this.color = FreightFairColors.accentDark});
+  const _ActionTile({required this.icon, required this.label, required this.onTap, this.color = TruxifyColors.accentDark});
 
   final IconData icon;
   final String label;

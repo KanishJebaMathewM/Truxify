@@ -33,7 +33,11 @@ class AppLogo extends StatelessWidget {
         const SizedBox(width: 10),
         Text(
           'Truxify',
-          style: textStyle ?? const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          style: textStyle ??
+              const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+              ),
         ),
       ],
     );

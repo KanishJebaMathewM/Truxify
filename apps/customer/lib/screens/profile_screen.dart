@@ -39,7 +39,7 @@ class ProfileScreen extends StatelessWidget {
                   width: double.infinity,
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
                   decoration: const BoxDecoration(
-                    color: FreightFairColors.accent,
+                    color: TruxifyColors.accent,
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -58,7 +58,7 @@ class ProfileScreen extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.w500,
-                            color: FreightFairColors.accent,
+                            color: TruxifyColors.accent,
                           ),
                         ),
                       ),
@@ -171,9 +171,9 @@ class ProfileScreen extends StatelessWidget {
                   _MenuItem(
                     icon: Icons.logout_rounded,
                     label: 'Logout',
-                    iconBackgroundColor: FreightFairColors.error.withValues(alpha: 0.12),
-                    iconColor: FreightFairColors.error,
-                    textColor: FreightFairColors.error,
+                    iconBackgroundColor: TruxifyColors.error.withValues(alpha: 0.12),
+                    iconColor: TruxifyColors.error,
+                    textColor: TruxifyColors.error,
                     showChevron: false,
                     showDivider: false,
                     onTap: () => _logout(context),
@@ -202,7 +202,7 @@ class _SectionLabel extends StatelessWidget {
       child: Text(
         text.toUpperCase(),
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: FreightFairColors.adaptiveSecondaryText(context),
+              color: TruxifyColors.adaptiveSecondaryText(context),
               fontSize: 11,
               letterSpacing: 0.06 * 11,
               fontWeight: FontWeight.w500,
@@ -216,7 +216,7 @@ class _StatsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final surface = Theme.of(context).colorScheme.surface;
-    final dividerColor = (Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border);
+    final dividerColor = (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border);
     return Container(
       decoration: BoxDecoration(
         color: surface,
@@ -266,7 +266,7 @@ class _StatColumn extends StatelessWidget {
     required this.label,
     required this.valueSize,
     this.addRightDivider = false,
-    this.dividerColor = FreightFairColors.border,
+    this.dividerColor = TruxifyColors.border,
   });
 
   final String value;
@@ -288,7 +288,7 @@ class _StatColumn extends StatelessWidget {
           Text(
             value,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: FreightFairColors.accent,
+                  color: TruxifyColors.accent,
                   fontWeight: FontWeight.w500,
                   fontSize: valueSize,
                 ),
@@ -297,7 +297,7 @@ class _StatColumn extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: FreightFairColors.adaptiveSecondaryText(context),
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                   fontSize: 11,
                 ),
           ),
@@ -335,7 +335,7 @@ class _MenuItem extends StatelessWidget {
     required this.onTap,
     this.trailing,
     this.iconBackgroundColor,
-    this.iconColor = FreightFairColors.accent,
+    this.iconColor = TruxifyColors.accent,
     this.textColor,
     this.showChevron = true,
     this.showDivider = true,
@@ -355,7 +355,7 @@ class _MenuItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final resolvedIconBg = iconBackgroundColor ??
-        (isDark ? FreightFairColors.darkAccentLight : FreightFairColors.accentLight);
+        (isDark ? TruxifyColors.darkAccentLight : TruxifyColors.accentLight);
     final resolvedTextColor = textColor ?? Theme.of(context).textTheme.bodyMedium?.color;
     return InkWell(
       onTap: onTap,
@@ -392,8 +392,8 @@ class _MenuItem extends StatelessWidget {
                       trailing!,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                             color: isDark
-                                ? FreightFairColors.darkSecondaryText
-                                : FreightFairColors.secondaryText,
+                                ? TruxifyColors.darkSecondaryText
+                                : TruxifyColors.secondaryText,
                             fontSize: 13,
                           ),
                     ),
@@ -402,7 +402,7 @@ class _MenuItem extends StatelessWidget {
                   Icon(
                     Icons.chevron_right_rounded,
                     size: 16,
-                    color: isDark ? FreightFairColors.darkSecondaryText : const Color(0xFFB0B0B0),
+                    color: isDark ? TruxifyColors.darkSecondaryText : const Color(0xFFB0B0B0),
                   ),
               ],
             ),
@@ -411,7 +411,7 @@ class _MenuItem extends StatelessWidget {
             Divider(
               height: 1,
               thickness: 1,
-              color: isDark ? FreightFairColors.darkBorder : FreightFairColors.border,
+              color: isDark ? TruxifyColors.darkBorder : TruxifyColors.border,
             ),
         ],
       ),
@@ -424,9 +424,9 @@ class _DarkModeMenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = FreightFairScope.of(context);
+    final controller = TruxifyScope.of(context);
     final isDark = controller.isDarkMode;
-    final iconBg = isDark ? FreightFairColors.darkAccentLight : FreightFairColors.accentLight;
+    final iconBg = isDark ? TruxifyColors.darkAccentLight : TruxifyColors.accentLight;
     return Column(
       children: [
         Padding(
@@ -440,7 +440,7 @@ class _DarkModeMenuItem extends StatelessWidget {
                   color: iconBg,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.dark_mode_rounded, size: 17, color: FreightFairColors.accent),
+                child: const Icon(Icons.dark_mode_rounded, size: 17, color: TruxifyColors.accent),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -455,7 +455,7 @@ class _DarkModeMenuItem extends StatelessWidget {
               Switch(
                 value: isDark,
                 onChanged: (_) => controller.toggleDarkMode(),
-                activeThumbColor: FreightFairColors.accent,
+                activeThumbColor: TruxifyColors.accent,
               ),
             ],
           ),
@@ -463,7 +463,7 @@ class _DarkModeMenuItem extends StatelessWidget {
         Divider(
           height: 1,
           thickness: 1,
-          color: isDark ? FreightFairColors.darkBorder : FreightFairColors.border,
+          color: isDark ? TruxifyColors.darkBorder : TruxifyColors.border,
         ),
       ],
     );

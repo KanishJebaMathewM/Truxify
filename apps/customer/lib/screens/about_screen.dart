@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../theme/app_theme.dart';
-
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('About Truxify'),
@@ -23,17 +23,18 @@ class AboutScreen extends StatelessWidget {
                 width: 100,
                 height: 100,
                 decoration: BoxDecoration(
-                  color: FreightFairColors.accentLight,
+                  color: colorScheme.primary.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.local_shipping_rounded,
-                  color: FreightFairColors.accent,
+                  color: colorScheme.primary,
                   size: 50,
                 ),
               ),
             ),
             const SizedBox(height: 20),
+
             Center(
               child: Column(
                 children: [
@@ -41,23 +42,25 @@ class AboutScreen extends StatelessWidget {
                     'Truxify',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.w700,
-                          color: FreightFairColors.accent,
+                          color: colorScheme.primary,
                         ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'Version 1.0.0',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: FreightFairColors.adaptiveSecondaryText(context),
+                          color: colorScheme.onSurface.withOpacity(0.6),
                         ),
                   ),
                 ],
               ),
             ),
+
             const SizedBox(height: 24),
+
             Container(
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                color: colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               padding: const EdgeInsets.all(16),
@@ -68,24 +71,26 @@ class AboutScreen extends StatelessWidget {
                     'About Us',
                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: FreightFairColors.accent,
+                          color: colorScheme.primary,
                         ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Truxify is a modern freight management platform connecting shippers with verified truck owners. We simplify logistics with real-time tracking, transparent pricing, and reliable service.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: FreightFairColors.adaptiveSecondaryText(context),
+                          color: colorScheme.onSurface.withOpacity(0.6),
                           height: 1.6,
                         ),
                   ),
                 ],
               ),
             ),
+
             const SizedBox(height: 16),
+
             Container(
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                color: colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               padding: const EdgeInsets.all(16),
@@ -96,28 +101,32 @@ class AboutScreen extends StatelessWidget {
                     'Our Mission',
                     style: Theme.of(context).textTheme.labelMedium?.copyWith(
                           fontWeight: FontWeight.w600,
-                          color: FreightFairColors.accent,
+                          color: colorScheme.primary,
                         ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'To revolutionize the logistics industry by making freight transportation safe, affordable, and sustainable for everyone.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: FreightFairColors.adaptiveSecondaryText(context),
+                          color: colorScheme.onSurface.withOpacity(0.6),
                           height: 1.6,
                         ),
                   ),
                 ],
               ),
             ),
+
             const SizedBox(height: 24),
+
             Text(
               'Contact Information',
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w600,
-              ),
+                  ),
             ),
+
             const SizedBox(height: 12),
+
             _ContactRow(
               icon: Icons.email_rounded,
               label: 'Email',
@@ -135,7 +144,9 @@ class AboutScreen extends StatelessWidget {
               label: 'Website',
               value: 'www.truxify.com',
             ),
+
             const SizedBox(height: 24),
+
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: const [
@@ -146,12 +157,14 @@ class AboutScreen extends StatelessWidget {
                 _SocialIcon(icon: Icons.mail_rounded),
               ],
             ),
+
             const SizedBox(height: 24),
+
             Center(
               child: Text(
                 '© 2024 Truxify. All rights reserved.',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: FreightFairColors.adaptiveSecondaryText(context),
+                      color: colorScheme.onSurface.withOpacity(0.6),
                     ),
               ),
             ),
@@ -175,16 +188,18 @@ class _ContactRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Row(
       children: [
         Container(
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: FreightFairColors.accentLight,
+            color: colorScheme.primary.withOpacity(0.15),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(icon, color: FreightFairColors.accent, size: 18),
+          child: Icon(icon, color: colorScheme.primary, size: 18),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -194,7 +209,7 @@ class _ContactRow extends StatelessWidget {
               Text(
                 label,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: FreightFairColors.adaptiveSecondaryText(context),
+                      color: colorScheme.onSurface.withOpacity(0.6),
                     ),
               ),
               const SizedBox(height: 2),
@@ -219,14 +234,16 @@ class _SocialIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: FreightFairColors.accentLight,
+        color: colorScheme.primary.withOpacity(0.15),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Icon(icon, color: FreightFairColors.accent, size: 18),
+      child: Icon(icon, color: colorScheme.primary, size: 18),
     );
   }
 }

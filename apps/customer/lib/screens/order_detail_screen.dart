@@ -5,6 +5,7 @@ import '../data/mock_data.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../widgets/timeline_row.dart';
 
 class OrderDetailScreen extends StatefulWidget {
   const OrderDetailScreen({super.key, required this.order});
@@ -23,6 +24,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   void dispose() {
     _commentController.dispose();
     super.dispose();
+  }
+
+  void _submitRating() {
+    if (_rating == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a rating before submitting.')),
+      );
+      return;
+    }
+
+    final comment = _commentController.text.trim();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Thanks for your review! You submitted a $_rating-star rating${comment.isNotEmpty ? ' with a comment.' : '.'}',
+        ),
+      ),
+    );
   }
 
   Future<void> _showReceipt() async {
@@ -73,13 +92,13 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               children: [
                 Text(widget.order.orderId, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 8),
-                Text(widget.order.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                Text(widget.order.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                 const SizedBox(height: 8),
                 Text('Date: ${widget.order.date}', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 8),
                 StatusBadge(
                   label: widget.order.status == 'Delivered' ? '✅ Delivered' : '❌ Cancelled',
-                  color: delivered ? FreightFairColors.accentDark : FreightFairColors.error,
+                  color: delivered ? TruxifyColors.accentDark : TruxifyColors.error,
                   filled: true,
                 ),
               ],
@@ -92,8 +111,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 Container(
                   width: 54,
                   height: 54,
-                  decoration: const BoxDecoration(color: FreightFairColors.accentLight, shape: BoxShape.circle),
-                  child: const Icon(Icons.person_rounded, color: FreightFairColors.accentDark),
+                  decoration: const BoxDecoration(color: TruxifyColors.accentLight, shape: BoxShape.circle),
+                  child: const Icon(Icons.person_rounded, color: TruxifyColors.accentDark),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -102,9 +121,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     children: [
                       Text(widget.order.driver, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                       const SizedBox(height: 4),
-                      Text('⭐ 4.8', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                      Text('⭐ 4.8', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                       const SizedBox(height: 4),
-                      Text(widget.order.truckNumber, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
+                      Text(widget.order.truckNumber, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                     ],
                   ),
                 ),
@@ -117,7 +136,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           ...widget.order.timeline.map(
             (step) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: _TimelineRow(step: step),
+              child: TimelineRow(step: step),
             ),
           ),
           const SizedBox(height: 4),
@@ -148,11 +167,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           PrimaryButton(
             label: 'Rebook This Route',
             onPressed: () {
-              FreightFairScope.of(context).openFindTrucks(
+              final routeParts = widget.order.route.split(' → ');
+              final pickup = routeParts.length == 2 ? routeParts.first : widget.order.route;
+              final drop = routeParts.length == 2 ? routeParts.last : widget.order.route;
+
+              TruxifyScope.of(context).openFindTrucks(
                 draft: RouteDraft(
-                  pickup: 'Surat, Gujarat',
-                  drop: 'Pune, Maharashtra',
-                  dateLabel: 'Tomorrow, 6:00 AM',
+                  pickup: pickup,
+                  drop: drop,
+                  dateLabel: widget.order.date,
                   goodsType: 'Textile',
                   weightTonnes: '3',
                   dimensions: '12 × 6 × 6',
@@ -179,7 +202,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             const SizedBox(height: 8),
             TextField(controller: _commentController, maxLines: 3, decoration: const InputDecoration(labelText: 'Comment')),
             const SizedBox(height: 12),
-            PrimaryButton(label: 'Submit Rating', onPressed: () {}),
+            PrimaryButton(label: 'Submit Rating', onPressed: _submitRating),
           ],
         ],
       ),
@@ -187,47 +210,3 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 }
 
-class _TimelineRow extends StatelessWidget {
-  const _TimelineRow({required this.step});
-
-  final TimelineStepData step;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            Container(
-              width: 14,
-              height: 14,
-              decoration: BoxDecoration(
-                color: step.completed ? FreightFairColors.accentDark : FreightFairColors.border,
-                shape: BoxShape.circle,
-              ),
-            ),
-            Container(width: 2, height: 42, color: FreightFairColors.border),
-          ],
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(top: 0),
-            child: InfoCard(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(step.title, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w800)),
-                  ),
-                  Text(step.timestamp, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: FreightFairColors.adaptiveSecondaryText(context))),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}

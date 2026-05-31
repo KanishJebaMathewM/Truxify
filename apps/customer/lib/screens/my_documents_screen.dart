@@ -54,7 +54,7 @@ class MyDocumentsScreen extends StatelessWidget {
                 final doc = documents[index];
                 return Container(
                   decoration: BoxDecoration(
-                    border: Border.all(color: (Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border)),
+                    border: Border.all(color: (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border)),
                     borderRadius: BorderRadius.circular(12),
                     color: Theme.of(context).colorScheme.surface,
                   ),
@@ -65,10 +65,10 @@ class MyDocumentsScreen extends StatelessWidget {
                         width: 44,
                         height: 44,
                         decoration: BoxDecoration(
-                          color: FreightFairColors.accentLight,
+                          color: TruxifyColors.accentLight,
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: Icon(doc['icon'] as IconData, color: FreightFairColors.accent, size: 22),
+                        child: Icon(doc['icon'] as IconData, color: TruxifyColors.accent, size: 22),
                       ),
                       const SizedBox(width: 14),
                       Expanded(

@@ -1,6 +1,6 @@
 {
-    "name": "truckify_driver",
-    "short_name": "truckify_driver",
+    "name": "truxify_driver",
+    "short_name": "truxify_driver",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

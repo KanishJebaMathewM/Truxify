@@ -58,12 +58,12 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
                   child: Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: isSelected ? FreightFairColors.accent : (Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border),
+                        color: isSelected ? TruxifyColors.accent : (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border),
                         width: isSelected ? 2 : 1,
                       ),
                       borderRadius: BorderRadius.circular(12),
                       color: isSelected
-                          ? FreightFairColors.accent.withValues(alpha: 0.08)
+                          ? TruxifyColors.accent.withValues(alpha: 0.08)
                           : Theme.of(context).colorScheme.surface,
                     ),
                     padding: const EdgeInsets.all(14),
@@ -73,10 +73,10 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            color: FreightFairColors.accentLight,
+                            color: TruxifyColors.accentLight,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(method['icon'], color: FreightFairColors.accent, size: 22),
+                          child: Icon(method['icon'], color: TruxifyColors.accent, size: 22),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -93,14 +93,14 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
                               Text(
                                 method['identifier'],
                                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: FreightFairColors.adaptiveSecondaryText(context),
+                                      color: TruxifyColors.adaptiveSecondaryText(context),
                                     ),
                               ),
                             ],
                           ),
                         ),
                         if (isSelected)
-                          const Icon(Icons.check_circle_rounded, color: FreightFairColors.accent, size: 24),
+                          const Icon(Icons.check_circle_rounded, color: TruxifyColors.accent, size: 24),
                       ],
                     ),
                   ),

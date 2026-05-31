@@ -12,8 +12,8 @@ import { initWebSocketServer } from './sockets/tracker.js';
 import orderRoutes from './routes/orderRoutes.js';
 import driverRoutes from './routes/driverRoutes.js';
 
-// Configuration load from root folder
-dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
+// Configuration load from root folder is handled in db.js
+
 
 const app = express();
 const server = http.createServer(app);
@@ -26,6 +26,23 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+// ============================================================================
+// REQUEST LOGGER
+// ============================================================================
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const color = res.statusCode >= 500 ? '\x1b[31m'
+                : res.statusCode >= 400 ? '\x1b[33m'
+                : res.statusCode >= 200 ? '\x1b[32m' : '\x1b[0m';
+    console.log(
+      `${color}[${new Date().toISOString()}] ${req.method} ${req.originalUrl} → ${res.statusCode} (${duration}ms)\x1b[0m`
+    );
+  });
+  next();
+});
 
 // ============================================================================
 // REST API ROUTING

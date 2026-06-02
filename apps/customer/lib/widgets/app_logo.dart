@@ -25,7 +25,7 @@ class AppLogo extends StatelessWidget {
         ),
         const SizedBox(width: 10),
         Text(
-          'FreightFair',
+          'Truxify',
           style: textStyle ?? const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
         ),
       ],

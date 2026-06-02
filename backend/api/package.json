@@ -6,7 +6,12 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "test": "vitest run",
+    "test:unit": "vitest run test/unit",
+    "test:integration": "vitest run test/integration",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.43.4",
@@ -19,7 +24,10 @@
     "ws": "^8.21.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.2"
+    "@vitest/coverage-v8": "^2.1.9",
+    "nodemon": "^3.1.2",
+    "supertest": "^7.2.2",
+    "vitest": "^2.1.9"
   },
   "keywords": [
     "express",

@@ -10,6 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  supabase_flutter: ^2.8.3
   flutter_map: ^8.3.0
   flutter_map_cancellable_tile_provider: ^3.0.0
   google_fonts: ^8.1.0

@@ -61,8 +61,6 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
     });
   }
 
-  const { base_freight, toll_estimate, platform_fee, total_amount } = pricing;
-
   const orderDisplayId = generateOrderDisplayId();
 
   try {
@@ -78,7 +76,10 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
         pickup_date, pickup_time,
         goods_type, weight_tonnes, length_ft, width_ft, height_ft,
         is_stackable, is_fragile, special_requirements,
-        base_freight, toll_estimate, platform_fee, total_amount,
+        base_freight: pricing.baseFreight,
+        toll_estimate: pricing.tollEstimate,
+        platform_fee: pricing.platformFee,
+        total_amount: pricing.totalAmount,
         payment_method_id, upi_id
       })
       .select('id, order_display_id, status, created_at')

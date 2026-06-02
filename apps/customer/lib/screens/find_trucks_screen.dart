@@ -77,7 +77,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final controller = FreightFairScope.of(context);
+    final controller = TruxifyScope.of(context);
     final draft = controller.consumePendingRouteDraft();
     if (draft != null) {
       _pickupController.text = draft.pickup;

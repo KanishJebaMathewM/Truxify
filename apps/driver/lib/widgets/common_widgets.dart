@@ -10,7 +10,7 @@ class AppCard extends StatelessWidget {
     required this.child,
     this.padding = const EdgeInsets.all(16),
     this.margin,
-    this.color = TruxifyColors.cardBackground,
+    this.color,
     this.onTap,
     this.border,
     this.elevation = 0,
@@ -19,21 +19,36 @@ class AppCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
   final EdgeInsetsGeometry? margin;
-  final Color color;
+  final Color? color;
   final VoidCallback? onTap;
   final BoxBorder? border;
   final double elevation;
 
+  Color _borderColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? TruxifyColors.darkBorder
+        : TruxifyColors.border;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final cardColor = color ?? Theme.of(context).colorScheme.surface;
     final card = Container(
       margin: margin,
       decoration: BoxDecoration(
-        color: color,
+        color: cardColor,
         borderRadius: BorderRadius.circular(14),
-        border: border ?? Border.all(color: color == TruxifyColors.cardBackground ? TruxifyColors.border : Colors.transparent),
+        border: border ??
+            Border.all(
+                color:
+                    color == null ? _borderColor(context) : Colors.transparent),
         boxShadow: elevation > 0
-            ? [BoxShadow(color: TruxifyColors.accent.withValues(alpha: 0.06), blurRadius: math.max(2, elevation), offset: const Offset(0, 2))]
+            ? [
+                BoxShadow(
+                    color: TruxifyColors.accent.withValues(alpha: 0.06),
+                    blurRadius: math.max(2, elevation),
+                    offset: const Offset(0, 2))
+              ]
             : null,
       ),
       child: Padding(padding: padding, child: child),
@@ -55,7 +70,8 @@ class AppCard extends StatelessWidget {
 }
 
 class SectionHeader extends StatelessWidget {
-  const SectionHeader({super.key, required this.title, this.subtitle, this.trailing});
+  const SectionHeader(
+      {super.key, required this.title, this.subtitle, this.trailing});
 
   final String title;
   final String? subtitle;
@@ -88,7 +104,12 @@ class SectionHeader extends StatelessWidget {
 }
 
 class PrimaryButton extends StatelessWidget {
-  const PrimaryButton({super.key, required this.label, this.onPressed, this.icon, this.isFullWidth = true});
+  const PrimaryButton(
+      {super.key,
+      required this.label,
+      this.onPressed,
+      this.icon,
+      this.isFullWidth = true});
 
   final String label;
   final VoidCallback? onPressed;
@@ -132,7 +153,11 @@ class PrimaryButton extends StatelessWidget {
 }
 
 class OutlinedAccentButton extends StatelessWidget {
-  const OutlinedAccentButton({super.key, required this.label, this.onPressed, this.foregroundColor = TruxifyColors.accent});
+  const OutlinedAccentButton(
+      {super.key,
+      required this.label,
+      this.onPressed,
+      this.foregroundColor = TruxifyColors.accent});
 
   final String label;
   final VoidCallback? onPressed;
@@ -146,9 +171,14 @@ class OutlinedAccentButton extends StatelessWidget {
         onPressed: onPressed,
         style: OutlinedButton.styleFrom(
           foregroundColor: foregroundColor,
-          side: BorderSide(color: TruxifyColors.border),
+          side: BorderSide(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? TruxifyColors.darkBorder
+                : TruxifyColors.border,
+          ),
           minimumSize: const Size.fromHeight(48),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
         child: Text(label),
       ),
@@ -157,7 +187,11 @@ class OutlinedAccentButton extends StatelessWidget {
 }
 
 class TextActionButton extends StatelessWidget {
-  const TextActionButton({super.key, required this.label, this.onPressed, this.color = TruxifyColors.accent});
+  const TextActionButton(
+      {super.key,
+      required this.label,
+      this.onPressed,
+      this.color = TruxifyColors.accent});
 
   final String label;
   final VoidCallback? onPressed;
@@ -174,7 +208,11 @@ class TextActionButton extends StatelessWidget {
 }
 
 class StatusPill extends StatelessWidget {
-  const StatusPill({super.key, required this.label, required this.backgroundColor, required this.foregroundColor});
+  const StatusPill(
+      {super.key,
+      required this.label,
+      required this.backgroundColor,
+      required this.foregroundColor});
 
   final String label;
   final Color backgroundColor;
@@ -201,7 +239,12 @@ class StatusPill extends StatelessWidget {
 }
 
 class InfoRow extends StatelessWidget {
-  const InfoRow({super.key, required this.label, required this.value, this.valueColor, this.bold = false});
+  const InfoRow(
+      {super.key,
+      required this.label,
+      required this.value,
+      this.valueColor,
+      this.bold = false});
 
   final String label;
   final String value;
@@ -217,7 +260,7 @@ class InfoRow extends StatelessWidget {
         Text(
           value,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: valueColor ?? TruxifyColors.primaryText,
+                color: valueColor ?? Theme.of(context).colorScheme.onSurface,
                 fontWeight: bold ? FontWeight.w700 : FontWeight.w600,
               ),
         ),
@@ -238,8 +281,14 @@ class DetailLine extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         children: [
-          Expanded(child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
-          Text(value, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
+          Expanded(
+              child:
+                  Text(label, style: Theme.of(context).textTheme.bodyMedium)),
+          Text(value,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -247,7 +296,8 @@ class DetailLine extends StatelessWidget {
 }
 
 class StatCard extends StatelessWidget {
-  const StatCard({super.key, required this.label, required this.value, this.icon});
+  const StatCard(
+      {super.key, required this.label, required this.value, this.icon});
 
   final String label;
   final String value;
@@ -268,7 +318,7 @@ class StatCard extends StatelessWidget {
             Text(
               value,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    color: TruxifyColors.primaryText,
+                    color: Theme.of(context).colorScheme.onSurface,
                     fontWeight: FontWeight.w800,
                     fontSize: 20,
                   ),
@@ -283,7 +333,11 @@ class StatCard extends StatelessWidget {
 }
 
 class ChipScroller extends StatelessWidget {
-  const ChipScroller({super.key, required this.labels, required this.selectedIndex, required this.onSelected});
+  const ChipScroller(
+      {super.key,
+      required this.labels,
+      required this.selectedIndex,
+      required this.onSelected});
 
   final List<String> labels;
   final int selectedIndex;
@@ -297,19 +351,24 @@ class ChipScroller extends StatelessWidget {
         children: List.generate(labels.length, (index) {
           final selected = index == selectedIndex;
           return Padding(
-            padding: EdgeInsets.only(right: index == labels.length - 1 ? 0 : 10),
+            padding:
+                EdgeInsets.only(right: index == labels.length - 1 ? 0 : 10),
             child: ChoiceChip(
               label: Text(labels[index]),
               selected: selected,
               onSelected: (_) => onSelected(index),
-                selectedColor: TruxifyColors.accentLight,
-                labelStyle: TextStyle(
-                  color: selected ? TruxifyColors.white : TruxifyColors.tertiaryText,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                ),
-                side: BorderSide(color: selected ? TruxifyColors.accent : TruxifyColors.border),
-                backgroundColor: TruxifyColors.cardBackground,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+              selectedColor: TruxifyColors.accentLight,
+              labelStyle: TextStyle(
+                color:
+                    selected ? TruxifyColors.white : TruxifyColors.tertiaryText,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
+              side: BorderSide(
+                  color:
+                      selected ? TruxifyColors.accent : TruxifyColors.border),
+              backgroundColor: TruxifyColors.cardBackground,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999)),
             ),
           );
         }),
@@ -329,7 +388,11 @@ class CountBadge extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(value, style: Theme.of(context).textTheme.titleLarge?.copyWith(color: TruxifyColors.accent)),
+        Text(value,
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(color: TruxifyColors.accent)),
         const SizedBox(height: 4),
         Text(label, style: Theme.of(context).textTheme.bodySmall),
       ],
@@ -358,7 +421,7 @@ class SectionLabel extends StatelessWidget {
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: TruxifyColors.secondaryText,
+              color: TruxifyColors.adaptiveSecondaryText(context),
               letterSpacing: 0.4,
             ),
       ),
@@ -385,7 +448,8 @@ class BottomSheetHandle extends StatelessWidget {
 }
 
 class LivePulseDot extends StatefulWidget {
-  const LivePulseDot({super.key, this.color = TruxifyColors.accent, this.size = 8});
+  const LivePulseDot(
+      {super.key, this.color = TruxifyColors.accent, this.size = 8});
 
   final Color color;
   final double size;
@@ -394,7 +458,8 @@ class LivePulseDot extends StatefulWidget {
   State<LivePulseDot> createState() => _LivePulseDotState();
 }
 
-class _LivePulseDotState extends State<LivePulseDot> with SingleTickerProviderStateMixin {
+class _LivePulseDotState extends State<LivePulseDot>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1500),
@@ -450,7 +515,8 @@ class StatusDot extends StatelessWidget {
 }
 
 class OtpInputRow extends StatelessWidget {
-  const OtpInputRow({super.key, required this.controllers, required this.focusNodes});
+  const OtpInputRow(
+      {super.key, required this.controllers, required this.focusNodes});
 
   final List<TextEditingController> controllers;
   final List<FocusNode> focusNodes;
@@ -461,7 +527,8 @@ class OtpInputRow extends StatelessWidget {
       children: List.generate(controllers.length, (index) {
         return Expanded(
           child: Padding(
-            padding: EdgeInsets.only(right: index == controllers.length - 1 ? 0 : 12),
+            padding: EdgeInsets.only(
+                right: index == controllers.length - 1 ? 0 : 12),
             child: SizedBox(
               height: 58,
               child: TextField(
@@ -470,11 +537,15 @@ class OtpInputRow extends StatelessWidget {
                 keyboardType: TextInputType.number,
                 textAlign: TextAlign.center,
                 maxLength: 1,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                style: Theme.of(context)
+                    .textTheme
+                    .titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w700),
                 decoration: InputDecoration(
                   counterText: '',
                   filled: true,
-                      fillColor: TruxifyColors.inputFill,
+                  fillColor:
+                      Theme.of(context).colorScheme.surfaceContainerHighest,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: const BorderSide(color: TruxifyColors.border),
@@ -498,7 +569,11 @@ class OtpInputRow extends StatelessWidget {
 }
 
 class DashedBorderBox extends StatelessWidget {
-  const DashedBorderBox({super.key, required this.child, this.color = TruxifyColors.border, this.strokeWidth = 1.2});
+  const DashedBorderBox(
+      {super.key,
+      required this.child,
+      this.color = TruxifyColors.border,
+      this.strokeWidth = 1.2});
 
   final Widget child;
   final Color color;
@@ -527,7 +602,8 @@ class _DashedBorderPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
     const dashWidth = 8.0;
     const dashSpace = 5.0;
-    final rect = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(16));
+    final rect =
+        RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(16));
     final path = Path()..addRRect(rect);
     for (final metric in path.computeMetrics()) {
       var distance = 0.0;
@@ -546,7 +622,8 @@ class _DashedBorderPainter extends CustomPainter {
 }
 
 class StackedCapacityBar extends StatelessWidget {
-  const StackedCapacityBar({super.key, required this.thisLoad, required this.otherLoads});
+  const StackedCapacityBar(
+      {super.key, required this.thisLoad, required this.otherLoads});
 
   final double thisLoad;
   final double otherLoads;

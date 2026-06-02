@@ -7,14 +7,14 @@ import 'home_screen.dart';
 import 'orders_screen.dart';
 import 'profile_screen.dart';
 
-class FreightFairShellScreen extends StatefulWidget {
-  const FreightFairShellScreen({super.key});
+class TruxifyShellScreen extends StatefulWidget {
+  const TruxifyShellScreen({super.key});
 
   @override
-  State<FreightFairShellScreen> createState() => _FreightFairShellScreenState();
+  State<TruxifyShellScreen> createState() => _TruxifyShellScreenState();
 }
 
-class _FreightFairShellScreenState extends State<FreightFairShellScreen> {
+class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
   final GlobalKey<NavigatorState> _homeNavigatorKey = GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _findNavigatorKey = GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _ordersNavigatorKey = GlobalKey<NavigatorState>();
@@ -22,7 +22,7 @@ class _FreightFairShellScreenState extends State<FreightFairShellScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final controller = FreightFairScope.of(context);
+    final controller = TruxifyScope.of(context);
 
     return Scaffold(
       body: IndexedStack(

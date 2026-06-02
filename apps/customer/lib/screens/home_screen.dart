@@ -1,7 +1,9 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../controllers/app_controller.dart';
+import '../core/offline/cache/cache_manager.dart';
 import '../data/mock_data.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
@@ -12,8 +14,39 @@ import '../widgets/common_widgets.dart';
 import '../widgets/recent_route_card.dart';
 import 'live_tracking_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final CacheManager _cacheManager = CacheManager();
+  bool _isOffline = false;
+  String _locationLabel = 'Surat, Gujarat';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLocation();
+  }
+
+  Future<void> _loadLocation() async {
+    final connectivity = await Connectivity().checkConnectivity();
+    final hasNetwork = connectivity != ConnectivityResult.none;
+    await _cacheManager.open();
+    await _cacheManager.cacheLastLocation(21.1702, 72.8311);
+    final cachedLocation = await _cacheManager.getLastLocation();
+    if (!mounted) return;
+
+    setState(() {
+      _isOffline = !hasNetwork;
+      if (cachedLocation != null) {
+        _locationLabel = 'Last truck location • ${cachedLocation['latitude']?.toStringAsFixed(3)}, ${cachedLocation['longitude']?.toStringAsFixed(3)}';
+      }
+    });
+  }
 
   static String _greetingFor(DateTime time) {
     final hour = time.hour;
@@ -42,7 +75,7 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = FreightFairScope.of(context);
+    final controller = TruxifyScope.of(context);
     final now = DateTime.now();
     final customerFirstName = mockCustomerName.split(' ').first;
     final greeting = _greetingFor(now);
@@ -64,12 +97,12 @@ class HomeScreen extends StatelessWidget {
                     color: Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border,
                   ),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.place_rounded, size: 16, color: TruxifyColors.accentDark),
-                    SizedBox(width: 6),
-                    Text('Surat, Gujarat', style: TextStyle(fontWeight: FontWeight.w700)),
+                    const Icon(Icons.place_rounded, size: 16, color: TruxifyColors.accentDark),
+                    const SizedBox(width: 6),
+                    Text(_isOffline ? _locationLabel : 'Surat, Gujarat', style: const TextStyle(fontWeight: FontWeight.w700)),
                   ],
                 ),
               ),

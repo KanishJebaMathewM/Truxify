@@ -296,7 +296,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                   children: [
                     TileLayer(
                       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.freightfair.customer',
+                      userAgentPackageName: 'com.truxify.customer',
                       tileProvider: CancellableNetworkTileProvider(),
                     ),
                     if (_selectedPoint != null)

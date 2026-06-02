@@ -52,8 +52,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: TruxifyColors.primaryBackground,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
@@ -64,18 +66,23 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 36),
               Text(
                 'Welcome, Driver',
-                style: Theme.of(context).textTheme.headlineMedium,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      color: colorScheme.onSurface,
+                    ),
               ),
               const SizedBox(height: 8),
-              Text(loginSubtitle,
-                  style: Theme.of(context).textTheme.bodyMedium),
+              Text(
+                loginSubtitle,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+              ),
               const SizedBox(height: 28),
               Text(
                 'Phone Number',
-                style: Theme.of(context)
-                    .textTheme
-                    .labelLarge
-                    ?.copyWith(color: TruxifyColors.secondaryText),
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
               ),
               const SizedBox(height: 10),
               TextField(
@@ -84,6 +91,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 inputFormatters: [
                   FilteringTextInputFormatter.digitsOnly,
                 ],
+                style: TextStyle(color: colorScheme.onSurface),
                 keyboardType: TextInputType.phone,
                 decoration: const InputDecoration(
                   prefixText: '+91  ',
@@ -106,10 +114,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     Expanded(
                       child: Text(
                         'Mock login is enabled for the offline driver demo. OTP 1234 always works.',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(color: TruxifyColors.primaryText),
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.onSurface,
+                            ),
                       ),
                     ),
                   ],
@@ -118,7 +125,9 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 18),
               Text(
                 'Protected driver access. No backend calls.',
-                style: Theme.of(context).textTheme.bodySmall,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
               ),
             ],
           ),

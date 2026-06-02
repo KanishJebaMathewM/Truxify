@@ -26,6 +26,24 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     super.dispose();
   }
 
+  void _submitRating() {
+    if (_rating == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a rating before submitting.')),
+      );
+      return;
+    }
+
+    final comment = _commentController.text.trim();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Thanks for your review! You submitted a $_rating-star rating${comment.isNotEmpty ? ' with a comment.' : '.'}',
+        ),
+      ),
+    );
+  }
+
   Future<void> _showReceipt() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -153,7 +171,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               final pickup = routeParts.length == 2 ? routeParts.first : widget.order.route;
               final drop = routeParts.length == 2 ? routeParts.last : widget.order.route;
 
-              FreightFairScope.of(context).openFindTrucks(
+              TruxifyScope.of(context).openFindTrucks(
                 draft: RouteDraft(
                   pickup: pickup,
                   drop: drop,
@@ -184,7 +202,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             const SizedBox(height: 8),
             TextField(controller: _commentController, maxLines: 3, decoration: const InputDecoration(labelText: 'Comment')),
             const SizedBox(height: 12),
-            PrimaryButton(label: 'Submit Rating', onPressed: () {}),
+            PrimaryButton(label: 'Submit Rating', onPressed: _submitRating),
           ],
         ],
       ),

@@ -13,9 +13,7 @@ class _FaqItem {
 class HelpSupportScreen extends StatelessWidget {
   const HelpSupportScreen({super.key});
 
-  @override
-  Widget build(BuildContext context) {
-    const faqs = [
+  static const List<_FaqItem> faqs = [
       _FaqItem(
         question: 'How do I book a truck?',
         answer: 'To book a truck, go to Home, enter your pickup and drop locations, select a truck, and confirm your booking.',
@@ -33,6 +31,9 @@ class HelpSupportScreen extends StatelessWidget {
         answer: 'You can track your shipment in real-time from the Orders section using the live tracking feature.',
       ),
     ];
+
+  @override
+  Widget build(BuildContext context) {
 
     return Scaffold(
       appBar: AppBar(

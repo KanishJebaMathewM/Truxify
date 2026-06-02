@@ -25,7 +25,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       context: context,
       isDismissible: false,
       enableDrag: false,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -75,7 +75,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -106,7 +106,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             style: GoogleFonts.robotoMono(
                               fontSize: 15,
                               fontWeight: FontWeight.bold,
-                              color: TruxifyColors.primaryText,
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                         ],
@@ -117,7 +117,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       statusText,
                       style: GoogleFonts.dmSans(
                         fontSize: 13,
-                        color: TruxifyColors.secondaryText,
+                        color: TruxifyColors.adaptiveSecondaryText(context),
                       ),
                     ),
                   ] else ...[
@@ -148,7 +148,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       textAlign: TextAlign.center,
                       style: GoogleFonts.robotoMono(
                         fontSize: 10,
-                        color: TruxifyColors.hintText,
+                        color: TruxifyColors.adaptiveSecondaryText(context),
                       ),
                     ),
                     const SizedBox(height: 24),
@@ -171,7 +171,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -189,7 +189,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 style: GoogleFonts.dmSans(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: TruxifyColors.primaryText,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               const SizedBox(height: 16),
@@ -213,10 +213,20 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: isSelected ? TruxifyColors.accentLight : Colors.grey.shade50,
+                              color: isSelected
+                                  ? (Theme.of(context).brightness ==
+                                          Brightness.dark
+                                      ? TruxifyColors.darkAccentLight
+                                      : TruxifyColors.accentLight)
+                                  : Theme.of(context).colorScheme.surface,
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: isSelected ? TruxifyColors.accent : Colors.grey.shade200,
+                                color: isSelected
+                                    ? TruxifyColors.accent
+                                    : (Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? TruxifyColors.darkBorder
+                                        : TruxifyColors.border),
                               ),
                             ),
                             child: Row(
@@ -226,12 +236,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                   type,
                                   style: GoogleFonts.dmSans(
                                     fontSize: 14,
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                    color: TruxifyColors.primaryText,
+                                    fontWeight: isSelected
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                    color:
+                                        Theme.of(context).colorScheme.onSurface,
                                   ),
                                 ),
                                 if (isSelected)
-                                  const Icon(Icons.check_circle_rounded, color: TruxifyColors.accent),
+                                  const Icon(Icons.check_circle_rounded,
+                                      color: TruxifyColors.accent),
                               ],
                             ),
                           ),
@@ -267,7 +281,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -287,13 +301,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: isWarning ? TruxifyColors.warningLight : TruxifyColors.successLight,
+                      color: isWarning
+                          ? TruxifyColors.warningLight
+                          : TruxifyColors.successLight,
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
@@ -301,7 +318,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       style: GoogleFonts.dmSans(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
-                        color: isWarning ? TruxifyColors.warning : TruxifyColors.success,
+                        color: isWarning
+                            ? TruxifyColors.warning
+                            : TruxifyColors.success,
                       ),
                     ),
                   ),
@@ -312,44 +331,71 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: TruxifyColors.secondaryBackground,
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: TruxifyColors.border),
                 ),
                 child: Column(
                   children: [
                     Icon(
-                      isWarning ? Icons.warning_amber_rounded : Icons.verified_user_rounded,
-                      color: isWarning ? TruxifyColors.warning : TruxifyColors.success,
+                      isWarning
+                          ? Icons.warning_amber_rounded
+                          : Icons.verified_user_rounded,
+                      color: isWarning
+                          ? TruxifyColors.warning
+                          : TruxifyColors.success,
                       size: 48,
                     ),
                     const SizedBox(height: 12),
                     Text(
                       'Decentralised Verification Status',
-                      style: GoogleFonts.dmSans(fontSize: 13, fontWeight: FontWeight.bold, color: TruxifyColors.primaryText),
+                      style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: TruxifyColors.primaryText),
                     ),
                     const SizedBox(height: 20),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Document ID:', style: GoogleFonts.dmSans(fontSize: 12, color: TruxifyColors.hintText)),
-                        Text(docNumber, style: GoogleFonts.robotoMono(fontSize: 11, fontWeight: FontWeight.bold, color: TruxifyColors.primaryText)),
+                        Text('Document ID:',
+                            style: GoogleFonts.dmSans(
+                                fontSize: 12, color: TruxifyColors.hintText)),
+                        Text(docNumber,
+                            style: GoogleFonts.robotoMono(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: TruxifyColors.primaryText)),
                       ],
                     ),
                     const Divider(height: 16, color: TruxifyColors.border),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Last Verified:', style: GoogleFonts.dmSans(fontSize: 12, color: TruxifyColors.hintText)),
-                        Text(lastVerified, style: GoogleFonts.dmSans(fontSize: 12, fontWeight: FontWeight.bold, color: TruxifyColors.primaryText)),
+                        Text('Last Verified:',
+                            style: GoogleFonts.dmSans(
+                                fontSize: 12, color: TruxifyColors.hintText)),
+                        Text(lastVerified,
+                            style: GoogleFonts.dmSans(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: TruxifyColors.primaryText)),
                       ],
                     ),
                     const Divider(height: 16, color: TruxifyColors.border),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text('Valid Until:', style: GoogleFonts.dmSans(fontSize: 12, color: TruxifyColors.hintText)),
-                        Text(validUntil, style: GoogleFonts.dmSans(fontSize: 12, fontWeight: FontWeight.bold, color: isWarning ? TruxifyColors.warning : TruxifyColors.primaryText)),
+                        Text('Valid Until:',
+                            style: GoogleFonts.dmSans(
+                                fontSize: 12, color: TruxifyColors.hintText)),
+                        Text(validUntil,
+                            style: GoogleFonts.dmSans(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: isWarning
+                                    ? TruxifyColors.warning
+                                    : TruxifyColors.primaryText)),
                       ],
                     ),
                   ],
@@ -363,7 +409,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
                           side: const BorderSide(color: TruxifyColors.accent),
                         ),
                         onPressed: () {
@@ -399,12 +446,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: TruxifyColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: TruxifyColors.primaryText),
+          icon: const Icon(Icons.arrow_back_rounded,
+              color: TruxifyColors.primaryText),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
@@ -412,7 +460,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           style: GoogleFonts.dmSans(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: TruxifyColors.primaryText,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         shape: const Border(bottom: BorderSide(color: TruxifyColors.border)),
@@ -438,14 +486,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                               style: GoogleFonts.dmSans(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
-                                color: TruxifyColors.primaryText,
+                                color: Theme.of(context).colorScheme.onSurface,
                               ),
                             ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: isWarning ? TruxifyColors.warningLight : TruxifyColors.accentLight,
+                              color: isWarning
+                                  ? TruxifyColors.warningLight
+                                  : TruxifyColors.accentLight,
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
@@ -453,7 +504,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                               style: GoogleFonts.dmSans(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
-                                color: isWarning ? TruxifyColors.warning : TruxifyColors.accentDark,
+                                color: isWarning
+                                    ? TruxifyColors.warning
+                                    : TruxifyColors.accentDark,
                               ),
                             ),
                           ),
@@ -464,24 +517,34 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         document.subtitle,
                         style: GoogleFonts.dmSans(
                           fontSize: 12,
-                          color: TruxifyColors.secondaryText,
+                          color: TruxifyColors.adaptiveSecondaryText(context),
                         ),
                       ),
                       const SizedBox(height: 12),
                       const Divider(height: 1, color: TruxifyColors.border),
                       const SizedBox(height: 12),
-                      _DocLine(label: document.statusLabel, value: document.hash, isMonospace: true),
-                      _DocLine(label: 'Last verified', value: document.lastVerified),
-                      _DocLine(label: 'Valid until', value: document.validUntil, isWarning: isWarning),
+                      _DocLine(
+                          label: document.statusLabel,
+                          value: document.hash,
+                          isMonospace: true),
+                      _DocLine(
+                          label: 'Last verified', value: document.lastVerified),
+                      _DocLine(
+                          label: 'Valid until',
+                          value: document.validUntil,
+                          isWarning: isWarning),
                       const SizedBox(height: 16),
                       Row(
                         children: [
                           Expanded(
                             child: OutlinedButton(
                               style: OutlinedButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                side: const BorderSide(color: TruxifyColors.border),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12)),
+                                side: const BorderSide(
+                                    color: TruxifyColors.border),
                               ),
                               onPressed: () => _showDocumentPreviewSheet(
                                 context,
@@ -495,7 +558,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                 'View',
                                 style: GoogleFonts.dmSans(
                                   fontWeight: FontWeight.bold,
-                                  color: TruxifyColors.secondaryText,
+                                  color: TruxifyColors.adaptiveSecondaryText(
+                                      context),
                                 ),
                               ),
                             ),
@@ -510,7 +574,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                 } else {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
-                                      content: Text('${document.title} re-verification request sent to RTO Node.'),
+                                      content: Text(
+                                          '${document.title} re-verification request sent to RTO Node.'),
                                       backgroundColor: TruxifyColors.success,
                                     ),
                                   );
@@ -529,15 +594,19 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               onTap: () => _showUploadSheet(context),
               child: Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.surface,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: TruxifyColors.accent.withOpacity(0.3), style: BorderStyle.solid),
+                  border: Border.all(
+                      color: TruxifyColors.accent.withOpacity(0.3),
+                      style: BorderStyle.solid),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
                   child: Column(
                     children: [
-                      const Icon(Icons.cloud_upload_outlined, color: TruxifyColors.accent, size: 36),
+                      const Icon(Icons.cloud_upload_outlined,
+                          color: TruxifyColors.accent, size: 36),
                       const SizedBox(height: 10),
                       Text(
                         'Upload New Document',
@@ -552,7 +621,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                         'RC Book, Driving Licence, Insurance, PUC Certificate',
                         style: GoogleFonts.dmSans(
                           fontSize: 11,
-                          color: TruxifyColors.hintText,
+                          color: TruxifyColors.adaptiveSecondaryText(context),
                         ),
                         textAlign: TextAlign.center,
                       ),
@@ -592,7 +661,7 @@ class _DocLine extends StatelessWidget {
             label,
             style: GoogleFonts.dmSans(
               fontSize: 12,
-              color: TruxifyColors.secondaryText,
+              color: TruxifyColors.adaptiveSecondaryText(context),
             ),
           ),
           Text(
@@ -601,12 +670,14 @@ class _DocLine extends StatelessWidget {
                 ? GoogleFonts.robotoMono(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: TruxifyColors.primaryText,
+                    color: Theme.of(context).colorScheme.onSurface,
                   )
                 : GoogleFonts.dmSans(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: isWarning ? TruxifyColors.warning : TruxifyColors.primaryText,
+                    color: isWarning
+                        ? TruxifyColors.warning
+                        : TruxifyColors.primaryText,
                   ),
           ),
         ],

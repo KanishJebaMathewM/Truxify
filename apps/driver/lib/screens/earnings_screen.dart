@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../data/mock_data.dart';
 
-
 class EarningsScreen extends StatefulWidget {
   const EarningsScreen({super.key});
 
@@ -34,12 +33,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
     return SafeArea(
       child: Scaffold(
-        backgroundColor: const Color(0xFFF7F3F3),
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Column(
           children: [
             // Top Bar
             Container(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Text(
@@ -47,7 +46,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 style: GoogleFonts.dmSans(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
-                  color: TruxifyColors.primaryText,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ),
@@ -61,7 +60,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   children: [
                     // 1. Period Selector
                     Padding(
-                      padding: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                      padding: const EdgeInsets.only(
+                          left: 16, right: 16, bottom: 16),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: List.generate(_periods.length, (index) {
@@ -74,11 +74,16 @@ class _EarningsScreenState extends State<EarningsScreen> {
                             },
                             child: Container(
                               margin: const EdgeInsets.symmetric(horizontal: 4),
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 6),
                               decoration: BoxDecoration(
-                                color: isSelected ? TruxifyColors.accent : Colors.white,
+                                color: isSelected
+                                    ? TruxifyColors.accent
+                                    : Theme.of(context).colorScheme.surface,
                                 border: Border.all(
-                                  color: isSelected ? TruxifyColors.accent : TruxifyColors.border,
+                                  color: isSelected
+                                      ? TruxifyColors.accent
+                                      : TruxifyColors.border,
                                 ),
                                 borderRadius: BorderRadius.circular(20),
                               ),
@@ -86,8 +91,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                 _periods[index],
                                 style: GoogleFonts.dmSans(
                                   fontSize: 12,
-                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                  color: isSelected ? Colors.white : TruxifyColors.hintText,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                  color: isSelected
+                                      ? Colors.white
+                                      : TruxifyColors.hintText,
                                 ),
                               ),
                             ),
@@ -98,7 +107,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
                     // 2. Hero Total Card
                     Container(
-                      margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                      margin: const EdgeInsets.only(
+                          left: 16, right: 16, bottom: 16),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
@@ -124,7 +134,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                           Text(
                             '₹18,400',
                             style: GoogleFonts.dmSans(
-                              color: Colors.white,
+                              color: Theme.of(context).colorScheme.surface,
                               fontSize: 38,
                               fontWeight: FontWeight.bold,
                             ),
@@ -143,7 +153,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                               widthFactor: 0.74,
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: Theme.of(context).colorScheme.surface,
                                   borderRadius: BorderRadius.circular(3),
                                 ),
                               ),
@@ -167,7 +177,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                     Text(
                                       '8',
                                       style: GoogleFonts.dmSans(
-                                        color: Colors.white,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .surface,
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -194,7 +206,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                     Text(
                                       '₹2,300',
                                       style: GoogleFonts.dmSans(
-                                        color: Colors.white,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .surface,
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -221,7 +235,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                     Text(
                                       '42h',
                                       style: GoogleFonts.dmSans(
-                                        color: Colors.white,
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .surface,
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
                                       ),
@@ -245,10 +261,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
                     // 3. Earnings Story Card
                     Container(
-                      margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                      margin: const EdgeInsets.only(
+                          left: 16, right: 16, bottom: 16),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         border: Border.all(color: TruxifyColors.border),
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -260,7 +277,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                             style: GoogleFonts.dmSans(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: TruxifyColors.primaryText,
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                           Text(
@@ -276,13 +293,18 @@ class _EarningsScreenState extends State<EarningsScreen> {
                             height: 110,
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.end,
-                              children: List.generate(weeklyEarnings.length, (index) {
+                              children:
+                                  List.generate(weeklyEarnings.length, (index) {
                                 final item = weeklyEarnings[index];
                                 final isSelected = index == _selectedBarIndex;
-                                final isHighest = item.amount.toDouble() == maxAmount;
+                                final isHighest =
+                                    item.amount.toDouble() == maxAmount;
 
                                 // Responsive bar height calculation based on screen size.
-                                final double barHeight = (item.amount.toDouble() / maxAmount) * (MediaQuery.sizeOf(context).height/14.1);
+                                final double barHeight =
+                                    (item.amount.toDouble() / maxAmount) *
+                                        (MediaQuery.sizeOf(context).height /
+                                            14.1);
 
                                 return Expanded(
                                   child: Column(
@@ -293,7 +315,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                         height: 12,
                                         child: (isSelected || isHighest)
                                             ? Text(
-                                                _getCompactAmount(item.amount.toDouble()),
+                                                _getCompactAmount(
+                                                    item.amount.toDouble()),
                                                 style: GoogleFonts.dmSans(
                                                   fontSize: 9,
                                                   fontWeight: FontWeight.bold,
@@ -311,7 +334,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                           });
                                         },
                                         child: AnimatedContainer(
-                                          duration: const Duration(milliseconds: 300),
+                                          duration:
+                                              const Duration(milliseconds: 300),
                                           curve: Curves.easeInOut,
                                           height: barHeight,
                                           width: 24,
@@ -320,8 +344,10 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                                 ? const Color(0xFF5E0B0B)
                                                 : (isHighest
                                                     ? TruxifyColors.accent
-                                                    : TruxifyColors.accentLight),
-                                            borderRadius: const BorderRadius.vertical(
+                                                    : TruxifyColors
+                                                        .accentLight),
+                                            borderRadius:
+                                                const BorderRadius.vertical(
                                               top: Radius.circular(6),
                                             ),
                                           ),
@@ -350,7 +376,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                           Center(
                             child: Container(
                               width: double.infinity,
-                              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 14),
+                              padding: const EdgeInsets.symmetric(
+                                  vertical: 8, horizontal: 14),
                               decoration: BoxDecoration(
                                 color: TruxifyColors.accentLight,
                                 borderRadius: BorderRadius.circular(10),
@@ -372,10 +399,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
                     // 4. Breakdown Card
                     Container(
-                      margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                      margin: const EdgeInsets.only(
+                          left: 16, right: 16, bottom: 16),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         border: Border.all(color: TruxifyColors.border),
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -387,7 +415,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                             style: GoogleFonts.dmSans(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: TruxifyColors.primaryText,
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -420,10 +448,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
                     // 5. Savings Comparison Card
                     Container(
-                      margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                      margin: const EdgeInsets.only(
+                          left: 16, right: 16, bottom: 16),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         border: Border.all(color: TruxifyColors.border),
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -435,7 +464,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                             style: GoogleFonts.dmSans(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: TruxifyColors.primaryText,
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -449,7 +478,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         'WITH TRUXIFY',
@@ -490,7 +520,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                     borderRadius: BorderRadius.circular(12),
                                   ),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text(
                                         'OLD BROKER SYSTEM',
@@ -507,7 +538,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                           fontSize: 20,
                                           fontWeight: FontWeight.w500,
                                           color: TruxifyColors.hintText,
-                                          decoration: TextDecoration.lineThrough,
+                                          decoration:
+                                              TextDecoration.lineThrough,
                                         ),
                                       ),
                                       const SizedBox(height: 2),
@@ -542,10 +574,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
                     // 6. Milestones Card
                     Container(
-                      margin: const EdgeInsets.only(left: 16, right: 16, bottom: 16),
+                      margin: const EdgeInsets.only(
+                          left: 16, right: 16, bottom: 16),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         border: Border.all(color: TruxifyColors.border),
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -557,7 +590,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                             style: GoogleFonts.dmSans(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: TruxifyColors.primaryText,
+                              color: Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -618,10 +651,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
                     // 7. Pending Payments Card
                     Container(
-                      margin: const EdgeInsets.only(left: 16, right: 16, bottom: 24),
+                      margin: const EdgeInsets.only(
+                          left: 16, right: 16, bottom: 24),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.surface,
                         border: Border.all(color: TruxifyColors.border),
                         borderRadius: BorderRadius.circular(16),
                       ),
@@ -636,7 +670,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                 style: GoogleFonts.dmSans(
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
-                                  color: TruxifyColors.primaryText,
+                                  color:
+                                      Theme.of(context).colorScheme.onSurface,
                                 ),
                               ),
                               Text(
@@ -652,10 +687,14 @@ class _EarningsScreenState extends State<EarningsScreen> {
                           const SizedBox(height: 12),
                           ...pendingPayments.map((item) {
                             final initials = item.customerName.isNotEmpty
-                                ? item.customerName.split(' ').map((e) => e[0]).join('')
+                                ? item.customerName
+                                    .split(' ')
+                                    .map((e) => e[0])
+                                    .join('')
                                 : 'C';
                             return Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 8.0),
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 8.0),
                               child: Row(
                                 children: [
                                   Container(
@@ -679,14 +718,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           item.customerName,
                                           style: GoogleFonts.dmSans(
                                             fontSize: 13,
                                             fontWeight: FontWeight.w500,
-                                            color: TruxifyColors.primaryText,
+                                            color: Theme.of(context)
+                                                .colorScheme
+                                                .onSurface,
                                           ),
                                         ),
                                         Text(
@@ -741,7 +783,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               label,
               style: GoogleFonts.dmSans(
                 fontSize: 13,
-                color: TruxifyColors.primaryText,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             Text(
@@ -820,7 +862,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   style: GoogleFonts.dmSans(
                     fontSize: 13,
                     fontWeight: FontWeight.w500,
-                    color: TruxifyColors.primaryText,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
                 Text(

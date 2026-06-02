@@ -313,7 +313,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> with SingleTick
                     TileLayer(
                       urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       tileProvider: CancellableNetworkTileProvider(),
-                      userAgentPackageName: 'com.freightfair.customer',
+                      userAgentPackageName: 'com.truxify.customer',
                     ),
                     PolylineLayer(
                       polylines: [

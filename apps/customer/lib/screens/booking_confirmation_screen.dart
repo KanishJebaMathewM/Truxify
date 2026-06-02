@@ -39,7 +39,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen> w
     await _controller.forward(from: 0);
     await Future<void>.delayed(const Duration(milliseconds: 1100));
     if (!mounted) return;
-    FreightFairScope.of(context).openOrders(tabIndex: 0);
+    TruxifyScope.of(context).openOrders(tabIndex: 0);
     Navigator.of(context).popUntil((route) => route.isFirst);
   }
 

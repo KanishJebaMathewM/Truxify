@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { computeOrderPricing } from '../lib/pricing.js';
 
 const router = express.Router();
 
@@ -25,13 +26,39 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
     pickup_date, pickup_time,
     goods_type, weight_tonnes, length_ft, width_ft, height_ft,
     is_stackable, is_fragile, special_requirements,
-    base_freight, toll_estimate, platform_fee, total_amount,
     payment_method_id, upi_id
   } = req.body;
 
   // Basic validations
   if (!pickup_address || !pickup_lat || !pickup_lng || !drop_address || !drop_lat || !drop_lng || !goods_type || !weight_tonnes) {
     return res.status(400).json({ error: 'Missing required routing or cargo specification fields.' });
+  }
+
+  // ============================================================================
+  // Server-side pricing (single source of truth).
+  // Client-supplied monetary fields are no longer accepted; pricing is derived
+  // from route geometry, cargo weight, and the goods-class multipliers. See
+  // ../lib/pricing.js for the rate card (env-overridable) and the full
+  // derivation. If the customer passed monetary fields anyway we silently
+  // drop them — the server's number is the only number that gets persisted.
+  // ============================================================================
+  let pricing;
+  try {
+    pricing = computeOrderPricing({
+      pickupLat:  Number(pickup_lat),
+      pickupLng:  Number(pickup_lng),
+      dropLat:    Number(drop_lat),
+      dropLng:    Number(drop_lng),
+      weightTonnes: Number(weight_tonnes),
+      isFragile:   Boolean(is_fragile),
+      isStackable: Boolean(is_stackable),
+    });
+  } catch (pricingErr) {
+    console.error('Pricing computation error:', pricingErr.message);
+    return res.status(400).json({
+      error: 'Unable to compute freight pricing for the given route/cargo.',
+      details: pricingErr.message,
+    });
   }
 
   const orderDisplayId = generateOrderDisplayId();
@@ -49,7 +76,10 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
         pickup_date, pickup_time,
         goods_type, weight_tonnes, length_ft, width_ft, height_ft,
         is_stackable, is_fragile, special_requirements,
-        base_freight, toll_estimate, platform_fee, total_amount,
+        base_freight: pricing.baseFreight,
+        toll_estimate: pricing.tollEstimate,
+        platform_fee: pricing.platformFee,
+        total_amount: pricing.totalAmount,
         payment_method_id, upi_id
       })
       .select('id, order_display_id, status, created_at')
@@ -79,8 +109,9 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
       // We don't fail the whole request since order is created, but log it
     }
 
-    // Step 3: Automatically expose this order as a "load_offer" for drivers
-    // In a production system, this could also be populated via database triggers.
+    // Step 3: Automatically expose this order as a "load_offer" for drivers.
+    // Freight value, fuel cost, toll cost, and net profit all come from the
+    // server-computed `pricing` object — never from the request body.
     const { error: offerErr } = await supabase
       .from('load_offers')
       .insert({
@@ -93,10 +124,10 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
         drop_address, drop_lat, drop_lng,
         goods_type,
         weight: `${weight_tonnes} tonnes`,
-        freight_value: base_freight,
-        fuel_cost: Math.round(base_freight * 0.45), // Mock calculation
-        toll_cost: toll_estimate || 0,
-        net_profit: Math.round(base_freight * 0.55) - (toll_estimate || 0),
+        freight_value: pricing.baseFreight,
+        fuel_cost: pricing.fuelCost,
+        toll_cost: pricing.tollEstimate,
+        net_profit: pricing.netProfit,
         status: 'available'
       });
 
@@ -416,12 +447,22 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
 
     let truckInfo = null;
     if (details && details.truck_id) {
-      truckInfo = await supabase
+      // The Supabase `maybeSingle()` builder returns a thenable, but
+      // awaiting the outer promise with `.then(res => res.data)` here
+      // would re-wrap the row in another Promise, leaving `truckInfo` as
+      // a Promise object (whose `id` and `number_plate` properties are
+      // undefined). Use a normal `await` and destructure `data` so the
+      // row is actually unwrapped before the RPC call below.
+      const { data, error: truckErr } = await supabase
         .from('trucks')
         .select('id, name, number_plate')
         .eq('id', details.truck_id)
-        .maybeSingle()
-        .then(res => res.data);
+        .maybeSingle();
+
+      if (truckErr) {
+        console.error('Truck lookup error during bid accept:', truckErr.message);
+      }
+      truckInfo = data;
     }
 
     // 6.4 Execute atomically via Supabase RPC

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:freightfair/theme/app_theme.dart';
+import 'package:truxify/theme/app_theme.dart';
 
 import '../data/mock_data.dart';
 import '../models/app_models.dart';

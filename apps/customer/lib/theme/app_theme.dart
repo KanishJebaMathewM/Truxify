@@ -37,7 +37,7 @@ class TruxifyColors {
   }
 }
 
-class FreightFairTheme {
+class TruxifyTheme {
   static ThemeData light() {
     final base = ThemeData(
       useMaterial3: true,

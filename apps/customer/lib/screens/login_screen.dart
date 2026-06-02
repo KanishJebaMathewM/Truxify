@@ -37,23 +37,23 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   @override
-void initState() {
-  super.initState();
-  for (int i = 0; i < 4; i++) {
-    final index = i;
-    _otpFocusNodes[index].onKeyEvent = (node, event) {
-      if (event is KeyDownEvent &&
-          event.logicalKey == LogicalKeyboardKey.backspace &&
-          _otpControllers[index].text.isEmpty &&
-          index > 0) {
-        _otpFocusNodes[index - 1].requestFocus();
-        _otpControllers[index - 1].clear();
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
-    };
+  void initState() {
+    super.initState();
+    for (int i = 0; i < 4; i++) {
+      final index = i;
+      _otpFocusNodes[index].onKeyEvent = (node, event) {
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.backspace &&
+            _otpControllers[index].text.isEmpty &&
+            index > 0) {
+          _otpFocusNodes[index - 1].requestFocus();
+          _otpControllers[index - 1].clear();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      };
+    }
   }
-}
 
   void _sendOtp() {
     FocusScope.of(context).unfocus();
@@ -90,7 +90,7 @@ void initState() {
     final otp = _otpControllers.map((controller) => controller.text).join();
     if (otp == mockOtp) {
       Navigator.of(context).pushReplacement(
-          AppPageRoute(builder: (_) => const FreightFairShellScreen()));
+          AppPageRoute(builder: (_) => const TruxifyShellScreen()));
       return;
     }
 
@@ -101,8 +101,9 @@ void initState() {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: TruxifyColors.secondaryBackground,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 22),
@@ -112,16 +113,19 @@ void initState() {
               const SizedBox(height: 12),
               const AppLogo(iconSize: 24),
               const SizedBox(height: 28),
-              Text('Welcome back',
-                  style: Theme.of(context)
-                      .textTheme
-                      .headlineSmall
-                      ?.copyWith(fontWeight: FontWeight.w800)),
+              Text(
+                'Welcome back',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
               const SizedBox(height: 6),
               Text(
                 'Sign in to manage your freight bookings offline with mock data.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: TruxifyColors.adaptiveSecondaryText(context)),
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
               ),
               const SizedBox(height: 28),
               AnimatedSwitcher(
@@ -138,15 +142,22 @@ void initState() {
   }
 
   Widget _buildPhoneForm(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final borderColor = Theme.of(context).brightness == Brightness.dark
+        ? TruxifyColors.darkBorder
+        : TruxifyColors.border;
+
     return Column(
       key: const ValueKey('phone'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Phone number',
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.w800)),
+        Text(
+          'Phone number',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w800,
+              ),
+        ),
         const SizedBox(height: 12),
         TextField(
           controller: _phoneController,
@@ -155,17 +166,21 @@ void initState() {
           inputFormatters: [
             FilteringTextInputFormatter.digitsOnly,
           ],
+          style: TextStyle(color: colorScheme.onSurface),
           decoration: InputDecoration(
             prefixIcon: Container(
               alignment: Alignment.center,
               width: 70,
               margin: const EdgeInsets.only(right: 8),
-              decoration: const BoxDecoration(
-                border:
-                    Border(right: BorderSide(color: TruxifyColors.border)),
+              decoration: BoxDecoration(
+                border: Border(
+                  right: BorderSide(color: borderColor),
+                ),
               ),
-              child: const Text('+91',
-                  style: TextStyle(fontWeight: FontWeight.w700)),
+              child: Text('+91',
+                  style: TextStyle(
+                      color: colorScheme.onSurface,
+                      fontWeight: FontWeight.w700)),
             ),
             hintText: '9876543210',
           ),
@@ -176,14 +191,14 @@ void initState() {
         InfoCard(
           child: Row(
             children: [
-              const Icon(Icons.lock_rounded,
-                  color: TruxifyColors.accentDark),
+              const Icon(Icons.lock_rounded, color: TruxifyColors.accentDark),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   'Mock verification is enabled. Use 1234 on the next screen.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                        color: TruxifyColors.adaptiveSecondaryText(context),
+                      ),
                 ),
               ),
             ],
@@ -194,15 +209,18 @@ void initState() {
   }
 
   Widget _buildOtpForm(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Column(
       key: const ValueKey('otp'),
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Enter OTP',
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.w800)),
+        Text(
+          'Enter OTP',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                color: colorScheme.onSurface,
+                fontWeight: FontWeight.w800,
+              ),
+        ),
         const SizedBox(height: 12),
         Row(
           children: List.generate(4, (index) {
@@ -215,10 +233,10 @@ void initState() {
                   keyboardType: TextInputType.number,
                   textAlign: TextAlign.center,
                   maxLength: 1,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: colorScheme.onSurface,
+                        fontWeight: FontWeight.w800,
+                      ),
                   decoration: const InputDecoration(counterText: ''),
                   onChanged: (value) {
                     if (value.isNotEmpty && index < 3) {

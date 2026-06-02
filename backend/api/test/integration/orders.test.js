@@ -1,0 +1,191 @@
+/**
+ * Integration tests for backend/api/src/routes/orderRoutes.js
+ *
+ * Locks in the server-side pricing contract landed in PR #299:
+ *   - Client-supplied monetary fields are IGNORED, server-computed values
+ *     are persisted in both `orders` and `load_offers`.
+ *   - The camelCase / snake_case key mapping (commit b04413e) is preserved
+ *     — no destructure of `pricing` into snake_case locals.
+ *   - Invalid coordinates / weight return 400 with a clear pricing error.
+ *
+ * The test app uses BYPASS_AUTH=true to skip Firebase; the `authenticate`
+ * middleware reads the `x-user-id` and `x-user-role` headers directly.
+ *
+ * Run with:  npm test -- test/integration/orders.test.js
+ */
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import request from 'supertest';
+
+// Hoisted mock: swap supabase out for our in-memory builder.
+const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
+
+const m = createSupabaseMock();
+
+vi.mock('../../src/config/db.js', () => ({
+  supabase: m.supabase,
+  // export the rest as undefined so the route imports are safe
+  firebaseAdmin: null,
+  redisClient: null,
+  mongoDb: null,
+}));
+
+vi.mock('../../src/sockets/tracker.js', () => ({
+  initWebSocketServer: () => ({}),
+}));
+
+const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
+import express from 'express';
+
+function buildApp() {
+  const app = express();
+  app.use(express.json());
+  app.use('/api/orders', orderRouter);
+  return app;
+}
+
+const CUSTOMER_HEADERS = {
+  'x-user-id': '00000000-0000-0000-0000-000000000abc',
+  'x-user-role': 'customer',
+  'x-user-name': 'Test Customer',
+};
+
+const validOrderBody = {
+  pickup_address: '123 Pickup St, Mumbai',
+  pickup_lat: 19.0760,
+  pickup_lng: 72.8777,
+  drop_address: '456 Drop Ave, Delhi',
+  drop_lat: 28.7041,
+  drop_lng: 77.1025,
+  pickup_date: '2026-06-10',
+  pickup_time: '09:00',
+  goods_type: 'electronics',
+  weight_tonnes: 10,
+  length_ft: 20,
+  width_ft: 8,
+  height_ft: 7,
+  is_stackable: false,
+  is_fragile: false,
+  special_requirements: '',
+  payment_method_id: 'pm_test_123',
+  upi_id: 'test@upi',
+};
+
+describe('POST /api/orders — server-side pricing contract', () => {
+  beforeEach(() => {
+    // Ensure each table exists in the in-memory store (the mock
+    // auto-creates on first .from(), but we want to reset between tests).
+    m.store.orders = [];
+    m.store.order_timeline = [];
+    m.store.load_offers = [];
+    m.calls.length = 0;
+  });
+
+  it('happy path: 201, server-computed pricing persisted, no client monetary field in store', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders')
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+
+    expect(res.status).toBe(201);
+    expect(res.body).toHaveProperty('order');
+
+    // Find the orders.insert call
+    const ordersInsert = m.calls.find(c => c.table === 'orders' && c.mode === 'insert');
+    expect(ordersInsert, 'orders.insert should be called').toBeTruthy();
+    const persisted = ordersInsert.payload;
+
+    // Server-computed values are paisa integers, derived from rate card
+    expect(persisted.base_freight).toBeGreaterThan(0);
+    expect(persisted.toll_estimate).toBeGreaterThan(0);
+    expect(persisted.platform_fee).toBeGreaterThan(0);
+    expect(persisted.total_amount).toBe(
+      persisted.base_freight + persisted.toll_estimate + persisted.platform_fee
+    );
+    // No client monetary field was ever read off the body.
+    // (The destructure on the old line 64 dropped all 4 client fields
+    //  from req.body before the insert — see PR #299 commit 6cc8ce8.)
+    expect(persisted.base_freight).not.toBe(1);
+    expect(persisted.total_amount).not.toBe(1);
+  });
+
+  it('CLIENT PRICING IGNORED: body includes base_freight:1 / total_amount:1 → server values still win', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders')
+      .set(CUSTOMER_HEADERS)
+      .send({ ...validOrderBody, base_freight: 1, toll_estimate: 1, platform_fee: 1, total_amount: 1 });
+
+    expect(res.status).toBe(201);
+    const ordersInsert = m.calls.find(c => c.table === 'orders' && c.mode === 'insert');
+    const persisted = ordersInsert.payload;
+    expect(persisted.base_freight).toBeGreaterThan(1);
+    expect(persisted.toll_estimate).toBeGreaterThan(1);
+    expect(persisted.platform_fee).toBeGreaterThan(1);
+    expect(persisted.total_amount).toBeGreaterThan(1);
+  });
+
+  it('load_offers mirrors orders: freight_value === orders.base_freight, etc.', async () => {
+    const app = buildApp();
+    await request(app).post('/api/orders').set(CUSTOMER_HEADERS).send(validOrderBody);
+
+    const orderInsert   = m.calls.find(c => c.table === 'orders' && c.mode === 'insert').payload;
+    const offerInsert   = m.calls.find(c => c.table === 'load_offers' && c.mode === 'insert').payload;
+    expect(offerInsert.freight_value).toBe(orderInsert.base_freight);
+    expect(offerInsert.toll_cost).toBe(orderInsert.toll_estimate);
+    // fuelCost + toll_cost + net_profit = baseFreight (the driver-side ledger invariant)
+    expect(offerInsert.fuel_cost + offerInsert.toll_cost + offerInsert.net_profit)
+      .toBe(offerInsert.freight_value);
+  });
+
+  it('bad coordinates: NaN drop_lat → 400 with a clear pricing error', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders')
+      .set(CUSTOMER_HEADERS)
+      .send({ ...validOrderBody, drop_lat: 'not-a-number' });
+    expect(res.status).toBe(400);
+    expect(res.body).toHaveProperty('error');
+  });
+
+  it('zero weight → 400', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders')
+      .set(CUSTOMER_HEADERS)
+      .send({ ...validOrderBody, weight_tonnes: 0 });
+    expect(res.status).toBe(400);
+  });
+
+  it('regression: NO `const { base_freight } = pricing` destructure in route handler', async () => {
+    // Static check — lock in the maintainer-caught camelCase/snake_case bug
+    // so a future refactor cannot reintroduce it.
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const url = await import('node:url');
+    const here = path.dirname(url.fileURLToPath(import.meta.url));
+    const routeSrc = await fs.readFile(
+      path.resolve(here, '../../src/routes/orderRoutes.js'),
+      'utf8'
+    );
+    expect(
+      routeSrc,
+      'orderRoutes.js must NOT destructure pricing into snake_case locals (regression of b04413e)'
+    ).not.toMatch(/const\s*\{\s*base_freight\s*,\s*toll_estimate\s*,\s*platform_fee\s*,\s*total_amount\s*\}\s*=\s*pricing/);
+  });
+
+  it('regression: NO client monetary fields in the orders.insert payload', async () => {
+    // The route should not read base_freight/toll_estimate/platform_fee/total_amount
+    // from req.body at all. If it does, the fix is regressed.
+    const app = buildApp();
+    await request(app).post('/api/orders').set(CUSTOMER_HEADERS).send({
+      ...validOrderBody,
+      base_freight: 99999, toll_estimate: 99999, platform_fee: 99999, total_amount: 99999,
+    });
+    const orderInsert = m.calls.find(c => c.table === 'orders' && c.mode === 'insert').payload;
+    expect(orderInsert.base_freight).not.toBe(99999);
+    expect(orderInsert.toll_estimate).not.toBe(99999);
+    expect(orderInsert.platform_fee).not.toBe(99999);
+    expect(orderInsert.total_amount).not.toBe(99999);
+  });
+});

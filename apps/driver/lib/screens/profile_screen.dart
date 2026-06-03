@@ -4,6 +4,9 @@ import '../controllers/app_controller.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_shared/truxify_shared.dart';
+import 'notifications_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
@@ -278,45 +281,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 16),
               _buildHelpOption(
-                icon: Icons.phone_in_talk_rounded,
-                title: 'Call Support Hotline',
-                subtitle: 'Direct connection to 24/7 emergency dispatch',
-                color: TruxifyColors.success,
-                onTap: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text(
-                            'Calling support hotline at +91 1800-TRUXIFY...')),
-                  );
-                },
-              ),
-              const SizedBox(height: 10),
-              _buildHelpOption(
-                icon: Icons.chat_bubble_outline_rounded,
-                title: 'Live Chat Assistant',
-                subtitle: 'Chat directly with support representatives',
-                color: TruxifyColors.accent,
-                onTap: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content:
-                            Text('Connecting to Truxify support agent...')),
-                  );
-                },
-              ),
-              const SizedBox(height: 10),
-              _buildHelpOption(
                 icon: Icons.help_outline_rounded,
                 title: 'Browse FAQs',
                 subtitle: 'Instant answers to common driver questions',
                 color: TruxifyColors.hintText,
                 onTap: () {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Opening help center database...')),
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => _DriverHelpScreen(),
+                    ),
                   );
                 },
               ),
@@ -641,6 +615,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
+                    'Notifications',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'View trip alerts and updates',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+                  ),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const NotificationsScreen(),
+                    ),
+                  ),
+                ),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  title: Text(
                     'Language',
                     style: GoogleFonts.dmSans(
                       fontSize: 14,
@@ -742,6 +746,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _DriverHelpScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    return HelpCenterScreen(
+      appType: 'driver',
+      userId: userId,
+      faqRepository: FaqRepository(client),
+      supportRepository: SupportRepository(client),
+      title: 'Help & Support',
     );
   }
 }

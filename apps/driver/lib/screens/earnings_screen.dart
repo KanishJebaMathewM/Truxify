@@ -571,12 +571,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: TruxifyColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: CustomScrollView(
         slivers: [
           // Premium App Bar
           SliverAppBar(
-            backgroundColor: TruxifyColors.cardBackground,
+            backgroundColor: Theme.of(context).colorScheme.surface,
             pinned: true,
             elevation: 0,
             surfaceTintColor: Colors.transparent,
@@ -585,14 +585,14 @@ class _EarningsScreenState extends State<EarningsScreen> {
               style: GoogleFonts.dmSans(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
-                color: TruxifyColors.primaryText,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(1),
               child: Container(
                 height: 1,
-                color: TruxifyColors.border,
+                color: Theme.of(context).colorScheme.outlineVariant,
               ),
             ),
           ),
@@ -670,9 +670,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
         decoration: BoxDecoration(
-          color: TruxifyColors.cardBackground,
+          color: Theme.of(context).cardTheme.color,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: TruxifyColors.border),
+          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.01),
@@ -697,7 +697,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               style: GoogleFonts.dmSans(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: TruxifyColors.primaryText,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 4),
@@ -705,7 +705,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               label,
               style: GoogleFonts.dmSans(
                 fontSize: 11,
-                color: TruxifyColors.tertiaryText,
+                color: TruxifyColors.adaptiveSecondaryText(context),
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -728,9 +728,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: TruxifyColors.cardBackground,
+        color: Theme.of(context).cardTheme.color,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: TruxifyColors.border),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.02),
@@ -753,7 +753,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -761,7 +761,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     'Tap a date to inspect trips',
                     style: GoogleFonts.dmSans(
                       fontSize: 11,
-                      color: TruxifyColors.tertiaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
                 ],
@@ -783,7 +783,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -811,7 +811,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.tertiaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
                 ),
@@ -848,8 +848,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
               }
 
               // Determine color based on earnings magnitude relative to max ₹8,400
-              Color cellBgColor = TruxifyColors.border.withOpacity(0.3);
-              Color textColor = TruxifyColors.primaryText;
+              Color cellBgColor = Theme.of(context).colorScheme.outlineVariant.withOpacity(0.3);
+              Color textColor = Theme.of(context).colorScheme.onSurface;
               FontWeight textWeight = FontWeight.normal;
 
               if (earnings > 0) {
@@ -868,8 +868,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 }
               } else if (_dailyData.containsKey(cellKey) && earnings == 0.0) {
                 // Cancelled day (grey card outline style)
-                cellBgColor = TruxifyColors.border.withOpacity(0.6);
-                textColor = TruxifyColors.tertiaryText;
+                cellBgColor = Theme.of(context).colorScheme.outlineVariant.withOpacity(0.6);
+                textColor = TruxifyColors.adaptiveSecondaryText(context);
               }
 
               return GestureDetector(
@@ -925,11 +925,11 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 'Less',
                 style: GoogleFonts.dmSans(
                   fontSize: 10,
-                  color: TruxifyColors.tertiaryText,
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                 ),
               ),
               const SizedBox(width: 4),
-              _buildLegendBox(TruxifyColors.border.withOpacity(0.3)),
+              _buildLegendBox(Theme.of(context).colorScheme.outlineVariant.withOpacity(0.3)),
               const SizedBox(width: 2),
               _buildLegendBox(TruxifyColors.accent.withOpacity(0.2)),
               const SizedBox(width: 2),
@@ -943,7 +943,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 'More',
                 style: GoogleFonts.dmSans(
                   fontSize: 10,
-                  color: TruxifyColors.tertiaryText,
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                 ),
               ),
             ],
@@ -974,9 +974,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: TruxifyColors.cardBackground,
+        color: Theme.of(context).cardTheme.color,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: TruxifyColors.border),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.02),
@@ -1010,15 +1010,15 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   style: GoogleFonts.dmSans(
                     fontSize: 15,
                     fontWeight: FontWeight.bold,
-                    color: TruxifyColors.primaryText,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
               ),
             ],
           ),
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 14),
-            child: Divider(color: TruxifyColors.border),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Divider(color: Theme.of(context).colorScheme.outlineVariant),
           ),
 
           if (hasData && earnings > 0.0) ...[
@@ -1035,7 +1035,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   label: 'HOURS',
                   value: '${data!['hours']}h',
                   icon: Icons.timer_outlined,
-                  color: TruxifyColors.secondaryText,
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                 ),
                 _buildDailyMetric(
                   label: 'TRIPS',
@@ -1053,7 +1053,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               style: GoogleFonts.dmSans(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: TruxifyColors.tertiaryText,
+                color: TruxifyColors.adaptiveSecondaryText(context),
                 letterSpacing: 1.0,
               ),
             ),
@@ -1064,9 +1064,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: TruxifyColors.background.withOpacity(0.3),
+                  color: Theme.of(context).scaffoldBackgroundColor.withOpacity(0.3),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: TruxifyColors.border),
+                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1095,7 +1095,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                 style: GoogleFonts.dmSans(
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
-                                  color: TruxifyColors.primaryText,
+                                  color: Theme.of(context).colorScheme.onSurface,
                                 ),
                               ),
                               const SizedBox(height: 2),
@@ -1103,7 +1103,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                                 trip['customer'] as String,
                                 style: GoogleFonts.dmSans(
                                   fontSize: 12,
-                                  color: TruxifyColors.secondaryText,
+                                  color: TruxifyColors.adaptiveSecondaryText(context),
                                 ),
                               ),
                             ],
@@ -1120,9 +1120,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       ],
                     ),
                     if (trip['verified'] == true) ...[
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 10),
-                        child: Divider(color: TruxifyColors.border, height: 1),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Divider(color: Theme.of(context).colorScheme.outlineVariant, height: 1),
                       ),
                       Row(
                         children: [
@@ -1139,7 +1139,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                               overflow: TextOverflow.ellipsis,
                               style: GoogleFonts.dmSans(
                                   fontSize: 10,
-                                  color: TruxifyColors.tertiaryText,
+                                  color: TruxifyColors.adaptiveSecondaryText(context),
                                   fontWeight: FontWeight.w500),
                             ),
                           ),
@@ -1149,7 +1149,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   ],
                 ),
               );
-            }).toList(),
+            }),
           ] else if (hasData && earnings == 0.0) ...[
             // Cancelled trip state details
             Row(
@@ -1164,13 +1164,13 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   label: 'HOURS',
                   value: '${data!['hours']}h',
                   icon: Icons.timer_outlined,
-                  color: TruxifyColors.secondaryText,
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                 ),
                 _buildDailyMetric(
                   label: 'TRIPS',
                   value: '0',
                   icon: Icons.local_shipping_outlined,
-                  color: TruxifyColors.tertiaryText,
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                 ),
               ],
             ),
@@ -1207,16 +1207,16 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     'Load route from Vadodara → Mumbai was cancelled before pickup. Platform cancellation insurance was processed.',
                     style: GoogleFonts.dmSans(
                       fontSize: 12,
-                      color: TruxifyColors.secondaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                       height: 1.4,
                     ),
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    'Transaction: ${data['trips'][0]['hash']}',
+                    'Transaction: ${(data['trips'] as List).isNotEmpty ? data['trips'][0]['hash'] : 'N/A'}',
                     style: GoogleFonts.dmSans(
                       fontSize: 10,
-                      color: TruxifyColors.tertiaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
                 ],
@@ -1248,7 +1248,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       style: GoogleFonts.dmSans(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
-                        color: TruxifyColors.primaryText,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -1257,7 +1257,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                       textAlign: TextAlign.center,
                       style: GoogleFonts.dmSans(
                         fontSize: 12,
-                        color: TruxifyColors.secondaryText,
+                        color: TruxifyColors.adaptiveSecondaryText(context),
                         height: 1.4,
                       ),
                     ),
@@ -1290,7 +1290,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 style: GoogleFonts.dmSans(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
-                  color: TruxifyColors.tertiaryText,
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                   letterSpacing: 0.5,
                 ),
               ),
@@ -1302,7 +1302,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             style: GoogleFonts.dmSans(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: TruxifyColors.primaryText,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
           ),
         ],
@@ -1315,9 +1315,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: TruxifyColors.cardBackground,
+        color: Theme.of(context).cardTheme.color,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: TruxifyColors.border),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.02),
@@ -1337,7 +1337,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 style: GoogleFonts.dmSans(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: TruxifyColors.primaryText,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               Container(
@@ -1400,7 +1400,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                           style: GoogleFonts.dmSans(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
-                            color: TruxifyColors.primaryText,
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -1408,7 +1408,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                           '${item.route} · ${item.note}',
                           style: GoogleFonts.dmSans(
                             fontSize: 12,
-                            color: TruxifyColors.secondaryText,
+                            color: TruxifyColors.adaptiveSecondaryText(context),
                           ),
                         ),
                       ],
@@ -1419,7 +1419,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 15,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ],

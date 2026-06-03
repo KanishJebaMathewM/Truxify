@@ -81,6 +81,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final now = DateTime.now();
     final customerFirstName = mockCustomerName.split(' ').first;
     final greeting = _greetingFor(now);
+    final quickStats = mockQuickStats.take(3).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -154,11 +155,16 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 24),
             Row(
               children: [
-                Expanded(child: StatCard(title: mockQuickStats[0].title, value: mockQuickStats[0].value, icon: mockQuickStats[0].icon)),
-                const SizedBox(width: 10),
-                Expanded(child: StatCard(title: mockQuickStats[1].title, value: mockQuickStats[1].value, icon: mockQuickStats[1].icon)),
-                const SizedBox(width: 10),
-                Expanded(child: StatCard(title: mockQuickStats[2].title, value: mockQuickStats[2].value, icon: mockQuickStats[2].icon)),
+                for (final stat in quickStats) ...[
+                  Expanded(
+                    child: StatCard(
+                      title: stat.title,
+                      value: stat.value,
+                      icon: stat.icon,
+                    ),
+                  ),
+                  if (stat != quickStats.last) const SizedBox(width: 10),
+                ],
               ],
             ),
             const SizedBox(height: 24),

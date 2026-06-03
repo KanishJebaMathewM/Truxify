@@ -4,7 +4,9 @@ import '../controllers/app_controller.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
-
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_driver/screens/login_screen.dart';
+import '../../core/supabase_config.dart';
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
     super.key,
@@ -717,14 +719,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           const SizedBox(height: 18),
           AppCard(
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Logged out successfully'),
-                  backgroundColor: TruxifyColors.success,
-                ),
-              );
-            },
+           onTap: () async {
+  try {
+    if (SupabaseConfig.isConfigured) {
+      await Supabase.instance.client.auth.signOut();
+    }
+
+    if (context.mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (_) => const LoginScreen(),
+        ),
+        (route) => false,
+      );
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Logout failed: $e')),
+    );
+  }
+},
             child: Row(
               children: [
                 const Icon(Icons.logout_rounded, color: TruxifyColors.error),

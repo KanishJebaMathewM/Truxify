@@ -7,6 +7,9 @@ import '../widgets/common_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/screens/login_screen.dart';
 import '../../core/supabase_config.dart';
+import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
+import 'notifications_screen.dart';
+
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
     super.key,
@@ -720,27 +723,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           const SizedBox(height: 18),
           AppCard(
-           onTap: () async {
-  try {
-    if (SupabaseConfig.isConfigured) {
-      await Supabase.instance.client.auth.signOut();
-    }
+            onTap: () async {
+              try {
+                if (SupabaseConfig.isConfigured) {
+                  await Supabase.instance.client.auth.signOut();
+                }
 
-    if (context.mounted) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const LoginScreen(),
-        ),
-        (route) => false,
-      );
-    }
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Logout failed: $e')),
-    );
-  }
-},
+                if (context.mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const LoginScreen(),
+                    ),
+                    (route) => false,
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Logout failed: $e')),
+                  );
+                }
+              }
+            },
             child: Row(
               children: [
                 const Icon(Icons.logout_rounded, color: TruxifyColors.error),

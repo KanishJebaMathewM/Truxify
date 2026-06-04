@@ -21,7 +21,7 @@ dependencies:
   http: ^1.2.2
   sqflite: ^2.3.0
   path: ^1.9.0
-  connectivity_plus: ^5.0.2
+  connectivity_plus: ^7.1.1
   web_socket_channel: ^2.4.0
   uuid: ^4.2.2
   geocoding: ^4.0.0

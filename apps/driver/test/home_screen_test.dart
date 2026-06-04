@@ -1,31 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
+import 'package:truxify_driver/controllers/app_controller.dart';
 import 'package:truxify_driver/core/app_routes.dart';
 import 'package:truxify_driver/screens/destination_picker_screen.dart';
 import 'package:truxify_driver/screens/shell_screen.dart';
 import 'package:truxify_driver/theme/app_theme.dart';
 
 Widget _buildTestApp() {
-  return MaterialApp(
-    theme: TruxifyTheme.light(),
-    home: const ShellScreen(),
-    onGenerateRoute: (settings) {
-      if (settings.name == AppRoutes.destinationPicker) {
-        final args = settings.arguments as DestinationPickerArgs?;
-        return MaterialPageRoute<void>(
-          builder: (_) => DestinationPickerScreen(
-            title: args?.title ?? 'Select Destination',
-            initialQuery: args?.initialQuery,
-            initialPoint: args?.initialPoint,
-          ),
-        );
-      }
+  final controller = TruxifyController();
 
-      return MaterialPageRoute<void>(
-        builder: (_) => const Scaffold(body: SizedBox.shrink()),
-      );
-    },
+  return TruxifyScope(
+    controller: controller,
+    child: MaterialApp(
+      theme: TruxifyTheme.light(),
+      home: const ShellScreen(),
+      onGenerateRoute: (settings) {
+        if (settings.name == AppRoutes.destinationPicker) {
+          final args = settings.arguments as DestinationPickerArgs?;
+          return MaterialPageRoute<void>(
+            builder: (_) => DestinationPickerScreen(
+              title: args?.title ?? 'Select Destination',
+              initialQuery: args?.initialQuery,
+              initialPoint: args?.initialPoint,
+            ),
+          );
+        }
+
+        return MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: SizedBox.shrink()),
+        );
+      },
+    ),
   );
 }
 

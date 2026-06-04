@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { computeOrderPricing } from '../lib/pricing.js';
 
 const router = express.Router();
 
@@ -25,13 +26,39 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
     pickup_date, pickup_time,
     goods_type, weight_tonnes, length_ft, width_ft, height_ft,
     is_stackable, is_fragile, special_requirements,
-    base_freight, toll_estimate, platform_fee, total_amount,
     payment_method_id, upi_id
   } = req.body;
 
   // Basic validations
   if (!pickup_address || !pickup_lat || !pickup_lng || !drop_address || !drop_lat || !drop_lng || !goods_type || !weight_tonnes) {
     return res.status(400).json({ error: 'Missing required routing or cargo specification fields.' });
+  }
+
+  // ============================================================================
+  // Server-side pricing (single source of truth).
+  // Client-supplied monetary fields are no longer accepted; pricing is derived
+  // from route geometry, cargo weight, and the goods-class multipliers. See
+  // ../lib/pricing.js for the rate card (env-overridable) and the full
+  // derivation. If the customer passed monetary fields anyway we silently
+  // drop them — the server's number is the only number that gets persisted.
+  // ============================================================================
+  let pricing;
+  try {
+    pricing = computeOrderPricing({
+      pickupLat:  Number(pickup_lat),
+      pickupLng:  Number(pickup_lng),
+      dropLat:    Number(drop_lat),
+      dropLng:    Number(drop_lng),
+      weightTonnes: Number(weight_tonnes),
+      isFragile:   Boolean(is_fragile),
+      isStackable: Boolean(is_stackable),
+    });
+  } catch (pricingErr) {
+    console.error('Pricing computation error:', pricingErr.message);
+    return res.status(400).json({
+      error: 'Unable to compute freight pricing for the given route/cargo.',
+      details: pricingErr.message,
+    });
   }
 
   const orderDisplayId = generateOrderDisplayId();
@@ -49,7 +76,10 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
         pickup_date, pickup_time,
         goods_type, weight_tonnes, length_ft, width_ft, height_ft,
         is_stackable, is_fragile, special_requirements,
-        base_freight, toll_estimate, platform_fee, total_amount,
+        base_freight: pricing.baseFreight,
+        toll_estimate: pricing.tollEstimate,
+        platform_fee: pricing.platformFee,
+        total_amount: pricing.totalAmount,
         payment_method_id, upi_id
       })
       .select('id, order_display_id, status, created_at')
@@ -79,8 +109,9 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
       // We don't fail the whole request since order is created, but log it
     }
 
-    // Step 3: Automatically expose this order as a "load_offer" for drivers
-    // In a production system, this could also be populated via database triggers.
+    // Step 3: Automatically expose this order as a "load_offer" for drivers.
+    // Freight value, fuel cost, toll cost, and net profit all come from the
+    // server-computed `pricing` object — never from the request body.
     const { error: offerErr } = await supabase
       .from('load_offers')
       .insert({
@@ -93,10 +124,10 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
         drop_address, drop_lat, drop_lng,
         goods_type,
         weight: `${weight_tonnes} tonnes`,
-        freight_value: base_freight,
-        fuel_cost: Math.round(base_freight * 0.45), // Mock calculation
-        toll_cost: toll_estimate || 0,
-        net_profit: Math.round(base_freight * 0.55) - (toll_estimate || 0),
+        freight_value: pricing.baseFreight,
+        fuel_cost: pricing.fuelCost,
+        toll_cost: pricing.tollEstimate,
+        net_profit: pricing.netProfit,
         status: 'available'
       });
 
@@ -306,48 +337,63 @@ router.get('/:id/bids', authenticate, requireRole(['customer']), async (req, res
     }
 
     // Populate profile and truck data
-    const enrichedBids = await Promise.all(bids.map(async (bid) => {
-      // Driver profile
-      const { data: profile } = await supabase
+    // Batch fetch all driver IDs at once
+    const driverIds = bids.map(b => b.driver_id);
+
+    const [profilesRes, detailsRes] = await Promise.all([
+      supabase
         .from('profiles')
-        .select('full_name, avatar_url, phone')
-        .eq('id', bid.driver_id)
-        .maybeSingle();
-
-      // Driver rating
-      const { data: details } = await supabase
+        .select('id, full_name, avatar_url, phone')
+        .in('id', driverIds),
+      supabase
         .from('driver_details')
-        .select('rating, total_trips, completion_rate, truck_id')
-        .eq('user_id', bid.driver_id)
-        .maybeSingle();
+        .select('user_id, rating, total_trips, completion_rate, truck_id')
+        .in('user_id', driverIds)
+    ]);
 
-      // Truck details
-      let truckInfo = null;
-      if (details && details.truck_id) {
-        const { data: truck } = await supabase
+    const profiles = profilesRes.data || [];
+    const details  = detailsRes.data || [];
+
+    // Batch fetch all trucks
+    const truckIds = details
+      .map(d => d.truck_id)
+      .filter(Boolean);
+
+    const trucksRes = truckIds.length > 0
+      ? await supabase
           .from('trucks')
-          .select('name, number_plate')
-          .eq('id', details.truck_id)
-          .maybeSingle();
-        truckInfo = truck;
-      }
+          .select('id, name, number_plate')
+          .in('id', truckIds)
+      : { data: [] };
+
+    const trucks = trucksRes.data || [];
+
+    // Map into lookup objects
+    const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
+    const detailMap  = Object.fromEntries(details.map(d => [d.user_id, d]));
+    const truckMap   = Object.fromEntries(trucks.map(t => [t.id, t]));
+
+    const enrichedBids = bids.map(bid => {
+      const profile = profileMap[bid.driver_id] || {};
+      const detail  = detailMap[bid.driver_id]  || {};
+      const truck   = detail.truck_id ? truckMap[detail.truck_id] : null;
 
       return {
-        id: bid.id,
+        id:         bid.id,
         bid_amount: bid.bid_amount,
         created_at: bid.created_at,
         driver: {
-          id: bid.driver_id,
-          name: profile?.full_name || 'Anonymous Driver',
-          avatar: profile?.avatar_url,
-          phone: profile?.phone,
-          rating: details?.rating || 0.00,
-          trips: details?.total_trips || 0,
-          completion_rate: details?.completion_rate || 100.00
+          id:              bid.driver_id,
+          name:            profile.full_name       || 'Anonymous Driver',
+          avatar:          profile.avatar_url,
+          phone:           profile.phone,
+          rating:          detail.rating           || 0.00,
+          trips:           detail.total_trips      || 0,
+          completion_rate: detail.completion_rate  || 100.00
         },
-        truck: truckInfo
+        truck
       };
-    }));
+    });
 
     res.json(enrichedBids);
 
@@ -401,54 +447,46 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
 
     let truckInfo = null;
     if (details && details.truck_id) {
-      truckInfo = await supabase
+      // The Supabase `maybeSingle()` builder returns a thenable, but
+      // awaiting the outer promise with `.then(res => res.data)` here
+      // would re-wrap the row in another Promise, leaving `truckInfo` as
+      // a Promise object (whose `id` and `number_plate` properties are
+      // undefined). Use a normal `await` and destructure `data` so the
+      // row is actually unwrapped before the RPC call below.
+      const { data, error: truckErr } = await supabase
         .from('trucks')
         .select('id, name, number_plate')
         .eq('id', details.truck_id)
-        .maybeSingle()
-        .then(res => res.data);
+        .maybeSingle();
+
+      if (truckErr) {
+        console.error('Truck lookup error during bid accept:', truckErr.message);
+      }
+      truckInfo = data;
     }
 
-    // 6.4 Perform transactional updates:
-    // Update Accepted Bid
-    await supabase.from('load_bids').update({ status: 'accepted', updated_at: new Date().toISOString() }).eq('id', bidId);
-    // Reject other bids for this load
-    await supabase.from('load_bids').update({ status: 'rejected', updated_at: new Date().toISOString() }).eq('load_id', bid.load_id).neq('id', bidId);
-    // Claim load offer
-    await supabase.from('load_offers').update({ status: 'claimed', updated_at: new Date().toISOString() }).eq('id', bid.load_id);
-
-    // Assign driver and truck to order
-    const { data: updatedOrder, error: updateErr } = await supabase
-      .from('orders')
-      .update({
-        driver_id: bid.driver_id,
-        truck_id: truckInfo?.id || null,
-        status: 'truck_assigned',
-        driver_name: profile?.full_name || 'Assigned Driver',
-        driver_rating: details?.rating || 0.00,
-        truck_number: truckInfo?.number_plate || 'N/A',
-        total_amount: bid.bid_amount, // Bind final contract amount
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', orderId)
-      .select('*')
-      .single();
-
-    if (updateErr) {
-      return res.status(500).json({ error: 'Failed to assign driver to order.', details: updateErr.message });
-    }
-
-    // Update milestone on order timeline
-    await supabase
-      .from('order_timeline')
-      .update({ completed: true, milestone_time: new Date().toISOString() })
-      .eq('order_display_id', order.order_display_id)
-      .eq('milestone', 'Truck Assigned');
-
-    res.json({
-      message: 'Bid accepted successfully. Driver and truck assigned.',
-      order: updatedOrder
+    // 6.4 Execute atomically via Supabase RPC
+    const { error: rpcErr } = await supabase.rpc('accept_bid_tx', {
+      p_bid_id:           bidId,
+      p_order_id:         orderId,
+      p_load_id:          bid.load_id,
+      p_driver_id:        bid.driver_id,
+      p_truck_id:         truckInfo?.id || null,
+      p_driver_name:      profile?.full_name || 'Assigned Driver',
+      p_driver_rating:    details?.rating || 0.00,
+      p_truck_number:     truckInfo?.number_plate || 'N/A',
+      p_bid_amount:       bid.bid_amount,
+      p_order_display_id: order.order_display_id
     });
+
+    if (rpcErr) {
+      return res.status(500).json({
+        error: 'Failed to accept bid atomically.',
+        details: rpcErr.message
+      });
+    }
+
+    res.json({ message: 'Bid accepted. Driver and truck assigned.' });
 
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });

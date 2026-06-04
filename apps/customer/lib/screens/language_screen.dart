@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/offline/cache/cache_manager.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 
@@ -11,6 +12,7 @@ class LanguageScreen extends StatefulWidget {
 }
 
 class _LanguageScreenState extends State<LanguageScreen> {
+  final CacheManager _cacheManager = CacheManager();
   int _selectedLanguageIndex = 0;
 
   final List<Map<String, String>> _languages = [
@@ -21,6 +23,31 @@ class _LanguageScreenState extends State<LanguageScreen> {
     {'code': 'ta', 'name': 'Tamil', 'native': 'தமிழ்'},
     {'code': 'te', 'name': 'Telugu', 'native': 'తెలుగు'},
   ];
+
+  void _showLanguageChangedSnackBar() {
+    final languageName = _languages[_selectedLanguageIndex]['name'] ?? '';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Language changed to $languageName')),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreLanguage();
+  }
+
+  Future<void> _restoreLanguage() async {
+    await _cacheManager.open();
+    final settings = await _cacheManager.getSettings();
+    final selectedCode = settings['language']?['code']?.toString();
+    if (selectedCode != null) {
+      final index = _languages.indexWhere((language) => language['code'] == selectedCode);
+      if (index >= 0 && mounted) {
+        setState(() => _selectedLanguageIndex = index);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,12 +76,12 @@ class _LanguageScreenState extends State<LanguageScreen> {
                   child: Container(
                     decoration: BoxDecoration(
                       border: Border.all(
-                        color: isSelected ? FreightFairColors.accent : (Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border),
+                        color: isSelected ? TruxifyColors.accent : (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border),
                         width: isSelected ? 2 : 1,
                       ),
                       borderRadius: BorderRadius.circular(12),
                       color: isSelected
-                          ? FreightFairColors.accent.withValues(alpha: 0.08)
+                          ? TruxifyColors.accent.withValues(alpha: 0.08)
                           : Theme.of(context).colorScheme.surface,
                     ),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -65,23 +92,23 @@ class _LanguageScreenState extends State<LanguageScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                language['name']!,
+                                language['name'] ?? '',
                                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                                       fontWeight: FontWeight.w600,
                                     ),
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                language['native']!,
+                                language['native'] ?? '',
                                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: FreightFairColors.adaptiveSecondaryText(context),
+                                      color: TruxifyColors.adaptiveSecondaryText(context),
                                     ),
                               ),
                             ],
                           ),
                         ),
                         if (isSelected)
-                          const Icon(Icons.check_circle_rounded, color: FreightFairColors.accent, size: 24),
+                          const Icon(Icons.check_circle_rounded, color: TruxifyColors.accent, size: 24),
                       ],
                     ),
                   ),
@@ -91,10 +118,16 @@ class _LanguageScreenState extends State<LanguageScreen> {
             const SizedBox(height: 32),
             PrimaryButton(
               label: 'Apply',
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Language changed to ${_languages[_selectedLanguageIndex]['name']}')),
-                );
+              onPressed: () async {
+                await _cacheManager.open();
+                await _cacheManager.cacheSettings({
+                  'language': {
+                    'code': _languages[_selectedLanguageIndex]['code'],
+                    'name': _languages[_selectedLanguageIndex]['name']
+                  },
+                });
+                if (!mounted) return;
+                _showLanguageChangedSnackBar();
                 Navigator.of(context).pop();
               },
             ),

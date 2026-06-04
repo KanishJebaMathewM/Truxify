@@ -1,6 +1,10 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:truxify/widgets/menu_card.dart';
+import 'package:truxify/widgets/menu_item.dart';
 
 import '../controllers/app_controller.dart';
+import '../core/offline/cache/cache_manager.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
 import 'about_screen.dart';
@@ -12,12 +16,61 @@ import 'my_documents_screen.dart';
 import 'payment_methods_screen.dart';
 import 'saved_addresses_screen.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
   static const _profileName = 'Karthik Murugan';
   static const _companyName = 'Sri Murugan Textiles';
   static const _phoneNumber = '+91 98765 43210';
+
+  final CacheManager _cacheManager = CacheManager();
+  bool _isOffline = false;
+  String? _lastUpdatedLabel;
+  String _displayName = _profileName;
+  String _displayCompany = _companyName;
+  String _displayPhone = _phoneNumber;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    final connectivity = await Connectivity().checkConnectivity();
+    final hasNetwork = connectivity != ConnectivityResult.none;
+    await _cacheManager.open();
+    await _cacheManager.cacheProfile({
+      'name': _profileName,
+      'company': _companyName,
+      'phone': _phoneNumber,
+    });
+
+    final cachedProfile = await _cacheManager.getProfile();
+    if (!mounted) return;
+
+    setState(() {
+      _isOffline = !hasNetwork;
+      _displayName = cachedProfile?['name']?.toString() ?? _profileName;
+      _displayCompany = cachedProfile?['company']?.toString() ?? _companyName;
+      _displayPhone = cachedProfile?['phone']?.toString() ?? _phoneNumber;
+      _lastUpdatedLabel = cachedProfile?['_cached_at']?.toString();
+    });
+  }
+
+  String _formatLastUpdated(String? updatedAt) {
+    if (updatedAt == null || updatedAt.isEmpty) return 'just now';
+    final lastUpdated = DateTime.tryParse(updatedAt);
+    if (lastUpdated == null) return 'just now';
+    final minutes = DateTime.now().difference(lastUpdated).inMinutes;
+    if (minutes < 1) return 'just now';
+    return minutes == 1 ? '1 min ago' : '$minutes mins ago';
+  }
 
   void _logout(BuildContext context) {
     Navigator.of(context).pushAndRemoveUntil(
@@ -39,7 +92,7 @@ class ProfileScreen extends StatelessWidget {
                   width: double.infinity,
                   padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
                   decoration: const BoxDecoration(
-                    color: FreightFairColors.accent,
+                    color: TruxifyColors.accent,
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -50,7 +103,9 @@ class ProfileScreen extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: Colors.white,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 3),
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: 0.4),
+                              width: 3),
                         ),
                         alignment: Alignment.center,
                         child: const Text(
@@ -58,13 +113,13 @@ class ProfileScreen extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.w500,
-                            color: FreightFairColors.accent,
+                            color: TruxifyColors.accent,
                           ),
                         ),
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        _profileName,
+                        _displayName,
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                               color: Colors.white,
                               fontWeight: FontWeight.w500,
@@ -72,7 +127,7 @@ class ProfileScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        _companyName,
+                        _displayCompany,
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: Colors.white.withValues(alpha: 0.75),
                               fontSize: 13,
@@ -80,7 +135,7 @@ class ProfileScreen extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        _phoneNumber,
+                        _displayPhone,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                               color: Colors.white.withValues(alpha: 0.6),
                               fontSize: 12,
@@ -93,8 +148,10 @@ class ProfileScreen extends StatelessWidget {
                   top: 20,
                   right: 20,
                   child: IconButton(
-                    onPressed: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const EditProfileScreen())),
-                    icon: const Icon(Icons.edit_rounded, color: Colors.white, size: 24),
+                    onPressed: () => Navigator.of(context).push(AppPageRoute(
+                        builder: (_) => const EditProfileScreen())),
+                    icon: const Icon(Icons.edit_rounded,
+                        color: Colors.white, size: 24),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                     splashRadius: 20,
@@ -102,6 +159,14 @@ class ProfileScreen extends StatelessWidget {
                 ),
               ],
             ),
+            if (_isOffline)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
+                child: Text(
+                  'Offline mode • Last updated ${_formatLastUpdated(_lastUpdatedLabel)}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.accentDark),
+                ),
+              ),
             Transform.translate(
               offset: const Offset(0, -18),
               child: Padding(
@@ -110,55 +175,65 @@ class ProfileScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 10),
-            _SectionLabel(text: 'Account', padding: const EdgeInsets.symmetric(horizontal: 16)),
+            _SectionLabel(
+                text: 'Account',
+                padding: const EdgeInsets.symmetric(horizontal: 16)),
             const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _MenuCard(
+              child: MenuCard(
                 children: [
-                  _MenuItem(
+                  MenuItem(
                     icon: Icons.credit_card_rounded,
                     label: 'Payment Methods',
-                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const PaymentMethodsScreen())),
+                    onTap: () => Navigator.of(context).push(AppPageRoute(
+                        builder: (_) => const PaymentMethodsScreen())),
                   ),
-                  _MenuItem(
+                  MenuItem(
                     icon: Icons.description_rounded,
                     label: 'My Documents',
-                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const MyDocumentsScreen())),
+                    onTap: () => Navigator.of(context).push(AppPageRoute(
+                        builder: (_) => const MyDocumentsScreen())),
                   ),
-                  _MenuItem(
+                  MenuItem(
                     icon: Icons.location_on_rounded,
                     label: 'Saved Addresses',
                     showDivider: false,
-                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const SavedAddressesScreen())),
+                    onTap: () => Navigator.of(context).push(AppPageRoute(
+                        builder: (_) => const SavedAddressesScreen())),
                   ),
                 ],
               ),
             ),
             const SizedBox(height: 12),
-            _SectionLabel(text: 'Preferences', padding: const EdgeInsets.symmetric(horizontal: 16)),
+            _SectionLabel(
+                text: 'Preferences',
+                padding: const EdgeInsets.symmetric(horizontal: 16)),
             const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _MenuCard(
+              child: MenuCard(
                 children: [
                   _DarkModeMenuItem(),
-                  _MenuItem(
+                  MenuItem(
                     icon: Icons.language_rounded,
                     label: 'Language',
                     trailing: 'English',
-                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const LanguageScreen())),
+                    onTap: () => Navigator.of(context).push(
+                        AppPageRoute(builder: (_) => const LanguageScreen())),
                   ),
-                  _MenuItem(
+                  MenuItem(
                     icon: Icons.help_outline_rounded,
                     label: 'Help & Support',
-                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const HelpSupportScreen())),
+                    onTap: () => Navigator.of(context).push(AppPageRoute(
+                        builder: (_) => const HelpSupportScreen())),
                   ),
-                  _MenuItem(
+                  MenuItem(
                     icon: Icons.info_outline_rounded,
                     label: 'About Truxify',
                     showDivider: false,
-                    onTap: () => Navigator.of(context).push(AppPageRoute(builder: (_) => const AboutScreen())),
+                    onTap: () => Navigator.of(context).push(
+                        AppPageRoute(builder: (_) => const AboutScreen())),
                   ),
                 ],
               ),
@@ -166,14 +241,15 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: 12),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _MenuCard(
+              child: MenuCard(
                 children: [
-                  _MenuItem(
+                  MenuItem(
                     icon: Icons.logout_rounded,
                     label: 'Logout',
-                    iconBackgroundColor: FreightFairColors.error.withValues(alpha: 0.12),
-                    iconColor: FreightFairColors.error,
-                    textColor: FreightFairColors.error,
+                    iconBackgroundColor:
+                        TruxifyColors.error.withValues(alpha: 0.12),
+                    iconColor: TruxifyColors.error,
+                    textColor: TruxifyColors.error,
                     showChevron: false,
                     showDivider: false,
                     onTap: () => _logout(context),
@@ -202,7 +278,7 @@ class _SectionLabel extends StatelessWidget {
       child: Text(
         text.toUpperCase(),
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: FreightFairColors.adaptiveSecondaryText(context),
+              color: TruxifyColors.adaptiveSecondaryText(context),
               fontSize: 11,
               letterSpacing: 0.06 * 11,
               fontWeight: FontWeight.w500,
@@ -216,13 +292,16 @@ class _StatsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final surface = Theme.of(context).colorScheme.surface;
-    final dividerColor = (Theme.of(context).brightness == Brightness.dark ? FreightFairColors.darkBorder : FreightFairColors.border);
+    final dividerColor = (Theme.of(context).brightness == Brightness.dark
+        ? TruxifyColors.darkBorder
+        : TruxifyColors.border);
     return Container(
       decoration: BoxDecoration(
         color: surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: const [
-          BoxShadow(color: Color(0x14000000), blurRadius: 8, offset: Offset(0, 2)),
+          BoxShadow(
+              color: Color(0x14000000), blurRadius: 8, offset: Offset(0, 2)),
         ],
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
@@ -266,7 +345,7 @@ class _StatColumn extends StatelessWidget {
     required this.label,
     required this.valueSize,
     this.addRightDivider = false,
-    this.dividerColor = FreightFairColors.border,
+    this.dividerColor = TruxifyColors.border,
   });
 
   final String value;
@@ -279,7 +358,9 @@ class _StatColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        border: addRightDivider ? Border(right: BorderSide(color: dividerColor)) : null,
+        border: addRightDivider
+            ? Border(right: BorderSide(color: dividerColor))
+            : null,
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Column(
@@ -288,7 +369,7 @@ class _StatColumn extends StatelessWidget {
           Text(
             value,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: FreightFairColors.accent,
+                  color: TruxifyColors.accent,
                   fontWeight: FontWeight.w500,
                   fontSize: valueSize,
                 ),
@@ -297,122 +378,10 @@ class _StatColumn extends StatelessWidget {
           Text(
             label,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: FreightFairColors.adaptiveSecondaryText(context),
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                   fontSize: 11,
                 ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _MenuCard extends StatelessWidget {
-  const _MenuCard({required this.children});
-
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    final surface = Theme.of(context).colorScheme.surface;
-    return Container(
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: const [
-          BoxShadow(color: Color(0x0F000000), blurRadius: 8, offset: Offset(0, 2)),
-        ],
-      ),
-      child: Column(children: children),
-    );
-  }
-}
-
-class _MenuItem extends StatelessWidget {
-  const _MenuItem({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.trailing,
-    this.iconBackgroundColor,
-    this.iconColor = FreightFairColors.accent,
-    this.textColor,
-    this.showChevron = true,
-    this.showDivider = true,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final String? trailing;
-  final Color? iconBackgroundColor;
-  final Color iconColor;
-  final Color? textColor;
-  final bool showChevron;
-  final bool showDivider;
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final resolvedIconBg = iconBackgroundColor ??
-        (isDark ? FreightFairColors.darkAccentLight : FreightFairColors.accentLight);
-    final resolvedTextColor = textColor ?? Theme.of(context).textTheme.bodyMedium?.color;
-    return InkWell(
-      onTap: onTap,
-      child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
-              children: [
-                Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: resolvedIconBg,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(icon, size: 17, color: iconColor),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: resolvedTextColor,
-                          fontWeight: FontWeight.w500,
-                          fontSize: 14,
-                        ),
-                  ),
-                ),
-                if (trailing != null)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: Text(
-                      trailing!,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: isDark
-                                ? FreightFairColors.darkSecondaryText
-                                : FreightFairColors.secondaryText,
-                            fontSize: 13,
-                          ),
-                    ),
-                  ),
-                if (showChevron)
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    size: 16,
-                    color: isDark ? FreightFairColors.darkSecondaryText : const Color(0xFFB0B0B0),
-                  ),
-              ],
-            ),
-          ),
-          if (showDivider)
-            Divider(
-              height: 1,
-              thickness: 1,
-              color: isDark ? FreightFairColors.darkBorder : FreightFairColors.border,
-            ),
         ],
       ),
     );
@@ -424,9 +393,11 @@ class _DarkModeMenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final controller = FreightFairScope.of(context);
-    final isDark = controller.isDarkMode;
-    final iconBg = isDark ? FreightFairColors.darkAccentLight : FreightFairColors.accentLight;
+    final controller = TruxifyScope.of(context);
+    final currentTheme = controller.themeMode;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final iconBg =
+        isDark ? TruxifyColors.darkAccentLight : TruxifyColors.accentLight;
     return Column(
       children: [
         Padding(
@@ -440,22 +411,37 @@ class _DarkModeMenuItem extends StatelessWidget {
                   color: iconBg,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.dark_mode_rounded, size: 17, color: FreightFairColors.accent),
+                child: const Icon(Icons.dark_mode_rounded,
+                    size: 17, color: TruxifyColors.accent),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Dark Mode',
+                  'Theme',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w500,
                         fontSize: 14,
                       ),
                 ),
               ),
-              Switch(
-                value: isDark,
-                onChanged: (_) => controller.toggleDarkMode(),
-                activeThumbColor: FreightFairColors.accent,
+              Text(
+                currentTheme.name[0].toUpperCase() +
+                    currentTheme.name.substring(1),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+              ),
+              PopupMenuButton<ThemeMode>(
+                onSelected: controller.setThemeMode,
+                icon: Icon(
+                  Icons.keyboard_arrow_down_rounded,
+                  color: TruxifyColors.adaptiveSecondaryText(context),
+                ),
+                itemBuilder: (context) => const [
+                  PopupMenuItem(value: ThemeMode.system, child: Text('System')),
+                  PopupMenuItem(value: ThemeMode.light, child: Text('Light')),
+                  PopupMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+                ],
               ),
             ],
           ),
@@ -463,7 +449,7 @@ class _DarkModeMenuItem extends StatelessWidget {
         Divider(
           height: 1,
           thickness: 1,
-          color: isDark ? FreightFairColors.darkBorder : FreightFairColors.border,
+          color: isDark ? TruxifyColors.darkBorder : TruxifyColors.border,
         ),
       ],
     );

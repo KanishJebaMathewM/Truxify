@@ -8,28 +8,56 @@ class AcceptBottomSheet extends StatelessWidget {
 
   final LoadOffer load;
 
+  Color _borderColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? TruxifyColors.darkBorder
+        : TruxifyColors.border;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      padding: EdgeInsets.fromLTRB(
+          20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const BottomSheetHandle(),
           const SizedBox(height: 16),
-          Text('Accept this load?', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+          Text(
+            'Accept this load?',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: colorScheme.onSurface,
+                  fontWeight: FontWeight.w800,
+                ),
+          ),
           const SizedBox(height: 4),
-          Text(load.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.secondaryText)),
+          Text(
+            load.route,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: TruxifyColors.adaptiveSecondaryText(context),
+                ),
+          ),
           const SizedBox(height: 16),
           AppCard(
-            color: TruxifyColors.accentVeryLight,
+            color: colorScheme.surfaceContainerHighest,
             child: Column(
               children: [
                 _SheetLine(label: 'Freight value', value: load.freightValue),
-                _SheetLine(label: 'Fuel cost', value: '- ${load.fuelCost}', valueColor: TruxifyColors.error),
-                _SheetLine(label: 'Toll cost', value: '- ${load.tollCost}', valueColor: TruxifyColors.error),
-                const Divider(height: 24),
+                _SheetLine(
+                    label: 'Fuel cost',
+                    value: '- ${load.fuelCost}',
+                    valueColor: TruxifyColors.error),
+                _SheetLine(
+                    label: 'Toll cost',
+                    value: '- ${load.tollCost}',
+                    valueColor: TruxifyColors.error),
+                Divider(
+                  height: 24,
+                  color: _borderColor(context),
+                ),
                 _SheetLine(
                   label: 'Net profit',
                   value: load.netProfit,
@@ -48,7 +76,7 @@ class AcceptBottomSheet extends StatelessWidget {
           TextActionButton(
             label: 'Cancel',
             onPressed: () => Navigator.of(context).pop(false),
-            color: TruxifyColors.secondaryText,
+            color: TruxifyColors.adaptiveSecondaryText(context),
           ),
         ],
       ),
@@ -60,7 +88,11 @@ class AcceptBottomSheet extends StatelessWidget {
 // Sheet line (used in accept bottom sheet)
 // ---------------------------------------------------------------------------
 class _SheetLine extends StatelessWidget {
-  const _SheetLine({required this.label, required this.value, this.valueColor, this.bold = false});
+  const _SheetLine(
+      {required this.label,
+      required this.value,
+      this.valueColor,
+      this.bold = false});
 
   final String label;
   final String value;
@@ -69,6 +101,7 @@ class _SheetLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
@@ -76,13 +109,15 @@ class _SheetLine extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.secondaryText),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: TruxifyColors.adaptiveSecondaryText(context),
+                  ),
             ),
           ),
           Text(
             value,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: valueColor ?? TruxifyColors.primaryText,
+                  color: valueColor ?? colorScheme.onSurface,
                   fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
                 ),
           ),

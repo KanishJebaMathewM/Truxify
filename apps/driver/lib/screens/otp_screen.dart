@@ -15,7 +15,8 @@ class OtpScreen extends StatefulWidget {
 }
 
 class _OtpScreenState extends State<OtpScreen> {
-  late final List<TextEditingController> _controllers = List.generate(4, (_) => TextEditingController());
+  late final List<TextEditingController> _controllers =
+      List.generate(4, (_) => TextEditingController());
   late final List<FocusNode> _focusNodes = List.generate(4, (_) => FocusNode());
   bool _verifying = false;
 
@@ -31,7 +32,9 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   Future<void> _verifyOtp() async {
-    final code = _controllers.map((controller) => controller.text).join();
+    final code = _controllers
+      .map((c) => c.text.replaceAll('\u200B', ''))
+      .join();
     if (code != '1234') {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter mock OTP 1234 to continue')),
@@ -44,19 +47,27 @@ class _OtpScreenState extends State<OtpScreen> {
       return;
     }
     setState(() => _verifying = false);
-    Navigator.of(context).pushNamedAndRemoveUntil(AppRoutes.shell, (route) => false);
+    Navigator.of(context)
+        .pushNamedAndRemoveUntil(AppRoutes.shell, (route) => false);
   }
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: TruxifyColors.primaryBackground,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: TruxifyColors.secondaryBackground,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         foregroundColor: TruxifyColors.primaryText,
-        title: const Text('Verify OTP'),
+        title: Text(
+          'Verify OTP',
+          style: TextStyle(
+            color: colorScheme.onSurface,
+          ),
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -68,12 +79,16 @@ class _OtpScreenState extends State<OtpScreen> {
               const SizedBox(height: 30),
               Text(
                 'Enter the 4-digit OTP',
-                style: Theme.of(context).textTheme.headlineMedium,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      color: colorScheme.onSurface,
+                    ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Sent to +91 ${widget.phone}',
-                style: Theme.of(context).textTheme.bodyMedium,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
               ),
               const SizedBox(height: 24),
               OtpInputRow(controllers: _controllers, focusNodes: _focusNodes),
@@ -85,8 +100,10 @@ class _OtpScreenState extends State<OtpScreen> {
               const SizedBox(height: 14),
               Text(
                 'Mock OTP: 1234',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.secondaryText),
-              ),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+              )
             ],
           ),
         ),

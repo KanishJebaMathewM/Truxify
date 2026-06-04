@@ -10,7 +10,7 @@ class TruxifyLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = textColor ?? TruxifyColors.primaryText;
+    final color = textColor ?? Theme.of(context).colorScheme.onSurface;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -24,7 +24,12 @@ class TruxifyLogo extends StatelessWidget {
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(size * 0.28),
-            boxShadow: [BoxShadow(color: TruxifyColors.accent.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(0, 2))],
+            boxShadow: [
+              BoxShadow(
+                  color: TruxifyColors.accent.withValues(alpha: 0.06),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2))
+            ],
           ),
           child: Center(
             child: Icon(

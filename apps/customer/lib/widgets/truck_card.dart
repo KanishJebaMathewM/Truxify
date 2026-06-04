@@ -47,7 +47,7 @@ class TruckCard extends StatelessWidget {
           Text(
             '${truck.truck}  |  ${truck.capacity}',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: FreightFairColors.adaptiveSecondaryText(context),
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                 ),
           ),
           const SizedBox(height: 12),
@@ -56,7 +56,7 @@ class TruckCard extends StatelessWidget {
               Text(
                 'Available space',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: FreightFairColors.adaptiveSecondaryText(context),
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
               ),
               const Spacer(),
@@ -75,9 +75,9 @@ class TruckCard extends StatelessWidget {
             child: LinearProgressIndicator(
               minHeight: 10,
               value: truck.freeSpacePercent / 100,
-              backgroundColor: FreightFairColors.accentLight,
+              backgroundColor: TruxifyColors.accentLight,
               valueColor: const AlwaysStoppedAnimation(
-                FreightFairColors.accent,
+                TruxifyColors.accent,
               ),
             ),
           ),
@@ -92,8 +92,8 @@ class TruckCard extends StatelessWidget {
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                           fontWeight: FontWeight.w800,
                           color: Theme.of(context).brightness == Brightness.dark
-                              ? FreightFairColors.accent
-                              : FreightFairColors.accentDark,
+                              ? TruxifyColors.accent
+                              : TruxifyColors.accentDark,
                         ),
                   ),
                   const SizedBox(height: 3),
@@ -101,7 +101,7 @@ class TruckCard extends StatelessWidget {
                     'ETA to pickup: ${truck.eta}',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color:
-                              FreightFairColors.adaptiveSecondaryText(context),
+                              TruxifyColors.adaptiveSecondaryText(context),
                         ),
                   ),
                 ],

@@ -11,6 +11,10 @@ class RouteDraft {
     required this.stacked,
     required this.fragile,
     required this.requirements,
+    this.pickupLat,
+    this.pickupLng,
+    this.dropLat,
+    this.dropLng,
   });
 
   final String pickup;
@@ -22,6 +26,10 @@ class RouteDraft {
   final bool stacked;
   final bool fragile;
   final List<String> requirements;
+  final double? pickupLat;
+  final double? pickupLng;
+  final double? dropLat;
+  final double? dropLng;
 }
 
 class ShipmentCardData {

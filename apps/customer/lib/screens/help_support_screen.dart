@@ -1,14 +1,6 @@
 import 'package:flutter/material.dart';
-
-import '../theme/app_theme.dart';
-import '../widgets/common_widgets.dart';
-
-class _FaqItem {
-  const _FaqItem({required this.question, required this.answer});
-
-  final String question;
-  final String answer;
-}
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 
 class HelpSupportScreen extends StatelessWidget {
   const HelpSupportScreen({super.key});

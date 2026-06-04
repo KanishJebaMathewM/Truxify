@@ -1,0 +1,39 @@
+name: PR Labeler
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    name: Apply safe PR labels
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out trusted labeler code
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Apply labels from issue, title, and changed paths
+        uses: actions/github-script@v8
+        env:
+          PR_LABELER_DRY_RUN: ${{ vars.PR_LABELER_DRY_RUN || 'false' }}
+        with:
+          script: |
+            const labeler = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-labeler.js`);
+            await labeler.run({
+              github,
+              context,
+              core,
+              dryRun: process.env.PR_LABELER_DRY_RUN === 'true'
+            });

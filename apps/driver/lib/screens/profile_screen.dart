@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-
+import '../controllers/app_controller.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_driver/screens/login_screen.dart';
+import '../../core/supabase_config.dart';
+import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
+import 'notifications_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
@@ -25,6 +30,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _driverEmail = 'kanish.jeba@truxify.com';
   String _currentLanguage = 'English';
 
+  Color _borderColor(BuildContext context) {
+    return Theme.of(context).brightness == Brightness.dark
+        ? TruxifyColors.darkBorder
+        : TruxifyColors.border;
+  }
+
   Future<void> _showEditProfileSheet(BuildContext context) async {
     final nameController = TextEditingController(text: _driverName);
     final phoneController = TextEditingController(text: _driverPhone);
@@ -33,13 +44,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
         return Padding(
-          padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+          padding: EdgeInsets.fromLTRB(
+              20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -51,19 +63,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: GoogleFonts.dmSans(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: TruxifyColors.primaryText,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               const SizedBox(height: 16),
               TextField(
                 controller: nameController,
-                style: GoogleFonts.dmSans(fontSize: 14, color: TruxifyColors.primaryText),
+                style: GoogleFonts.dmSans(
+                    fontSize: 14,
+                    color: Theme.of(context).colorScheme.onSurface),
                 decoration: InputDecoration(
                   labelText: 'Full Name',
-                  labelStyle: GoogleFonts.dmSans(color: TruxifyColors.secondaryText),
+                  labelStyle: GoogleFonts.dmSans(
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: TruxifyColors.border),
+                    borderSide: BorderSide(
+                      color: _borderColor(context),
+                    ),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -74,13 +91,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 12),
               TextField(
                 controller: phoneController,
-                style: GoogleFonts.dmSans(fontSize: 14, color: TruxifyColors.primaryText),
+                style: GoogleFonts.dmSans(
+                    fontSize: 14,
+                    color: Theme.of(context).colorScheme.onSurface),
                 decoration: InputDecoration(
                   labelText: 'Phone Number',
-                  labelStyle: GoogleFonts.dmSans(color: TruxifyColors.secondaryText),
+                  labelStyle: GoogleFonts.dmSans(
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: TruxifyColors.border),
+                    borderSide: BorderSide(
+                      color: _borderColor(context),
+                    ),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -92,13 +114,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 12),
               TextField(
                 controller: emailController,
-                style: GoogleFonts.dmSans(fontSize: 14, color: TruxifyColors.primaryText),
+                style: GoogleFonts.dmSans(
+                    fontSize: 14,
+                    color: Theme.of(context).colorScheme.onSurface),
                 decoration: InputDecoration(
                   labelText: 'Email Address',
-                  labelStyle: GoogleFonts.dmSans(color: TruxifyColors.secondaryText),
+                  labelStyle: GoogleFonts.dmSans(
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: TruxifyColors.border),
+                    borderSide: BorderSide(
+                      color: _borderColor(context),
+                    ),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -137,7 +164,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -157,11 +184,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 16),
-                  ...['English', 'Hindi (हिंदी)', 'Gujarati (ગુજરાતી)'].map((lang) {
+                  ...['English', 'Hindi (हिंदी)', 'Gujarati (ગુજરાતી)']
+                      .map((lang) {
                     final isSelected = lang.startsWith(selectedLang);
                     return GestureDetector(
                       onTap: () {
@@ -171,10 +199,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         margin: const EdgeInsets.only(bottom: 8),
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: isSelected ? TruxifyColors.accentLight : Colors.grey.shade50,
+                          color: isSelected
+                              ? TruxifyColors.accentLight
+                              : Colors.grey.shade50,
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: isSelected ? TruxifyColors.accent : Colors.grey.shade200,
+                            color: isSelected
+                                ? TruxifyColors.accent
+                                : Colors.grey.shade200,
                           ),
                         ),
                         child: Row(
@@ -184,12 +216,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               lang,
                               style: GoogleFonts.dmSans(
                                 fontSize: 14,
-                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                color: TruxifyColors.primaryText,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                                color: Theme.of(context).colorScheme.onSurface,
                               ),
                             ),
                             if (isSelected)
-                              const Icon(Icons.check_circle_rounded, color: TruxifyColors.accent),
+                              const Icon(Icons.check_circle_rounded,
+                                  color: TruxifyColors.accent),
                           ],
                         ),
                       ),
@@ -205,7 +240,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       Navigator.of(context).pop();
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('Language switched to $_currentLanguage'),
+                          content:
+                              Text('Language switched to $_currentLanguage'),
                           backgroundColor: TruxifyColors.success,
                         ),
                       );
@@ -224,7 +260,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -242,36 +278,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: GoogleFonts.dmSans(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: TruxifyColors.primaryText,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               const SizedBox(height: 16),
-              _buildHelpOption(
-                icon: Icons.phone_in_talk_rounded,
-                title: 'Call Support Hotline',
-                subtitle: 'Direct connection to 24/7 emergency dispatch',
-                color: TruxifyColors.success,
-                onTap: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Calling support hotline at +91 1800-TRUXIFY...')),
-                  );
-                },
-              ),
-              const SizedBox(height: 10),
-              _buildHelpOption(
-                icon: Icons.chat_bubble_outline_rounded,
-                title: 'Live Chat Assistant',
-                subtitle: 'Chat directly with support representatives',
-                color: TruxifyColors.accent,
-                onTap: () {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Connecting to Truxify support agent...')),
-                  );
-                },
-              ),
-              const SizedBox(height: 10),
               _buildHelpOption(
                 icon: Icons.help_outline_rounded,
                 title: 'Browse FAQs',
@@ -279,8 +289,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 color: TruxifyColors.hintText,
                 onTap: () {
                   Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Opening help center database...')),
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => _DriverHelpScreen(),
+                    ),
                   );
                 },
               ),
@@ -304,7 +316,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          border: Border.all(color: TruxifyColors.border),
+          border: Border.all(
+            color: _borderColor(context),
+          ),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
@@ -327,7 +341,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -335,13 +349,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     subtitle,
                     style: GoogleFonts.dmSans(
                       fontSize: 11,
-                      color: TruxifyColors.secondaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: TruxifyColors.hintText),
+            const Icon(Icons.chevron_right_rounded,
+                color: TruxifyColors.hintText),
           ],
         ),
       ),
@@ -352,7 +367,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -372,7 +387,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   shape: BoxShape.circle,
                 ),
                 child: const Center(
-                  child: Icon(Icons.local_shipping_rounded, color: TruxifyColors.accentDark, size: 32),
+                  child: Icon(Icons.local_shipping_rounded,
+                      color: TruxifyColors.accentDark, size: 32),
                 ),
               ),
               const SizedBox(height: 12),
@@ -381,7 +397,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: GoogleFonts.dmSans(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: TruxifyColors.primaryText,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               Text(
@@ -397,7 +413,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 textAlign: TextAlign.center,
                 style: GoogleFonts.dmSans(
                   fontSize: 13,
-                  color: TruxifyColors.secondaryText,
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                   height: 1.4,
                 ),
               ),
@@ -442,15 +458,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white.withOpacity(0.2), width: 3),
+                    border: Border.all(
+                        color: Colors.white.withOpacity(0.2), width: 3),
                   ),
                   child: CircleAvatar(
                     radius: 30,
-                    backgroundColor: Colors.white,
+                    backgroundColor: Theme.of(context).colorScheme.surface,
                     child: Text(
                       _driverName.isNotEmpty
                           ? _driverName.substring(0, 1) +
-                              (_driverName.contains(' ') ? _driverName.split(' ')[1].substring(0, 1) : '')
+                              (_driverName.contains(' ')
+                                  ? _driverName.split(' ')[1].substring(0, 1)
+                                  : '')
                           : 'JD',
                       style: GoogleFonts.dmSans(
                         fontSize: 20,
@@ -483,7 +502,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       const SizedBox(height: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
                           color: Colors.white.withOpacity(0.15),
                           borderRadius: BorderRadius.circular(12),
@@ -491,7 +511,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.star_rounded, color: Colors.amber, size: 14),
+                            const Icon(Icons.star_rounded,
+                                color: Colors.amber, size: 14),
                             const SizedBox(width: 4),
                             Text(
                               '$driverRating · $driverTrips trips',
@@ -529,14 +550,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     value: driverEarningsMonth,
                   ),
                 ),
-                Container(width: 1, height: 32, color: TruxifyColors.border),
+                Container(
+                  width: 1,
+                  height: 32,
+                  color: _borderColor(context),
+                ),
                 Expanded(
                   child: _MetricColumn(
                     label: 'Total Trips',
                     value: driverTrips,
                   ),
                 ),
-                Container(width: 1, height: 32, color: TruxifyColors.border),
+                Container(
+                  width: 1,
+                  height: 32,
+                  color: _borderColor(context),
+                ),
                 Expanded(
                   child: _MetricColumn(
                     label: 'Completion Rate',
@@ -554,86 +583,138 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Column(
               children: [
                 ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
                     'Documents',
                     style: GoogleFonts.dmSans(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   subtitle: Text(
                     'Driver license, permit, and vehicle papers',
                     style: GoogleFonts.dmSans(
                       fontSize: 12,
-                      color: TruxifyColors.secondaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
-                  trailing: const Icon(Icons.chevron_right_rounded, color: TruxifyColors.secondaryText),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
                   onTap: () => widget.onOpenDocuments?.call(),
                 ),
-                const Divider(height: 1, color: TruxifyColors.border),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
+                const _ThemeModeTile(),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
                 ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  title: Text(
+                    'Notifications',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'View trip alerts and updates',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+                  ),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const NotificationsScreen(),
+                    ),
+                  ),
+                ),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
                     'Language',
                     style: GoogleFonts.dmSans(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   subtitle: Text(
                     _currentLanguage,
                     style: GoogleFonts.dmSans(
                       fontSize: 12,
-                      color: TruxifyColors.secondaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
-                  trailing: const Icon(Icons.chevron_right_rounded, color: TruxifyColors.secondaryText),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
                   onTap: () => _showLanguageSheet(context),
                 ),
-                const Divider(height: 1, color: TruxifyColors.border),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
                 ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
                     'Help & Support',
                     style: GoogleFonts.dmSans(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   subtitle: Text(
                     '24/7 hotline, chat assistant, and FAQs',
                     style: GoogleFonts.dmSans(
                       fontSize: 12,
-                      color: TruxifyColors.secondaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
-                  trailing: const Icon(Icons.chevron_right_rounded, color: TruxifyColors.secondaryText),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
                   onTap: () => _showHelpSheet(context),
                 ),
-                const Divider(height: 1, color: TruxifyColors.border),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
                 ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
                     'About Truxify',
                     style: GoogleFonts.dmSans(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   subtitle: Text(
                     'Version and application info',
                     style: GoogleFonts.dmSans(
                       fontSize: 12,
-                      color: TruxifyColors.secondaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
-                  trailing: const Icon(Icons.chevron_right_rounded, color: TruxifyColors.secondaryText),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
                   onTap: () => _showAboutSheet(context),
                 ),
               ],
@@ -642,13 +723,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           const SizedBox(height: 18),
           AppCard(
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Logged out successfully'),
-                  backgroundColor: TruxifyColors.success,
-                ),
-              );
+            onTap: () async {
+              try {
+                if (SupabaseConfig.isConfigured) {
+                  await Supabase.instance.client.auth.signOut();
+                }
+
+                if (context.mounted) {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const LoginScreen(),
+                    ),
+                    (route) => false,
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Logout failed: $e')),
+                  );
+                }
+              }
             },
             child: Row(
               children: [
@@ -671,6 +767,62 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 }
 
+class _DriverHelpScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final client = Supabase.instance.client;
+    final userId = client.auth.currentUser?.id;
+    return HelpCenterScreen(
+      appType: 'driver',
+      userId: userId,
+      faqRepository: FaqRepository(client),
+      supportRepository: SupportRepository(client),
+      title: 'Help & Support',
+    );
+  }
+}
+
+class _ThemeModeTile extends StatelessWidget {
+  const _ThemeModeTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = TruxifyScope.of(context);
+    final currentTheme = controller.themeMode;
+
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      title: Text(
+        'Theme',
+        style: GoogleFonts.dmSans(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          color: Theme.of(context).colorScheme.onSurface,
+        ),
+      ),
+      subtitle: Text(
+        currentTheme.name[0].toUpperCase() + currentTheme.name.substring(1),
+        style: GoogleFonts.dmSans(
+          fontSize: 12,
+          color: TruxifyColors.adaptiveSecondaryText(context),
+        ),
+      ),
+      trailing: PopupMenuButton<ThemeMode>(
+        onSelected: controller.setThemeMode,
+        icon: Icon(
+          Icons.keyboard_arrow_down_rounded,
+          color: TruxifyColors.adaptiveSecondaryText(context),
+        ),
+        itemBuilder: (context) => const [
+          PopupMenuItem(value: ThemeMode.system, child: Text('System')),
+          PopupMenuItem(value: ThemeMode.light, child: Text('Light')),
+          PopupMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+        ],
+      ),
+    );
+  }
+}
+
 class _MetricColumn extends StatelessWidget {
   const _MetricColumn({required this.label, required this.value});
 
@@ -685,7 +837,7 @@ class _MetricColumn extends StatelessWidget {
           value,
           style: GoogleFonts.dmSans(
             fontSize: 18,
-            color: TruxifyColors.primaryText,
+            color: Theme.of(context).colorScheme.onSurface,
             fontWeight: FontWeight.bold,
           ),
         ),
@@ -695,11 +847,10 @@ class _MetricColumn extends StatelessWidget {
           textAlign: TextAlign.center,
           style: GoogleFonts.dmSans(
             fontSize: 11,
-            color: TruxifyColors.secondaryText,
+            color: TruxifyColors.adaptiveSecondaryText(context),
           ),
         ),
       ],
     );
   }
 }
-

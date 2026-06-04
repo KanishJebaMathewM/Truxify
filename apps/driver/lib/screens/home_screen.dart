@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
+import 'package:truxify_driver/widgets/slide_to_confirm_button.dart';
 
 import '../core/app_routes.dart';
 import '../data/mock_data.dart';
@@ -16,6 +17,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/map_markers.dart';
 import 'destination_picker_screen.dart';
+import '../widgets/pulsing_location_dot.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -207,7 +209,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F3F3),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: SafeArea(
         bottom: false,
         child: Stack(
@@ -242,7 +244,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: FloatingActionButton(
                 heroTag: 'driver-home-recenter',
                 onPressed: _centerMapOnCurrentLocation,
-                backgroundColor: Colors.white,
+                backgroundColor: Theme.of(context).colorScheme.surface,
                 foregroundColor: TruxifyColors.accent,
                 elevation: 4,
                 shape: const CircleBorder(),
@@ -283,7 +285,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildActiveNavigationHeader(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
@@ -320,7 +322,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: GoogleFonts.dmSans(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: TruxifyColors.primaryText,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
               ],
@@ -539,7 +541,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildSearchCard(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
@@ -558,7 +560,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const _PulsingLocationDot(),
+                const PulsingLocationDot(),
                 Container(
                   width: 1,
                   height: 12,
@@ -591,7 +593,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               style: GoogleFonts.dmSans(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
-                                color: TruxifyColors.primaryText,
+                                color: Theme.of(context).colorScheme.onSurface,
                               ),
                             ),
                           ),
@@ -604,10 +606,11 @@ class _HomeScreenState extends State<HomeScreen> {
                                     color: TruxifyColors.accent,
                                   ),
                                 )
-                              : const Icon(
+                              : Icon(
                                   Icons.refresh_rounded,
                                   size: 16,
-                                  color: TruxifyColors.hintText,
+                                  color: TruxifyColors.adaptiveSecondaryText(
+                                      context),
                                 ),
                         ],
                       ),
@@ -647,7 +650,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildBottomSheet(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: const BorderRadius.vertical(
           top: Radius.circular(20),
         ),
@@ -692,7 +695,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 15,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                 ],
@@ -704,7 +707,7 @@ class _HomeScreenState extends State<HomeScreen> {
             'Radar active. Looking for load assignments near Surat Yard...',
             style: GoogleFonts.dmSans(
               fontSize: 11,
-              color: TruxifyColors.secondaryText,
+              color: TruxifyColors.adaptiveSecondaryText(context),
             ),
           ),
           const SizedBox(height: 16),
@@ -746,7 +749,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF9F7F7),
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.surfaceContainerHighest
+            : const Color(0xFFF9F7F7),
         border: Border.all(color: TruxifyColors.border),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -759,14 +764,14 @@ class _HomeScreenState extends State<HomeScreen> {
             style: GoogleFonts.dmSans(
               fontSize: 14,
               fontWeight: FontWeight.bold,
-              color: TruxifyColors.primaryText,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
           ),
           Text(
             label,
             style: GoogleFonts.dmSans(
               fontSize: 9,
-              color: TruxifyColors.hintText,
+              color: TruxifyColors.adaptiveSecondaryText(context),
             ),
           ),
         ],
@@ -778,7 +783,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final routeStr = _destination?.address ?? 'Destination';
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
@@ -821,7 +826,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   'GJ-05-BY-9898 · Tata Signa',
                   style: GoogleFonts.dmSans(
                     fontSize: 11,
-                    color: TruxifyColors.hintText,
+                    color: TruxifyColors.adaptiveSecondaryText(context),
                   ),
                 ),
               ),
@@ -833,7 +838,7 @@ class _HomeScreenState extends State<HomeScreen> {
             style: GoogleFonts.dmSans(
               fontSize: 15,
               fontWeight: FontWeight.bold,
-              color: TruxifyColors.primaryText,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
           ),
           const SizedBox(height: 12),
@@ -868,9 +873,11 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 6),
             ClipRRect(
               borderRadius: BorderRadius.circular(3),
-              child: const LinearProgressIndicator(
+              child: LinearProgressIndicator(
                 value: 0.25,
-                backgroundColor: TruxifyColors.border,
+                backgroundColor: Theme.of(context).brightness == Brightness.dark
+                    ? TruxifyColors.darkBorder
+                    : TruxifyColors.border,
                 valueColor:
                     AlwaysStoppedAnimation<Color>(TruxifyColors.success),
                 minHeight: 6,
@@ -903,7 +910,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
-                      color: TruxifyColors.hintText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
                 ),
@@ -923,7 +930,7 @@ class _HomeScreenState extends State<HomeScreen> {
           label,
           style: GoogleFonts.dmSans(
             fontSize: 10,
-            color: TruxifyColors.hintText,
+            color: TruxifyColors.adaptiveSecondaryText(context),
           ),
         ),
         const SizedBox(height: 2),
@@ -932,187 +939,10 @@ class _HomeScreenState extends State<HomeScreen> {
           style: GoogleFonts.dmSans(
             fontSize: 13,
             fontWeight: FontWeight.bold,
-            color: TruxifyColors.primaryText,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
       ],
-    );
-  }
-}
-
-class SlideToConfirmButton extends StatefulWidget {
-  const SlideToConfirmButton({
-    super.key,
-    required this.label,
-    required this.onConfirmed,
-    this.backgroundColor = TruxifyColors.accent,
-    this.foregroundColor = Colors.white,
-  });
-
-  final String label;
-  final VoidCallback onConfirmed;
-  final Color backgroundColor;
-  final Color foregroundColor;
-
-  @override
-  State<SlideToConfirmButton> createState() => _SlideToConfirmButtonState();
-}
-
-class _SlideToConfirmButtonState extends State<SlideToConfirmButton> {
-  double _dragProgress = 0.0;
-  bool _confirmed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final double maxDragWidth =
-            constraints.maxWidth - 50; // button width helper
-        return Container(
-          height: 52,
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: widget.backgroundColor.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: widget.backgroundColor.withOpacity(0.2)),
-          ),
-          child: Stack(
-            children: [
-              Center(
-                child: Opacity(
-                  opacity: (1.0 - _dragProgress).clamp(0.2, 1.0),
-                  child: Text(
-                    widget.label,
-                    style: GoogleFonts.dmSans(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: widget.backgroundColor,
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                left: _dragProgress * maxDragWidth + 3,
-                top: 3,
-                bottom: 3,
-                child: GestureDetector(
-                  onHorizontalDragUpdate: (details) {
-                    if (_confirmed) return;
-                    setState(() {
-                      _dragProgress =
-                          (_dragProgress + (details.delta.dx / maxDragWidth))
-                              .clamp(0.0, 1.0);
-                    });
-                  },
-                  onHorizontalDragEnd: (details) {
-                    if (_confirmed) return;
-                    if (_dragProgress >= 0.9) {
-                      setState(() {
-                        _dragProgress = 1.0;
-                        _confirmed = true;
-                      });
-                      widget.onConfirmed();
-                      Future.delayed(const Duration(milliseconds: 500), () {
-                        if (mounted) {
-                          setState(() {
-                            _dragProgress = 0.0;
-                            _confirmed = false;
-                          });
-                        }
-                      });
-                    } else {
-                      setState(() {
-                        _dragProgress = 0.0;
-                      });
-                    }
-                  },
-                  child: Container(
-                    width: 46,
-                    height: 46,
-                    decoration: BoxDecoration(
-                      color: widget.backgroundColor,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: widget.backgroundColor.withOpacity(0.3),
-                          blurRadius: 6,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Icon(
-                      _confirmed
-                          ? Icons.check_rounded
-                          : Icons.chevron_right_rounded,
-                      color: widget.foregroundColor,
-                      size: 20,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-}
-
-class _PulsingLocationDot extends StatefulWidget {
-  const _PulsingLocationDot();
-
-  @override
-  State<_PulsingLocationDot> createState() => _PulsingLocationDotState();
-}
-
-class _PulsingLocationDotState extends State<_PulsingLocationDot>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 2),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: 14 + (16 * _controller.value),
-              height: 14 + (16 * _controller.value),
-              decoration: BoxDecoration(
-                color: TruxifyColors.success
-                    .withValues(alpha: 1.0 - _controller.value),
-                shape: BoxShape.circle,
-              ),
-            ),
-            Container(
-              width: 10,
-              height: 10,
-              decoration: const BoxDecoration(
-                color: TruxifyColors.success,
-                shape: BoxShape.circle,
-              ),
-            ),
-          ],
-        );
-      },
     );
   }
 }

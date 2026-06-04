@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:freightfair/theme/app_theme.dart';
+import 'package:truxify/theme/app_theme.dart';
 
 import '../data/mock_data.dart';
 import '../models/app_models.dart';
@@ -16,18 +16,71 @@ class TruckResultsScreen extends StatefulWidget {
 
 class _TruckResultsScreenState extends State<TruckResultsScreen> {
   int _selectedSort = 0;
-  static const _sortChips = ['Best Match', 'Cheapest', 'Fastest', 'Top Rated'];
+  static const _sortChips = [
+    'Best Match',
+    'Cheapest',
+    'Fastest',
+    'Top Rated',
+  ];
+
+  int _price(String price) {
+    return int.parse(
+      price.replaceAll('₹', '').replaceAll(',', '').trim(),
+    );
+  }
+
+  double _eta(String eta) {
+    if (eta.contains('mins')) {
+      return double.parse(eta.replaceAll('mins', '').trim());
+    }
+    if (eta.contains('hrs')) {
+      return double.parse(eta.replaceAll('hrs', '').trim()) * 60;
+    }
+    return double.infinity;
+  }
+
+  List<TruckResultData> get sortedTrucks {
+    final trucks = List<TruckResultData>.from(mockTruckResults);
+
+    switch (_selectedSort) {
+      case 0: // Best Match
+        trucks.sort(
+          (a, b) => (b.badge == 'Best Match' ? 1 : 0)
+              .compareTo(a.badge == 'Best Match' ? 1 : 0),
+        );
+        break;
+      case 1: // Cheapest
+        trucks.sort((a, b) => _price(a.price).compareTo(_price(b.price)));
+        break;
+      case 2: // Fastest
+        trucks.sort((a, b) => _eta(a.eta).compareTo(_eta(b.eta)));
+        break;
+      case 3: // Top Rated
+        trucks.sort((a, b) => b.rating.compareTo(a.rating));
+        break;
+      default:
+        break;
+    }
+
+    return trucks;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final results = sortedTrucks;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('12 trucks found'),
+        title: Text('${results.length} trucks found'),
         leading: IconButton(
-            onPressed: () => Navigator.of(context).pop(),
-            icon: const Icon(Icons.arrow_back_rounded)),
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
         actions: [
-          IconButton(onPressed: () {}, icon: const Icon(Icons.sort_rounded))
+          IconButton(
+            onPressed: () {}, // Filter Section to be implemented
+            icon: const Icon(Icons.sort_rounded),
+          ),
         ],
       ),
       body: ListView(
@@ -56,15 +109,14 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
                   ),
                   selected: selected,
                   onSelected: (_) => setState(() => _selectedSort = index),
-                  selectedColor: FreightFairColors.accent,
+                  selectedColor: TruxifyColors.accent,
                   backgroundColor:
                       Theme.of(context).brightness == Brightness.dark
-                          ? FreightFairColors.darkBackground
+                          ? TruxifyColors.darkBackground
                           : Colors.white,
                   side: BorderSide(
-                    color: selected
-                        ? FreightFairColors.accent
-                        : Colors.grey.shade300,
+                    color:
+                        selected ? TruxifyColors.accent : Colors.grey.shade300,
                     width: 1.2,
                   ),
                   shape: RoundedRectangleBorder(
@@ -81,16 +133,14 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          ...mockTruckResults.asMap().entries.map(
+          ...results.asMap().entries.map(
             (entry) {
-              final index = entry.key;
-              final truck = entry.value;
               return Padding(
                 padding: const EdgeInsets.only(bottom: 14),
                 child: TruckCard(
-                  truck: truck,
+                  truck: entry.value,
                   draft: widget.draft,
-                  isHighlighted: index == 0,
+                  isHighlighted: entry.key == 0,
                 ),
               );
             },

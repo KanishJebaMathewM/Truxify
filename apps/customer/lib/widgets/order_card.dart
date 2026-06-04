@@ -35,7 +35,7 @@ class ActiveOrderCard extends StatelessWidget {
                 ),
                 StatusBadge(
                   label: order.milestone,
-                  color: FreightFairColors.accent,
+                  color: TruxifyColors.accent,
                   filled: true,
                 ),
               ],
@@ -45,7 +45,7 @@ class ActiveOrderCard extends StatelessWidget {
               order.route,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color:
-                        FreightFairColors.adaptiveSecondaryText(context),
+                        TruxifyColors.adaptiveSecondaryText(context),
                   ),
             ),
             const SizedBox(height: 8),
@@ -61,7 +61,7 @@ class ActiveOrderCard extends StatelessWidget {
               'ETA: ${order.eta}',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color:
-                        FreightFairColors.adaptiveSecondaryText(context),
+                        TruxifyColors.adaptiveSecondaryText(context),
                   ),
             ),
             const SizedBox(height: 14),
@@ -88,9 +88,10 @@ class HistoryOrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = order.status == 'Delivered'
-        ? FreightFairColors.accentDark
-        : FreightFairColors.error;
+    final isSuccess = order.status == 'Delivered' || order.status == 'Payment Released';
+    final statusColor = isSuccess
+        ? TruxifyColors.accentDark
+        : TruxifyColors.error;
 
     return GestureDetector(
       onTap: onTap,
@@ -115,7 +116,7 @@ class HistoryOrderCard extends StatelessWidget {
                       .textTheme
                       .bodySmall
                       ?.copyWith(
-                        color: FreightFairColors
+                        color: TruxifyColors
                             .adaptiveSecondaryText(context),
                       ),
                 ),
@@ -134,14 +135,14 @@ class HistoryOrderCard extends StatelessWidget {
                         color:
                             Theme.of(context).brightness ==
                                     Brightness.dark
-                                ? FreightFairColors.accent
-                                : FreightFairColors.accentDark,
+                                ? TruxifyColors.accent
+                                : TruxifyColors.accentDark,
                       ),
                 ),
                 const SizedBox(width: 10),
                 StatusBadge(
-                  label: order.status == 'Delivered'
-                      ? '✅ Delivered'
+                  label: isSuccess
+                      ? '✅ ${order.status}'
                       : '❌ Cancelled',
                   color: statusColor,
                   filled: true,
@@ -156,7 +157,7 @@ class HistoryOrderCard extends StatelessWidget {
                   .bodyMedium
                   ?.copyWith(
                     color:
-                        FreightFairColors.adaptiveSecondaryText(context),
+                        TruxifyColors.adaptiveSecondaryText(context),
                   ),
             ),
             const SizedBox(height: 14),

@@ -78,7 +78,7 @@ class PrimaryButton extends StatelessWidget {
       width: double.infinity,
       child: ElevatedButton(
         onPressed: onPressed,
-        style: ElevatedButton.styleFrom(backgroundColor: backgroundColor ?? FreightFairColors.accent),
+        style: ElevatedButton.styleFrom(backgroundColor: backgroundColor ?? TruxifyColors.accent),
         child: child,
       ),
     );
@@ -97,14 +97,14 @@ class AccentPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: backgroundColor ?? FreightFairColors.accentLight,
+        color: backgroundColor ?? TruxifyColors.accentLight,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
         label,
         style: Theme.of(context).textTheme.labelMedium?.copyWith(
               fontWeight: FontWeight.w700,
-              color: textColor ?? FreightFairColors.accentDark,
+              color: textColor ?? TruxifyColors.accentDark,
             ),
       ),
     );
@@ -124,19 +124,19 @@ class StatCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: elevatedSurfaceDecoration(
-        color: isDark ? FreightFairColors.darkAccentLight : FreightFairColors.accentLight,
+        color: isDark ? TruxifyColors.darkAccentLight : TruxifyColors.accentLight,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: isDark ? FreightFairColors.accent : FreightFairColors.accentDark, size: 20),
+          Icon(icon, color: isDark ? TruxifyColors.accent : TruxifyColors.accentDark, size: 20),
           const SizedBox(height: 12),
           Text(value, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 4),
           Text(
             title,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: isDark ? FreightFairColors.darkSecondaryText : FreightFairColors.secondaryText,
+              color: isDark ? TruxifyColors.darkSecondaryText : TruxifyColors.secondaryText,
             ),
           ),
         ],
@@ -190,7 +190,7 @@ class StatusBadge extends StatelessWidget {
 }
 
 class LiveDot extends StatefulWidget {
-  const LiveDot({super.key, this.color = FreightFairColors.accent, this.size = 10});
+  const LiveDot({super.key, this.color = TruxifyColors.accent, this.size = 10});
 
   final Color color;
   final double size;

@@ -3,6 +3,7 @@ import cors from 'cors';
 import http from 'http';
 import dotenv from 'dotenv';
 import path from 'path';
+import rateLimit from 'express-rate-limit';
 
 // Pre-load DB config to execute client setups
 import './config/db.js';
@@ -12,20 +13,66 @@ import { initWebSocketServer } from './sockets/tracker.js';
 import orderRoutes from './routes/orderRoutes.js';
 import driverRoutes from './routes/driverRoutes.js';
 
-// Configuration load from root folder
-dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
+// Configuration load from root folder is handled in db.js
+
 
 const app = express();
 const server = http.createServer(app);
+app.set('trust proxy', 1); // ← add this
 
 // Enable CORS for frontend clients (Flutter Web, mobile, etc.)
+const corsOrigins = process.env.NODE_ENV === 'production'
+  ? (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean)
+  : '*';
+
 app.use(cors({
-  origin: '*', // Allow all origins for development; tighten in production
+  origin: corsOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-user-role', 'x-user-name']
 }));
 
 app.use(express.json());
+
+// ============================================================================
+// RATE LIMITING
+// ============================================================================
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.originalUrl === '/api/health',
+  message: { error: 'Too many requests, please try again later.' }
+});
+
+const healthLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: 'Health check rate limit exceeded.' }
+});
+
+app.use('/api/', limiter);
+app.use('/api/health', healthLimiter);
+
+
+
+// ============================================================================
+// REQUEST LOGGER
+// ============================================================================
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const color = res.statusCode >= 500 ? '\x1b[31m'
+                : res.statusCode >= 400 ? '\x1b[33m'
+                : res.statusCode >= 200 ? '\x1b[32m' : '\x1b[0m';
+    console.log(
+      `${color}[${new Date().toISOString()}] ${req.method} ${req.originalUrl} → ${res.statusCode} (${duration}ms)\x1b[0m`
+    );
+  });
+  next();
+});
 
 // ============================================================================
 // REST API ROUTING

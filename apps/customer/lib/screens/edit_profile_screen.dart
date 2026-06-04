@@ -51,7 +51,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     width: 100,
                     height: 100,
                     decoration: BoxDecoration(
-                      color: FreightFairColors.accentLight,
+                      color: TruxifyColors.accentLight,
                       shape: BoxShape.circle,
                     ),
                     alignment: Alignment.center,
@@ -60,7 +60,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       style: TextStyle(
                         fontSize: 32,
                         fontWeight: FontWeight.w600,
-                        color: FreightFairColors.accent,
+                        color: TruxifyColors.accent,
                       ),
                     ),
                   ),
@@ -71,7 +71,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       width: 36,
                       height: 36,
                       decoration: BoxDecoration(
-                        color: FreightFairColors.accent,
+                        color: TruxifyColors.accent,
                         shape: BoxShape.circle,
                       ),
                       child: const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 18),
@@ -84,7 +84,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             Text(
               'Full Name',
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: FreightFairColors.primaryText,
+                    color: TruxifyColors.primaryText,
                     fontWeight: FontWeight.w600,
                   ),
             ),
@@ -100,7 +100,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             Text(
               'Company Name',
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: FreightFairColors.primaryText,
+                    color: TruxifyColors.primaryText,
                     fontWeight: FontWeight.w600,
                   ),
             ),
@@ -116,7 +116,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             Text(
               'Phone Number',
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: FreightFairColors.primaryText,
+                    color: TruxifyColors.primaryText,
                     fontWeight: FontWeight.w600,
                   ),
             ),

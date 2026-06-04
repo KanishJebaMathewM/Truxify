@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-
 import '../core/app_routes.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
@@ -23,10 +22,14 @@ class ShellScreen extends StatefulWidget {
 }
 
 class _ShellScreenState extends State<ShellScreen> {
-  final GlobalKey<NavigatorState> _homeNavigatorKey = GlobalKey<NavigatorState>();
-  final GlobalKey<NavigatorState> _tripsNavigatorKey = GlobalKey<NavigatorState>();
-  final GlobalKey<NavigatorState> _earningsNavigatorKey = GlobalKey<NavigatorState>();
-  final GlobalKey<NavigatorState> _profileNavigatorKey = GlobalKey<NavigatorState>();
+  final GlobalKey<NavigatorState> _homeNavigatorKey =
+      GlobalKey<NavigatorState>();
+  final GlobalKey<NavigatorState> _tripsNavigatorKey =
+      GlobalKey<NavigatorState>();
+  final GlobalKey<NavigatorState> _earningsNavigatorKey =
+      GlobalKey<NavigatorState>();
+  final GlobalKey<NavigatorState> _profileNavigatorKey =
+      GlobalKey<NavigatorState>();
   final ValueNotifier<int> _currentIndex = ValueNotifier<int>(0);
   late final List<Widget> _tabs;
 
@@ -40,7 +43,8 @@ class _ShellScreenState extends State<ShellScreen> {
       _buildTabNavigator(
         _profileNavigatorKey,
         ProfileScreen(
-          onOpenDocuments: () => _profileNavigatorKey.currentState?.pushNamed(AppRoutes.documents),
+          onOpenDocuments: () =>
+              _profileNavigatorKey.currentState?.pushNamed(AppRoutes.documents),
           onSelectTab: _openTab,
         ),
       ),
@@ -91,7 +95,8 @@ class _ShellScreenState extends State<ShellScreen> {
         if (args is! RouteMapPoint) {
           return _errorRoute();
         }
-        return truxifyPageRoute((context) => LoadPointDetailScreen(point: args));
+        return truxifyPageRoute(
+            (context) => LoadPointDetailScreen(point: args));
       case AppRoutes.destinationPicker:
         final args = settings.arguments as DestinationPickerArgs?;
         return truxifyPageRoute(
@@ -134,9 +139,14 @@ class _ShellScreenState extends State<ShellScreen> {
       bottomNavigationBar: SafeArea(
         top: false,
         child: Container(
-          decoration: const BoxDecoration(
-            color: TruxifyColors.secondaryBackground,
-            border: Border(top: BorderSide(color: TruxifyColors.border)),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            border: Border(
+                top: BorderSide(
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? TruxifyColors.darkBorder
+                  : TruxifyColors.border,
+            )),
           ),
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
           child: ValueListenableBuilder<int>(
@@ -206,10 +216,20 @@ class _NavItem extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: selected ? TruxifyColors.accentLight : Colors.transparent,
+                  color: selected
+                      ? (Theme.of(context).brightness == Brightness.dark
+                          ? TruxifyColors.darkAccentLight
+                          : TruxifyColors.accentLight)
+                      : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon, size: 20, color: selected ? TruxifyColors.accentDark : TruxifyColors.secondaryText),
+                child: Icon(icon,
+                    size: 20,
+                    color: selected
+                        ? (Theme.of(context).brightness == Brightness.dark
+                            ? TruxifyColors.accent
+                            : TruxifyColors.accentDark)
+                        : TruxifyColors.adaptiveSecondaryText(context)),
               ),
               const SizedBox(height: 6),
               Text(
@@ -219,7 +239,11 @@ class _NavItem extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: selected ? TruxifyColors.accentDark : TruxifyColors.secondaryText,
+                  color: selected
+                      ? (Theme.of(context).brightness == Brightness.dark
+                          ? TruxifyColors.accent
+                          : TruxifyColors.accentDark)
+                      : TruxifyColors.adaptiveSecondaryText(context),
                 ),
               ),
             ],

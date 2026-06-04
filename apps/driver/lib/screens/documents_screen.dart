@@ -830,8 +830,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                           context,
                                           title,
                                           hash,
-                                          _formatDate(DateTime.now()
-                                              .toIso8601String()), // Mocking last verified as today
+                                          _formatDate(doc['last_verified_at'] as String? ?? doc['created_at'] as String?),
                                           validUntilStr,
                                           isWarning,
                                         ),

@@ -127,11 +127,20 @@ export function initWebSocketServer(server) {
 /**
  * Handle incoming GPS coordinate telemetry from a driver app
  */
-async function handleLocationPing(ws, data) {
-  const { driver_id, order_display_id, latitude, longitude, speed, bearing, device_timestamp } = data;
+export async function handleLocationPing(ws, data) {
+  const { driver_id: payloadDriverId, order_display_id, latitude, longitude, speed, bearing, device_timestamp } = data;
+  const driver_id = ws.driverId;
 
-  if (!driver_id || !latitude || !longitude) {
-    return ws.send(JSON.stringify({ error: 'Missing mandatory tracking parameters (driver_id, lat, lng).' }));
+  if (!driver_id) {
+    return ws.send(JSON.stringify({ error: 'Unauthorized: Missing authenticated WebSocket identity.' }));
+  }
+
+  if (payloadDriverId && payloadDriverId !== driver_id) {
+    return ws.send(JSON.stringify({ error: 'Unauthorized: driver_id does not match authenticated WebSocket identity.' }));
+  }
+
+  if (!latitude || !longitude) {
+    return ws.send(JSON.stringify({ error: 'Missing mandatory tracking parameters (lat, lng).' }));
   }
 
   // 🛡️ ADJUSTMENT 2: Device Timestamp Strict Validation

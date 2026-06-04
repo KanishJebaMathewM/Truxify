@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  truxify_shared:
+    path: ../../packages/truxify_shared
   supabase_flutter: ^2.8.3
   flutter_map: ^8.3.0
   flutter_map_cancellable_tile_provider: ^3.0.0

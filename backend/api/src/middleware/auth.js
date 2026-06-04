@@ -9,6 +9,11 @@ export async function authenticate(req, res, next) {
 
   // Support local development bypass mode
   if (bypassAuth) {
+    if (process.env.NODE_ENV === 'production') {
+      return res.status(503).json({
+        error: 'BYPASS_AUTH is enabled in production. This is a misconfiguration and must be disabled before serving traffic.'
+      });
+    }
     const testUserId = req.headers['x-user-id']; // e.g. a Supabase profile UUID
     const testUserRole = req.headers['x-user-role'] || 'customer'; // customer or driver
     const testFullName = req.headers['x-user-name'] || 'Test User';

@@ -10,7 +10,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  supabase_flutter: ^2.8.3
+  truxify_shared:
+    path: ../../packages/truxify_shared
+
+  supabase_flutter: ^2.9.1
+
   google_fonts: ^8.1.0
   flutter_map: ^8.1.1
   latlong2: ^0.9.1

@@ -239,6 +239,10 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       stacked: _stacked,
       fragile: _fragile,
       requirements: _requirements.toList(),
+      pickupLat: _pickupPoint?.latitude,
+      pickupLng: _pickupPoint?.longitude,
+      dropLat: _dropPoint?.latitude,
+      dropLng: _dropPoint?.longitude,
     );
   }
 

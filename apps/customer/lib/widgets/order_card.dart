@@ -88,7 +88,8 @@ class HistoryOrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = order.status == 'Delivered'
+    final isSuccess = order.status == 'Delivered' || order.status == 'Payment Released';
+    final statusColor = isSuccess
         ? TruxifyColors.accentDark
         : TruxifyColors.error;
 
@@ -140,8 +141,8 @@ class HistoryOrderCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 StatusBadge(
-                  label: order.status == 'Delivered'
-                      ? '✅ Delivered'
+                  label: isSuccess
+                      ? '✅ ${order.status}'
                       : '❌ Cancelled',
                   color: statusColor,
                   filled: true,

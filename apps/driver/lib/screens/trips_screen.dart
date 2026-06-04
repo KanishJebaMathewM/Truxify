@@ -2,11 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/app_routes.dart';
+import '../core/driver_session.dart';
+import '../core/supabase_config.dart';
 import '../models/app_models.dart';
+import '../models/marketplace_models.dart';
 import '../theme/app_theme.dart';
-import '../data/mock_data.dart';
 import '../widgets/common_widgets.dart';
+import '../services/marketplace_repository.dart';
 import '../services/trip_service.dart';
 
 class TripsScreen extends StatefulWidget {
@@ -17,6 +21,12 @@ class TripsScreen extends StatefulWidget {
 }
 
 class _TripsScreenState extends State<TripsScreen> {
+  int _selectedChipIndex = 0; // 0: All, 1: Active, 2: Completed, 3: Cancelled
+  int _selectedSortIndex = 0; // 0: Newest, 1: Oldest, 2: Highest, 3: Lowest, 4: By status
+  int _topTabIndex = 0; // 0: Trips, 1: Marketplace
+
+  RealtimeChannel? _bidChannel;
+  final MarketplaceRepository _marketplaceRepository = MarketplaceRepository();
   late final TripService _tripService;
 
   List<Map<String, dynamic>> _trips = [];
@@ -24,10 +34,56 @@ class _TripsScreenState extends State<TripsScreen> {
   Map<String, List<Map<String, dynamic>>> _routePointsByTripId = {};
 
   bool _isLoadingTrips = true;
-  int _selectedChipIndex = 0;
-  int _selectedSortIndex = 0;
 
-  // 0: Newest, 1: Oldest, 2: Highest, 3: Lowest, 4: By status
+  bool _marketplaceLoading = false;
+  String? _marketplaceError;
+  List<LoadOffer> _marketplaceLoads = const [];
+  List<LoadOffer> _enRouteLoads = const [];
+  Map<String, DriverBid> _bidsByLoadId = const {};
+  Future<void> _refreshMarketplace({bool showSpinner = true}) async {
+    if (!SupabaseConfig.isConfigured) {
+      setState(() {
+        _marketplaceLoading = false;
+        _marketplaceError = 'Supabase is not configured. Pass --dart-define=SUPABASE_URL=... and --dart-define=SUPABASE_ANON_KEY=...';
+      });
+      return;
+    }
+    if (showSpinner) {
+      setState(() {
+        _marketplaceLoading = true;
+        _marketplaceError = null;
+      });
+    } else {
+      setState(() => _marketplaceError = null);
+    }
+
+    try {
+      final results = await Future.wait([
+        _marketplaceRepository.fetchLoadOffers(),
+        _marketplaceRepository.fetchEnRouteLoads(),
+        _marketplaceRepository.fetchDriverBids(driverId: DriverSession.driverId),
+      ]);
+
+      final standardLoads = results[0] as List<LoadOffer>;
+      final enRouteLoads = results[1] as List<LoadOffer>;
+      final bids = results[2] as List<DriverBid>;
+      final bidsByLoad = <String, DriverBid>{for (final bid in bids) bid.loadId: bid};
+
+      if (!mounted) return;
+      setState(() {
+        _marketplaceLoads = standardLoads;
+        _enRouteLoads = enRouteLoads;
+        _bidsByLoadId = bidsByLoad;
+        _marketplaceLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _marketplaceError = e.toString();
+        _marketplaceLoading = false;
+      });
+    }
+  }
 
   final List<String> _statusFilters = [
     'All',
@@ -41,6 +97,12 @@ class _TripsScreenState extends State<TripsScreen> {
     super.initState();
     _tripService = TripService();
     _loadTrips();
+    if (SupabaseConfig.isConfigured) {
+      _refreshMarketplace();
+      _subscribeToRealtime();
+    } else {
+      _marketplaceError = 'Supabase is not configured. Pass --dart-define=SUPABASE_URL=... and --dart-define=SUPABASE_ANON_KEY=...';
+    }
   }
 
   Future<void> _loadTrips() async {
@@ -133,6 +195,26 @@ class _TripsScreenState extends State<TripsScreen> {
         tripItems: const [],
       );
     }).toList();
+  }
+
+  void _subscribeToRealtime() {
+    _bidChannel = Supabase.instance.client
+        .channel('driver-bids')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'load_bids',
+          callback: (_) => _refreshMarketplace(),
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    if (SupabaseConfig.isConfigured && _bidChannel != null) {
+      Supabase.instance.client.removeChannel(_bidChannel!);
+    }
+    super.dispose();
   }
 
   List<Trip> _getFilteredAndSortedTrips() {
@@ -362,31 +444,98 @@ class _TripsScreenState extends State<TripsScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'My Trips',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        _topTabIndex == 0 ? 'My Trips' : 'Marketplace',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: TruxifyColors.primaryText,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      _TopTabToggle(
+                        index: _topTabIndex,
+                        onChanged: (value) => setState(() => _topTabIndex = value),
+                      ),
+                    ],
                   ),
-                  InkWell(
-                    onTap: _showSortBottomSheet,
-                    borderRadius: BorderRadius.circular(20),
-                    child: const Padding(
-                      padding: EdgeInsets.all(4.0),
-                      child: Icon(
-                        Icons.tune,
-                        color: TruxifyColors.accent,
-                        size: 22,
+                  if (_topTabIndex == 0)
+                    InkWell(
+                      onTap: _showSortBottomSheet,
+                      borderRadius: BorderRadius.circular(20),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4.0),
+                        child: Icon(
+                          Icons.tune,
+                          color: TruxifyColors.accent,
+                          size: 22,
+                        ),
+                      ),
+                    )
+                  else
+                    InkWell(
+                      onTap: () => _refreshMarketplace(showSpinner: true),
+                      borderRadius: BorderRadius.circular(20),
+                      child: const Padding(
+                        padding: EdgeInsets.all(4.0),
+                        child: Icon(
+                          Icons.refresh_rounded,
+                          color: TruxifyColors.accent,
+                          size: 22,
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),
             Container(height: 1, color: TruxifyColors.border),
 
+            if (_topTabIndex == 1)
+              Expanded(
+                child: RefreshIndicator(
+                  color: TruxifyColors.accent,
+                  onRefresh: () => _refreshMarketplace(showSpinner: false),
+                  child: _MarketplaceBody(
+                    loading: _marketplaceLoading,
+                    error: _marketplaceError,
+                    standardLoads: _marketplaceLoads,
+                    enRouteLoads: _enRouteLoads,
+                    bidsByLoadId: _bidsByLoadId,
+                    onOpenLoad: (load) => Navigator.of(context).pushNamed(AppRoutes.loadDetail, arguments: load),
+                    onSubmitBid: (load, amount) async {
+                      final loadId = load.id;
+                      if (loadId.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('This load is missing an id.')),
+                        );
+                        return;
+                      }
+                      try {
+                        final bid = await _marketplaceRepository.submitBid(
+                          loadId: loadId,
+                          driverId: DriverSession.driverId,
+                          amount: amount,
+                        );
+                        if (!context.mounted) return;
+                        setState(() {
+                          _bidsByLoadId = <String, DriverBid>{..._bidsByLoadId, bid.loadId: bid};
+                        });
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Bid submitted (Pending).')),
+                        );
+                      } catch (e) {
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Failed to submit bid: $e')),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              )
+            else
             // Summary Strip
             Container(
               color: Theme.of(context).colorScheme.surface,
@@ -847,6 +996,366 @@ class _TripsScreenState extends State<TripsScreen> {
                 ),
               );
             }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TopTabToggle extends StatelessWidget {
+  const _TopTabToggle({required this.index, required this.onChanged});
+
+  final int index;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget chip(String label, int value) {
+      final selected = index == value;
+      return InkWell(
+        onTap: () => onChanged(value),
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: selected ? TruxifyColors.accentLight : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: TruxifyColors.border),
+          ),
+          child: Text(
+            label,
+            style: GoogleFonts.dmSans(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: selected ? TruxifyColors.accentDark : TruxifyColors.secondaryText,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Row(
+      children: [
+        chip('Trips', 0),
+        const SizedBox(width: 8),
+        chip('Loads', 1),
+      ],
+    );
+  }
+}
+
+class _MarketplaceBody extends StatelessWidget {
+  const _MarketplaceBody({
+    required this.loading,
+    required this.error,
+    required this.standardLoads,
+    required this.enRouteLoads,
+    required this.bidsByLoadId,
+    required this.onOpenLoad,
+    required this.onSubmitBid,
+  });
+
+  final bool loading;
+  final String? error;
+  final List<LoadOffer> standardLoads;
+  final List<LoadOffer> enRouteLoads;
+  final Map<String, DriverBid> bidsByLoadId;
+  final ValueChanged<LoadOffer> onOpenLoad;
+  final Future<void> Function(LoadOffer load, num amount) onSubmitBid;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading && standardLoads.isEmpty && enRouteLoads.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: const [
+          SizedBox(height: 120),
+          Center(child: CircularProgressIndicator()),
+        ],
+      );
+    }
+
+    if (error != null && standardLoads.isEmpty && enRouteLoads.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: [
+          AppCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Could not load marketplace', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                Text(error!, style: Theme.of(context).textTheme.bodyMedium),
+                const SizedBox(height: 14),
+                OutlinedAccentButton(
+                  label: 'Pull to refresh',
+                  onPressed: null,
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (standardLoads.isEmpty && enRouteLoads.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        children: const [
+          SizedBox(height: 80),
+          Center(child: Text('No loads available right now. Pull to refresh.')),
+        ],
+      );
+    }
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+      children: [
+        if (enRouteLoads.isNotEmpty) ...[
+          const SectionHeader(
+            title: 'En-route opportunities',
+            subtitle: 'Pick up nearby loads with minimal detours',
+          ),
+          const SizedBox(height: 10),
+          ...enRouteLoads.map(
+            (load) => _LoadOfferCard(
+              load: load,
+              bid: bidsByLoadId[load.id],
+              onOpen: () => onOpenLoad(load),
+              onBid: (amount) => onSubmitBid(load, amount),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (standardLoads.isNotEmpty) ...[
+          const SectionHeader(
+            title: 'Marketplace loads',
+            subtitle: 'Available loads you can bid for',
+          ),
+          const SizedBox(height: 10),
+          ...standardLoads.map(
+            (load) => _LoadOfferCard(
+              load: load,
+              bid: bidsByLoadId[load.id],
+              onOpen: () => onOpenLoad(load),
+              onBid: (amount) => onSubmitBid(load, amount),
+            ),
+          ),
+        ],
+        if (error != null) ...[
+          const SizedBox(height: 14),
+          Text(
+            'Some data may be out of date. Last error: $error',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.secondaryText),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _LoadOfferCard extends StatelessWidget {
+  const _LoadOfferCard({
+    required this.load,
+    required this.bid,
+    required this.onOpen,
+    required this.onBid,
+  });
+
+  final LoadOffer load;
+  final DriverBid? bid;
+  final VoidCallback onOpen;
+  final Future<void> Function(num amount) onBid;
+
+  StatusPill _pillFor(BidStatus status) {
+    switch (status) {
+      case BidStatus.accepted:
+        return const StatusPill(label: 'Accepted', backgroundColor: TruxifyColors.successLight, foregroundColor: TruxifyColors.success);
+      case BidStatus.rejected:
+        return const StatusPill(label: 'Rejected', backgroundColor: TruxifyColors.errorLight, foregroundColor: TruxifyColors.error);
+      case BidStatus.pending:
+      default:
+        return const StatusPill(label: 'Pending', backgroundColor: TruxifyColors.warningLight, foregroundColor: TruxifyColors.warning);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: 12),
+      onTap: onOpen,
+      elevation: 2,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(load.route, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    if (load.routeSubtitle.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(load.routeSubtitle, style: Theme.of(context).textTheme.bodySmall),
+                    ],
+                  ],
+                ),
+              ),
+              if (bid != null) _pillFor(bid!.status),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 6,
+            children: [
+              _MetaChip(icon: Icons.inventory_2_rounded, label: load.goods),
+              _MetaChip(icon: Icons.scale_rounded, label: load.weight),
+              _MetaChip(icon: Icons.account_balance_wallet_rounded, label: load.freightValue),
+              _MetaChip(icon: Icons.trending_up_rounded, label: load.estimatedProfit),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Est. profit: ${load.netProfit}',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              TextButton(
+                onPressed: () async {
+                  final result = await showModalBottomSheet<num>(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: TruxifyColors.cardBackground,
+                    shape: const RoundedRectangleBorder(
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                    ),
+                    builder: (_) => _BidBottomSheet(load: load, existingBid: bid),
+                  );
+                  if (result != null) {
+                    await onBid(result);
+                  }
+                },
+                style: TextButton.styleFrom(foregroundColor: TruxifyColors.accent),
+                child: Text(bid == null ? 'Bid' : 'Update bid'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MetaChip extends StatelessWidget {
+  const _MetaChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: TruxifyColors.secondaryBackground,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: TruxifyColors.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: TruxifyColors.secondaryText),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.primaryText),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BidBottomSheet extends StatefulWidget {
+  const _BidBottomSheet({required this.load, required this.existingBid});
+
+  final LoadOffer load;
+  final DriverBid? existingBid;
+
+  @override
+  State<_BidBottomSheet> createState() => _BidBottomSheetState();
+}
+
+class _BidBottomSheetState extends State<_BidBottomSheet> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.existingBid?.amount.toString(),
+  );
+  String? _error;
+  bool _submitting = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final raw = _controller.text.trim();
+    final amount = num.tryParse(raw);
+    if (amount == null || amount <= 0) {
+      setState(() => _error = 'Enter a valid bid amount.');
+      return;
+    }
+    setState(() {
+      _error = null;
+      _submitting = true;
+    });
+    Navigator.of(context).pop(amount);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const BottomSheetHandle(),
+          const SizedBox(height: 16),
+          Text('Submit bid', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 4),
+          Text(widget.load.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.secondaryText)),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _controller,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'Bid amount',
+              hintText: 'e.g. 25000',
+              errorText: _error,
+            ),
+          ),
+          const SizedBox(height: 16),
+          PrimaryButton(
+            label: _submitting ? 'Submitting...' : 'Submit',
+            onPressed: _submitting ? null : _submit,
+          ),
+          const SizedBox(height: 8),
+          TextActionButton(
+            label: 'Cancel',
+            onPressed: _submitting ? null : () => Navigator.of(context).pop(),
+            color: TruxifyColors.secondaryText,
           ),
         ],
       ),

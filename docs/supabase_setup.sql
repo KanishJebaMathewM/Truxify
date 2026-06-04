@@ -636,47 +636,16 @@ create index if not exists idx_support_tickets_status on support_tickets (status
 -- 24. EARNINGS DAILY SUMMARY  (pre-aggregated for the earnings chart)
 -- ────────────────────────────────────────────────────────────────────────────
 create table if not exists earnings_daily (
-  id          uuid primary key default gen_random_uuid(),
-  driver_id   uuid not null,                                  -- profiles.id
-  day_date    date not null,
-  amount      int not null default 0,                         -- paisa
-  trip_count  int not null default 0,
-  created_at  timestamptz not null default now()
+  id           uuid primary key default gen_random_uuid(),
+  driver_id    uuid not null references profiles(id) on delete cascade,
+  day_date     date not null,
+  amount       int not null default 0,                          -- paisa
+  trip_count   int not null default 0,
+  hours_driven numeric(4,2) not null default 0.00,
+  created_at   timestamptz not null default now()
 );
 
 create unique index if not exists idx_earnings_daily_driver_day on earnings_daily (driver_id, day_date);
-
-
--- ────────────────────────────────────────────────────────────────────────────
--- 25. MILESTONES  (gamification achievements for drivers)
--- ────────────────────────────────────────────────────────────────────────────
-create table if not exists milestones (
-  id          uuid primary key default gen_random_uuid(),
-  title       text not null,                                  -- '100 Trips'
-  subtitle    text not null,                                  -- 'Century club member'
-  icon_name   text,                                           -- Flutter icon reference
-  threshold   int not null,                                   -- numeric threshold value
-  metric      text not null
-              check (metric in ('trips','earnings','rating','completion_rate')),
-  is_active   boolean not null default true,
-  created_at  timestamptz not null default now()
-);
-
-
--- ────────────────────────────────────────────────────────────────────────────
--- 26. DRIVER MILESTONES  (which milestones a driver has achieved)
--- ────────────────────────────────────────────────────────────────────────────
-create table if not exists driver_milestones (
-  id            uuid primary key default gen_random_uuid(),
-  driver_id     uuid not null,                                -- profiles.id
-  milestone_id  uuid not null,                                -- milestones.id
-  achieved      boolean not null default false,
-  progress      numeric(5,2),                                 -- 0.00–100.00 (percentage)
-  achieved_at   timestamptz,
-  created_at    timestamptz not null default now()
-);
-
-create unique index if not exists idx_driver_milestones_unique on driver_milestones (driver_id, milestone_id);
 
 
 -- ############################################################################
@@ -707,8 +676,6 @@ alter table notifications           enable row level security;
 alter table faqs                    enable row level security;
 alter table support_tickets         enable row level security;
 alter table earnings_daily          enable row level security;
-alter table milestones              enable row level security;
-alter table driver_milestones       enable row level security;
 
 
 -- ############################################################################
@@ -848,15 +815,6 @@ create policy "Service role full access on earnings_daily"
   on earnings_daily for all
   using (true) with check (true);
 
--- 25. MILESTONES
-create policy "Service role full access on milestones"
-  on milestones for all
-  using (true) with check (true);
-
--- 26. DRIVER MILESTONES
-create policy "Service role full access on driver_milestones"
-  on driver_milestones for all
-  using (true) with check (true);
 
 
 -- ############################################################################
@@ -1040,6 +998,7 @@ create or replace function complete_trip_tx(
   p_trip_display_id text,
   p_driver_id       uuid,
   p_net_earnings    int,
+  p_hours_driven    numeric(4,2),
   p_end_time        text
 ) returns void
 language plpgsql
@@ -1069,12 +1028,13 @@ begin
      'Payout for Trip ' || p_trip_display_id);
 
   -- Step 4: Upsert daily earnings summary
-  insert into earnings_daily (driver_id, day_date, amount, trip_count)
-  values (p_driver_id, current_date, p_net_earnings, 1)
+  insert into earnings_daily (driver_id, day_date, amount, trip_count, hours_driven)
+  values (p_driver_id, current_date, p_net_earnings, 1, p_hours_driven)
   on conflict (driver_id, day_date)
   do update set
-    amount     = earnings_daily.amount + excluded.amount,
-    trip_count = earnings_daily.trip_count + 1;
+    amount       = earnings_daily.amount + excluded.amount,
+    trip_count   = earnings_daily.trip_count + 1,
+    hours_driven = earnings_daily.hours_driven + excluded.hours_driven;
 end;
 $$;
 
@@ -1252,47 +1212,6 @@ values
   ('Kolkata → Patna',   'Low',    600000,  'Low but consistent demand',    true)
 on conflict do nothing;
 
--- Seed Milestones
-insert into milestones (title, subtitle, icon_name, threshold, metric)
-values
-  ('First Delivery',  'Welcome to the road!',       'local_shipping', 1,    'trips'),
-  ('10 Trips',        'Getting warmed up',           'directions_car', 10,   'trips'),
-  ('50 Trips',        'Half-century champion',       'emoji_events',   50,   'trips'),
-  ('100 Trips',       'Century club member',         'military_tech',  100,  'trips'),
-  ('500 Trips',       'Road warrior',                'shield',         500,  'trips'),
-  ('₹1 Lakh Earned',  'First lakh milestone',        'currency_rupee', 10000000, 'earnings'),
-  ('₹5 Lakh Earned',  'Five lakh champion',          'diamond',        50000000, 'earnings'),
-  ('4.5★ Rating',     'Customer favourite',          'star',           450,  'rating'),
-  ('99% Completion',  'Reliability legend',          'verified',       9900, 'completion_rate')
-on conflict do nothing;
-
--- Seed Driver Milestones (progress for seed driver)
-insert into driver_milestones (driver_id, milestone_id, achieved, progress, achieved_at)
-select
-  'b2222222-2222-2222-2222-222222222222',
-  m.id,
-  case
-    when m.metric = 'trips' and m.threshold <= 148 then true
-    when m.metric = 'earnings' and m.threshold <= 52500000 then true
-    when m.metric = 'rating' and m.threshold <= 472 then true
-    when m.metric = 'completion_rate' and m.threshold <= 9650 then true
-    else false
-  end,
-  case
-    when m.metric = 'trips' then least(100.00, round((148.0 / m.threshold) * 100, 2))
-    when m.metric = 'earnings' then least(100.00, round((52500000.0 / m.threshold) * 100, 2))
-    when m.metric = 'rating' then least(100.00, round((472.0 / m.threshold) * 100, 2))
-    when m.metric = 'completion_rate' then least(100.00, round((9650.0 / m.threshold) * 100, 2))
-  end,
-  case
-    when m.metric = 'trips' and m.threshold <= 148 then now() - interval '30 days'
-    when m.metric = 'earnings' and m.threshold <= 52500000 then now() - interval '20 days'
-    when m.metric = 'rating' and m.threshold <= 472 then now() - interval '15 days'
-    when m.metric = 'completion_rate' and m.threshold <= 9650 then now() - interval '10 days'
-    else null
-  end
-from milestones m
-on conflict (driver_id, milestone_id) do nothing;
 
 -- Seed FAQs
 insert into faqs (app_type, question, answer, sort_order, is_active)
@@ -1335,15 +1254,15 @@ values
 on conflict do nothing;
 
 -- Seed Earnings Daily (last 7 days for the seed driver)
-insert into earnings_daily (driver_id, day_date, amount, trip_count)
+insert into earnings_daily (driver_id, day_date, amount, trip_count, hours_driven)
 values
-  ('b2222222-2222-2222-2222-222222222222', current_date - 6, 1850000, 2),
-  ('b2222222-2222-2222-2222-222222222222', current_date - 5, 0, 0),
-  ('b2222222-2222-2222-2222-222222222222', current_date - 4, 2400000, 3),
-  ('b2222222-2222-2222-2222-222222222222', current_date - 3, 1200000, 1),
-  ('b2222222-2222-2222-2222-222222222222', current_date - 2, 3100000, 3),
-  ('b2222222-2222-2222-2222-222222222222', current_date - 1, 1600000, 2),
-  ('b2222222-2222-2222-2222-222222222222', current_date,     900000, 1)
+  ('b2222222-2222-2222-2222-222222222222', current_date - 6, 1850000, 2, 5.20),
+  ('b2222222-2222-2222-2222-222222222222', current_date - 5, 0, 0, 0.00),
+  ('b2222222-2222-2222-2222-222222222222', current_date - 4, 2400000, 3, 8.50),
+  ('b2222222-2222-2222-2222-222222222222', current_date - 3, 1200000, 1, 3.50),
+  ('b2222222-2222-2222-2222-222222222222', current_date - 2, 3100000, 3, 9.00),
+  ('b2222222-2222-2222-2222-222222222222', current_date - 1, 1600000, 2, 4.80),
+  ('b2222222-2222-2222-2222-222222222222', current_date,     900000, 1, 2.50)
 on conflict (driver_id, day_date) do nothing;
 
 -- Seed Wallet Transactions (recent history)
@@ -1361,11 +1280,11 @@ on conflict do nothing;
 -- ✅ SETUP COMPLETE
 -- ============================================================================
 -- Your Supabase database now has:
---   • 26 tables with indexes
+--   • 24 tables with indexes
 --   • Row Level Security enabled + permissive policies
 --   • Auto-updating `updated_at` triggers
 --   • 4 RPC functions: accept_bid_tx, withdraw_funds_tx, complete_trip_tx, submit_rating_tx
---   • Seed data: 1 customer, 1 driver, 1 truck, 1 order, FAQs, milestones, etc.
+--   • Seed data: 1 customer, 1 driver, 1 truck, 1 order, FAQs, etc.
 --
 -- NEXT STEPS:
 --   1. Copy your Supabase URL + anon key into .env

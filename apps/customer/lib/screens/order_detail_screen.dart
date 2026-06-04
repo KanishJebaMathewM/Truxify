@@ -75,7 +75,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final delivered = widget.order.status == 'Delivered';
+    final isSuccess = widget.order.status == 'Delivered' || widget.order.status == 'Payment Released';
 
     return Scaffold(
       appBar: AppBar(
@@ -97,8 +97,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 Text('Date: ${widget.order.date}', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 8),
                 StatusBadge(
-                  label: widget.order.status == 'Delivered' ? '✅ Delivered' : '❌ Cancelled',
-                  color: delivered ? TruxifyColors.accentDark : TruxifyColors.error,
+                  label: isSuccess ? '✅ ${widget.order.status}' : '❌ Cancelled',
+                  color: isSuccess ? TruxifyColors.accentDark : TruxifyColors.error,
                   filled: true,
                 ),
               ],
@@ -187,7 +187,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             },
           ),
           const SizedBox(height: 18),
-          if (widget.order.status == 'Delivered') ...[
+          if (isSuccess) ...[
             Text('Rate your driver', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
             const SizedBox(height: 10),
             Row(

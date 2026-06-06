@@ -56,6 +56,12 @@ const CUSTOMER_HEADERS = {
   'x-user-name': 'Test Customer',
 };
 
+const DRIVER_HEADERS = {
+  'x-user-id': '00000000-0000-0000-0000-000000000def',
+  'x-user-role': 'driver',
+  'x-user-name': 'Test Driver',
+};
+
 const validOrderBody = {
   pickup_address: '123 Pickup St, Mumbai',
   pickup_lat: 19.0760,
@@ -226,6 +232,39 @@ describe('POST /api/orders — server-side pricing contract', () => {
     expect(orderInsert.toll_estimate).not.toBe(99999);
     expect(orderInsert.platform_fee).not.toBe(99999);
     expect(orderInsert.total_amount).not.toBe(99999);
+  });
+});
+
+describe('POST /api/orders/:id/bids — duplicate bid prevention', () => {
+  beforeEach(() => {
+    m.store.load_offers = [];
+    m.store.load_bids = [];
+    m.calls.length = 0;
+  });
+
+  it('rejects a duplicate pending bid from the same driver on the same load', async () => {
+    const app = buildApp();
+    m.store.load_offers.push({
+      id: 'load-duplicate',
+      status: 'available',
+    });
+    m.store.load_bids.push({
+      id: 'existing-bid',
+      load_id: 'load-duplicate',
+      driver_id: DRIVER_HEADERS['x-user-id'],
+      bid_amount: 500000,
+      status: 'pending',
+    });
+
+    const res = await request(app)
+      .post('/api/orders/load-duplicate/bids')
+      .set(DRIVER_HEADERS)
+      .send({ bid_amount: 510000 });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'You already have a pending bid for this load.' });
+    const bidInserts = m.calls.filter(c => c.table === 'load_bids' && c.mode === 'insert');
+    expect(bidInserts).toHaveLength(0);
   });
 });
 

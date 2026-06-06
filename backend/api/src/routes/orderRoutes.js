@@ -273,6 +273,25 @@ router.post('/:id/bids', authenticate, requireRole(['driver']), async (req, res)
       return res.status(410).json({ error: 'Load is no longer available for bidding.' });
     }
 
+    const { data: existingBid, error: existingBidErr } = await supabase
+      .from('load_bids')
+      .select('id')
+      .eq('load_id', loadOfferId)
+      .eq('driver_id', req.user.id)
+      .eq('status', 'pending')
+      .maybeSingle();
+
+    if (existingBidErr) {
+      return res.status(500).json({
+        error: 'Failed to verify existing bids.',
+        details: existingBidErr.message
+      });
+    }
+
+    if (existingBid) {
+      return res.status(409).json({ error: 'You already have a pending bid for this load.' });
+    }
+
     // Submit bid
     const { data: bid, error: bidErr } = await supabase
       .from('load_bids')

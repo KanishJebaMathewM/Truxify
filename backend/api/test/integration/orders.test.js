@@ -228,3 +228,45 @@ describe('POST /api/orders — server-side pricing contract', () => {
     expect(orderInsert.total_amount).not.toBe(99999);
   });
 });
+
+describe('POST /api/orders/:id/bids/:bidId/accept — bid ownership', () => {
+  beforeEach(() => {
+    m.store.orders = [];
+    m.store.load_offers = [];
+    m.store.load_bids = [];
+    m.store.profiles = [];
+    m.store.driver_details = [];
+    m.store.trucks = [];
+    m.calls.length = 0;
+  });
+
+  it('rejects a pending bid when it belongs to a different order load offer', async () => {
+    const app = buildApp();
+    m.store.orders.push({
+      id: 'order-owned',
+      order_display_id: 'ORDER-OWNED',
+      customer_id: CUSTOMER_HEADERS['x-user-id'],
+    });
+    m.store.load_offers.push({
+      id: 'load-owned',
+      order_display_id: 'ORDER-OWNED',
+      customer_id: CUSTOMER_HEADERS['x-user-id'],
+    });
+    m.store.load_bids.push({
+      id: 'bid-from-other-load',
+      load_id: 'load-other',
+      driver_id: 'driver-other',
+      bid_amount: 42000,
+      status: 'pending',
+    });
+
+    const res = await request(app)
+      .post('/api/orders/order-owned/bids/bid-from-other-load/accept')
+      .set(CUSTOMER_HEADERS)
+      .send();
+
+    expect(res.status).toBe(403);
+    expect(res.body).toEqual({ error: 'Access Denied: Bid does not belong to this order.' });
+    expect(m.calls.some(c => c.rpc === 'accept_bid_tx')).toBe(false);
+  });
+});

@@ -135,6 +135,28 @@ class SupabaseQueryBuilder {
       }
       return { data: rows, error: null };
     }
+    if (this._mode === 'update') {
+  let rows = this._store[this._table] ?? [];
+
+  for (const row of rows) {
+    const matches = this._filters.every(f => {
+      const v = row[f.col];
+
+      switch (f.op) {
+        case 'eq':
+          return v === f.val;
+        default:
+          return true;
+      }
+    });
+
+    if (matches) {
+      Object.assign(row, this._payload);
+    }
+  }
+
+  return { data: rows, error: null };
+}
 
     if (this._mode === 'select' || this._mode === null) {
       let rows = (this._store[this._table] ?? []).slice();

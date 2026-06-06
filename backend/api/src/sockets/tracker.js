@@ -1,5 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
+import { mongoDb, redisClient, firebaseAdmin, supabase } from '../config/db.js';
 
 // In-memory mapping of active client subscriptions
 const trackingSubscriptions = new Map();
@@ -40,6 +40,10 @@ export function initWebSocketServer(server) {
         return;
       }
       ws.driverId = reqUrl.searchParams.get('driver_id') || 'test_driver';
+      ws.user = {
+        id: reqUrl.searchParams.get('user_id') || ws.driverId,
+        role: reqUrl.searchParams.get('user_role') || 'driver',
+      };
       console.log(`🔓 WS Auth bypassed for driver: ${ws.driverId}`);
     } else {
       if (!token) {
@@ -48,8 +52,30 @@ export function initWebSocketServer(server) {
       }
       try {
         const decoded = await firebaseAdmin.auth().verifyIdToken(token);
-        ws.driverId = decoded.uid;
-        console.log(`✅ WS Authenticated driver: ${ws.driverId}`);
+        if (!supabase) {
+          ws.close(4001, 'Unauthorized: Profile lookup is not configured');
+          return;
+        }
+
+        const { data: profile, error } = await supabase
+          .from('profiles')
+          .select('id, firebase_uid, role')
+          .eq('firebase_uid', decoded.uid)
+          .eq('is_active', true)
+          .maybeSingle();
+
+        if (error || !profile) {
+          ws.close(4001, 'Unauthorized: User profile not found');
+          return;
+        }
+
+        ws.user = {
+          id: profile.id,
+          uid: profile.firebase_uid,
+          role: profile.role,
+        };
+        ws.driverId = profile.id;
+        console.log(`✅ WS Authenticated user: ${ws.user.id}`);
       } catch (e) {
         console.error('WS Auth failed:', e.message);
         ws.close(4001, 'Unauthorized: Invalid token');
@@ -123,7 +149,7 @@ export async function handleTrackingMessage(ws, message) {
         break;
 
       case 'subscribe_tracking':
-        handleSubscribe(ws, data);
+        await handleSubscribe(ws, data);
         break;
 
       case 'unsubscribe_tracking':
@@ -299,12 +325,18 @@ function initTelemetryScheduler() {
   }, BUFFER_FLUSH_INTERVAL_MS);
 }
 
-function handleSubscribe(ws, data) {
+export async function handleSubscribe(ws, data) {
   const { order_display_id, driver_id } = data;
   const targetId = order_display_id || driver_id;
 
   if (!targetId) {
     return ws.send(JSON.stringify({ error: 'Subscription target (order_display_id or driver_id) is missing.' }));
+  }
+
+  const authorized = await canSubscribe(ws, { order_display_id, driver_id });
+
+  if (!authorized) {
+    return ws.send(JSON.stringify({ error: 'Forbidden: You are not authorized to subscribe to this tracking target.' }));
   }
 
   if (!trackingSubscriptions.has(targetId)) {
@@ -314,6 +346,43 @@ function handleSubscribe(ws, data) {
   trackingSubscriptions.get(targetId).add(ws);
   console.log(`🔌 Client subscribed to telemetry updates for: "${targetId}"`);
   ws.send(JSON.stringify({ status: 'subscribed', target: targetId }));
+}
+
+async function canSubscribe(ws, { order_display_id, driver_id }) {
+  const userId = ws.user?.id || ws.driverId;
+  const userRole = ws.user?.role;
+
+  if (!userId) {
+    return false;
+  }
+
+  if (driver_id) {
+    return driver_id === userId || driver_id === ws.driverId;
+  }
+
+  if (!order_display_id || !supabase) {
+    return false;
+  }
+
+  const { data: order, error } = await supabase
+    .from('orders')
+    .select('customer_id, driver_id')
+    .eq('order_display_id', order_display_id)
+    .maybeSingle();
+
+  if (error || !order) {
+    return false;
+  }
+
+  if (userRole === 'customer') {
+    return order.customer_id === userId;
+  }
+
+  if (userRole === 'driver') {
+    return order.driver_id === userId;
+  }
+
+  return order.customer_id === userId || order.driver_id === userId;
 }
 
 function handleUnsubscribe(ws, data) {
@@ -338,3 +407,9 @@ function removeClientFromAllSubscriptions(ws) {
     }
   });
 }
+
+export const __testing = {
+  resetTrackingSubscriptions() {
+    trackingSubscriptions.clear();
+  },
+};

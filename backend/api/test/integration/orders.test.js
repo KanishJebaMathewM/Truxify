@@ -16,6 +16,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 
+const routeEstimateMock = vi.fn();
+
 // Hoisted mock: swap supabase out for our in-memory builder.
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 
@@ -33,7 +35,12 @@ vi.mock('../../src/sockets/tracker.js', () => ({
   initWebSocketServer: () => ({}),
 }));
 
+vi.mock('../../src/services/osrm.js', () => ({
+  getRouteEstimate: routeEstimateMock,
+}));
+
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
+const { computeOrderPricing } = await import('../../src/lib/pricing.js');
 import express from 'express';
 
 function buildApp() {
@@ -78,6 +85,8 @@ describe('POST /api/orders — server-side pricing contract', () => {
     m.store.order_timeline = [];
     m.store.load_offers = [];
     m.calls.length = 0;
+    routeEstimateMock.mockReset();
+    routeEstimateMock.mockResolvedValue(null);
   });
 
   it('happy path: 201, server-computed pricing persisted, no client monetary field in store', async () => {
@@ -136,6 +145,36 @@ describe('POST /api/orders — server-side pricing contract', () => {
     // fuelCost + toll_cost + net_profit = baseFreight (the driver-side ledger invariant)
     expect(offerInsert.fuel_cost + offerInsert.toll_cost + offerInsert.net_profit)
       .toBe(offerInsert.freight_value);
+  });
+
+  it('uses OSRM road distance for persisted pricing when routing succeeds', async () => {
+    routeEstimateMock.mockResolvedValueOnce({ distanceKm: 1423.456, durationSeconds: 90000 });
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders')
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+
+    expect(res.status).toBe(201);
+    expect(routeEstimateMock).toHaveBeenCalledWith({
+      pickupLat: validOrderBody.pickup_lat,
+      pickupLng: validOrderBody.pickup_lng,
+      dropLat: validOrderBody.drop_lat,
+      dropLng: validOrderBody.drop_lng,
+    });
+
+    const orderInsert = m.calls.find(c => c.table === 'orders' && c.mode === 'insert').payload;
+    const straightLinePricing = computeOrderPricing({
+      pickupLat: validOrderBody.pickup_lat,
+      pickupLng: validOrderBody.pickup_lng,
+      dropLat: validOrderBody.drop_lat,
+      dropLng: validOrderBody.drop_lng,
+      weightTonnes: validOrderBody.weight_tonnes,
+    });
+
+    expect(orderInsert.base_freight).not.toBe(straightLinePricing.baseFreight);
+    expect(orderInsert.toll_estimate).toBe(Math.round(200 * 1423.456));
   });
 
   it('bad coordinates: NaN drop_lat → 400 with a clear pricing error', async () => {

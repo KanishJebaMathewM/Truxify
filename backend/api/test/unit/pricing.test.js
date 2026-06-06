@@ -144,6 +144,11 @@ describe('pricing lib — computeOrderPricing', () => {
     expect(p.distanceKm).toBe(Math.round(p.distanceKm * 100) / 100);
   });
 
+  it('uses OSRM road distance when a finite roadDistanceKm is supplied', () => {
+    const p = computeOrderPricing({ ...mumbaiDelhi, roadDistanceKm: 1423.456 });
+    expect(p.distanceKm).toBe(1423.46);
+  });
+
   it('Mumbai → Delhi, 10 tonnes, no flags: all-positive amounts, total = base + toll + platform', () => {
     const p = computeOrderPricing(mumbaiDelhi);
     expect(p.distanceKm).toBeGreaterThan(1100);

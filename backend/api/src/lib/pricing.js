@@ -73,6 +73,7 @@ export function haversineKm(lat1, lon1, lat2, lon2) {
  * @param {number} input.dropLat     - decimal degrees
  * @param {number} input.dropLng     - decimal degrees
  * @param {number} input.weightTonnes - cargo weight in tonnes (> 0)
+ * @param {number} [input.roadDistanceKm] - routed road distance in kilometres
  * @param {boolean} [input.isFragile] - fragile cargo multiplier
  * @param {boolean} [input.isStackable] - stackable cargo discount
  * @param {object} [rateCard] - override rate card (mainly for tests)
@@ -85,14 +86,17 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   }
   const {
     pickupLat, pickupLng, dropLat, dropLng,
-    weightTonnes, isFragile = false, isStackable = false,
+    weightTonnes, roadDistanceKm, isFragile = false, isStackable = false,
   } = input;
 
   if (!Number.isFinite(weightTonnes) || weightTonnes <= 0) {
     throw new RangeError(`weightTonnes must be a positive number, got ${weightTonnes}`);
   }
 
-  const distanceKm = haversineKm(pickupLat, pickupLng, dropLat, dropLng);
+  const fallbackDistanceKm = haversineKm(pickupLat, pickupLng, dropLat, dropLng);
+  const distanceKm = Number.isFinite(roadDistanceKm) && roadDistanceKm >= 0
+    ? roadDistanceKm
+    : fallbackDistanceKm;
 
   // Base rate scaled by goods class.
   let rate = rateCard.ratePerTonneKm;

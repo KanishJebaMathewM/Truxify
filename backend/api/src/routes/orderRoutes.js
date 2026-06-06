@@ -456,20 +456,19 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
 });
 
 // ============================================================================
-// 7. UPDATE ORDER STATUS (DRIVER) - Generate OTP when moving to in_transit
+// 7. UPDATE ORDER MILESTONE (DRIVER) - Generate OTP when moving to In Transit
 // ============================================================================
-router.put('/:id/status', authenticate, requireRole(['driver']), async (req, res) => {
+router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req, res) => {
   const orderId = req.params.id;
-  const { status } = req.body;
+  const { milestone } = req.body;
 
-  if (!status) {
-    return res.status(400).json({ error: 'Status is required.' });
+  if (!milestone) {
+    return res.status(400).json({ error: 'Milestone is required.' });
   }
 
-  // Prevent direct transition to delivered - must use OTP verification
-  const validStatuses = ['truck_assigned', 'picked_up', 'in_transit', 'arriving', 'cancelled'];
-  if (!validStatuses.includes(status)) {
-    return res.status(400).json({ error: 'Invalid order status. Use /verify-delivery to confirm delivery.' });
+  // Prevent direct transition to Delivered - must use OTP verification
+  if (milestone === 'Delivered') {
+    return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
   }
 
   try {
@@ -488,21 +487,43 @@ router.put('/:id/status', authenticate, requireRole(['driver']), async (req, res
       return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
     }
 
-    // 7.2 Prepare updates
+    // 7.2 Determine corresponding order status from milestone
+    let status = null;
+    switch (milestone) {
+      case 'Truck Assigned':
+        status = 'truck_assigned';
+        break;
+      case 'En Route to Pickup':
+        status = 'picked_up'; // Using picked_up for En Route to Pickup
+        break;
+      case 'Goods Loaded':
+        status = 'picked_up';
+        break;
+      case 'In Transit':
+        status = 'in_transit';
+        break;
+      case 'Arriving':
+        status = 'arriving';
+        break;
+    }
+
+    // 7.3 Prepare updates
     const updates = {
-      status,
       updated_at: new Date().toISOString()
     };
+    if (status) {
+      updates.status = status;
+    }
 
-    // Generate OTP if moving to in_transit
+    // Generate OTP if moving to In Transit
     let generatedOtp = null;
-    if (status === 'in_transit' && !order.delivery_otp) {
+    if (milestone === 'In Transit' && !order.delivery_otp) {
       generatedOtp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
       updates.delivery_otp = generatedOtp;
       updates.otp_generated_at = new Date().toISOString();
     }
 
-    // 7.3 Perform update
+    // 7.4 Perform order update
     const { data: updatedOrder, error: updateErr } = await supabase
       .from('orders')
       .update(updates)
@@ -511,31 +532,19 @@ router.put('/:id/status', authenticate, requireRole(['driver']), async (req, res
       .single();
 
     if (updateErr) {
-      return res.status(500).json({ error: 'Failed to update order status.', details: updateErr.message });
+      return res.status(500).json({ error: 'Failed to update order.', details: updateErr.message });
     }
 
-    // 7.4 Update order timeline
-    let timelineMilestone = null;
-    switch (status) {
-      case 'picked_up':
-        timelineMilestone = 'Goods Loaded';
-        break;
-      case 'in_transit':
-        timelineMilestone = 'In Transit';
-        break;
-    }
+    // 7.5 Update order timeline
+    await supabase
+      .from('order_timeline')
+      .update({ completed: true, milestone_time: new Date().toISOString() })
+      .eq('order_display_id', order.order_display_id)
+      .eq('milestone', milestone);
 
-    if (timelineMilestone) {
-      await supabase
-        .from('order_timeline')
-        .update({ completed: true, milestone_time: new Date().toISOString() })
-        .eq('order_display_id', order.order_display_id)
-        .eq('milestone', timelineMilestone);
-    }
-
-    // 7.5 Return response
+    // 7.6 Return response
     const response = {
-      message: 'Order status updated successfully.',
+      message: 'Milestone updated successfully.',
       order: updatedOrder
     };
     if (generatedOtp) {
@@ -577,12 +586,12 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), async
       return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
     }
 
-    // 8.2 Validate OTP
+    // 8.2 Validate OTP - type safe comparison
     if (!order.delivery_otp || order.otp_verified) {
       return res.status(400).json({ error: 'OTP not available or already verified.' });
     }
 
-    if (order.delivery_otp !== otp) {
+    if (order.delivery_otp !== String(otp)) {
       return res.status(400).json({ error: 'Invalid OTP. Please check and try again.' });
     }
 
@@ -609,14 +618,13 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), async
       .eq('order_display_id', order.order_display_id)
       .eq('milestone', 'Delivered');
 
-    // 8.5 Call complete_trip_tx RPC if it exists
-    // Note: If this RPC isn't defined yet, we'll log and proceed gracefully
+    // 8.5 Call complete_trip_tx RPC
     try {
       const { error: rpcErr } = await supabase.rpc('complete_trip_tx', {
         p_order_id: orderId
       });
       if (rpcErr) {
-        console.warn('complete_trip_tx RPC not available or failed, proceeding with order update:', rpcErr.message);
+        console.warn('complete_trip_tx RPC not available or failed:', rpcErr.message);
       }
     } catch (rpcErr) {
       console.warn('complete_trip_tx RPC call error:', rpcErr.message);

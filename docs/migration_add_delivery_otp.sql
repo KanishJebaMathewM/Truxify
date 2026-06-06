@@ -6,7 +6,10 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS otp_generated_at TIMESTAMPTZ;
 
 -- RPC Function: Complete trip and release payment to driver (by order ID)
 CREATE OR REPLACE FUNCTION complete_trip_tx(p_order_id UUID)
-RETURNS void AS $$
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
 DECLARE
   v_order RECORD;
 BEGIN
@@ -50,4 +53,4 @@ BEGIN
     amount = earnings_daily.amount + EXCLUDED.amount,
     trip_count = earnings_daily.trip_count + 1;
 END;
-$$ LANGUAGE plpgsql;
+$$;

@@ -296,7 +296,12 @@ create table if not exists orders (
   eta                  text,
 
   created_at           timestamptz not null default now(),
-  updated_at           timestamptz not null default now()
+  updated_at           timestamptz not null default now(),
+
+  -- Delivery Verification
+  delivery_otp         text,                                    -- OTP for delivery verification
+  otp_verified         boolean not null default false,          -- Whether OTP has been verified
+  otp_generated_at     timestamptz                              -- When OTP was generated
 );
 
 create index idx_orders_customer     on orders (customer_id);
@@ -702,3 +707,53 @@ create table if not exists driver_milestones (
 create unique index idx_driver_milestones_unique on driver_milestones (driver_id, milestone_id);
 
 alter table driver_milestones enable row level security;
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 27. COMPLETE TRIP RPC (SECURITY DEFINER)
+-- ────────────────────────────────────────────────────────────────────────────
+CREATE OR REPLACE FUNCTION complete_trip_tx(p_order_id UUID)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_order RECORD;
+BEGIN
+  SELECT * INTO v_order FROM orders WHERE id = p_order_id;
+  
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Order not found';
+  END IF;
+  
+  IF v_order.driver_id IS NULL THEN
+    RAISE EXCEPTION 'No driver assigned to this order';
+  END IF;
+
+  UPDATE driver_details
+  SET 
+    total_trips = total_trips + 1,
+    wallet_confirmed = wallet_confirmed + v_order.total_amount,
+    wallet_total = wallet_total + v_order.total_amount,
+    updated_at = NOW()
+  WHERE user_id = v_order.driver_id;
+  
+  INSERT INTO wallet_transactions (
+    driver_id, order_display_id, amount, txn_type, status, description
+  ) VALUES (
+    v_order.driver_id,
+    v_order.order_display_id,
+    v_order.total_amount,
+    'credit',
+    'confirmed',
+    'Payout for Order ' || v_order.order_display_id
+  );
+  
+  INSERT INTO earnings_daily (driver_id, day_date, amount, trip_count)
+  VALUES (v_order.driver_id, CURRENT_DATE, v_order.total_amount, 1)
+  ON CONFLICT (driver_id, day_date)
+  DO UPDATE SET 
+    amount = earnings_daily.amount + EXCLUDED.amount,
+    trip_count = earnings_daily.trip_count + 1;
+END;
+$$;

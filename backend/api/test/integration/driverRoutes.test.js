@@ -166,6 +166,21 @@ describe('Driver Routes', () => {
     expect(Array.isArray(res.body)).toBe(true);
   });
 
+  it('GET /earnings/summary rejects invalid days values', async () => {
+    const app = buildApp();
+
+    for (const days of ['abc', '0', '-3', '1.5', '366']) {
+      const res = await request(app)
+        .get(`/api/drivers/earnings/summary?days=${days}`)
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe(
+        'days must be an integer between 1 and 365'
+      );
+    }
+  });
+
   it('POST /wallet/withdraw rejects invalid amount', async () => {
     const app = buildApp();
 

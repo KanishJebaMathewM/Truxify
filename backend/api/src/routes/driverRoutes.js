@@ -139,7 +139,14 @@ router.get('/wallet/history', authenticate, requireRole(['driver']), async (req,
 // 4. FETCH Aggregated daily/weekly earnings summaries for chart (DRIVER)
 // ============================================================================
 router.get('/earnings/summary', authenticate, requireRole(['driver']), async (req, res) => {
-  const limitDays = parseInt(req.query.days || '30', 10);
+  const daysParam = req.query.days ?? '30';
+  const limitDays = typeof daysParam === 'string' ? Number(daysParam) : NaN;
+
+  if (!Number.isInteger(limitDays) || limitDays < 1 || limitDays > 365) {
+    return res.status(400).json({
+      error: 'days must be an integer between 1 and 365'
+    });
+  }
 
   try {
     const cutoff = new Date();

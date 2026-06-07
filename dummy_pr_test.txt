@@ -1,0 +1,1 @@
+This is a dummy file to test the GitHub Actions welcome comment automation.

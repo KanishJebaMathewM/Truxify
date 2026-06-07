@@ -22,17 +22,6 @@ class TruckRepository {
     return Truck.fromJson(response);
   }
 
-  Future<List<TyreDiagnostic>> fetchTyreDiagnostics(String truckId) async {
-    final response = await _client
-        .from('tyre_diagnostics')
-        .select()
-        .eq('truck_id', truckId);
-
-    return List<Map<String, dynamic>>.from(response)
-        .map(TyreDiagnostic.fromJson)
-        .toList(growable: false);
-  }
-
   Future<List<TruckMaintenanceTicket>> fetchMaintenanceTickets(
       String truckId) async {
     final response = await _client
@@ -59,7 +48,7 @@ class TruckRepository {
           'driver_id': driverId,
           'category': category,
           'description': description,
-          'status': 'Open',
+          'status': 'open',
         })
         .select()
         .single();

@@ -5,10 +5,6 @@ class Truck {
     required this.name,
     required this.numberPlate,
     required this.maxCapacityTons,
-    required this.fuelLevelPct,
-    required this.engineHealthPct,
-    required this.avgTyrePressurePsi,
-    required this.tpmsConnected,
     required this.insuranceExpiry,
     required this.pucExpiry,
     required this.permitExpiry,
@@ -19,10 +15,6 @@ class Truck {
   final String name;
   final String numberPlate;
   final double maxCapacityTons;
-  final double fuelLevelPct;
-  final double engineHealthPct;
-  final double avgTyrePressurePsi;
-  final bool tpmsConnected;
   final DateTime? insuranceExpiry;
   final DateTime? pucExpiry;
   final DateTime? permitExpiry;
@@ -34,10 +26,6 @@ class Truck {
       name: json['name'] as String,
       numberPlate: json['number_plate'] as String,
       maxCapacityTons: (json['max_capacity_tons'] as num?)?.toDouble() ?? 0.0,
-      fuelLevelPct: (json['fuel_level_pct'] as num?)?.toDouble() ?? 0.0,
-      engineHealthPct: (json['engine_health_pct'] as num?)?.toDouble() ?? 0.0,
-      avgTyrePressurePsi: (json['avg_tyre_pressure_psi'] as num?)?.toDouble() ?? 0.0,
-      tpmsConnected: json['tpms_connected'] as bool? ?? false,
       insuranceExpiry: json['insurance_expiry'] != null
           ? DateTime.tryParse(json['insurance_expiry'] as String)
           : null,
@@ -57,45 +45,9 @@ class Truck {
       'name': name,
       'number_plate': numberPlate,
       'max_capacity_tons': maxCapacityTons,
-      'fuel_level_pct': fuelLevelPct,
-      'engine_health_pct': engineHealthPct,
-      'avg_tyre_pressure_psi': avgTyrePressurePsi,
-      'tpms_connected': tpmsConnected,
       'insurance_expiry': insuranceExpiry?.toIso8601String(),
       'puc_expiry': pucExpiry?.toIso8601String(),
       'permit_expiry': permitExpiry?.toIso8601String(),
-    };
-  }
-}
-
-class TyreDiagnostic {
-  const TyreDiagnostic({
-    required this.truckId,
-    required this.position,
-    required this.pressurePsi,
-    required this.status,
-  });
-
-  final String truckId;
-  final String position;
-  final double pressurePsi;
-  final String status;
-
-  factory TyreDiagnostic.fromJson(Map<String, dynamic> json) {
-    return TyreDiagnostic(
-      truckId: json['truck_id'] as String,
-      position: json['position'] as String,
-      pressurePsi: (json['pressure_psi'] as num?)?.toDouble() ?? 0.0,
-      status: json['status'] as String,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'truck_id': truckId,
-      'position': position,
-      'pressure_psi': pressurePsi,
-      'status': status,
     };
   }
 }

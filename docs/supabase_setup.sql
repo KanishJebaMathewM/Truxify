@@ -132,13 +132,6 @@ create table if not exists trucks (
   cargo_length_ft       numeric(6,2),
   cargo_width_ft        numeric(6,2),
   cargo_height_ft       numeric(6,2),
-  -- Live telemetry snapshots (latest values cached here; history in MongoDB)
-  fuel_level_pct        int,
-  engine_health_pct     int,
-  avg_tyre_pressure_psi int,
-  oil_quality_pct       int,
-  next_service_km       int,
-  tpms_connected        boolean not null default false,
   -- Compliance dates
   insurance_expiry      date,
   puc_expiry            date,
@@ -1462,15 +1455,12 @@ on conflict (user_id) do nothing;
 
 -- Seed Truck
 insert into trucks (id, driver_id, name, number_plate, max_capacity_tons,
-  cargo_length_ft, cargo_width_ft, cargo_height_ft,
-  fuel_level_pct, engine_health_pct, avg_tyre_pressure_psi, oil_quality_pct,
-  next_service_km, tpms_connected, insurance_expiry, puc_expiry, permit_expiry)
+  cargo_length_ft, cargo_width_ft, cargo_height_ft, insurance_expiry, puc_expiry, permit_expiry)
 values
   ('c3333333-3333-3333-3333-333333333333',
    'b2222222-2222-2222-2222-222222222222',
    'Tata 407', 'GJ 05 AB 1234', 7.50,
    14.00, 6.00, 6.50,
-   78, 92, 35, 85, 12000, true,
    '2027-03-15', '2026-12-31', '2027-06-30')
 on conflict do nothing;
 

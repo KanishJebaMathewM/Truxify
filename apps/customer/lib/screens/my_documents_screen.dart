@@ -3,7 +3,6 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../core/offline/cache/cache_manager.dart';
 import '../theme/app_theme.dart';
 
 class MyDocumentsScreen extends StatefulWidget {
@@ -14,7 +13,6 @@ class MyDocumentsScreen extends StatefulWidget {
 }
 
 class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
-  final CacheManager _cacheManager = CacheManager(); 
   final _supabase = Supabase.instance.client;
   
   bool _isOffline = false;

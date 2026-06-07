@@ -8,9 +8,31 @@ class TripService {
 
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
 
+  Future<void> _verifyTripOwnership(
+    String tripDisplayId,
+    String driverId,
+  ) async {
+    final tripCheck = await _client
+        .from('trips')
+        .select('id')
+        .eq('trip_display_id', tripDisplayId)
+        .eq('driver_id', driverId)
+        .maybeSingle();
+
+    if (tripCheck == null) {
+      throw Exception('Unauthorized access to trip data');
+    }
+  }
+
   Future<List<Map<String, dynamic>>> fetchActiveTrips() async {
-    final response =
-        await _client.from('trips').select().eq('status', 'active');
+    final driverId = _client.auth.currentUser?.id;
+    if (driverId == null) throw Exception('User not authenticated');
+
+    final response = await _client
+        .from('trips')
+        .select()
+        .eq('status', 'active')
+        .eq('driver_id', driverId);
 
     debugPrint('Trips response: $response');
 
@@ -20,6 +42,11 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchTripItems(
     String tripDisplayId,
   ) async {
+    final driverId = _client.auth.currentUser?.id;
+    if (driverId == null) throw Exception('User not authenticated');
+
+    await _verifyTripOwnership(tripDisplayId, driverId);
+
     final response = await _client
         .from('trip_items')
         .select()
@@ -31,6 +58,11 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchTripStops(
     String tripDisplayId,
   ) async {
+    final driverId = _client.auth.currentUser?.id;
+    if (driverId == null) throw Exception('User not authenticated');
+
+    await _verifyTripOwnership(tripDisplayId, driverId);
+
     final response = await _client
         .from('trip_stops')
         .select()
@@ -43,6 +75,11 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchRouteMapPoints(
     String tripDisplayId,
   ) async {
+    final driverId = _client.auth.currentUser?.id;
+    if (driverId == null) throw Exception('User not authenticated');
+
+    await _verifyTripOwnership(tripDisplayId, driverId);
+
     final response = await _client
         .from('route_map_points')
         .select()
@@ -53,9 +90,13 @@ class TripService {
   }
 
   Future<List<Map<String, dynamic>>> fetchTrips() async {
+    final driverId = _client.auth.currentUser?.id;
+    if (driverId == null) throw Exception('User not authenticated');
+
     final response = await _client
         .from('trips')
         .select()
+        .eq('driver_id', driverId)
         .order('trip_date', ascending: false);
 
     return List<Map<String, dynamic>>.from(response);

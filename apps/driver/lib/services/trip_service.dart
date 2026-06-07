@@ -106,10 +106,15 @@ class TripService {
     String stopId,
     String tripDisplayId,
   ) async {
+    final driverId = _client.auth.currentUser?.id;
+    if (driverId == null) throw Exception('User not authenticated');
+
+    await _verifyTripOwnership(tripDisplayId, driverId);
+
     await _client.from('trip_stops').update({
       'is_completed': true,
       'is_current': false,
-    }).eq('id', stopId);
+    }).eq('id', stopId).eq('trip_display_id', tripDisplayId);
 
     final nextStops = await _client
         .from('trip_stops')
@@ -122,11 +127,15 @@ class TripService {
     if (nextStops.isNotEmpty) {
       await _client
           .from('trip_stops')
-          .update({'is_current': true}).eq('id', nextStops.first['id']);
+          .update({'is_current': true})
+          .eq('id', nextStops.first['id'])
+          .eq('trip_display_id', tripDisplayId);
     } else {
       await _client
           .from('trips')
-          .update({'status': 'completed'}).eq('trip_display_id', tripDisplayId);
+          .update({'status': 'completed'})
+          .eq('trip_display_id', tripDisplayId)
+          .eq('driver_id', driverId);
     }
   }
 }

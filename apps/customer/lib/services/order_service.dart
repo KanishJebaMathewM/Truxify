@@ -112,9 +112,28 @@ class OrderService {
     return List<Map<String, dynamic>>.from(response);
   }
 
+  Future<void> _verifyOrderOwnership(
+    String orderDisplayId,
+    String customerId,
+  ) async {
+    final orderCheck = await _client
+        .from('orders')
+        .select('id')
+        .eq('order_display_id', orderDisplayId)
+        .eq('customer_id', customerId)
+        .maybeSingle();
+
+    if (orderCheck == null) {
+      throw Exception('Unauthorized access to order data');
+    }
+  }
+
   Future<List<Map<String, dynamic>>> fetchOrderTimeline(
     String orderDisplayId,
   ) async {
+    final customerId = SupabaseService.requireUserId();
+    await _verifyOrderOwnership(orderDisplayId, customerId);
+
     final response = await _client
         .from('order_timeline')
         .select()

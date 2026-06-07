@@ -197,25 +197,20 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   String _tripRoute(Map<String, dynamic> trip) {
-    final pickup =
-        trip['pickup_location'] ?? trip['pickup'] ?? trip['source'] ?? 'Pickup';
-    final drop =
-        trip['drop_location'] ?? trip['drop'] ?? trip['destination'] ?? 'Drop';
-
-    return '$pickup → $drop';
+    return trip['route_label']?.toString() ?? 'Route unavailable';
   }
 
   String _tripCustomer(Map<String, dynamic> trip) {
-    return trip['customer_name'] ??
-        trip['customer'] ??
-        trip['manufacturer_name'] ??
+    return trip['customer_name']?.toString() ??
+        trip['customer_display_name']?.toString() ??
         'Customer';
   }
 
   double _tripAmount(Map<String, dynamic> trip) {
-    final value = trip['amount'] ?? trip['fare'] ?? trip['total_amount'] ?? 0;
+    final value = trip['net_earnings'] ?? trip['total_earnings'] ?? 0;
     if (value is num) return value / 100.0;
-    return double.tryParse(value.toString()) ?? 0.0;
+
+    return (double.tryParse(value.toString()) ?? 0.0) / 100.0;
   }
 
   @override

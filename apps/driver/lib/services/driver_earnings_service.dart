@@ -1,7 +1,10 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DriverEarningsService {
-  final SupabaseClient _client = Supabase.instance.client;
+  DriverEarningsService({SupabaseClient? client})
+      : _client = client ?? Supabase.instance.client;
+
+  final SupabaseClient _client;
 
   String? get driverId => _client.auth.currentUser?.id;
 
@@ -41,17 +44,15 @@ class DriverEarningsService {
   }) async {
     if (driverId == null) return [];
 
-    final start = DateTime(date.year, date.month, date.day);
-    final end = start.add(const Duration(days: 1));
+    final day = date.toIso8601String().split('T').first;
 
     final response = await _client
         .from('trips')
         .select()
         .eq('driver_id', driverId!)
         .eq('status', 'completed')
-        .gte('completed_at', start.toIso8601String())
-        .lt('completed_at', end.toIso8601String())
-        .order('completed_at', ascending: false);
+        .eq('trip_date', day)
+        .order('created_at', ascending: false);
 
     return List<Map<String, dynamic>>.from(response);
   }

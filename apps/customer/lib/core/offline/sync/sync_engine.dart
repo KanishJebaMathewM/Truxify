@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart'; // ✅ IMPORT SUPABASE
 
 import '../conflict/conflict_resolver.dart';
 import '../db/offline_event_db.dart';
@@ -81,14 +82,32 @@ class SyncEngine {
     });
 
     try {
+      // 🚀 AUTH EXTRACTION (Issue #361/#362 Fix)
+      // Grab the fresh active Supabase JWT token from the local client session
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken;
+
+      if (token == null) {
+        print('[SyncEngine] ⚠️ Cannot sync batch: User session token is null/expired.');
+        return false;
+      }
+
       final response = await http.post(
         Uri.parse('$apiBaseUrl/api/v1/trips/events/batch'),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token', // ✅ INJECT ACCESS TOKEN
+        },
         body: body,
       ).timeout(const Duration(seconds: 15));
 
       if (response.statusCode == 200 || response.statusCode == 202) {
         return true;
+      }
+
+      if (response.statusCode == 401) {
+        print('[SyncEngine] 🚨 Auth rejected by server (401 Unauthorized).');
+        return false;
       }
 
       if (response.statusCode == 409 || response.statusCode == 422 || response.statusCode == 400) {

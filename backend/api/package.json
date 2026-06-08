@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "check-env": "node scripts/check-env.js",
     "test": "vitest run",
     "test:unit": "vitest run test/unit",
     "test:integration": "vitest run test/integration",

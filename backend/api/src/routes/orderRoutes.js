@@ -1,8 +1,10 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { getRouteEstimate } from '../services/osrm.js';
+import { createOrderSchema, submitBidSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
@@ -20,7 +22,7 @@ function generateOrderDisplayId() {
 // ============================================================================
 // 1. CREATE AN ORDER (CUSTOMER)
 // ============================================================================
-router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
+router.post('/', authenticate, requireRole(['customer']), validateBody(createOrderSchema), async (req, res) => {
   const {
     pickup_address, pickup_lat, pickup_lng,
     drop_address, drop_lat, drop_lng,
@@ -31,7 +33,7 @@ router.post('/', authenticate, requireRole(['customer']), async (req, res) => {
   } = req.body;
 
   // Basic validations
-  if (!pickup_address || !pickup_lat || !pickup_lng || !drop_address || !drop_lat || !drop_lng || !goods_type || !weight_tonnes) {
+  if (!pickup_address || pickup_lat == null || pickup_lng == null || !drop_address || drop_lat == null || drop_lng == null || !goods_type || weight_tonnes == null) {
     return res.status(400).json({ error: 'Missing required routing or cargo specification fields.' });
   }
 
@@ -249,7 +251,7 @@ router.get('/:id', authenticate, async (req, res) => {
 // ============================================================================
 // 4. SUBMIT BID FOR LOAD OFFER (DRIVER)
 // ============================================================================
-router.post('/:id/bids', authenticate, requireRole(['driver']), async (req, res) => {
+router.post('/:id/bids', authenticate, requireRole(['driver']), validateBody(submitBidSchema), async (req, res) => {
   const loadOfferId = req.params.id; // load_offers.id
   const { bid_amount } = req.body; // in paisa
 

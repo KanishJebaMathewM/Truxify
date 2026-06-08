@@ -109,6 +109,15 @@ describe('Driver Routes', () => {
       .send({ is_online: 'yes' });
 
     expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'is_online',
+          message: expect.any(String),
+        }),
+      ])
+    );
   });
 
   it('GET /wallet/history rejects invalid page', async () => {

@@ -1,6 +1,8 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
+import { driverOnlineSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
@@ -47,7 +49,7 @@ router.get('/stats', authenticate, requireRole(['driver']), async (req, res) => 
 // ============================================================================
 // 2. TOGGLE ONLINE / OFFLINE STATUS (DRIVER)
 // ============================================================================
-router.put('/online', authenticate, requireRole(['driver']), async (req, res) => {
+router.put('/online', authenticate, requireRole(['driver']), validateBody(driverOnlineSchema), async (req, res) => {
   const { is_online } = req.body;
 
   if (typeof is_online !== 'boolean') {

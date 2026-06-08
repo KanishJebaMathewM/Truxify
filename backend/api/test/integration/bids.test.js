@@ -51,6 +51,35 @@ describe('Bid Routes', () => {
       .send({ bid_amount: 0 });
 
     expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'bid_amount',
+          message: 'Must be greater than 0',
+        }),
+      ])
+    );
+  });
+
+  it('POST /:id/bids rejects non-integer bid amounts', async () => {
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders/load-1/bids')
+      .set(DRIVER)
+      .send({ bid_amount: 100.5 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'bid_amount',
+          message: 'Must be a positive integer',
+        }),
+      ])
+    );
   });
 
   it('POST /:id/bids creates bid', async () => {

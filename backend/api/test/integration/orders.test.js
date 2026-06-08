@@ -183,14 +183,51 @@ describe('POST /api/orders — server-side pricing contract', () => {
     expect(orderInsert.toll_estimate).toBe(Math.round(200 * 1423.456));
   });
 
-  it('bad coordinates: NaN drop_lat → 400 with a clear pricing error', async () => {
+  it('accepts zero-valued coordinates when they are in range', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders')
+      .set(CUSTOMER_HEADERS)
+      .send({ ...validOrderBody, pickup_lat: 0, pickup_lng: 0 });
+
+    expect(res.status).toBe(201);
+  });
+
+  it('bad coordinates: NaN drop_lat → 400 with structured validation details', async () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/orders')
       .set(CUSTOMER_HEADERS)
       .send({ ...validOrderBody, drop_lat: 'not-a-number' });
     expect(res.status).toBe(400);
-    expect(res.body).toHaveProperty('error');
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'drop_lat',
+          message: expect.any(String),
+        }),
+      ])
+    );
+  });
+
+  it('invalid pickup_date format → 400 with field-level validation details', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders')
+      .set(CUSTOMER_HEADERS)
+      .send({ ...validOrderBody, pickup_date: 'tomorrow' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'pickup_date',
+          message: 'Must be a valid ISO date string',
+        }),
+      ])
+    );
   });
 
   it('zero weight → 400', async () => {
@@ -200,6 +237,15 @@ describe('POST /api/orders — server-side pricing contract', () => {
       .set(CUSTOMER_HEADERS)
       .send({ ...validOrderBody, weight_tonnes: 0 });
     expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          field: 'weight_tonnes',
+          message: 'Must be greater than 0',
+        }),
+      ])
+    );
   });
 
   it('regression: NO `const { base_freight } = pricing` destructure in route handler', async () => {
@@ -558,7 +604,17 @@ describe('POST /api/orders — missing required fields', () => {
       .send({ pickup_address: '123 St' }); // missing most required fields
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toContain('Missing required');
+    expect(res.body.error).toBe('Validation failed');
+    expect(res.body.details).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: 'pickup_lat' }),
+        expect.objectContaining({ field: 'pickup_lng' }),
+        expect.objectContaining({ field: 'drop_lat' }),
+        expect.objectContaining({ field: 'drop_lng' }),
+        expect.objectContaining({ field: 'weight_tonnes' }),
+        expect.objectContaining({ field: 'pickup_date' }),
+      ])
+    );
   });
 });
 
@@ -877,4 +933,3 @@ describe('Delivery OTP Verification and Milestones', () => {
     expect(rpcCall.args).toEqual({ p_order_id: 'order-1' });
   });
 });
-

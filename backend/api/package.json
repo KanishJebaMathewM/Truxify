@@ -22,7 +22,8 @@
     "firebase-admin": "^13.10.0",
     "ioredis": "^5.11.0",
     "mongodb": "^7.2.0",
-    "ws": "^8.21.0"
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.8",

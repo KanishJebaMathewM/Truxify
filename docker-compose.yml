@@ -18,7 +18,15 @@ services:
       - mongo
       - redis
       - db
-
+  
+  ml-engine:
+    build:
+      context: ./backend/ml
+    container_name: truxify-ml-engine
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./backend/ml:/app
   db:
     image: postgis/postgis:15-3.3-alpine
     ports:

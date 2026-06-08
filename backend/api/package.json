@@ -11,7 +11,8 @@
     "test:unit": "vitest run test/unit",
     "test:integration": "vitest run test/integration",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "verify-db": "node scripts/verify-db-schema.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.107.0",

@@ -33,25 +33,29 @@ class AppCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cardColor = color ?? Theme.of(context).colorScheme.surface;
-    final card = Container(
-      margin: margin,
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(14),
-        border: border ??
-            Border.all(
-                color:
-                    color == null ? _borderColor(context) : Colors.transparent),
-        boxShadow: elevation > 0
-            ? [
-                BoxShadow(
-                    color: TruxifyColors.accent.withValues(alpha: 0.06),
-                    blurRadius: math.max(2, elevation),
-                    offset: const Offset(0, 2))
-              ]
-            : null,
+    final card = Material(
+      color: Colors.transparent,
+      child: Container(
+        margin: margin,
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(14),
+          border: border ??
+              Border.all(
+                  color: color == null
+                      ? _borderColor(context)
+                      : Colors.transparent),
+          boxShadow: elevation > 0
+              ? [
+                  BoxShadow(
+                      color: TruxifyColors.accent.withValues(alpha: 0.06),
+                      blurRadius: math.max(2, elevation),
+                      offset: const Offset(0, 2))
+                ]
+              : null,
+        ),
+        child: Padding(padding: padding, child: child),
       ),
-      child: Padding(padding: padding, child: child),
     );
 
     if (onTap == null) {

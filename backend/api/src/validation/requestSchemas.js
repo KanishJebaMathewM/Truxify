@@ -1,6 +1,11 @@
 import { z } from 'zod';
 
-const coordinateSchema = z
+const latitudeSchema = z
+  .number()
+  .min(-90, { message: 'Must be greater than or equal to -90' })
+  .max(90, { message: 'Must be less than or equal to 90' });
+
+const longitudeSchema = z
   .number()
   .min(-180, { message: 'Must be greater than or equal to -180' })
   .max(180, { message: 'Must be less than or equal to 180' });
@@ -12,10 +17,10 @@ const isoDateStringSchema = z
   });
 
 export const createOrderSchema = z.object({
-  pickup_lat: coordinateSchema,
-  pickup_lng: coordinateSchema,
-  drop_lat: coordinateSchema,
-  drop_lng: coordinateSchema,
+  pickup_lat: latitudeSchema,
+  pickup_lng: longitudeSchema,
+  drop_lat: latitudeSchema,
+  drop_lng: longitudeSchema,
   weight_tonnes: z.number().positive({ message: 'Must be greater than 0' }),
   pickup_date: isoDateStringSchema,
 }).passthrough();

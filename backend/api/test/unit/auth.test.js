@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import jwt from 'jsonwebtoken';
 
 describe('authenticate middleware - non bypass flow', () => {
   beforeEach(() => {
@@ -23,6 +24,124 @@ describe('authenticate middleware - non bypass flow', () => {
     await authenticate(req, res, vi.fn());
 
     expect(res.status).toHaveBeenCalledWith(401);
+  });
+
+  it('returns 500 when supabase missing for supabase token', async () => {
+    const token = jwt.sign({ iss: 'https://test.supabase.co/auth/v1' }, 'secret');
+    vi.doMock('../../src/config/db.js', () => ({
+      firebaseAdmin: {},
+      supabase: null,
+    }));
+
+    const { authenticate } = await import('../../src/middleware/auth.js');
+
+    const req = {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    };
+
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    await authenticate(req, res, vi.fn());
+
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
+
+  it('returns 401 when supabase getUser fails', async () => {
+    const token = jwt.sign({ iss: 'https://test.supabase.co/auth/v1' }, 'secret');
+    const supabase = {
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: { user: null },
+          error: { message: 'invalid token' },
+        }),
+      },
+    };
+
+    vi.doMock('../../src/config/db.js', () => ({
+      firebaseAdmin: {},
+      supabase,
+    }));
+
+    const { authenticate } = await import('../../src/middleware/auth.js');
+
+    const req = {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    };
+
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    await authenticate(req, res, vi.fn());
+
+    expect(res.status).toHaveBeenCalledWith(401);
+  });
+
+  it('authenticates valid supabase user', async () => {
+    const token = jwt.sign({ iss: 'https://test.supabase.co/auth/v1' }, 'secret');
+    const supabase = {
+      auth: {
+        getUser: vi.fn().mockResolvedValue({
+          data: {
+            user: { id: 'supabase-user-uuid' },
+          },
+          error: null,
+        }),
+      },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: {
+                    id: 'user-1',
+                    firebase_uid: 'firebase-user-id',
+                    role: 'driver',
+                    full_name: 'John Supa',
+                    phone: '9999999999',
+                  },
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+      }),
+    };
+
+    vi.doMock('../../src/config/db.js', () => ({
+      firebaseAdmin: {},
+      supabase,
+    }));
+
+    const { authenticate } = await import('../../src/middleware/auth.js');
+
+    const req = {
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
+    };
+
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    const next = vi.fn();
+
+    await authenticate(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(req.user.role).toBe('driver');
+    expect(req.user.fullName).toBe('John Supa');
   });
 
   it('returns 500 when firebase admin missing', async () => {

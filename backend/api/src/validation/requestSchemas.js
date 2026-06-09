@@ -43,3 +43,12 @@ export const withdrawSchema = z.object({
     .positive({ message: 'Amount must be greater than 0' })
     .safe({ message: 'Amount is too large' }),
 }).passthrough();
+
+export const submitRatingSchema = z.object({
+  stars: z
+    .number()
+    .int({ message: 'Stars must be a whole number' })
+    .min(1, { message: 'Stars must be between 1 and 5' })
+    .max(5, { message: 'Stars must be between 1 and 5' }),
+  comment: z.string().trim().max(1000, { message: 'Comment must be 1000 characters or fewer' }).optional(),
+}).passthrough();

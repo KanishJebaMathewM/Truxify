@@ -113,7 +113,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Mock login is enabled for the offline driver demo. OTP 1234 always works.',
+                        'OTP verification is handled by the backend. Enter the code sent to your phone to continue.',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                               color: colorScheme.onSurface,
                             ),

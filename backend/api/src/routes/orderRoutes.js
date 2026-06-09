@@ -4,7 +4,8 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { getRouteEstimate } from '../services/osrm.js';
-import { createOrderSchema, submitBidSchema } from '../validation/requestSchemas.js';
+import { createOrderSchema, submitBidSchema, submitRatingSchema } from '../validation/requestSchemas.js';
+import { awardReputationPoints } from '../services/reputation.js';
 
 const router = express.Router();
 
@@ -219,6 +220,104 @@ router.post('/:id/bids', authenticate, requireRole(['driver']), validateBody(sub
     res.status(201).json({ message: 'Bid submitted successfully.', bid });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error.' });
+  }
+});
+
+// ============================================================================
+// 5.5 SUBMIT RATING FOR A DELIVERED ORDER (CUSTOMER)
+// ============================================================================
+router.post('/:id/ratings', authenticate, requireRole(['customer']), validateBody(submitRatingSchema), async (req, res) => {
+  const orderId = req.params.id;
+  const { stars, comment = null } = req.body;
+
+  try {
+    const { data: order, error: orderErr } = await supabase
+      .from('orders')
+      .select('id, order_display_id, customer_id, driver_id, status')
+      .eq('id', orderId)
+      .maybeSingle();
+
+    if (orderErr) {
+      return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
+    }
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    if (order.customer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
+    }
+
+    if (!['delivered', 'payment_released'].includes(order.status)) {
+      return res.status(400).json({ error: 'Order must be delivered before a rating can be submitted.' });
+    }
+
+    if (!order.driver_id) {
+      return res.status(400).json({ error: 'Order does not have an assigned driver.' });
+    }
+
+    const { data: existingRating, error: ratingCheckErr } = await supabase
+      .from('ratings')
+      .select('id')
+      .eq('order_display_id', order.order_display_id)
+      .eq('customer_id', req.user.id)
+      .maybeSingle();
+
+    if (ratingCheckErr) {
+      return res.status(500).json({ error: 'Failed to verify existing rating.', details: ratingCheckErr.message });
+    }
+
+    if (existingRating) {
+      return res.status(409).json({ error: 'A rating has already been submitted for this order.' });
+    }
+
+    const { error: rpcErr } = await supabase.rpc('submit_rating_tx', {
+      p_order_display_id: order.order_display_id,
+      p_customer_id: req.user.id,
+      p_driver_id: order.driver_id,
+      p_stars: stars,
+      p_comment: comment,
+    });
+
+    if (rpcErr) {
+      return res.status(500).json({ error: 'Failed to submit rating.', details: rpcErr.message });
+    }
+
+    // Fetch driver's registered Polygon wallet address for on-chain reputation update.
+    // This is intentionally fire-and-forget — a blockchain failure must never block
+    // the HTTP response. The Supabase rating is the source of truth.
+    const { data: driverDetails } = await supabase
+      .from('driver_details')
+      .select('polygon_wallet_address')
+      .eq('user_id', order.driver_id)
+      .maybeSingle();
+
+    const polygonAddress = driverDetails?.polygon_wallet_address ?? null;
+
+    if (polygonAddress) {
+      // Non-blocking — do not await on the critical response path.
+      awardReputationPoints(polygonAddress, stars).catch(err =>
+        console.error('[reputation] Unhandled rejection in awardReputationPoints:', err.message)
+      );
+    } else {
+      console.warn(
+        `[reputation] Driver ${order.driver_id} has no polygon_wallet_address — skipping on-chain update.`
+      );
+    }
+
+    return res.status(201).json({
+      message: 'Rating submitted successfully.',
+      rating: {
+        order_display_id: order.order_display_id,
+        customer_id: req.user.id,
+        driver_id: order.driver_id,
+        stars,
+        comment,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal Server Error.' });
   }
 });
 

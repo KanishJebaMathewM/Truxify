@@ -799,7 +799,7 @@ class _HomeScreenState extends State<HomeScreen> {
           checkpoints.map((p) => '${p.latitude},${p.longitude}').join('|');
 
       final url = 'https://www.google.com/maps/dir/?api=1'
-          '&origin=${_currentLocation.latitude},${_currentLocation.longitude}'
+          '&origin=21.1702,72.8311'
           '&destination=${destination.latitude},${destination.longitude}'
           '${waypointString.isNotEmpty ? '&waypoints=$waypointString' : ''}'
           '&travelmode=driving';
@@ -817,9 +817,11 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     } catch (_) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to generate route')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to generate route')),
+        );
+      }
     }
   }
 

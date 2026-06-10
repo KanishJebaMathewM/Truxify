@@ -43,6 +43,7 @@ class _TripsScreenState extends State<TripsScreen> {
   List<LoadOffer> _enRouteLoads = const [];
   Map<String, DriverBid> _bidsByLoadId = const {};
 
+
   final List<String> _statusFilters = [
     'All',
     'Active',
@@ -456,6 +457,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final trips = _getFilteredAndSortedTrips();
 
     return SafeArea(
@@ -477,7 +479,9 @@ class _TripsScreenState extends State<TripsScreen> {
                         style: GoogleFonts.dmSans(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
-                          color: TruxifyColors.primaryText,
+                          color: isDark
+                              ? TruxifyColors.accent
+                              : TruxifyColors.primaryText,
                         ),
                       ),
                       const SizedBox(width: 10),
@@ -671,12 +675,17 @@ class _TripsScreenState extends State<TripsScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 16, vertical: 6),
                         decoration: BoxDecoration(
-                          color:
-                              isSelected ? TruxifyColors.accent : Colors.white,
+                          color: isSelected
+                              ? TruxifyColors.accent
+                              : (isDark
+                                  ? TruxifyColors.darkSecondaryBackground
+                                  : Colors.white),
                           border: Border.all(
                             color: isSelected
                                 ? TruxifyColors.accent
-                                : TruxifyColors.border,
+                                : (isDark
+                                    ? TruxifyColors.darkBorder
+                                    : TruxifyColors.border),
                           ),
                           borderRadius: BorderRadius.circular(20),
                         ),
@@ -1092,9 +1101,9 @@ class _TopTabToggle extends StatelessWidget {
             style: GoogleFonts.dmSans(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: selected
-                  ? TruxifyColors.accentDark
-                  : TruxifyColors.secondaryText,
+              color: Theme.of(context).brightness == Brightness.dark
+                  ? (selected ? TruxifyColors.accentDark : TruxifyColors.strongBorder)
+                  : (selected ? TruxifyColors.accentDark : TruxifyColors.primaryText),
             ),
           ),
         ),

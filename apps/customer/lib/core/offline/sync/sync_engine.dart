@@ -24,12 +24,12 @@ class SyncEngine {
   final int maxRetries;
   final int batchSize;
 
-  StreamSubscription<ConnectivityResult>? _connectivitySubscription;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   final Connectivity _connectivity = Connectivity();
 
   Future<void> startListening() async {
     _connectivitySubscription = _connectivity.onConnectivityChanged.listen((result) {
-      final hasNetwork = result != ConnectivityResult.none;
+      final hasNetwork = !result.contains(ConnectivityResult.none);
       if (hasNetwork) {
         unawaited(syncPending());
       }

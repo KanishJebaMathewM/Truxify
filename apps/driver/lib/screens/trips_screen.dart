@@ -1254,7 +1254,6 @@ class _LoadOfferCard extends StatelessWidget {
             backgroundColor: TruxifyColors.errorLight,
             foregroundColor: TruxifyColors.error);
       case BidStatus.pending:
-      default:
         return const StatusPill(
             label: 'Pending',
             backgroundColor: TruxifyColors.warningLight,

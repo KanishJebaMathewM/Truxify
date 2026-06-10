@@ -34,7 +34,14 @@ vi.mock('../../src/config/db.js', () => ({
   },
 }));
 
-const { closeWebSocketServer, handleLocationPing, handleTrackingMessage, handleSubscribe, __testing } = await import('../../src/sockets/tracker.js');
+const {
+  closeWebSocketServer,
+  handleLocationPing,
+  handleTrackingMessage,
+  handleSubscribe,
+  rejectWebSocketUpgrade,
+  __testing,
+} = await import('../../src/sockets/tracker.js');
 
 describe('tracker WebSocket telemetry authorization', () => {
   beforeEach(() => {
@@ -234,6 +241,152 @@ describe('tracker graceful shutdown', () => {
   });
 });
 
+describe('tracker WebSocket upgrade rate limiting', () => {
+  it('allows requests within the Redis-backed per-IP limit', async () => {
+    const incr = vi.fn().mockResolvedValue(1);
+    const expire = vi.fn().mockResolvedValue(1);
+    const ttl = vi.fn().mockResolvedValue(60);
+
+    vi.resetModules();
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: { incr, expire, ttl },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { isWebSocketUpgradeAllowed } = await import('../../src/sockets/tracker.js');
+    const allowed = await isWebSocketUpgradeAllowed({
+      headers: { 'x-forwarded-for': '203.0.113.10, 10.0.0.2' },
+      socket: { remoteAddress: '10.0.0.2' },
+    });
+
+    expect(allowed).toBe(true);
+    expect(incr).toHaveBeenCalledWith('ws:upgrade:203.0.113.10');
+    expect(expire).toHaveBeenCalledWith('ws:upgrade:203.0.113.10', 60);
+  });
+
+  it('blocks the sixth upgrade attempt for the same IP', async () => {
+    const incr = vi.fn().mockResolvedValue(6);
+    const expire = vi.fn().mockResolvedValue(1);
+    const ttl = vi.fn().mockResolvedValue(60);
+
+    vi.resetModules();
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: { incr, expire, ttl },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { isWebSocketUpgradeAllowed } = await import('../../src/sockets/tracker.js');
+    const allowed = await isWebSocketUpgradeAllowed({
+      headers: {},
+      socket: { remoteAddress: '198.51.100.7' },
+    });
+
+    expect(allowed).toBe(false);
+    expect(ttl).toHaveBeenCalledWith('ws:upgrade:198.51.100.7');
+    expect(expire).not.toHaveBeenCalled();
+  });
+
+  it('tracks separate IP addresses independently', async () => {
+    const counts = new Map();
+    const incr = vi.fn(async (key) => {
+      const next = (counts.get(key) || 0) + 1;
+      counts.set(key, next);
+      return next;
+    });
+    const expire = vi.fn().mockResolvedValue(1);
+    const ttl = vi.fn().mockResolvedValue(60);
+
+    vi.resetModules();
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: { incr, expire, ttl },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { isWebSocketUpgradeAllowed } = await import('../../src/sockets/tracker.js');
+    const firstIpRequest = { headers: {}, socket: { remoteAddress: '203.0.113.20' } };
+    const secondIpRequest = { headers: {}, socket: { remoteAddress: '203.0.113.21' } };
+
+    await isWebSocketUpgradeAllowed(firstIpRequest);
+    await isWebSocketUpgradeAllowed(firstIpRequest);
+    await isWebSocketUpgradeAllowed(firstIpRequest);
+    await isWebSocketUpgradeAllowed(firstIpRequest);
+    await isWebSocketUpgradeAllowed(firstIpRequest);
+
+    expect(await isWebSocketUpgradeAllowed(firstIpRequest)).toBe(false);
+    expect(await isWebSocketUpgradeAllowed(secondIpRequest)).toBe(true);
+  });
+
+  it('sets expiration using fallback TTL check when attempts > 1 and TTL is missing (-1)', async () => {
+    const incr = vi.fn().mockResolvedValue(3);
+    const ttl = vi.fn().mockResolvedValue(-1); // no TTL exists
+    const expire = vi.fn().mockResolvedValue(1);
+
+    vi.resetModules();
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: { incr, expire, ttl },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { isWebSocketUpgradeAllowed } = await import('../../src/sockets/tracker.js');
+    const allowed = await isWebSocketUpgradeAllowed({
+      headers: {},
+      socket: { remoteAddress: '198.51.100.12' },
+    });
+
+    expect(allowed).toBe(true);
+    expect(ttl).toHaveBeenCalledWith('ws:upgrade:198.51.100.12');
+    expect(expire).toHaveBeenCalledWith('ws:upgrade:198.51.100.12', 60);
+  });
+
+  it('allows upgrades and logs when Redis rate limiting fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    vi.resetModules();
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: {
+        incr: vi.fn().mockRejectedValue(new Error('redis down')),
+        expire: vi.fn(),
+        ttl: vi.fn(),
+      },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { isWebSocketUpgradeAllowed } = await import('../../src/sockets/tracker.js');
+    const allowed = await isWebSocketUpgradeAllowed({
+      headers: {},
+      socket: { remoteAddress: '203.0.113.30' },
+    });
+
+    expect(allowed).toBe(true);
+    expect(errorSpy).toHaveBeenCalledWith('Redis WebSocket upgrade rate limit error:', 'redis down');
+
+    errorSpy.mockRestore();
+  });
+
+  it('rejects excessive upgrades with an HTTP 429 response', () => {
+    const socket = {
+      write: vi.fn(),
+      destroy: vi.fn(),
+    };
+
+    rejectWebSocketUpgrade(socket);
+
+    expect(socket.write).toHaveBeenCalledWith(expect.stringContaining('HTTP/1.1 429 Too Many Requests'));
+    expect(socket.write).toHaveBeenCalledWith(expect.stringContaining('Connection: close'));
+    expect(socket.destroy).toHaveBeenCalled();
+  });
+});
+
 describe('handleLocationPing - main telemetry flow', () => {
   beforeEach(() => {
     __testing.resetTrackingSubscriptions();
@@ -361,6 +514,7 @@ describe('handleLocationPing - with Redis', () => {
     const redisSet = vi.fn().mockResolvedValue('OK');
     const redisClient = { get: redisGet, set: redisSet };
 
+    vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       mongoDb: null,
       redisClient,

@@ -16,13 +16,16 @@
     "verify-db": "node scripts/verify-db-schema.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.107.0",
+    "@supabase/supabase-js": "^2.108.0",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
+    "ethers": "6.15.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
-    "firebase-admin": "^13.10.0",
-    "ioredis": "^5.11.0",
+    "firebase-admin": "^14.0.0",
+    "helmet": "^8.2.0",
+    "ioredis": "^5.11.1",
+    "jsonwebtoken": "^9.0.0",
     "mongodb": "^7.2.0",
     "ws": "^8.21.0",
     "zod": "^4.4.3"

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/driver_session.dart';
 
 class TripService {
   TripService({SupabaseClient? client}) : _providedClient = client;
@@ -8,15 +9,18 @@ class TripService {
 
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
 
-  Future<void> _verifyTripOwnership(
-    String tripDisplayId,
-    String driverId,
-  ) async {
+  String get _driverId {
+    final id = DriverSession.driverId;
+    if (id.isEmpty) throw Exception('Driver session not initialised');
+    return id;
+  }
+
+  Future<void> _verifyTripOwnership(String tripDisplayId) async {
     final tripCheck = await _client
         .from('trips')
         .select('id')
         .eq('trip_display_id', tripDisplayId)
-        .eq('driver_id', driverId)
+        .eq('driver_id', _driverId)
         .maybeSingle();
 
     if (tripCheck == null) {
@@ -24,17 +28,14 @@ class TripService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> fetchActiveTrips() async {
-    final driverId = _client.auth.currentUser?.id;
-    if (driverId == null) throw Exception('User not authenticated');
+  Future<List<Map<String, dynamic>>> fetchTrips({String? status}) async {
+    var query = _client.from('trips').select().eq('driver_id', _driverId);
 
-    final response = await _client
-        .from('trips')
-        .select()
-        .eq('status', 'active')
-        .eq('driver_id', driverId);
+    if (status != null) {
+      query = query.eq('status', status);
+    }
 
-    debugPrint('Trips response: $response');
+    final response = await query.order('trip_date', ascending: false);
 
     return List<Map<String, dynamic>>.from(response);
   }
@@ -42,10 +43,7 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchTripItems(
     String tripDisplayId,
   ) async {
-    final driverId = _client.auth.currentUser?.id;
-    if (driverId == null) throw Exception('User not authenticated');
-
-    await _verifyTripOwnership(tripDisplayId, driverId);
+    await _verifyTripOwnership(tripDisplayId);
 
     final response = await _client
         .from('trip_items')
@@ -58,10 +56,7 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchTripStops(
     String tripDisplayId,
   ) async {
-    final driverId = _client.auth.currentUser?.id;
-    if (driverId == null) throw Exception('User not authenticated');
-
-    await _verifyTripOwnership(tripDisplayId, driverId);
+    await _verifyTripOwnership(tripDisplayId);
 
     final response = await _client
         .from('trip_stops')
@@ -75,10 +70,7 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchRouteMapPoints(
     String tripDisplayId,
   ) async {
-    final driverId = _client.auth.currentUser?.id;
-    if (driverId == null) throw Exception('User not authenticated');
-
-    await _verifyTripOwnership(tripDisplayId, driverId);
+    await _verifyTripOwnership(tripDisplayId);
 
     final response = await _client
         .from('route_map_points')
@@ -89,32 +81,20 @@ class TripService {
     return List<Map<String, dynamic>>.from(response);
   }
 
-  Future<List<Map<String, dynamic>>> fetchTrips() async {
-    final driverId = _client.auth.currentUser?.id;
-    if (driverId == null) throw Exception('User not authenticated');
-
-    final response = await _client
-        .from('trips')
-        .select()
-        .eq('driver_id', driverId)
-        .order('trip_date', ascending: false);
-
-    return List<Map<String, dynamic>>.from(response);
-  }
-
   Future<void> markStopCompleted(
     String stopId,
     String tripDisplayId,
   ) async {
-    final driverId = _client.auth.currentUser?.id;
-    if (driverId == null) throw Exception('User not authenticated');
+    await _verifyTripOwnership(tripDisplayId);
 
-    await _verifyTripOwnership(tripDisplayId, driverId);
-
-    await _client.from('trip_stops').update({
-      'is_completed': true,
-      'is_current': false,
-    }).eq('id', stopId).eq('trip_display_id', tripDisplayId);
+    await _client
+        .from('trip_stops')
+        .update({
+          'is_completed': true,
+          'is_current': false,
+        })
+        .eq('id', stopId)
+        .eq('trip_display_id', tripDisplayId);
 
     final nextStops = await _client
         .from('trip_stops')
@@ -135,7 +115,7 @@ class TripService {
           .from('trips')
           .update({'status': 'completed'})
           .eq('trip_display_id', tripDisplayId)
-          .eq('driver_id', driverId);
+          .eq('driver_id', _driverId);
     }
   }
 }

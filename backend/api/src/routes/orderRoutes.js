@@ -493,10 +493,11 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req,
     const updates = { status, updated_at: new Date().toISOString() };
     let generatedOtp = null;
 
-    if (milestone === 'In Transit' && !order.delivery_otp) {
+    if (milestone === 'In Transit' && (!order.delivery_otp || isOtpExpired(order.otp_generated_at))) {
       generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
       updates.delivery_otp = generatedOtp;
       updates.otp_generated_at = new Date().toISOString();
+      clearOtpState(orderId);
     }
 
     const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update(updates).eq('id', orderId).select('*').single();

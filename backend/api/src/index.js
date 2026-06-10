@@ -17,6 +17,14 @@ import profileRoutes from './routes/profileRoutes.js';
 
 // Configuration load from root folder is handled in db.js
 
+// ============================================================================
+// STARTUP VALIDATION — crash fast, not at request time
+// ============================================================================
+if (process.env.NODE_ENV === 'production' && process.env.BYPASS_AUTH === 'true') {
+  console.error('FATAL: BYPASS_AUTH is enabled in production. This is a severe security misconfiguration.');
+  console.error('Set BYPASS_AUTH=false (or unset it) and restart the server.');
+  process.exit(1);
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -36,6 +44,12 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
     }
   });
 
+// In production, x-user-id / x-user-role / x-user-name must NOT be accepted
+// as authentication headers — only expose them in non-production.
+const corsAllowedHeaders = process.env.NODE_ENV === 'production'
+  ? ['Content-Type', 'Authorization']
+  : ['Content-Type', 'Authorization', 'x-user-id', 'x-user-role', 'x-user-name'];
+
 app.use(cors({
   origin: (origin, callback) => {
     // Allow non-browser/same-origin requests with no Origin header
@@ -51,8 +65,20 @@ app.use(cors({
     return callback(null, false);
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-user-role', 'x-user-name']
+  allowedHeaders: corsAllowedHeaders,
 }));
+
+// ── Production header sanitization (defense in depth) ────────────────
+// Even if a proxy or misconfiguration lets dev auth headers through,
+// strip them before they reach any route handler in production.
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    delete req.headers['x-user-id'];
+    delete req.headers['x-user-role'];
+    delete req.headers['x-user-name'];
+    next();
+  });
+}
 
 app.use(express.json());
 

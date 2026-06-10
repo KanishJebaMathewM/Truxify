@@ -421,6 +421,38 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
     expect(res.status).toHaveBeenCalledWith(503);
   });
 
+  it('strips dev auth headers in production and falls through to token flow', async () => {
+    process.env.BYPASS_AUTH = 'false';
+    process.env.NODE_ENV = 'production';
+
+    vi.doMock('../../src/config/db.js', () => ({
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { authenticate } = await import('../../src/middleware/auth.js');
+
+    const req = {
+      headers: {
+        'x-user-id': 'some-uuid',
+        'x-user-role': 'driver',
+        'authorization': 'Bearer token123',
+      },
+    };
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    await authenticate(req, res, vi.fn());
+
+    // Headers should have been deleted before any logic ran
+    expect(req.headers['x-user-id']).toBeUndefined();
+    expect(req.headers['x-user-role']).toBeUndefined();
+    // Falls through to token flow → 500 because supabase is null
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
+
   it('returns 401 when BYPASS_AUTH is enabled but x-user-id header is missing', async () => {
     vi.doMock('../../src/config/db.js', () => ({
       firebaseAdmin: null,

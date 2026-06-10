@@ -896,7 +896,8 @@ describe('Delivery OTP Verification and Milestones', () => {
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
       delivery_otp: '123456',
-      otp_verified: false
+      otp_verified: false,
+      otp_generated_at: new Date().toISOString()
     }];
 
     const app = buildApp();
@@ -909,7 +910,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       .send({ otp: '654321' }); // Invalid OTP
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Invalid OTP. Please check and try again.');
+    expect(res.body.error).toContain('Invalid OTP');
   });
 
   it('verifies delivery successfully with correct OTP, updates status and calls RPC', async () => {
@@ -919,7 +920,8 @@ describe('Delivery OTP Verification and Milestones', () => {
       order_display_id: 'ORD001',
       delivery_otp: '123456',
       otp_verified: false,
-      status: 'in_transit'
+      status: 'in_transit',
+      otp_generated_at: new Date().toISOString()
     }];
     m.store.order_timeline = [{
       order_display_id: 'ORD001',
@@ -949,6 +951,190 @@ describe('Delivery OTP Verification and Milestones', () => {
     const rpcCall = m.calls.find(c => c.rpc === 'complete_trip_tx');
     expect(rpcCall).toBeTruthy();
     expect(rpcCall.args).toEqual({ p_order_id: 'order-1' });
+  });
+
+  it('fails OTP verification if OTP is expired', async () => {
+    m.store.orders = [{
+      id: 'order-expired',
+      driver_id: 'driver-123',
+      order_display_id: 'ORD-EXP',
+      delivery_otp: '123456',
+      otp_verified: false,
+      status: 'in_transit',
+      otp_generated_at: new Date(Date.now() - 20 * 60 * 1000).toISOString() // 20 minutes ago (TTL is 15)
+    }];
+
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/order-expired/verify-delivery')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({ otp: '123456' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('expired');
+  });
+
+  it('enforces brute-force lockout after max failed attempts and allows reset after lockout time', async () => {
+    const orderId = 'order-lockout';
+    m.store.orders = [{
+      id: orderId,
+      driver_id: 'driver-123',
+      order_display_id: 'ORD-LOCK',
+      delivery_otp: '123456',
+      otp_verified: false,
+      status: 'in_transit',
+      otp_generated_at: new Date().toISOString()
+    }];
+
+    const app = buildApp();
+
+    // 1. Fail 4 times, verifying remaining attempts message
+    for (let i = 1; i <= 4; i++) {
+      const res = await request(app)
+        .post(`/api/orders/${orderId}/verify-delivery`)
+        .set({
+          'x-user-id': 'driver-123',
+          'x-user-role': 'driver'
+        })
+        .send({ otp: '000000' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain(`${5 - i} attempt(s) remaining`);
+    }
+
+    // 2. 5th failure: triggers lockout
+    const res5 = await request(app)
+      .post(`/api/orders/${orderId}/verify-delivery`)
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({ otp: '000000' });
+    expect(res5.status).toBe(400);
+    expect(res5.body.error).toContain('Verification is locked');
+
+    // 3. 6th attempt (even with correct OTP) returns 429 Too Many Requests
+    const res6 = await request(app)
+      .post(`/api/orders/${orderId}/verify-delivery`)
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({ otp: '123456' });
+    expect(res6.status).toBe(429);
+    expect(res6.body.error).toContain('Too many failed OTP attempts');
+
+    // 4. Advance time by 31 minutes to bypass lockout
+    const originalNow = Date.now;
+    Date.now = () => originalNow() + 31 * 60 * 1000;
+
+    // Update the generated time so the OTP itself isn't expired
+    m.store.orders.find(o => o.id === orderId).otp_generated_at = new Date(Date.now()).toISOString();
+
+    try {
+      // Correct OTP should now succeed
+      const resAfterLockout = await request(app)
+        .post(`/api/orders/${orderId}/verify-delivery`)
+        .set({
+          'x-user-id': 'driver-123',
+          'x-user-role': 'driver'
+        })
+        .send({ otp: '123456' });
+      expect(resAfterLockout.status).toBe(200);
+      expect(resAfterLockout.body.message).toMatch(/Delivery verified successfully/i);
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
+  it('clears lockout state on successful verification', async () => {
+    const orderId = 'order-clear-state';
+    m.store.orders = [{
+      id: orderId,
+      driver_id: 'driver-123',
+      order_display_id: 'ORD-CLEAR',
+      delivery_otp: '123456',
+      otp_verified: false,
+      status: 'in_transit',
+      otp_generated_at: new Date().toISOString()
+    }];
+
+    const app = buildApp();
+
+    // Fail 3 times (count is 3)
+    for (let i = 0; i < 3; i++) {
+      await request(app)
+        .post(`/api/orders/${orderId}/verify-delivery`)
+        .set({
+          'x-user-id': 'driver-123',
+          'x-user-role': 'driver'
+        })
+        .send({ otp: '000000' });
+    }
+
+    // Succeed
+    const resSuccess = await request(app)
+      .post(`/api/orders/${orderId}/verify-delivery`)
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({ otp: '123456' });
+    expect(resSuccess.status).toBe(200);
+
+    // Reset verification status manually in the mock store to test lockout reset
+    const order = m.store.orders.find(o => o.id === orderId);
+    order.otp_verified = false;
+
+    // Fail 4 more times (if state wasn't cleared, this would lockout since total failures would be 7)
+    for (let i = 1; i <= 4; i++) {
+      const resFail = await request(app)
+        .post(`/api/orders/${orderId}/verify-delivery`)
+        .set({
+          'x-user-id': 'driver-123',
+          'x-user-role': 'driver'
+        })
+        .send({ otp: '000000' });
+      expect(resFail.status).toBe(400);
+      expect(resFail.body.error).toContain(`${5 - i} attempt(s) remaining`);
+    }
+  });
+
+  it('regenerates OTP when milestone In Transit is called and existing OTP has expired', async () => {
+    const orderId = 'order-regen';
+    m.store.orders = [{
+      id: orderId,
+      driver_id: 'driver-123',
+      order_display_id: 'ORD-REGEN',
+      delivery_otp: '123456',
+      otp_verified: false,
+      status: 'in_transit',
+      otp_generated_at: new Date(Date.now() - 20 * 60 * 1000).toISOString()
+    }];
+    m.store.order_timeline = [{
+      order_display_id: 'ORD-REGEN',
+      milestone: 'In Transit',
+      completed: true
+    }];
+
+    const app = buildApp();
+    const res = await request(app)
+      .put(`/api/orders/${orderId}/milestones`)
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({ milestone: 'In Transit' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('otp');
+    expect(res.body.otp).not.toBe('123456');
+
+    const order = m.store.orders.find(o => o.id === orderId);
+    expect(order.delivery_otp).toBe(res.body.otp);
+    expect(new Date(order.otp_generated_at).getTime()).toBeGreaterThan(Date.now() - 5000);
   });
 });
 

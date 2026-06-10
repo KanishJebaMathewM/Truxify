@@ -193,7 +193,7 @@ describe('Support Routes', () => {
       .set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(200);
-    expect(res.body.map(ticket => ticket.id)).toEqual(['ticket-new', 'ticket-old']);
+    expect(res.body.tickets.map(ticket => ticket.id)).toEqual(['ticket-new', 'ticket-old']);
 
     const ticketQuery = m.calls.find(c => c.table === 'support_tickets' && c.mode === 'select');
     expect(ticketQuery.filters).toContainEqual({ col: 'user_id', op: 'eq', val: 'customer-1' });

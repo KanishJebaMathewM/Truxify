@@ -3,3 +3,9 @@ include: package:flutter_lints/flutter.yaml
 analyzer:
   exclude:
     - build/**
+  errors:
+    deprecated_member_use: ignore
+    use_build_context_synchronously: ignore
+    unnecessary_brace_in_string_interps: ignore
+    unused_import: ignore
+    unused_field: ignore

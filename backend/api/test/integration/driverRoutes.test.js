@@ -175,6 +175,55 @@ describe('Driver Routes', () => {
     expect(Array.isArray(res.body)).toBe(true);
   });
 
+  it('GET /earnings/summary with days=1 returns only today', async () => {
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+    m.store.earnings_daily.push(
+      { driver_id: 'driver-1', day_date: yesterday, amount: 1000, trip_count: 1 },
+      { driver_id: 'driver-1', day_date: today, amount: 2000, trip_count: 2 }
+    );
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .get('/api/drivers/earnings/summary?days=1')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(1);
+    expect(res.body[0].day_date).toBe(today);
+  });
+
+  it('GET /earnings/summary with days=7 returns at most 7 calendar dates', async () => {
+    const today = new Date();
+    const dates = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+    const oldDate = new Date(today);
+    oldDate.setDate(oldDate.getDate() - 10);
+    const oldDateStr = oldDate.toISOString().split('T')[0];
+
+    m.store.earnings_daily.push(
+      { driver_id: 'driver-1', day_date: oldDateStr, amount: 500, trip_count: 1 },
+      ...dates.map((d, i) => ({ driver_id: 'driver-1', day_date: d, amount: (i + 1) * 100, trip_count: i + 1 }))
+    );
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .get('/api/drivers/earnings/summary?days=7')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(7);
+    expect(res.body[0].day_date).toBe(dates[0]);
+    expect(res.body[6].day_date).toBe(dates[6]);
+  });
+
   it('GET /earnings/summary rejects invalid days values', async () => {
     const app = buildApp();
 

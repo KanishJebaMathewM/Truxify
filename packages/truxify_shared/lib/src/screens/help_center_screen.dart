@@ -97,7 +97,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
           TextField(controller: _subjectController, decoration: const InputDecoration(labelText: 'Subject')),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _category,
+            initialValue: _category,
             items: const ['General', 'Booking', 'Billing', 'Technical'].map((value) => DropdownMenuItem(value: value, child: Text(value))).toList(),
             onChanged: (value) => setState(() => _category = value ?? 'General'),
             decoration: const InputDecoration(labelText: 'Category'),

@@ -19,6 +19,9 @@ class FindTrucksScreen extends StatefulWidget {
 }
 
 class _FindTrucksScreenState extends State<FindTrucksScreen> {
+  // Form key for validation
+  final _formKey = GlobalKey<FormState>();
+
   late final TextEditingController _pickupController;
   late final TextEditingController _dropController;
   late final TextEditingController _weightController;
@@ -33,12 +36,28 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   String _goodsType = 'Textile';
   bool _stacked = true;
   bool _fragile = false;
-  final Set<String> _requirements = <String>{'Temperature control', 'Loading help needed'};
+  final Set<String> _requirements = <String>{
+    'Temperature control',
+    'Loading help needed'
+  };
   LatLng? _pickupPoint;
   LatLng? _dropPoint;
 
-  static const _goodsTypes = <String>['Textile', 'Electronics', 'Food', 'Machinery', 'Furniture', 'Other'];
-  static const _requirementsOptions = <String>['Temperature control', 'Waterproof cover', 'Loading help needed'];
+  String? _weightErrorText;
+
+  static const _goodsTypes = <String>[
+    'Textile',
+    'Electronics',
+    'Food',
+    'Machinery',
+    'Furniture',
+    'Other'
+  ];
+  static const _requirementsOptions = <String>[
+    'Temperature control',
+    'Waterproof cover',
+    'Loading help needed'
+  ];
 
   String _requirementDisplayLabel(String requirement) {
     if (requirement == 'Loading help needed') {
@@ -57,14 +76,20 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     _pickupController = TextEditingController(text: draft.pickup);
     _dropController = TextEditingController(text: draft.drop);
     _weightController = TextEditingController(text: draft.weightTonnes);
-    _lengthController = TextEditingController(text: draft.dimensions.split(' × ').first);
-    _widthController = TextEditingController(text: draft.dimensions.split(' × ')[1]);
-    _heightController = TextEditingController(text: draft.dimensions.split(' × ')[2]);
+    _lengthController =
+        TextEditingController(text: draft.dimensions.split(' × ').first);
+    _widthController =
+        TextEditingController(text: draft.dimensions.split(' × ')[1]);
+    _heightController =
+        TextEditingController(text: draft.dimensions.split(' × ')[2]);
     final parsedDateTime = _parseDateTimeLabel(draft.dateLabel);
-    _selectedDate = parsedDateTime?.date ?? DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
+    _selectedDate = parsedDateTime?.date ??
+        DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
     _selectedTime = parsedDateTime?.time ?? const TimeOfDay(hour: 6, minute: 0);
-    _dateController = TextEditingController(text: _formatDateLabel(_selectedDate!));
-    _timeController = TextEditingController(text: _formatTimeLabel(_selectedTime!));
+    _dateController =
+        TextEditingController(text: _formatDateLabel(_selectedDate!));
+    _timeController =
+        TextEditingController(text: _formatTimeLabel(_selectedTime!));
     _goodsType = draft.goodsType;
     _customGoodsTypeController = TextEditingController();
     _stacked = draft.stacked;
@@ -90,8 +115,12 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
         _heightController.text = parts[2];
       }
       final parsedDateTime = _parseDateTimeLabel(draft.dateLabel);
-      _selectedDate = parsedDateTime?.date ?? _selectedDate ?? DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
-      _selectedTime = parsedDateTime?.time ?? _selectedTime ?? const TimeOfDay(hour: 6, minute: 0);
+      _selectedDate = parsedDateTime?.date ??
+          _selectedDate ??
+          DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
+      _selectedTime = parsedDateTime?.time ??
+          _selectedTime ??
+          const TimeOfDay(hour: 6, minute: 0);
       _dateController.text = _formatDateLabel(_selectedDate!);
       _timeController.text = _formatTimeLabel(_selectedTime!);
       _goodsType = draft.goodsType;
@@ -114,7 +143,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     _heightController.dispose();
     _dateController.dispose();
     _timeController.dispose();
-      _customGoodsTypeController.dispose();
+    _customGoodsTypeController.dispose();
     super.dispose();
   }
 
@@ -134,7 +163,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
 
   String _formatTimeLabel(TimeOfDay time) {
     final now = DateTime.now();
-    final dateTime = DateTime(now.year, now.month, now.day, time.hour, time.minute);
+    final dateTime =
+        DateTime(now.year, now.month, now.day, time.hour, time.minute);
     return DateFormat('h:mm a').format(dateTime);
   }
 
@@ -190,7 +220,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   }
 
   Future<void> _pickDate() async {
-    final initialDate = _selectedDate ?? DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
+    final initialDate = _selectedDate ??
+        DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
     final firstDate = DateUtils.dateOnly(DateTime.now());
     final lastDate = firstDate.add(const Duration(days: 365));
 
@@ -209,6 +240,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       _selectedDate = DateUtils.dateOnly(pickedDate);
       _dateController.text = _formatDateLabel(_selectedDate!);
     });
+
+    _formKey.currentState?.validate();
   }
 
   Future<void> _pickTime() async {
@@ -235,7 +268,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       dateLabel: _composeDateTimeLabel(),
       goodsType: _goodsType,
       weightTonnes: _weightController.text,
-      dimensions: '${_lengthController.text} × ${_widthController.text} × ${_heightController.text}',
+      dimensions:
+          '${_lengthController.text} × ${_widthController.text} × ${_heightController.text}',
       stacked: _stacked,
       fragile: _fragile,
       requirements: _requirements.toList(),
@@ -261,7 +295,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       AppPageRoute(
         builder: (_) => LocationPickerScreen(
           title: isPickup ? 'Set Pickup Location' : 'Set Drop Location',
-          initialQuery: isPickup ? _pickupController.text : _dropController.text,
+          initialQuery:
+              isPickup ? _pickupController.text : _dropController.text,
           initialPoint: isPickup ? _pickupPoint : _dropPoint,
         ),
       ),
@@ -280,429 +315,600 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
         _dropPoint = result.point;
       }
     });
+
+    _formKey.currentState?.validate();
+  }
+
+  // Validates the pickup location field.
+  String? _validatePickup(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) {
+      return 'Please select a pickup location.';
+    }
+    if (text == _dropController.text.trim() && text.isNotEmpty) {
+      return 'Pickup and drop locations cannot be the same.';
+    }
+    return null;
+  }
+
+  // Validates the drop location field.
+  String? _validateDrop(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) {
+      return 'Please select a drop location.';
+    }
+    if (text == _pickupController.text.trim() && text.isNotEmpty) {
+      return 'Pickup and drop locations cannot be the same.';
+    }
+    return null;
+  }
+
+  // Validates the pickup date field.
+  String? _validateDate(String? value) {
+    if (_selectedDate == null || (value?.trim().isEmpty ?? true)) {
+      return 'Please select a future pickup date.';
+    }
+    final today = DateUtils.dateOnly(DateTime.now());
+    if (!_selectedDate!.isAfter(today.subtract(const Duration(days: 1)))) {
+      if (_selectedDate!.isBefore(today)) {
+        return 'Please select a future pickup date.';
+      }
+    }
+    return null;
+  }
+
+  String? _validateWeight(String? value) {
+    final text = value?.trim() ?? '';
+    String? error;
+
+    if (text.isEmpty) {
+      error = 'Weight must be greater than 0.';
+    } else {
+      final weight = double.tryParse(text);
+      if (weight == null) {
+        error = 'Please enter a valid numeric weight.';
+      } else if (weight <= 0) {
+        error = 'Weight must be greater than 0.';
+      } else if (weight < 0.1 || weight > 50) {
+        error = 'Weight must be between 0.1 and 50 tonnes.';
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _weightErrorText = error);
+    });
+
+    return error;
+  }
+
+  void _onFindTrucks() {
+    if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+
+    Navigator.of(context).push(
+      AppPageRoute(builder: (_) => TruckResultsScreen(draft: _buildDraft())),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header with Filter
-            Row(
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Find Trucks',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'ML powered matching',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: TruxifyColors.accentLight,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: IconButton(
-                    onPressed: () {},
-                    icon: const Icon(Icons.filter_list_rounded, color: TruxifyColors.accentDark),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-
-            // ROUTE Section
-            Text(
-              'ROUTE',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: TruxifyColors.adaptiveSecondaryText(context),
-                    letterSpacing: 0.5,
-                  ),
-            ),
-            const SizedBox(height: 12),
-            InfoCard(
-              child: Column(
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header with Filter
+              Row(
                 children: [
-                  // Pickup Location
-                  TextField(
-                    controller: _pickupController,
-                    readOnly: true,
-                    onTap: () => _openLocationPicker(isPickup: true),
-                    decoration: InputDecoration(
-                      labelText: 'Pickup Location',
-                      prefixIcon: const Icon(Icons.location_on_rounded, color: TruxifyColors.accentDark),
-                      prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                      suffixIcon: IconButton(
-                        onPressed: () => _openLocationPicker(isPickup: true),
-                        icon: const Icon(Icons.map_rounded, color: TruxifyColors.accentDark),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  // Drop Location + Swap
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _dropController,
-                          readOnly: true,
-                          onTap: () => _openLocationPicker(isPickup: false),
-                          decoration: InputDecoration(
-                            labelText: 'Drop Location',
-                            prefixIcon: const Icon(Icons.location_on_rounded, color: Color(0xFFD32F2F)),
-                            prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                            suffixIcon: IconButton(
-                              onPressed: () => _openLocationPicker(isPickup: false),
-                              icon: const Icon(Icons.map_rounded, color: TruxifyColors.accentDark),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: TruxifyColors.accentLight,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: TruxifyColors.border),
-                        ),
-                        child: IconButton(
-                          onPressed: _swapLocations,
-                          icon: const Icon(Icons.swap_vert_rounded, color: TruxifyColors.accentDark),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  // Date and Time
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _dateController,
-                          readOnly: true,
-                          onTap: _pickDate,
-                          decoration: InputDecoration(
-                            labelText: 'Date',
-                            prefixIcon: const Icon(Icons.calendar_today_rounded, color: TruxifyColors.accentDark),
-                            prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: _timeController,
-                          readOnly: true,
-                          onTap: _pickTime,
-                          decoration: InputDecoration(
-                            labelText: 'Time',
-                            prefixIcon: const Icon(Icons.access_time_rounded, color: TruxifyColors.accentDark),
-                            prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // GOODS DETAILS Section
-            Text(
-              'GOODS DETAILS',
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: TruxifyColors.adaptiveSecondaryText(context),
-                    letterSpacing: 0.5,
-                  ),
-            ),
-            const SizedBox(height: 12),
-            InfoCard(
-              child: Column(
-                children: [
-                  // Goods Type Dropdown
-                  DropdownButtonFormField<String>(
-                    initialValue: _goodsType,
-                    items: _goodsTypes.map((type) => DropdownMenuItem(value: type, child: Text(type))).toList(),
-                    onChanged: (value) => setState(() => _goodsType = value ?? _goodsType),
-                    decoration: const InputDecoration(labelText: 'Goods Type'),
-                  ),
-                  // "Other" custom goods type text field
-                  if (_goodsType == 'Other') ...[
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: _customGoodsTypeController,
-                      textCapitalization: TextCapitalization.sentences,
-                      decoration: const InputDecoration(
-                        labelText: 'Describe your goods',
-                        hintText: 'e.g. Chemicals, Scrap metal…',
-                        prefixIcon: Icon(Icons.edit_note_rounded, color: TruxifyColors.accentDark),
-                        prefixIconConstraints: BoxConstraints(minWidth: 40, minHeight: 40),
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  // Weight and Dimensions (4 columns) — labels use floating style so they never clip
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _weightController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Weight (t)',
-                            hintText: '3',
-                            floatingLabelBehavior: FloatingLabelBehavior.always,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _lengthController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Length (ft)',
-                            hintText: '12',
-                            floatingLabelBehavior: FloatingLabelBehavior.always,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _widthController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Width (ft)',
-                            hintText: '6',
-                            floatingLabelBehavior: FloatingLabelBehavior.always,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextField(
-                          controller: _heightController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Height (ft)',
-                            hintText: '6',
-                            floatingLabelBehavior: FloatingLabelBehavior.always,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 14),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  // Stackable and Fragile toggles as colored buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _ColorToggleButton(
-                          icon: Icons.layers_rounded,
-                          label: 'Stackable',
-                          isSelected: _stacked,
-                          onPressed: () => setState(() => _stacked = !_stacked),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _ColorToggleButton(
-                          icon: Icons.warning_rounded,
-                          label: 'Fragile',
-                          isSelected: _fragile,
-                          onPressed: () => setState(() => _fragile = !_fragile),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  // Special requirements
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Special requirements',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: TruxifyColors.adaptiveSecondaryText(context),
-                          ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: _requirementsOptions.map((item) {
-                      final selected = _requirements.contains(item);
-                      final label = _requirementDisplayLabel(item);
-
-                      return Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () {
-                            setState(() {
-                              if (selected) {
-                                _requirements.remove(item);
-                              } else {
-                                _requirements.add(item);
-                              }
-                            });
-                          },
-                          borderRadius: BorderRadius.circular(999),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: selected
-                                  ? (Theme.of(context).brightness == Brightness.dark
-                                      ? TruxifyColors.darkAccentLight
-                                      : TruxifyColors.accentLight)
-                                  : Theme.of(context).colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(
-                                color: selected ? Colors.transparent : (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (selected)
-                                  Icon(Icons.check_rounded, color: TruxifyColors.accentDark, size: 16)
-                                else
-                                  Icon(Icons.add_rounded, color: TruxifyColors.adaptiveSecondaryText(context), size: 16),
-                                const SizedBox(width: 6),
-                                Text(
-                                  label,
-                                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                        color: selected
-                                            ? TruxifyColors.accentDark
-                                            : TruxifyColors.adaptiveSecondaryText(context),
-                                      ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            // Estimated Price Range with Left Border
-            Stack(
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surface,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
+                  Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Estimated Price Range',
-                            style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: TruxifyColors.accentLight,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              'Stable this week',
-                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                    color: TruxifyColors.accentDark,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
                       Text(
-                        '₹6,200 — ₹7,800',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.w800,
-                              color: Theme.of(context).brightness == Brightness.dark
-                                  ? TruxifyColors.accent
-                                  : TruxifyColors.accentDark,
-                            ),
+                        'Find Trucks',
+                        style: Theme.of(context)
+                            .textTheme
+                            .headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w800),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 2),
                       Text(
-                        'Based on current demand + route',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
+                        'ML powered matching',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color:
+                                TruxifyColors.adaptiveSecondaryText(context)),
                       ),
                     ],
                   ),
-                ),
-                Positioned(
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
-                  child: Container(
-                    width: 4,
+                  const Spacer(),
+                  Container(
+                    width: 48,
+                    height: 48,
                     decoration: BoxDecoration(
-                      color: TruxifyColors.accentDark,
-                      borderRadius: const BorderRadius.only(
-                        topLeft: Radius.circular(16),
-                        bottomLeft: Radius.circular(16),
+                      color: TruxifyColors.accentLight,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: IconButton(
+                      onPressed: () {},
+                      icon: const Icon(Icons.filter_list_rounded,
+                          color: TruxifyColors.accentDark),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              // ROUTE Section
+              Text(
+                'ROUTE',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                      letterSpacing: 0.5,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              InfoCard(
+                child: Column(
+                  children: [
+                    // Pickup Location
+                    TextFormField(
+                      controller: _pickupController,
+                      readOnly: true,
+                      onTap: () => _openLocationPicker(isPickup: true),
+                      validator: _validatePickup,
+                      decoration: InputDecoration(
+                        labelText: 'Pickup Location',
+                        prefixIcon: const Icon(Icons.location_on_rounded,
+                            color: TruxifyColors.accentDark),
+                        prefixIconConstraints:
+                            const BoxConstraints(minWidth: 40, minHeight: 40),
+                        suffixIcon: IconButton(
+                          onPressed: () => _openLocationPicker(isPickup: true),
+                          icon: const Icon(Icons.map_rounded,
+                              color: TruxifyColors.accentDark),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    // Drop Location + Swap
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _dropController,
+                            readOnly: true,
+                            onTap: () => _openLocationPicker(isPickup: false),
+                            validator: _validateDrop,
+                            decoration: InputDecoration(
+                              labelText: 'Drop Location',
+                              prefixIcon: const Icon(Icons.location_on_rounded,
+                                  color: Color(0xFFD32F2F)),
+                              prefixIconConstraints: const BoxConstraints(
+                                  minWidth: 40, minHeight: 40),
+                              suffixIcon: IconButton(
+                                onPressed: () =>
+                                    _openLocationPicker(isPickup: false),
+                                icon: const Icon(Icons.map_rounded,
+                                    color: TruxifyColors.accentDark),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Align swap button to top so it doesn't shift when error text appears
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: TruxifyColors.accentLight,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: TruxifyColors.border),
+                            ),
+                            child: IconButton(
+                              onPressed: _swapLocations,
+                              icon: const Icon(Icons.swap_vert_rounded,
+                                  color: TruxifyColors.accentDark),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    // Date and Time
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _dateController,
+                            readOnly: true,
+                            onTap: _pickDate,
+                            validator: _validateDate,
+                            decoration: InputDecoration(
+                              labelText: 'Date',
+                              prefixIcon: const Icon(
+                                  Icons.calendar_today_rounded,
+                                  color: TruxifyColors.accentDark),
+                              prefixIconConstraints: const BoxConstraints(
+                                  minWidth: 40, minHeight: 40),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextField(
+                            controller: _timeController,
+                            readOnly: true,
+                            onTap: _pickTime,
+                            decoration: InputDecoration(
+                              labelText: 'Time',
+                              prefixIcon: const Icon(Icons.access_time_rounded,
+                                  color: TruxifyColors.accentDark),
+                              prefixIconConstraints: const BoxConstraints(
+                                  minWidth: 40, minHeight: 40),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // GOODS DETAILS Section
+              Text(
+                'GOODS DETAILS',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                      letterSpacing: 0.5,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              InfoCard(
+                child: Column(
+                  children: [
+                    // Goods Type Dropdown
+                    DropdownButtonFormField<String>(
+                      initialValue: _goodsType,
+                      items: _goodsTypes
+                          .map((type) =>
+                              DropdownMenuItem(value: type, child: Text(type)))
+                          .toList(),
+                      onChanged: (value) =>
+                          setState(() => _goodsType = value ?? _goodsType),
+                      decoration:
+                          const InputDecoration(labelText: 'Goods Type'),
+                    ),
+                    // "Other" custom goods type text field
+                    if (_goodsType == 'Other') ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _customGoodsTypeController,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: const InputDecoration(
+                          labelText: 'Describe your goods',
+                          hintText: 'e.g. Chemicals, Scrap metal…',
+                          prefixIcon: Icon(Icons.edit_note_rounded,
+                              color: TruxifyColors.accentDark),
+                          prefixIconConstraints:
+                              BoxConstraints(minWidth: 40, minHeight: 40),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _weightController,
+                            keyboardType: TextInputType.number,
+                            validator: _validateWeight,
+                            decoration: const InputDecoration(
+                              labelText: 'Weight (t)',
+                              hintText: '3',
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 14),
+                              errorStyle: TextStyle(fontSize: 0, height: 0),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _lengthController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Length (ft)',
+                              hintText: '12',
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 14),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _widthController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Width (ft)',
+                              hintText: '6',
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 14),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _heightController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Height (ft)',
+                              hintText: '6',
+                              floatingLabelBehavior:
+                                  FloatingLabelBehavior.always,
+                              contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 14),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (_weightErrorText != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        _weightErrorText!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                          fontSize: 12,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    // Stackable and Fragile toggles
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _ColorToggleButton(
+                            icon: Icons.layers_rounded,
+                            label: 'Stackable',
+                            isSelected: _stacked,
+                            onPressed: () =>
+                                setState(() => _stacked = !_stacked),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _ColorToggleButton(
+                            icon: Icons.warning_rounded,
+                            label: 'Fragile',
+                            isSelected: _fragile,
+                            onPressed: () =>
+                                setState(() => _fragile = !_fragile),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    // Special requirements
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Special requirements',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color:
+                                  TruxifyColors.adaptiveSecondaryText(context),
+                            ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: _requirementsOptions.map((item) {
+                        final selected = _requirements.contains(item);
+                        final label = _requirementDisplayLabel(item);
+
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              setState(() {
+                                if (selected) {
+                                  _requirements.remove(item);
+                                } else {
+                                  _requirements.add(item);
+                                }
+                              });
+                            },
+                            borderRadius: BorderRadius.circular(999),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? (Theme.of(context).brightness ==
+                                            Brightness.dark
+                                        ? TruxifyColors.darkAccentLight
+                                        : TruxifyColors.accentLight)
+                                    : Theme.of(context)
+                                        .colorScheme
+                                        .surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: selected
+                                      ? Colors.transparent
+                                      : (Theme.of(context).brightness ==
+                                              Brightness.dark
+                                          ? TruxifyColors.darkBorder
+                                          : TruxifyColors.border),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (selected)
+                                    Icon(Icons.check_rounded,
+                                        color: TruxifyColors.accentDark,
+                                        size: 16)
+                                  else
+                                    Icon(Icons.add_rounded,
+                                        color:
+                                            TruxifyColors.adaptiveSecondaryText(
+                                                context),
+                                        size: 16),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    label,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                          color: selected
+                                              ? TruxifyColors.accentDark
+                                              : TruxifyColors
+                                                  .adaptiveSecondaryText(
+                                                      context),
+                                        ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // Estimated Price Range with Left Border
+              Stack(
+                children: [
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color:
+                              (Theme.of(context).brightness == Brightness.dark
+                                  ? TruxifyColors.darkBorder
+                                  : TruxifyColors.border)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Estimated Price Range',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: TruxifyColors.accentLight,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                'Stable this week',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelSmall
+                                    ?.copyWith(
+                                      color: TruxifyColors.accentDark,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '₹6,200 — ₹7,800',
+                          style: Theme.of(context)
+                              .textTheme
+                              .headlineSmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: Theme.of(context).brightness ==
+                                        Brightness.dark
+                                    ? TruxifyColors.accent
+                                    : TruxifyColors.accentDark,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Based on current demand + route',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                  color: TruxifyColors.adaptiveSecondaryText(
+                                      context)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    child: Container(
+                      width: 4,
+                      decoration: BoxDecoration(
+                        color: TruxifyColors.accentDark,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(16),
+                          bottomLeft: Radius.circular(16),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
+                ],
+              ),
+              const SizedBox(height: 20),
 
-            // Find Trucks Button
-            PrimaryButton(
-              label: 'Find Trucks',
-              onPressed: () {
-                Navigator.of(context).push(
-                  AppPageRoute(builder: (_) => TruckResultsScreen(draft: _buildDraft())),
-                );
-              },
-            ),
-          ],
+              // Find Trucks Button
+              PrimaryButton(
+                label: 'Find Trucks',
+                onPressed: _onFindTrucks,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -744,7 +950,11 @@ class _ColorToggleButton extends StatelessWidget {
                 : Theme.of(context).colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected ? TruxifyColors.accentDark : (Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border),
+              color: isSelected
+                  ? TruxifyColors.accentDark
+                  : (Theme.of(context).brightness == Brightness.dark
+                      ? TruxifyColors.darkBorder
+                      : TruxifyColors.border),
             ),
           ),
           child: Row(
@@ -752,7 +962,9 @@ class _ColorToggleButton extends StatelessWidget {
             children: [
               Icon(
                 icon,
-                color: isSelected ? Colors.white : TruxifyColors.adaptiveSecondaryText(context),
+                color: isSelected
+                    ? Colors.white
+                    : TruxifyColors.adaptiveSecondaryText(context),
                 size: 24,
               ),
               if (label != null) ...[
@@ -761,7 +973,9 @@ class _ColorToggleButton extends StatelessWidget {
                   label!,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: isSelected ? Colors.white : TruxifyColors.adaptiveSecondaryText(context),
+                        color: isSelected
+                            ? Colors.white
+                            : TruxifyColors.adaptiveSecondaryText(context),
                       ),
                 ),
               ],

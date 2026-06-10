@@ -4,6 +4,7 @@ import http from 'http';
 import dotenv from 'dotenv';
 import path from 'path';
 import rateLimit from 'express-rate-limit';
+import tripRoutes from './routes/tripRoutes.js';
 
 import { closeDbConnections } from './config/db.js';
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js';
@@ -12,6 +13,7 @@ import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import orderRoutes from './routes/orderRoutes.js';
 import driverRoutes from './routes/driverRoutes.js';
 import supportRoutes from './routes/supportRoutes.js';
+import profileRoutes from './routes/profileRoutes.js';
 
 // Configuration load from root folder is handled in db.js
 
@@ -20,13 +22,34 @@ const app = express();
 const server = http.createServer(app);
 app.set('trust proxy', 1); // ← add this
 
-// Enable CORS for frontend clients (Flutter Web, mobile, etc.)
-const corsOrigins = process.env.NODE_ENV === 'production'
-  ? (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean)
-  : '*';
+// Enable CORS only for explicitly allowed frontend origins
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter((origin) => {
+    if (!origin) return false;
+    try {
+      const parsed = new URL(origin);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  });
 
 app.use(cors({
-  origin: corsOrigins,
+  origin: (origin, callback) => {
+    // Allow non-browser/same-origin requests with no Origin header
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+
+    // In development/testing, allow localhost or loopback origins
+    if (process.env.NODE_ENV !== 'production') {
+      const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+      if (isLocalhost) return callback(null, true);
+    }
+
+    return callback(null, false);
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'x-user-role', 'x-user-name']
 }));
@@ -54,6 +77,7 @@ const healthLimiter = rateLimit({
 
 app.use('/api/', limiter);
 app.use('/api/health', healthLimiter);
+app.use('/api/v1/trips', tripRoutes);
 
 
 
@@ -93,7 +117,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/orders', orderRoutes);
 app.use('/api/driver', driverRoutes);
 app.use('/api/support', supportRoutes);
-
+app.use('/api/profile', profileRoutes);
 // Root route
 app.get('/', (req, res) => {
   res.send('<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://localhost:5000/ws/tracking</code></p>');

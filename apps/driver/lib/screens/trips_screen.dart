@@ -22,7 +22,8 @@ class TripsScreen extends StatefulWidget {
 
 class _TripsScreenState extends State<TripsScreen> {
   int _selectedChipIndex = 0; // 0: All, 1: Active, 2: Completed, 3: Cancelled
-  int _selectedSortIndex = 0; // 0: Newest, 1: Oldest, 2: Highest, 3: Lowest, 4: By status
+  int _selectedSortIndex =
+      0; // 0: Newest, 1: Oldest, 2: Highest, 3: Lowest, 4: By status
   int _topTabIndex = 0; // 0: Trips, 1: Marketplace
 
   RealtimeChannel? _bidChannel;
@@ -34,62 +35,19 @@ class _TripsScreenState extends State<TripsScreen> {
   Map<String, List<Map<String, dynamic>>> _routePointsByTripId = {};
 
   bool _isLoadingTrips = true;
+  String? _tripsError;
 
   bool _marketplaceLoading = false;
   String? _marketplaceError;
   List<LoadOffer> _marketplaceLoads = const [];
   List<LoadOffer> _enRouteLoads = const [];
   Map<String, DriverBid> _bidsByLoadId = const {};
-  Future<void> _refreshMarketplace({bool showSpinner = true}) async {
-    if (!SupabaseConfig.isConfigured) {
-      setState(() {
-        _marketplaceLoading = false;
-        _marketplaceError = 'Supabase is not configured. Pass --dart-define=SUPABASE_URL=... and --dart-define=SUPABASE_ANON_KEY=...';
-      });
-      return;
-    }
-    if (showSpinner) {
-      setState(() {
-        _marketplaceLoading = true;
-        _marketplaceError = null;
-      });
-    } else {
-      setState(() => _marketplaceError = null);
-    }
-
-    try {
-      final results = await Future.wait([
-        _marketplaceRepository.fetchLoadOffers(),
-        _marketplaceRepository.fetchEnRouteLoads(),
-        _marketplaceRepository.fetchDriverBids(driverId: DriverSession.driverId),
-      ]);
-
-      final standardLoads = results[0] as List<LoadOffer>;
-      final enRouteLoads = results[1] as List<LoadOffer>;
-      final bids = results[2] as List<DriverBid>;
-      final bidsByLoad = <String, DriverBid>{for (final bid in bids) bid.loadId: bid};
-
-      if (!mounted) return;
-      setState(() {
-        _marketplaceLoads = standardLoads;
-        _enRouteLoads = enRouteLoads;
-        _bidsByLoadId = bidsByLoad;
-        _marketplaceLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _marketplaceError = e.toString();
-        _marketplaceLoading = false;
-      });
-    }
-  }
 
   final List<String> _statusFilters = [
     'All',
     'Active',
     'Completed',
-    'Cancelled'
+    'Cancelled',
   ];
 
   @override
@@ -101,11 +59,17 @@ class _TripsScreenState extends State<TripsScreen> {
       _refreshMarketplace();
       _subscribeToRealtime();
     } else {
-      _marketplaceError = 'Supabase is not configured. Pass --dart-define=SUPABASE_URL=... and --dart-define=SUPABASE_ANON_KEY=...';
+      _marketplaceError =
+          'Supabase is not configured. Pass --dart-define=SUPABASE_URL=... and --dart-define=SUPABASE_ANON_KEY=...';
     }
   }
 
   Future<void> _loadTrips() async {
+    setState(() {
+      _isLoadingTrips = true;
+      _tripsError = null;
+    });
+
     try {
       final trips = await _tripService.fetchTrips();
 
@@ -113,7 +77,9 @@ class _TripsScreenState extends State<TripsScreen> {
       final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
 
       await Future.wait(trips.map((trip) async {
-        final tripId = trip['trip_display_id'].toString();
+        final tripId = trip['trip_display_id']?.toString();
+        if (tripId == null || tripId.isEmpty) return;
+
         final results = await Future.wait([
           _tripService.fetchTripStops(tripId),
           _tripService.fetchRouteMapPoints(tripId),
@@ -131,10 +97,11 @@ class _TripsScreenState extends State<TripsScreen> {
         _isLoadingTrips = false;
       });
     } catch (e) {
-      debugPrint("Failed to load trips: $e");
+      debugPrint('Failed to load trips: $e');
       if (!mounted) return;
       setState(() {
         _isLoadingTrips = false;
+        _tripsError = e.toString();
       });
     }
   }
@@ -146,9 +113,7 @@ class _TripsScreenState extends State<TripsScreen> {
       orElse: () => {},
     );
 
-    if (currentStop.isEmpty) {
-      return;
-    }
+    if (currentStop.isEmpty) return;
 
     await _tripService.markStopCompleted(
       currentStop['id'].toString(),
@@ -197,26 +162,6 @@ class _TripsScreenState extends State<TripsScreen> {
     }).toList();
   }
 
-  void _subscribeToRealtime() {
-    _bidChannel = Supabase.instance.client
-        .channel('driver-bids')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'load_bids',
-          callback: (_) => _refreshMarketplace(),
-        )
-        .subscribe();
-  }
-
-  @override
-  void dispose() {
-    if (SupabaseConfig.isConfigured && _bidChannel != null) {
-      Supabase.instance.client.removeChannel(_bidChannel!);
-    }
-    super.dispose();
-  }
-
   List<Trip> _getFilteredAndSortedTrips() {
     List<Trip> trips = _mapSupabaseTripsToUiTrips();
 
@@ -228,7 +173,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
     // Sort
     switch (_selectedSortIndex) {
-      case 0: // Newest first (Keep original list order since mock is ordered newest first)
+      case 0: // Newest first — fetchTrips already orders by trip_date desc
         break;
       case 1: // Oldest first
         trips = trips.reversed.toList();
@@ -241,7 +186,7 @@ class _TripsScreenState extends State<TripsScreen> {
         trips.sort((a, b) =>
             _parseEarnings(a.earnings).compareTo(_parseEarnings(b.earnings)));
         break;
-      case 4: // By status (Active first, then Completed, then Cancelled)
+      case 4: // By status (Active → Completed → Cancelled)
         trips.sort((a, b) => a.status.index.compareTo(b.status.index));
         break;
     }
@@ -264,6 +209,99 @@ class _TripsScreenState extends State<TripsScreen> {
   int _parseEarnings(String earnings) {
     final clean = earnings.replaceAll(RegExp(r'[^\d]'), '');
     return int.tryParse(clean) ?? 0;
+  }
+
+  int _totalEarningsPaise() => _trips.fold(
+        0,
+        (sum, row) => sum + ((row['net_earnings'] ?? 0) as num).toInt(),
+      );
+
+  int _completedCount() =>
+      _trips.where((r) => r['status'] == 'completed').length;
+
+  double _completionRate() {
+    final total = _trips.length;
+    if (total == 0) return 0;
+    return (_completedCount() / total) * 100;
+  }
+
+  String _formatEarnings(int paise) {
+    final rupees = paise / 100;
+    if (rupees >= 100000) {
+      return '₹${(rupees / 100000).toStringAsFixed(1)}L';
+    } else if (rupees >= 1000) {
+      return '₹${(rupees / 1000).toStringAsFixed(1)}K';
+    }
+    return '₹${rupees.toStringAsFixed(0)}';
+  }
+
+  Future<void> _refreshMarketplace({bool showSpinner = true}) async {
+    if (!SupabaseConfig.isConfigured) {
+      setState(() {
+        _marketplaceLoading = false;
+        _marketplaceError =
+            'Supabase is not configured. Pass --dart-define=SUPABASE_URL=... and --dart-define=SUPABASE_ANON_KEY=...';
+      });
+      return;
+    }
+    if (showSpinner) {
+      setState(() {
+        _marketplaceLoading = true;
+        _marketplaceError = null;
+      });
+    } else {
+      setState(() => _marketplaceError = null);
+    }
+
+    try {
+      final results = await Future.wait([
+        _marketplaceRepository.fetchLoadOffers(),
+        _marketplaceRepository.fetchEnRouteLoads(),
+        _marketplaceRepository.fetchDriverBids(
+            driverId: DriverSession.driverId),
+      ]);
+
+      final standardLoads = results[0] as List<LoadOffer>;
+      final enRouteLoads = results[1] as List<LoadOffer>;
+      final bids = results[2] as List<DriverBid>;
+      final bidsByLoad = <String, DriverBid>{
+        for (final bid in bids) bid.loadId: bid,
+      };
+
+      if (!mounted) return;
+      setState(() {
+        _marketplaceLoads = standardLoads;
+        _enRouteLoads = enRouteLoads;
+        _bidsByLoadId = bidsByLoad;
+        _marketplaceLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _marketplaceError = e.toString();
+        _marketplaceLoading = false;
+      });
+    }
+  }
+
+  void _subscribeToRealtime() {
+    _bidChannel = Supabase.instance.client
+        .channel('driver-bids')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'load_bids',
+          callback: (_) => _refreshMarketplace(),
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    if (SupabaseConfig.isConfigured && _bidChannel != null) {
+      Supabase.instance.client.removeChannel(_bidChannel!);
+    }
+    super.dispose();
   }
 
   void _showSortBottomSheet() {
@@ -325,9 +363,7 @@ class _TripsScreenState extends State<TripsScreen> {
                     height: 48,
                     child: ElevatedButton(
                       onPressed: () {
-                        setState(() {
-                          _selectedSortIndex = tempSortIndex;
-                        });
+                        setState(() => _selectedSortIndex = tempSortIndex);
                         Navigator.pop(context);
                       },
                       style: ElevatedButton.styleFrom(
@@ -420,17 +456,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final allTrips = _trips.isNotEmpty
-        ? _mapSupabaseTripsToUiTrips()
-        : _getFilteredAndSortedTrips();
-
-    final trips = _selectedChipIndex == 0
-        ? allTrips
-        : allTrips
-            .where((trip) =>
-                trip.status == _getStatusFromIndex(_selectedChipIndex))
-            .toList();
-    debugPrint('Supabase trips count: ${_trips.length}');
+    final trips = _getFilteredAndSortedTrips();
 
     return SafeArea(
       child: Scaffold(
@@ -457,7 +483,8 @@ class _TripsScreenState extends State<TripsScreen> {
                       const SizedBox(width: 10),
                       _TopTabToggle(
                         index: _topTabIndex,
-                        onChanged: (value) => setState(() => _topTabIndex = value),
+                        onChanged: (value) =>
+                            setState(() => _topTabIndex = value),
                       ),
                     ],
                   ),
@@ -503,12 +530,14 @@ class _TripsScreenState extends State<TripsScreen> {
                     standardLoads: _marketplaceLoads,
                     enRouteLoads: _enRouteLoads,
                     bidsByLoadId: _bidsByLoadId,
-                    onOpenLoad: (load) => Navigator.of(context).pushNamed(AppRoutes.loadDetail, arguments: load),
+                    onOpenLoad: (load) => Navigator.of(context)
+                        .pushNamed(AppRoutes.loadDetail, arguments: load),
                     onSubmitBid: (load, amount) async {
                       final loadId = load.id;
                       if (loadId.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('This load is missing an id.')),
+                          const SnackBar(
+                              content: Text('This load is missing an id.')),
                         );
                         return;
                       }
@@ -520,10 +549,14 @@ class _TripsScreenState extends State<TripsScreen> {
                         );
                         if (!context.mounted) return;
                         setState(() {
-                          _bidsByLoadId = <String, DriverBid>{..._bidsByLoadId, bid.loadId: bid};
+                          _bidsByLoadId = <String, DriverBid>{
+                            ..._bidsByLoadId,
+                            bid.loadId: bid,
+                          };
                         });
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Bid submitted (Pending).')),
+                          const SnackBar(
+                              content: Text('Bid submitted (Pending).')),
                         );
                       } catch (e) {
                         if (!context.mounted) return;
@@ -535,157 +568,195 @@ class _TripsScreenState extends State<TripsScreen> {
                   ),
                 ),
               )
-            else
-            // Summary Strip
-            Container(
-              color: Theme.of(context).colorScheme.surface,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Text(
-                          '24',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: TruxifyColors.accent,
+            else ...[
+              // Summary Strip — computed from real trip data
+              Container(
+                color: Theme.of(context).colorScheme.surface,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Text(
+                            '${_trips.length}',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: TruxifyColors.accent,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Total trips',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 10,
-                            color: TruxifyColors.adaptiveSecondaryText(context),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Total trips',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 10,
+                              color:
+                                  TruxifyColors.adaptiveSecondaryText(context),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(width: 1, height: 32, color: TruxifyColors.border),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Text(
-                          '₹1.2L',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: TruxifyColors.accent,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Total earned',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 10,
-                            color: TruxifyColors.adaptiveSecondaryText(context),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(width: 1, height: 32, color: TruxifyColors.border),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Text(
-                          '97%',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: TruxifyColors.accent,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Completion',
-                          style: GoogleFonts.dmSans(
-                            fontSize: 10,
-                            color: TruxifyColors.adaptiveSecondaryText(context),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Container(height: 1, color: TruxifyColors.border),
-
-            // Filter Chips
-            Container(
-              height: 52,
-              color: Theme.of(context).colorScheme.surface,
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                itemCount: _statusFilters.length,
-                itemBuilder: (context, index) {
-                  final isSelected = index == _selectedChipIndex;
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _selectedChipIndex = index;
-                      });
-                    },
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: isSelected ? TruxifyColors.accent : Colors.white,
-                        border: Border.all(
-                          color: isSelected
-                              ? TruxifyColors.accent
-                              : TruxifyColors.border,
-                        ),
-                        borderRadius: BorderRadius.circular(20),
+                        ],
                       ),
-                      child: Center(
-                        child: Text(
-                          _statusFilters[index],
-                          style: GoogleFonts.dmSans(
-                            fontSize: 12,
-                            fontWeight: isSelected
-                                ? FontWeight.w600
-                                : FontWeight.normal,
+                    ),
+                    Container(
+                        width: 1, height: 32, color: TruxifyColors.border),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Text(
+                            _formatEarnings(_totalEarningsPaise()),
+                            style: GoogleFonts.dmSans(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: TruxifyColors.accent,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Total earned',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 10,
+                              color:
+                                  TruxifyColors.adaptiveSecondaryText(context),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                        width: 1, height: 32, color: TruxifyColors.border),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          Text(
+                            '${_completionRate().toStringAsFixed(0)}%',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: TruxifyColors.accent,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Completion',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 10,
+                              color:
+                                  TruxifyColors.adaptiveSecondaryText(context),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(height: 1, color: TruxifyColors.border),
+
+              // Filter Chips
+              Container(
+                height: 52,
+                color: Theme.of(context).colorScheme.surface,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  itemCount: _statusFilters.length,
+                  itemBuilder: (context, index) {
+                    final isSelected = index == _selectedChipIndex;
+                    return GestureDetector(
+                      onTap: () => setState(() => _selectedChipIndex = index),
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 6),
+                        decoration: BoxDecoration(
+                          color:
+                              isSelected ? TruxifyColors.accent : Colors.white,
+                          border: Border.all(
                             color: isSelected
-                                ? Colors.white
-                                : TruxifyColors.adaptiveSecondaryText(context),
+                                ? TruxifyColors.accent
+                                : TruxifyColors.border,
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Center(
+                          child: Text(
+                            _statusFilters[index],
+                            style: GoogleFonts.dmSans(
+                              fontSize: 12,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                              color: isSelected
+                                  ? Colors.white
+                                  : TruxifyColors.adaptiveSecondaryText(
+                                      context),
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
               ),
-            ),
 
-            // Trips List
-            Expanded(
-              child: trips.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No trips found',
-                        style: GoogleFonts.dmSans(
-                          color: TruxifyColors.adaptiveSecondaryText(context),
-                          fontSize: 14,
-                        ),
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(12),
-                      itemCount: trips.length,
-                      itemBuilder: (context, index) {
-                        final trip = trips[index];
-                        return _buildTripCard(context, trip);
-                      },
-                    ),
-            ),
+              // Trips List
+              Expanded(
+                child: RefreshIndicator(
+                  color: TruxifyColors.accent,
+                  onRefresh: _loadTrips,
+                  child: _isLoadingTrips
+                      ? const Center(child: CircularProgressIndicator())
+                      : _tripsError != null
+                          ? ListView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.all(16),
+                              children: [
+                                const SizedBox(height: 40),
+                                Center(
+                                  child: Text(
+                                    'Failed to load trips.\nPull down to retry.',
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.dmSans(
+                                      color:
+                                          TruxifyColors.adaptiveSecondaryText(
+                                              context),
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            )
+                          : trips.isEmpty
+                              ? ListView(
+                                  physics:
+                                      const AlwaysScrollableScrollPhysics(),
+                                  children: [
+                                    const SizedBox(height: 80),
+                                    Center(
+                                      child: Text(
+                                        'No trips found',
+                                        style: GoogleFonts.dmSans(
+                                          color: TruxifyColors
+                                              .adaptiveSecondaryText(context),
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : ListView.builder(
+                                  physics:
+                                      const AlwaysScrollableScrollPhysics(),
+                                  padding: const EdgeInsets.all(12),
+                                  itemCount: trips.length,
+                                  itemBuilder: (context, index) =>
+                                      _buildTripCard(context, trips[index]),
+                                ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -694,9 +765,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
   Widget _buildLiveStopsPreview(String tripId) {
     final stops = _tripStopsByTripId[tripId] ?? [];
-    if (stops.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    if (stops.isEmpty) return const SizedBox.shrink();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -726,11 +795,11 @@ class _TripsScreenState extends State<TripsScreen> {
         ...stops.map((stop) {
           final isCompleted = stop['is_completed'] == true;
           final isCurrent = stop['is_current'] == true;
-
           return Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
-              '${isCompleted ? "✅" : isCurrent ? "🔄" : "⏳"} ${stop['customer_name']} → ${stop['drop_location']}',
+              '${isCompleted ? "✅" : isCurrent ? "🔄" : "⏳"} '
+              '${stop['customer_name']} → ${stop['drop_location']}',
               style: GoogleFonts.dmSans(
                 fontSize: 11,
                 color: Theme.of(context).colorScheme.onSurface,
@@ -744,6 +813,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
   Widget _buildTripCard(BuildContext context, Trip trip) {
     final routePoints = _routePointsByTripId[trip.tripId] ?? [];
+
     Color statusColor;
     Color statusBgColor;
     String statusLabel;
@@ -767,13 +837,8 @@ class _TripsScreenState extends State<TripsScreen> {
     }
 
     return GestureDetector(
-      onTap: () {
-        Navigator.pushNamed(
-          context,
-          AppRoutes.tripDetail,
-          arguments: trip,
-        );
-      },
+      onTap: () =>
+          Navigator.pushNamed(context, AppRoutes.tripDetail, arguments: trip),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
@@ -798,7 +863,7 @@ class _TripsScreenState extends State<TripsScreen> {
             children: [
               Container(
                 width: 4,
-                height: 120, // Approximate height matching card content
+                height: 120,
                 color: statusColor,
               ),
               Expanded(
@@ -807,7 +872,7 @@ class _TripsScreenState extends State<TripsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Small route thumbnail (OSM)
+                      // Route map thumbnail
                       SizedBox(
                         height: 86,
                         child: _buildRouteMap(routePoints),
@@ -815,7 +880,7 @@ class _TripsScreenState extends State<TripsScreen> {
                       const SizedBox(height: 8),
                       _buildLiveStopsPreview(trip.tripId),
                       const SizedBox(height: 8),
-                      // Top Row
+                      // Route + status badge
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -848,7 +913,6 @@ class _TripsScreenState extends State<TripsScreen> {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      // Date Row
                       Text(
                         trip.date,
                         style: GoogleFonts.dmSans(
@@ -857,7 +921,7 @@ class _TripsScreenState extends State<TripsScreen> {
                         ),
                       ),
                       const SizedBox(height: 8),
-                      // Items Row
+                      // Items chips
                       trip.items.isEmpty
                           ? Text(
                               '—',
@@ -900,7 +964,7 @@ class _TripsScreenState extends State<TripsScreen> {
                               ),
                             ),
                       const SizedBox(height: 8),
-                      // Bottom Row
+                      // Distance + earnings
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -1028,7 +1092,9 @@ class _TopTabToggle extends StatelessWidget {
             style: GoogleFonts.dmSans(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: selected ? TruxifyColors.accentDark : TruxifyColors.secondaryText,
+              color: selected
+                  ? TruxifyColors.accentDark
+                  : TruxifyColors.secondaryText,
             ),
           ),
         ),
@@ -1085,11 +1151,12 @@ class _MarketplaceBody extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Could not load marketplace', style: Theme.of(context).textTheme.titleMedium),
+                Text('Could not load marketplace',
+                    style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 Text(error!, style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 14),
-                OutlinedAccentButton(
+                const OutlinedAccentButton(
                   label: 'Pull to refresh',
                   onPressed: null,
                 ),
@@ -1150,7 +1217,10 @@ class _MarketplaceBody extends StatelessWidget {
           const SizedBox(height: 14),
           Text(
             'Some data may be out of date. Last error: $error',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.secondaryText),
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: TruxifyColors.secondaryText),
           ),
         ],
       ],
@@ -1174,11 +1244,20 @@ class _LoadOfferCard extends StatelessWidget {
   StatusPill _pillFor(BidStatus status) {
     switch (status) {
       case BidStatus.accepted:
-        return const StatusPill(label: 'Accepted', backgroundColor: TruxifyColors.successLight, foregroundColor: TruxifyColors.success);
+        return const StatusPill(
+            label: 'Accepted',
+            backgroundColor: TruxifyColors.successLight,
+            foregroundColor: TruxifyColors.success);
       case BidStatus.rejected:
-        return const StatusPill(label: 'Rejected', backgroundColor: TruxifyColors.errorLight, foregroundColor: TruxifyColors.error);
+        return const StatusPill(
+            label: 'Rejected',
+            backgroundColor: TruxifyColors.errorLight,
+            foregroundColor: TruxifyColors.error);
       case BidStatus.pending:
-        return const StatusPill(label: 'Pending', backgroundColor: TruxifyColors.warningLight, foregroundColor: TruxifyColors.warning);
+        return const StatusPill(
+            label: 'Pending',
+            backgroundColor: TruxifyColors.warningLight,
+            foregroundColor: TruxifyColors.warning);
     }
   }
 
@@ -1198,10 +1277,17 @@ class _LoadOfferCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(load.route, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    Text(
+                      load.route,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
                     if (load.routeSubtitle.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(load.routeSubtitle, style: Theme.of(context).textTheme.bodySmall),
+                      Text(load.routeSubtitle,
+                          style: Theme.of(context).textTheme.bodySmall),
                     ],
                   ],
                 ),
@@ -1216,8 +1302,11 @@ class _LoadOfferCard extends StatelessWidget {
             children: [
               _MetaChip(icon: Icons.inventory_2_rounded, label: load.goods),
               _MetaChip(icon: Icons.scale_rounded, label: load.weight),
-              _MetaChip(icon: Icons.account_balance_wallet_rounded, label: load.freightValue),
-              _MetaChip(icon: Icons.trending_up_rounded, label: load.estimatedProfit),
+              _MetaChip(
+                  icon: Icons.account_balance_wallet_rounded,
+                  label: load.freightValue),
+              _MetaChip(
+                  icon: Icons.trending_up_rounded, label: load.estimatedProfit),
             ],
           ),
           const SizedBox(height: 12),
@@ -1226,7 +1315,10 @@ class _LoadOfferCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   'Est. profit: ${load.netProfit}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
               TextButton(
@@ -1236,15 +1328,16 @@ class _LoadOfferCard extends StatelessWidget {
                     isScrollControlled: true,
                     backgroundColor: TruxifyColors.cardBackground,
                     shape: const RoundedRectangleBorder(
-                      borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                      borderRadius:
+                          BorderRadius.vertical(top: Radius.circular(24)),
                     ),
-                    builder: (_) => _BidBottomSheet(load: load, existingBid: bid),
+                    builder: (_) =>
+                        _BidBottomSheet(load: load, existingBid: bid),
                   );
-                  if (result != null) {
-                    await onBid(result);
-                  }
+                  if (result != null) await onBid(result);
                 },
-                style: TextButton.styleFrom(foregroundColor: TruxifyColors.accent),
+                style:
+                    TextButton.styleFrom(foregroundColor: TruxifyColors.accent),
                 child: Text(bid == null ? 'Bid' : 'Update bid'),
               ),
             ],
@@ -1277,7 +1370,10 @@ class _MetaChip extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.primaryText),
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: TruxifyColors.primaryText),
           ),
         ],
       ),
@@ -1325,16 +1421,29 @@ class _BidBottomSheetState extends State<_BidBottomSheet> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.fromLTRB(20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      padding: EdgeInsets.fromLTRB(
+          20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const BottomSheetHandle(),
           const SizedBox(height: 16),
-          Text('Submit bid', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+          Text(
+            'Submit bid',
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(fontWeight: FontWeight.w800),
+          ),
           const SizedBox(height: 4),
-          Text(widget.load.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.secondaryText)),
+          Text(
+            widget.load.route,
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: TruxifyColors.secondaryText),
+          ),
           const SizedBox(height: 16),
           TextField(
             controller: _controller,

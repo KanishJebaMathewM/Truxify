@@ -4,8 +4,21 @@ import jwt from 'jsonwebtoken';
 /**
  * Authentication middleware to verify requests using Firebase ID Tokens.
  * Supports BYPASS_AUTH=true environment variable for easy local testing.
+ *
+ * In production, development auth headers (x-user-id, x-user-role, x-user-name)
+ * are unconditionally stripped to prevent any possibility of bypass.
  */
 export async function authenticate(req, res, next) {
+  // ── Production header sanitization (defense in depth) ──────────────
+  // Strip dev-only authentication headers before any logic runs.
+  // This ensures they cannot be used even if BYPASS_AUTH is accidentally
+  // enabled or a proxy misconfiguration exposes them.
+  if (process.env.NODE_ENV === 'production') {
+    delete req.headers['x-user-id'];
+    delete req.headers['x-user-role'];
+    delete req.headers['x-user-name'];
+  }
+
   const bypassAuth = process.env.BYPASS_AUTH === 'true';
 
   // Support local development bypass mode

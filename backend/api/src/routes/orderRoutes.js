@@ -6,8 +6,58 @@ import { computeOrderPricing } from '../lib/pricing.js';
 import { getRouteEstimate } from '../services/osrm.js';
 import { createOrderSchema, submitBidSchema, submitRatingSchema } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
+import rateLimit from 'express-rate-limit';
 
 const router = express.Router();
+
+// ── OTP brute-force protection (in-memory state) ────────────────────
+const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
+const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
+const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
+
+// Map<orderId, { count: number, lockedUntil: number|null }>
+const otpFailedAttempts = new Map();
+
+function isOtpExpired(otpGeneratedAt) {
+  if (!otpGeneratedAt) return true;
+  const elapsed = Date.now() - new Date(otpGeneratedAt).getTime();
+  return elapsed > OTP_TTL_MINUTES * 60 * 1000;
+}
+
+function checkOtpLockout(orderId) {
+  const record = otpFailedAttempts.get(orderId);
+  if (!record || !record.lockedUntil) return false;
+  if (Date.now() >= record.lockedUntil) {
+    otpFailedAttempts.delete(orderId);
+    return false;
+  }
+  return true;
+}
+
+function recordOtpFailure(orderId) {
+  let record = otpFailedAttempts.get(orderId);
+  if (!record) {
+    record = { count: 0, lockedUntil: null };
+    otpFailedAttempts.set(orderId, record);
+  }
+  record.count += 1;
+  if (record.count >= OTP_MAX_FAILED_ATTEMPTS) {
+    record.lockedUntil = Date.now() + OTP_LOCKOUT_MINUTES * 60 * 1000;
+  }
+}
+
+function clearOtpState(orderId) {
+  otpFailedAttempts.delete(orderId);
+}
+
+// Rate limiter for the verify-delivery endpoint
+const verifyDeliveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many delivery verification attempts. Please try again later.' },
+});
 
 /**
  * Helper to generate order display IDs like #FF20260521
@@ -427,8 +477,11 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req,
   const { milestone } = req.body;
 
   const milestoneMap = {
-    'Truck Assigned': 'truck_assigned', 'En Route to Pickup': 'picked_up',
-    'Goods Loaded': 'picked_up', 'In Transit': 'in_transit', 'Arriving': 'arriving',
+    'Truck Assigned': 'truck_assigned',
+    'En Route to Pickup': 'truck_assigned',
+    'Goods Loaded': 'picked_up',
+    'In Transit': 'in_transit',
+    'Arriving': 'arriving',
   };
 
   if (milestone === 'Delivered') return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
@@ -443,10 +496,11 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req,
     const updates = { status, updated_at: new Date().toISOString() };
     let generatedOtp = null;
 
-    if (milestone === 'In Transit' && !order.delivery_otp) {
+    if (milestone === 'In Transit' && (!order.delivery_otp || isOtpExpired(order.otp_generated_at))) {
       generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
       updates.delivery_otp = generatedOtp;
       updates.otp_generated_at = new Date().toISOString();
+      clearOtpState(orderId);
     }
 
     const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update(updates).eq('id', orderId).select('*').single();
@@ -467,18 +521,44 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req,
 // ============================================================================
 // 8. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
 // ============================================================================
-router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), async (req, res) => {
+router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verifyDeliveryLimiter, async (req, res) => {
   const orderId = req.params.id;
   const { otp } = req.body;
 
   if (!otp) return res.status(400).json({ error: 'OTP is required for verification.' });
+
+  // Check for active lockout from previous failed attempts
+  if (checkOtpLockout(orderId)) {
+    return res.status(429).json({
+      error: `Too many failed OTP attempts. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes.`,
+    });
+  }
 
   try {
     const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
     if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
     if (!order.delivery_otp || order.otp_verified) return res.status(400).json({ error: 'OTP not available or already verified.' });
-    if (order.delivery_otp !== String(otp)) return res.status(400).json({ error: 'Invalid OTP. Please check and try again.' });
+
+    // Check OTP expiry
+    if (isOtpExpired(order.otp_generated_at)) {
+      return res.status(400).json({
+        error: 'OTP has expired. Please request a new delivery OTP.',
+      });
+    }
+
+    if (order.delivery_otp !== String(otp)) {
+      recordOtpFailure(orderId);
+      const remaining = OTP_MAX_FAILED_ATTEMPTS - (otpFailedAttempts.get(orderId)?.count || 0);
+      const message = remaining > 0
+        ? `Invalid OTP. ${remaining} attempt(s) remaining before lockout.`
+        : `Invalid OTP. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes due to too many failed attempts.`;
+      console.warn(`[OTP] Failed verification attempt for order ${orderId} by driver ${req.user.id}. ${remaining} attempts remaining.`);
+      return res.status(400).json({ error: message });
+    }
+
+    // Successful verification — clear failure state
+    clearOtpState(orderId);
 
     const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update({
       otp_verified: true, status: 'payment_released', updated_at: new Date().toISOString()

@@ -646,7 +646,8 @@ create table if not exists earnings_daily (
   amount       int not null default 0,                          -- paisa
   trip_count   int not null default 0,
   hours_driven numeric(4,2) not null default 0.00,
-  created_at   timestamptz not null default now()
+  created_at   timestamptz not null default now(),
+  constraint earnings_daily_driver_day_unique unique (driver_id, day_date)
 );
 
 create unique index if not exists idx_earnings_daily_driver_day on earnings_daily (driver_id, day_date);

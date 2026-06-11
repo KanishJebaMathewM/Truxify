@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet'; // 🔒 ADDED HELMET IMPORT FOR ISSUE #361
 import http from 'http';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -25,11 +26,56 @@ if (process.env.NODE_ENV === 'production' && process.env.BYPASS_AUTH === 'true')
   console.error('Set BYPASS_AUTH=false (or unset it) and restart the server.');
   process.exit(1);
 }
-
 const app = express();
 const server = http.createServer(app);
-app.set('trust proxy', 1); // ← add this
 
+// Trust proxy required for rate-limiting behind load balancers/Docker
+app.set('trust proxy', 1); 
+
+// ============================================================================
+// 🔒 ADVANCED SECURITY HEADERS (HELMET CONFIGURATION)
+// Resolves missing security headers from Issue #361
+// ============================================================================
+app.use(helmet({
+  // Content Security Policy (CSP) - Prevents XSS and data injection
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"], // Adjust if strict CSP is needed for frontend
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+  // HTTP Strict Transport Security (HSTS) - Enforces HTTPS
+  hsts: { 
+    maxAge: 31536000, // 1 year
+    includeSubDomains: true, 
+    preload: true 
+  },
+  // X-Frame-Options - Prevents clickjacking by disabling iframes
+  frameguard: { 
+    action: "deny" 
+  },
+  // X-Content-Type-Options - Prevents MIME-sniffing
+  noSniff: true, 
+  // Additional modern security headers
+  crossOriginEmbedderPolicy: false, // Set false if breaking third-party images/maps
+  crossOriginOpenerPolicy: { policy: "same-origin" },
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // Allows Flutter app to fetch resources
+  dnsPrefetchControl: { allow: false },
+  hidePoweredBy: true, // Removes X-Powered-By: Express
+  referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  xssFilter: true
+}));
+
+// ============================================================================
+// CORS CONFIGURATION
+// ============================================================================
+// Enable CORS for frontend clients (Flutter Web, mobile, etc.)
+const corsOrigins = process.env.NODE_ENV === 'production'
+  ? (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean)
+  : '*';
 // Enable CORS only for explicitly allowed frontend origins
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
@@ -80,7 +126,9 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.use(express.json());
+// Payload parsers
+app.use(express.json({ limit: '1mb' })); // Added payload limit for security
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // ============================================================================
 // RATE LIMITING
@@ -104,8 +152,6 @@ const healthLimiter = rateLimit({
 app.use('/api/', limiter);
 app.use('/api/health', healthLimiter);
 app.use('/api/v1/trips', tripRoutes);
-
-
 
 // ============================================================================
 // REQUEST LOGGER
@@ -175,6 +221,7 @@ server.listen(PORT, () => {
   console.log(`🚀 Truxify Node.js server is listening on PORT: ${PORT}`);
   console.log(`🔗 REST API Root: http://localhost:${PORT}`);
   console.log(`🔌 WebSocket URL: ws://localhost:${PORT}/ws/tracking`);
+  console.log(`🔒 Security Headers: Enabled via Helmet`);
   console.log(`================================================================`);
 });
 

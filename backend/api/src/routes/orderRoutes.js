@@ -1,10 +1,18 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { validateBody } from '../middleware/validate.js';
+import { validateBody, validateParams } from '../middleware/validate.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { getRouteEstimate } from '../services/osrm.js';
-import { createOrderSchema, submitBidSchema, submitRatingSchema } from '../validation/requestSchemas.js';
+import {
+  createOrderSchema,
+  submitBidSchema,
+  submitRatingSchema,
+  paramIdSchema,
+  acceptBidParamsSchema,
+  updateMilestoneSchema,
+  verifyDeliverySchema
+} from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
 import rateLimit from 'express-rate-limit';
 
@@ -207,7 +215,7 @@ router.get('/history', authenticate, requireRole(['customer']), async (req, res)
 // ============================================================================
 // 3. FETCH SPECIFIC ORDER DETAILS AND TIMELINE (CUSTOMER OR DRIVER)
 // ============================================================================
-router.get('/:id', authenticate, async (req, res) => {
+router.get('/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
@@ -240,11 +248,9 @@ router.get('/:id', authenticate, async (req, res) => {
 // ============================================================================
 // 4. SUBMIT BID FOR LOAD OFFER (DRIVER)
 // ============================================================================
-router.post('/:id/bids', authenticate, requireRole(['driver']), validateBody(submitBidSchema), async (req, res) => {
+router.post('/:id/bids', authenticate, requireRole(['driver']), validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
   const loadOfferId = req.params.id;
   const { bid_amount } = req.body;
-
-  if (!bid_amount || bid_amount <= 0) return res.status(400).json({ error: 'Invalid bid amount.' });
 
   try {
     const { data: offer, error: offerErr } = await supabase.from('load_offers').select('id, status, customer_id').eq('id', loadOfferId).maybeSingle();
@@ -274,9 +280,9 @@ router.post('/:id/bids', authenticate, requireRole(['driver']), validateBody(sub
 });
 
 // ============================================================================
-// 5.5 SUBMIT RATING FOR A DELIVERED ORDER (CUSTOMER)
+// 5. SUBMIT RATING FOR A DELIVERED ORDER (CUSTOMER)
 // ============================================================================
-router.post('/:id/ratings', authenticate, requireRole(['customer']), validateBody(submitRatingSchema), async (req, res) => {
+router.post('/:id/ratings', authenticate, requireRole(['customer']), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
   const orderId = req.params.id;
   const { stars, comment = null } = req.body;
 
@@ -372,9 +378,9 @@ router.post('/:id/ratings', authenticate, requireRole(['customer']), validateBod
 });
 
 // ============================================================================
-// 5. VIEW BIDS FOR AN ORDER (CUSTOMER)
+// 6. VIEW BIDS FOR AN ORDER (CUSTOMER)
 // ============================================================================
-router.get('/:id/bids', authenticate, requireRole(['customer']), async (req, res) => {
+router.get('/:id/bids', authenticate, requireRole(['customer']), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
@@ -426,9 +432,9 @@ router.get('/:id/bids', authenticate, requireRole(['customer']), async (req, res
 });
 
 // ============================================================================
-// 6. ACCEPT BID (CUSTOMER)
+// 7. ACCEPT BID (CUSTOMER)
 // ============================================================================
-router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), async (req, res) => {
+router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
   const orderId = req.params.id;
   const bidId = req.params.bidId;
 
@@ -470,9 +476,9 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
 });
 
 // ============================================================================
-// 7. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
+// 8. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 // ============================================================================
-router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req, res) => {
+router.put('/:id/milestones', authenticate, requireRole(['driver']), validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   const orderId = req.params.id;
   const { milestone } = req.body;
 
@@ -485,7 +491,6 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req,
   };
 
   if (milestone === 'Delivered') return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
-  if (!milestone || !milestoneMap[milestone]) return res.status(400).json({ error: 'Invalid milestone supplied.' });
 
   try {
     const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
@@ -519,9 +524,9 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req,
 });
 
 // ============================================================================
-// 8. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
+// 9. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
 // ============================================================================
-router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verifyDeliveryLimiter, async (req, res) => {
+router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verifyDeliveryLimiter, validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   const orderId = req.params.id;
   const { otp } = req.body;
 

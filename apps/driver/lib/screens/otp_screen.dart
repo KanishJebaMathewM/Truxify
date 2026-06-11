@@ -31,9 +31,8 @@ class _OtpScreenState extends State<OtpScreen> {
   }
 
   Future<void> _verifyOtp() async {
-    final code = _controllers
-      .map((c) => c.text.replaceAll('\u200B', ''))
-      .join();
+    final code =
+        _controllers.map((c) => c.text.replaceAll('\u200B', '')).join();
     if (!RegExp(r'^\d{4}$').hasMatch(code)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter a valid 4-digit OTP')),
@@ -42,10 +41,15 @@ class _OtpScreenState extends State<OtpScreen> {
     }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('OTP verification is not available yet. Please try again later.'),
+        content: Text(
+            'OTP verification is not available yet. Please try again later.'),
       ),
     );
     // TODO: Integrate backend OTP verification and navigate only after a successful response.
+    // TODO: After implimenting the backend otp logic then remove the push named.
+    Navigator.of(context).pushNamed(
+      AppRoutes.shell,
+    );
   }
 
   @override

@@ -2,7 +2,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
-
+import 'package:url_launcher/url_launcher.dart';
 import '../services/geocode_service.dart';
 import '../services/route_service.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -21,13 +21,54 @@ class TripDetailScreen extends StatefulWidget {
 
 class _TripDetailScreenState extends State<TripDetailScreen> {
   final MapController _mapController = MapController();
+  late Future<_RouteResult?> _routeFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _routeFuture = _loadRouteForTrip(widget.trip.route);
+  }
 
   @override
   void dispose() {
     _mapController.dispose();
     super.dispose();
   }
+  Future<void> _openGoogleMapsRoute() async {
+    final routeResult = await _routeFuture;
+    final start = routeResult?.start;
+    final end = routeResult?.end;
 
+    if (start == null || end == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Route coordinates not available')),
+        );
+      }
+      return;
+    }
+
+    final url = 'https://www.google.com/maps/dir/?api=1'
+        '&origin=${start.latitude},${start.longitude}'
+        '&destination=${end.latitude},${end.longitude}'
+        '&travelmode=driving';
+
+    try {
+      final uri = Uri.parse(url);
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open Google Maps')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to open Google Maps')),
+        );
+      }
+    }
+  }
   void _showBlockchainBottomSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -358,7 +399,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                     SizedBox(
                       height: 180,
                       child: FutureBuilder<_RouteResult?>(
-                        future: _loadRouteForTrip(trip.route),
+                        future: _routeFuture,
                         builder: (context, snap) {
                           if (snap.connectionState != ConnectionState.done) {
                             return Container(
@@ -476,13 +517,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                     Padding(
                       padding: const EdgeInsets.all(12.0),
                       child: InkWell(
-                        onTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Opening route in Google Maps...'),
-                            ),
-                          );
-                        },
+                        onTap: _openGoogleMapsRoute,
                         borderRadius: BorderRadius.circular(10),
                         child: Container(
                           width: double.infinity,
@@ -771,7 +806,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         ]);
       }
 
-      return _RouteResult(start: start, end: end, routePoints: routePoints);
+      final result = _RouteResult(start: start, end: end, routePoints: routePoints);
+      return result;
     } catch (_) {
       return null;
     }

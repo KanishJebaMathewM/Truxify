@@ -789,34 +789,48 @@ class _ThemeModeTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final controller = TruxifyScope.of(context);
     final currentTheme = controller.themeMode;
+    final selectedTheme = currentTheme == ThemeMode.system
+        ? (Theme.of(context).brightness == Brightness.dark
+            ? ThemeMode.dark
+            : ThemeMode.light)
+        : currentTheme;
 
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      title: Text(
-        'Theme',
-        style: GoogleFonts.dmSans(
-          fontSize: 14,
-          fontWeight: FontWeight.bold,
-          color: Theme.of(context).colorScheme.onSurface,
-        ),
-      ),
-      subtitle: Text(
-        currentTheme.name[0].toUpperCase() + currentTheme.name.substring(1),
-        style: GoogleFonts.dmSans(
-          fontSize: 12,
-          color: TruxifyColors.adaptiveSecondaryText(context),
-        ),
-      ),
-      trailing: PopupMenuButton<ThemeMode>(
-        onSelected: controller.setThemeMode,
-        icon: Icon(
-          Icons.keyboard_arrow_down_rounded,
-          color: TruxifyColors.adaptiveSecondaryText(context),
-        ),
-        itemBuilder: (context) => const [
-          PopupMenuItem(value: ThemeMode.system, child: Text('System')),
-          PopupMenuItem(value: ThemeMode.light, child: Text('Light')),
-          PopupMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          Text(
+            'Theme',
+            style: GoogleFonts.dmSans(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const Spacer(),
+          SegmentedButton<ThemeMode>(
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              padding: WidgetStateProperty.all(
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
+            segments: const [
+              ButtonSegment<ThemeMode>(
+                value: ThemeMode.light,
+                label: Text('Light'),
+              ),
+              ButtonSegment<ThemeMode>(
+                value: ThemeMode.dark,
+                label: Text('Dark'),
+              ),
+            ],
+            selected: {selectedTheme},
+            onSelectionChanged: (selection) {
+              controller.setThemeMode(selection.first);
+            },
+          ),
         ],
       ),
     );

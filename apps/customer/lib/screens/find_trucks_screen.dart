@@ -74,6 +74,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     _lengthController = TextEditingController();
     _widthController = TextEditingController();
     _heightController = TextEditingController();
+    _selectedDate = DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
+    _selectedTime = const TimeOfDay(hour: 6, minute: 0);
     _dateController = TextEditingController(text: _formatDateLabel(_selectedDate!));
     _timeController = TextEditingController(text: _formatTimeLabel(_selectedTime!));
     _customGoodsTypeController = TextEditingController();

@@ -6,6 +6,11 @@ import { computeOrderPricing } from '../lib/pricing.js';
 
 const router = express.Router();
 
+function parseBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  return ['true', '1', 'yes'].includes(String(value).trim().toLowerCase());
+}
+
 router.get('/search', authenticate, async (req, res) => {
   const {
     pickup_lat, pickup_lng,
@@ -18,23 +23,37 @@ router.get('/search', authenticate, async (req, res) => {
     return res.status(400).json({ error: 'Missing required query parameters: pickup_lat, pickup_lng, drop_lat, drop_lng, weight_tonnes' });
   }
 
+  const numPickupLat = Number(pickup_lat);
+  const numPickupLng = Number(pickup_lng);
+  const numDropLat = Number(drop_lat);
+  const numDropLng = Number(drop_lng);
+  const numWeightTonnes = Number(weight_tonnes);
+
+  if ([numPickupLat, numPickupLng, numDropLat, numDropLng, numWeightTonnes].some(isNaN)) {
+    return res.status(400).json({ error: 'Invalid numeric parameters' });
+  }
+
+  if (numWeightTonnes <= 0 || numWeightTonnes > 50) {
+    return res.status(400).json({ error: 'Weight must be between 0 and 50 tonnes' });
+  }
+
   try {
     const routeEstimate = await getRouteEstimate({
-      pickupLat: Number(pickup_lat),
-      pickupLng: Number(pickup_lng),
-      dropLat: Number(drop_lat),
-      dropLng: Number(drop_lng),
+      pickupLat: numPickupLat,
+      pickupLng: numPickupLng,
+      dropLat: numDropLat,
+      dropLng: numDropLng,
     });
 
     const pricing = computeOrderPricing({
-      pickupLat: Number(pickup_lat),
-      pickupLng: Number(pickup_lng),
-      dropLat: Number(drop_lat),
-      dropLng: Number(drop_lng),
-      weightTonnes: Number(weight_tonnes),
+      pickupLat: numPickupLat,
+      pickupLng: numPickupLng,
+      dropLat: numDropLat,
+      dropLng: numDropLng,
+      weightTonnes: numWeightTonnes,
       roadDistanceKm: routeEstimate?.distanceKm,
-      isFragile: is_fragile === 'true',
-      isStackable: is_stackable === 'true',
+      isFragile: parseBoolean(is_fragile),
+      isStackable: parseBoolean(is_stackable),
     });
 
     const { data: drivers, error: driversErr } = await supabase
@@ -44,7 +63,8 @@ router.get('/search', authenticate, async (req, res) => {
       .not('truck_id', 'is', null);
 
     if (driversErr) {
-      return res.status(500).json({ error: 'Failed to search trucks.', details: driversErr.message });
+      console.error('Driver search error:', driversErr.message);
+      return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
     if (!drivers || drivers.length === 0) {

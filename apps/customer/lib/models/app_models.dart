@@ -92,7 +92,7 @@ class TruckResultData {
   factory TruckResultData.fromJson(Map<String, dynamic> json) {
     final rawPrice = json['price'];
     final priceStr = rawPrice is num
-        ? '₹${(rawPrice / 100).round().toStringAsFixed(0)}'
+        ? '₹${(rawPrice / 100).round()}'
         : (rawPrice?.toString() ?? '₹0');
 
     final etaMinutes = json['etaMinutes'];

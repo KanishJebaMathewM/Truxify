@@ -215,15 +215,20 @@ class OrderService {
       },
     );
 
+    final body = response.body.isNotEmpty
+        ? jsonDecode(response.body)
+        : null;
+
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('Failed to search trucks: ${response.statusCode}');
+      final message = body is Map<String, dynamic>
+          ? (body['error']?.toString() ?? 'Failed to search trucks')
+          : 'Failed to search trucks';
+      throw StateError(message);
     }
 
-    final List<dynamic> body = response.body.isNotEmpty
-        ? (jsonDecode(response.body) as List<dynamic>)
-        : <dynamic>[];
+    final List<dynamic> listBody = body is List<dynamic> ? body : <dynamic>[];
 
-    return body.cast<Map<String, dynamic>>();
+    return listBody.cast<Map<String, dynamic>>();
   }
 
   Future<List<Map<String, dynamic>>> fetchHistoryOrders() async {

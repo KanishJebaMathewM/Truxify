@@ -136,27 +136,32 @@ class SupabaseQueryBuilder {
       return { data: rows, error: null };
     }
     if (this._mode === 'update') {
-  let rows = this._store[this._table] ?? [];
+      let rows = this._store[this._table] ?? [];
+      let updatedRows = [];
 
-  for (const row of rows) {
-    const matches = this._filters.every(f => {
-      const v = row[f.col];
+      for (const row of rows) {
+        const matches = this._filters.every(f => {
+          const v = row[f.col];
 
-      switch (f.op) {
-        case 'eq':
-          return v === f.val;
-        default:
-          return true;
+          switch (f.op) {
+            case 'eq':
+              return v === f.val;
+            default:
+              return true;
+          }
+        });
+
+        if (matches) {
+          Object.assign(row, this._payload);
+          updatedRows.push(row);
+        }
       }
-    });
 
-    if (matches) {
-      Object.assign(row, this._payload);
+      if (this._single) {
+        return { data: updatedRows[0] ?? null, error: updatedRows[0] ? null : { message: 'no rows' } };
+      }
+      return { data: updatedRows, error: null };
     }
-  }
-
-  return { data: rows, error: null };
-}
 
     if (this._mode === 'select' || this._mode === null) {
       let rows = (this._store[this._table] ?? []).slice();
@@ -180,10 +185,15 @@ class SupabaseQueryBuilder {
         const { col, ascending } = this._order;
         rows.sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (ascending ? 1 : -1));
       }
+      const totalCount = rows.length;
+      if (this._range) {
+        const [from, to] = this._range;
+        rows = rows.slice(from, to + 1);
+      }
       if (this._limit != null) rows = rows.slice(0, this._limit);
-      if (this._single)     return { data: rows[0] ?? null, error: rows[0] ? null : { message: 'no rows' } };
-      if (this._maybeSingle) return { data: rows[0] ?? null, error: null };
-      return { data: rows, error: null };
+      if (this._single)     return { data: rows[0] ?? null, error: rows[0] ? null : { message: 'no rows' }, count: rows[0] ? 1 : 0 };
+      if (this._maybeSingle) return { data: rows[0] ?? null, error: null, count: rows[0] ? 1 : 0 };
+      return { data: rows, error: null, count: totalCount };
     }
 
     return { data: null, error: { message: `mock: unhandled mode ${this._mode}` } };

@@ -203,6 +203,7 @@ class _NavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Expanded(
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -217,19 +218,23 @@ class _NavItem extends StatelessWidget {
                 height: 36,
                 decoration: BoxDecoration(
                   color: selected
-                      ? (Theme.of(context).brightness == Brightness.dark
+                      ? (isDark
                           ? TruxifyColors.darkAccentLight
                           : TruxifyColors.accentLight)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(icon,
-                    size: 20,
-                    color: selected
-                        ? (Theme.of(context).brightness == Brightness.dark
-                            ? TruxifyColors.accent
-                            : TruxifyColors.accentDark)
-                        : TruxifyColors.adaptiveSecondaryText(context)),
+                child: Icon(
+                  icon,
+                  size: 20,
+                  color: selected
+                      ? (isDark
+                          ? TruxifyColors.accentLight
+                          : TruxifyColors.accentDark)
+                      : (isDark
+                          ? TruxifyColors.darkSecondaryText
+                          : TruxifyColors.secondaryText),
+                ),
               ),
               const SizedBox(height: 6),
               Text(

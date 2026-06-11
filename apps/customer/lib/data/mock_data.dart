@@ -18,6 +18,10 @@ const mockDefaultRouteDraft = RouteDraft(
   stacked: true,
   fragile: false,
   requirements: <String>['Temperature control', 'Loading help needed'],
+  pickupLat: 21.1702,
+  pickupLng: 72.8311,
+  dropLat: 26.9124,
+  dropLng: 75.7873,
 );
 
 const mockActiveShipments = <ShipmentCardData>[

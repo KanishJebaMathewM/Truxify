@@ -2,7 +2,7 @@
 
 import 'dart:convert';
 import 'dart:math' as math;
-
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -33,7 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   final MapController _mapController = MapController();
-  double _mapZoom = 5.7;
+  final double _mapZoom = 5.7;
 
   Future<List<ll.LatLng>>? _routeFuture;
   DestinationPickResult? _destination;
@@ -779,6 +779,52 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _openGoogleMapsRoute() async {
+    if (_destination == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No destination available')),
+      );
+      return;
+    }
+
+    try {
+      final destination = _destination!.point;
+
+      final routePoints =
+          await (_routeFuture ?? Future.value([_currentLocation, destination]));
+
+      final checkpoints = _buildCheckpointPoints(routePoints);
+
+      final waypointString =
+          checkpoints.map((p) => '${p.latitude},${p.longitude}').join('|');
+
+      final url = 'https://www.google.com/maps/dir/?api=1'
+          '&origin=21.1702,72.8311'
+          '&destination=${destination.latitude},${destination.longitude}'
+          '${waypointString.isNotEmpty ? '&waypoints=$waypointString' : ''}'
+          '&travelmode=driving';
+
+      final uri = Uri.parse(url);
+
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open Google Maps')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to generate route')),
+        );
+      }
+    }
+  }
+
   Widget _buildActiveTripSheet(BuildContext context) {
     final routeStr = _destination?.address ?? 'Destination';
     return Container(
@@ -830,6 +876,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
+              IconButton(
+                icon: const Icon(Icons.navigation_rounded),
+                color: TruxifyColors.accent,
+                onPressed: _openGoogleMapsRoute,
+              )
             ],
           ),
           const SizedBox(height: 8),

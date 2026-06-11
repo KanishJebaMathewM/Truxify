@@ -1,11 +1,12 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
-const TICKET_COLUMNS = 'id, subject, description, category, status, created_at';
+const TICKET_COLUMNS = 'id, subject, description, category, status, created_at, updated_at';
+const TICKET_DETAIL_COLUMNS = 'id, user_id, subject, description, category, status, created_at, updated_at';
 
 function normalizeRequiredText(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -104,12 +105,28 @@ router.post('/tickets', authenticate, async (req, res) => {
 // 3. LIST CURRENT USER'S SUPPORT TICKETS (AUTHENTICATED USER)
 // ============================================================================
 router.get('/tickets', authenticate, async (req, res) => {
+  const { status, category, page = '1', limit = '20' } = req.query;
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  const offset = (pageNum - 1) * limitNum;
+
   try {
-    const { data: tickets, error } = await supabase
+    let query = supabase
       .from('support_tickets')
-      .select(TICKET_COLUMNS)
-      .eq('user_id', req.user.id)
-      .order('created_at', { ascending: false });
+      .select(TICKET_COLUMNS, { count: 'exact' })
+      .eq('user_id', req.user.id);
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    if (category) {
+      query = query.eq('category', category);
+    }
+
+    const { data: tickets, error, count } = await query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limitNum - 1);
 
     if (error) {
       return res.status(500).json({
@@ -118,7 +135,197 @@ router.get('/tickets', authenticate, async (req, res) => {
       });
     }
 
-    res.json(tickets || []);
+    res.json({
+      tickets: tickets || [],
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: count || 0,
+        totalPages: count ? Math.ceil(count / limitNum) : 0,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 4. GET SINGLE SUPPORT TICKET (AUTHENTICATED USER - OWNER)
+// ============================================================================
+router.get('/tickets/:id', authenticate, async (req, res) => {
+  const ticketId = req.params.id;
+
+  try {
+    const { data: ticket, error } = await supabase
+      .from('support_tickets')
+      .select(TICKET_DETAIL_COLUMNS)
+      .eq('id', ticketId)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({
+        error: 'Failed to fetch support ticket.',
+        details: error.message,
+      });
+    }
+
+    if (!ticket) {
+      return res.status(404).json({ error: 'Support ticket not found.' });
+    }
+
+    if (ticket.user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access Denied: You do not own this ticket.' });
+    }
+
+    res.json(ticket);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 5. UPDATE SUPPORT TICKET (AUTHENTICATED USER - OWNER OR ADMIN)
+// ============================================================================
+router.patch('/tickets/:id', authenticate, async (req, res) => {
+  const ticketId = req.params.id;
+  const { subject, description, category, status } = req.body;
+
+  try {
+    const { data: ticket, error: fetchError } = await supabase
+      .from('support_tickets')
+      .select('id, user_id, status')
+      .eq('id', ticketId)
+      .maybeSingle();
+
+    if (fetchError) {
+      return res.status(500).json({
+        error: 'Failed to fetch support ticket.',
+        details: fetchError.message,
+      });
+    }
+
+    if (!ticket) {
+      return res.status(404).json({ error: 'Support ticket not found.' });
+    }
+
+    if (ticket.user_id !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Access Denied: You do not own this ticket.' });
+    }
+
+    if (ticket.status === 'closed') {
+      return res.status(400).json({ error: 'Cannot update a closed ticket.' });
+    }
+
+    const VALID_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
+    const CATEGORY_MAP = {
+      billing: 'payment', booking: 'order', payment: 'payment',
+      order: 'order', technical: 'technical', general: 'general', account: 'account',
+    };
+
+    const updates = { updated_at: new Date().toISOString() };
+
+    if (subject !== undefined) {
+      const trimmed = typeof subject === 'string' ? subject.trim() : '';
+      if (!trimmed) {
+        return res.status(400).json({ error: 'subject cannot be empty.' });
+      }
+      updates.subject = trimmed;
+    }
+
+    if (description !== undefined) {
+      updates.description = typeof description === 'string' ? description.trim() : '';
+    }
+
+    if (category !== undefined) {
+      const normalized = category.toLowerCase().trim();
+      const dbCategory = CATEGORY_MAP[normalized] || 'general';
+      updates.category = dbCategory;
+    }
+
+    if (status !== undefined) {
+      const normalizedStatus = status.toLowerCase().trim();
+      if (!VALID_STATUSES.includes(normalizedStatus)) {
+        return res.status(400).json({
+          error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}`,
+        });
+      }
+      if (req.user.role !== 'admin' && normalizedStatus !== ticket.status && normalizedStatus !== 'closed') {
+        return res.status(403).json({
+          error: 'Access Denied: Only admins can change tickets to this status.',
+        });
+      }
+      updates.status = normalizedStatus;
+    }
+
+    const { data: updatedTicket, error: updateError } = await supabase
+      .from('support_tickets')
+      .update(updates)
+      .eq('id', ticketId)
+      .select(TICKET_COLUMNS)
+      .single();
+
+    if (updateError) {
+      return res.status(500).json({
+        error: 'Failed to update support ticket.',
+        details: updateError.message,
+      });
+    }
+
+    res.json({
+      message: 'Support ticket updated successfully.',
+      ticket: updatedTicket,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 6. LIST ALL TICKETS (ADMIN ONLY)
+// ============================================================================
+router.get('/admin/tickets', authenticate, requireRole(['admin']), async (req, res) => {
+  const { status, category, user_id, page = '1', limit = '20' } = req.query;
+  const pageNum = Math.max(1, parseInt(page, 10) || 1);
+  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  const offset = (pageNum - 1) * limitNum;
+
+  try {
+    let query = supabase
+      .from('support_tickets')
+      .select(TICKET_DETAIL_COLUMNS, { count: 'exact' });
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    if (category) {
+      query = query.eq('category', category);
+    }
+
+    if (user_id) {
+      query = query.eq('user_id', user_id);
+    }
+
+    const { data: tickets, error, count } = await query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limitNum - 1);
+
+    if (error) {
+      return res.status(500).json({
+        error: 'Failed to fetch tickets.',
+        details: error.message,
+      });
+    }
+
+    res.json({
+      tickets: tickets || [],
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: count || 0,
+        totalPages: count ? Math.ceil(count / limitNum) : 0,
+      },
+    });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }

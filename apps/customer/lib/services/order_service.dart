@@ -152,7 +152,34 @@ class OrderService {
         .eq('customer_id', userId)
         .inFilter('status', ['pending', 'active', 'in_transit']);
 
-    return List<Map<String, dynamic>>.from(response);
+    final orders = List<Map<String, dynamic>>.from(response);
+
+    final driverIds = orders
+        .where((o) => o['driver_id'] != null)
+        .map((o) => o['driver_id'].toString())
+        .toSet()
+        .toList();
+
+    if (driverIds.isNotEmpty) {
+      final profilesResponse = await _client
+          .from('profiles')
+          .select('id, full_name')
+          .inFilter('id', driverIds);
+
+      final profiles = List<Map<String, dynamic>>.from(profilesResponse);
+
+      final driverMap = {
+        for (final profile in profiles)
+          profile['id'].toString(): profile['full_name']
+      };
+
+      for (final order in orders) {
+        order['driver_name'] =
+            driverMap[order['driver_id']?.toString()] ?? 'Driver Assigned';
+      }
+    }
+
+    return orders;
   }
 
   Future<List<Map<String, dynamic>>> fetchHistoryOrders() async {
@@ -169,6 +196,33 @@ class OrderService {
       'cancelled',
     ]);
 
-    return List<Map<String, dynamic>>.from(response);
+    final orders = List<Map<String, dynamic>>.from(response);
+
+    final driverIds = orders
+        .where((o) => o['driver_id'] != null)
+        .map((o) => o['driver_id'].toString())
+        .toSet()
+        .toList();
+
+    if (driverIds.isNotEmpty) {
+      final profilesResponse = await _client
+          .from('profiles')
+          .select('id, full_name')
+          .inFilter('id', driverIds);
+
+      final profiles = List<Map<String, dynamic>>.from(profilesResponse);
+
+      final driverMap = {
+        for (final profile in profiles)
+          profile['id'].toString(): profile['full_name']
+      };
+
+      for (final order in orders) {
+        order['driver_name'] =
+            driverMap[order['driver_id']?.toString()] ?? 'Driver Assigned';
+      }
+    }
+
+    return orders;
   }
 }

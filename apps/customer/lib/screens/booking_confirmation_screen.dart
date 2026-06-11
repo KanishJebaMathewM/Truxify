@@ -20,10 +20,6 @@ class BookingConfirmationScreen extends StatefulWidget {
 
 class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     with SingleTickerProviderStateMixin {
-  double get _pickupLat => 21.1702;
-  double get _pickupLng => 72.8311;
-  double get _dropLat => 26.9124;
-  double get _dropLng => 75.7873;
   final TextEditingController _upiController =
       TextEditingController(text: 'karthik@upi');
   bool _showSuccess = false;
@@ -47,14 +43,25 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   }
 
   Future<void> _pay() async {
+    if (widget.draft.pickupLat == null ||
+        widget.draft.pickupLng == null ||
+        widget.draft.dropLat == null ||
+        widget.draft.dropLng == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Missing pickup or drop coordinates. Please go back and select valid locations.')),
+      );
+      return;
+    }
+
     try {
       final orderId = await _orderService.createOrder(
         pickupAddress: widget.draft.pickup,
         dropAddress: widget.draft.drop,
-        pickupLat: widget.draft.pickupLat ?? _pickupLat,
-        pickupLng: widget.draft.pickupLng ?? _pickupLng,
-        dropLat: widget.draft.dropLat ?? _dropLat,
-        dropLng: widget.draft.dropLng ?? _dropLng,
+        pickupLat: widget.draft.pickupLat!,
+        pickupLng: widget.draft.pickupLng!,
+        dropLat: widget.draft.dropLat!,
+        dropLng: widget.draft.dropLng!,
         pickupTime: widget.draft.dateLabel,
         goodsType: widget.draft.goodsType,
         weightTonnes: double.tryParse(widget.draft.weightTonnes) ?? 0,

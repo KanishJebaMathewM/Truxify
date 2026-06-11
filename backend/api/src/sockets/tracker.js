@@ -14,6 +14,55 @@ let telemetryFlushInterval = null;
 let wsServer = null;
 let wsHeartbeatInterval = null;
 
+const WS_UPGRADE_RATE_LIMIT = 5;
+const WS_UPGRADE_RATE_WINDOW_SECONDS = 60;
+
+function getClientIp(request) {
+  const forwardedFor = request.headers?.['x-forwarded-for'];
+
+  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+    return forwardedFor.split(',')[0].trim();
+  }
+
+  return request.socket?.remoteAddress || request.connection?.remoteAddress || 'unknown';
+}
+
+export async function isWebSocketUpgradeAllowed(request) {
+  if (!redisClient) {
+    return true;
+  }
+
+  const ipAddress = getClientIp(request);
+  const key = `ws:upgrade:${ipAddress}`;
+
+  try {
+    const attempts = await redisClient.incr(key);
+
+    if (attempts === 1) {
+      await redisClient.expire(key, WS_UPGRADE_RATE_WINDOW_SECONDS);
+    } else {
+      const ttl = await redisClient.ttl(key);
+      if (ttl === -1) {
+        await redisClient.expire(key, WS_UPGRADE_RATE_WINDOW_SECONDS);
+      }
+    }
+
+    return attempts <= WS_UPGRADE_RATE_LIMIT;
+  } catch (err) {
+    console.error('Redis WebSocket upgrade rate limit error:', err.message);
+    return true;
+  }
+}
+
+export function rejectWebSocketUpgrade(socket) {
+  socket.write(
+    'HTTP/1.1 429 Too Many Requests\r\n' +
+    'Connection: close\r\n' +
+    '\r\n'
+  );
+  socket.destroy();
+}
+
 /**
  * Initialize WebSockets Server and bind event handlers
  */
@@ -21,10 +70,17 @@ export function initWebSocketServer(server) {
   const wss = new WebSocketServer({ noServer: true });
   wsServer = wss;
 
-  server.on('upgrade', (request, socket, head) => {
+  server.on('upgrade', async (request, socket, head) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
 
     if (pathname === '/ws/tracking') {
+      const allowed = await isWebSocketUpgradeAllowed(request);
+
+      if (!allowed) {
+        rejectWebSocketUpgrade(socket);
+        return;
+      }
+
       wss.handleUpgrade(request, socket, head, (ws) => {
         wss.emit('connection', ws, request);
       });

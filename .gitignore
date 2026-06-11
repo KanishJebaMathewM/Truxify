@@ -56,3 +56,7 @@ app.*.map.json
 coverage/
 backend/api/coverage/
 *.lcov
+
+__pycache__/
+*.pyc
+venv/

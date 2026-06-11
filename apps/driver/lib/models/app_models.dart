@@ -223,7 +223,7 @@ class DocumentRecord {
     required this.subtitle,
     required this.statusLabel,
     required this.statusTone,
-    required this.hash,
+    required this.docNumber,
     required this.lastVerified,
     required this.validUntil,
     this.ctaLabel = 'View Document',
@@ -233,7 +233,7 @@ class DocumentRecord {
   final String subtitle;
   final String statusLabel;
   final String statusTone;
-  final String hash;
+  final String docNumber;
   final String lastVerified;
   final String validUntil;
   final String ctaLabel;

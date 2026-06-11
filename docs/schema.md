@@ -265,6 +265,7 @@ erDiagram
         date day_date
         int amount
         int trip_count
+        numeric hours_driven
     }
 
     milestones {
@@ -446,7 +447,7 @@ graph LR
 | Table | Purpose | Key Columns | Links To |
 |-------|---------|-------------|----------|
 | `wallet_transactions` | Driver earnings/withdrawals ledger | `driver_id`, `amount`, `txn_type`, `status` | `profiles.id` |
-| `earnings_daily` | Pre-aggregated daily chart data | `driver_id`, `day_date`, `amount`, `trip_count` | `profiles.id` |
+| `earnings_daily` | Pre-aggregated daily chart data | `driver_id`, `day_date`, `amount`, `trip_count`, `hours_driven` | `profiles.id` |
 
 ### ⭐ Engagement Layer (6 tables)
 

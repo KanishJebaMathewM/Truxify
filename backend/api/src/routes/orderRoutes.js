@@ -15,6 +15,7 @@ import {
   predictDemandSchema
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
+import { sendDeliveryOtpNotification } from '../services/notificationService.js';
 import { predictDemand } from '../services/ml.js';
 import rateLimit from 'express-rate-limit';
 
@@ -229,6 +230,12 @@ router.get('/:id', authenticate, validateParams(paramIdSchema), async (req, res)
       return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
     }
 
+    const responseOrder = { ...order };
+    // Strip delivery OTP for drivers to prevent security bypass
+    if (req.user.role === 'driver' && responseOrder.delivery_otp) {
+      delete responseOrder.delivery_otp;
+    }
+
     const { data: timeline } = await supabase.from('order_timeline').select('milestone, milestone_time, completed, sort_order').eq('order_display_id', order.order_display_id).order('sort_order', { ascending: true });
 
     let driverProfile = null;
@@ -241,7 +248,7 @@ router.get('/:id', authenticate, validateParams(paramIdSchema), async (req, res)
       }
     }
 
-    res.json({ order, timeline: timeline || [], driver: driverProfile });
+    res.json({ order: responseOrder, timeline: timeline || [], driver: driverProfile });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }
@@ -516,8 +523,17 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), validatePar
     const { error: timelineErr } = await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() }).eq('order_display_id', order.order_display_id).eq('milestone', milestone);
     if (timelineErr) return res.status(500).json({ error: 'Failed to update order timeline.', details: timelineErr.message });
 
-    const response = { message: 'Milestone updated successfully.', order: updatedOrder, milestone, status };
-    if (generatedOtp) response.otp = generatedOtp;
+    if (generatedOtp) {
+      await sendDeliveryOtpNotification(order.customer_id, order.order_display_id, generatedOtp);
+    }
+
+    // Strip delivery_otp from updatedOrder to prevent exposure to drivers
+    const responseOrder = { ...updatedOrder };
+    if (responseOrder.delivery_otp) {
+      delete responseOrder.delivery_otp;
+    }
+
+    const response = { message: 'Milestone updated successfully.', order: responseOrder, milestone, status };
 
     res.json(response);
   } catch (err) {
@@ -582,7 +598,13 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
       console.warn('complete_trip_tx RPC call error:', rpcErr.message);
     }
 
-    res.json({ message: 'Delivery verified successfully! Payment released to driver.', order: updatedOrder });
+    // Strip delivery_otp from updatedOrder to prevent exposure
+    const responseOrder = { ...updatedOrder };
+    if (responseOrder.delivery_otp) {
+      delete responseOrder.delivery_otp;
+    }
+
+    res.json({ message: 'Delivery verified successfully! Payment released to driver.', order: responseOrder });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }

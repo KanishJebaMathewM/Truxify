@@ -1,0 +1,98 @@
+name: Truxify CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: truxify-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/api/package-lock.json
+
+      - name: Install dependencies
+        working-directory: backend/api
+        run: npm ci
+
+      - name: Run tests
+        working-directory: backend/api
+        run: npm test
+
+  customer:
+    name: Customer Flutter checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get shared dependencies
+        working-directory: packages/truxify_shared
+        run: flutter pub get
+
+      - name: Get dependencies
+        working-directory: apps/customer
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: apps/customer
+        run: flutter analyze
+
+      - name: Test
+        working-directory: apps/customer
+        run: flutter test
+
+  driver:
+    name: Driver Flutter checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get shared dependencies
+        working-directory: packages/truxify_shared
+        run: flutter pub get
+
+      - name: Get dependencies
+        working-directory: apps/driver
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: apps/driver
+        run: flutter analyze
+
+      - name: Test
+        working-directory: apps/driver
+        run: flutter test

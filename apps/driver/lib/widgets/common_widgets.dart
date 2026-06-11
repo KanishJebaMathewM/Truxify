@@ -33,15 +33,26 @@ class AppCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cardColor = color ?? Theme.of(context).colorScheme.surface;
-    final card = Container(
+    
+    Widget content = Padding(padding: padding, child: child);
+    
+    if (onTap != null) {
+      content = InkWell(
+        onTap: onTap,
+        child: content,
+      );
+    }
+
+    return Container(
       margin: margin,
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(14),
         border: border ??
             Border.all(
-                color:
-                    color == null ? _borderColor(context) : Colors.transparent),
+                color: color == null
+                    ? _borderColor(context)
+                    : Colors.transparent),
         boxShadow: elevation > 0
             ? [
                 BoxShadow(
@@ -51,19 +62,12 @@ class AppCard extends StatelessWidget {
               ]
             : null,
       ),
-      child: Padding(padding: padding, child: child),
-    );
-
-    if (onTap == null) {
-      return card;
-    }
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(16),
-        onTap: onTap,
-        child: card,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Material(
+          color: Colors.transparent,
+          child: content,
+        ),
       ),
     );
   }
@@ -536,11 +540,6 @@ class _OtpInputRowState extends State<OtpInputRow> {
         controller.text = _zwsp;
       }
     }
-  }
-
-  String _realValue(int index) {
-    final text = widget.controllers[index].text;
-    return text.replaceAll(_zwsp, '');
   }
 
   void _onChanged(String value, int index) {

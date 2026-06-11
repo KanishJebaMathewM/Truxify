@@ -75,6 +75,12 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   void _setupFromDraft(RouteDraft draft) {
     _pickupController = TextEditingController(text: draft.pickup);
     _dropController = TextEditingController(text: draft.drop);
+    if (draft.pickupLat != null && draft.pickupLng != null) {
+      _pickupPoint = LatLng(draft.pickupLat!, draft.pickupLng!);
+    }
+    if (draft.dropLat != null && draft.dropLng != null) {
+      _dropPoint = LatLng(draft.dropLat!, draft.dropLng!);
+    }
     _weightController = TextEditingController(text: draft.weightTonnes);
     _lengthController =
         TextEditingController(text: draft.dimensions.split(' × ').first);
@@ -107,6 +113,12 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     if (draft != null) {
       _pickupController.text = draft.pickup;
       _dropController.text = draft.drop;
+      if (draft.pickupLat != null && draft.pickupLng != null) {
+        _pickupPoint = LatLng(draft.pickupLat!, draft.pickupLng!);
+      }
+      if (draft.dropLat != null && draft.dropLng != null) {
+        _dropPoint = LatLng(draft.dropLat!, draft.dropLng!);
+      }
       _weightController.text = draft.weightTonnes;
       final parts = draft.dimensions.split(' × ');
       if (parts.length == 3) {
@@ -383,6 +395,20 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
 
   void _onFindTrucks() {
     if (!(_formKey.currentState?.validate() ?? false)) {
+      return;
+    }
+
+    if (_pickupPoint == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a pickup location on the map.')),
+      );
+      return;
+    }
+
+    if (_dropPoint == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a drop location on the map.')),
+      );
       return;
     }
 

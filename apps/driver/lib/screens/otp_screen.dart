@@ -18,7 +18,6 @@ class _OtpScreenState extends State<OtpScreen> {
   late final List<TextEditingController> _controllers =
       List.generate(4, (_) => TextEditingController());
   late final List<FocusNode> _focusNodes = List.generate(4, (_) => FocusNode());
-  bool _verifying = false;
 
   @override
   void dispose() {
@@ -35,20 +34,18 @@ class _OtpScreenState extends State<OtpScreen> {
     final code = _controllers
       .map((c) => c.text.replaceAll('\u200B', ''))
       .join();
-    if (code != '1234') {
+    if (!RegExp(r'^\d{4}$').hasMatch(code)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter mock OTP 1234 to continue')),
+        const SnackBar(content: Text('Enter a valid 4-digit OTP')),
       );
       return;
     }
-    setState(() => _verifying = true);
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-    if (!mounted) {
-      return;
-    }
-    setState(() => _verifying = false);
-    Navigator.of(context)
-        .pushNamedAndRemoveUntil(AppRoutes.shell, (route) => false);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('OTP verification is not available yet. Please try again later.'),
+      ),
+    );
+    // TODO: Integrate backend OTP verification and navigate only after a successful response.
   }
 
   @override
@@ -94,16 +91,9 @@ class _OtpScreenState extends State<OtpScreen> {
               OtpInputRow(controllers: _controllers, focusNodes: _focusNodes),
               const SizedBox(height: 24),
               PrimaryButton(
-                label: _verifying ? 'Verifying...' : 'Verify OTP',
-                onPressed: _verifying ? null : _verifyOtp,
+                label: 'Verify OTP',
+                onPressed: _verifyOtp,
               ),
-              const SizedBox(height: 14),
-              Text(
-                'Mock OTP: 1234',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: TruxifyColors.adaptiveSecondaryText(context),
-                    ),
-              )
             ],
           ),
         ),

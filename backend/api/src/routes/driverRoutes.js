@@ -2,7 +2,7 @@ import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
-import { driverOnlineSchema } from '../validation/requestSchemas.js';
+import { driverOnlineSchema, withdrawSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
@@ -152,7 +152,7 @@ router.get('/earnings/summary', authenticate, requireRole(['driver']), async (re
 
   try {
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - limitDays);
+    cutoff.setDate(cutoff.getDate() - (limitDays - 1));
 
     const { data: summary, error } = await supabase
       .from('earnings_daily')
@@ -175,12 +175,8 @@ router.get('/earnings/summary', authenticate, requireRole(['driver']), async (re
 // ============================================================================
 // 5. WITHDRAW FUNDS FROM WALLET (DRIVER)
 // ============================================================================
-router.post('/wallet/withdraw', authenticate, requireRole(['driver']), async (req, res) => {
+router.post('/wallet/withdraw', authenticate, requireRole(['driver']), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa
-
-  if (!amount || amount <= 0) {
-    return res.status(400).json({ error: 'Invalid withdrawal amount specified.' });
-  }
 
   try {
     // 5.1 Fetch driver confirmed balance

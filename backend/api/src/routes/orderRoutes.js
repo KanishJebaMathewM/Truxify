@@ -1,106 +1,71 @@
 import express from 'express';
-import { z } from 'zod'; // 🔒 ADDED ZOD FOR ISSUE #361
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { validateBody } from '../middleware/validate.js';
+import { validateBody, validateParams } from '../middleware/validate.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { getRouteEstimate } from '../services/osrm.js';
-import { createOrderSchema, submitBidSchema } from '../validation/requestSchemas.js';
+import {
+  createOrderSchema,
+  submitBidSchema,
+  submitRatingSchema,
+  paramIdSchema,
+  acceptBidParamsSchema,
+  updateMilestoneSchema,
+  verifyDeliverySchema
+} from '../validation/requestSchemas.js';
+import { awardReputationPoints } from '../services/reputation.js';
+import rateLimit from 'express-rate-limit';
 
 const router = express.Router();
 
-// ============================================================================
-// 🛡️ ZOD VALIDATION SCHEMAS & MIDDLEWARE (ISSUE #361)
-// ============================================================================
+// ── OTP brute-force protection (in-memory state) ────────────────────
+const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
+const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
+const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
 
-// Reusable Middleware to execute Zod validation
-const validateRequest = (schema, source = 'body') => (req, res, next) => {
-  try {
-    // Parse either req.body, req.params, or req.query based on the route needs
-    if (source === 'body') req.body = schema.parse(req.body);
-    if (source === 'params') req.params = schema.parse(req.params);
-    if (source === 'query') req.query = schema.parse(req.query);
-    next();
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      const formattedErrors = error.errors.map(err => ({
-        field: err.path.join('.'),
-        message: err.message
-      }));
-      return res.status(400).json({ 
-        error: 'Malformed request payload', 
-        details: formattedErrors 
-      });
-    }
-    next(error);
+// Map<orderId, { count: number, lockedUntil: number|null }>
+const otpFailedAttempts = new Map();
+
+function isOtpExpired(otpGeneratedAt) {
+  if (!otpGeneratedAt) return true;
+  const elapsed = Date.now() - new Date(otpGeneratedAt).getTime();
+  return elapsed > OTP_TTL_MINUTES * 60 * 1000;
+}
+
+function checkOtpLockout(orderId) {
+  const record = otpFailedAttempts.get(orderId);
+  if (!record || !record.lockedUntil) return false;
+  if (Date.now() >= record.lockedUntil) {
+    otpFailedAttempts.delete(orderId);
+    return false;
   }
-};
+  return true;
+}
 
-// --- Reusable Schema Primitives ---
-const coordinateSchema = z.preprocess(
-  (val) => Number(val),
-  z.number({ invalid_type_error: "Coordinate must be a number" })
-);
+function recordOtpFailure(orderId) {
+  let record = otpFailedAttempts.get(orderId);
+  if (!record) {
+    record = { count: 0, lockedUntil: null };
+    otpFailedAttempts.set(orderId, record);
+  }
+  record.count += 1;
+  if (record.count >= OTP_MAX_FAILED_ATTEMPTS) {
+    record.lockedUntil = Date.now() + OTP_LOCKOUT_MINUTES * 60 * 1000;
+  }
+}
 
-const latitudeSchema = coordinateSchema.min(-90, "Latitude must be >= -90").max(90, "Latitude must be <= 90");
-const longitudeSchema = coordinateSchema.min(-180, "Longitude must be >= -180").max(180, "Longitude must be <= 180");
-const uuidSchema = z.string().uuid("Invalid ID format");
-const dateRegex = /^\d{4}-\d{2}-\d{2}$/; // YYYY-MM-DD
-const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/; // HH:MM or HH:MM:SS
-const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+function clearOtpState(orderId) {
+  otpFailedAttempts.delete(orderId);
+}
 
-// --- Route-Specific Schemas ---
-
-// 1. Create Order Schema
-const createOrderSchema = z.object({
-  pickup_address: z.string().min(5, "Pickup address is too short").max(255, "Pickup address is too long"),
-  pickup_lat: latitudeSchema,
-  pickup_lng: longitudeSchema,
-  drop_address: z.string().min(5, "Drop address is too short").max(255, "Drop address is too long"),
-  drop_lat: latitudeSchema,
-  drop_lng: longitudeSchema,
-  pickup_date: z.string().regex(dateRegex, "Date must be in YYYY-MM-DD format"),
-  pickup_time: z.string().regex(timeRegex, "Time must be in HH:MM format"),
-  goods_type: z.string().min(2, "Goods type must be specified"),
-  weight_tonnes: z.preprocess((val) => Number(val), z.number().positive("Weight must be greater than 0").max(100, "Weight exceeds maximum legal limits")),
-  length_ft: z.preprocess((val) => Number(val), z.number().positive().max(60).optional()),
-  width_ft: z.preprocess((val) => Number(val), z.number().positive().max(15).optional()),
-  height_ft: z.preprocess((val) => Number(val), z.number().positive().max(15).optional()),
-  is_stackable: z.boolean().default(false).optional(),
-  is_fragile: z.boolean().default(false).optional(),
-  special_requirements: z.string().max(500).optional(),
-  payment_method_id: z.string().optional(),
-  upi_id: z.string().regex(upiRegex, "Invalid UPI ID format").optional().or(z.literal(''))
-}).refine(data => {
-  // Ensure pickup and drop are not the exact same coordinates
-  return !(data.pickup_lat === data.drop_lat && data.pickup_lng === data.drop_lng);
-}, {
-  message: "Pickup and Drop locations cannot be identical",
-  path: ["drop_lat", "drop_lng"]
+// Rate limiter for the verify-delivery endpoint
+const verifyDeliveryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many delivery verification attempts. Please try again later.' },
 });
-
-// 2. Param ID Schema (For fetching specific orders)
-const paramIdSchema = z.object({
-  id: uuidSchema.or(z.string().min(1, "ID is required")) // Assuming it could be UUID or custom int/string
-});
-
-// 3. Bid Submission Schema
-const submitBidSchema = z.object({
-  bid_amount: z.number()
-    .int("Bid amount must be an integer (in paisa)")
-    .positive("Bid amount must be greater than zero")
-    .min(10000, "Minimum bid is ₹100 (10,000 paisa)")
-});
-
-// 4. Accept Bid Params Schema
-const acceptBidParamsSchema = z.object({
-  id: z.string().min(1, "Order ID is required"),
-  bidId: z.string().min(1, "Bid ID is required")
-});
-
-// ============================================================================
-// CORE ROUTER LOGIC
-// ============================================================================
 
 /**
  * Helper to generate order display IDs like #FF20260521
@@ -115,10 +80,7 @@ function generateOrderDisplayId() {
 
 // ============================================================================
 // 1. CREATE AN ORDER (CUSTOMER)
-// 🔒 Added validateRequest(createOrderSchema)
 // ============================================================================
-router.post('/', authenticate, requireRole(['customer']), validateRequest(createOrderSchema, 'body'), async (req, res) => {
-  // Zod has already sanitized and typed these variables
 router.post('/', authenticate, requireRole(['customer']), validateBody(createOrderSchema), async (req, res) => {
   const {
     pickup_address, pickup_lat, pickup_lng,
@@ -129,16 +91,10 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
     payment_method_id, upi_id
   } = req.body;
 
-  // Basic validations
   if (!pickup_address || pickup_lat == null || pickup_lng == null || !drop_address || drop_lat == null || drop_lng == null || !goods_type || weight_tonnes == null) {
     return res.status(400).json({ error: 'Missing required routing or cargo specification fields.' });
   }
 
-  // ============================================================================
-  // Server-side pricing (single source of truth).
-  // Client-supplied monetary fields are no longer accepted; pricing is derived
-  // from route geometry, cargo weight, and the goods-class multipliers.
-  // ============================================================================
   let pricing;
   try {
     const routeEstimate = await getRouteEstimate({
@@ -148,13 +104,6 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
       dropLng: Number(drop_lng),
     });
     pricing = computeOrderPricing({
-      pickupLat:  pickup_lat,
-      pickupLng:  pickup_lng,
-      dropLat:    drop_lat,
-      dropLng:    drop_lng,
-      weightTonnes: weight_tonnes,
-      isFragile:   is_fragile,
-      isStackable: is_stackable,
       pickupLat:  Number(pickup_lat),
       pickupLng:  Number(pickup_lng),
       dropLat:    Number(drop_lat),
@@ -175,7 +124,6 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
   const orderDisplayId = generateOrderDisplayId();
 
   try {
-    // Step 1: Insert into orders table
     const { data: order, error: orderErr } = await supabase
       .from('orders')
       .insert({
@@ -201,7 +149,6 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
       return res.status(500).json({ error: 'Failed to create order record.', details: orderErr.message });
     }
 
-    // Step 2: Initialize Timeline Milestones
     const milestones = [
       { order_display_id: orderDisplayId, milestone: 'Order Placed', milestone_time: new Date().toISOString(), completed: true, sort_order: 10 },
       { order_display_id: orderDisplayId, milestone: 'Truck Assigned', milestone_time: null, completed: false, sort_order: 20 },
@@ -211,16 +158,12 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
       { order_display_id: orderDisplayId, milestone: 'Delivered', milestone_time: null, completed: false, sort_order: 60 }
     ];
 
-    const { error: timelineErr } = await supabase
-      .from('order_timeline')
-      .insert(milestones);
+    const { error: timelineErr } = await supabase.from('order_timeline').insert(milestones);
 
     if (timelineErr) {
       console.error('Timeline Insertion Error:', timelineErr.message);
-      // We don't fail the whole request since order is created, but log it
     }
 
-    // Step 3: Automatically expose this order as a "load_offer" for drivers.
     const { error: offerErr } = await supabase
       .from('load_offers')
       .insert({
@@ -244,11 +187,7 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
       console.error('Load Offer Insertion Error:', offerErr.message);
     }
 
-    res.status(201).json({
-      message: 'Order created successfully and broadcasted to loads board.',
-      order
-    });
-
+    res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
   } catch (err) {
     console.error('Order creation exception:', err.message);
     res.status(500).json({ error: 'Internal Server Error.' });
@@ -266,10 +205,7 @@ router.get('/history', authenticate, requireRole(['customer']), async (req, res)
       .eq('customer_id', req.user.id)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      return res.status(500).json({ error: 'Failed to fetch history.', details: error.message });
-    }
-
+    if (error) return res.status(500).json({ error: 'Failed to fetch history.', details: error.message });
     res.json(history);
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
@@ -278,71 +214,32 @@ router.get('/history', authenticate, requireRole(['customer']), async (req, res)
 
 // ============================================================================
 // 3. FETCH SPECIFIC ORDER DETAILS AND TIMELINE (CUSTOMER OR DRIVER)
-// 🔒 Added validateRequest(paramIdSchema)
 // ============================================================================
-router.get('/:id', authenticate, validateRequest(paramIdSchema, 'params'), async (req, res) => {
+router.get('/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
-    // 3.1 Fetch Order detail
-    const { data: order, error: orderErr } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('id', orderId)
-      .maybeSingle();
+    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
 
-    if (orderErr) {
-      return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
-    }
-
-    if (!order) {
-      return res.status(404).json({ error: 'Order not found.' });
-    }
-
-    // Security check: Make sure user owns this order or is the assigned driver
     if (order.customer_id !== req.user.id && order.driver_id !== req.user.id) {
       return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
     }
 
-    // 3.2 Fetch timeline
-    const { data: timeline, error: timelineErr } = await supabase
-      .from('order_timeline')
-      .select('milestone, milestone_time, completed, sort_order')
-      .eq('order_display_id', order.order_display_id)
-      .order('sort_order', { ascending: true });
+    const { data: timeline } = await supabase.from('order_timeline').select('milestone, milestone_time, completed, sort_order').eq('order_display_id', order.order_display_id).order('sort_order', { ascending: true });
 
-    // 3.3 Fetch driver details if assigned
     let driverProfile = null;
     if (order.driver_id) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('full_name, phone, avatar_url')
-        .eq('id', order.driver_id)
-        .maybeSingle();
-
-      const { data: details } = await supabase
-        .from('driver_details')
-        .select('rating, total_trips')
-        .eq('user_id', order.driver_id)
-        .maybeSingle();
+      const { data: profile } = await supabase.from('profiles').select('full_name, phone, avatar_url').eq('id', order.driver_id).maybeSingle();
+      const { data: details } = await supabase.from('driver_details').select('rating, total_trips').eq('user_id', order.driver_id).maybeSingle();
 
       if (profile && details) {
-        driverProfile = {
-          name: profile.full_name,
-          phone: profile.phone,
-          avatar: profile.avatar_url,
-          rating: details.rating,
-          trips: details.total_trips
-        };
+        driverProfile = { name: profile.full_name, phone: profile.phone, avatar: profile.avatar_url, rating: details.rating, trips: details.total_trips };
       }
     }
 
-    res.json({
-      order,
-      timeline: timeline || [],
-      driver: driverProfile
-    });
-
+    res.json({ order, timeline: timeline || [], driver: driverProfile });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }
@@ -350,194 +247,165 @@ router.get('/:id', authenticate, validateRequest(paramIdSchema, 'params'), async
 
 // ============================================================================
 // 4. SUBMIT BID FOR LOAD OFFER (DRIVER)
-// 🔒 Added validateRequest(submitBidSchema) & paramIdSchema
 // ============================================================================
-router.post('/:id/bids', authenticate, requireRole(['driver']), validateRequest(paramIdSchema, 'params'), validateRequest(submitBidSchema, 'body'), async (req, res) => {
-router.post('/:id/bids', authenticate, requireRole(['driver']), validateBody(submitBidSchema), async (req, res) => {
-  const loadOfferId = req.params.id; // load_offers.id
-  const { bid_amount } = req.body; // securely validated in paisa
+router.post('/:id/bids', authenticate, requireRole(['driver']), validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
+  const loadOfferId = req.params.id;
+  const { bid_amount } = req.body;
 
   try {
-    // Check if the load exists and is still available
-    const { data: offer, error: offerErr } = await supabase
-      .from('load_offers')
-      .select('id, status, customer_id')
-      .eq('id', loadOfferId)
-      .maybeSingle();
+    const { data: offer, error: offerErr } = await supabase.from('load_offers').select('id, status, customer_id').eq('id', loadOfferId).maybeSingle();
+    if (offerErr || !offer) return res.status(404).json({ error: 'Load offer not found.' });
+    if (offer.status !== 'available') return res.status(410).json({ error: 'Load is no longer available for bidding.' });
+    if (offer.customer_id === req.user.id) return res.status(403).json({ error: 'You cannot bid on your own load offer' });
 
-    if (offerErr || !offer) {
-      return res.status(404).json({ error: 'Load offer not found.' });
-    }
+    const { data: driverDetails, error: driverDetailsErr } = await supabase.from('driver_details').select('truck_id').eq('user_id', req.user.id).maybeSingle();
+    if (driverDetailsErr) return res.status(500).json({ error: 'Failed to verify driver profile.', details: driverDetailsErr.message });
+    if (!driverDetails?.truck_id) return res.status(400).json({ error: 'You must assign a valid truck to your profile before bidding on loads' });
 
-    if (offer.status !== 'available') {
-      return res.status(410).json({ error: 'Load is no longer available for bidding.' });
-    }
+    const { data: truck, error: truckErr } = await supabase.from('trucks').select('id').eq('id', driverDetails.truck_id).maybeSingle();
+    if (truckErr) return res.status(500).json({ error: 'Failed to verify assigned truck.', details: truckErr.message });
+    if (!truck) return res.status(400).json({ error: 'Assigned truck record could not be found' });
 
-    if (offer.customer_id === req.user.id) {
-      return res.status(403).json({ error: 'You cannot bid on your own load offer' });
-    }
+    const { data: existingBid, error: existingBidErr } = await supabase.from('load_bids').select('id').eq('load_id', loadOfferId).eq('driver_id', req.user.id).eq('status', 'pending').maybeSingle();
+    if (existingBidErr) return res.status(500).json({ error: 'Failed to verify existing bids.', details: existingBidErr.message });
+    if (existingBid) return res.status(409).json({ error: 'You already have a pending bid for this load.' });
 
-    const { data: driverDetails, error: driverDetailsErr } = await supabase
-      .from('driver_details')
-      .select('truck_id')
-      .eq('user_id', req.user.id)
-      .maybeSingle();
+    const { data: bid, error: bidErr } = await supabase.from('load_bids').insert({ load_id: loadOfferId, driver_id: req.user.id, bid_amount, status: 'pending' }).select('*').single();
+    if (bidErr) return res.status(500).json({ error: 'Failed to record bid.', details: bidErr.message });
 
-    if (driverDetailsErr) {
-      return res.status(500).json({
-        error: 'Failed to verify driver profile.',
-        details: driverDetailsErr.message
-      });
-    }
-
-    if (!driverDetails?.truck_id) {
-      return res.status(400).json({
-        error: 'You must assign a valid truck to your profile before bidding on loads'
-      });
-    }
-
-    const { data: truck, error: truckErr } = await supabase
-      .from('trucks')
-      .select('id')
-      .eq('id', driverDetails.truck_id)
-      .maybeSingle();
-
-    if (truckErr) {
-      return res.status(500).json({
-        error: 'Failed to verify assigned truck.',
-        details: truckErr.message
-      });
-    }
-
-    if (!truck) {
-      return res.status(400).json({
-        error: 'Assigned truck record could not be found'
-      });
-    }
-
-    const { data: existingBid, error: existingBidErr } = await supabase
-      .from('load_bids')
-      .select('id')
-      .eq('load_id', loadOfferId)
-      .eq('driver_id', req.user.id)
-      .eq('status', 'pending')
-      .maybeSingle();
-
-    if (existingBidErr) {
-      return res.status(500).json({
-        error: 'Failed to verify existing bids.',
-        details: existingBidErr.message
-      });
-    }
-
-    if (existingBid) {
-      return res.status(409).json({ error: 'You already have a pending bid for this load.' });
-    }
-
-    // Submit bid
-    const { data: bid, error: bidErr } = await supabase
-      .from('load_bids')
-      .insert({
-        load_id: loadOfferId,
-        driver_id: req.user.id,
-        bid_amount,
-        status: 'pending'
-      })
-      .select('*')
-      .single();
-
-    if (bidErr) {
-      return res.status(500).json({ error: 'Failed to record bid.', details: bidErr.message });
-    }
-
-    res.status(201).json({
-      message: 'Bid submitted successfully.',
-      bid
-    });
-
+    res.status(201).json({ message: 'Bid submitted successfully.', bid });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error.' });
   }
 });
 
 // ============================================================================
-// 5. VIEW BIDS FOR AN ORDER (CUSTOMER)
-// 🔒 Added validateRequest(paramIdSchema)
+// 5. SUBMIT RATING FOR A DELIVERED ORDER (CUSTOMER)
 // ============================================================================
-router.get('/:id/bids', authenticate, requireRole(['customer']), validateRequest(paramIdSchema, 'params'), async (req, res) => {
+router.post('/:id/ratings', authenticate, requireRole(['customer']), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
   const orderId = req.params.id;
+  const { stars, comment = null } = req.body;
 
   try {
-    // Find matching load offer display id from the order
-    const { data: order } = await supabase
+    const { data: order, error: orderErr } = await supabase
       .from('orders')
-      .select('order_display_id, customer_id')
+      .select('id, order_display_id, customer_id, driver_id, status')
       .eq('id', orderId)
       .maybeSingle();
 
-    if (!order || order.customer_id !== req.user.id) {
+    if (orderErr) {
+      return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
+    }
+
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    if (order.customer_id !== req.user.id) {
       return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
     }
 
-    // Find the load offer
-    const { data: offer } = await supabase
-      .from('load_offers')
+    if (!['delivered', 'payment_released'].includes(order.status)) {
+      return res.status(400).json({ error: 'Order must be delivered before a rating can be submitted.' });
+    }
+
+    if (!order.driver_id) {
+      return res.status(400).json({ error: 'Order does not have an assigned driver.' });
+    }
+
+    const { data: existingRating, error: ratingCheckErr } = await supabase
+      .from('ratings')
       .select('id')
       .eq('order_display_id', order.order_display_id)
+      .eq('customer_id', req.user.id)
       .maybeSingle();
 
-    if (!offer) {
-      return res.json([]); // No load offer created yet
+    if (ratingCheckErr) {
+      return res.status(500).json({ error: 'Failed to verify existing rating.', details: ratingCheckErr.message });
     }
 
-    // Fetch active bids and join driver profiles
-    const { data: bids, error: bidErr } = await supabase
-      .from('load_bids')
-      .select('*')
-      .eq('load_id', offer.id)
-      .eq('status', 'pending')
-      .order('bid_amount', { ascending: true });
-
-    if (bidErr) {
-      return res.status(500).json({ error: 'Query failed.', details: bidErr.message });
+    if (existingRating) {
+      return res.status(409).json({ error: 'A rating has already been submitted for this order.' });
     }
 
-    if (!bids || bids.length === 0) {
-      return res.json([]);
+    const { error: rpcErr } = await supabase.rpc('submit_rating_tx', {
+      p_order_display_id: order.order_display_id,
+      p_customer_id: req.user.id,
+      p_driver_id: order.driver_id,
+      p_stars: stars,
+      p_comment: comment,
+    });
+
+    if (rpcErr) {
+      return res.status(500).json({ error: 'Failed to submit rating.', details: rpcErr.message });
     }
 
-    // Batch fetch all driver IDs at once
+    // Fetch driver's registered Polygon wallet address for on-chain reputation update.
+    // This is intentionally fire-and-forget — a blockchain failure must never block
+    // the HTTP response. The Supabase rating is the source of truth.
+    const { data: driverDetails } = await supabase
+      .from('driver_details')
+      .select('polygon_wallet_address')
+      .eq('user_id', order.driver_id)
+      .maybeSingle();
+
+    const polygonAddress = driverDetails?.polygon_wallet_address ?? null;
+
+    if (polygonAddress) {
+      // Non-blocking — do not await on the critical response path.
+      awardReputationPoints(polygonAddress, stars).catch(err =>
+        console.error('[reputation] Unhandled rejection in awardReputationPoints:', err.message)
+      );
+    } else {
+      console.warn(
+        `[reputation] Driver ${order.driver_id} has no polygon_wallet_address — skipping on-chain update.`
+      );
+    }
+
+    return res.status(201).json({
+      message: 'Rating submitted successfully.',
+      rating: {
+        order_display_id: order.order_display_id,
+        customer_id: req.user.id,
+        driver_id: order.driver_id,
+        stars,
+        comment,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ error: 'Internal Server Error.' });
+  }
+});
+
+// ============================================================================
+// 6. VIEW BIDS FOR AN ORDER (CUSTOMER)
+// ============================================================================
+router.get('/:id/bids', authenticate, requireRole(['customer']), validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id;
+
+  try {
+    const { data: order } = await supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
+    if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
+
+    const { data: offer } = await supabase.from('load_offers').select('id').eq('order_display_id', order.order_display_id).maybeSingle();
+    if (!offer) return res.json([]);
+
+    const { data: bids, error: bidErr } = await supabase.from('load_bids').select('*').eq('load_id', offer.id).eq('status', 'pending').order('bid_amount', { ascending: true });
+    if (bidErr) return res.status(500).json({ error: 'Query failed.', details: bidErr.message });
+    if (!bids || bids.length === 0) return res.json([]);
+
     const driverIds = bids.map(b => b.driver_id);
-
     const [profilesRes, detailsRes] = await Promise.all([
-      supabase
-        .from('profiles')
-        .select('id, full_name, avatar_url, phone')
-        .in('id', driverIds),
-      supabase
-        .from('driver_details')
-        .select('user_id, rating, total_trips, completion_rate, truck_id')
-        .in('user_id', driverIds)
+      supabase.from('profiles').select('id, full_name, avatar_url, phone').in('id', driverIds),
+      supabase.from('driver_details').select('user_id, rating, total_trips, completion_rate, truck_id').in('user_id', driverIds)
     ]);
 
     const profiles = profilesRes.data || [];
     const details  = detailsRes.data || [];
-
-    // Batch fetch all trucks
-    const truckIds = details
-      .map(d => d.truck_id)
-      .filter(Boolean);
-
-    const trucksRes = truckIds.length > 0
-      ? await supabase
-          .from('trucks')
-          .select('id, name, number_plate')
-          .in('id', truckIds)
-      : { data: [] };
-
+    const truckIds = details.map(d => d.truck_id).filter(Boolean);
+    const trucksRes = truckIds.length > 0 ? await supabase.from('trucks').select('id, name, number_plate').in('id', truckIds) : { data: [] };
     const trucks = trucksRes.data || [];
 
-    // Map into lookup objects
     const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
     const detailMap  = Object.fromEntries(details.map(d => [d.user_id, d]));
     const truckMap   = Object.fromEntries(trucks.map(t => [t.id, t]));
@@ -548,315 +416,171 @@ router.get('/:id/bids', authenticate, requireRole(['customer']), validateRequest
       const truck   = detail.truck_id ? truckMap[detail.truck_id] : null;
 
       return {
-        id:         bid.id,
-        bid_amount: bid.bid_amount,
-        created_at: bid.created_at,
+        id: bid.id, bid_amount: bid.bid_amount, created_at: bid.created_at,
         driver: {
-          id:              bid.driver_id,
-          name:            profile.full_name       || 'Anonymous Driver',
-          avatar:          profile.avatar_url,
-          phone:           profile.phone,
-          rating:          detail.rating           || 0.00,
-          trips:           detail.total_trips      || 0,
-          completion_rate: detail.completion_rate  || 100.00
+          id: bid.driver_id, name: profile.full_name || 'Anonymous Driver', avatar: profile.avatar_url, phone: profile.phone,
+          rating: detail.rating || 0.00, trips: detail.total_trips || 0, completion_rate: detail.completion_rate || 100.00
         },
         truck
       };
     });
 
     res.json(enrichedBids);
-
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // ============================================================================
-// 6. ACCEPT BID (CUSTOMER)
-// 🔒 Added validateRequest(acceptBidParamsSchema)
+// 7. ACCEPT BID (CUSTOMER)
 // ============================================================================
-router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), validateRequest(acceptBidParamsSchema, 'params'), async (req, res) => {
+router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
   const orderId = req.params.id;
   const bidId = req.params.bidId;
 
   try {
-    // 6.1 Verify order ownership
-    const { data: order } = await supabase
-      .from('orders')
-      .select('order_display_id, customer_id')
-      .eq('id', orderId)
-      .maybeSingle();
+    const { data: order } = await supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
+    if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
 
-    if (!order || order.customer_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    }
+    const { data: bid } = await supabase.from('load_bids').select('*').eq('id', bidId).maybeSingle();
+    if (!bid || bid.status !== 'pending') return res.status(404).json({ error: 'Bid is not active or not found.' });
 
-    // 6.2 Fetch bid details
-    const { data: bid } = await supabase
-      .from('load_bids')
-      .select('*')
-      .eq('id', bidId)
-      .maybeSingle();
+    const { data: loadOffer, error: loadOfferErr } = await supabase.from('load_offers').select('id').eq('order_display_id', order.order_display_id).maybeSingle();
+    if (loadOfferErr) return res.status(500).json({ error: 'Failed to verify bid ownership.', details: loadOfferErr.message });
+    if (!loadOffer) return res.status(404).json({ error: 'Load offer for this order was not found.' });
+    if (bid.load_id !== loadOffer.id) return res.status(403).json({ error: 'Access Denied: Bid does not belong to this order.' });
 
-    if (!bid || bid.status !== 'pending') {
-      return res.status(404).json({ error: 'Bid is not active or not found.' });
-    }
-
-    // 6.3 Verify the bid belongs to this order's load offer
-    const { data: loadOffer, error: loadOfferErr } = await supabase
-      .from('load_offers')
-      .select('id')
-      .eq('order_display_id', order.order_display_id)
-      .maybeSingle();
-
-    if (loadOfferErr) {
-      return res.status(500).json({
-        error: 'Failed to verify bid ownership.',
-        details: loadOfferErr.message
-      });
-    }
-
-    if (!loadOffer) {
-      return res.status(404).json({ error: 'Load offer for this order was not found.' });
-    }
-
-    if (bid.load_id !== loadOffer.id) {
-      return res.status(403).json({ error: 'Access Denied: Bid does not belong to this order.' });
-    }
-
-    // 6.4 Fetch driver details & truck details for denormalized snapshot storage
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name')
-      .eq('id', bid.driver_id)
-      .maybeSingle();
-
-    const { data: details } = await supabase
-      .from('driver_details')
-      .select('rating, truck_id')
-      .eq('user_id', bid.driver_id)
-      .maybeSingle();
+    const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', bid.driver_id).maybeSingle();
+    const { data: details } = await supabase.from('driver_details').select('rating, truck_id').eq('user_id', bid.driver_id).maybeSingle();
 
     let truckInfo = null;
     if (details && details.truck_id) {
-      const { data, error: truckErr } = await supabase
-        .from('trucks')
-        .select('id, name, number_plate')
-        .eq('id', details.truck_id)
-        .maybeSingle();
-
-      if (truckErr) {
-        console.error('Truck lookup error during bid accept:', truckErr.message);
-      }
+      const { data, error: truckErr } = await supabase.from('trucks').select('id, name, number_plate').eq('id', details.truck_id).maybeSingle();
+      if (truckErr) console.error('Truck lookup error during bid accept:', truckErr.message);
       truckInfo = data;
     }
 
-    // 6.5 Execute atomically via Supabase RPC
     const { error: rpcErr } = await supabase.rpc('accept_bid_tx', {
-      p_bid_id:           bidId,
-      p_order_id:         orderId,
-      p_load_id:          bid.load_id,
-      p_driver_id:        bid.driver_id,
-      p_truck_id:         truckInfo?.id || null,
-      p_driver_name:      profile?.full_name || 'Assigned Driver',
-      p_driver_rating:    details?.rating || 0.00,
-      p_truck_number:     truckInfo?.number_plate || 'N/A',
-      p_bid_amount:       bid.bid_amount,
-      p_order_display_id: order.order_display_id
+      p_bid_id: bidId, p_order_id: orderId, p_load_id: bid.load_id, p_driver_id: bid.driver_id,
+      p_truck_id: truckInfo?.id || null, p_driver_name: profile?.full_name || 'Assigned Driver',
+      p_driver_rating: details?.rating || 0.00, p_truck_number: truckInfo?.number_plate || 'N/A',
+      p_bid_amount: bid.bid_amount, p_order_display_id: order.order_display_id
     });
 
-    if (rpcErr) {
-      return res.status(500).json({
-        error: 'Failed to accept bid atomically.',
-        details: rpcErr.message
-      });
-    }
+    if (rpcErr) return res.status(500).json({ error: 'Failed to accept bid atomically.', details: rpcErr.message });
 
     res.json({ message: 'Bid accepted. Driver and truck assigned.' });
-
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
-export default router;
 // ============================================================================
-// 7. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
+// 8. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 // ============================================================================
-router.put('/:id/milestones', authenticate, requireRole(['driver']), async (req, res) => {
+router.put('/:id/milestones', authenticate, requireRole(['driver']), validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   const orderId = req.params.id;
   const { milestone } = req.body;
 
   const milestoneMap = {
     'Truck Assigned': 'truck_assigned',
-    'En Route to Pickup': 'picked_up',
+    'En Route to Pickup': 'truck_assigned',
     'Goods Loaded': 'picked_up',
     'In Transit': 'in_transit',
     'Arriving': 'arriving',
   };
 
-  // Prevent direct transition to Delivered - must use OTP verification
-  if (milestone === 'Delivered') {
-    return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
-  }
-
-  if (!milestone || !milestoneMap[milestone]) {
-    return res.status(400).json({
-      error: 'Invalid milestone supplied.'
-    });
-  }
+  if (milestone === 'Delivered') return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
 
   try {
-    // 7.1 Fetch order and verify driver is assigned
-    const { data: order, error: orderErr } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('id', orderId)
-      .maybeSingle();
-
-    if (orderErr || !order) {
-      return res.status(404).json({ error: 'Order not found.' });
-    }
-
-    if (order.driver_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
-    }
+    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
+    if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
 
     const status = milestoneMap[milestone];
-
-    // 7.3 Prepare updates
-    const updates = {
-      status,
-      updated_at: new Date().toISOString()
-    };
-
-    // Generate OTP if moving to In Transit
+    const updates = { status, updated_at: new Date().toISOString() };
     let generatedOtp = null;
-    if (milestone === 'In Transit' && !order.delivery_otp) {
-      generatedOtp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit OTP
+
+    if (milestone === 'In Transit' && (!order.delivery_otp || isOtpExpired(order.otp_generated_at))) {
+      generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
       updates.delivery_otp = generatedOtp;
       updates.otp_generated_at = new Date().toISOString();
+      clearOtpState(orderId);
     }
 
-    // 7.4 Perform order update
-    const { data: updatedOrder, error: updateErr } = await supabase
-      .from('orders')
-      .update(updates)
-      .eq('id', orderId)
-      .select('*')
-      .single();
+    const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update(updates).eq('id', orderId).select('*').single();
+    if (updateErr) return res.status(500).json({ error: 'Failed to update order.', details: updateErr.message });
 
-    if (updateErr) {
-      return res.status(500).json({ error: 'Failed to update order.', details: updateErr.message });
-    }
+    const { error: timelineErr } = await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() }).eq('order_display_id', order.order_display_id).eq('milestone', milestone);
+    if (timelineErr) return res.status(500).json({ error: 'Failed to update order timeline.', details: timelineErr.message });
 
-    // 7.5 Update order timeline
-    const { error: timelineErr } = await supabase
-      .from('order_timeline')
-      .update({ completed: true, milestone_time: new Date().toISOString() })
-      .eq('order_display_id', order.order_display_id)
-      .eq('milestone', milestone);
-
-    if (timelineErr) {
-      return res.status(500).json({ error: 'Failed to update order timeline.', details: timelineErr.message });
-    }
-
-    // 7.6 Return response
-    const response = {
-      message: 'Milestone updated successfully.',
-      order: updatedOrder,
-      milestone,
-      status
-    };
-    if (generatedOtp) {
-      // In real app, you would send this OTP to the customer via SMS/email
-      response.otp = generatedOtp;
-    }
+    const response = { message: 'Milestone updated successfully.', order: updatedOrder, milestone, status };
+    if (generatedOtp) response.otp = generatedOtp;
 
     res.json(response);
-
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
 // ============================================================================
-// 8. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
+// 9. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
 // ============================================================================
-router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), async (req, res) => {
+router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verifyDeliveryLimiter, validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   const orderId = req.params.id;
   const { otp } = req.body;
 
-  if (!otp) {
-    return res.status(400).json({ error: 'OTP is required for verification.' });
+  if (!otp) return res.status(400).json({ error: 'OTP is required for verification.' });
+
+  // Check for active lockout from previous failed attempts
+  if (checkOtpLockout(orderId)) {
+    return res.status(429).json({
+      error: `Too many failed OTP attempts. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes.`,
+    });
   }
 
   try {
-    // 8.1 Fetch order and verify driver is assigned
-    const { data: order, error: orderErr } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('id', orderId)
-      .maybeSingle();
+    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
+    if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
+    if (!order.delivery_otp || order.otp_verified) return res.status(400).json({ error: 'OTP not available or already verified.' });
 
-    if (orderErr || !order) {
-      return res.status(404).json({ error: 'Order not found.' });
-    }
-
-    if (order.driver_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
-    }
-
-    // 8.2 Validate OTP - type safe comparison
-    if (!order.delivery_otp || order.otp_verified) {
-      return res.status(400).json({ error: 'OTP not available or already verified.' });
+    // Check OTP expiry
+    if (isOtpExpired(order.otp_generated_at)) {
+      return res.status(400).json({
+        error: 'OTP has expired. Please request a new delivery OTP.',
+      });
     }
 
     if (order.delivery_otp !== String(otp)) {
-      return res.status(400).json({ error: 'Invalid OTP. Please check and try again.' });
+      recordOtpFailure(orderId);
+      const remaining = OTP_MAX_FAILED_ATTEMPTS - (otpFailedAttempts.get(orderId)?.count || 0);
+      const message = remaining > 0
+        ? `Invalid OTP. ${remaining} attempt(s) remaining before lockout.`
+        : `Invalid OTP. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes due to too many failed attempts.`;
+      console.warn(`[OTP] Failed verification attempt for order ${orderId} by driver ${req.user.id}. ${remaining} attempts remaining.`);
+      return res.status(400).json({ error: message });
     }
 
-    // 8.3 Mark OTP as verified and update order status
-    const { data: updatedOrder, error: updateErr } = await supabase
-      .from('orders')
-      .update({
-        otp_verified: true,
-        status: 'payment_released',
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', orderId)
-      .select('*')
-      .single();
+    // Successful verification — clear failure state
+    clearOtpState(orderId);
 
-    if (updateErr) {
-      return res.status(500).json({ error: 'Failed to verify OTP.', details: updateErr.message });
-    }
+    const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update({
+      otp_verified: true, status: 'payment_released', updated_at: new Date().toISOString()
+    }).eq('id', orderId).select('*').single();
 
-    // 8.4 Update order timeline
-    await supabase
-      .from('order_timeline')
-      .update({ completed: true, milestone_time: new Date().toISOString() })
-      .eq('order_display_id', order.order_display_id)
-      .eq('milestone', 'Delivered');
+    if (updateErr) return res.status(500).json({ error: 'Failed to verify OTP.', details: updateErr.message });
 
-    // 8.5 Call complete_trip_tx RPC
+    await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() }).eq('order_display_id', order.order_display_id).eq('milestone', 'Delivered');
+
     try {
-      const { error: rpcErr } = await supabase.rpc('complete_trip_tx', {
-        p_order_id: orderId
-      });
-      if (rpcErr) {
-        console.warn('complete_trip_tx RPC not available or failed:', rpcErr.message);
-      }
+      const { error: rpcErr } = await supabase.rpc('complete_trip_tx', { p_order_id: orderId });
+      if (rpcErr) console.warn('complete_trip_tx RPC not available or failed:', rpcErr.message);
     } catch (rpcErr) {
       console.warn('complete_trip_tx RPC call error:', rpcErr.message);
     }
 
-    // 8.6 Return success
-    res.json({
-      message: 'Delivery verified successfully! Payment released to driver.',
-      order: updatedOrder
-    });
-
+    res.json({ message: 'Delivery verified successfully! Payment released to driver.', order: updatedOrder });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }

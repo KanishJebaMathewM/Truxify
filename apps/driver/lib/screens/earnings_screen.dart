@@ -717,19 +717,22 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Widget _buildTripTile(Map<String, dynamic> trip) {
     final amount = _tripAmount(trip);
 
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: const Icon(
-        Icons.check_circle_rounded,
-        color: TruxifyColors.success,
-      ),
-      title: Text(_tripRoute(trip)),
-      subtitle: Text(_tripCustomer(trip)),
-      trailing: Text(
-        _formatRupees(amount),
-        style: GoogleFonts.dmSans(
-          fontWeight: FontWeight.bold,
-          color: TruxifyColors.accent,
+    return Material(
+      color: Colors.transparent,
+      child: ListTile(
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(
+          Icons.check_circle_rounded,
+          color: TruxifyColors.success,
+        ),
+        title: Text(_tripRoute(trip)),
+        subtitle: Text(_tripCustomer(trip)),
+        trailing: Text(
+          _formatRupees(amount),
+          style: GoogleFonts.dmSans(
+            fontWeight: FontWeight.bold,
+            color: TruxifyColors.accent,
+          ),
         ),
       ),
     );
@@ -835,20 +838,24 @@ class _EarningsScreenState extends State<EarningsScreen> {
             ..._pendingPayments.map((item) {
               final amount = ((item['amount'] ?? 0) / 100.0);
 
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const CircleAvatar(
-                  backgroundColor: TruxifyColors.accentVeryLight,
-                  child: Icon(
-                    Icons.account_balance_wallet_outlined,
-                    color: TruxifyColors.accent,
+              return Material(
+                color: Colors.transparent,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const CircleAvatar(
+                    backgroundColor: TruxifyColors.accentVeryLight,
+                    child: Icon(
+                      Icons.account_balance_wallet_outlined,
+                      color: TruxifyColors.accent,
+                    ),
                   ),
-                ),
-                title: Text(item['description'] ?? 'Pending payment'),
-                subtitle: Text(item['trip_display_id'] ?? item['status'] ?? ''),
-                trailing: Text(
-                  _formatRupees(amount),
-                  style: GoogleFonts.dmSans(fontWeight: FontWeight.bold),
+                  title: Text(item['description'] ?? 'Pending payment'),
+                  subtitle:
+                      Text(item['trip_display_id'] ?? item['status'] ?? ''),
+                  trailing: Text(
+                    _formatRupees(amount),
+                    style: GoogleFonts.dmSans(fontWeight: FontWeight.bold),
+                  ),
                 ),
               );
             }),

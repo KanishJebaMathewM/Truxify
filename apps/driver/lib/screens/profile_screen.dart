@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../controllers/app_controller.dart';
+import '../core/app_routes.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:truxify_driver/screens/login_screen.dart';
 import '../../core/supabase_config.dart';
 import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
 import 'notifications_screen.dart';
@@ -729,15 +729,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   await Supabase.instance.client.auth.signOut();
                 }
 
-                if (context.mounted) {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const LoginScreen(),
-                    ),
-                    (route) => false,
-                  );
+                if (!context.mounted) {
+                  return;
                 }
+
+                // Logout lives inside the profile tab's nested navigator, so we
+                // must clear the root stack to remove the authenticated shell.
+                Navigator.of(context, rootNavigator: true)
+                    .pushNamedAndRemoveUntil(
+                  AppRoutes.login,
+                  (route) => false,
+                );
               } catch (e) {
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(

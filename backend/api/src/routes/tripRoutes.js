@@ -73,6 +73,7 @@ router.post('/events/batch', authenticate, validateBatchPayload(batchSyncSchema)
       .from('processed_batches')
       .select('id')
       .eq('idempotency_key', idempotencyKey)
+      .eq('user_id', userId)
       .maybeSingle();
 
     if (existingBatch) {

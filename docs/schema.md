@@ -1,6 +1,6 @@
 # 📊 Truxify — Database Schema
 
-> **26 tables · 4 RPC functions · 0 foreign keys**
+> **27 tables · 4 RPC functions · 0 foreign keys**
 > All relationships are logical (application-layer joins). No wired constraints.
 
 ---

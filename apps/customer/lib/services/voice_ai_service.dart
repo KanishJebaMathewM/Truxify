@@ -24,12 +24,18 @@ class VoiceAiService {
       return 'Loading your shipment details…';
     }
 
-    final eta = order['eta']?.toString();
-    final rawStatus = order['status']?.toString() ?? 'in_transit';
-    final status = formatStatus(rawStatus);
-    final dropAddress = order['drop_address']?.toString() ?? 'your destination';
+    final rawEta = order['eta']?.toString().trim();
+    final eta = (rawEta != null && rawEta.isNotEmpty) ? rawEta : null;
 
-    if (eta != null && eta.isNotEmpty) {
+    final rawStatus = order['status']?.toString().trim() ?? '';
+    final status = formatStatus(rawStatus.isNotEmpty ? rawStatus : 'pending');
+
+    final rawDropAddress = order['drop_address']?.toString().trim();
+    final dropAddress = (rawDropAddress != null && rawDropAddress.isNotEmpty)
+        ? rawDropAddress
+        : 'your destination';
+
+    if (eta != null) {
       return 'Your shipment is currently $status and expected to reach '
              '$dropAddress by $eta.';
     }

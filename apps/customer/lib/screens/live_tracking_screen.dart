@@ -70,11 +70,26 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     final token = session?.accessToken ?? '';
 
     final apiBaseUrl = OrderService.defaultApiBaseUrl;
-    final wsScheme = apiBaseUrl.startsWith('https') ? 'wss' : 'ws';
-    final hostPort = apiBaseUrl.replaceFirst(RegExp(r'^https?://'), '');
-    final wsUrl = '$wsScheme://$hostPort/ws/tracking?token=$token';
+    final baseUri = Uri.parse(apiBaseUrl);
+    final wsScheme = baseUri.scheme == 'https' ? 'wss' : 'ws';
+    
+    var wsPath = baseUri.path;
+    if (wsPath.endsWith('/')) {
+      wsPath = wsPath.substring(0, wsPath.length - 1);
+    }
+    wsPath = '$wsPath/ws/tracking';
 
-    debugPrint('Connecting to tracking WebSocket at: $wsUrl');
+    final wsUri = Uri(
+      scheme: wsScheme,
+      host: baseUri.host,
+      port: baseUri.hasPort ? baseUri.port : null,
+      path: wsPath,
+      queryParameters: token.isNotEmpty ? {'token': token} : null,
+    );
+    final wsUrl = wsUri.toString();
+
+    final redactedUrl = wsUri.replace(queryParameters: token.isNotEmpty ? {'token': '[REDACTED]'} : null).toString();
+    debugPrint('Connecting to tracking WebSocket at: $redactedUrl');
 
     _trackingWebSocket = ResilientWebSocket(
       wsUrl,

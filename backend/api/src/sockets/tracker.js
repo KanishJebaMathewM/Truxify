@@ -119,7 +119,10 @@ export function initWebSocketServer(server) {
           // ignore decoding errors
         }
 
-        const isSupabaseToken = decoded && decoded.iss && (decoded.iss.includes('supabase') || decoded.iss.includes('supabase.co'));
+        const isSupabaseToken = decoded &&
+          typeof decoded === 'object' &&
+          typeof decoded.iss === 'string' &&
+          (decoded.iss.includes('supabase') || decoded.iss.includes('supabase.co'));
         let profile = null;
 
         if (isSupabaseToken) {
@@ -127,7 +130,9 @@ export function initWebSocketServer(server) {
             ws.close(4001, 'Unauthorized: Supabase client is not configured');
             return;
           }
-          const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+          const response = await supabase.auth.getUser(token);
+          const user = response?.data?.user;
+          const authError = response?.error;
           if (authError || !user) {
             ws.close(4001, 'Unauthorized: Invalid or expired Supabase token');
             return;

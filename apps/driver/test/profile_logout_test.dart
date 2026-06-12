@@ -65,13 +65,15 @@ void main() {
 
     await tester.tap(find.text('Logout'));
     await _pumpTransition(tester);
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('Welcome, Driver'), findsOneWidget);
     expect(find.text('Logout'), findsNothing);
     expect(find.text('My Documents'), findsNothing);
 
     await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
 
     expect(find.text('Welcome, Driver'), findsOneWidget);
     expect(find.text('Logout'), findsNothing);

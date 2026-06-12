@@ -645,17 +645,21 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
     }
 
     // Escrow: release funds to driver after successful delivery verification
-    escrowRelease(order.order_display_id).then(({ txHash }) => {
-      if (txHash) {
-        supabase.from('orders').update({
-          escrow_status: 'released',
-          release_tx_hash: txHash,
-          escrow_released_at: new Date().toISOString(),
-        }).eq('id', orderId).then(({ error: e }) => {
-          if (e) console.warn('[escrow] Failed to update release_tx_hash:', e.message);
-        });
-      }
-    }).catch(err => console.error('[escrow] Unhandled rejection in escrowRelease:', err.message));
+    if (order.escrow_status === 'funded') {
+      escrowRelease(order.order_display_id).then(({ txHash }) => {
+        if (txHash) {
+          supabase.from('orders').update({
+            escrow_status: 'released',
+            release_tx_hash: txHash,
+            escrow_released_at: new Date().toISOString(),
+          }).eq('id', orderId).then(({ error: e }) => {
+            if (e) console.warn('[escrow] Failed to update release_tx_hash:', e.message);
+          });
+        }
+      }).catch(err => console.error('[escrow] Unhandled rejection in escrowRelease:', err.message));
+    } else {
+      console.log(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
+    }
 
     // Strip delivery_otp from updatedOrder to prevent exposure
     const responseOrder = { ...updatedOrder };
@@ -769,7 +773,7 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
       .eq('order_display_id', order.order_display_id)
       .eq('milestone', 'Order Placed');
 
-    if (order.escrow_booking_id) {
+    if (order.escrow_status === 'funded') {
       escrowRefund(order.order_display_id).then(({ txHash }) => {
         if (txHash) {
           supabase.from('orders').update({
@@ -781,6 +785,8 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
           });
         }
       }).catch(err => console.error('[escrow] Unhandled rejection in escrowRefund:', err.message));
+    } else if (order.escrow_booking_id) {
+      console.log(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain refund.`);
     }
 
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });

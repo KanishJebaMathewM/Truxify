@@ -239,7 +239,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            pricingText != null ? pricingText : 'New estimated price: calculating...',
+                            (pricingText ?? 'New estimated price: calculating...'),
                             style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
                           ),
                         ),

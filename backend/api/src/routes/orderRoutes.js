@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
@@ -513,7 +514,7 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), validatePar
     let generatedOtp = null;
 
     if (milestone === 'In Transit' && (!order.delivery_otp || isOtpExpired(order.otp_generated_at))) {
-      generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      generatedOtp = crypto.randomInt(100000, 1000000).toString();
       updates.delivery_otp = generatedOtp;
       updates.otp_generated_at = new Date().toISOString();
       clearOtpState(orderId);

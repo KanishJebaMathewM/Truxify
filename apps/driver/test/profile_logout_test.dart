@@ -71,7 +71,8 @@ void main() {
     expect(find.text('My Documents'), findsNothing);
 
     await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
 
     expect(find.text('Welcome, Driver'), findsOneWidget);
     expect(find.text('Logout'), findsNothing);

@@ -133,6 +133,24 @@ app.use(express.json({ limit: '1mb' })); // Added payload limit for security
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // ============================================================================
+// REQUEST LOGGER — registered before all routes and rate limiters so that every
+// incoming request (including those that get rate-limited or 404) is logged.
+// ============================================================================
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const color = res.statusCode >= 500 ? '\x1b[31m'
+                : res.statusCode >= 400 ? '\x1b[33m'
+                : res.statusCode >= 200 ? '\x1b[32m' : '\x1b[0m';
+    console.log(
+      `${color}[${new Date().toISOString()}] ${req.method} ${req.originalUrl} → ${res.statusCode} (${duration}ms)\x1b[0m`
+    );
+  });
+  next();
+});
+
+// ============================================================================
 // RATE LIMITING
 // ============================================================================
 
@@ -154,23 +172,6 @@ const healthLimiter = rateLimit({
 app.use('/api/', limiter);
 app.use('/api/health', healthLimiter);
 app.use('/api/v1/trips', tripRoutes);
-
-// ============================================================================
-// REQUEST LOGGER
-// ============================================================================
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    const color = res.statusCode >= 500 ? '\x1b[31m'
-                : res.statusCode >= 400 ? '\x1b[33m'
-                : res.statusCode >= 200 ? '\x1b[32m' : '\x1b[0m';
-    console.log(
-      `${color}[${new Date().toISOString()}] ${req.method} ${req.originalUrl} → ${res.statusCode} (${duration}ms)\x1b[0m`
-    );
-  });
-  next();
-});
 
 // ============================================================================
 // REST API ROUTING

@@ -151,10 +151,16 @@ class TripService {
     }
 
     final firstStopId = stops.first['id'];
-    await _client
+    final updatedStop = await _client
         .from('trip_stops')
         .update({'is_current': true})
         .eq('id', firstStopId)
-        .eq('trip_display_id', tripDisplayId);
+        .eq('trip_display_id', tripDisplayId)
+        .select()
+        .maybeSingle();
+
+    if (updatedStop == null) {
+      throw Exception('Failed to start trip: Stop not found or update failed');
+    }
   }
 }

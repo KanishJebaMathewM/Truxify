@@ -281,4 +281,115 @@ void main() {
       );
     });
   });
+
+  group('TripService.updateOnlineStatus Tests', () {
+    test('Successfully updates online status', () async {
+      final updatedDetails = <Map<dynamic, dynamic>>[];
+      final eqParams = <String, dynamic>{};
+
+      final client = FakeSupabaseClient(
+        onFrom: (relation) {
+          if (relation == 'driver_details') {
+            return FakeSupabaseQueryBuilder(
+              Future.value([{'user_id': driverId}]),
+              onUpdate: (values) => updatedDetails.add(values),
+              onEq: (col, val) => eqParams[col] = val,
+            );
+          }
+          throw UnimplementedError('Table $relation not mocked');
+        },
+      );
+
+      final service = TripService(client: client);
+      await service.updateOnlineStatus(true);
+
+      expect(eqParams['user_id'], equals(driverId));
+      expect(updatedDetails.first['is_online'], isTrue);
+      expect(updatedDetails.first['updated_at'], isNotNull);
+    });
+
+    test('Throws exception if driver_details update returns null', () async {
+      final client = FakeSupabaseClient(
+        onFrom: (relation) {
+          if (relation == 'driver_details') {
+            return FakeSupabaseQueryBuilder(
+              Future.value(<Map<String, dynamic>>[]),
+            );
+          }
+          throw UnimplementedError('Table $relation not mocked');
+        },
+      );
+
+      final service = TripService(client: client);
+      expect(
+        () => service.updateOnlineStatus(true),
+        throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('Driver profile not found or update failed'))),
+      );
+    });
+  });
+
+  group('TripService.startTrip Tests', () {
+    test('Successfully starts a trip by marking first stop as current', () async {
+      final updatedStops = <Map<dynamic, dynamic>>[];
+      final eqParams = <String, dynamic>{};
+      int tripStopsCallCount = 0;
+
+      final client = FakeSupabaseClient(
+        onFrom: (relation) {
+          if (relation == 'trips') {
+            return FakeSupabaseQueryBuilder(
+              Future.value([{'id': 'trip-id-123'}]),
+              onEq: (col, val) => eqParams[col] = val,
+            );
+          } else if (relation == 'trip_stops') {
+            tripStopsCallCount++;
+            if (tripStopsCallCount == 1) {
+              // Fetch first stop
+              return FakeSupabaseQueryBuilder(
+                Future.value([{'id': stopId, 'sort_order': 1}]),
+                onEq: (col, val) => eqParams[col] = val,
+              );
+            } else {
+              // Update stop
+              return FakeSupabaseQueryBuilder(
+                Future.value([{'id': stopId}]),
+                onUpdate: (values) => updatedStops.add(values),
+                onEq: (col, val) => eqParams[col] = val,
+              );
+            }
+          }
+          throw UnimplementedError('Table $relation not mocked');
+        },
+      );
+
+      final service = TripService(client: client);
+      await service.startTrip(tripDisplayId);
+
+      expect(updatedStops.first['is_current'], isTrue);
+      expect(eqParams['trip_display_id'], equals(tripDisplayId));
+    });
+
+    test('Throws exception if startTrip finds no active stops', () async {
+      final client = FakeSupabaseClient(
+        onFrom: (relation) {
+          if (relation == 'trips') {
+            return FakeSupabaseQueryBuilder(
+              Future.value([{'id': 'trip-id-123'}]),
+            );
+          } else if (relation == 'trip_stops') {
+            return FakeSupabaseQueryBuilder(
+              Future.value(<Map<String, dynamic>>[]),
+            );
+          }
+          throw UnimplementedError('Table $relation not mocked');
+        },
+      );
+
+      final service = TripService(client: client);
+      expect(
+        () => service.startTrip(tripDisplayId),
+        throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('No active stops found for this trip'))),
+      );
+    });
+  });
 }

@@ -68,9 +68,8 @@ function selectLabels({
     }
   }
 
-  if (hasProgramSignal({ title: prTitle, body: prBody, rules })) {
-    addLabels(selected, rules.programLabels);
-  }
+  // Always apply program labels (like gssoc:approved) to all created PRs
+  addLabels(selected, rules.programLabels);
 
   addLabels(selected, labelsMatchingRules(prTitle, rules.titleRules));
 

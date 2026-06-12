@@ -87,11 +87,137 @@ GET /health
 Returns the health status of the service.
 
 Example Response:
-
 ```json
 {
   "status": "healthy"
 }
+```
+
+### Predict Demand Endpoint
+
+```http
+POST /predict/demand
+```
+
+Predicts ride/truck demand based on time, weather, and traffic features. If the model hasn't been trained yet, this endpoint triggers the training pipeline automatically.
+
+**Request Body Schema**:
+```json
+{
+  "hour": 14.5,
+  "day_of_week": 3,
+  "temperature": 25.0,
+  "precipitation": 0.0,
+  "historical_volume": 50.0,
+  "nearby_drivers": 15.0
+}
+```
+
+**Response Schema**:
+```json
+{
+  "predicted_demand": 54.93,
+  "model_version": "1.0.0",
+  "feature_names": [
+    "hour",
+    "day_of_week",
+    "is_weekend",
+    "temperature",
+    "precipitation",
+    "historical_volume",
+    "nearby_drivers"
+  ]
+}
+```
+
+### Train Demand Model Endpoint
+
+```http
+POST /train/demand
+```
+
+Triggers model training using synthetic dataset and saves the model pickle and metadata metrics to `models_storage/`.
+
+**Response Schema**:
+```json
+{
+  "status": "success",
+  "metrics": {
+    "mae": 4.304729891391666,
+    "rmse": 5.299083712860529,
+    "r2": 0.7975017721221801,
+    "n_samples": 2000,
+    "feature_names": [
+      "hour",
+      "day_of_week",
+      "is_weekend",
+      "temperature",
+      "precipitation",
+      "historical_volume",
+      "nearby_drivers"
+    ]
+  }
+}
+```
+
+### List Models Endpoint
+
+```http
+GET /models
+```
+
+Lists all trained models with their saved timestamps and performance metrics.
+
+**Response Schema**:
+```json
+{
+  "models": [
+    {
+      "model_name": "demand_forecast",
+      "saved_at": "2026-06-11T17:44:09.780044",
+      "metrics": {
+        "mae": 4.304729891391666,
+        "rmse": 5.299083712860529,
+        "r2": 0.7975017721221801,
+        "n_samples": 2000,
+        "feature_names": [
+          "hour",
+          "day_of_week",
+          "is_weekend",
+          "temperature",
+          "precipitation",
+          "historical_volume",
+          "nearby_drivers"
+        ]
+      }
+    }
+  ]
+}
+```
+
+## Model Training & Evaluation Metrics
+
+The demand forecasting model is built using a **Gradient Boosting Regressor** (`scikit-learn`). 
+
+- **Target Metric**: R² score, Mean Absolute Error (MAE), Root Mean Squared Error (RMSE).
+- **Features Used**: Hour of day, Day of week, Weekend flag, Temperature, Precipitation, Historical booking volume, Nearby available drivers.
+- **Baseline Performance Metrics**:
+  - **R² Score**: ~0.80 (80% variance explained)
+  - **MAE**: ~4.30 units of demand
+  - **RMSE**: ~5.30 units of demand
+  - **Dataset size**: 2,000 synthetic logs
+
+## Running Tests
+
+FastAPI microservice endpoints are verified via a test suite built with `pytest` and `httpx`.
+
+### 1. Activate the Virtual Environment
+Activate your Python virtual environment.
+
+### 2. Run Pytest
+From the project root directory, run:
+```bash
+pytest backend/ml/tests
 ```
 
 ## API Documentation

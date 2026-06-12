@@ -34,14 +34,14 @@ const validateBatchPayload = (schema) => (req, res, next) => {
     next();
   } catch (error) {
     if (error instanceof z.ZodError) {
-      const formattedErrors = error.errors.map(err => ({
+      const formattedErrors = (error.issues || error.errors).map(err => ({
         field: err.path.join('.'),
         message: err.message
       }));
       // The Flutter app explicitly looks for 422 to stop retrying bad payloads
-      return res.status(422).json({ 
-        error: 'Unprocessable Entity: Malformed batch payload', 
-        details: formattedErrors 
+      return res.status(422).json({
+        error: 'Unprocessable Entity: Malformed batch payload',
+        details: formattedErrors
       });
     }
     next(error);

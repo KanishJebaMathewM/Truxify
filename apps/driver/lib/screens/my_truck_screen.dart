@@ -72,7 +72,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -93,7 +93,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -102,7 +102,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.secondaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -141,7 +141,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.secondaryText,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -156,8 +156,11 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                           color: TruxifyColors.hintText, fontSize: 13),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            const BorderSide(color: TruxifyColors.border),
+                        borderSide: BorderSide(
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? TruxifyColors.darkBorder
+                              : TruxifyColors.border,
+                        ),
                       ),
                     ),
                   ),
@@ -239,7 +242,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -259,7 +262,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: TruxifyColors.primaryText,
+                      color: Theme.of(context).colorScheme.onSurface,
                     ),
                   ),
                   Container(
@@ -289,9 +292,13 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: TruxifyColors.secondaryBackground,
+                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: TruxifyColors.border),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? TruxifyColors.darkBorder
+                        : TruxifyColors.border,
+                  ),
                 ),
                 child: Column(
                   children: [
@@ -309,12 +316,13 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                       style: GoogleFonts.dmSans(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
-                          color: TruxifyColors.primaryText),
+                          color: Theme.of(context).colorScheme.onSurface),
                     ),
                     Text(
                       'Issuer: Ministry of Road Transport & Highways',
                       style: GoogleFonts.dmSans(
-                          fontSize: 11, color: TruxifyColors.secondaryText),
+                          fontSize: 11,
+                          color: TruxifyColors.adaptiveSecondaryText(context)),
                     ),
                     const SizedBox(height: 20),
                     Row(
@@ -327,10 +335,15 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                             style: GoogleFonts.dmSans(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
-                                color: TruxifyColors.primaryText)),
+                                color: Theme.of(context).colorScheme.onSurface)),
                       ],
                     ),
-                    const Divider(height: 16, color: TruxifyColors.border),
+                    Divider(
+                      height: 16,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? TruxifyColors.darkBorder
+                          : TruxifyColors.border,
+                    ),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -364,22 +377,22 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: TruxifyColors.background,
-        body: Center(
+      return Scaffold(
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        body: const Center(
             child: CircularProgressIndicator(color: TruxifyColors.accent)),
       );
     }
 
     if (_errorMessage != null || _truck == null) {
       return Scaffold(
-        backgroundColor: TruxifyColors.background,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         appBar: AppBar(
-          backgroundColor: Colors.white,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded,
-                color: TruxifyColors.primaryText),
+            icon: Icon(Icons.arrow_back_rounded,
+                color: Theme.of(context).colorScheme.onSurface),
             onPressed: () => Navigator.of(context).pop(),
           ),
         ),
@@ -426,13 +439,13 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
         : 'N/A';
 
     return Scaffold(
-      backgroundColor: TruxifyColors.background,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded,
-              color: TruxifyColors.primaryText),
+          icon: Icon(Icons.arrow_back_rounded,
+              color: Theme.of(context).colorScheme.onSurface),
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: Text(
@@ -440,7 +453,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
           style: GoogleFonts.dmSans(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: TruxifyColors.primaryText,
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         actions: [
@@ -450,7 +463,13 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
             onPressed: () => _showReportIssueSheet(context),
           ),
         ],
-        shape: const Border(bottom: BorderSide(color: TruxifyColors.border)),
+        shape: Border(
+          bottom: BorderSide(
+            color: Theme.of(context).brightness == Brightness.dark
+                ? TruxifyColors.darkBorder
+                : TruxifyColors.border,
+          ),
+        ),
       ),
       body: SafeArea(
         child: RefreshIndicator(
@@ -523,7 +542,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                     fontSize: 11,
                     letterSpacing: 0.8,
                     fontWeight: FontWeight.bold,
-                    color: TruxifyColors.secondaryText,
+                    color: TruxifyColors.adaptiveSecondaryText(context),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -583,7 +602,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                                 overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.dmSans(
                                     fontSize: 11,
-                                    color: TruxifyColors.secondaryText),
+                                    color: TruxifyColors.adaptiveSecondaryText(context)),
                               ),
                               if (ticket.createdAt != null) ...[
                                 const SizedBox(height: 2),
@@ -625,7 +644,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                         textAlign: TextAlign.center,
                         style: GoogleFonts.dmSans(
                           fontSize: 13,
-                          color: TruxifyColors.secondaryText,
+                          color: TruxifyColors.adaptiveSecondaryText(context),
                         ),
                       ),
                     ],
@@ -641,7 +660,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                   fontSize: 11,
                   letterSpacing: 0.8,
                   fontWeight: FontWeight.bold,
-                  color: TruxifyColors.secondaryText,
+                  color: TruxifyColors.adaptiveSecondaryText(context),
                 ),
               ),
               const SizedBox(height: 12),
@@ -694,13 +713,16 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
     required String value,
     VoidCallback? onTap,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return InkWell(
       onTap: onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         child: Row(
           children: [
-            Icon(icon, size: 18, color: TruxifyColors.accentDark),
+            Icon(icon,
+                size: 18,
+                color: isDark ? TruxifyColors.accent : TruxifyColors.accentDark),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -708,7 +730,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                 style: GoogleFonts.dmSans(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: TruxifyColors.primaryText,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ),
@@ -718,7 +740,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                 fontSize: 11,
                 color: onTap != null
                     ? TruxifyColors.accent
-                    : TruxifyColors.secondaryText,
+                    : TruxifyColors.adaptiveSecondaryText(context),
                 fontWeight: onTap != null ? FontWeight.bold : FontWeight.normal,
               ),
             ),

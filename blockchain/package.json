@@ -7,7 +7,8 @@
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^4.0.13",
-    "ethers": "^6.15.0",
-    "hardhat": "^3.8.0"
+    "@nomicfoundation/hardhat-verify": "^3.0.20",
+    "ethers": "^6.12.1",
+    "hardhat": "^3.9.0"
   }
 }

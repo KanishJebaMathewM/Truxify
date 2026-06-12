@@ -88,9 +88,26 @@ class _OrdersScreenState extends State<OrdersScreen>
     return '$minutes mins ago';
   }
 
+  String _resolveDriverName(Map<String, dynamic> order) {
+    // Option 1: resolved via Supabase join (profiles!orders_driver_id_fkey)
+    final profile = order['profiles'];
+    if (profile is Map<String, dynamic>) {
+      final name = profile['full_name']?.toString().trim();
+      if (name != null && name.isNotEmpty) return name;
+    }
+
+    // Option 2: resolved via manual batch lookup (driver_name key)
+    final driverName = order['driver_name']?.toString().trim();
+    if (driverName != null && driverName.isNotEmpty) return driverName;
+
+    // Fallback: no driver info available
+    return 'Driver Assigned';
+  }
+
   Future<void> _loadOrders() async {
     final connectivity = await Connectivity().checkConnectivity();
-    final hasNetwork = connectivity.isNotEmpty && !connectivity.contains(ConnectivityResult.none);
+    final hasNetwork = connectivity.isNotEmpty &&
+        !connectivity.contains(ConnectivityResult.none);
 
     if (!kIsWeb) {
       await _cacheManager.open();
@@ -103,7 +120,6 @@ class _OrdersScreenState extends State<OrdersScreen>
         final historyOrders = await _orderService.fetchHistoryOrders();
         debugPrint("Supabase history orders: $historyOrders");
 
-        // cache latest data
         String? updatedAt;
 
         if (!kIsWeb) {
@@ -114,6 +130,7 @@ class _OrdersScreenState extends State<OrdersScreen>
 
           updatedAt = await _cacheManager.getLastUpdatedLabel('orders');
         }
+
         if (!mounted) return;
 
         setState(() {
@@ -123,25 +140,31 @@ class _OrdersScreenState extends State<OrdersScreen>
           _activeOrders = activeOrders.map((order) {
             return ActiveOrderData(
               orderId: order['order_display_id']?.toString() ?? '',
-              route: '${order['pickup_address']} → ${order['drop_address']}',
-              driver: order['driver_id']?.toString() ?? 'Not Assigned',
+              route:
+                  '${order['pickup_address']} → ${order['drop_address']}',
+              driver: _resolveDriverName(order),
               milestone:
                   _formatStatus(order['status']?.toString() ?? 'pending'),
               eta: order['eta']?.toString() ?? '',
-              status: _formatStatus(order['status']?.toString() ?? 'pending'),
+              status:
+                  _formatStatus(order['status']?.toString() ?? 'pending'),
             );
           }).toList();
 
           _historyOrders = historyOrders.map((order) {
             final rawAmount = order['total_amount'] ?? 0;
-            final amountInRupees = (rawAmount is num) ? (rawAmount / 100).toStringAsFixed(0) : rawAmount.toString();
+            final amountInRupees = (rawAmount is num)
+                ? (rawAmount / 100).toStringAsFixed(0)
+                : rawAmount.toString();
             return HistoryOrderData(
               orderId: order['order_display_id']?.toString() ?? '',
-              route: '${order['pickup_address']} → ${order['drop_address']}',
+              route:
+                  '${order['pickup_address']} → ${order['drop_address']}',
               date: order['pickup_date']?.toString() ?? '',
               amount: '₹$amountInRupees',
-              status: _formatStatus(order['status']?.toString() ?? 'completed'),
-              driver: order['driver_id']?.toString() ?? '',
+              status: _formatStatus(
+                  order['status']?.toString() ?? 'completed'),
+              driver: _resolveDriverName(order),
               truckNumber: order['truck_id']?.toString() ?? '',
               timeline: const [],
             );
@@ -150,7 +173,8 @@ class _OrdersScreenState extends State<OrdersScreen>
       } else {
         if (!kIsWeb) {
           final cachedOrders = await _cacheManager.getOrders(limit: 50);
-          final updatedAt = await _cacheManager.getLastUpdatedLabel('orders');
+          final updatedAt =
+              await _cacheManager.getLastUpdatedLabel('orders');
 
           if (!mounted) return;
 
@@ -298,8 +322,9 @@ class _OrdersScreenState extends State<OrdersScreen>
                         order: order,
                         onTap: () => Navigator.of(context).push(
                           AppPageRoute(
-                              builder: (_) =>
-                                  LiveTrackingScreen(orderId: order.orderId)),
+                            builder: (_) =>
+                                LiveTrackingScreen(orderId: order.orderId),
+                          ),
                         ),
                       );
                     },
@@ -317,12 +342,14 @@ class _OrdersScreenState extends State<OrdersScreen>
                         order: order,
                         onTap: () => Navigator.of(context).push(
                           AppPageRoute(
-                              builder: (_) => OrderDetailScreen(order: order)),
+                            builder: (_) =>
+                                OrderDetailScreen(order: order),
+                          ),
                         ),
                       );
                     },
                   ),
-                )
+                ),
               ],
             ),
           ),

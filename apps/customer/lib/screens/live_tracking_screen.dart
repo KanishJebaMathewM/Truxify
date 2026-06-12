@@ -1,5 +1,6 @@
 import 'dart:async';
 import '../services/order_service.dart';
+import '../services/voice_ai_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
@@ -115,7 +116,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                       ?.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
               Text(
-                'Your truck is near Vadodara, expected by 4:30 PM today',
+                VoiceAiService.buildResponse(VoiceAiOrderInput.fromMap(_order)),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: TruxifyColors.adaptiveSecondaryText(context)),
@@ -664,20 +665,20 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                             _ActionTile(
                                 icon: Icons.mic_rounded,
                                 label: 'Voice AI',
-                                onTap: _showVoiceAi),
+                                onTap: _order == null ? null : _showVoiceAi),
                             _ActionTile(
                                 icon: Icons.call_rounded,
                                 label: 'Call Driver',
-                                onTap: _showCallDriver),
+                                onTap: _order == null ? null : _showCallDriver),
                             _ActionTile(
                                 icon: Icons.edit_location_alt_rounded,
                                 label: 'Change Drop',
-                                onTap: _showChangeDrop),
+                                onTap: _order == null ? null : _showChangeDrop),
                             _ActionTile(
                                 icon: Icons.close_rounded,
                                 label: 'Cancel',
                                 color: TruxifyColors.error,
-                                onTap: _showCancel),
+                                onTap: _order == null ? null : _showCancel),
                           ],
                         ),
                       ],
@@ -697,12 +698,12 @@ class _ActionTile extends StatelessWidget {
   const _ActionTile(
       {required this.icon,
       required this.label,
-      required this.onTap,
+      this.onTap,
       this.color = TruxifyColors.accentDark});
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Color color;
 
   @override
@@ -716,9 +717,13 @@ class _ActionTile extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color),
+          Icon(icon, color: onTap == null ? TruxifyColors.border : color),
           const SizedBox(height: 6),
-          Text(label, textAlign: TextAlign.center),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: onTap == null ? const TextStyle(color: TruxifyColors.border) : null,
+          ),
         ],
       ),
     );

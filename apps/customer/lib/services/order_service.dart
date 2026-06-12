@@ -152,7 +152,83 @@ class OrderService {
         .eq('customer_id', userId)
         .inFilter('status', ['pending', 'active', 'in_transit']);
 
-    return List<Map<String, dynamic>>.from(response);
+    final orders = List<Map<String, dynamic>>.from(response);
+
+    final driverIds = orders
+        .where((o) => o['driver_id'] != null)
+        .map((o) => o['driver_id'].toString())
+        .toSet()
+        .toList();
+
+    if (driverIds.isNotEmpty) {
+      final profilesResponse = await _client
+          .from('profiles')
+          .select('id, full_name')
+          .inFilter('id', driverIds);
+
+      final profiles = List<Map<String, dynamic>>.from(profilesResponse);
+
+      final driverMap = {
+        for (final profile in profiles)
+          profile['id'].toString(): profile['full_name']
+      };
+
+      for (final order in orders) {
+        order['driver_name'] =
+            driverMap[order['driver_id']?.toString()] ?? 'Driver Assigned';
+      }
+    }
+
+    return orders;
+  }
+
+  Future<List<Map<String, dynamic>>> searchTrucks({
+    required double pickupLat,
+    required double pickupLng,
+    required double dropLat,
+    required double dropLng,
+    required double weightTonnes,
+    bool isFragile = false,
+    bool isStackable = true,
+  }) async {
+    final token = _client.auth.currentSession?.accessToken;
+    final userId = SupabaseService.requireUserId();
+
+    final params = <String, String>{
+      'pickup_lat': pickupLat.toString(),
+      'pickup_lng': pickupLng.toString(),
+      'drop_lat': dropLat.toString(),
+      'drop_lng': dropLng.toString(),
+      'weight_tonnes': weightTonnes.toString(),
+      'is_fragile': isFragile.toString(),
+      'is_stackable': isStackable.toString(),
+    };
+
+    final uri = Uri.parse('$_apiBaseUrl/api/trucks/search').replace(queryParameters: params);
+    final response = await _httpClient.get(
+      uri,
+      headers: <String, String>{
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        'x-user-id': userId,
+        'x-user-role': 'customer',
+      },
+    );
+
+    final body = response.body.isNotEmpty
+        ? jsonDecode(response.body)
+        : null;
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final message = body is Map<String, dynamic>
+          ? (body['error']?.toString() ?? 'Failed to search trucks')
+          : 'Failed to search trucks';
+      throw StateError(message);
+    }
+
+    final List<dynamic> listBody = body is List<dynamic> ? body : <dynamic>[];
+
+    return listBody.cast<Map<String, dynamic>>();
   }
 
   Future<List<Map<String, dynamic>>> fetchHistoryOrders() async {
@@ -169,6 +245,33 @@ class OrderService {
       'cancelled',
     ]);
 
-    return List<Map<String, dynamic>>.from(response);
+    final orders = List<Map<String, dynamic>>.from(response);
+
+    final driverIds = orders
+        .where((o) => o['driver_id'] != null)
+        .map((o) => o['driver_id'].toString())
+        .toSet()
+        .toList();
+
+    if (driverIds.isNotEmpty) {
+      final profilesResponse = await _client
+          .from('profiles')
+          .select('id, full_name')
+          .inFilter('id', driverIds);
+
+      final profiles = List<Map<String, dynamic>>.from(profilesResponse);
+
+      final driverMap = {
+        for (final profile in profiles)
+          profile['id'].toString(): profile['full_name']
+      };
+
+      for (final order in orders) {
+        order['driver_name'] =
+            driverMap[order['driver_id']?.toString()] ?? 'Driver Assigned';
+      }
+    }
+
+    return orders;
   }
 }

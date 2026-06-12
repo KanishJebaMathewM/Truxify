@@ -82,12 +82,35 @@ class TruckResultData {
     required this.rating,
     required this.truck,
     required this.capacity,
-    required this.freeSpacePercent,
+    this.freeSpacePercent = 0,
     required this.price,
     required this.eta,
     this.badge,
     this.badgeColor = Colors.black,
   });
+
+  factory TruckResultData.fromJson(Map<String, dynamic> json) {
+    final rawPrice = json['price'];
+    final priceStr = rawPrice is num
+        ? '₹${(rawPrice / 100).round()}'
+        : (rawPrice?.toString() ?? '₹0');
+
+    final etaMinutes = json['etaMinutes'];
+    final etaStr = etaMinutes != null
+        ? (etaMinutes < 60
+            ? '${etaMinutes} mins'
+            : '${(etaMinutes / 60).toStringAsFixed(1)} hrs')
+        : '—';
+
+    return TruckResultData(
+      driver: json['driver'] as String? ?? 'Unknown Driver',
+      rating: (json['rating'] as num?)?.toDouble() ?? 0.0,
+      truck: json['truck'] as String? ?? 'Unknown Truck',
+      capacity: json['capacity'] as String? ?? '',
+      price: priceStr,
+      eta: etaStr,
+    );
+  }
 
   final String driver;
   final double rating;

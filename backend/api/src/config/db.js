@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
 import { MongoClient } from 'mongodb';
 import Redis from 'ioredis';
-import admin from 'firebase-admin';
+import * as admin from 'firebase-admin';
 import path from 'path';
 
 // Load environment variables from root directory .env
@@ -89,32 +89,44 @@ if (redisUrl) {
 } else {
   console.warn('⚠️ REDIS_URL not found in .env. Redis session cache disabled.');
 }
+// ============================================================================
+// 4. FIREBASE ADMIN SDK (SAFE OPTIONAL INIT)
+// ============================================================================
 
-// ============================================================================
-// 4. FIREBASE ADMIN SDK (Authentication validation & Push Notifications)
-// ============================================================================
-const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 export let firebaseAdmin = null;
 
-if (serviceAccountJson) {
+const serviceAccountRaw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+
+if (serviceAccountRaw) {
   try {
-    let credentialData;
-    // Handle both absolute file paths and raw stringified JSON payloads
-    if (serviceAccountJson.trim().startsWith('{')) {
-      credentialData = JSON.parse(serviceAccountJson);
-    } else {
-      credentialData = admin.credential.cert(serviceAccountJson);
+    let serviceAccount = null;
+
+    // Only try JSON parse if it looks valid
+    if (serviceAccountRaw.trim().startsWith('{')) {
+      serviceAccount = JSON.parse(serviceAccountRaw);
     }
 
-    firebaseAdmin = admin.initializeApp({
-      credential: admin.credential.cert(credentialData)
-    });
-    console.log('✅ Firebase Admin SDK initialized successfully.');
-  } catch (error) {
-    console.error('❌ Failed to initialize Firebase Admin:', error.message);
+    if (serviceAccount && serviceAccount.private_key) {
+      // Fix escaped newlines
+      serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
+
+      if (!admin.apps.length) {
+        firebaseAdmin = admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+        });
+
+        console.log('✅ Firebase Admin SDK initialized successfully.');
+      }
+    } else {
+      throw new Error('Invalid Firebase service account format');
+    }
+
+  } catch (err) {
+    console.warn('⚠️ Firebase disabled (invalid config). Continuing without it.');
+    firebaseAdmin = null;
   }
 } else {
-  console.warn('⚠️ FIREBASE_SERVICE_ACCOUNT_JSON not found in .env. Firebase Auth verification disabled.');
+  console.warn('⚠️ Firebase not configured. Skipping initialization.');
 }
 
 export async function closeDbConnections() {

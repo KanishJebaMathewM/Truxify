@@ -100,7 +100,7 @@ test('selectLabels ignores labels that do not exist in the repository', () => {
     availableLabels
   });
 
-  assert.deepEqual(labels, ['type:docs']);
+  assert.deepEqual(labels, ['gssoc:approved', 'type:docs']);
 });
 
 test('selectLabels matches new performance, design, devops, and accessibility prefixes', () => {
@@ -108,23 +108,23 @@ test('selectLabels matches new performance, design, devops, and accessibility pr
     prTitle: 'perf: optimize load time',
     availableLabels
   });
-  assert.deepEqual(labelsPerf, ['type:performance']);
+  assert.deepEqual(labelsPerf, ['gssoc:approved', 'type:performance']);
 
   const labelsDesign = selectLabels({
     prTitle: 'ui: update dashboard layout',
     availableLabels
   });
-  assert.deepEqual(labelsDesign, ['type:design']);
+  assert.deepEqual(labelsDesign, ['gssoc:approved', 'type:design']);
 
   const labelsDevOps = selectLabels({
     prTitle: 'ci: add test action',
     availableLabels
   });
-  assert.deepEqual(labelsDevOps, ['type:devops']);
+  assert.deepEqual(labelsDevOps, ['gssoc:approved', 'type:devops']);
 
   const labelsA11y = selectLabels({
     prTitle: 'a11y: add screen reader labels',
     availableLabels
   });
-  assert.deepEqual(labelsA11y, ['type:accessibility']);
+  assert.deepEqual(labelsA11y, ['gssoc:approved', 'type:accessibility']);
 });

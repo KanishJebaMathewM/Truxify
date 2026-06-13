@@ -61,7 +61,7 @@ To prevent fraud (such as fake licenses or invalid registration certificates), T
 2. **Hashing**: The Express API saves the file to Cloudflare R2 and calculates its cryptographic hash:
    $$\text{hash} = \text{Keccak-256}(\text{document bytes})$$
 3. **On-Chain Recording**: The document ID, expiry date, and hash are recorded in the `documents` table and written to the blockchain.
-4. **Verification**: If a driver alters a document scan on their phone or if an database entry is modified, the file's hash will not match the on-chain registry, flaggin the account.
+4. **Verification**: If a driver alters a document scan on their phone or if a database entry is modified, the file's hash will not match the on-chain registry, flagging the account.
 
 ---
 

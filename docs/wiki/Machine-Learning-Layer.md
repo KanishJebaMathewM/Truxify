@@ -52,7 +52,7 @@ The ML service (`backend/ml`) loads model configurations and weights into memory
       "feature_names": ["hour", "day_of_week", "is_weekend", "temperature", "precipitation", "historical_volume", "nearby_drivers"]
     }
     ```
-* **`POST /train/demand`**: Force-triggers the training script using synthetic datasets or archived MongoDB telemetry logs.
+* **`POST /train/demand`**: Force-triggers the training script using synthetic datasets.
   * **Response**:
     ```json
     {
@@ -61,7 +61,16 @@ The ML service (`backend/ml`) loads model configurations and weights into memory
         "mae": 4.30,
         "rmse": 5.30,
         "r2": 0.80,
-        "n_samples": 2000
+        "n_samples": 2000,
+        "feature_names": [
+          "hour",
+          "day_of_week",
+          "is_weekend",
+          "temperature",
+          "precipitation",
+          "historical_volume",
+          "nearby_drivers"
+        ]
       }
     }
     ```

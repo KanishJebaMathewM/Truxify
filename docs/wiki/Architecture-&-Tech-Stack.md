@@ -164,7 +164,7 @@ graph TB
 
 Security is applied at the application, transport, database, and ledger levels:
 
-* **Authentication**: Managed via Firebase Auth. The frontend logs in via phone number (OTP) and obtains a JWT token. This token is passed in the `Authorization: Bearer <token>` header of every API request.
-* **Authorization**: The Node.js `auth.js` middleware validates the Firebase token, checks the profile in Supabase, and binds `req.user` and `req.user.role` to the request object.
+* **Authentication**: Managed primarily via Firebase Auth, where the frontend logs in via phone number (OTP) and obtains a JWT token. Additionally, the WebSocket tracking endpoint supports both Firebase and Supabase JWT tokens for upgrade authentication. The token is passed in the `Authorization: Bearer <token>` header of HTTP requests, or as a query parameter for WebSocket connections.
+* **Authorization**: The Node.js `auth.js` middleware validates the Firebase token for API routes, and the WebSocket tracking router verifies the respective Firebase or Supabase JWT on connection upgrades. The API then fetches the user profile from Supabase and binds user identity and role properties to the request or socket context.
 * **Database Isolation**: Row-Level Security (RLS) policies are active on PostgreSQL. Clients never talk to Supabase directly; they interact only with the Express API. The API uses a secure `SUPABASE_SERVICE_ROLE_KEY` to perform authorized operations under strict API validation.
 * **Data Integrity**: Financial ledger transactions (allocating pending balances, withdrawing funds) are processed inside Supabase using Postgres functions with explicit `SELECT ... FOR UPDATE` row locking to prevent race conditions or double-spending.

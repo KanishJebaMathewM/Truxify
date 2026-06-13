@@ -62,6 +62,12 @@ npm run test:coverage     # v8 coverage report in coverage/
 | POST   | `/api/orders/:id/bid`     | driver        |
 | POST   | `/api/orders/:id/accept`  | customer      |
 | GET    | `/api/orders/available`   | driver        |
+| GET    | `/api/support/faqs`       | none (public) |
+| POST   | `/api/support/tickets`    | authenticated |
+| GET    | `/api/support/tickets`    | authenticated |
+| GET    | `/api/support/tickets/:id`| owner / admin |
+| PATCH  | `/api/support/tickets/:id`| owner / admin |
+| GET    | `/api/support/admin/tickets`| admin        |
 
 ## Pricing
 

@@ -1,0 +1,19 @@
+{
+  "model_name": "demand_forecast",
+  "saved_at": "2026-06-11T17:52:15.446087",
+  "metrics": {
+    "mae": 4.304729891391666,
+    "rmse": 5.299083712860529,
+    "r2": 0.7975017721221801,
+    "n_samples": 2000,
+    "feature_names": [
+      "hour",
+      "day_of_week",
+      "is_weekend",
+      "temperature",
+      "precipitation",
+      "historical_volume",
+      "nearby_drivers"
+    ]
+  }
+}

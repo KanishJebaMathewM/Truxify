@@ -87,14 +87,14 @@ class TripService {
   ) async {
     await _verifyTripOwnership(tripDisplayId);
 
-    await _client
-        .from('trip_stops')
-        .update({
-          'is_completed': true,
-          'is_current': false,
-        })
-        .eq('id', stopId)
-        .eq('trip_display_id', tripDisplayId);
+    final updatedStop = await _client.from('trip_stops').update({
+      'is_completed': true,
+      'is_current': false,
+    }).eq('id', stopId).eq('trip_display_id', tripDisplayId).select().maybeSingle();
+
+    if (updatedStop == null) {
+      throw Exception('Stop not found or does not belong to this trip');
+    }
 
     final nextStops = await _client
         .from('trip_stops')
@@ -116,6 +116,51 @@ class TripService {
           .update({'status': 'completed'})
           .eq('trip_display_id', tripDisplayId)
           .eq('driver_id', _driverId);
+    }
+  }
+  Future<void> updateOnlineStatus(bool isOnline) async {
+    final updated = await _client
+        .from('driver_details')
+        .update({
+          'is_online': isOnline,
+          'updated_at': DateTime.now().toIso8601String(),
+        })
+        .eq('user_id', _driverId)
+        .select()
+        .maybeSingle();
+
+    if (updated == null) {
+      throw Exception('Driver profile not found or update failed');
+    }
+  }
+
+  Future<void> startTrip(String tripDisplayId) async {
+    await _verifyTripOwnership(tripDisplayId);
+
+    // Find the first stop of this trip that is not completed
+    final stops = await _client
+        .from('trip_stops')
+        .select()
+        .eq('trip_display_id', tripDisplayId)
+        .eq('is_completed', false)
+        .order('sort_order')
+        .limit(1);
+
+    if (stops.isEmpty) {
+      throw Exception('No active stops found for this trip');
+    }
+
+    final firstStopId = stops.first['id'];
+    final updatedStop = await _client
+        .from('trip_stops')
+        .update({'is_current': true})
+        .eq('id', firstStopId)
+        .eq('trip_display_id', tripDisplayId)
+        .select()
+        .maybeSingle();
+
+    if (updatedStop == null) {
+      throw Exception('Failed to start trip: Stop not found or update failed');
     }
   }
 }

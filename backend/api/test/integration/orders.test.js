@@ -23,11 +23,12 @@ const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js
 
 const m = createSupabaseMock();
 
+let mockRedis = null;
+
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
-  // export the rest as undefined so the route imports are safe
   firebaseAdmin: null,
-  redisClient: null,
+  get redisClient() { return mockRedis; },
   mongoDb: null,
 }));
 
@@ -45,6 +46,11 @@ const awardReputationPointsMock = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../src/services/reputation.js', () => ({
   reputationContract: {},
   awardReputationPoints: awardReputationPointsMock,
+}));
+
+const predictDemandMock = vi.fn();
+vi.mock('../../src/services/ml.js', () => ({
+  predictDemand: predictDemandMock,
 }));
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
@@ -315,6 +321,97 @@ describe('POST /api/orders — server-side pricing contract', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/Milestone updated successfully/i);
+  });
+
+  it('En Route to Pickup milestone does not set status to picked_up', async () => {
+    m.store.orders = [{
+      id: 'order-1',
+      driver_id: 'driver-123',
+      order_display_id: 'ORD001',
+      status: 'truck_assigned'
+    }];
+
+    m.store.order_timeline = [{
+      order_display_id: 'ORD001',
+      milestone: 'En Route to Pickup',
+      completed: false
+    }];
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .put('/api/orders/order-1/milestones')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({
+        milestone: 'En Route to Pickup'
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('en_route_pickup');
+    expect(res.body.status).not.toBe('picked_up');
+  });
+
+  it('Arrived at Pickup milestone sets status to arrived_pickup', async () => {
+    m.store.orders = [{
+      id: 'order-1',
+      driver_id: 'driver-123',
+      order_display_id: 'ORD001',
+      status: 'en_route_pickup'
+    }];
+
+    m.store.order_timeline = [{
+      order_display_id: 'ORD001',
+      milestone: 'Arrived at Pickup',
+      completed: false
+    }];
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .put('/api/orders/order-1/milestones')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({
+        milestone: 'Arrived at Pickup'
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('arrived_pickup');
+  });
+
+  it('Goods Loaded milestone sets status to picked_up', async () => {
+    m.store.orders = [{
+      id: 'order-1',
+      driver_id: 'driver-123',
+      order_display_id: 'ORD001',
+      status: 'truck_assigned'
+    }];
+
+    m.store.order_timeline = [{
+      order_display_id: 'ORD001',
+      milestone: 'Goods Loaded',
+      completed: false
+    }];
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .put('/api/orders/order-1/milestones')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      })
+      .send({
+        milestone: 'Goods Loaded'
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('picked_up');
   });
 
   it('returns 403 when driver is not assigned to order', async () => {
@@ -593,6 +690,38 @@ describe('GET /api/orders/:id — order details', () => {
     expect(res.body.driver.name).toBe('Test Driver');
   });
 
+  it('exposes delivery_otp to customer but strips it for driver', async () => {
+    m.store.orders.push({
+      id: 'order-3',
+      customer_id: 'customer-123',
+      driver_id: 'driver-123',
+      order_display_id: 'OD3',
+      delivery_otp: '654321',
+    });
+
+    const app = buildApp();
+
+    // 1. Customer request
+    const customerRes = await request(app)
+      .get('/api/orders/order-3')
+      .set({
+        'x-user-id': 'customer-123',
+        'x-user-role': 'customer'
+      });
+    expect(customerRes.status).toBe(200);
+    expect(customerRes.body.order.delivery_otp).toBe('654321');
+
+    // 2. Driver request
+    const driverRes = await request(app)
+      .get('/api/orders/order-3')
+      .set({
+        'x-user-id': 'driver-123',
+        'x-user-role': 'driver'
+      });
+    expect(driverRes.status).toBe(200);
+    expect(driverRes.body.order).not.toHaveProperty('delivery_otp');
+  });
+
   it('returns 500 on DB error', async () => {
     m.programError('db failure');
 
@@ -821,9 +950,10 @@ describe('Delivery OTP Verification and Milestones', () => {
     expect(res.body.error).toBe('Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.');
   });
 
-  it('generates and returns OTP when moving to In Transit milestone', async () => {
+  it('generates OTP but does not return it in response when moving to In Transit milestone', async () => {
     m.store.orders = [{
       id: 'order-1',
+      customer_id: 'customer-456',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
       status: 'picked_up',
@@ -834,6 +964,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       milestone: 'In Transit',
       completed: false
     }];
+    m.store.notifications = [];
 
     const app = buildApp();
     const res = await request(app)
@@ -845,13 +976,19 @@ describe('Delivery OTP Verification and Milestones', () => {
       .send({ milestone: 'In Transit' });
 
     expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('otp');
-    expect(res.body.otp).toMatch(/^\d{6}$/); // 6-digit OTP
+    expect(res.body).not.toHaveProperty('otp');
+    expect(res.body.order).not.toHaveProperty('delivery_otp');
 
     const order = m.store.orders.find(o => o.id === 'order-1');
-    expect(order.delivery_otp).toBe(res.body.otp);
+    expect(order.delivery_otp).toMatch(/^\d{6}$/); // 6-digit OTP
     expect(order.otp_verified).toBe(false);
     expect(order.otp_generated_at).toBeDefined();
+
+    // Verify customer notification was created
+    const notification = m.store.notifications.find(n => n.user_id === 'customer-456');
+    expect(notification).toBeTruthy();
+    expect(notification.body).toContain(order.delivery_otp);
+    expect(notification.notif_type).toBe('order_update');
   });
 
   it('fails OTP verification if missing OTP', async () => {
@@ -940,6 +1077,7 @@ describe('Delivery OTP Verification and Milestones', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/Delivery verified successfully/i);
+    expect(res.body.order).not.toHaveProperty('delivery_otp');
 
     const order = m.store.orders.find(o => o.id === 'order-1');
     expect(order.otp_verified).toBe(true);
@@ -1102,10 +1240,11 @@ describe('Delivery OTP Verification and Milestones', () => {
     }
   });
 
-  it('regenerates OTP when milestone In Transit is called and existing OTP has expired', async () => {
+  it('regenerates OTP but does not return it in response when milestone In Transit is called and existing OTP has expired', async () => {
     const orderId = 'order-regen';
     m.store.orders = [{
       id: orderId,
+      customer_id: 'customer-456',
       driver_id: 'driver-123',
       order_display_id: 'ORD-REGEN',
       delivery_otp: '123456',
@@ -1118,6 +1257,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       milestone: 'In Transit',
       completed: true
     }];
+    m.store.notifications = [];
 
     const app = buildApp();
     const res = await request(app)
@@ -1129,12 +1269,166 @@ describe('Delivery OTP Verification and Milestones', () => {
       .send({ milestone: 'In Transit' });
 
     expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('otp');
-    expect(res.body.otp).not.toBe('123456');
+    expect(res.body).not.toHaveProperty('otp');
+    expect(res.body.order).not.toHaveProperty('delivery_otp');
 
     const order = m.store.orders.find(o => o.id === orderId);
-    expect(order.delivery_otp).toBe(res.body.otp);
+    expect(order.delivery_otp).not.toBe('123456');
+    expect(order.delivery_otp).toMatch(/^\d{6}$/);
     expect(new Date(order.otp_generated_at).getTime()).toBeGreaterThan(Date.now() - 5000);
+
+    // Verify customer notification was created
+    const notification = m.store.notifications.find(n => n.user_id === 'customer-456');
+    expect(notification).toBeTruthy();
+    expect(notification.body).toContain(order.delivery_otp);
+  });
+
+  describe('Redis-based rate limiting & error fallback resilience', () => {
+    let redisStore;
+    let redisCalls;
+    let activeMockRedis;
+    let failingMockRedis;
+
+    beforeEach(() => {
+      redisStore = new Map();
+      redisCalls = [];
+      
+      activeMockRedis = {
+        get: vi.fn(async (key) => {
+          redisCalls.push({ method: 'get', key });
+          return redisStore.get(key);
+        }),
+        incr: vi.fn(async (key) => {
+          redisCalls.push({ method: 'incr', key });
+          const val = (parseInt(redisStore.get(key) || '0', 10) + 1).toString();
+          redisStore.set(key, val);
+          return parseInt(val, 10);
+        }),
+        expire: vi.fn(async (key, ttl) => {
+          redisCalls.push({ method: 'expire', key, ttl });
+          return 1;
+        }),
+        set: vi.fn(async (key, val, mode, ttl) => {
+          redisCalls.push({ method: 'set', key, val, mode, ttl });
+          redisStore.set(key, val);
+          return 'OK';
+        }),
+        del: vi.fn(async (...keys) => {
+          redisCalls.push({ method: 'del', keys });
+          for (const key of keys) {
+            redisStore.delete(key);
+          }
+          return keys.length;
+        })
+      };
+
+      failingMockRedis = {
+        get: vi.fn(async () => { throw new Error('Redis connection lost'); }),
+        incr: vi.fn(async () => { throw new Error('Redis connection lost'); }),
+        expire: vi.fn(async () => { throw new Error('Redis connection lost'); }),
+        set: vi.fn(async () => { throw new Error('Redis connection lost'); }),
+        del: vi.fn(async () => { throw new Error('Redis connection lost'); })
+      };
+
+      mockRedis = null; // defaults to null
+    });
+
+    it('uses active Redis client to store verification failures and locks out after max attempts', async () => {
+      mockRedis = activeMockRedis;
+
+      m.store.orders = [{
+        id: 'order-redis-active',
+        driver_id: 'driver-123',
+        customer_id: 'customer-456',
+        order_display_id: 'ORD-REDIS',
+        delivery_otp: '123456',
+        otp_verified: false,
+        otp_generated_at: new Date().toISOString()
+      }];
+
+      const app = buildApp();
+
+      // Send 1st invalid OTP
+      const res1 = await request(app)
+        .post('/api/orders/order-redis-active/verify-delivery')
+        .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
+        .send({ otp: '000000' });
+      expect(res1.status).toBe(400);
+      expect(res1.body.error).toContain('Invalid OTP. 4 attempt(s) remaining');
+      expect(redisStore.get('otp_failed_count:order-redis-active')).toBe('1');
+
+      // Send remaining attempts to reach 5
+      for (let i = 0; i < 4; i++) {
+        await request(app)
+          .post('/api/orders/order-redis-active/verify-delivery')
+          .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
+          .send({ otp: '000000' });
+      }
+
+      expect(redisStore.get('otp_failed_count:order-redis-active')).toBe('5');
+      expect(redisStore.get('otp_lockout:order-redis-active')).toBe('1');
+
+      // Verify next request is blocked with 429 even with correct OTP
+      const res6 = await request(app)
+        .post('/api/orders/order-redis-active/verify-delivery')
+        .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
+        .send({ otp: '123456' });
+      expect(res6.status).toBe(429);
+      expect(res6.body.error).toContain('Too many failed OTP attempts');
+
+      // Expire the OTP now, so that the In Transit milestone update triggers regeneration and clear
+      m.store.orders[0].otp_generated_at = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+
+      // Milestone change clears lockout in Redis
+      await request(app)
+        .put('/api/orders/order-redis-active/milestones')
+        .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
+        .send({ milestone: 'In Transit' });
+      expect(redisStore.get('otp_failed_count:order-redis-active')).toBeUndefined();
+      expect(redisStore.get('otp_lockout:order-redis-active')).toBeUndefined();
+    });
+
+    it('gracefully falls back to in-memory rate limiting when Redis client throws error (resilience)', async () => {
+      mockRedis = failingMockRedis;
+
+      m.store.orders = [{
+        id: 'order-redis-failing',
+        driver_id: 'driver-123',
+        customer_id: 'customer-456',
+        order_display_id: 'ORD-FAIL-REDIS',
+        delivery_otp: '123456',
+        otp_verified: false,
+        otp_generated_at: new Date().toISOString()
+      }];
+
+      const app = buildApp();
+
+      // Verify that even if Redis fails, the endpoint handles it gracefully and returns 400 (not 500)
+      const res1 = await request(app)
+        .post('/api/orders/order-redis-failing/verify-delivery')
+        .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
+        .send({ otp: '000000' });
+      
+      expect(res1.status).toBe(400);
+      expect(res1.body.error).toContain('Invalid OTP. 4 attempt(s) remaining');
+
+      // Lockout is still recorded in memory
+      for (let i = 0; i < 4; i++) {
+        await request(app)
+          .post('/api/orders/order-redis-failing/verify-delivery')
+          .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
+          .send({ otp: '000000' });
+      }
+
+      // 6th attempt should return 429
+      const res6 = await request(app)
+        .post('/api/orders/order-redis-failing/verify-delivery')
+        .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
+        .send({ otp: '123456' });
+      
+      expect(res6.status).toBe(429);
+      expect(res6.body.error).toContain('Too many failed OTP attempts');
+    });
   });
 });
 
@@ -1314,5 +1608,315 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
     await new Promise(r => setTimeout(r, 0));
     // Rating saved off-chain; blockchain skipped gracefully.
     expect(awardReputationPointsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/orders/predict-demand — ML demand prediction', () => {
+  beforeEach(() => {
+    predictDemandMock.mockReset();
+  });
+
+  it('happy path: 200, returns prediction from ML engine', async () => {
+    predictDemandMock.mockResolvedValueOnce({
+      predicted_demand: 42.5,
+      model_version: '1.0.0',
+      feature_names: ['hour', 'day_of_week', 'is_weekend', 'temperature', 'precipitation', 'historical_volume', 'nearby_drivers'],
+    });
+
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/predict-demand')
+      .set(CUSTOMER_HEADERS)
+      .send({
+        hour: 14.5,
+        day_of_week: 3,
+        temperature: 25,
+        precipitation: 0,
+        historical_volume: 50,
+        nearby_drivers: 15,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      predicted_demand: 42.5,
+      model_version: '1.0.0',
+      feature_names: ['hour', 'day_of_week', 'is_weekend', 'temperature', 'precipitation', 'historical_volume', 'nearby_drivers'],
+    });
+    expect(predictDemandMock).toHaveBeenCalledWith({
+      hour: 14.5,
+      day_of_week: 3,
+      temperature: 25,
+      precipitation: 0,
+      historical_volume: 50,
+      nearby_drivers: 15,
+    });
+  });
+
+  it('returns 400 for validation failure (invalid inputs)', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/predict-demand')
+      .set(CUSTOMER_HEADERS)
+      .send({
+        hour: 25, // invalid hour (must be 0-23)
+        day_of_week: 3,
+        temperature: 25,
+        precipitation: 0,
+        historical_volume: 50,
+        nearby_drivers: 15,
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+  });
+
+  it('returns 502 Bad Gateway when ML engine throws an error', async () => {
+    predictDemandMock.mockRejectedValueOnce(new Error('ML service unavailable'));
+
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/predict-demand')
+      .set(CUSTOMER_HEADERS)
+      .send({
+        hour: 14.5,
+        day_of_week: 3,
+        temperature: 25,
+        precipitation: 0,
+        historical_volume: 50,
+        nearby_drivers: 15,
+      });
+
+    expect(res.status).toBe(502);
+    expect(res.body.error).toBe('Failed to fetch demand prediction from ML engine.');
+    expect(res.body.details).toBe('ML service unavailable');
+  });
+});
+
+describe('Customer actions: change-drop and cancel endpoints', () => {
+  beforeEach(() => {
+    // reset store and calls
+    m.store.orders = [];
+    m.store.order_timeline = [];
+    m.calls.length = 0;
+    routeEstimateMock.mockReset();
+    routeEstimateMock.mockResolvedValue({ distanceKm: 100 });
+  });
+
+  it('allows customer to change drop and returns recalculated pricing', async () => {
+    m.store.orders.push({
+      id: 'order-change-1',
+      customer_id: CUSTOMER_HEADERS['x-user-id'],
+      order_display_id: 'OD-CHANGE-1',
+      pickup_lat: 19.0760,
+      pickup_lng: 72.8777,
+      drop_lat: 28.7041,
+      drop_lng: 77.1025,
+      weight_tonnes: 3,
+      is_fragile: false,
+      is_stackable: true,
+      status: 'pending'
+    });
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .put('/api/orders/OD-CHANGE-1/change-drop')
+      .set(CUSTOMER_HEADERS)
+      .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('pricing');
+    expect(res.body.pricing).toHaveProperty('total_amount');
+    const stored = m.store.orders.find(o => o.id === 'order-change-1');
+    expect(stored.drop_address).toBe('New Drop Place');
+    expect(stored.drop_lat).toBe(22.22);
+    expect(stored.drop_lng).toBe(88.88);
+  });
+
+  it('allows customer to cancel order and returns cancellation_fee and persists reason', async () => {
+    m.store.orders.push({
+      id: 'order-cancel-1',
+      customer_id: CUSTOMER_HEADERS['x-user-id'],
+      order_display_id: 'OD-CANCEL-1',
+      status: 'pending',
+      cancellation_fee: 500
+    });
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders/OD-CANCEL-1/cancel')
+      .set(CUSTOMER_HEADERS)
+      .send({ reason: 'Change of plans' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('cancellation_fee');
+    expect(res.body.cancellation_fee).toBe(500);
+    const stored = m.store.orders.find(o => o.id === 'order-cancel-1');
+    expect(stored.status).toBe('cancelled');
+    expect(stored.cancellation_reason).toBe('Change of plans');
+  });
+
+  it('rejects cancel when requester is not the order owner', async () => {
+    m.store.orders.push({
+      id: 'order-cancel-2',
+      customer_id: CUSTOMER_HEADERS['x-user-id'],
+      order_display_id: 'OD-CANCEL-2',
+      status: 'pending',
+      cancellation_fee: 300
+    });
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders/OD-CANCEL-2/cancel')
+      .set({ 'x-user-id': 'some-other-user', 'x-user-role': 'customer' })
+      .send({ reason: 'Not owner' });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects change-drop when requester is not the order owner', async () => {
+    m.store.orders.push({
+      id: 'order-change-2',
+      customer_id: CUSTOMER_HEADERS['x-user-id'],
+      order_display_id: 'OD-CHANGE-2',
+      pickup_lat: 19.0760,
+      pickup_lng: 72.8777,
+      drop_lat: 28.7041,
+      drop_lng: 77.1025,
+      weight_tonnes: 3,
+      is_fragile: false,
+      is_stackable: true,
+      status: 'pending'
+    });
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .put('/api/orders/OD-CHANGE-2/change-drop')
+      .set({ 'x-user-id': 'some-other-user', 'x-user-role': 'customer' })
+      .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('rejects cancel when order is already delivered', async () => {
+    m.store.orders.push({
+      id: 'order-cancel-delivered',
+      customer_id: CUSTOMER_HEADERS['x-user-id'],
+      order_display_id: 'OD-CANCEL-DELIVERED',
+      status: 'delivered',
+      cancellation_fee: 500
+    });
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders/OD-CANCEL-DELIVERED/cancel')
+      .set(CUSTOMER_HEADERS)
+      .send({ reason: 'delivered' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Order cannot be cancelled after delivery or payment release.');
+  });
+
+  it('rejects cancel when payment is already released', async () => {
+    m.store.orders.push({
+      id: 'order-cancel-released',
+      customer_id: CUSTOMER_HEADERS['x-user-id'],
+      order_display_id: 'OD-CANCEL-RELEASED',
+      status: 'payment_released',
+      cancellation_fee: 500
+    });
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders/OD-CANCEL-RELEASED/cancel')
+      .set(CUSTOMER_HEADERS)
+      .send({ reason: 'payment released' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Order cannot be cancelled after delivery or payment release.');
+  });
+
+  it('returns 400 when route estimate computation fails during change-drop', async () => {
+    m.store.orders.push({
+      id: 'order-change-fail',
+      customer_id: CUSTOMER_HEADERS['x-user-id'],
+      order_display_id: 'OD-CHANGE-FAIL',
+      pickup_lat: 19.0760,
+      pickup_lng: 72.8777,
+      drop_lat: 28.7041,
+      drop_lng: 77.1025,
+      weight_tonnes: 3,
+      is_fragile: false,
+      is_stackable: true,
+      status: 'pending'
+    });
+
+    routeEstimateMock.mockRejectedValue(new Error('OSRM service down'));
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .put('/api/orders/OD-CHANGE-FAIL/change-drop')
+      .set(CUSTOMER_HEADERS)
+      .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Unable to compute new pricing for the requested drop.');
+    expect(res.body.details).toBe('OSRM service down');
+  });
+
+  it('returns 500 when weight_tonnes is missing in DB during change-drop', async () => {
+    m.store.orders.push({
+      id: 'order-change-no-weight',
+      customer_id: CUSTOMER_HEADERS['x-user-id'],
+      order_display_id: 'OD-CHANGE-NO-WEIGHT',
+      pickup_lat: 19.0760,
+      pickup_lng: 72.8777,
+      drop_lat: 28.7041,
+      drop_lng: 77.1025,
+      weight_tonnes: null,
+      is_fragile: false,
+      is_stackable: true,
+      status: 'pending'
+    });
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .put('/api/orders/OD-CHANGE-NO-WEIGHT/change-drop')
+      .set(CUSTOMER_HEADERS)
+      .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
+
+    expect(res.status).toBe(500);
+    expect(res.body.error).toBe('Data inconsistency: Order is missing weight_tonnes.');
+  });
+
+  it('returns 404 for change-drop with non-existent order_display_id', async () => {
+    const app = buildApp();
+
+    const res = await request(app)
+      .put('/api/orders/OD-NONEXISTENT/change-drop')
+      .set(CUSTOMER_HEADERS)
+      .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Order not found.');
+  });
+
+  it('returns 404 for cancel with non-existent order_display_id', async () => {
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders/OD-NONEXISTENT/cancel')
+      .set(CUSTOMER_HEADERS)
+      .send({ reason: 'Non-existent' });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Order not found.');
   });
 });

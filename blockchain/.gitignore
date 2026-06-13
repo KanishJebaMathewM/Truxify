@@ -1,0 +1,9 @@
+# Hardhat files
+artifacts/
+cache/
+
+# Dependencies
+node_modules/
+
+# Local env files
+.env

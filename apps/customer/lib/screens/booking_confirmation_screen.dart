@@ -3,6 +3,10 @@ import '../services/order_service.dart';
 import '../controllers/app_controller.dart';
 import '../data/mock_data.dart';
 import '../models/app_models.dart';
+import '../models/payment_method.dart';
+import '../models/saved_address.dart';
+import '../repositories/address_repository.dart';
+import '../repositories/payment_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 
@@ -20,16 +24,17 @@ class BookingConfirmationScreen extends StatefulWidget {
 
 class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     with SingleTickerProviderStateMixin {
-  double get _pickupLat => 21.1702;
-  double get _pickupLng => 72.8311;
-  double get _dropLat => 26.9124;
-  double get _dropLng => 75.7873;
-  final TextEditingController _upiController =
-      TextEditingController(text: 'karthik@upi');
+  final _paymentRepo = PaymentRepository();
+  final _addressRepo = AddressRepository();
   bool _showSuccess = false;
+  bool _isLoading = true;
   String? _createdOrderId;
   late final AnimationController _controller;
   late final OrderService _orderService;
+  List<PaymentMethod> _paymentMethods = [];
+  List<SavedAddress> _addresses = [];
+  PaymentMethod? _selectedPayment;
+  SavedAddress? _selectedAddress;
 
   @override
   void initState() {
@@ -37,28 +42,80 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     _orderService = OrderService();
     _controller = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 600));
+    _loadCheckoutData();
   }
 
   @override
   void dispose() {
-    _upiController.dispose();
     _controller.dispose();
     super.dispose();
   }
 
+  Future<void> _loadCheckoutData() async {
+    setState(() => _isLoading = true);
+    try {
+      final methods = await _paymentRepo.fetchAll();
+      final addresses = await _addressRepo.fetchAll();
+
+      if (!mounted) return;
+
+      setState(() {
+        _paymentMethods = methods;
+        _addresses = addresses;
+        _selectedPayment = methods.isEmpty
+            ? null
+            : methods.firstWhere(
+                (m) => m.isDefault,
+                orElse: () => methods.first,
+              );
+        _selectedAddress = addresses.isEmpty
+            ? null
+            : addresses.firstWhere(
+                (a) => a.isDefault,
+                orElse: () => addresses.first,
+              );
+      });
+    } catch (e) {
+      debugPrint('Failed to load checkout data: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load checkout options: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
   Future<void> _pay() async {
+    final finalDropLat = _selectedAddress?.latitude ?? widget.draft.dropLat;
+    final finalDropLng = _selectedAddress?.longitude ?? widget.draft.dropLng;
+
+    if (widget.draft.pickupLat == null ||
+        widget.draft.pickupLng == null ||
+        finalDropLat == null ||
+        finalDropLng == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Missing pickup or drop coordinates. Please go back and select valid locations.')),
+      );
+      return;
+    }
+
     try {
       final orderId = await _orderService.createOrder(
         pickupAddress: widget.draft.pickup,
-        dropAddress: widget.draft.drop,
-        pickupLat: widget.draft.pickupLat ?? _pickupLat,
-        pickupLng: widget.draft.pickupLng ?? _pickupLng,
-        dropLat: widget.draft.dropLat ?? _dropLat,
-        dropLng: widget.draft.dropLng ?? _dropLng,
+        dropAddress: _selectedAddress?.fullAddress ?? widget.draft.drop,
+        pickupLat: widget.draft.pickupLat!,
+        pickupLng: widget.draft.pickupLng!,
+        dropLat: finalDropLat,
+        dropLng: finalDropLng,
         pickupTime: widget.draft.dateLabel,
         goodsType: widget.draft.goodsType,
         weightTonnes: double.tryParse(widget.draft.weightTonnes) ?? 0,
-        upiId: _upiController.text.trim(),
+        paymentMethodId: _selectedPayment?.id,
       );
 
       _createdOrderId = orderId;
@@ -107,7 +164,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                 _SummaryRow(
                     label: 'Route',
                     value:
-                        '${widget.draft.pickup.split(',').first} → ${widget.draft.drop.split(',').first}'),
+                        '${widget.draft.pickup.split(',').first} → ${_selectedAddress != null ? _selectedAddress!.label : widget.draft.drop.split(',').first}'),
                 _SummaryRow(label: 'Pickup', value: widget.draft.dateLabel),
                 _SummaryRow(
                     label: 'Goods',
@@ -195,10 +252,59 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                         .titleMedium
                         ?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 12),
-                TextField(
-                    controller: _upiController,
-                    decoration:
-                        const InputDecoration(labelText: 'Mock UPI ID')),
+                DropdownButtonFormField<PaymentMethod>(
+                  value: _selectedPayment,
+                  decoration: InputDecoration(
+                    labelText: 'Select payment method',
+                    helperText: _isLoading
+                        ? 'Loading payment methods...'
+                        : (_paymentMethods.isEmpty
+                            ? 'No payment methods saved. Please add one in Profile.'
+                            : null),
+                  ),
+                  items: _paymentMethods
+                      .map(
+                        (method) => DropdownMenuItem<PaymentMethod>(
+                          value: method,
+                          child: Text(method.displayLabel),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _isLoading || _paymentMethods.isEmpty
+                      ? null
+                      : (value) {
+                          setState(() {
+                            _selectedPayment = value;
+                          });
+                        },
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<SavedAddress>(
+                  value: _selectedAddress,
+                  decoration: InputDecoration(
+                    labelText: 'Select saved address',
+                    helperText: _isLoading
+                        ? 'Loading saved addresses...'
+                        : (_addresses.isEmpty
+                            ? 'No saved addresses. Please add one in Profile.'
+                            : null),
+                  ),
+                  items: _addresses
+                      .map(
+                        (address) => DropdownMenuItem<SavedAddress>(
+                          value: address,
+                          child: Text(address.label),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _isLoading || _addresses.isEmpty
+                      ? null
+                      : (value) {
+                          setState(() {
+                            _selectedAddress = value;
+                          });
+                        },
+                ),
                 const SizedBox(height: 16),
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 250),
@@ -207,7 +313,10 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                           controller: _controller,
                           orderId: _createdOrderId ?? '',
                         )
-                      : PrimaryButton(label: 'Pay & Confirm', onPressed: _pay),
+                      : PrimaryButton(
+                          label: _isLoading ? 'Loading...' : 'Pay & Confirm',
+                          onPressed: _isLoading ? null : _pay,
+                        ),
                 ),
               ],
             ),

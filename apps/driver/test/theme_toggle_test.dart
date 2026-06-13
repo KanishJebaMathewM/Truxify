@@ -43,7 +43,8 @@ void main() {
     await tester.pumpWidget(_buildTestProfileApp(
       controller: controller,
     ));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
 
     final segmentedButton = tester.widget<SegmentedButton<ThemeMode>>(
       find.byType(SegmentedButton<ThemeMode>),
@@ -63,7 +64,8 @@ void main() {
     await tester.pumpWidget(_buildTestProfileApp(
       controller: controller,
     ));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
 
     final segmentedButton = tester.widget<SegmentedButton<ThemeMode>>(
       find.byType(SegmentedButton<ThemeMode>),
@@ -81,7 +83,8 @@ void main() {
     await tester.pumpWidget(_buildTestProfileApp(
       controller: controller,
     ));
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
 
     // Tap the 'Dark' segment
     final darkText = find.descendant(
@@ -90,7 +93,8 @@ void main() {
     );
     expect(darkText, findsOneWidget);
     await tester.tap(darkText);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump();
 
     // Check that controller.themeMode is now ThemeMode.dark
     expect(controller.themeMode, ThemeMode.dark);

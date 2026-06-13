@@ -111,7 +111,17 @@ class CacheManager {
     }).toList();
 
     if (activeOnly) {
-      return results.where((item) => item['status'] == 'active' || item['status'] == 'in_transit').toList();
+      const activeStatuses = {
+        'pending',
+        'active',
+        'truck_assigned',
+        'en_route_pickup',
+        'arrived_pickup',
+        'picked_up',
+        'in_transit',
+        'arriving'
+      };
+      return results.where((item) => activeStatuses.contains(item['status'])).toList();
     }
 
     return results;

@@ -161,15 +161,15 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                   setSheetState(() {
                     progress += 0.15;
                     if (progress > 0.7) {
-                      statusText = 'Encrypting document payload...';
+                      statusText = 'Processing document...';
                     } else if (progress > 0.4) {
-                      statusText = 'Uploading blocks to decentralised storage...';
+                      statusText = 'Uploading to secure storage...';
                     }
                   });
                 } else if (progress >= 0.8 && progress < 1.0) {
                   timer.cancel(); 
                   setSheetState(() {
-                    statusText = 'Registering with Truxify Network...';
+                    statusText = 'Verifying document...';
                   });
 
                   try {
@@ -188,8 +188,6 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                       'user_id': userId,
                       'doc_type': dbDocType,
                       'status': 'pending',
-                      'file_url': 'https://example.com/vault/${dbDocType}_${DateTime.now().millisecondsSinceEpoch}.pdf',
-                      'blockchain_hash': '0x${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}...${userId.substring(0, 4)}',
                       'valid_until': DateTime.now().add(const Duration(days: 365)).toIso8601String(),
                     };
 
@@ -203,7 +201,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                       setSheetState(() {
                         progress = 1.0;
                         isDone = true;
-                        statusText = 'Upload Successful & Encrypted!';
+                        statusText = 'Upload Successful!';
                       });
                       _fetchDocuments();
                     }

@@ -225,4 +225,32 @@ class OrderService {
 
     return orders;
   }
+
+  Future<String?> fetchDriverName(String driverId) async {
+    try {
+      final response = await _client
+          .from('profiles')
+          .select('full_name')
+          .eq('id', driverId)
+          .maybeSingle();
+      return response?['full_name']?.toString();
+    } catch (e) {
+      debugPrint('Error fetching driver name: $e');
+      return null;
+    }
+  }
+
+  Future<String?> fetchTruckNumber(String truckId) async {
+    try {
+      final response = await _client
+          .from('trucks')
+          .select('number_plate')
+          .eq('id', truckId)
+          .maybeSingle();
+      return response?['number_plate']?.toString();
+    } catch (e) {
+      debugPrint('Error fetching truck number: $e');
+      return null;
+    }
+  }
 }

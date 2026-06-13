@@ -27,6 +27,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   Map<String, dynamic>? _order;
   RealtimeChannel? _ordersChannel;
   List<LatLng> _routePoints = const [_fallbackPickupPoint, _fallbackDropPoint];
+  String _driverName = 'Loading driver...';
+  String _truckNumber = 'Loading truck...';
+  bool _isLoadingDetails = false;
 
   @override
   void initState() {
@@ -60,6 +63,30 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       setState(() {
         _order = order;
 
+        if (order != null) {
+          final dn = order['driver_name']?.toString();
+          final tn = order['truck_number']?.toString();
+
+          if (dn != null && dn.isNotEmpty) {
+            _driverName = dn;
+          } else if (order['driver_id'] == null) {
+            _driverName = 'Driver not assigned';
+          } else {
+            _driverName = 'Loading driver...';
+          }
+
+          if (tn != null && tn.isNotEmpty) {
+            _truckNumber = tn;
+          } else if (order['truck_id'] == null) {
+            _truckNumber = 'Truck not assigned';
+          } else {
+            _truckNumber = 'Loading truck...';
+          }
+        } else {
+          _driverName = 'Driver not assigned';
+          _truckNumber = 'Truck not assigned';
+        }
+
         final pickupLat = (order?['pickup_lat'] as num?)?.toDouble();
         final pickupLng = (order?['pickup_lng'] as num?)?.toDouble();
         final dropLat = (order?['drop_lat'] as num?)?.toDouble();
@@ -75,8 +102,65 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
           ];
         }
       });
+
+      if (order != null) {
+        await _fetchDriverAndTruck(order['driver_id'], order['truck_id']);
+      }
     } catch (e) {
       debugPrint('Failed to load order: $e');
+    }
+  }
+
+  Future<void> _fetchDriverAndTruck(dynamic driverId, dynamic truckId) async {
+    if (driverId == null && truckId == null) {
+      if (mounted) {
+        setState(() {
+          _driverName = 'Driver not assigned';
+          _truckNumber = 'Truck not assigned';
+          _isLoadingDetails = false;
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _isLoadingDetails = true;
+      });
+    }
+
+    try {
+      final futures = <Future>[];
+
+      if (driverId != null) {
+        futures.add(_orderService.fetchDriverName(driverId.toString()));
+      } else {
+        futures.add(Future.value(null));
+      }
+
+      if (truckId != null) {
+        futures.add(_orderService.fetchTruckNumber(truckId.toString()));
+      } else {
+        futures.add(Future.value(null));
+      }
+
+      final results = await Future.wait(futures);
+
+      if (!mounted) return;
+
+      setState(() {
+        _driverName = results[0]?.toString() ?? _order?['driver_name']?.toString() ?? 'Driver not assigned';
+        _truckNumber = results[1]?.toString() ?? _order?['truck_number']?.toString() ?? 'Truck not assigned';
+        _isLoadingDetails = false;
+      });
+    } catch (e) {
+      debugPrint('Error fetching driver/truck details: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLoadingDetails = false;
+        _driverName = _order?['driver_name']?.toString() ?? 'Driver not assigned';
+        _truckNumber = _order?['truck_number']?.toString() ?? 'Truck not assigned';
+      });
     }
   }
 
@@ -133,9 +217,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   }
 
   Future<void> _showCallDriver() async {
-    final driverName =
-        _order?['driver_id']?.toString() ?? 'Driver not assigned';
-    final truckNumber = _order?['truck_id']?.toString() ?? 'Truck not assigned';
+    final driverName = _driverName;
+    final truckNumber = _truckNumber;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -410,9 +493,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   @override
   Widget build(BuildContext context) {
-    final driverName =
-        _order?['driver_id']?.toString() ?? 'Driver not assigned';
-    final truckNumber = _order?['truck_id']?.toString() ?? 'Truck not assigned';
+    final driverName = _driverName;
+    final truckNumber = _truckNumber;
     final eta = _order?['eta']?.toString() ?? 'TBD';
     final currentLocation = _order?['status']?.toString() ?? 'Pending';
     return Scaffold(

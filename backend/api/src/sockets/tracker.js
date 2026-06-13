@@ -1,13 +1,15 @@
 import { WebSocketServer } from 'ws';
 import { mongoDb, redisClient, firebaseAdmin, supabase } from '../config/db.js';
+import jwt from 'jsonwebtoken';
 
 // In-memory mapping of active client subscriptions
 const trackingSubscriptions = new Map();
 
 // =====================================================================
-// 📦 EXTRA STORAGE & BUFFER CONFIGURATIONS (#269)
+// EXTRA STORAGE & BUFFER CONFIGURATIONS (#269)
 // =====================================================================
 let telemetryWriteBuffer = [];
+const MAX_BUFFER_SIZE = 10000;
 const BUFFER_FLUSH_INTERVAL_MS = 20000; 
 let isSchedulerActive = false;
 let telemetryFlushInterval = null;
@@ -111,22 +113,68 @@ export function initWebSocketServer(server) {
         return;
       }
       try {
-        const decoded = await firebaseAdmin.auth().verifyIdToken(token);
-        if (!supabase) {
-          ws.close(4001, 'Unauthorized: Profile lookup is not configured');
-          return;
+        let decoded = null;
+        try {
+          decoded = jwt.decode(token);
+        } catch (err) {
+          // ignore decoding errors
         }
 
-        const { data: profile, error } = await supabase
-          .from('profiles')
-          .select('id, firebase_uid, role')
-          .eq('firebase_uid', decoded.uid)
-          .eq('is_active', true)
-          .maybeSingle();
+        const isSupabaseToken = decoded &&
+          typeof decoded === 'object' &&
+          typeof decoded.iss === 'string' &&
+          (decoded.iss.includes('supabase') || decoded.iss.includes('supabase.co'));
+        let profile = null;
 
-        if (error || !profile) {
-          ws.close(4001, 'Unauthorized: User profile not found');
-          return;
+        if (isSupabaseToken) {
+          if (!supabase) {
+            ws.close(4001, 'Unauthorized: Supabase client is not configured');
+            return;
+          }
+          const response = await supabase.auth.getUser(token);
+          const user = response?.data?.user;
+          const authError = response?.error;
+          if (authError || !user) {
+            ws.close(4001, 'Unauthorized: Invalid or expired Supabase token');
+            return;
+          }
+
+          const { data: userProfile, error } = await supabase
+            .from('profiles')
+            .select('id, firebase_uid, role')
+            .eq('id', user.id)
+            .eq('is_active', true)
+            .maybeSingle();
+
+          if (error || !userProfile) {
+            ws.close(4001, 'Unauthorized: User profile not found');
+            return;
+          }
+          profile = userProfile;
+        } else {
+          // Firebase Verification
+          if (!firebaseAdmin) {
+            ws.close(4001, 'Unauthorized: Firebase Auth is not configured');
+            return;
+          }
+          const decodedToken = await firebaseAdmin.auth().verifyIdToken(token);
+          if (!supabase) {
+            ws.close(4001, 'Unauthorized: Profile lookup is not configured');
+            return;
+          }
+
+          const { data: userProfile, error } = await supabase
+            .from('profiles')
+            .select('id, firebase_uid, role')
+            .eq('firebase_uid', decodedToken.uid)
+            .eq('is_active', true)
+            .maybeSingle();
+
+          if (error || !userProfile) {
+            ws.close(4001, 'Unauthorized: User profile not found');
+            return;
+          }
+          profile = userProfile;
         }
 
         ws.user = {
@@ -282,6 +330,11 @@ export async function handleLocationPing(ws, data) {
   }
 
   // 🛡️ 2. WRITE-BUFFER DEFERMENT (BATCHING)
+  if (telemetryWriteBuffer.length >= MAX_BUFFER_SIZE) {
+    console.warn(`[TRUXIFY BATCH CONTROL] Telemetry buffer limit reached (${MAX_BUFFER_SIZE}). Dropping oldest telemetry record to prevent memory exhaustion.`);
+    telemetryWriteBuffer.shift();
+  }
+
   telemetryWriteBuffer.push({
     driver_id,
     order_display_id: order_display_id || null,

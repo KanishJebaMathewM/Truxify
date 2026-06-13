@@ -1025,4 +1025,34 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
     // Only the subscribe confirmation should be received, not location_update
     expect(receivedMessages.every(m => m.status === 'subscribed')).toBe(true);
   });
+
+  describe('telemetry buffer size limits (CWE-770)', () => {
+    beforeEach(() => {
+      __testing.clearTelemetryWriteBuffer();
+    });
+
+    it('enforces MAX_BUFFER_SIZE by shifting the oldest telemetry records', async () => {
+      const mockRecords = Array.from({ length: 10000 }, (_, i) => ({ driver_id: `driver-old-${i}` }));
+      __testing.setTelemetryWriteBuffer(mockRecords);
+
+      const ws = { driverId: 'driver-new', send: vi.fn() };
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      await handleLocationPing(ws, {
+        driver_id: 'driver-new',
+        latitude: 12.9716,
+        longitude: 77.5946,
+      });
+
+      const buffer = __testing.getTelemetryWriteBuffer();
+      expect(buffer.length).toBe(10000);
+      expect(buffer[0].driver_id).toBe('driver-old-1'); // oldest record (driver-old-0) shifted out
+      expect(buffer[9999].driver_id).toBe('driver-new'); // new record added at the end
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Telemetry buffer limit reached')
+      );
+
+      consoleWarnSpy.mockRestore();
+    });
+  });
 });

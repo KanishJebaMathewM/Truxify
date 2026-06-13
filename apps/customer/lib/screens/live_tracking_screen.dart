@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import '../services/order_service.dart';
 import '../services/voice_ai_service.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/offline/websocket/resilient_websocket.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/timeline_connector.dart';
@@ -22,32 +24,136 @@ class LiveTrackingScreen extends StatefulWidget {
 
 class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _truckController;
+  late final AnimationController _movementController;
   late final OrderService _orderService;
   List<Map<String, dynamic>> _timeline = [];
   Map<String, dynamic>? _order;
   RealtimeChannel? _ordersChannel;
   List<LatLng> _routePoints = const [_fallbackPickupPoint, _fallbackDropPoint];
 
+  LatLng? _previousPosition;
+  LatLng? _currentPosition;
+  ResilientWebSocket? _trackingWebSocket;
+  StreamSubscription? _trackingSubscription;
+
   @override
   void initState() {
     super.initState();
 
     _orderService = OrderService();
-    _truckController =
-        AnimationController(vsync: this, duration: const Duration(seconds: 9))
-          ..repeat();
+    _movementController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
 
     _loadOrder();
     _loadTimeline();
     _subscribeToOrderUpdates();
+    _subscribeToTracking();
   }
 
   @override
   void dispose() {
-    _truckController.dispose();
+    _movementController.dispose();
     _ordersChannel?.unsubscribe();
+    _trackingSubscription?.cancel();
+    _trackingWebSocket?.close();
     super.dispose();
+  }
+
+  void _subscribeToTracking() {
+    final apiBaseUrl = OrderService.defaultApiBaseUrl;
+    final baseUri = Uri.parse(apiBaseUrl);
+    final wsScheme = baseUri.scheme == 'https' ? 'wss' : 'ws';
+    
+    var wsPath = baseUri.path;
+    if (wsPath.endsWith('/')) {
+      wsPath = wsPath.substring(0, wsPath.length - 1);
+    }
+    wsPath = '$wsPath/ws/tracking';
+
+    String buildUrl() {
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken ?? '';
+      final wsUri = Uri(
+        scheme: wsScheme,
+        host: baseUri.host,
+        port: baseUri.hasPort ? baseUri.port : null,
+        path: wsPath,
+        queryParameters: token.isNotEmpty ? {'token': token} : null,
+      );
+      return wsUri.toString();
+    }
+
+    final initialWsUrl = buildUrl();
+    final initialUri = Uri.parse(initialWsUrl);
+    final redactedUrl = initialUri.replace(queryParameters: initialUri.queryParameters.containsKey('token') ? {'token': '[REDACTED]'} : null).toString();
+    debugPrint('Connecting to tracking WebSocket at: $redactedUrl');
+
+    _trackingWebSocket = ResilientWebSocket(
+      initialWsUrl,
+      urlFactory: buildUrl,
+      onConnect: () {
+        debugPrint('WebSocket connected, subscribing to order updates...');
+        _trackingWebSocket?.send({
+          'event': 'subscribe_tracking',
+          'data': {
+            'order_display_id': widget.orderId,
+          },
+        });
+      },
+    );
+
+    _trackingSubscription = _trackingWebSocket!.stream.listen((message) {
+      debugPrint('Tracking WebSocket message received: $message');
+      try {
+        if (message == 'pong') return;
+        final payload = jsonDecode(message as String) as Map<String, dynamic>;
+
+        if (payload['event'] == 'location_update') {
+          final data = payload['data'] as Map<String, dynamic>?;
+          if (data != null) {
+            final lat = (data['latitude'] as num?)?.toDouble();
+            final lng = (data['longitude'] as num?)?.toDouble();
+
+            if (lat != null && lng != null && mounted) {
+              _updateTruckPosition(LatLng(lat, lng));
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Error parsing tracking WebSocket message: $e');
+      }
+    });
+
+    _trackingWebSocket!.connect();
+  }
+
+  void _updateTruckPosition(LatLng newPosition) {
+    if (!mounted) return;
+
+    if (_currentPosition == null) {
+      setState(() {
+        _currentPosition = newPosition;
+      });
+      return;
+    }
+
+    setState(() {
+      if (_previousPosition != null && _movementController.isAnimating) {
+        final t = _movementController.value;
+        _previousPosition = LatLng(
+          _previousPosition!.latitude +
+              (_currentPosition!.latitude - _previousPosition!.latitude) * t,
+          _previousPosition!.longitude +
+              (_currentPosition!.longitude - _previousPosition!.longitude) * t,
+        );
+      } else {
+        _previousPosition = _currentPosition;
+      }
+      _currentPosition = newPosition;
+    });
+    _movementController.forward(from: 0.0);
   }
 
   Future<void> _loadOrder() async {
@@ -391,39 +497,23 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         .subscribe();
   }
 
-  LatLng _pointAlongRoute(double t) {
-    final points = _routePoints;
-    if (points.length < 2) {
-      return _interpolatePoint(
-        _fallbackPickupPoint,
-        _fallbackDropPoint,
-        t,
+  List<Marker> _buildTruckMarkers() {
+    if (_currentPosition == null) {
+      return const [];
+    }
+
+    LatLng point;
+    if (_previousPosition != null && _movementController.isAnimating) {
+      final t = _movementController.value;
+      point = LatLng(
+        _previousPosition!.latitude +
+            (_currentPosition!.latitude - _previousPosition!.latitude) * t,
+        _previousPosition!.longitude +
+            (_currentPosition!.longitude - _previousPosition!.longitude) * t,
       );
+    } else {
+      point = _currentPosition!;
     }
-
-    final clampedT = t.clamp(0.0, 1.0);
-    final totalSegments = points.length - 1;
-    final scaled = clampedT * totalSegments;
-    final segmentIndex = scaled.floor().clamp(0, totalSegments - 1);
-    final localT = scaled - segmentIndex;
-
-    if (segmentIndex >= totalSegments) {
-      return points.last;
-    }
-
-    return _interpolatePoint(
-        points[segmentIndex], points[segmentIndex + 1], localT);
-  }
-
-  LatLng _interpolatePoint(LatLng start, LatLng end, double t) {
-    return LatLng(
-      start.latitude + ((end.latitude - start.latitude) * t),
-      start.longitude + ((end.longitude - start.longitude) * t),
-    );
-  }
-
-  List<Marker> _buildTruckMarkers(double animationProgress) {
-    final point = _pointAlongRoute(0.5);
 
     return [
       Marker(
@@ -494,7 +584,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         children: [
           Positioned.fill(
             child: AnimatedBuilder(
-              animation: _truckController,
+              animation: _movementController,
               builder: (context, child) {
                 return FlutterMap(
                   options: const MapOptions(
@@ -535,7 +625,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                           child: Icon(Icons.place_rounded,
                               color: Colors.redAccent, size: 26),
                         ),
-                        ..._buildTruckMarkers(_truckController.value),
+                        ..._buildTruckMarkers(),
                       ],
                     ),
                   ],

@@ -110,6 +110,15 @@ const verifyDeliveryLimiter = rateLimit({
   message: { error: 'Too many delivery verification attempts. Please try again later.' },
 });
 
+// Rate limiter for the predict-demand endpoint
+const predictDemandLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many demand prediction requests. Please try again later.' },
+});
+
 /**
  * Helper to generate order display IDs like #FF20260521
  */
@@ -837,7 +846,7 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
 // ============================================================================
 // 12. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
 // ============================================================================
-router.post('/predict-demand', authenticate, validateBody(predictDemandSchema), async (req, res) => {
+router.post('/predict-demand', authenticate, requireRole(['customer', 'driver']), predictDemandLimiter, validateBody(predictDemandSchema), async (req, res) => {
   try {
     const prediction = await predictDemand(req.body);
     return res.json(prediction);

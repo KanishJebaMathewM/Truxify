@@ -188,6 +188,7 @@ export function initWebSocketServer(server) {
           role: profile.role,
         };
         ws.driverId = profile.id;
+        await restoreSubscriptions(ws);
         console.log(`✅ WS Authenticated user: ${ws.user.id}`);
       } catch (e) {
         console.error('WS Auth failed:', e.message);
@@ -209,12 +210,16 @@ export function initWebSocketServer(server) {
 
     ws.on('close', () => {
       console.log('🔌 WebSocket connection closed.');
-      removeClientFromAllSubscriptions(ws);
+      void (async () => {
+        await removeClientFromAllSubscriptions(ws);
+      })();
     });
 
     ws.on('error', (err) => {
       console.error('🔌 WebSocket client error:', err.message);
-      removeClientFromAllSubscriptions(ws);
+      void (async () => {
+        await removeClientFromAllSubscriptions(ws);
+      })();
     });
   });
 
@@ -269,7 +274,7 @@ export async function handleTrackingMessage(ws, message) {
         break;
 
       case 'unsubscribe_tracking':
-        handleUnsubscribe(ws, data);
+        await handleUnsubscribe(ws, data);
         break;
 
       default:
@@ -562,8 +567,23 @@ export async function handleSubscribe(ws, data) {
   }
 
   trackingSubscriptions.get(targetId).add(ws);
+  ws.subscriptionTargets ??= new Set();
+  ws.subscriptionTargets.add(targetId);
+
+  if (redisClient) {
+    try {
+      const subscriberId = ws.user?.id || ws.driverId;
+      if (subscriberId) {
+        await redisClient.sadd(`user:subscriptions:${subscriberId}`, targetId);
+        await redisClient.persist(`user:subscriptions:${subscriberId}`);
+      }
+    } catch (err) {
+      console.error('Redis subscription persistence error:', err.message);
+    }
+  }
+
   console.log(`🔌 Client subscribed to telemetry updates for: "${targetId}"`);
-  ws.send(JSON.stringify({ status: 'subscribed', target: targetId }));
+  ws.send(JSON.stringify({ status: 'subscribed', target: targetId, reconnect_supported: true }));
 }
 
 async function canSubscribe(ws, { order_display_id, driver_id }) {
@@ -603,18 +623,31 @@ async function canSubscribe(ws, { order_display_id, driver_id }) {
   return order.customer_id === userId || order.driver_id === userId;
 }
 
-function handleUnsubscribe(ws, data) {
+async function handleUnsubscribe(ws, data) {
   const { order_display_id, driver_id } = data;
   const targetId = order_display_id || driver_id;
 
   if (targetId && trackingSubscriptions.has(targetId)) {
     trackingSubscriptions.get(targetId).delete(ws);
+    ws.subscriptionTargets?.delete(targetId);
+
+    if (redisClient) {
+      const subscriberId = ws.user?.id || ws.driverId;
+      try {
+        if (subscriberId) {
+          await redisClient.srem(`user:subscriptions:${subscriberId}`, targetId);
+        }
+      } catch (err) {
+        console.error('Redis subscription cleanup error:', err.message);
+      }
+    }
+
     console.log(`🔌 Client unsubscribed from updates for: "${targetId}"`);
     ws.send(JSON.stringify({ status: 'unsubscribed', target: targetId }));
   }
 }
 
-function removeClientFromAllSubscriptions(ws) {
+async function removeClientFromAllSubscriptions(ws) {
   trackingSubscriptions.forEach((clients, key) => {
     if (clients.has(ws)) {
       clients.delete(ws);
@@ -624,11 +657,80 @@ function removeClientFromAllSubscriptions(ws) {
       trackingSubscriptions.delete(key);
     }
   });
+
+  if (redisClient) {
+    const subscriberId = ws.user?.id || ws.driverId;
+    if (subscriberId) {
+      let hasOtherSockets = false;
+      if (wsServer && wsServer.clients) {
+        for (const client of wsServer.clients) {
+          if (client !== ws && client.readyState === 1) {
+            const clientUserId = client.user?.id || client.driverId;
+            if (clientUserId === subscriberId) {
+              hasOtherSockets = true;
+              break;
+            }
+          }
+        }
+      }
+      if (!hasOtherSockets) {
+        try {
+          await redisClient.expire(`user:subscriptions:${subscriberId}`, 3600);
+        } catch (err) {
+          console.error('Redis subscription expire error on disconnect:', err.message);
+        }
+      }
+    }
+  }
+}
+
+async function restoreSubscriptions(ws) {
+  const subscriberId = ws.user?.id || ws.driverId;
+  if (!redisClient || !subscriberId) return;
+
+  try {
+    const targets = await redisClient.smembers(`user:subscriptions:${subscriberId}`);
+
+    ws.subscriptionTargets ??= new Set();
+
+    if (targets.length > 0) {
+      await redisClient.persist(`user:subscriptions:${subscriberId}`);
+    }
+
+    for (const targetId of targets) {
+      const allowed = await canSubscribe(
+        ws,
+        targetId.startsWith('ORDER-')
+          ? { order_display_id: targetId }
+          : { driver_id: targetId }
+      );
+
+      if (!allowed) {
+        await redisClient.srem(`user:subscriptions:${subscriberId}`, targetId);
+        continue;
+      }
+
+      if (!trackingSubscriptions.has(targetId)) {
+        trackingSubscriptions.set(targetId, new Set());
+      }
+
+      trackingSubscriptions.get(targetId).add(ws);
+      ws.subscriptionTargets.add(targetId);
+    }
+  } catch (err) {
+    console.error('Subscription restoration error:', err.message);
+  }
 }
 
 export const __testing = {
   resetTrackingSubscriptions() {
     trackingSubscriptions.clear();
+  },
+  async restoreSubscriptions(ws) {
+    await restoreSubscriptions(ws);
+  },
+  getTrackingSubscriptions() {
+    return trackingSubscriptions;
   },
   flushTelemetryBuffer,
   removeClientFromAllSubscriptions,

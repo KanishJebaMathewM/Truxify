@@ -26,8 +26,7 @@ export default defineConfig({
     // characters (like '#') can bypass Vite's URL-based resolution limitations by running
     // from a safe directory junction or symlink.
     preserveSymlinks:
-      process.cwd().includes('#') ||
-      getSafeRealPath(process.cwd()).includes('#') ||
+      (!process.cwd().includes('#') && getSafeRealPath(process.cwd()).includes('#')) ||
       process.env.PRESERVE_SYMLINKS === 'true',
   },
   plugins: [

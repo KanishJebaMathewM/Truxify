@@ -44,6 +44,12 @@ export async function getCachedProfile(firebaseUid) {
     return raw ? JSON.parse(raw) : null;
   } catch (err) {
     console.error('Redis getCachedProfile error:', err);
+    // On read or parsing failure, attempt a best-effort delete of the corrupted key
+    try {
+      await redisClient.del(cacheKey(firebaseUid));
+    } catch (delErr) {
+      // Ignore failures on background cleanup deletion
+    }
     return null;
   }
 }

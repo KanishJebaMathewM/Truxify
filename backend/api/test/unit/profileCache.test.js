@@ -119,13 +119,13 @@ describe('profileCache utility', () => {
       }));
 
       const mockProfile = { id: 'user-123', fullName: 'Alice' };
-      const { setCachedProfile } = await import('../../src/lib/profileCache.js');
+      const { setCachedProfile, TTL_SECONDS } = await import('../../src/lib/profileCache.js');
       await setCachedProfile('firebase-123', mockProfile);
       expect(redisClientMock.set).toHaveBeenCalledWith(
         'user:profile:firebase-123',
         JSON.stringify(mockProfile),
         'EX',
-        900
+        TTL_SECONDS
       );
     });
 

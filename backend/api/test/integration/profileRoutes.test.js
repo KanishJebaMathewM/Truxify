@@ -1,13 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
-import { invalidateCachedProfile } from '../../src/lib/profileCache.js';
 
 vi.mock('../../src/lib/profileCache.js', () => ({
   invalidateCachedProfile: vi.fn(),
   getCachedProfile: vi.fn(),
   setCachedProfile: vi.fn(),
 }));
+
+const { invalidateCachedProfile } = await import('../../src/lib/profileCache.js');
 
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();

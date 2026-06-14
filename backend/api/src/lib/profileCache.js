@@ -1,6 +1,6 @@
 import * as db from '../config/db.js';
 
-const TTL_SECONDS = 900; // 15 minutes
+export const TTL_SECONDS = 900; // 15 minutes
 const cacheKey = (firebaseUid) => `user:profile:${firebaseUid}`;
 
 /**
@@ -33,7 +33,7 @@ export async function getCachedProfile(firebaseUid) {
     const raw = await redisClient.get(cacheKey(firebaseUid));
     return raw ? JSON.parse(raw) : null;
   } catch (err) {
-    console.error('Redis getCachedProfile error:', err.message);
+    console.error('Redis getCachedProfile error:', err);
     return null;
   }
 }
@@ -52,7 +52,7 @@ export async function setCachedProfile(firebaseUid, profile) {
   try {
     await redisClient.set(cacheKey(firebaseUid), JSON.stringify(profile), 'EX', TTL_SECONDS);
   } catch (err) {
-    console.error('Redis setCachedProfile error:', err.message);
+    console.error('Redis setCachedProfile error:', err);
   }
 }
 
@@ -69,6 +69,6 @@ export async function invalidateCachedProfile(firebaseUid) {
   try {
     await redisClient.del(cacheKey(firebaseUid));
   } catch (err) {
-    console.error('Redis invalidateCachedProfile error:', err.message);
+    console.error('Redis invalidateCachedProfile error:', err);
   }
 }

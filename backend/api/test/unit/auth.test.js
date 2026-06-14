@@ -730,6 +730,7 @@ describe('authenticate middleware - Redis caching', () => {
       redisClient: redisClientMock,
     }));
 
+    const { TTL_SECONDS } = await import('../../src/lib/profileCache.js');
     const { authenticate } = await import('../../src/middleware/auth.js');
 
     const req = {
@@ -758,7 +759,7 @@ describe('authenticate middleware - Redis caching', () => {
         phone: dbProfile.phone
       }),
       'EX',
-      900
+      TTL_SECONDS
     );
     expect(next).toHaveBeenCalled();
     expect(req.user).toEqual({

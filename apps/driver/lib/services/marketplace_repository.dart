@@ -28,24 +28,40 @@ class MarketplaceRepository {
   final http.Client _httpClient;
   final String _apiBaseUrl;
 
-  Future<List<LoadOffer>> fetchLoadOffers() async {
-    final rows = await _client
-        .from('load_offers')
-        .select()
-        .eq('is_en_route', false)
-        .order('created_at', ascending: false);
+  Map<String, String> _authHeaders() {
+    final session = _client.auth.currentSession;
+    final accessToken = session?.accessToken;
+    final userId = _client.auth.currentUser?.id ?? '';
+    return <String, String>{
+      'Content-Type': 'application/json',
+      if (accessToken != null) 'Authorization': 'Bearer $accessToken',
+      'x-user-id': userId,
+      'x-user-role': 'driver',
+    };
+  }
 
-    return rows.whereType<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
+  Future<List<LoadOffer>> fetchLoadOffers() async {
+    final uri = Uri.parse('$_apiBaseUrl/api/orders/load-offers');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch load offers');
+    }
+
+    final body = jsonDecode(response.body) as List;
+    return body.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
   }
 
   Future<List<LoadOffer>> fetchEnRouteLoads() async {
-    final rows = await _client
-        .from('load_offers')
-        .select()
-        .eq('is_en_route', true)
-        .order('created_at', ascending: false);
+    final uri = Uri.parse('$_apiBaseUrl/api/orders/load-offers/en-route');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
 
-    return rows.whereType<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch en-route loads');
+    }
+
+    final body = jsonDecode(response.body) as List;
+    return body.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
   }
 
   Future<DriverBid> submitBid({
@@ -78,8 +94,15 @@ class MarketplaceRepository {
   }
 
   Future<List<DriverBid>> fetchDriverBids({required String driverId}) async {
-    final rows = await _client.from('load_bids').select().eq('driver_id', driverId).order('created_at', ascending: false);
-    return rows.whereType<Map<String, dynamic>>().map(DriverBid.fromJson).toList(growable: false);
+    final uri = Uri.parse('$_apiBaseUrl/api/bids');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch driver bids');
+    }
+
+    final body = jsonDecode(response.body) as List;
+    return body.cast<Map<String, dynamic>>().map(DriverBid.fromJson).toList(growable: false);
   }
 
   LoadOffer _mapLoadOffer(Map<String, dynamic> row) {

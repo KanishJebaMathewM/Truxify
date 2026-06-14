@@ -48,6 +48,24 @@ router.get('/', authenticate, async (req, res) => {
   }
 });
 
+// GET PROFILE NAME BY ID
+router.get('/:id/name', authenticate, async (req, res) => {
+  try {
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('id', req.params.id)
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ error: 'Failed to fetch profile name.', details: error.message });
+    if (!profile) return res.status(404).json({ error: 'Profile not found.' });
+
+    res.json({ full_name: profile.full_name });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // UPDATE PROFILE (basic version)
 router.put('/', authenticate, async (req, res) => {
   try {

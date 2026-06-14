@@ -151,110 +151,66 @@ class OrderService {
     return body;
   }
 
-  Future<Map<String, dynamic>?> fetchOrderById(String orderDisplayId) async {
+  Map<String, String> _authHeaders() {
+    final token = _client.auth.currentSession?.accessToken;
     final userId = SupabaseService.requireUserId();
+    return <String, String>{
+      'Content-Type': 'application/json',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      'x-user-id': userId,
+      'x-user-role': 'customer',
+    };
+  }
 
-    final response = await _client
-        .from('orders')
-        .select()
-        .eq('order_display_id', orderDisplayId)
-        .eq('customer_id', userId)
-        .maybeSingle();
+  Future<Map<String, dynamic>?> fetchOrderById(String orderDisplayId) async {
+    final uri = Uri.parse('$_apiBaseUrl/api/orders/$orderDisplayId');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
 
-    return response;
+    if (response.statusCode == 404) return null;
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch order');
+    }
+
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    return body['order'] as Map<String, dynamic>?;
   }
 
   Future<List<Map<String, dynamic>>> fetchOrders() async {
-    final userId = SupabaseService.requireUserId();
+    final uri = Uri.parse('$_apiBaseUrl/api/orders/history');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
 
-    final response = await _client
-        .from('orders')
-        .select()
-        .eq('customer_id', userId)
-        .order('pickup_date', ascending: false);
-
-    debugPrint('Orders response: $response');
-
-    return List<Map<String, dynamic>>.from(response);
-  }
-
-  Future<void> _verifyOrderOwnership(
-    String orderDisplayId,
-    String customerId,
-  ) async {
-    final orderCheck = await _client
-        .from('orders')
-        .select('id')
-        .eq('order_display_id', orderDisplayId)
-        .eq('customer_id', customerId)
-        .maybeSingle();
-
-    if (orderCheck == null) {
-      throw Exception('Unauthorized access to order data');
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch orders');
     }
+
+    final body = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(body as List);
   }
 
   Future<List<Map<String, dynamic>>> fetchOrderTimeline(
     String orderDisplayId,
   ) async {
-    final customerId = SupabaseService.requireUserId();
-    await _verifyOrderOwnership(orderDisplayId, customerId);
+    final uri = Uri.parse('$_apiBaseUrl/api/orders/$orderDisplayId/timeline');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
 
-    final response = await _client
-        .from('order_timeline')
-        .select()
-        .eq('order_display_id', orderDisplayId)
-        .order('sort_order');
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch order timeline');
+    }
 
-    return List<Map<String, dynamic>>.from(response);
+    final body = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(body as List);
   }
 
   Future<List<Map<String, dynamic>>> fetchActiveOrders() async {
-    final userId = SupabaseService.requireUserId();
+    final uri = Uri.parse('$_apiBaseUrl/api/orders/my/active');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
 
-    final response = await _client
-        .from('orders')
-        .select()
-        .eq('customer_id', userId)
-        .inFilter('status', [
-          'pending',
-          'active',
-          'truck_assigned',
-          'en_route_pickup',
-          'arrived_pickup',
-          'picked_up',
-          'in_transit',
-          'arriving'
-        ]);
-
-    final orders = List<Map<String, dynamic>>.from(response);
-
-    final driverIds = orders
-        .where((o) => o['driver_id'] != null)
-        .map((o) => o['driver_id'].toString())
-        .toSet()
-        .toList();
-
-    if (driverIds.isNotEmpty) {
-      final profilesResponse = await _client
-          .from('profiles')
-          .select('id, full_name')
-          .inFilter('id', driverIds);
-
-      final profiles = List<Map<String, dynamic>>.from(profilesResponse);
-
-      final driverMap = {
-        for (final profile in profiles)
-          profile['id'].toString(): profile['full_name']
-      };
-
-      for (final order in orders) {
-        order['driver_name'] =
-            driverMap[order['driver_id']?.toString()] ?? 'Driver Assigned';
-      }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch active orders');
     }
 
-    return orders;
+    final body = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(body as List);
   }
 
   Future<List<Map<String, dynamic>>> searchTrucks({
@@ -307,58 +263,27 @@ class OrderService {
   }
 
   Future<List<Map<String, dynamic>>> fetchHistoryOrders() async {
-    final userId = SupabaseService.requireUserId();
+    final uri = Uri.parse('$_apiBaseUrl/api/orders/history');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
 
-    final response = await _client
-        .from('orders')
-        .select()
-        .eq('customer_id', userId)
-        .inFilter('status', [
-      'completed',
-      'delivered',
-      'payment_released',
-      'cancelled',
-    ]);
-
-    final orders = List<Map<String, dynamic>>.from(response);
-
-    final driverIds = orders
-        .where((o) => o['driver_id'] != null)
-        .map((o) => o['driver_id'].toString())
-        .toSet()
-        .toList();
-
-    if (driverIds.isNotEmpty) {
-      final profilesResponse = await _client
-          .from('profiles')
-          .select('id, full_name')
-          .inFilter('id', driverIds);
-
-      final profiles = List<Map<String, dynamic>>.from(profilesResponse);
-
-      final driverMap = {
-        for (final profile in profiles)
-          profile['id'].toString(): profile['full_name']
-      };
-
-      for (final order in orders) {
-        order['driver_name'] =
-            driverMap[order['driver_id']?.toString()] ?? 'Driver Assigned';
-      }
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch history orders');
     }
 
-    return orders;
+    final body = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(body as List);
   }
 
   Future<String?> fetchDriverName(String driverId) async {
     try {
-      final response = await _client
-          .from('profiles')
-          .select('full_name')
-          .eq('id', driverId)
-          .maybeSingle();
-      final fullName = response?['full_name']?.toString().trim();
-      return (fullName != null && fullName.isNotEmpty) ? fullName : null;
+      final uri = Uri.parse('$_apiBaseUrl/api/profile/$driverId/name');
+      final response = await _httpClient.get(uri, headers: _authHeaders());
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final fullName = body['full_name']?.toString().trim();
+        return (fullName != null && fullName.isNotEmpty) ? fullName : null;
+      }
+      return null;
     } catch (e, st) {
       debugPrint('Error fetching driver name: $e\n$st');
       return null;
@@ -367,13 +292,14 @@ class OrderService {
 
   Future<String?> fetchTruckNumber(String truckId) async {
     try {
-      final response = await _client
-          .from('trucks')
-          .select('number_plate')
-          .eq('id', truckId)
-          .maybeSingle();
-      final numberPlate = response?['number_plate']?.toString().trim();
-      return (numberPlate != null && numberPlate.isNotEmpty) ? numberPlate : null;
+      final uri = Uri.parse('$_apiBaseUrl/api/trucks/$truckId/number');
+      final response = await _httpClient.get(uri, headers: _authHeaders());
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final numberPlate = body['number_plate']?.toString().trim();
+        return (numberPlate != null && numberPlate.isNotEmpty) ? numberPlate : null;
+      }
+      return null;
     } catch (e, st) {
       debugPrint('Error fetching truck number: $e\n$st');
       return null;

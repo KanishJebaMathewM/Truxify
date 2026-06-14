@@ -212,7 +212,107 @@ router.get('/earnings/summary', authenticate, requireRole(['driver']), async (re
 });
 
 // ============================================================================
-// 5. WITHDRAW FUNDS FROM WALLET (DRIVER)
+// 5. FETCH DRIVER TRIPS (DRIVER)
+// ============================================================================
+router.get('/trips', authenticate, requireRole(['driver']), async (req, res) => {
+  const { status } = req.query;
+
+  try {
+    let query = supabase
+      .from('trips')
+      .select('*')
+      .eq('driver_id', req.user.id);
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data: trips, error } = await query.order('trip_date', { ascending: false });
+
+    if (error) return res.status(500).json({ error: 'Failed to fetch trips.', details: error.message });
+    res.json(trips || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 6. FETCH TRIP ITEMS (DRIVER)
+// ============================================================================
+router.get('/trips/:tripDisplayId/items', authenticate, requireRole(['driver']), async (req, res) => {
+  const { tripDisplayId } = req.params;
+
+  try {
+    const { data: trip } = await supabase.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
+    if (!trip) return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
+
+    const { data: items, error } = await supabase.from('trip_items').select('*').eq('trip_display_id', tripDisplayId);
+
+    if (error) return res.status(500).json({ error: 'Failed to fetch trip items.', details: error.message });
+    res.json(items || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 7. FETCH TRIP STOPS (DRIVER)
+// ============================================================================
+router.get('/trips/:tripDisplayId/stops', authenticate, requireRole(['driver']), async (req, res) => {
+  const { tripDisplayId } = req.params;
+
+  try {
+    const { data: trip } = await supabase.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
+    if (!trip) return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
+
+    const { data: stops, error } = await supabase.from('trip_stops').select('*').eq('trip_display_id', tripDisplayId).order('sort_order', { ascending: true });
+
+    if (error) return res.status(500).json({ error: 'Failed to fetch trip stops.', details: error.message });
+    res.json(stops || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 8. FETCH ROUTE MAP POINTS (DRIVER)
+// ============================================================================
+router.get('/trips/:tripDisplayId/route-points', authenticate, requireRole(['driver']), async (req, res) => {
+  const { tripDisplayId } = req.params;
+
+  try {
+    const { data: trip } = await supabase.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
+    if (!trip) return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
+
+    const { data: points, error } = await supabase.from('route_map_points').select('*').eq('trip_display_id', tripDisplayId).order('sort_order', { ascending: true });
+
+    if (error) return res.status(500).json({ error: 'Failed to fetch route points.', details: error.message });
+    res.json(points || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 9. FETCH DRIVER BIDS (DRIVER)
+// ============================================================================
+router.get('/bids', authenticate, requireRole(['driver']), async (req, res) => {
+  try {
+    const { data: bids, error } = await supabase
+      .from('load_bids')
+      .select('*')
+      .eq('driver_id', req.user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ error: 'Failed to fetch bids.', details: error.message });
+    res.json(bids || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 10. WITHDRAW FUNDS FROM WALLET (DRIVER)
 // ============================================================================
 router.post('/wallet/withdraw', authenticate, requireRole(['driver']), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa

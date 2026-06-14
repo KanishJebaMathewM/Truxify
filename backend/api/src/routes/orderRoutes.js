@@ -239,7 +239,72 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
 });
 
 // ============================================================================
-// 2. FETCH ORDER HISTORY (CUSTOMER)
+// 2. FETCH MY ACTIVE ORDERS (CUSTOMER)
+// ============================================================================
+router.get('/my/active', authenticate, requireRole(['customer']), async (req, res) => {
+  const activeStatuses = ['pending', 'active', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving'];
+
+  try {
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('customer_id', req.user.id)
+      .in('status', activeStatuses)
+      .order('pickup_date', { ascending: false });
+
+    if (error) return res.status(500).json({ error: 'Failed to fetch active orders.', details: error.message });
+
+    const driverIds = [...new Set(orders.filter(o => o.driver_id).map(o => o.driver_id))];
+    if (driverIds.length > 0) {
+      const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', driverIds);
+      const driverMap = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
+      orders.forEach(o => { o.driver_name = driverMap[o.driver_id] || 'Driver Assigned'; });
+    }
+
+    res.json(orders);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 3. FETCH LOAD OFFERS (MARKETPLACE)
+// ============================================================================
+router.get('/load-offers', authenticate, async (req, res) => {
+  try {
+    const { data: offers, error } = await supabase
+      .from('load_offers')
+      .select('*')
+      .eq('is_en_route', false)
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ error: 'Failed to fetch load offers.', details: error.message });
+    res.json(offers);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 4. FETCH EN-ROUTE LOADS (MARKETPLACE)
+// ============================================================================
+router.get('/load-offers/en-route', authenticate, async (req, res) => {
+  try {
+    const { data: offers, error } = await supabase
+      .from('load_offers')
+      .select('*')
+      .eq('is_en_route', true)
+      .order('created_at', { ascending: false });
+
+    if (error) return res.status(500).json({ error: 'Failed to fetch en-route loads.', details: error.message });
+    res.json(offers);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 5. FETCH MY ORDER HISTORY (CUSTOMER)
 // ============================================================================
 router.get('/history', authenticate, requireRole(['customer']), async (req, res) => {
   try {
@@ -257,13 +322,18 @@ router.get('/history', authenticate, requireRole(['customer']), async (req, res)
 });
 
 // ============================================================================
-// 3. FETCH SPECIFIC ORDER DETAILS AND TIMELINE (CUSTOMER OR DRIVER)
+// 6. FETCH SPECIFIC ORDER DETAILS AND TIMELINE (CUSTOMER OR DRIVER)
 // ============================================================================
 router.get('/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
-    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    let { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    if (!order && !orderErr) {
+      const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
+      order = result.data;
+      orderErr = result.error;
+    }
     if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
     if (!order) return res.status(404).json({ error: 'Order not found.' });
 
@@ -296,7 +366,42 @@ router.get('/:id', authenticate, validateParams(paramIdSchema), async (req, res)
 });
 
 // ============================================================================
-// 4. SUBMIT BID FOR LOAD OFFER (DRIVER)
+// 7. FETCH ORDER TIMELINE (CUSTOMER OR DRIVER)
+// ============================================================================
+router.get('/:id/timeline', authenticate, validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id;
+
+  try {
+    let order;
+    const { data: orderById } = await supabase.from('orders').select('customer_id, driver_id, order_display_id').eq('id', orderId).maybeSingle();
+    if (orderById) {
+      order = orderById;
+    } else {
+      const { data: orderByDisplay } = await supabase.from('orders').select('customer_id, driver_id, order_display_id').eq('order_display_id', orderId).maybeSingle();
+      order = orderByDisplay;
+    }
+
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+    if (order.customer_id !== req.user.id && order.driver_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You do not own or are not assigned to this order.' });
+    }
+
+    const { data: timeline, error: timelineErr } = await supabase
+      .from('order_timeline')
+      .select('milestone, milestone_time, completed, sort_order')
+      .eq('order_display_id', order.order_display_id)
+      .order('sort_order', { ascending: true });
+
+    if (timelineErr) return res.status(500).json({ error: 'Failed to fetch timeline.', details: timelineErr.message });
+    res.json(timeline || []);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 8. SUBMIT BID FOR LOAD OFFER (DRIVER)
 // ============================================================================
 router.post('/:id/bids', authenticate, requireRole(['driver']), validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
   const loadOfferId = req.params.id;
@@ -330,7 +435,7 @@ router.post('/:id/bids', authenticate, requireRole(['driver']), validateParams(p
 });
 
 // ============================================================================
-// 5. SUBMIT RATING FOR A DELIVERED ORDER (CUSTOMER)
+// 9. SUBMIT RATING FOR A DELIVERED ORDER (CUSTOMER)
 // ============================================================================
 router.post('/:id/ratings', authenticate, requireRole(['customer']), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
   const orderId = req.params.id;
@@ -428,7 +533,7 @@ router.post('/:id/ratings', authenticate, requireRole(['customer']), validatePar
 });
 
 // ============================================================================
-// 6. VIEW BIDS FOR AN ORDER (CUSTOMER)
+// 10. VIEW BIDS FOR AN ORDER (CUSTOMER)
 // ============================================================================
 router.get('/:id/bids', authenticate, requireRole(['customer']), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
@@ -482,7 +587,7 @@ router.get('/:id/bids', authenticate, requireRole(['customer']), validateParams(
 });
 
 // ============================================================================
-// 7. ACCEPT BID (CUSTOMER)
+// 11. ACCEPT BID (CUSTOMER)
 // ============================================================================
 router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
   const orderId = req.params.id;
@@ -568,7 +673,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
 });
 
 // ============================================================================
-// 8. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
+// 12. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 // ============================================================================
 router.put('/:id/milestones', authenticate, requireRole(['driver']), validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   const orderId = req.params.id;
@@ -626,7 +731,7 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), validatePar
 });
 
 // ============================================================================
-// 9. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
+// 13. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
 // ============================================================================
 router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verifyDeliveryLimiter, validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   const orderId = req.params.id;
@@ -712,7 +817,7 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
 });
 
 // ============================================================================
-// 10. CHANGE DROP (CUSTOMER)
+// 14. CHANGE DROP (CUSTOMER)
 // ============================================================================
 router.put('/:id/change-drop', authenticate, requireRole(['customer']), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
   const orderId = req.params.id; // this is order_display_id from client
@@ -786,7 +891,7 @@ router.put('/:id/change-drop', authenticate, requireRole(['customer']), validate
 });
 
 // ============================================================================
-// 11. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
+// 15. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
 // ============================================================================
 router.post('/:id/cancel', authenticate, requireRole(['customer']), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
   const orderId = req.params.id; // this is order_display_id from client
@@ -835,7 +940,7 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
 });
 
 // ============================================================================
-// 12. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
+// 16. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
 // ============================================================================
 router.post('/predict-demand', authenticate, validateBody(predictDemandSchema), async (req, res) => {
   try {

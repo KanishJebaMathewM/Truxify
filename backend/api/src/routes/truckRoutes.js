@@ -108,4 +108,22 @@ router.get('/search', authenticate, async (req, res) => {
   }
 });
 
+// GET TRUCK NUMBER PLATE BY ID
+router.get('/:id/number', authenticate, async (req, res) => {
+  try {
+    const { data: truck, error } = await supabase
+      .from('trucks')
+      .select('number_plate')
+      .eq('id', req.params.id)
+      .maybeSingle();
+
+    if (error) return res.status(500).json({ error: 'Failed to fetch truck number.', details: error.message });
+    if (!truck) return res.status(404).json({ error: 'Truck not found.' });
+
+    res.json({ number_plate: truck.number_plate });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 export default router;

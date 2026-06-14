@@ -1,11 +1,27 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/driver_session.dart';
 
 class TripService {
-  TripService({SupabaseClient? client}) : _providedClient = client;
+  TripService({
+    SupabaseClient? client,
+    http.Client? httpClient,
+    String? apiBaseUrl,
+  })  : _providedClient = client,
+        _httpClient = httpClient ?? http.Client(),
+        _apiBaseUrl = _normalizeBaseUrl(apiBaseUrl ?? defaultApiBaseUrl);
+
+  static const String defaultApiBaseUrl = String.fromEnvironment(
+    'TRUXIFY_API_BASE_URL',
+    defaultValue: 'http://localhost:5000',
+  );
 
   final SupabaseClient? _providedClient;
+  final http.Client _httpClient;
+  final String _apiBaseUrl;
 
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
 
@@ -15,78 +31,83 @@ class TripService {
     return id;
   }
 
-  Future<void> _verifyTripOwnership(String tripDisplayId) async {
-    final tripCheck = await _client
-        .from('trips')
-        .select('id')
-        .eq('trip_display_id', tripDisplayId)
-        .eq('driver_id', _driverId)
-        .maybeSingle();
+  static String _normalizeBaseUrl(String value) {
+    return value.endsWith('/') ? value.substring(0, value.length - 1) : value;
+  }
 
-    if (tripCheck == null) {
-      throw Exception('Unauthorized access to trip data');
-    }
+  Map<String, String> _authHeaders() {
+    final session = _client.auth.currentSession;
+    final accessToken = session?.accessToken;
+    return <String, String>{
+      'Content-Type': 'application/json',
+      if (accessToken != null) 'Authorization': 'Bearer $accessToken',
+      'x-user-id': _driverId,
+      'x-user-role': 'driver',
+    };
   }
 
   Future<List<Map<String, dynamic>>> fetchTrips({String? status}) async {
-    var query = _client.from('trips').select().eq('driver_id', _driverId);
-
+    var uriString = '$_apiBaseUrl/api/trips';
     if (status != null) {
-      query = query.eq('status', status);
+      uriString += '?status=${Uri.encodeQueryComponent(status)}';
+    }
+    final uri = Uri.parse(uriString);
+    final response = await _httpClient.get(uri, headers: _authHeaders());
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch trips');
     }
 
-    final response = await query.order('trip_date', ascending: false);
-
-    return List<Map<String, dynamic>>.from(response);
+    final body = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(body as List);
   }
 
   Future<List<Map<String, dynamic>>> fetchTripItems(
     String tripDisplayId,
   ) async {
-    await _verifyTripOwnership(tripDisplayId);
+    final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/items');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
 
-    final response = await _client
-        .from('trip_items')
-        .select()
-        .eq('trip_display_id', tripDisplayId);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch trip items');
+    }
 
-    return List<Map<String, dynamic>>.from(response);
+    final body = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(body as List);
   }
 
   Future<List<Map<String, dynamic>>> fetchTripStops(
     String tripDisplayId,
   ) async {
-    await _verifyTripOwnership(tripDisplayId);
+    final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/stops');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
 
-    final response = await _client
-        .from('trip_stops')
-        .select()
-        .eq('trip_display_id', tripDisplayId)
-        .order('sort_order');
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch trip stops');
+    }
 
-    return List<Map<String, dynamic>>.from(response);
+    final body = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(body as List);
   }
 
   Future<List<Map<String, dynamic>>> fetchRouteMapPoints(
     String tripDisplayId,
   ) async {
-    await _verifyTripOwnership(tripDisplayId);
+    final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/route-points');
+    final response = await _httpClient.get(uri, headers: _authHeaders());
 
-    final response = await _client
-        .from('route_map_points')
-        .select()
-        .eq('trip_display_id', tripDisplayId)
-        .order('sort_order');
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('Failed to fetch route map points');
+    }
 
-    return List<Map<String, dynamic>>.from(response);
+    final body = jsonDecode(response.body);
+    return List<Map<String, dynamic>>.from(body as List);
   }
 
   Future<void> markStopCompleted(
     String stopId,
     String tripDisplayId,
   ) async {
-    await _verifyTripOwnership(tripDisplayId);
-
     final updatedStop = await _client.from('trip_stops').update({
       'is_completed': true,
       'is_current': false,
@@ -135,8 +156,6 @@ class TripService {
   }
 
   Future<void> startTrip(String tripDisplayId) async {
-    await _verifyTripOwnership(tripDisplayId);
-
     // Find the first stop of this trip that is not completed
     final stops = await _client
         .from('trip_stops')

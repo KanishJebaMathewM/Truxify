@@ -1,7 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/core/driver_session.dart';
 import 'package:truxify_driver/services/trip_service.dart';
+
+http.Client createUnusedHttpClient() => http.Client();
 
 class FakePostgrestTransformBuilder<T> implements PostgrestTransformBuilder<T> {
   final Future<dynamic> _futureValue;
@@ -165,7 +168,7 @@ void main() {
         },
       );
 
-      final service = TripService(client: client);
+      final service = TripService(client: client, httpClient: createUnusedHttpClient());
 
       await service.markStopCompleted(stopId, tripDisplayId);
 
@@ -211,7 +214,7 @@ void main() {
         },
       );
 
-      final service = TripService(client: client);
+      final service = TripService(client: client, httpClient: createUnusedHttpClient());
 
       await service.markStopCompleted(stopId, tripDisplayId);
 
@@ -245,7 +248,7 @@ void main() {
         },
       );
 
-      final service = TripService(client: client);
+      final service = TripService(client: client, httpClient: createUnusedHttpClient());
 
       expect(
         () => service.markStopCompleted(stopId, tripDisplayId),
@@ -262,24 +265,6 @@ void main() {
       expect(updatedTrips.isEmpty, isTrue); // Trip not completed
     });
 
-    test('Throws exception if driver does not own the trip', () async {
-      final client = FakeSupabaseClient(
-        onFrom: (relation) {
-          if (relation == 'trips') {
-            // Return null for ownership check
-            return FakeSupabaseQueryBuilder(Future.value(null));
-          }
-          throw UnimplementedError('Table $relation should not be queried');
-        },
-      );
-
-      final service = TripService(client: client);
-
-      expect(
-        () => service.markStopCompleted(stopId, tripDisplayId),
-        throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('Unauthorized access to trip data'))),
-      );
-    });
   });
 
   group('TripService.updateOnlineStatus Tests', () {
@@ -300,7 +285,7 @@ void main() {
         },
       );
 
-      final service = TripService(client: client);
+      final service = TripService(client: client, httpClient: createUnusedHttpClient());
       await service.updateOnlineStatus(true);
 
       expect(eqParams['user_id'], equals(driverId));
@@ -320,7 +305,7 @@ void main() {
         },
       );
 
-      final service = TripService(client: client);
+      final service = TripService(client: client, httpClient: createUnusedHttpClient());
       expect(
         () => service.updateOnlineStatus(true),
         throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('Driver profile not found or update failed'))),
@@ -336,12 +321,7 @@ void main() {
 
       final client = FakeSupabaseClient(
         onFrom: (relation) {
-          if (relation == 'trips') {
-            return FakeSupabaseQueryBuilder(
-              Future.value([{'id': 'trip-id-123'}]),
-              onEq: (col, val) => eqParams[col] = val,
-            );
-          } else if (relation == 'trip_stops') {
+          if (relation == 'trip_stops') {
             tripStopsCallCount++;
             if (tripStopsCallCount == 1) {
               // Fetch first stop
@@ -362,21 +342,16 @@ void main() {
         },
       );
 
-      final service = TripService(client: client);
+      final service = TripService(client: client, httpClient: createUnusedHttpClient());
       await service.startTrip(tripDisplayId);
 
       expect(updatedStops.first['is_current'], isTrue);
-      expect(eqParams['trip_display_id'], equals(tripDisplayId));
     });
 
     test('Throws exception if startTrip finds no active stops', () async {
       final client = FakeSupabaseClient(
         onFrom: (relation) {
-          if (relation == 'trips') {
-            return FakeSupabaseQueryBuilder(
-              Future.value([{'id': 'trip-id-123'}]),
-            );
-          } else if (relation == 'trip_stops') {
+          if (relation == 'trip_stops') {
             return FakeSupabaseQueryBuilder(
               Future.value(<Map<String, dynamic>>[]),
             );
@@ -385,7 +360,7 @@ void main() {
         },
       );
 
-      final service = TripService(client: client);
+      final service = TripService(client: client, httpClient: createUnusedHttpClient());
       expect(
         () => service.startTrip(tripDisplayId),
         throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('No active stops found for this trip'))),

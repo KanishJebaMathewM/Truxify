@@ -1214,4 +1214,38 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       consoleWarnSpy.mockRestore();
     });
   });
+
+  describe('per-connection message rate limiting (CWE-770)', () => {
+    beforeEach(() => {
+      __testing.clearTelemetryWriteBuffer();
+    });
+
+    it('allows messages within the per-second limit', async () => {
+      const ws = { driverId: 'driver-rate', send: vi.fn() };
+
+      for (let i = 0; i < 5; i++) {
+        await handleTrackingMessage(ws, JSON.stringify({
+          event: 'location_ping',
+          data: { latitude: 12.97, longitude: 77.59 },
+        }));
+      }
+
+      const buffer = __testing.getTelemetryWriteBuffer();
+      expect(buffer.length).toBe(5);
+    });
+
+    it('drops messages that exceed the per-second limit', async () => {
+      const ws = { driverId: 'driver-rate-limit', send: vi.fn() };
+
+      for (let i = 0; i < 15; i++) {
+        await handleTrackingMessage(ws, JSON.stringify({
+          event: 'location_ping',
+          data: { latitude: 12.97, longitude: 77.59 },
+        }));
+      }
+
+      const buffer = __testing.getTelemetryWriteBuffer();
+      expect(buffer.length).toBe(10);
+    });
+  });
 });

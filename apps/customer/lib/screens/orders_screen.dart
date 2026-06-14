@@ -165,7 +165,9 @@ class _OrdersScreenState extends State<OrdersScreen>
               status: _formatStatus(
                   order['status']?.toString() ?? 'completed'),
               driver: _resolveDriverName(order),
-              truckNumber: order['truck_id']?.toString() ?? '',
+              truckNumber: order['truck_number']?.toString().trim().isNotEmpty == true
+                  ? order['truck_number'].toString().trim()
+                  : '—',
               timeline: const [],
             );
           }).toList();

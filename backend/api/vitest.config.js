@@ -1,16 +1,9 @@
-/**
- * Vitest configuration for the backend API.
- *
- * Picks up:
- *   - test/unit/**\/*.test.js
- *   - test/integration/**\/*.test.js
- *
- * The integration tests use `vi.mock('../../src/config/db.js', ...)` to
- * swap supabase out for the in-memory mock — no live DB required.
- */
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  resolve: {
+    preserveSymlinks: true,
+  },
   plugins: [
     {
       name: 'remove-shebang',

@@ -6,8 +6,8 @@ import {
   getDriverDetails
 } from '../services/profileService.js';
 import { supabase } from '../config/db.js';
-
 import { ProfileModel } from '../models/ProfileModel.js';
+import { invalidateCachedProfile } from '../lib/profileCache.js';
 
 const router = express.Router();
 
@@ -77,6 +77,12 @@ router.put('/', authenticate, async (req, res) => {
 
       if (driverError) throw driverError;
     }
+
+    // Invalidate the profile cache so that the next request retrieves fresh profile data
+    if (req.user && req.user.uid) {
+      await invalidateCachedProfile(req.user.uid);
+    }
+
     res.json({
       message: 'Profile updated',
       profile: data

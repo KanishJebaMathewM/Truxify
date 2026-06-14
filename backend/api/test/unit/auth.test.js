@@ -624,3 +624,227 @@ describe('requireRole middleware', () => {
     expect(next).toHaveBeenCalled();
   });
 });
+
+describe('authenticate middleware - Redis caching', () => {
+  beforeEach(() => {
+    process.env.BYPASS_AUTH = 'false';
+    vi.resetModules();
+  });
+
+  it('retrieves user profile from Redis on cache hit and skips database query', async () => {
+    const cachedUser = {
+      id: 'cached-user-123',
+      uid: 'cached-firebase-uid',
+      role: 'customer',
+      fullName: 'Cached User',
+      phone: '+1234567890'
+    };
+
+    const redisClientMock = {
+      get: vi.fn().mockResolvedValue(JSON.stringify(cachedUser)),
+      set: vi.fn(),
+    };
+
+    const firebaseAdminMock = {
+      auth: () => ({
+        verifyIdToken: vi.fn().mockResolvedValue({
+          uid: 'cached-firebase-uid',
+        }),
+      }),
+    };
+
+    const supabaseMock = {
+      from: vi.fn(),
+    };
+
+    vi.doMock('../../src/config/db.js', () => ({
+      firebaseAdmin: firebaseAdminMock,
+      supabase: supabaseMock,
+      redisClient: redisClientMock,
+    }));
+
+    const { authenticate } = await import('../../src/middleware/auth.js');
+
+    const req = {
+      headers: {
+        authorization: 'Bearer token123',
+      },
+    };
+
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    const next = vi.fn();
+
+    await authenticate(req, res, next);
+
+    expect(redisClientMock.get).toHaveBeenCalledWith('user:profile:cached-firebase-uid');
+    expect(supabaseMock.from).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalled();
+    expect(req.user).toEqual(cachedUser);
+  });
+
+  it('queries database and populates Redis on cache miss', async () => {
+    const dbProfile = {
+      id: 'db-user-123',
+      firebase_uid: 'miss-firebase-uid',
+      role: 'driver',
+      full_name: 'Database User',
+      phone: '+9876543210'
+    };
+
+    const redisClientMock = {
+      get: vi.fn().mockResolvedValue(null),
+      set: vi.fn().mockResolvedValue('OK'),
+    };
+
+    const firebaseAdminMock = {
+      auth: () => ({
+        verifyIdToken: vi.fn().mockResolvedValue({
+          uid: 'miss-firebase-uid',
+        }),
+      }),
+    };
+
+    const supabaseMock = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: dbProfile,
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+      }),
+    };
+
+    vi.doMock('../../src/config/db.js', () => ({
+      firebaseAdmin: firebaseAdminMock,
+      supabase: supabaseMock,
+      redisClient: redisClientMock,
+    }));
+
+    const { authenticate } = await import('../../src/middleware/auth.js');
+
+    const req = {
+      headers: {
+        authorization: 'Bearer token123',
+      },
+    };
+
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    const next = vi.fn();
+
+    await authenticate(req, res, next);
+
+    expect(redisClientMock.get).toHaveBeenCalledWith('user:profile:miss-firebase-uid');
+    expect(redisClientMock.set).toHaveBeenCalledWith(
+      'user:profile:miss-firebase-uid',
+      JSON.stringify({
+        id: dbProfile.id,
+        uid: dbProfile.firebase_uid,
+        role: dbProfile.role,
+        fullName: dbProfile.full_name,
+        phone: dbProfile.phone
+      }),
+      'EX',
+      900
+    );
+    expect(next).toHaveBeenCalled();
+    expect(req.user).toEqual({
+      id: dbProfile.id,
+      uid: dbProfile.firebase_uid,
+      role: dbProfile.role,
+      fullName: dbProfile.full_name,
+      phone: dbProfile.phone
+    });
+  });
+
+  it('falls back to database query gracefully when Redis client throws error', async () => {
+    const dbProfile = {
+      id: 'db-user-456',
+      firebase_uid: 'error-firebase-uid',
+      role: 'customer',
+      full_name: 'Resilient User',
+      phone: '+1111111111'
+    };
+
+    const redisClientMock = {
+      get: vi.fn().mockRejectedValue(new Error('Redis connection lost')),
+      set: vi.fn(),
+    };
+
+    const firebaseAdminMock = {
+      auth: () => ({
+        verifyIdToken: vi.fn().mockResolvedValue({
+          uid: 'error-firebase-uid',
+        }),
+      }),
+    };
+
+    const supabaseMock = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: dbProfile,
+                  error: null,
+                }),
+            }),
+          }),
+        }),
+      }),
+    };
+
+    vi.doMock('../../src/config/db.js', () => ({
+      firebaseAdmin: firebaseAdminMock,
+      supabase: supabaseMock,
+      redisClient: redisClientMock,
+    }));
+
+    const { authenticate } = await import('../../src/middleware/auth.js');
+
+    const req = {
+      headers: {
+        authorization: 'Bearer token123',
+      },
+    };
+
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+
+    const next = vi.fn();
+
+    // Temporarily capture and ignore console.error to avoid test noise
+    const originalConsoleError = console.error;
+    console.error = vi.fn();
+
+    await authenticate(req, res, next);
+
+    console.error = originalConsoleError;
+
+    expect(redisClientMock.get).toHaveBeenCalledWith('user:profile:error-firebase-uid');
+    expect(next).toHaveBeenCalled();
+    expect(req.user).toEqual({
+      id: dbProfile.id,
+      uid: dbProfile.firebase_uid,
+      role: dbProfile.role,
+      fullName: dbProfile.full_name,
+      phone: dbProfile.phone
+    });
+  });
+});

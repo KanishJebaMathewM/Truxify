@@ -1,5 +1,6 @@
 import { firebaseAdmin, supabase } from '../config/db.js';
 import jwt from 'jsonwebtoken';
+import { getCachedProfile, setCachedProfile } from '../lib/profileCache.js';
 
 /**
  * Authentication middleware to verify requests using Firebase ID Tokens.
@@ -98,6 +99,13 @@ export async function authenticate(req, res, next) {
       const decodedToken = await firebaseAdmin.auth().verifyIdToken(token);
       const firebaseUid = decodedToken.uid;
 
+      // Check Redis cache first
+      const cachedProfile = await getCachedProfile(firebaseUid);
+      if (cachedProfile) {
+        req.user = cachedProfile;
+        return next();
+      }
+
       if (!supabase) {
         return res.status(500).json({ error: 'Supabase client is not configured on this server.' });
       }
@@ -131,6 +139,11 @@ export async function authenticate(req, res, next) {
       fullName: userProfile.full_name,
       phone: userProfile.phone
     };
+
+    // Populate cache on successful DB fetch
+    if (userProfile.firebase_uid) {
+      await setCachedProfile(userProfile.firebase_uid, req.user);
+    }
 
     next();
   } catch (error) {

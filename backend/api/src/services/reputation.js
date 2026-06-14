@@ -73,13 +73,8 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
     console.warn(`[reputation] Invalid driver wallet address "${driverWalletAddress}" — skipping.`);
     return;
   }
-  try {
-    const tx = await reputationContract.increaseReputation(driverWalletAddress, stars);
-    console.log(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
-    await tx.wait(1); // wait for 1 confirmation
-    console.log(`[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`);
-  } catch (err) {
-    // Non-fatal: log and continue. The off-chain rating is already saved.
-    console.error('[reputation] On-chain reputation update failed:', err.message);
-  }
+  const tx = await reputationContract.increaseReputation(driverWalletAddress, stars);
+  console.log(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
+  await tx.wait(1); // wait for 1 confirmation
+  console.log(`[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`);
 }

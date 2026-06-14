@@ -402,10 +402,11 @@ router.post('/:id/ratings', authenticate, requireRole(['customer']), validatePar
     const polygonAddress = driverDetails?.polygon_wallet_address ?? null;
 
     if (polygonAddress) {
-      // Non-blocking — do not await on the critical response path.
-      awardReputationPoints(polygonAddress, stars).catch(err =>
-        console.error('[reputation] Unhandled rejection in awardReputationPoints:', err.message)
-      );
+      try {
+        await awardReputationPoints(polygonAddress, stars);
+      } catch (repErr) {
+        console.error('[reputation] On-chain reputation update failed:', repErr.message);
+      }
     } else {
       console.warn(
         `[reputation] Driver ${order.driver_id} has no polygon_wallet_address — skipping on-chain update.`
@@ -519,35 +520,8 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
 
     if (rpcErr) return res.status(500).json({ error: 'Failed to accept bid atomically.', details: rpcErr.message });
 
-    // Fetch driver's Polygon wallet address for escrow deposit
-    const { data: driverDetails } = await supabase
-      .from('driver_details')
-      .select('polygon_wallet_address')
-      .eq('user_id', bid.driver_id)
-      .maybeSingle();
-
-    const driverWallet = driverDetails?.polygon_wallet_address ?? null;
-    if (driverWallet) {
-      const amountWei = ethers.parseEther((bid.bid_amount / 100).toFixed(2).toString());
-      escrowDeposit(order.order_display_id, driverWallet, amountWei).then(({ txHash }) => {
-        if (txHash) {
-          supabase.from('orders').update({
-            escrow_status: 'funded',
-            deposit_tx_hash: txHash,
-            escrow_deposited_at: new Date().toISOString(),
-          }).eq('id', orderId).then(({ error: e }) => {
-            if (e) console.warn('[escrow] Failed to update deposit_tx_hash:', e.message);
-          });
-        }
-      }).catch(err =>
-        console.error('[escrow] Unhandled rejection in escrowDeposit:', err.message)
-      );
-    } else {
-      console.warn(`[escrow] Driver ${bid.driver_id} has no polygon_wallet_address — skipping escrow deposit.`);
-    }
-
-    // Update order with escrow booking reference
-    const { error: escrowUpdateErr } = await supabase
+    // Record escrow booking reference immediately
+    const { error: escrowBookingErr } = await supabase
       .from('orders')
       .update({
         escrow_booking_id: `escrow:${order.order_display_id}`,
@@ -555,8 +529,38 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       })
       .eq('id', orderId);
 
-    if (escrowUpdateErr) {
-      console.warn('[escrow] Failed to update escrow_booking_id:', escrowUpdateErr.message);
+    if (escrowBookingErr) {
+      console.warn('[escrow] Failed to update escrow_booking_id:', escrowBookingErr.message);
+    }
+
+    // Fetch driver's and customer's Polygon wallet addresses for escrow deposit
+    const [driverDetailsResult, customerProfileResult] = await Promise.all([
+      supabase.from('driver_details').select('polygon_wallet_address').eq('user_id', bid.driver_id).maybeSingle(),
+      supabase.from('profiles').select('polygon_wallet_address').eq('id', req.user.id).maybeSingle(),
+    ]);
+
+    const driverWallet = driverDetailsResult.data?.polygon_wallet_address ?? null;
+    const customerWallet = customerProfileResult.data?.polygon_wallet_address ?? null;
+
+    if (driverWallet && customerWallet) {
+      const amountWei = ethers.parseEther((bid.bid_amount / 100).toFixed(2).toString());
+      try {
+        const { txHash } = await escrowDeposit(order.order_display_id, customerWallet, driverWallet, amountWei);
+        if (txHash) {
+          await supabase.from('orders').update({
+            escrow_status: 'funded',
+            deposit_tx_hash: txHash,
+            escrow_deposited_at: new Date().toISOString(),
+          }).eq('id', orderId);
+        }
+      } catch (depositErr) {
+        console.error('[escrow] Deposit failed for order', orderId, ':', depositErr.message);
+        await supabase.from('orders').update({
+          escrow_status: 'fund_failed',
+        }).eq('id', orderId);
+      }
+    } else {
+      console.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — skipping escrow deposit.`);
     }
 
     res.json({ message: 'Bid accepted. Driver and truck assigned.' });
@@ -682,17 +686,18 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
 
     // Escrow: release funds to driver after successful delivery verification
     if (order.escrow_status === 'funded') {
-      escrowRelease(order.order_display_id).then(({ txHash }) => {
+      try {
+        const { txHash } = await escrowRelease(order.order_display_id);
         if (txHash) {
-          supabase.from('orders').update({
+          await supabase.from('orders').update({
             escrow_status: 'released',
             release_tx_hash: txHash,
             escrow_released_at: new Date().toISOString(),
-          }).eq('id', orderId).then(({ error: e }) => {
-            if (e) console.warn('[escrow] Failed to update release_tx_hash:', e.message);
-          });
+          }).eq('id', orderId);
         }
-      }).catch(err => console.error('[escrow] Unhandled rejection in escrowRelease:', err.message));
+      } catch (releaseErr) {
+        console.error('[escrow] Release failed for order', orderId, ':', releaseErr.message);
+      }
     } else {
       console.log(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
     }
@@ -810,17 +815,18 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
       .eq('milestone', 'Order Placed');
 
     if (order.escrow_status === 'funded') {
-      escrowRefund(order.order_display_id).then(({ txHash }) => {
+      try {
+        const { txHash } = await escrowRefund(order.order_display_id);
         if (txHash) {
-          supabase.from('orders').update({
+          await supabase.from('orders').update({
             escrow_status: 'refunded',
             refund_tx_hash: txHash,
             escrow_refunded_at: new Date().toISOString(),
-          }).eq('order_display_id', orderId).then(({ error: e }) => {
-            if (e) console.warn('[escrow] Failed to update refund_tx_hash:', e.message);
-          });
+          }).eq('order_display_id', orderId);
         }
-      }).catch(err => console.error('[escrow] Unhandled rejection in escrowRefund:', err.message));
+      } catch (refundErr) {
+        console.error('[escrow] Refund failed for order', orderId, ':', refundErr.message);
+      }
     } else if (order.escrow_booking_id) {
       console.log(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain refund.`);
     }

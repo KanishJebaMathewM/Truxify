@@ -61,8 +61,8 @@ export function getEscrowBookingId(orderDisplayId) {
  * Deposit funds into escrow for a booking.
  * Called when a bid is accepted and the order moves to in_progress.
  *
- * This is fire-and-forget from the HTTP handler — a blockchain failure
- * must never block the response. The Supabase order is the source of truth.
+ * Callers should await the returned promise. If the blockchain transaction
+ * fails, the function throws so the caller can avoid updating off-chain state.
  *
  * @param {string} orderDisplayId
  * @param {string} driverWalletAddress — 0x-prefixed Polygon address
@@ -81,18 +81,13 @@ export async function escrowDeposit(orderDisplayId, driverWalletAddress, amountW
     return { txHash: null, bookingId };
   }
 
-  try {
-    const tx = await escrowContract.deposit(bookingId, driverWalletAddress, {
-      value: amountWei,
-    });
-    console.log(`[escrow] deposit tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
-    const receipt = await tx.wait(1);
-    console.log(`[escrow] deposit confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
-    return { txHash: receipt.hash, bookingId };
-  } catch (err) {
-    console.error(`[escrow] Deposit failed for booking ${orderDisplayId}:`, err.message);
-    return { txHash: null, bookingId };
-  }
+  const tx = await escrowContract.deposit(bookingId, customerWalletAddress, driverWalletAddress, {
+    value: amountWei,
+  });
+  console.log(`[escrow] deposit tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+  const receipt = await tx.wait(1);
+  console.log(`[escrow] deposit confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+  return { txHash: receipt.hash, bookingId };
 }
 
 /**
@@ -110,16 +105,11 @@ export async function escrowRelease(orderDisplayId) {
     return { txHash: null, bookingId };
   }
 
-  try {
-    const tx = await escrowContract.releaseFunds(bookingId);
-    console.log(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
-    const receipt = await tx.wait(1);
-    console.log(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
-    return { txHash: receipt.hash, bookingId };
-  } catch (err) {
-    console.error(`[escrow] releaseFunds failed for booking ${orderDisplayId}:`, err.message);
-    return { txHash: null, bookingId };
-  }
+  const tx = await escrowContract.releaseFunds(bookingId);
+  console.log(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+  const receipt = await tx.wait(1);
+  console.log(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+  return { txHash: receipt.hash, bookingId };
 }
 
 /**
@@ -137,14 +127,9 @@ export async function escrowRefund(orderDisplayId) {
     return { txHash: null, bookingId };
   }
 
-  try {
-    const tx = await escrowContract.refundFunds(bookingId);
-    console.log(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
-    const receipt = await tx.wait(1);
-    console.log(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
-    return { txHash: receipt.hash, bookingId };
-  } catch (err) {
-    console.error(`[escrow] refundFunds failed for booking ${orderDisplayId}:`, err.message);
-    return { txHash: null, bookingId };
-  }
+  const tx = await escrowContract.refundFunds(bookingId);
+  console.log(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+  const receipt = await tx.wait(1);
+  console.log(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+  return { txHash: receipt.hash, bookingId };
 }

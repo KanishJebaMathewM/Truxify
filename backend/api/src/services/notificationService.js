@@ -23,7 +23,6 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
         notif_type: 'order_update',
         metadata: {
           order_display_id: orderDisplayId,
-          otp,
         },
       });
 
@@ -71,12 +70,14 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
 
   // 3. SMS Gateway (e.g. Twilio) Stub
   if (process.env.TWILIO_AUTH_TOKEN) {
-    console.log(
-      `[NotificationService] [SMS] SMS stub: Sending SMS to customer phone containing OTP ${otp}`
-    );
+    const smsOtpLog = process.env.NODE_DEBUG
+      ? `Sending SMS to customer phone containing OTP ${otp}`
+      : `Sending SMS to customer phone containing OTP ${otp.slice(0, 2)}***`;
+    console.log(`[NotificationService] [SMS] SMS stub: ${smsOtpLog}`);
   } else {
+    const logOtp = process.env.NODE_DEBUG ? otp : `${otp.slice(0, 2)}***`;
     console.log(
-      `[NotificationService] [SMS] SMS stub: No SMS gateway configured. Logging OTP out-of-band: ${otp}`
+      `[NotificationService] [SMS] SMS stub: No SMS gateway configured. Logging OTP out-of-band: ${logOtp}`
     );
   }
 }

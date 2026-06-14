@@ -108,11 +108,13 @@ export async function authenticate(req, res, next) {
       // must explicitly call invalidateCachedProfile(firebaseUid).
       const cachedProfile = await getCachedProfile(firebaseUid);
       if (cachedProfile) {
-        const isValidShape = typeof cachedProfile === 'object' &&
-          (cachedProfile.isActive === false ||
-           (typeof cachedProfile.id === 'string' &&
-            typeof cachedProfile.uid === 'string' &&
-            typeof cachedProfile.role === 'string'));
+        const isValidShape = cachedProfile && typeof cachedProfile === 'object' && (
+          cachedProfile.isActive === false ||
+          (cachedProfile.isActive === true &&
+           cachedProfile.uid === firebaseUid &&
+           typeof cachedProfile.id === 'string' &&
+           typeof cachedProfile.role === 'string')
+        );
 
         if (!isValidShape) {
           void invalidateCachedProfile(firebaseUid);

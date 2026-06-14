@@ -12,6 +12,14 @@
 import { defineConfig } from 'vitest/config';
 import fs from 'node:fs';
 
+const getSafeRealPath = (path) => {
+  try {
+    return fs.realpathSync(path);
+  } catch (err) {
+    return path;
+  }
+};
+
 export default defineConfig({
   resolve: {
     // Preserve symlinks so that testing under workspace directories containing special
@@ -19,7 +27,7 @@ export default defineConfig({
     // from a safe directory junction or symlink.
     preserveSymlinks:
       process.cwd().includes('#') ||
-      fs.realpathSync(process.cwd()).includes('#') ||
+      getSafeRealPath(process.cwd()).includes('#') ||
       process.env.PRESERVE_SYMLINKS === 'true',
   },
   plugins: [

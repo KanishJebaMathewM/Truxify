@@ -78,9 +78,13 @@ router.put('/', authenticate, async (req, res) => {
       if (driverError) throw driverError;
     }
 
-    // Invalidate the profile cache so that the next request retrieves fresh profile data
+    // Invalidate the profile cache so that the next request retrieves fresh profile data.
+    // We intentionally do not await here (making it fire-and-forget) to avoid adding
+    // Redis network round-trip latency to the response path. Since invalidateCachedProfile
+    // catches and logs errors internally, and the client receives the updated profile in the
+    // response payload, fire-and-forget is the optimal choice.
     if (req.user && req.user.uid) {
-      await invalidateCachedProfile(req.user.uid);
+      void invalidateCachedProfile(req.user.uid);
     }
 
     res.json({

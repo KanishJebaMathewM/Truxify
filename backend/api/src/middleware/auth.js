@@ -1,6 +1,6 @@
 import { firebaseAdmin, supabase } from '../config/db.js';
 import jwt from 'jsonwebtoken';
-import { getCachedProfile, setCachedProfile, invalidateCachedProfile, TOMBSTONE_TTL_SECONDS } from '../lib/profileCache.js';
+import { getCachedProfile, setCachedProfile, invalidateCachedProfile, TOMBSTONE_TTL_SECONDS, isValidCachedProfile } from '../lib/profileCache.js';
 
 /**
  * Authentication middleware to verify requests using Firebase ID Tokens.
@@ -108,19 +108,7 @@ export async function authenticate(req, res, next) {
       // must explicitly call invalidateCachedProfile(firebaseUid).
       const cachedProfile = await getCachedProfile(firebaseUid);
       if (cachedProfile) {
-        const isValidShape = cachedProfile &&
-          typeof cachedProfile === 'object' &&
-          !Array.isArray(cachedProfile) &&
-          typeof cachedProfile.isActive === 'boolean' &&
-          (
-            cachedProfile.isActive === false ||
-            (cachedProfile.isActive === true &&
-             cachedProfile.uid === firebaseUid &&
-             typeof cachedProfile.id === 'string' &&
-             typeof cachedProfile.role === 'string')
-          );
-
-        if (!isValidShape) {
+        if (!isValidCachedProfile(firebaseUid, cachedProfile)) {
           void invalidateCachedProfile(firebaseUid);
         } else {
           if (cachedProfile.isActive === false) {

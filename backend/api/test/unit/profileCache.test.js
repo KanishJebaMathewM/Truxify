@@ -216,4 +216,48 @@ describe('profileCache utility', () => {
       }
     });
   });
+
+  describe('isValidCachedProfile', () => {
+    it('returns false for invalid inputs (null, array, string, non-object)', async () => {
+      const { isValidCachedProfile } = await import('../../src/lib/profileCache.js');
+      expect(isValidCachedProfile('uid123', null)).toBe(false);
+      expect(isValidCachedProfile('uid123', undefined)).toBe(false);
+      expect(isValidCachedProfile('uid123', [])).toBe(false);
+      expect(isValidCachedProfile('uid123', 'string')).toBe(false);
+      expect(isValidCachedProfile('uid123', 123)).toBe(false);
+    });
+
+    it('returns false if isActive is missing or not a boolean', async () => {
+      const { isValidCachedProfile } = await import('../../src/lib/profileCache.js');
+      expect(isValidCachedProfile('uid123', { uid: 'uid123', id: 'id123', role: 'driver' })).toBe(false);
+      expect(isValidCachedProfile('uid123', { isActive: 'true', uid: 'uid123', id: 'id123', role: 'driver' })).toBe(false);
+    });
+
+    it('returns true for a valid tombstone (isActive === false)', async () => {
+      const { isValidCachedProfile } = await import('../../src/lib/profileCache.js');
+      expect(isValidCachedProfile('uid123', { isActive: false })).toBe(true);
+    });
+
+    it('returns true for a valid active profile', async () => {
+      const { isValidCachedProfile } = await import('../../src/lib/profileCache.js');
+      const validProfile = {
+        id: 'user-id-123',
+        uid: 'uid123',
+        role: 'driver',
+        isActive: true
+      };
+      expect(isValidCachedProfile('uid123', validProfile)).toBe(true);
+    });
+
+    it('returns false for active profile with non-matching uid or invalid types', async () => {
+      const { isValidCachedProfile } = await import('../../src/lib/profileCache.js');
+      const badUid = { id: 'user-id-123', uid: 'different-uid', role: 'driver', isActive: true };
+      const badId = { id: 123, uid: 'uid123', role: 'driver', isActive: true };
+      const badRole = { id: 'user-id-123', uid: 'uid123', role: null, isActive: true };
+
+      expect(isValidCachedProfile('uid123', badUid)).toBe(false);
+      expect(isValidCachedProfile('uid123', badId)).toBe(false);
+      expect(isValidCachedProfile('uid123', badRole)).toBe(false);
+    });
+  });
 });

@@ -12,21 +12,58 @@ const cacheKey = (firebaseUid) => `user:profile:${firebaseUid}`;
  * 
  * @returns {object|null} The Redis client if configured, or null.
  */
-let hasLoggedRedisClientError = false;
+const LAST_LOG_TIMES = {};
+const LOG_THROTTLE_INTERVAL_MS = 60000; // 60 seconds
+
+/**
+ * Throttles logging of cache errors on high-frequency paths to prevent flood.
+ */
+function logCacheError(operation, error) {
+  const now = Date.now();
+  const lastLog = LAST_LOG_TIMES[operation] || 0;
+  if (now - lastLog >= LOG_THROTTLE_INTERVAL_MS) {
+    LAST_LOG_TIMES[operation] = now;
+    const errorDetails = error?.stack ?? error?.message ?? String(error);
+    console.error(`Redis ${operation} error (throttled):`, errorDetails);
+  }
+}
 
 function getRedisClient() {
-  try {
-    return db.redisClient ?? null;
-  } catch (err) {
+  if (process.env.VITEST === 'true') {
     // Under Vitest testing, accessing undefined keys on namespace mock proxies throws.
-    // We suppress mock proxy errors in tests, but log genuine unexpected errors in production once.
-    const isVitestMockError = process.env.VITEST === 'true' || process.env.NODE_ENV === 'test';
-    if (!isVitestMockError && !hasLoggedRedisClientError) {
-      console.error('Unexpected error resolving redisClient from db config:', err);
-      hasLoggedRedisClientError = true;
+    // We wrap the access in a try-catch to allow a graceful fallback to null.
+    try {
+      return db.redisClient ?? null;
+    } catch {
+      return null;
     }
-    return null;
   }
+  return db.redisClient ?? null;
+}
+
+/**
+ * Validates the shape of a cached profile.
+ * 
+ * @param {string} firebaseUid - The expected Firebase UID.
+ * @param {any} cachedProfile - The cached profile to validate.
+ * @returns {boolean} True if the cached profile shape is valid, false otherwise.
+ */
+export function isValidCachedProfile(firebaseUid, cachedProfile) {
+  if (!cachedProfile || typeof cachedProfile !== 'object' || Array.isArray(cachedProfile)) {
+    return false;
+  }
+  if (typeof cachedProfile.isActive !== 'boolean') {
+    return false;
+  }
+  if (cachedProfile.isActive === false) {
+    return true; // Valid tombstone
+  }
+  return (
+    cachedProfile.isActive === true &&
+    cachedProfile.uid === firebaseUid &&
+    typeof cachedProfile.id === 'string' &&
+    typeof cachedProfile.role === 'string'
+  );
 }
 
 /**
@@ -43,7 +80,7 @@ export async function getCachedProfile(firebaseUid) {
     const raw = await redisClient.get(cacheKey(firebaseUid));
     return raw ? JSON.parse(raw) : null;
   } catch (err) {
-    console.error('Redis getCachedProfile error:', err);
+    logCacheError('getCachedProfile', err);
     // On read or parsing failure, attempt a best-effort delete of the corrupted key
     try {
       await redisClient.del(cacheKey(firebaseUid));
@@ -68,7 +105,7 @@ export async function setCachedProfile(firebaseUid, profile, ttlSeconds = TTL_SE
   try {
     await redisClient.set(cacheKey(firebaseUid), JSON.stringify(profile), 'EX', ttlSeconds);
   } catch (err) {
-    console.error('Redis setCachedProfile error:', err);
+    logCacheError('setCachedProfile', err);
   }
 }
 
@@ -85,6 +122,6 @@ export async function invalidateCachedProfile(firebaseUid) {
   try {
     await redisClient.del(cacheKey(firebaseUid));
   } catch (err) {
-    console.error('Redis invalidateCachedProfile error:', err);
+    logCacheError('invalidateCachedProfile', err);
   }
 }

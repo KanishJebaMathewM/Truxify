@@ -669,9 +669,14 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
 
     const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update({
       otp_verified: true, status: 'payment_released', updated_at: new Date().toISOString()
-    }).eq('id', orderId).select('*').single();
+    }).eq('id', orderId).not('status', 'eq', 'cancelled').select('*').single();
 
-    if (updateErr) return res.status(500).json({ error: 'Failed to verify OTP.', details: updateErr.message });
+    if (updateErr) {
+      if (updateErr.code === 'PGRST116') {
+        return res.status(409).json({ error: 'Order was already cancelled. Cannot verify delivery.' });
+      }
+      return res.status(500).json({ error: 'Failed to verify OTP.', details: updateErr.message });
+    }
 
     await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() }).eq('order_display_id', order.order_display_id).eq('milestone', 'Delivered');
 
@@ -683,7 +688,7 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
     }
 
     // Escrow: release funds to driver after successful delivery verification
-    if (order.escrow_status === 'funded') {
+    if (updatedOrder.escrow_status === 'funded') {
       escrowRelease(order.order_display_id).then(({ txHash }) => {
         if (txHash) {
           supabase.from('orders').update({
@@ -798,12 +803,18 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
     if (!order) return res.status(404).json({ error: 'Order not found.' });
     if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
 
-    if (['delivered', 'payment_released'].includes(order.status)) {
-      return res.status(400).json({ error: 'Order cannot be cancelled after delivery or payment release.' });
+    const { data: updatedOrder, error: updateErr } = await supabase.from('orders')
+      .update({ status: 'cancelled', cancellation_reason: reason, updated_at: new Date().toISOString() })
+      .eq('order_display_id', orderId)
+      .not('status', 'in', '("delivered","payment_released")')
+      .select('cancellation_fee, order_display_id, status, cancellation_reason, escrow_status')
+      .single();
+    if (updateErr) {
+      if (updateErr.code === 'PGRST116') {
+        return res.status(409).json({ error: 'Order was already delivered or payment released. Cannot cancel.' });
+      }
+      return res.status(500).json({ error: 'Failed to cancel order.', details: updateErr.message });
     }
-
-    const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update({ status: 'cancelled', cancellation_reason: reason, updated_at: new Date().toISOString() }).eq('order_display_id', orderId).select('cancellation_fee, order_display_id, status, cancellation_reason').single();
-    if (updateErr) return res.status(500).json({ error: 'Failed to cancel order.', details: updateErr.message });
 
     const cancellationFee = updatedOrder?.cancellation_fee ?? 0;
 
@@ -811,7 +822,7 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
       .eq('order_display_id', order.order_display_id)
       .eq('milestone', 'Order Placed');
 
-    if (order.escrow_status === 'funded') {
+    if (updatedOrder.escrow_status === 'funded') {
       escrowRefund(order.order_display_id).then(({ txHash }) => {
         if (txHash) {
           supabase.from('orders').update({

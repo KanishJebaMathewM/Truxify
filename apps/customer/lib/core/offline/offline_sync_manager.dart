@@ -35,8 +35,8 @@ class OfflineSyncManager {
     await _syncEngine.syncPending();
   }
 
-  Future<void> recordOtpDelivery({required String tripId, required String stopId, required String otp}) async {
-    final event = TripEvent.otpDelivery(tripId, stopId, otp);
+  Future<void> recordOtpDelivery({required String tripId, required String stopId}) async {
+    final event = TripEvent.otpDelivery(tripId, stopId);
     await _db.insert(event);
     await _syncEngine.syncPending();
   }

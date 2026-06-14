@@ -9,15 +9,36 @@ const router = express.Router();
 // 🛡️ OFFLINE SYNC VALIDATION SCHEMAS (ISSUE #362)
 // ============================================================================
 
+// Per-event-type payload validation
+// otpDelivery events are strictly validated — only stopId allowed, no otp field
+// All other event types pass through with generic payload validation
+const otpDeliveryPayloadSchema = z.object({
+  stopId: z.string().min(1),
+}).strict();
+
+function validateEventPayload(type, payload) {
+  if (type === 'otpDelivery') {
+    return otpDeliveryPayloadSchema.safeParse(payload);
+  }
+  if (type === 'gpsUpdate') {
+    return z.object({
+      lat: z.number().min(-90).max(90),
+      lng: z.number().min(-180).max(180),
+      timestampMs: z.number().int().positive().optional(),
+    }).safeParse(payload);
+  }
+  return { success: true, data: payload };
+}
+
+const SENSITIVE_FIELDS = ['otp', 'delivery_otp', 'token', 'secret', 'password'];
+
 // Schema for an individual Trip Event from the Flutter offline database
 const tripEventSchema = z.object({
   id: z.string().min(1, "Event ID is required"),
   trip_id: z.string().optional().nullable(),
   type: z.string().min(1, "Event type is required"),
   occurred_at: z.string().datetime("occurred_at must be a valid ISO 8601 date string"),
-  // Allow flexible metadata payloads (like speed, battery level, etc.)
   payload: z.record(z.any()).optional().default({}),
-  // Tracking the retry count sent by the Flutter SyncEngine
   retry_count: z.number().int().nonnegative().optional().default(0)
 });
 
@@ -77,16 +98,31 @@ router.post('/events/batch', authenticate, validateBatchPayload(batchSyncSchema)
       .maybeSingle();
 
     if (existingBatch) {
-      console.log(`[SyncEngine] Ignored duplicate batch: ${idempotencyKey}`);
+      console.log('[SyncEngine] Ignored duplicate batch:', idempotencyKey);
       // Return 202 Accepted so the Flutter app marks them as synced locally
       return res.status(202).json({ message: 'Batch already processed.' });
     }
 
-    // 2. Prepare data for bulk upsert
-    // We map the validated Zod objects to match the database column names
+    // 2. Validate per-event-type payloads and strip sensitive fields
+    for (const event of events) {
+      const result = validateEventPayload(event.type, event.payload || {});
+      if (!result.success) {
+        console.warn('[SyncEngine] Invalid payload for event', event.id, '(type:', event.type, '):', result.error.issues);
+        return res.status(422).json({
+          error: 'Unprocessable Entity: Invalid event payload for type ' + event.type,
+          details: result.error.issues,
+        });
+      }
+    }
+
     const recordsToInsert = events.map(event => {
       const lat = event.payload?.lat !== undefined ? Number(event.payload.lat) : null;
       const lng = event.payload?.lng !== undefined ? Number(event.payload.lng) : null;
+
+      const safeMetadata = { ...event.payload };
+      for (const field of SENSITIVE_FIELDS) {
+        delete safeMetadata[field];
+      }
 
       return {
         event_id: event.id,
@@ -96,7 +132,7 @@ router.post('/events/batch', authenticate, validateBatchPayload(batchSyncSchema)
         event_timestamp: event.occurred_at,
         latitude: lat,
         longitude: lng,
-        metadata: event.payload,
+        metadata: safeMetadata,
         created_at: new Date().toISOString()
       };
     });
@@ -128,13 +164,13 @@ router.post('/events/batch', authenticate, validateBatchPayload(batchSyncSchema)
 
     if (idempotencyError) {
       // Non-fatal error. We processed the events, but failed to log the key.
-      console.warn(`[SyncEngine] Failed to log idempotency key: ${idempotencyKey}`);
+      console.warn('[SyncEngine] Failed to log idempotency key:', idempotencyKey);
     }
 
     // 5. Respond with 202 Accepted
     // This triggers `return true;` in the Flutter SyncEngine, allowing it to
     // clear the local database queue.
-    console.log(`[SyncEngine] Successfully processed batch of ${events.length} events for User: ${userId}`);
+    console.log('[SyncEngine] Successfully processed batch of', events.length, 'events for User:', userId);
     return res.status(202).json({
       message: 'Batch processed successfully',
       processed_count: events.length

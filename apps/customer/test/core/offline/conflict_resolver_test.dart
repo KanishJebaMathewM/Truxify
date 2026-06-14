@@ -21,14 +21,14 @@ void main() {
     test('deduplicates OTP delivery events by trip and stop', () {
       final resolver = ConflictResolver();
       final events = <TripEvent>[
-        TripEvent.otpDelivery('trip-1', 'stop-1', '123456', occurredAt: '2024-01-01T00:00:00.000Z'),
-        TripEvent.otpDelivery('trip-1', 'stop-1', '123456', occurredAt: '2024-01-01T00:00:01.000Z'),
+        TripEvent.otpDelivery('trip-1', 'stop-1', occurredAt: '2024-01-01T00:00:00.000Z'),
+        TripEvent.otpDelivery('trip-1', 'stop-1', occurredAt: '2024-01-01T00:00:01.000Z'),
       ];
 
       final resolved = resolver.resolve(events);
 
       expect(resolved, hasLength(1));
-      expect(resolved.single.payload['otp'], '123456');
+      expect(resolved.single.payload['stopId'], 'stop-1');
     });
   });
 }

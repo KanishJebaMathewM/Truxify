@@ -42,8 +42,7 @@ class TripEvent {
 
   factory TripEvent.otpDelivery(
     String tripId,
-    String stopId,
-    String otp, {
+    String stopId, {
     String? id,
     String? occurredAt,
     String syncStatus = 'pending',
@@ -53,7 +52,7 @@ class TripEvent {
       id: id ?? const Uuid().v4(),
       tripId: tripId,
       type: 'otpDelivery',
-      payload: {'stopId': stopId, 'otp': otp},
+      payload: {'stopId': stopId},
       occurredAt: occurredAt ?? DateTime.now().toUtc().toIso8601String(),
       syncStatus: syncStatus,
       retryCount: retryCount,

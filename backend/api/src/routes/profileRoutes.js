@@ -80,7 +80,7 @@ router.put('/', authenticate, async (req, res) => {
 
     // Invalidate the profile cache so that the next request retrieves fresh profile data
     if (req.user && req.user.uid) {
-      await invalidateCachedProfile(req.user.uid);
+      void invalidateCachedProfile(req.user.uid);
     }
 
     res.json({

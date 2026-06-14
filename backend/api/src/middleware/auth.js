@@ -61,6 +61,7 @@ export async function authenticate(req, res, next) {
   try {
     let userProfile = null;
     let decoded = null;
+    let firebaseUid = null;
 
     try {
       decoded = jwt.decode(token);
@@ -97,7 +98,7 @@ export async function authenticate(req, res, next) {
         return res.status(500).json({ error: 'Firebase Auth verification is not configured on this server.' });
       }
       const decodedToken = await firebaseAdmin.auth().verifyIdToken(token);
-      const firebaseUid = decodedToken.uid;
+      firebaseUid = decodedToken.uid;
 
       // Check Redis cache first.
       // NOTE: On cache hit, we attach the cached profile directly and skip the DB query entirely
@@ -107,6 +108,12 @@ export async function authenticate(req, res, next) {
       // must explicitly call invalidateCachedProfile(firebaseUid).
       const cachedProfile = await getCachedProfile(firebaseUid);
       if (cachedProfile) {
+        if (cachedProfile.isActive === false) {
+          return res.status(403).json({ 
+            error: 'User profile not found in database.', 
+            hint: 'Register user in profiles table first.' 
+          });
+        }
         req.user = cachedProfile;
         return next();
       }
@@ -130,6 +137,10 @@ export async function authenticate(req, res, next) {
     }
 
     if (!userProfile) {
+      if (firebaseUid) {
+        // Cache the inactive/not-found status as a tombstone to prevent DB load on subsequent requests
+        void setCachedProfile(firebaseUid, { isActive: false });
+      }
       return res.status(403).json({ 
         error: 'User profile not found in database.', 
         hint: 'Register user in profiles table first.' 
@@ -142,7 +153,8 @@ export async function authenticate(req, res, next) {
       uid: userProfile.firebase_uid,
       role: userProfile.role,
       fullName: userProfile.full_name,
-      phone: userProfile.phone
+      phone: userProfile.phone,
+      isActive: true
     };
 
     // Populate cache on successful DB fetch (fire-and-forget to avoid delaying the request critical path)

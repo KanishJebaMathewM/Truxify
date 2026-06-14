@@ -626,9 +626,20 @@ describe('requireRole middleware', () => {
 });
 
 describe('authenticate middleware - Redis caching', () => {
+  let originalBypassAuth;
+
   beforeEach(() => {
+    originalBypassAuth = process.env.BYPASS_AUTH;
     process.env.BYPASS_AUTH = 'false';
     vi.resetModules();
+  });
+
+  afterEach(() => {
+    if (originalBypassAuth === undefined) {
+      delete process.env.BYPASS_AUTH;
+    } else {
+      process.env.BYPASS_AUTH = originalBypassAuth;
+    }
   });
 
   it('retrieves user profile from Redis on cache hit and skips database query', async () => {
@@ -756,7 +767,8 @@ describe('authenticate middleware - Redis caching', () => {
         uid: dbProfile.firebase_uid,
         role: dbProfile.role,
         fullName: dbProfile.full_name,
-        phone: dbProfile.phone
+        phone: dbProfile.phone,
+        isActive: true
       }),
       'EX',
       TTL_SECONDS
@@ -767,7 +779,8 @@ describe('authenticate middleware - Redis caching', () => {
       uid: dbProfile.firebase_uid,
       role: dbProfile.role,
       fullName: dbProfile.full_name,
-      phone: dbProfile.phone
+      phone: dbProfile.phone,
+      isActive: true
     });
   });
 
@@ -846,7 +859,8 @@ describe('authenticate middleware - Redis caching', () => {
       uid: dbProfile.firebase_uid,
       role: dbProfile.role,
       fullName: dbProfile.full_name,
-      phone: dbProfile.phone
+      phone: dbProfile.phone,
+      isActive: true
     });
   });
 });

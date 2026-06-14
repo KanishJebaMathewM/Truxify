@@ -11,10 +11,20 @@ const cacheKey = (firebaseUid) => `user:profile:${firebaseUid}`;
  * 
  * @returns {object|null} The Redis client if configured, or null.
  */
+let hasLoggedRedisClientError = false;
+
 function getRedisClient() {
   try {
     return db.redisClient ?? null;
   } catch (err) {
+    // Under Vitest testing, accessing undefined keys on namespace mock proxies throws.
+    // We suppress mock proxy errors in tests, but log genuine unexpected errors in production once.
+    const isVitestMockError = process.env.NODE_ENV === 'test' || 
+      (err.message && (err.message.includes('mock') || err.message.includes('spy')));
+    if (!isVitestMockError && !hasLoggedRedisClientError) {
+      console.error('Unexpected error resolving redisClient from db config:', err);
+      hasLoggedRedisClientError = true;
+    }
     return null;
   }
 }

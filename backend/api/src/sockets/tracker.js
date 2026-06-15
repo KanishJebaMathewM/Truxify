@@ -528,16 +528,18 @@ export async function closeWebSocketServer() {
     wsHeartbeatInterval = null;
   }
 
-  // Wait for MongoDB to be available before final flush
-  const mongoMaxWaitMs = 10000;
-  const mongoPollIntervalMs = 500;
-  const mongoWaitStart = Date.now();
-  while (!mongoDb && Date.now() - mongoWaitStart < mongoMaxWaitMs) {
-    await new Promise(r => setTimeout(r, mongoPollIntervalMs));
-  }
-  if (!mongoDb) {
-    const dataLoss = telemetryWriteBuffer.length;
-    console.warn(`[TRUXIFY SHUTDOWN] MongoDB not available after waiting. ${dataLoss} telemetry records will be lost.`);
+  // Wait for MongoDB to be available before final flush (skip wait in test environment)
+  if (!process.env.VITEST) {
+    const mongoMaxWaitMs = parseInt(process.env.MONGODB_SHUTDOWN_WAIT_MS || '10000', 10);
+    const mongoPollIntervalMs = 500;
+    const mongoWaitStart = Date.now();
+    while (!mongoDb && Date.now() - mongoWaitStart < mongoMaxWaitMs) {
+      await new Promise(r => setTimeout(r, mongoPollIntervalMs));
+    }
+    if (!mongoDb) {
+      const dataLoss = telemetryWriteBuffer.length;
+      console.warn(`[TRUXIFY SHUTDOWN] MongoDB not available after waiting. ${dataLoss} telemetry records will be lost.`);
+    }
   }
 
   try {

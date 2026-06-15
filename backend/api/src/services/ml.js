@@ -16,26 +16,19 @@ export async function predictDemand(features) {
   const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
   const url = `${baseUrl}/predict/demand`;
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(features),
+    signal: AbortSignal.timeout(5000),
+  });
 
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(features),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`ML Engine prediction request failed: ${response.statusText} (${text})`);
-    }
-
-    return response.json();
-  } finally {
-    clearTimeout(timeoutId);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`ML Engine prediction request failed: ${response.statusText} (${text})`);
   }
+
+  return response.json();
 }

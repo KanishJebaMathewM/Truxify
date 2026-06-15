@@ -1690,6 +1690,61 @@ describe('POST /api/orders/predict-demand — ML demand prediction', () => {
     expect(res.body.error).toBe('Failed to fetch demand prediction from ML engine.');
     expect(res.body.details).toBe('ML service unavailable');
   });
+
+  it('restricts role to customer or driver (returns 403 for admin)', async () => {
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/predict-demand')
+      .set({
+        'x-user-id': '00000000-0000-0000-0000-000000000xyz',
+        'x-user-role': 'admin',
+        'x-user-name': 'Test Admin',
+      })
+      .send({
+        hour: 14.5,
+        day_of_week: 3,
+        temperature: 25,
+        precipitation: 0,
+        historical_volume: 50,
+        nearby_drivers: 15,
+      });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Forbidden: Insufficient privileges.');
+  });
+
+  it('predictDemandLimiter uses user-based rate limiting key generator', async () => {
+    const route = orderRouter.stack.find(s => s.route && s.route.path === '/predict-demand');
+    expect(route).toBeDefined();
+
+    const rateLimitLayer = route.route.stack.find(
+      layer => layer.name === 'rateLimit' || (layer.handle && typeof layer.handle.resetKey === 'function')
+    );
+    expect(rateLimitLayer).toBeDefined();
+
+    const limiter = rateLimitLayer.handle;
+    expect(limiter.getKey).toBeDefined();
+
+    const mockUserVal = 'test-user-rate-limit-123';
+    const mockReq = {
+      user: { id: mockUserVal },
+      ip: '127.0.0.1',
+    };
+    const mockRes = {
+      headersSent: false,
+      setHeader: () => {},
+      getHeader: () => {},
+    };
+    let nextCalled = false;
+    const next = () => { nextCalled = true; };
+
+    await limiter(mockReq, mockRes, next);
+    expect(nextCalled).toBe(true);
+
+    const info = await limiter.getKey(mockUserVal);
+    expect(info).toBeDefined();
+    expect(info.totalHits).toBe(1);
+  });
 });
 
 describe('Customer actions: change-drop and cancel endpoints', () => {

@@ -114,6 +114,12 @@ const verifyDeliveryLimiter = rateLimit({
 const predictDemandLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 10,
+  keyGenerator: (req) => {
+    if (!req.user || !req.user.id) {
+      throw new Error('User is not authenticated');
+    }
+    return req.user.id;
+  },
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many demand prediction requests. Please try again later.' },

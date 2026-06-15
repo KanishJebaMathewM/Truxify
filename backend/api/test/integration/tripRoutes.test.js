@@ -228,4 +228,103 @@ describe('Trip Routes', () => {
         expect(res.status).toBe(500);
         expect(res.body.error).toBe('Database failed to process batch.');
     });
+
+    it('POST /events/batch returns 422 for otpDelivery event containing otp', async () => {
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-otp-leak',
+                events: [
+                    {
+                        id: 'event-otp-leak',
+                        trip_id: 'trip-1',
+                        type: 'otpDelivery',
+                        occurred_at: new Date().toISOString(),
+                        payload: {
+                            stopId: 'stop-1',
+                            otp: '123456',
+                        },
+                    },
+                ],
+            });
+
+        expect(res.status).toBe(422);
+        expect(res.body.error).toContain('Unprocessable Entity: Invalid event payload for type otpDelivery');
+    });
+
+    it('POST /events/batch returns 422 for gpsUpdate event with out of bounds coordinates', async () => {
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-gps-oob',
+                events: [
+                    {
+                        id: 'event-gps-oob',
+                        trip_id: 'trip-1',
+                        type: 'gpsUpdate',
+                        occurred_at: new Date().toISOString(),
+                        payload: {
+                            lat: 95.0,
+                            lng: 72.8777,
+                        },
+                    },
+                ],
+            });
+
+        expect(res.status).toBe(422);
+        expect(res.body.error).toContain('Unprocessable Entity: Invalid event payload for type gpsUpdate');
+    });
+
+    it('POST /events/batch inserts trip events and strips sensitive fields from metadata', async () => {
+        const originalFrom = m.supabase.from.bind(m.supabase);
+        m.supabase.from = table => {
+            const builder = originalFrom(table);
+            if (table === 'trip_events') {
+                builder.upsert = vi.fn(async payload => {
+                    m.calls.push({
+                        table: 'trip_events',
+                        mode: 'upsert',
+                        payload,
+                    });
+                    m.store.trip_events.push(...payload);
+                    return { data: payload, error: null };
+                });
+            }
+            return builder;
+        };
+
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-sensitive-strip',
+                events: [
+                    {
+                        id: 'event-sensitive',
+                        trip_id: 'trip-1',
+                        type: 'gpsUpdate',
+                        occurred_at: new Date().toISOString(),
+                        payload: {
+                            lat: 19.076,
+                            lng: 72.8777,
+                            secret: 'my-sensitive-token',
+                            password: 'my-password',
+                        },
+                    },
+                ],
+            });
+
+        m.supabase.from = originalFrom;
+
+        expect(res.status).toBe(202);
+        const upsertCall = m.calls.find(
+            c => c.table === 'trip_events' && c.mode === 'upsert' && c.payload[0].event_id === 'event-sensitive'
+        );
+        expect(upsertCall).toBeTruthy();
+        expect(upsertCall.payload[0].metadata).not.toHaveProperty('secret');
+        expect(upsertCall.payload[0].metadata).not.toHaveProperty('password');
+        expect(upsertCall.payload[0].metadata.lat).toBe(19.076);
+    });
 });

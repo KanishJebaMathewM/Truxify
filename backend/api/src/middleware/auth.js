@@ -1,5 +1,6 @@
 import { firebaseAdmin, supabase } from '../config/db.js';
 import jwt from 'jsonwebtoken';
+import { getCachedProfile, setCachedProfile, invalidateCachedProfile, TOMBSTONE_TTL_SECONDS, isValidCachedProfile } from '../lib/profileCache.js';
 
 /**
  * Authentication middleware to verify requests using Firebase ID Tokens.
@@ -60,6 +61,7 @@ export async function authenticate(req, res, next) {
   try {
     let userProfile = null;
     let decoded = null;
+    let firebaseUid = null;
 
     try {
       decoded = jwt.decode(token);
@@ -96,7 +98,29 @@ export async function authenticate(req, res, next) {
         return res.status(500).json({ error: 'Firebase Auth verification is not configured on this server.' });
       }
       const decodedToken = await firebaseAdmin.auth().verifyIdToken(token);
-      const firebaseUid = decodedToken.uid;
+      firebaseUid = decodedToken.uid;
+
+      // Check Redis cache first.
+      // NOTE: On cache hit, we attach the cached profile directly and skip the DB query entirely
+      // to reduce database load (per the Acceptance Criteria).
+      // Since all profile mutations in this API (e.g., PUT /api/profile) invalidate the cache,
+      // the cache remains consistent. Any future administrative role or status mutations
+      // must explicitly call invalidateCachedProfile(firebaseUid).
+      const cachedProfile = await getCachedProfile(firebaseUid);
+      if (cachedProfile) {
+        if (!isValidCachedProfile(firebaseUid, cachedProfile)) {
+          void invalidateCachedProfile(firebaseUid);
+        } else {
+          if (cachedProfile.isActive === false) {
+            return res.status(403).json({ 
+              error: 'User profile not found in database.', 
+              hint: 'Register user in profiles table first.' 
+            });
+          }
+          req.user = cachedProfile;
+          return next();
+        }
+      }
 
       if (!supabase) {
         return res.status(500).json({ error: 'Supabase client is not configured on this server.' });
@@ -117,6 +141,10 @@ export async function authenticate(req, res, next) {
     }
 
     if (!userProfile) {
+      if (firebaseUid) {
+        // Cache the inactive/not-found status as a tombstone to prevent DB load on subsequent requests
+        void setCachedProfile(firebaseUid, { isActive: false }, TOMBSTONE_TTL_SECONDS);
+      }
       return res.status(403).json({ 
         error: 'User profile not found in database.', 
         hint: 'Register user in profiles table first.' 
@@ -129,8 +157,14 @@ export async function authenticate(req, res, next) {
       uid: userProfile.firebase_uid,
       role: userProfile.role,
       fullName: userProfile.full_name,
-      phone: userProfile.phone
+      phone: userProfile.phone,
+      isActive: true
     };
+
+    // Populate cache on successful DB fetch (fire-and-forget to avoid delaying the request critical path)
+    if (userProfile.firebase_uid) {
+      void setCachedProfile(userProfile.firebase_uid, req.user);
+    }
 
     next();
   } catch (error) {

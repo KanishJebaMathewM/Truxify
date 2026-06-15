@@ -437,6 +437,12 @@ git commit -m "feat: add profit predictor model"
 git push origin feature/your-feature-name
 ```
 
+### 👥 Contributors
+
+Thanks to all contributors ❤️
+
+[![Contributors](https://contrib.rocks/image?repo=KanishJebaMathewM/Truxify)](https://github.com/KanishJebaMathewM/Truxify/graphs/contributors)
+
 ---
 
 ## 📄 License

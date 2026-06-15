@@ -1,0 +1,258 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import request from 'supertest';
+import express from 'express';
+
+const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
+const m = createSupabaseMock();
+
+vi.mock('../../src/config/db.js', () => ({
+  supabase: m.supabase,
+  firebaseAdmin: null,
+  redisClient: null,
+  mongoDb: null,
+}));
+
+const { default: loadRouter } = await import('../../src/routes/loadRoutes.js');
+
+function buildApp() {
+  const app = express();
+  app.use(express.json());
+  app.use('/api/loads', loadRouter);
+  return app;
+}
+
+const DRIVER_HEADERS = {
+  'x-user-id': 'driver-uuid-123',
+  'x-user-role': 'driver',
+  'x-user-name': 'Test Driver',
+};
+
+const CUSTOMER_HEADERS = {
+  'x-user-id': 'customer-uuid-123',
+  'x-user-role': 'customer',
+  'x-user-name': 'Test Customer',
+};
+
+describe('Load Offers Routes Integration Tests', () => {
+  beforeEach(() => {
+    process.env.BYPASS_AUTH = 'true';
+    process.env.NODE_ENV = 'test';
+    m.store.load_offers = [];
+    m.calls.length = 0;
+  });
+
+  describe('GET /api/loads (Browse Loads)', () => {
+    it('returns 401 if x-user-id header is missing when BYPASS_AUTH is enabled', async () => {
+      const res = await request(buildApp())
+        .get('/api/loads');
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe('Authentication bypassed but x-user-id header is missing.');
+    });
+
+    it('returns 403 if user role is not authorized (driver only)', async () => {
+      const res = await request(buildApp())
+        .get('/api/loads')
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('Forbidden: Insufficient privileges.');
+    });
+
+    it('successfully fetches available load offers with default pagination', async () => {
+      // Pre-load dummy data in available status
+      m.store.load_offers.push({
+        id: 'load-1',
+        pickup_address: 'Chennai Central',
+        drop_address: 'Bangalore City',
+        freight_value: 1200000, // 12000 INR
+        extra_distance_km: 10,
+        status: 'available',
+        goods_type: 'Industrial'
+      });
+
+      const res = await request(buildApp())
+        .get('/api/loads')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.loads).toHaveLength(1);
+      expect(res.body.total).toBe(1);
+      expect(res.body.page).toBe(1);
+      expect(res.body.limit).toBe(10);
+      
+      const load = res.body.loads[0];
+      expect(load.id).toBe('load-1');
+      expect(load.pickup).toBe('Chennai Central');
+      expect(load.destination).toBe('Bangalore City');
+      expect(load.estimated_price).toBe(12000);
+      expect(load.vehicle_type).toBe('Truck');
+    });
+
+    it('rejects invalid pagination parameters', async () => {
+      // Test letters/malformed strings
+      let res = await request(buildApp())
+        .get('/api/loads?page=2abc')
+        .set(DRIVER_HEADERS);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('page must be a valid integer');
+
+      res = await request(buildApp())
+        .get('/api/loads?limit=10.7')
+        .set(DRIVER_HEADERS);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('limit must be a valid integer');
+
+      // Test out of range values
+      res = await request(buildApp())
+        .get('/api/loads?page=0')
+        .set(DRIVER_HEADERS);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('page must be greater than or equal to 1');
+
+      res = await request(buildApp())
+        .get('/api/loads?limit=101')
+        .set(DRIVER_HEADERS);
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('limit must be between 1 and 100');
+    });
+
+    it('applies filters correctly', async () => {
+      m.store.load_offers.push({
+        id: 'load-1',
+        pickup_address: 'Chennai Central',
+        drop_address: 'Bangalore City',
+        freight_value: 1200000,
+        extra_distance_km: 10,
+        status: 'available',
+        goods_type: 'Industrial'
+      });
+
+      const res = await request(buildApp())
+        .get('/api/loads?pickup_location=Chennai&destination=Bangalore&goods_type=Industrial&min_price=10000&max_price=15000&distance=15')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+
+      // Verify DB queries made
+      const call = m.calls.find(c => c.table === 'load_offers' && c.mode === 'select');
+      expect(call).toBeDefined();
+      
+      const filters = call.filters;
+      expect(filters).toContainEqual({ col: 'pickup_address', op: 'ilike', val: '%Chennai%' });
+      expect(filters).toContainEqual({ col: 'drop_address', op: 'ilike', val: '%Bangalore%' });
+      expect(filters).toContainEqual({ col: 'goods_type', op: 'eq', val: 'Industrial' });
+      expect(filters).toContainEqual({ col: 'freight_value', op: 'gte', val: 1000000 });
+      expect(filters).toContainEqual({ col: 'freight_value', op: 'lte', val: 1500000 });
+      expect(filters).toContainEqual({ col: 'extra_distance_km', op: 'lte', val: 15 });
+    });
+
+    it('supports status filtering (open/available maps to available)', async () => {
+      m.store.load_offers.push({
+        id: 'load-1',
+        status: 'available',
+      });
+
+      const res = await request(buildApp())
+        .get('/api/loads?status=open')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      const call = m.calls.find(c => c.table === 'load_offers' && c.mode === 'select');
+      expect(call.filters).toContainEqual({ col: 'status', op: 'eq', val: 'available' });
+    });
+
+    it('returns empty if vehicle_type filter is not Truck', async () => {
+      m.store.load_offers.push({
+        id: 'load-1',
+        status: 'available',
+      });
+
+      const res = await request(buildApp())
+        .get('/api/loads?vehicle_type=Van')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.loads).toHaveLength(0);
+      expect(res.body.total).toBe(0);
+    });
+
+    it('maps sort_by parameters correctly', async () => {
+      // Sort by estimated_price -> maps to freight_value
+      await request(buildApp())
+        .get('/api/loads?sort_by=estimated_price&order=asc')
+        .set(DRIVER_HEADERS);
+
+      let call = m.calls[m.calls.length - 1];
+      expect(call.order).toEqual({ col: 'freight_value', ascending: true });
+
+      // Sort by distance -> maps to extra_distance_km
+      await request(buildApp())
+        .get('/api/loads?sort_by=distance&order=desc')
+        .set(DRIVER_HEADERS);
+
+      call = m.calls[m.calls.length - 1];
+      expect(call.order).toEqual({ col: 'extra_distance_km', ascending: false });
+    });
+
+    it('returns 500 without leaking database details on db error', async () => {
+      m.programError('Internal DB deadlock');
+
+      const res = await request(buildApp())
+        .get('/api/loads')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Failed to fetch load offers.');
+      expect(res.body.details).toBeUndefined();
+    });
+  });
+
+  describe('GET /api/loads/:id (Get Single Load)', () => {
+    it('successfully gets a single available load', async () => {
+      m.store.load_offers.push({
+        id: 'load-123',
+        pickup_address: 'Pune',
+        drop_address: 'Mumbai',
+        freight_value: 500000,
+        status: 'available',
+      });
+
+      const res = await request(buildApp())
+        .get('/api/loads/load-123')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.load.id).toBe('load-123');
+      expect(res.body.load.pickup).toBe('Pune');
+      expect(res.body.load.destination).toBe('Mumbai');
+      expect(res.body.load.estimated_price).toBe(5000);
+    });
+
+    it('returns 404 if load not found or status is not available', async () => {
+      m.store.load_offers.push({
+        id: 'load-claimed',
+        status: 'claimed',
+      });
+
+      const res = await request(buildApp())
+        .get('/api/loads/load-claimed')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toBe('Load offer not found or no longer available.');
+    });
+
+    it('returns 500 on db error without exposing details', async () => {
+      m.programError('Fatal PostgreSQL failure');
+
+      const res = await request(buildApp())
+        .get('/api/loads/some-id')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Failed to fetch load offer.');
+      expect(res.body.details).toBeUndefined();
+    });
+  });
+});

@@ -28,19 +28,13 @@ const loginSubtitle = 'Log in to start earning';
 final DateTime driverMockNow = DateTime.now();
 final int driverMonthlyEarningsInr =
     DriverMetrics.tryParseInrAmount(driverEarningsMonth) ??
-        DriverMetrics.monthlyEarningsInrFromHistory(tripHistory,
-            now: driverMockNow);
+        DriverMetrics.monthlyEarningsInrFromHistory(tripHistory, now: driverMockNow);
 final String driverMonthlyEarningsLabel =
     DriverMetrics.formatInrCompact(driverMonthlyEarningsInr);
 final String driverTimeSinceLastTripLabel =
     DriverMetrics.timeSinceLastTripLabel(tripHistory, now: driverMockNow);
 
-const availableFilterChips = [
-  'All',
-  'Best Profit',
-  'Nearest',
-  'Earliest Pickup'
-];
+const availableFilterChips = ['All', 'Best Profit', 'Nearest', 'Earliest Pickup'];
 const tripHistoryFilters = ['This Week', 'This Month', 'All Time'];
 
 const List<DemandRoute> demandRoutes = [
@@ -75,8 +69,7 @@ const List<RouteMapPoint> activeRouteMapPoints = [
     id: 'vadodara-toll',
     title: 'Vadodara Toll',
     subtitle: 'Checkpoint',
-    details:
-        'Unclaimed road checkpoint on the corridor. Tap to claim if you are covering it.',
+    details: 'Unclaimed road checkpoint on the corridor. Tap to claim if you are covering it.',
     progress: 0.34,
     claimed: false,
     icon: Icons.toll_rounded,
@@ -100,8 +93,7 @@ const List<RouteMapPoint> activeRouteMapPoints = [
     id: 'jaipur-drop',
     title: 'Jaipur Drop',
     subtitle: 'Destination',
-    details:
-        'Final drop location. This remains unclaimed until the truck reaches Jaipur.',
+    details: 'Final drop location. This remains unclaimed until the truck reaches Jaipur.',
     progress: 0.94,
     claimed: false,
     icon: Icons.location_on_rounded,
@@ -390,6 +382,37 @@ const List<TripRecord> tripHistory = [
   ),
 ];
 
+const List<DocumentRecord> documentRecords = [
+  DocumentRecord(
+    title: 'RC Book',
+    subtitle: 'Truck: TN 45 AB 1234',
+    statusLabel: 'Verified via Digilocker ✅',
+    statusTone: 'verified',
+    docNumber: 'TN-45-AB-1234',
+    lastVerified: '1 Jan 2024',
+    validUntil: '2034',
+  ),
+  DocumentRecord(
+    title: 'Driving Licence',
+    subtitle: 'Licence No: TN1234567890',
+    statusLabel: 'Verified via Digilocker ✅',
+    statusTone: 'verified',
+    docNumber: 'TN1234567890',
+    lastVerified: '1 Jan 2024',
+    validUntil: '2030',
+  ),
+  DocumentRecord(
+    title: 'Insurance',
+    subtitle: 'Policy: HDFC ERGO',
+    statusLabel: 'Expiring Soon ⚠️',
+    statusTone: 'warning',
+    docNumber: 'HDFC-ERGO-12345',
+    lastVerified: '1 Jan 2024',
+    validUntil: 'Dec 2025',
+    ctaLabel: 'Renew Insurance',
+  ),
+];
+
 /// Lookup map: loadOfferId → LoadOffer.
 /// Used by [LoadPointDetailScreen] to resolve a map point to its full load data.
 final Map<String, LoadOffer> loadOfferById = {
@@ -583,3 +606,4 @@ const List<PendingPayment> pendingPayments = [
     note: 'Releasing on delivery',
   ),
 ];
+

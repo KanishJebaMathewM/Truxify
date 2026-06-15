@@ -5,6 +5,9 @@ import 'package:truxify/widgets/menu_item.dart';
 
 import '../controllers/app_controller.dart';
 import '../core/offline/cache/cache_manager.dart';
+import '../repositories/address_repository.dart';
+import '../repositories/payment_repository.dart';
+import '../services/profile_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
 import 'about_screen.dart';
@@ -24,16 +27,20 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  static const _profileName = 'Karthik Murugan';
-  static const _companyName = 'Sri Murugan Textiles';
-  static const _phoneNumber = '+91 98765 43210';
-
+  final _profileService = ProfileService();
+  final _paymentRepo = PaymentRepository();
+  final _addressRepo = AddressRepository();
   final CacheManager _cacheManager = CacheManager();
   bool _isOffline = false;
   String? _lastUpdatedLabel;
-  String _displayName = _profileName;
-  String _displayCompany = _companyName;
-  String _displayPhone = _phoneNumber;
+  String _displayName = '';
+  String _displayCompany = '';
+  String _displayPhone = '';
+  String? _defaultPaymentLabel;
+  String? _defaultAddressLabel;
+  int _totalOrders = 0;
+  num _totalSaved = 0;
+  num _co2ReducedKg = 0;
 
   @override
   void initState() {
@@ -43,22 +50,90 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadProfile() async {
     final connectivity = await Connectivity().checkConnectivity();
-    final hasNetwork = connectivity.isNotEmpty && !connectivity.contains(ConnectivityResult.none);
+    final hasNetwork = connectivity.isNotEmpty &&
+        !connectivity.contains(ConnectivityResult.none);
     await _cacheManager.open();
-    await _cacheManager.cacheProfile({
-      'name': _profileName,
-      'company': _companyName,
-      'phone': _phoneNumber,
-    });
+
+    if (hasNetwork) {
+      try {
+        final profileResponse = await _profileService.fetchProfile();
+        final profile = profileResponse['profile'] as Map<String, dynamic>?;
+        final extra = profileResponse['extra'] as Map<String, dynamic>?;
+
+        if (profile != null) {
+          await _cacheManager.cacheProfile({
+            'name': profile['fullName']?.toString() ?? '',
+            'company': profile['companyName']?.toString() ?? '',
+            'phone': profile['phone']?.toString() ?? '',
+            'totalOrders': extra?['totalOrders']?.toString() ?? '0',
+            'totalSaved': extra?['totalSaved']?.toString() ?? '0',
+            'co2ReducedKg': extra?['co2ReducedKg']?.toString() ?? '0',
+          });
+        }
+
+        final methods = await _paymentRepo.fetchAll();
+        final addresses = await _addressRepo.fetchAll();
+
+        if (!mounted) return;
+
+        setState(() {
+          _isOffline = false;
+          _displayName = profile?['fullName']?.toString() ?? '';
+          _displayCompany = profile?['companyName']?.toString() ?? '';
+          _displayPhone = profile?['phone']?.toString() ?? '';
+
+          String? defaultPayment;
+          for (final m in methods) {
+            if (m.isDefault) {
+              defaultPayment = m.displayLabel;
+              break;
+            }
+          }
+          _defaultPaymentLabel = defaultPayment;
+
+          String? defaultAddress;
+          for (final a in addresses) {
+            if (a.isDefault) {
+              defaultAddress = a.label;
+              break;
+            }
+          }
+          _defaultAddressLabel = defaultAddress;
+
+          final rawOrders = extra?['totalOrders'];
+          _totalOrders = rawOrders is int
+              ? rawOrders
+              : (rawOrders != null ? (int.tryParse(rawOrders.toString()) ?? 0) : 0);
+
+          final rawSaved = extra?['totalSaved'];
+          _totalSaved = rawSaved is num
+              ? rawSaved
+              : (rawSaved != null ? (num.tryParse(rawSaved.toString()) ?? 0) : 0);
+
+          final rawCo2 = extra?['co2ReducedKg'];
+          _co2ReducedKg = rawCo2 is num
+              ? rawCo2
+              : (rawCo2 != null ? (num.tryParse(rawCo2.toString()) ?? 0) : 0);
+
+          _lastUpdatedLabel = DateTime.now().toIso8601String();
+        });
+        return;
+      } catch (e) {
+        debugPrint('Failed to load profile from backend: $e');
+      }
+    }
 
     final cachedProfile = await _cacheManager.getProfile();
     if (!mounted) return;
 
     setState(() {
       _isOffline = !hasNetwork;
-      _displayName = cachedProfile?['name']?.toString() ?? _profileName;
-      _displayCompany = cachedProfile?['company']?.toString() ?? _companyName;
-      _displayPhone = cachedProfile?['phone']?.toString() ?? _phoneNumber;
+      _displayName = cachedProfile?['name']?.toString() ?? '';
+      _displayCompany = cachedProfile?['company']?.toString() ?? '';
+      _displayPhone = cachedProfile?['phone']?.toString() ?? '';
+      _totalOrders = int.tryParse(cachedProfile?['totalOrders']?.toString() ?? '0') ?? 0;
+      _totalSaved = num.tryParse(cachedProfile?['totalSaved']?.toString() ?? '0') ?? 0;
+      _co2ReducedKg = num.tryParse(cachedProfile?['co2ReducedKg']?.toString() ?? '0') ?? 0;
       _lastUpdatedLabel = cachedProfile?['_cached_at']?.toString();
     });
   }
@@ -164,14 +239,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
                 child: Text(
                   'Offline mode • Last updated ${_formatLastUpdated(_lastUpdatedLabel)}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.accentDark),
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: TruxifyColors.accentDark),
                 ),
               ),
             Transform.translate(
               offset: const Offset(0, -18),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: _StatsCard(),
+                child: _StatsCard(
+                  totalOrders: _totalOrders,
+                  totalSaved: _totalSaved,
+                  co2ReducedKg: _co2ReducedKg,
+                ),
               ),
             ),
             const SizedBox(height: 10),
@@ -186,6 +268,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   MenuItem(
                     icon: Icons.credit_card_rounded,
                     label: 'Payment Methods',
+                    trailing: _defaultPaymentLabel,
                     onTap: () => Navigator.of(context).push(AppPageRoute(
                         builder: (_) => const PaymentMethodsScreen())),
                   ),
@@ -198,6 +281,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   MenuItem(
                     icon: Icons.location_on_rounded,
                     label: 'Saved Addresses',
+                    trailing: _defaultAddressLabel,
                     showDivider: false,
                     onTap: () => Navigator.of(context).push(AppPageRoute(
                         builder: (_) => const SavedAddressesScreen())),
@@ -214,7 +298,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: MenuCard(
                 children: [
-                  _DarkModeMenuItem(),
+                  const _ThemeModeTile(),
                   MenuItem(
                     icon: Icons.language_rounded,
                     label: 'Language',
@@ -289,6 +373,16 @@ class _SectionLabel extends StatelessWidget {
 }
 
 class _StatsCard extends StatelessWidget {
+  const _StatsCard({
+    required this.totalOrders,
+    required this.totalSaved,
+    required this.co2ReducedKg,
+  });
+
+  final int totalOrders;
+  final num totalSaved;
+  final num co2ReducedKg;
+
   @override
   Widget build(BuildContext context) {
     final surface = Theme.of(context).colorScheme.surface;
@@ -309,7 +403,7 @@ class _StatsCard extends StatelessWidget {
         children: [
           Expanded(
             child: _StatColumn(
-              value: '28',
+              value: '$totalOrders',
               label: 'Orders',
               valueSize: 20,
               addRightDivider: true,
@@ -318,7 +412,8 @@ class _StatsCard extends StatelessWidget {
           ),
           Expanded(
             child: _StatColumn(
-              value: '₹42.8k',
+              value:
+                  '₹${(totalSaved / 100).toStringAsFixed(totalSaved % 100 == 0 ? 0 : 2)}',
               label: 'Saved',
               valueSize: 16,
               addRightDivider: true,
@@ -327,7 +422,7 @@ class _StatsCard extends StatelessWidget {
           ),
           Expanded(
             child: _StatColumn(
-              value: '124',
+              value: '$co2ReducedKg',
               label: 'kg CO2',
               valueSize: 20,
               dividerColor: dividerColor,
@@ -388,16 +483,22 @@ class _StatColumn extends StatelessWidget {
   }
 }
 
-class _DarkModeMenuItem extends StatelessWidget {
-  const _DarkModeMenuItem();
+class _ThemeModeTile extends StatelessWidget {
+  const _ThemeModeTile();
 
   @override
   Widget build(BuildContext context) {
     final controller = TruxifyScope.of(context);
     final currentTheme = controller.themeMode;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final selectedTheme = currentTheme == ThemeMode.system
+        ? (isDark ? ThemeMode.dark : ThemeMode.light)
+        : currentTheme;
+
     final iconBg =
         isDark ? TruxifyColors.darkAccentLight : TruxifyColors.accentLight;
+
     return Column(
       children: [
         Padding(
@@ -411,8 +512,11 @@ class _DarkModeMenuItem extends StatelessWidget {
                   color: iconBg,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.dark_mode_rounded,
-                    size: 17, color: TruxifyColors.accent),
+                child: const Icon(
+                  Icons.dark_mode_rounded,
+                  size: 17,
+                  color: TruxifyColors.accent,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -424,24 +528,31 @@ class _DarkModeMenuItem extends StatelessWidget {
                       ),
                 ),
               ),
-              Text(
-                currentTheme.name[0].toUpperCase() +
-                    currentTheme.name.substring(1),
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: TruxifyColors.adaptiveSecondaryText(context),
+              SegmentedButton<ThemeMode>(
+                showSelectedIcon: false,
+                style: ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  padding: WidgetStateProperty.all(
+                    const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
                     ),
-              ),
-              PopupMenuButton<ThemeMode>(
-                onSelected: controller.setThemeMode,
-                icon: Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  color: TruxifyColors.adaptiveSecondaryText(context),
+                  ),
                 ),
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: ThemeMode.system, child: Text('System')),
-                  PopupMenuItem(value: ThemeMode.light, child: Text('Light')),
-                  PopupMenuItem(value: ThemeMode.dark, child: Text('Dark')),
+                segments: const [
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.light,
+                    label: Text('Light'),
+                  ),
+                  ButtonSegment<ThemeMode>(
+                    value: ThemeMode.dark,
+                    label: Text('Dark'),
+                  ),
                 ],
+                selected: {selectedTheme},
+                onSelectionChanged: (selection) {
+                  controller.setThemeMode(selection.first);
+                },
               ),
             ],
           ),

@@ -3,8 +3,47 @@ import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { driverOnlineSchema, withdrawSchema } from '../validation/requestSchemas.js';
+import rateLimit from 'express-rate-limit';
+import { z } from 'zod';
 
 const router = express.Router();
+
+const loginOtpSchema = z.object({
+  phone: z.string().trim().min(10).max(20),
+  otp: z.string().regex(/^\d{4}$/, { message: 'OTP must be 4 digits' }),
+});
+
+const verifyLoginOtpLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many OTP verification attempts. Please try again later.' },
+});
+
+router.post('/otp/verify', verifyLoginOtpLimiter, validateBody(loginOtpSchema), async (req, res) => {
+  const { phone, otp } = req.body;
+  const expectedOtp = (process.env.DRIVER_LOGIN_OTP || '1234').trim();
+
+  if (process.env.NODE_ENV === 'production' && !process.env.DRIVER_LOGIN_OTP) {
+    return res.status(503).json({
+      error: 'Driver login OTP verification is not configured on this server.',
+    });
+  }
+
+  if (process.env.DRIVER_LOGIN_PHONE && phone !== process.env.DRIVER_LOGIN_PHONE.trim()) {
+    return res.status(400).json({ error: 'Invalid phone number for OTP verification.' });
+  }
+
+  if (otp !== expectedOtp) {
+    return res.status(400).json({ error: 'Invalid OTP. Please try again.' });
+  }
+
+  return res.json({
+    message: 'OTP verified successfully.',
+    verified: true,
+  });
+});
 
 // ============================================================================
 // 1. GET DRIVER STATS (DRIVER)

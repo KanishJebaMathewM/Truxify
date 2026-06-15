@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:truxify/theme/app_theme.dart';
 
-import '../data/mock_data.dart';
 import '../models/app_models.dart';
+import '../services/order_service.dart';
 import '../widgets/truck_card.dart';
 
 class TruckResultsScreen extends StatefulWidget {
@@ -16,12 +16,64 @@ class TruckResultsScreen extends StatefulWidget {
 
 class _TruckResultsScreenState extends State<TruckResultsScreen> {
   int _selectedSort = 0;
+  List<TruckResultData>? _trucks;
+  bool _isLoading = true;
+  String? _error;
+
   static const _sortChips = [
     'Best Match',
     'Cheapest',
     'Fastest',
     'Top Rated',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchTrucks();
+  }
+
+  Future<void> _fetchTrucks() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final draft = widget.draft;
+      final weight = double.tryParse(draft.weightTonnes) ?? 0;
+
+      if (draft.pickupLat == null || draft.pickupLng == null ||
+          draft.dropLat == null || draft.dropLng == null) {
+        setState(() {
+          _error = 'Please select pickup and drop locations on the map.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final service = OrderService();
+      final results = await service.searchTrucks(
+        pickupLat: draft.pickupLat!,
+        pickupLng: draft.pickupLng!,
+        dropLat: draft.dropLat!,
+        dropLng: draft.dropLng!,
+        weightTonnes: weight,
+        isFragile: draft.fragile,
+        isStackable: draft.stacked,
+      );
+
+      setState(() {
+        _trucks = results.map((j) => TruckResultData.fromJson(j)).toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString().replaceFirst('StateError: ', '');
+        _isLoading = false;
+      });
+    }
+  }
 
   int _price(String price) {
     return int.parse(
@@ -40,7 +92,7 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
   }
 
   List<TruckResultData> get sortedTrucks {
-    final trucks = List<TruckResultData>.from(mockTruckResults);
+    final trucks = List<TruckResultData>.from(_trucks ?? []);
 
     switch (_selectedSort) {
       case 0: // Best Match
@@ -67,6 +119,90 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Finding trucks...'),
+          leading: IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_error != null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Search Failed'),
+          leading: IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.error_outline_rounded, size: 48,
+                    color: Theme.of(context).colorScheme.error),
+                const SizedBox(height: 16),
+                Text(
+                  _error!,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: _fetchTrucks,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_trucks == null || _trucks!.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('No trucks found'),
+          leading: IconButton(
+            onPressed: () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.local_shipping_rounded, size: 48,
+                    color: TruxifyColors.adaptiveSecondaryText(context)),
+                const SizedBox(height: 16),
+                Text(
+                  'No available trucks match your route and cargo. Try adjusting your search criteria.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+                const SizedBox(height: 24),
+                OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Adjust Search'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     final results = sortedTrucks;
 
     return Scaffold(
@@ -78,8 +214,8 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
         ),
         actions: [
           IconButton(
-            onPressed: () {}, // Filter Section to be implemented
-            icon: const Icon(Icons.sort_rounded),
+            onPressed: _fetchTrucks,
+            icon: const Icon(Icons.refresh_rounded),
           ),
         ],
       ),

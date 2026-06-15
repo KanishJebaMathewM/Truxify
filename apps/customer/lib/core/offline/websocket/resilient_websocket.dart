@@ -4,11 +4,19 @@ import 'dart:convert';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class ResilientWebSocket {
-  ResilientWebSocket(this.url, {this.initialDelay = const Duration(seconds: 2), this.maxDelay = const Duration(seconds: 60)});
+  ResilientWebSocket(
+    this.url, {
+    this.initialDelay = const Duration(seconds: 2),
+    this.maxDelay = const Duration(seconds: 60),
+    this.onConnect,
+    this.urlFactory,
+  });
 
   final String url;
   final Duration initialDelay;
   final Duration maxDelay;
+  final void Function()? onConnect;
+  final String Function()? urlFactory;
 
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
@@ -29,7 +37,8 @@ class ResilientWebSocket {
 
   Future<void> _connectOnce() async {
     try {
-      _channel = WebSocketChannel.connect(Uri.parse(url));
+      final targetUrl = urlFactory != null ? urlFactory!() : url;
+      _channel = WebSocketChannel.connect(Uri.parse(targetUrl));
       _subscription = _channel!.stream.listen(
         (message) {
           _controller.add(message);
@@ -38,6 +47,7 @@ class ResilientWebSocket {
         onError: (_) => _scheduleReconnect(),
       );
       _startHeartbeat();
+      onConnect?.call();
     } catch (_) {
       _scheduleReconnect();
     }

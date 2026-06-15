@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import '../services/order_service.dart';
+import '../services/voice_ai_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/offline/websocket/resilient_websocket.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/timeline_connector.dart';
@@ -21,32 +24,144 @@ class LiveTrackingScreen extends StatefulWidget {
 
 class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _truckController;
+  late final AnimationController _movementController;
   late final OrderService _orderService;
   List<Map<String, dynamic>> _timeline = [];
   Map<String, dynamic>? _order;
   RealtimeChannel? _ordersChannel;
   List<LatLng> _routePoints = const [_fallbackPickupPoint, _fallbackDropPoint];
 
+  static const String _loadingDriverText = 'Loading driver...';
+  static const String _loadingTruckText = 'Loading truck...';
+  static const String _fallbackDriverText = 'Driver not assigned';
+  static const String _fallbackTruckText = 'Truck not assigned';
+
+  String _driverName = _loadingDriverText;
+  String _truckNumber = _loadingTruckText;
+  bool _isLoadingDetails = false;
+  LatLng? _previousPosition;
+  LatLng? _currentPosition;
+  ResilientWebSocket? _trackingWebSocket;
+  StreamSubscription? _trackingSubscription;
+
   @override
   void initState() {
     super.initState();
 
     _orderService = OrderService();
-    _truckController =
-        AnimationController(vsync: this, duration: const Duration(seconds: 9))
-          ..repeat();
+    _movementController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
 
     _loadOrder();
     _loadTimeline();
     _subscribeToOrderUpdates();
+    _subscribeToTracking();
   }
 
   @override
   void dispose() {
-    _truckController.dispose();
+    _movementController.dispose();
     _ordersChannel?.unsubscribe();
+    _trackingSubscription?.cancel();
+    _trackingWebSocket?.close();
     super.dispose();
+  }
+
+  void _subscribeToTracking() {
+    final apiBaseUrl = OrderService.defaultApiBaseUrl;
+    final baseUri = Uri.parse(apiBaseUrl);
+    final wsScheme = baseUri.scheme == 'https' ? 'wss' : 'ws';
+    
+    var wsPath = baseUri.path;
+    if (wsPath.endsWith('/')) {
+      wsPath = wsPath.substring(0, wsPath.length - 1);
+    }
+    wsPath = '$wsPath/ws/tracking';
+
+    String buildUrl() {
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken ?? '';
+      final wsUri = Uri(
+        scheme: wsScheme,
+        host: baseUri.host,
+        port: baseUri.hasPort ? baseUri.port : null,
+        path: wsPath,
+        queryParameters: token.isNotEmpty ? {'token': token} : null,
+      );
+      return wsUri.toString();
+    }
+
+    final initialWsUrl = buildUrl();
+    final initialUri = Uri.parse(initialWsUrl);
+    final redactedUrl = initialUri.replace(queryParameters: initialUri.queryParameters.containsKey('token') ? {'token': '[REDACTED]'} : null).toString();
+    debugPrint('Connecting to tracking WebSocket at: $redactedUrl');
+
+    _trackingWebSocket = ResilientWebSocket(
+      initialWsUrl,
+      urlFactory: buildUrl,
+      onConnect: () {
+        debugPrint('WebSocket connected, subscribing to order updates...');
+        _trackingWebSocket?.send({
+          'event': 'subscribe_tracking',
+          'data': {
+            'order_display_id': widget.orderId,
+          },
+        });
+      },
+    );
+
+    _trackingSubscription = _trackingWebSocket!.stream.listen((message) {
+      debugPrint('Tracking WebSocket message received: $message');
+      try {
+        if (message == 'pong') return;
+        final payload = jsonDecode(message as String) as Map<String, dynamic>;
+
+        if (payload['event'] == 'location_update') {
+          final data = payload['data'] as Map<String, dynamic>?;
+          if (data != null) {
+            final lat = (data['latitude'] as num?)?.toDouble();
+            final lng = (data['longitude'] as num?)?.toDouble();
+
+            if (lat != null && lng != null && mounted) {
+              _updateTruckPosition(LatLng(lat, lng));
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Error parsing tracking WebSocket message: $e');
+      }
+    });
+
+    _trackingWebSocket!.connect();
+  }
+
+  void _updateTruckPosition(LatLng newPosition) {
+    if (!mounted) return;
+
+    if (_currentPosition == null) {
+      setState(() {
+        _currentPosition = newPosition;
+      });
+      return;
+    }
+
+    setState(() {
+      if (_previousPosition != null && _movementController.isAnimating) {
+        final t = _movementController.value;
+        _previousPosition = LatLng(
+          _previousPosition!.latitude +
+              (_currentPosition!.latitude - _previousPosition!.latitude) * t,
+          _previousPosition!.longitude +
+              (_currentPosition!.longitude - _previousPosition!.longitude) * t,
+        );
+      } else {
+        _previousPosition = _currentPosition;
+      }
+      _currentPosition = newPosition;
+    });
+    _movementController.forward(from: 0.0);
   }
 
   Future<void> _loadOrder() async {
@@ -57,8 +172,46 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
       if (!mounted) return;
 
+      bool isStale = false;
       setState(() {
+        if (_order != null && order != null) {
+          final existingUpdated =
+              DateTime.tryParse(_order?['updated_at']?.toString() ?? '');
+          final newUpdated =
+              DateTime.tryParse(order['updated_at']?.toString() ?? '');
+          if (existingUpdated != null &&
+              newUpdated != null &&
+              newUpdated.isBefore(existingUpdated)) {
+            isStale = true;
+            return;
+          }
+        }
+
         _order = order;
+
+        if (order != null) {
+          final dn = order['driver_name']?.toString().trim();
+          final tn = order['truck_number']?.toString().trim();
+
+          if (dn != null && dn.isNotEmpty) {
+            _driverName = dn;
+          } else if (order['driver_id'] == null) {
+            _driverName = _fallbackDriverText;
+          } else {
+            _driverName = _loadingDriverText;
+          }
+
+          if (tn != null && tn.isNotEmpty) {
+            _truckNumber = tn;
+          } else if (order['truck_id'] == null) {
+            _truckNumber = _fallbackTruckText;
+          } else {
+            _truckNumber = _loadingTruckText;
+          }
+        } else {
+          _driverName = _fallbackDriverText;
+          _truckNumber = _fallbackTruckText;
+        }
 
         final pickupLat = (order?['pickup_lat'] as num?)?.toDouble();
         final pickupLng = (order?['pickup_lng'] as num?)?.toDouble();
@@ -75,8 +228,76 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
           ];
         }
       });
+
+      if (isStale) return;
+
+      if (order != null) {
+        await _fetchDriverAndTruck(order['driver_id'], order['truck_id']);
+      }
     } catch (e) {
       debugPrint('Failed to load order: $e');
+    }
+  }
+
+  Future<void> _fetchDriverAndTruck(dynamic driverId, dynamic truckId) async {
+    if (driverId == null && truckId == null) {
+      if (mounted) {
+        setState(() {
+          _driverName = _fallbackDriverText;
+          _truckNumber = _fallbackTruckText;
+          _isLoadingDetails = false;
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _isLoadingDetails = true;
+      });
+    }
+
+    try {
+      final results = await Future.wait<String?>([
+        driverId != null
+            ? _orderService.fetchDriverName(driverId.toString())
+            : Future.value(null),
+        truckId != null
+            ? _orderService.fetchTruckNumber(truckId.toString())
+            : Future.value(null),
+      ]);
+
+      if (!mounted) return;
+
+      if (_order?['driver_id'] != driverId || _order?['truck_id'] != truckId) {
+        return;
+      }
+
+      setState(() {
+        final dnFallback = _order?['driver_name']?.toString().trim();
+        _driverName = results[0] ??
+            (dnFallback != null && dnFallback.isNotEmpty ? dnFallback : _fallbackDriverText);
+
+        final tnFallback = _order?['truck_number']?.toString().trim();
+        _truckNumber = results[1] ??
+            (tnFallback != null && tnFallback.isNotEmpty ? tnFallback : _fallbackTruckText);
+        _isLoadingDetails = false;
+      });
+    } catch (e) {
+      debugPrint('Error fetching driver/truck details: $e');
+      if (!mounted) return;
+
+      if (_order?['driver_id'] != driverId || _order?['truck_id'] != truckId) {
+        return;
+      }
+
+      setState(() {
+        _isLoadingDetails = false;
+        final dnFallback = _order?['driver_name']?.toString().trim();
+        _driverName = dnFallback != null && dnFallback.isNotEmpty ? dnFallback : _fallbackDriverText;
+        final tnFallback = _order?['truck_number']?.toString().trim();
+        _truckNumber = tnFallback != null && tnFallback.isNotEmpty ? tnFallback : _fallbackTruckText;
+      });
     }
   }
 
@@ -115,7 +336,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                       ?.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: 8),
               Text(
-                'Your truck is near Vadodara, expected by 4:30 PM today',
+                VoiceAiService.buildResponse(VoiceAiOrderInput.fromMap(_order)),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                     color: TruxifyColors.adaptiveSecondaryText(context)),
@@ -133,9 +354,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   }
 
   Future<void> _showCallDriver() async {
-    final driverName =
-        _order?['driver_id']?.toString() ?? 'Driver not assigned';
-    final truckNumber = _order?['truck_id']?.toString() ?? 'Truck not assigned';
+    final driverName = _driverName;
+    final truckNumber = _truckNumber;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -181,100 +401,173 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   }
 
   Future<void> _showChangeDrop() async {
-    final newDropController = TextEditingController(text: 'Bhiwadi, Rajasthan');
+    final newDropController = TextEditingController(text: _order?['drop_address']?.toString() ?? '');
+    final latController = TextEditingController(text: (_order?['drop_lat']?.toString() ?? ''));
+    final lngController = TextEditingController(text: (_order?['drop_lng']?.toString() ?? ''));
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        return Padding(
-          padding:
-              EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-          child: Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface,
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Change Drop',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleLarge
-                        ?.copyWith(fontWeight: FontWeight.w800)),
-                const SizedBox(height: 14),
-                TextField(
-                    controller: newDropController,
-                    decoration:
-                        const InputDecoration(labelText: 'New drop location')),
-                const SizedBox(height: 16),
-                InfoCard(
-                  child: Row(
-                    children: [
-                      const Icon(Icons.attach_money_rounded,
-                          color: TruxifyColors.accentDark),
-                      const SizedBox(width: 10),
-                      Expanded(
-                          child: Text('New estimated price: ₹7,120',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodyLarge
-                                  ?.copyWith(fontWeight: FontWeight.w700))),
-                    ],
+        bool isLoading = false;
+        String? pricingText;
+
+        return StatefulBuilder(builder: (context, setModalState) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Change Drop',
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 14),
+                  TextField(
+                      controller: newDropController,
+                      decoration: const InputDecoration(labelText: 'New drop location')),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    Flexible(
+                      child: TextField(
+                        controller: latController,
+                        keyboardType: TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'Latitude'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: TextField(
+                        controller: lngController,
+                        keyboardType: TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'Longitude'),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 16),
+                  InfoCard(
+                    child: Row(
+                      children: [
+                        const Icon(Icons.attach_money_rounded, color: TruxifyColors.accentDark),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            (pricingText ?? 'New estimated price: calculating...'),
+                            style: Theme.of(context).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                PrimaryButton(
-                    label: 'Request Change',
-                    onPressed: () => Navigator.of(context).pop()),
-              ],
+                  const SizedBox(height: 16),
+                  PrimaryButton(
+                    label: isLoading ? 'Requesting...' : 'Request Change',
+                    onPressed: isLoading
+                        ? null
+                        : () async {
+                            final addr = newDropController.text.trim();
+                            final lat = double.tryParse(latController.text.trim());
+                            final lng = double.tryParse(lngController.text.trim());
+                            if (addr.isEmpty || lat == null || lng == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter valid address and coordinates')));
+                              return;
+                            }
+
+                            setModalState(() => isLoading = true);
+                            try {
+                              final resp = await _orderService.changeDrop(
+                                orderDisplayId: widget.orderId,
+                                dropAddress: addr,
+                                dropLat: lat,
+                                dropLng: lng,
+                              );
+
+                              final pricing = resp['pricing'];
+                              final total = pricing != null ? pricing['total_amount'] : null;
+                              setModalState(() => pricingText = total != null ? 'New estimated price: ₹${total.toString()}' : 'Price updated');
+
+                              // refresh outer order state
+                              await _loadOrder();
+
+                              if (!mounted) return;
+                              Navigator.of(context).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Drop location updated successfully')));
+                            } catch (e) {
+                              setModalState(() => isLoading = false);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to change drop: $e')));
+                            }
+                          },
+                  ),
+                ],
+              ),
             ),
-          ),
-        );
+          );
+        });
       },
     );
+
     newDropController.dispose();
+    latController.dispose();
+    lngController.dispose();
   }
 
   Future<void> _showCancel() async {
+    bool isLoading = false;
+    String? feeText = _order?['cancellation_fee'] != null ? 'Cancellation fee ₹${_order!['cancellation_fee']}' : null;
+
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.warning_amber_rounded,
-                  color: TruxifyColors.warning, size: 42),
-              const SizedBox(height: 10),
-              Text('Cancellation fee ₹680',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800)),
-              const SizedBox(height: 6),
-              Text('This fee is charged for cancelling after assignment.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: TruxifyColors.adaptiveSecondaryText(context))),
-              const SizedBox(height: 18),
-              PrimaryButton(
-                  label: 'Confirm Cancel',
+        return StatefulBuilder(builder: (context, setModalState) {
+          return Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: TruxifyColors.warning, size: 42),
+                const SizedBox(height: 10),
+                Text(feeText ?? 'Cancellation fee calculating...',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 6),
+                Text('This fee is charged for cancelling after assignment.', textAlign: TextAlign.center, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
+                const SizedBox(height: 18),
+                PrimaryButton(
+                  label: isLoading ? 'Cancelling...' : 'Confirm Cancel',
                   backgroundColor: TruxifyColors.error,
-                  onPressed: () => Navigator.of(context).pop()),
-            ],
-          ),
-        );
+                  onPressed: isLoading
+                      ? null
+                      : () async {
+                          setModalState(() => isLoading = true);
+                          try {
+                            final resp = await _orderService.cancelOrder(orderDisplayId: widget.orderId);
+                            final fee = resp['cancellation_fee'];
+                            await _loadOrder();
+                            if (!mounted) return;
+                            Navigator.of(context).pop();
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Order cancelled. Fee: ₹${fee ?? 0}')));
+                          } catch (e) {
+                            setModalState(() => isLoading = false);
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to cancel order: $e')));
+                          }
+                        },
+                ),
+              ],
+            ),
+          );
+        });
       },
     );
   }
@@ -317,39 +610,23 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         .subscribe();
   }
 
-  LatLng _pointAlongRoute(double t) {
-    final points = _routePoints;
-    if (points.length < 2) {
-      return _interpolatePoint(
-        _fallbackPickupPoint,
-        _fallbackDropPoint,
-        t,
+  List<Marker> _buildTruckMarkers() {
+    if (_currentPosition == null) {
+      return const [];
+    }
+
+    LatLng point;
+    if (_previousPosition != null && _movementController.isAnimating) {
+      final t = _movementController.value;
+      point = LatLng(
+        _previousPosition!.latitude +
+            (_currentPosition!.latitude - _previousPosition!.latitude) * t,
+        _previousPosition!.longitude +
+            (_currentPosition!.longitude - _previousPosition!.longitude) * t,
       );
+    } else {
+      point = _currentPosition!;
     }
-
-    final clampedT = t.clamp(0.0, 1.0);
-    final totalSegments = points.length - 1;
-    final scaled = clampedT * totalSegments;
-    final segmentIndex = scaled.floor().clamp(0, totalSegments - 1);
-    final localT = scaled - segmentIndex;
-
-    if (segmentIndex >= totalSegments) {
-      return points.last;
-    }
-
-    return _interpolatePoint(
-        points[segmentIndex], points[segmentIndex + 1], localT);
-  }
-
-  LatLng _interpolatePoint(LatLng start, LatLng end, double t) {
-    return LatLng(
-      start.latitude + ((end.latitude - start.latitude) * t),
-      start.longitude + ((end.longitude - start.longitude) * t),
-    );
-  }
-
-  List<Marker> _buildTruckMarkers(double animationProgress) {
-    final point = _pointAlongRoute(0.5);
 
     return [
       Marker(
@@ -410,9 +687,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   @override
   Widget build(BuildContext context) {
-    final driverName =
-        _order?['driver_id']?.toString() ?? 'Driver not assigned';
-    final truckNumber = _order?['truck_id']?.toString() ?? 'Truck not assigned';
+    final driverName = _driverName;
+    final truckNumber = _truckNumber;
     final eta = _order?['eta']?.toString() ?? 'TBD';
     final currentLocation = _order?['status']?.toString() ?? 'Pending';
     return Scaffold(
@@ -420,7 +696,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         children: [
           Positioned.fill(
             child: AnimatedBuilder(
-              animation: _truckController,
+              animation: _movementController,
               builder: (context, child) {
                 return FlutterMap(
                   options: const MapOptions(
@@ -461,7 +737,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                           child: Icon(Icons.place_rounded,
                               color: Colors.redAccent, size: 26),
                         ),
-                        ..._buildTruckMarkers(_truckController.value),
+                        ..._buildTruckMarkers(),
                       ],
                     ),
                   ],
@@ -664,20 +940,20 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                             _ActionTile(
                                 icon: Icons.mic_rounded,
                                 label: 'Voice AI',
-                                onTap: _showVoiceAi),
+                                onTap: _order == null ? null : _showVoiceAi),
                             _ActionTile(
                                 icon: Icons.call_rounded,
                                 label: 'Call Driver',
-                                onTap: _showCallDriver),
+                                onTap: _order == null ? null : _showCallDriver),
                             _ActionTile(
                                 icon: Icons.edit_location_alt_rounded,
                                 label: 'Change Drop',
-                                onTap: _showChangeDrop),
+                                onTap: _order == null ? null : _showChangeDrop),
                             _ActionTile(
                                 icon: Icons.close_rounded,
                                 label: 'Cancel',
                                 color: TruxifyColors.error,
-                                onTap: _showCancel),
+                                onTap: _order == null ? null : _showCancel),
                           ],
                         ),
                       ],
@@ -697,12 +973,12 @@ class _ActionTile extends StatelessWidget {
   const _ActionTile(
       {required this.icon,
       required this.label,
-      required this.onTap,
+      this.onTap,
       this.color = TruxifyColors.accentDark});
 
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final Color color;
 
   @override
@@ -716,9 +992,13 @@ class _ActionTile extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: color),
+          Icon(icon, color: onTap == null ? TruxifyColors.border : color),
           const SizedBox(height: 6),
-          Text(label, textAlign: TextAlign.center),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: onTap == null ? const TextStyle(color: TruxifyColors.border) : null,
+          ),
         ],
       ),
     );

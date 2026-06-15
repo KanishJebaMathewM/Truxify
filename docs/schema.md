@@ -1,7 +1,7 @@
 # 📊 Truxify — Database Schema
 
-> **26 tables · 4 RPC functions · 0 foreign keys**
-> All relationships are logical (application-layer joins). No wired constraints.
+> **27 tables · 4 RPC functions · 27 foreign keys**
+> Critical business entities now use physical referential integrity for core joins and audit trails.
 
 ---
 
@@ -126,6 +126,7 @@ erDiagram
         text goods_type
         numeric weight_tonnes
         int total_amount
+        text cancellation_reason
         text driver_name
         text eta
     }
@@ -214,6 +215,14 @@ erDiagram
         text comment
     }
 
+    processed_batches {
+        uuid id PK
+        text idempotency_key
+        uuid user_id
+        int event_count
+        timestamptz processed_at
+    }
+
     wallet_transactions {
         uuid id PK
         uuid driver_id
@@ -265,6 +274,7 @@ erDiagram
         date day_date
         int amount
         int trip_count
+        numeric hours_driven
     }
 
     milestones {
@@ -292,15 +302,20 @@ erDiagram
     profiles ||--o{ saved_addresses : "user_id"
     profiles ||--o{ payment_methods : "user_id"
     profiles ||--o{ orders : "customer_id"
+    profiles ||--o{ orders : "driver_id"
     profiles ||--o{ notifications : "user_id"
     profiles ||--o{ support_tickets : "user_id"
     profiles ||--o{ ratings : "customer_id"
+    profiles ||--o{ ratings : "driver_id"
 
     trucks ||--o{ tyre_diagnostics : "truck_id"
     trucks ||--o{ truck_maintenance_tickets : "truck_id"
+    profiles ||--o{ truck_maintenance_tickets : "driver_id"
+    driver_details ||--o| trucks : "truck_id"
 
     orders ||--o{ order_timeline : "order_display_id"
     orders ||--o| load_offers : "order_display_id"
+    orders ||--o{ ratings : "order_display_id"
 
     load_offers ||--o{ load_bids : "load_id"
 
@@ -309,6 +324,10 @@ erDiagram
     trips ||--o{ route_map_points : "trip_display_id"
 
     profiles ||--o{ wallet_transactions : "driver_id"
+    orders ||--o{ ratings : "order_display_id"
+    orders ||--o{ wallet_transactions : "order_display_id"
+    trips ||--o{ wallet_transactions : "trip_display_id"
+    profiles ||--o{ processed_batches : "user_id"
     profiles ||--o{ earnings_daily : "driver_id"
     profiles ||--o{ driver_milestones : "driver_id"
     milestones ||--o{ driver_milestones : "milestone_id"
@@ -356,6 +375,10 @@ graph LR
     subgraph FINANCE["💰 Finance Layer"]
         WT[wallet_transactions]
         ED[earnings_daily]
+    end
+
+    subgraph OP["⚙️ Operational Layer"]
+        PB[processed_batches]
     end
 
     subgraph ENGAGEMENT["⭐ Engagement Layer"]
@@ -419,7 +442,7 @@ graph LR
 
 | Table | Purpose | Key Columns | Links To |
 |-------|---------|-------------|----------|
-| `orders` | Core booking record | `order_display_id`, `customer_id`, `driver_id`, `status` | `profiles.id`, `trucks.id` |
+| `orders` | Core booking record | `order_display_id`, `customer_id`, `driver_id`, `status`, `cancellation_reason` | `profiles.id`, `trucks.id` |
 | `order_timeline` | Milestone events per order | `order_display_id`, `milestone`, `completed` | `orders.order_display_id` |
 | `saved_addresses` | Customer saved locations | `user_id`, `label`, `lat/lng` | `profiles.id` |
 | `payment_methods` | Customer payment options | `user_id`, `method_type`, `display_label` | `profiles.id` |
@@ -445,14 +468,20 @@ graph LR
 
 | Table | Purpose | Key Columns | Links To |
 |-------|---------|-------------|----------|
-| `wallet_transactions` | Driver earnings/withdrawals ledger | `driver_id`, `amount`, `txn_type`, `status` | `profiles.id` |
-| `earnings_daily` | Pre-aggregated daily chart data | `driver_id`, `day_date`, `amount`, `trip_count` | `profiles.id` |
+| `wallet_transactions` | Driver earnings/withdrawals ledger | `driver_id`, `amount`, `txn_type`, `status` | `profiles.id`, `orders.order_display_id`, `trips.trip_display_id` |
+| `earnings_daily` | Pre-aggregated daily chart data | `driver_id`, `day_date`, `amount`, `trip_count`, `hours_driven` | `profiles.id` |
+
+### ⚙️ Operational Layer (1 table)
+
+| Table | Purpose | Key Columns | Links To |
+|-------|---------|-------------|----------|
+| `processed_batches` | Offline sync / event idempotency tracking | `idempotency_key`, `user_id`, `event_count`, `processed_at` | `profiles.id` |
 
 ### ⭐ Engagement Layer (6 tables)
 
 | Table | Purpose | Key Columns | Links To |
 |-------|---------|-------------|----------|
-| `ratings` | Customer → driver reviews | `order_display_id`, `stars`, `comment` | `profiles.id`, `orders` |
+| `ratings` | Customer → driver reviews | `order_display_id`, `stars`, `comment` | `profiles.id`, `orders.order_display_id` |
 | `milestones` | Gamification achievement definitions | `title`, `threshold`, `metric` | — |
 | `driver_milestones` | Driver progress on milestones | `driver_id`, `milestone_id`, `achieved` | `profiles.id`, `milestones.id` |
 | `notifications` | In-app notification inbox | `user_id`, `title`, `notif_type`, `is_read` | `profiles.id` |

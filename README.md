@@ -251,7 +251,7 @@ One of Truxify's most powerful features — touching all 6 layers simultaneously
 
 ## 🚀 Getting Started
 
-> **Note:** Truxify is in active early development (Phase 1). The customer app frontend is the current focus.
+> **Note:** Truxify is in active development (Phase 2). The core platform features are the current focus.
 
 ### Prerequisites
 
@@ -388,13 +388,13 @@ Once the stack is running, you can reach the local services here:
 
 ## 🗺️ Roadmap
 
-### Phase 1 — Foundation *(Current)*
+### Phase 1 — Foundation
 - [x] Customer app frontend (Flutter)
-- [ ] Driver app frontend (Flutter)
-- [ ] Backend API skeleton (Node.js)
-- [ ] Database schema design
+- [x] Driver app frontend (Flutter)
+- [x] Backend API skeleton (Node.js)
+- [x] Database schema design
 
-### Phase 2 — Core Platform
+### Phase 2 — Core Platform *(Current)*
 - [ ] User authentication (Firebase)
 - [ ] Load posting and bidding
 - [ ] Basic ML matching

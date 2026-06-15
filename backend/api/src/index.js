@@ -1,10 +1,12 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet'; // 🔒 ADDED HELMET IMPORT FOR ISSUE #361
 import http from 'http';
 import dotenv from 'dotenv';
 import path from 'path';
 import rateLimit from 'express-rate-limit';
 import tripRoutes from './routes/tripRoutes.js';
+import deviceRoutes from './routes/deviceRoutes.js';
 
 import { closeDbConnections } from './config/db.js';
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js';
@@ -15,6 +17,7 @@ import driverRoutes from './routes/driverRoutes.js';
 import supportRoutes from './routes/supportRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
 import loadRoutes from './routes/loadRoutes.js';
+import truckRoutes from './routes/truckRoutes.js';
 
 // Configuration load from root folder is handled in db.js
 
@@ -26,11 +29,56 @@ if (process.env.NODE_ENV === 'production' && process.env.BYPASS_AUTH === 'true')
   console.error('Set BYPASS_AUTH=false (or unset it) and restart the server.');
   process.exit(1);
 }
-
 const app = express();
 const server = http.createServer(app);
-app.set('trust proxy', 1); // ← add this
 
+// Trust proxy required for rate-limiting behind load balancers/Docker
+app.set('trust proxy', 1); 
+
+// ============================================================================
+// 🔒 ADVANCED SECURITY HEADERS (HELMET CONFIGURATION)
+// Resolves missing security headers from Issue #361
+// ============================================================================
+app.use(helmet({
+  // Content Security Policy (CSP) - Prevents XSS and data injection
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"], // Adjust if strict CSP is needed for frontend
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+  // HTTP Strict Transport Security (HSTS) - Enforces HTTPS
+  hsts: { 
+    maxAge: 31536000, // 1 year
+    includeSubDomains: true, 
+    preload: true 
+  },
+  // X-Frame-Options - Prevents clickjacking by disabling iframes
+  frameguard: { 
+    action: "deny" 
+  },
+  // X-Content-Type-Options - Prevents MIME-sniffing
+  noSniff: true, 
+  // Additional modern security headers
+  crossOriginEmbedderPolicy: false, // Set false if breaking third-party images/maps
+  crossOriginOpenerPolicy: { policy: "same-origin" },
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // Allows Flutter app to fetch resources
+  dnsPrefetchControl: { allow: false },
+  hidePoweredBy: true, // Removes X-Powered-By: Express
+  referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  xssFilter: true
+}));
+
+// ============================================================================
+// CORS CONFIGURATION
+// ============================================================================
+// Enable CORS for frontend clients (Flutter Web, mobile, etc.)
+const corsOrigins = process.env.NODE_ENV === 'production'
+  ? (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean)
+  : '*';
 // Enable CORS only for explicitly allowed frontend origins
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
@@ -81,7 +129,27 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.use(express.json());
+// Payload parsers
+app.use(express.json({ limit: '1mb' })); // Added payload limit for security
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// ============================================================================
+// REQUEST LOGGER — registered before all routes and rate limiters so that every
+// incoming request (including those that get rate-limited or 404) is logged.
+// ============================================================================
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    const color = res.statusCode >= 500 ? '\x1b[31m'
+                : res.statusCode >= 400 ? '\x1b[33m'
+                : res.statusCode >= 200 ? '\x1b[32m' : '\x1b[0m';
+    console.log(
+      `${color}[${new Date().toISOString()}] ${req.method} ${req.originalUrl} → ${res.statusCode} (${duration}ms)\x1b[0m`
+    );
+  });
+  next();
+});
 
 // ============================================================================
 // RATE LIMITING
@@ -106,25 +174,6 @@ app.use('/api/', limiter);
 app.use('/api/health', healthLimiter);
 app.use('/api/v1/trips', tripRoutes);
 
-
-
-// ============================================================================
-// REQUEST LOGGER
-// ============================================================================
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    const color = res.statusCode >= 500 ? '\x1b[31m'
-                : res.statusCode >= 400 ? '\x1b[33m'
-                : res.statusCode >= 200 ? '\x1b[32m' : '\x1b[0m';
-    console.log(
-      `${color}[${new Date().toISOString()}] ${req.method} ${req.originalUrl} → ${res.statusCode} (${duration}ms)\x1b[0m`
-    );
-  });
-  next();
-});
-
 // ============================================================================
 // REST API ROUTING
 // ============================================================================
@@ -146,6 +195,8 @@ app.use('/api/driver', driverRoutes);
 app.use('/api/loads', loadRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/profile', profileRoutes);
+app.use('/api/devices', deviceRoutes);
+app.use('/api/trucks', truckRoutes);
 // Root route
 app.get('/', (req, res) => {
   res.send('<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://localhost:5000/ws/tracking</code></p>');
@@ -177,6 +228,7 @@ server.listen(PORT, () => {
   console.log(`🚀 Truxify Node.js server is listening on PORT: ${PORT}`);
   console.log(`🔗 REST API Root: http://localhost:${PORT}`);
   console.log(`🔌 WebSocket URL: ws://localhost:${PORT}/ws/tracking`);
+  console.log(`🔒 Security Headers: Enabled via Helmet`);
   console.log(`================================================================`);
 });
 

@@ -23,7 +23,7 @@ describe("Escrow", function () {
     const id = bookingId("booking-1");
     const amount = ethers.parseEther("1");
 
-    await escrow.connect(customer).deposit(id, driver.address, { value: amount });
+    await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount });
     const saved = await escrow.escrows(id);
 
     assert.equal(saved.customer, customer.address);
@@ -37,7 +37,7 @@ describe("Escrow", function () {
     const { escrow, relayer, customer, driver } = await deployEscrow();
     const id = bookingId("booking-release");
     const amount = ethers.parseEther("0.25");
-    await escrow.connect(customer).deposit(id, driver.address, { value: amount });
+    await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount });
 
     const driverBefore = await ethers.provider.getBalance(driver.address);
     await escrow.connect(relayer).releaseFunds(id);
@@ -53,7 +53,7 @@ describe("Escrow", function () {
     const { escrow, relayer, customer, driver } = await deployEscrow();
     const id = bookingId("booking-refund");
     const amount = ethers.parseEther("0.25");
-    await escrow.connect(customer).deposit(id, driver.address, { value: amount });
+    await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount });
 
     await escrow.connect(relayer).refundFunds(id);
     const saved = await escrow.escrows(id);
@@ -68,11 +68,11 @@ describe("Escrow", function () {
     const releaseId = bookingId("double-release");
     const refundId = bookingId("double-refund");
 
-    await escrow.connect(customer).deposit(releaseId, driver.address, { value: 1000n });
+    await escrow.connect(customer).deposit(releaseId, customer.address, driver.address, { value: 1000n });
     await escrow.connect(relayer).releaseFunds(releaseId);
     await assertRejectsWith(escrow.connect(relayer).releaseFunds(releaseId), "Escrow not funded");
 
-    await escrow.connect(customer).deposit(refundId, driver.address, { value: 1000n });
+    await escrow.connect(customer).deposit(refundId, customer.address, driver.address, { value: 1000n });
     await escrow.connect(relayer).refundFunds(refundId);
     await assertRejectsWith(escrow.connect(relayer).refundFunds(refundId), "Escrow not funded");
   });
@@ -80,7 +80,7 @@ describe("Escrow", function () {
   it("rejects unauthorized release and refund attempts", async function () {
     const { escrow, customer, driver, outsider } = await deployEscrow();
     const id = bookingId("unauthorized");
-    await escrow.connect(customer).deposit(id, driver.address, { value: 1000n });
+    await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: 1000n });
 
     await assertRejectsWith(escrow.connect(outsider).releaseFunds(id), "Not authorized relayer");
     await assertRejectsWith(escrow.connect(outsider).refundFunds(id), "Not authorized relayer");
@@ -91,9 +91,9 @@ describe("Escrow", function () {
     const id = bookingId("invalid-state");
 
     await assertRejectsWith(escrow.connect(relayer).releaseFunds(id), "Escrow not funded");
-    await escrow.connect(customer).deposit(id, driver.address, { value: 1000n });
+    await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: 1000n });
     await assertRejectsWith(
-      escrow.connect(customer).deposit(id, driver.address, { value: 1000n }),
+      escrow.connect(customer).deposit(id, customer.address, driver.address, { value: 1000n }),
       "Escrow exists"
     );
   });
@@ -106,7 +106,7 @@ describe("Escrow", function () {
 
     const id = bookingId("reentrant-booking");
     await escrow.connect(owner).setRelayer(await attacker.getAddress(), true);
-    await escrow.connect(customer).deposit(id, await attacker.getAddress(), { value: 1000n });
+    await escrow.connect(customer).deposit(id, customer.address, await attacker.getAddress(), { value: 1000n });
 
     await assertRejectsWith(attacker.attackRelease(id), "Driver payout failed");
   });

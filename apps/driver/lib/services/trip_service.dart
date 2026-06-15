@@ -119,24 +119,48 @@ class TripService {
     }
   }
   Future<void> updateOnlineStatus(bool isOnline) async {
-    await _client
-        .from('drivers')
+    final updated = await _client
+        .from('driver_details')
         .update({
           'is_online': isOnline,
-          'last_seen': DateTime.now().toIso8601String(),
+          'updated_at': DateTime.now().toIso8601String(),
         })
-        .eq('id', _driverId);
+        .eq('user_id', _driverId)
+        .select()
+        .maybeSingle();
+
+    if (updated == null) {
+      throw Exception('Driver profile not found or update failed');
+    }
   }
 
   Future<void> startTrip(String tripDisplayId) async {
     await _verifyTripOwnership(tripDisplayId);
-    await _client
-        .from('trips')
-        .update({
-          'status': 'in_progress',
-          'started_at': DateTime.now().toIso8601String(),
-        })
+
+    // Find the first stop of this trip that is not completed
+    final stops = await _client
+        .from('trip_stops')
+        .select()
         .eq('trip_display_id', tripDisplayId)
-        .eq('driver_id', _driverId);
+        .eq('is_completed', false)
+        .order('sort_order')
+        .limit(1);
+
+    if (stops.isEmpty) {
+      throw Exception('No active stops found for this trip');
+    }
+
+    final firstStopId = stops.first['id'];
+    final updatedStop = await _client
+        .from('trip_stops')
+        .update({'is_current': true})
+        .eq('id', firstStopId)
+        .eq('trip_display_id', tripDisplayId)
+        .select()
+        .maybeSingle();
+
+    if (updatedStop == null) {
+      throw Exception('Failed to start trip: Stop not found or update failed');
+    }
   }
 }

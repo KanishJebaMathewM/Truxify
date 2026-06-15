@@ -3,7 +3,6 @@ import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../controllers/app_controller.dart';
-import '../data/mock_data.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
@@ -69,40 +68,17 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   @override
   void initState() {
     super.initState();
-    _setupFromDraft(mockDefaultRouteDraft);
-  }
-
-  void _setupFromDraft(RouteDraft draft) {
-    _pickupController = TextEditingController(text: draft.pickup);
-    _dropController = TextEditingController(text: draft.drop);
-    if (draft.pickupLat != null && draft.pickupLng != null) {
-      _pickupPoint = LatLng(draft.pickupLat!, draft.pickupLng!);
-    }
-    if (draft.dropLat != null && draft.dropLng != null) {
-      _dropPoint = LatLng(draft.dropLat!, draft.dropLng!);
-    }
-    _weightController = TextEditingController(text: draft.weightTonnes);
-    _lengthController =
-        TextEditingController(text: draft.dimensions.split(' × ').first);
-    _widthController =
-        TextEditingController(text: draft.dimensions.split(' × ')[1]);
-    _heightController =
-        TextEditingController(text: draft.dimensions.split(' × ')[2]);
-    final parsedDateTime = _parseDateTimeLabel(draft.dateLabel);
-    _selectedDate = parsedDateTime?.date ??
-        DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
-    _selectedTime = parsedDateTime?.time ?? const TimeOfDay(hour: 6, minute: 0);
-    _dateController =
-        TextEditingController(text: _formatDateLabel(_selectedDate!));
-    _timeController =
-        TextEditingController(text: _formatTimeLabel(_selectedTime!));
-    _goodsType = draft.goodsType;
+    _pickupController = TextEditingController();
+    _dropController = TextEditingController();
+    _weightController = TextEditingController();
+    _lengthController = TextEditingController();
+    _widthController = TextEditingController();
+    _heightController = TextEditingController();
+    _selectedDate = DateUtils.dateOnly(DateTime.now().add(const Duration(days: 1)));
+    _selectedTime = const TimeOfDay(hour: 6, minute: 0);
+    _dateController = TextEditingController(text: _formatDateLabel(_selectedDate!));
+    _timeController = TextEditingController(text: _formatTimeLabel(_selectedTime!));
     _customGoodsTypeController = TextEditingController();
-    _stacked = draft.stacked;
-    _fragile = draft.fragile;
-    _requirements
-      ..clear()
-      ..addAll(draft.requirements);
   }
 
   @override

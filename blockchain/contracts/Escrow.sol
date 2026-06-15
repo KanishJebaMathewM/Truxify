@@ -57,20 +57,21 @@ contract Escrow {
         emit RelayerUpdated(relayer, authorized);
     }
 
-    function deposit(bytes32 bookingId, address payable driver) external payable {
+    function deposit(bytes32 bookingId, address payable customer, address payable driver) external payable {
         require(bookingId != bytes32(0), "Invalid booking");
+        require(customer != address(0), "Invalid customer");
         require(driver != address(0), "Invalid driver");
         require(msg.value > 0, "Deposit required");
         require(escrows[bookingId].status == EscrowStatus.None, "Escrow exists");
 
         escrows[bookingId] = BookingEscrow({
-            customer: payable(msg.sender),
+            customer: customer,
             driver: driver,
             amount: msg.value,
             status: EscrowStatus.Funded
         });
 
-        emit Deposited(bookingId, msg.sender, driver, msg.value);
+        emit Deposited(bookingId, customer, driver, msg.value);
     }
 
     function releaseFunds(bytes32 bookingId) external onlyRelayer nonReentrant {

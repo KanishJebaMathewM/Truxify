@@ -5,8 +5,6 @@ import '../models/app_models.dart';
 const mockOtp = '1234';
 const mockPhoneNumber = '+91 98765 43210';
 const mockCustomerName = 'Karthik Murugan';
-const mockCompanyName = 'Sri Murugan Textiles';
-const mockInitials = 'KM';
 
 const mockDefaultRouteDraft = RouteDraft(
   pickup: 'Surat, Gujarat',

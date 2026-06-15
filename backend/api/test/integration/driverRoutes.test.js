@@ -72,6 +72,29 @@ describe('Driver Routes', () => {
     expect(res.body.truck).toBe(null);
   });
 
+  it('POST /otp/verify accepts the default driver login OTP', async () => {
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/drivers/otp/verify')
+      .send({ phone: '9876543210', otp: '1234' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.verified).toBe(true);
+    expect(res.body.message).toBe('OTP verified successfully.');
+  });
+
+  it('POST /otp/verify rejects invalid OTP', async () => {
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/drivers/otp/verify')
+      .send({ phone: '9876543210', otp: '0000' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid OTP. Please try again.');
+  });
+
   it('GET /stats returns truck details when truck assigned', async () => {
     m.store.driver_details.push({
       user_id: 'driver-1',

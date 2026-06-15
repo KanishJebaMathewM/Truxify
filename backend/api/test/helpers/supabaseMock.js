@@ -121,6 +121,29 @@ class SupabaseQueryBuilder {
       return { data, error: null };
     }
 
+    if (this._mode === 'upsert') {
+      const rows = Array.isArray(this._payload) ? this._payload : [this._payload];
+      if (!this._store[this._table]) {
+        this._store[this._table] = [];
+      }
+      for (const row of rows) {
+        const pkFields = ['id', 'user_id', 'event_id'];
+        let foundIdx = -1;
+        for (const pk of pkFields) {
+          if (row[pk] !== undefined) {
+            foundIdx = this._store[this._table].findIndex(r => r[pk] === row[pk]);
+            if (foundIdx !== -1) break;
+          }
+        }
+        if (foundIdx !== -1) {
+          this._store[this._table][foundIdx] = { ...this._store[this._table][foundIdx], ...row };
+        } else {
+          this._store[this._table].push(row);
+        }
+      }
+      return { data: rows, error: null };
+    }
+
     if (this._mode === 'insert') {
       const rows = Array.isArray(this._payload) ? this._payload : [this._payload];
       for (const row of rows) {

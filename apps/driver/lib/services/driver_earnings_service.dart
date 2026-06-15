@@ -4,10 +4,14 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class DriverEarningsService {
-  DriverEarningsService({SupabaseClient? client, http.Client? httpClient, String? apiBaseUrl,})
-      : _providedClient = client,
-      _httpClient = httpClient ?? http.Client(),
-      _apiBaseUrl = (apiBaseUrl ?? defaultApiBaseUrl).replaceFirst(RegExp(r'/$'), '',);
+  DriverEarningsService({
+    SupabaseClient? client,
+    http.Client? httpClient,
+    String? apiBaseUrl,
+  })  : _providedClient = client,
+        _isClientOwned = httpClient == null,
+        _httpClient = httpClient ?? http.Client(),
+        _apiBaseUrl = (apiBaseUrl ?? defaultApiBaseUrl).replaceFirst(RegExp(r'/$'), '',);
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
@@ -17,6 +21,7 @@ class DriverEarningsService {
   final SupabaseClient? _providedClient;
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
   final http.Client _httpClient;
+  final bool _isClientOwned;
   final String _apiBaseUrl;
 
   String? get driverId => _client.auth.currentUser?.id;
@@ -39,18 +44,40 @@ class DriverEarningsService {
       queryParameters: {'page': '$page', 'limit': '$limit'},
     );
 
-    final response = await _httpClient.get(uri, headers: _authHeaders);
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception(
-        decoded['error']?.toString() ?? 'Failed to load wallet history.',
-      );
+    final http.Response response;
+    try {
+      response = await _httpClient.get(uri, headers: _authHeaders);
+    } catch (e) {
+      throw Exception('Network error: Failed to fetch wallet history.');
     }
 
-    final transactions = decoded['transactions'] as List<dynamic>? ?? [];
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } catch (_) {
+      throw Exception('Failed to parse wallet history response.');
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final errorMsg = (decoded is Map) ? decoded['error']?.toString() : null;
+      throw Exception(errorMsg ?? 'Failed to load wallet history.');
+    }
+
+    if (decoded is! Map) {
+      throw Exception('Invalid wallet history response format.');
+    }
+
+    final transactions = decoded['transactions'];
+    if (transactions is! List) {
+      return [];
+    }
+
     return transactions
-        .map((t) => Map<String, dynamic>.from(t as Map))
+        .map((t) {
+          if (t is! Map) return null;
+          return Map<String, dynamic>.from(t);
+        })
+        .whereType<Map<String, dynamic>>()
         .toList();
   }
 
@@ -64,27 +91,64 @@ class DriverEarningsService {
     final today = DateTime.now();
 
     final daysSinceMonthStart = today.difference(start).inDays + 1;
+
+    // Fallback: If we query a historical month > 365 days ago,
+    // the backend API will reject it or return incomplete data.
+    // We fetch directly from the Supabase client for these older months.
+    if (daysSinceMonthStart > 365) {
+      final response = await _client
+          .from('earnings_daily')
+          .select()
+          .eq('driver_id', driverId!)
+          .gte('day_date', start.toIso8601String().split('T').first)
+          .lt('day_date', end.toIso8601String().split('T').first)
+          .order('day_date');
+      return List<Map<String, dynamic>>.from(response);
+    }
+
     final days = daysSinceMonthStart.clamp(1, 365);
 
     final uri = Uri.parse('$_apiBaseUrl/api/driver/earnings/summary').replace(
       queryParameters: {'days': '$days'},
     );
 
-    final response = await _httpClient.get(uri, headers: _authHeaders);
-    final decoded = jsonDecode(response.body);
+    final http.Response response;
+    try {
+      response = await _httpClient.get(uri, headers: _authHeaders);
+    } catch (e) {
+      throw Exception('Network error: Failed to fetch earnings summary.');
+    }
+
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } catch (_) {
+      throw Exception('Failed to parse earnings summary response.');
+    }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final error = decoded is Map ? decoded['error']?.toString() : null;
       throw Exception(error ?? 'Failed to load earnings summary.');
     }
 
-    return (decoded as List<dynamic>)
-        .map((e) => Map<String, dynamic>.from(e as Map))
+    if (decoded is! List) {
+      throw Exception('Invalid earnings summary response format.');
+    }
+
+    return decoded
+        .map((e) {
+          if (e is! Map) return null;
+          return Map<String, dynamic>.from(e);
+        })
+        .whereType<Map<String, dynamic>>()
         .where((e) {
-      final date = DateTime.tryParse(e['day_date'].toString());
-      if (date == null) return false;
-      return !date.isBefore(start) && date.isBefore(end);
-    }).toList();
+          final dateStr = e['day_date'];
+          if (dateStr == null) return false;
+          final date = DateTime.tryParse(dateStr.toString());
+          if (date == null) return false;
+          return !date.isBefore(start) && date.isBefore(end);
+        })
+        .toList();
   }
 
   Future<List<Map<String, dynamic>>> fetchCompletedTripsForDay({
@@ -103,5 +167,11 @@ class DriverEarningsService {
         .order('created_at', ascending: false);
 
     return List<Map<String, dynamic>>.from(response);
+  }
+
+  void dispose() {
+    if (_isClientOwned) {
+      _httpClient.close();
+    }
   }
 }

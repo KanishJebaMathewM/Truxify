@@ -34,6 +34,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
     _loadAllData();
   }
 
+  @override
+  void dispose() {
+    _earningsService.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadAllData() async {
     await Future.wait([
       _loadMonthlyEarnings(),

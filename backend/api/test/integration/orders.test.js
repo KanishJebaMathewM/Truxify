@@ -1817,8 +1817,8 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'delivered' });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Order cannot be cancelled after delivery or payment release.');
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('Order was already cancelled, delivered, or payment released. Cannot cancel.');
   });
 
   it('rejects cancel when payment is already released', async () => {
@@ -1837,8 +1837,8 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'payment released' });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Order cannot be cancelled after delivery or payment release.');
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('Order was already cancelled, delivered, or payment released. Cannot cancel.');
   });
 
   it('returns 400 when route estimate computation fails during change-drop', async () => {

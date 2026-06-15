@@ -77,6 +77,7 @@ class SupabaseQueryBuilder {
   like(col, p)  { this._filters.push({ col, op: 'like', val: p }); return this; }
   ilike(col, p) { this._filters.push({ col, op: 'ilike', val: p }); return this; }
   is(col, val)  { this._filters.push({ col, op: 'is', val }); return this; }
+  not(col, op, val) { this._filters.push({ col, op: `not:${op}`, val }); return this; }
   order(col, opts = {}) {
     this._order = { col, ascending: opts.ascending !== false };
     return this;
@@ -93,6 +94,54 @@ class SupabaseQueryBuilder {
     return this._exec().then(resolve, reject);
   }
   catch(reject) { return this._exec().catch(reject); }
+
+  _matches(row, f) {
+    const v = row[f.col];
+    let op = f.op;
+    let negate = false;
+    if (op.startsWith('not:')) {
+      negate = true;
+      op = op.substring(4);
+    }
+    let res = true;
+    switch (op) {
+      case 'eq':
+      case 'is':
+        res = v === f.val;
+        break;
+      case 'neq':
+        res = v !== f.val;
+        break;
+      case 'gt':
+        res = v > f.val;
+        break;
+      case 'gte':
+        res = v >= f.val;
+        break;
+      case 'lt':
+        res = v < f.val;
+        break;
+      case 'lte':
+        res = v <= f.val;
+        break;
+      case 'in': {
+        if (typeof f.val === 'string') {
+          const clean = f.val.replace(/^\s*\(\s*|\s*\)\s*$/g, '');
+          const items = clean.split(',').map(s => s.trim().replace(/^["']|["']$/g, ''));
+          res = items.includes(v);
+        } else if (Array.isArray(f.val)) {
+          res = f.val.includes(v);
+        } else {
+          res = false;
+        }
+        break;
+      }
+      default:
+        res = true;
+        break;
+    }
+    return negate ? !res : res;
+  }
 
   async _exec() {
     const callRecord = {
@@ -163,16 +212,7 @@ class SupabaseQueryBuilder {
       let updatedRows = [];
 
       for (const row of rows) {
-        const matches = this._filters.every(f => {
-          const v = row[f.col];
-
-          switch (f.op) {
-            case 'eq':
-              return v === f.val;
-            default:
-              return true;
-          }
-        });
+        const matches = this._filters.every(f => this._matches(row, f));
 
         if (matches) {
           Object.assign(row, this._payload);
@@ -181,7 +221,7 @@ class SupabaseQueryBuilder {
       }
 
       if (this._single) {
-        return { data: updatedRows[0] ?? null, error: updatedRows[0] ? null : { message: 'no rows' } };
+        return { data: updatedRows[0] ?? null, error: updatedRows[0] ? null : { code: 'PGRST116', message: 'no rows' } };
       }
       return { data: updatedRows, error: null };
     }
@@ -189,20 +229,7 @@ class SupabaseQueryBuilder {
     if (this._mode === 'select' || this._mode === null) {
       let rows = (this._store[this._table] ?? []).slice();
       for (const f of this._filters) {
-        rows = rows.filter(r => {
-          const v = r[f.col];
-          switch (f.op) {
-            case 'eq':  return v === f.val;
-            case 'neq': return v !== f.val;
-            case 'gt':  return v >  f.val;
-            case 'gte': return v >= f.val;
-            case 'lt':  return v <  f.val;
-            case 'lte': return v <= f.val;
-            case 'in':  return f.val.includes(v);
-            case 'is':  return v === f.val;
-            default:    return true;
-          }
-        });
+        rows = rows.filter(r => this._matches(r, f));
       }
       if (this._order) {
         const { col, ascending } = this._order;
@@ -214,7 +241,7 @@ class SupabaseQueryBuilder {
         rows = rows.slice(from, to + 1);
       }
       if (this._limit != null) rows = rows.slice(0, this._limit);
-      if (this._single)     return { data: rows[0] ?? null, error: rows[0] ? null : { message: 'no rows' }, count: rows[0] ? 1 : 0 };
+      if (this._single)     return { data: rows[0] ?? null, error: rows[0] ? null : { code: 'PGRST116', message: 'no rows' }, count: rows[0] ? 1 : 0 };
       if (this._maybeSingle) return { data: rows[0] ?? null, error: null, count: rows[0] ? 1 : 0 };
       return { data: rows, error: null, count: totalCount };
     }

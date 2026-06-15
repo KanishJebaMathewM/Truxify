@@ -669,11 +669,17 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
 
     const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update({
       otp_verified: true, status: 'payment_released', updated_at: new Date().toISOString()
-    }).eq('id', orderId).not('status', 'eq', 'cancelled').select('*').single();
+    })
+      .eq('id', orderId)
+      .eq('otp_verified', false)
+      .not('status', 'eq', 'cancelled')
+      .not('status', 'eq', 'payment_released')
+      .select('*')
+      .single();
 
     if (updateErr) {
       if (updateErr.code === 'PGRST116') {
-        return res.status(409).json({ error: 'Order was already cancelled. Cannot verify delivery.' });
+        return res.status(409).json({ error: 'Order was already cancelled or payment released.' });
       }
       return res.status(500).json({ error: 'Failed to verify OTP.', details: updateErr.message });
     }
@@ -806,12 +812,12 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
     const { data: updatedOrder, error: updateErr } = await supabase.from('orders')
       .update({ status: 'cancelled', cancellation_reason: reason, updated_at: new Date().toISOString() })
       .eq('order_display_id', orderId)
-      .not('status', 'in', '("delivered","payment_released")')
+      .not('status', 'in', '("delivered","payment_released","cancelled")')
       .select('cancellation_fee, order_display_id, status, cancellation_reason, escrow_status')
       .single();
     if (updateErr) {
       if (updateErr.code === 'PGRST116') {
-        return res.status(409).json({ error: 'Order was already delivered or payment released. Cannot cancel.' });
+        return res.status(409).json({ error: 'Order was already cancelled, delivered, or payment released. Cannot cancel.' });
       }
       return res.status(500).json({ error: 'Failed to cancel order.', details: updateErr.message });
     }

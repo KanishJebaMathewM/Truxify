@@ -16,6 +16,7 @@ import orderRoutes from './routes/orderRoutes.js';
 import driverRoutes from './routes/driverRoutes.js';
 import supportRoutes from './routes/supportRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
+import loadRoutes from './routes/loadRoutes.js';
 import truckRoutes from './routes/truckRoutes.js';
 
 // Configuration load from root folder is handled in db.js
@@ -191,6 +192,7 @@ app.get('/api/health', (req, res) => {
 
 app.use('/api/orders', orderRoutes);
 app.use('/api/driver', driverRoutes);
+app.use('/api/loads', loadRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/devices', deviceRoutes);

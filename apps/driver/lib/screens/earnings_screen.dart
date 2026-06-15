@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:truxify_driver/models/earnings_daily_model.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/earnings_shimmer.dart';
 
 class EarningsScreen extends StatefulWidget {
   const EarningsScreen({super.key});
@@ -14,7 +15,8 @@ class EarningsScreen extends StatefulWidget {
 class _EarningsScreenState extends State<EarningsScreen> {
   final DriverEarningsService _earningsService = DriverEarningsService();
 
-  bool _isLoading = false;
+  bool _isMonthLoading = false;
+  bool _isLoading = true;
 
   late DateTime _selectedDate;
   late int _currentYear;
@@ -34,16 +36,36 @@ class _EarningsScreenState extends State<EarningsScreen> {
     _loadAllData();
   }
 
+  @override
+  void dispose() {
+    _earningsService.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadAllData() async {
+    setState(() => _isLoading = true);
+    final startTime = DateTime.now();
+
     await Future.wait([
       _loadMonthlyEarnings(),
       _loadSelectedDayTrips(),
       _loadPendingPayments(),
     ]);
+
+    final elapsed = DateTime.now().difference(startTime);
+    final remainingDelay = const Duration(milliseconds: 1500) - elapsed;
+    final isTesting = WidgetsBinding.instance.runtimeType.toString().contains('Test');
+    if (remainingDelay > Duration.zero && !isTesting) {
+      await Future.delayed(remainingDelay);
+    }
+
+    if (mounted) {
+      setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _loadMonthlyEarnings() async {
-    setState(() => _isLoading = true);
+    setState(() => _isMonthLoading = true);
 
     try {
       final data = await _earningsService.fetchMonthlyEarnings(
@@ -62,7 +84,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       debugPrint('Failed to load monthly earnings: $e');
     } finally {
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() => _isMonthLoading = false);
       }
     }
   }
@@ -259,14 +281,38 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 20),
                   child: Column(
                     children: [
-                      if (_isLoading) const LinearProgressIndicator(),
-                      _buildOverallSummaryCards(),
+                      if (!_isLoading && _isMonthLoading) const LinearProgressIndicator(),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _isLoading
+                            ? const SummaryCardsShimmer(key: ValueKey('summary_shimmer'))
+                            : _buildOverallSummaryCards(key: const ValueKey('summary_content')),
+                      ),
                       const SizedBox(height: 24),
-                      _buildHeatmapCalendarCard(),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _isLoading
+                            ? HeatmapCalendarShimmer(
+                                key: const ValueKey('calendar_shimmer'),
+                                currentYear: _currentYear,
+                                currentMonth: _currentMonth,
+                              )
+                            : _buildHeatmapCalendarCard(key: const ValueKey('calendar_content')),
+                      ),
                       const SizedBox(height: 24),
-                      _buildSelectedDateDetailsCard(),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _isLoading
+                            ? const SelectedDateDetailsShimmer(key: ValueKey('details_shimmer'))
+                            : _buildSelectedDateDetailsCard(key: const ValueKey('details_content')),
+                      ),
                       const SizedBox(height: 24),
-                      _buildPendingPaymentsCard(),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _isLoading
+                            ? const PendingPaymentsShimmer(key: ValueKey('payments_shimmer'))
+                            : _buildPendingPaymentsCard(key: const ValueKey('payments_content')),
+                      ),
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -277,8 +323,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
         ));
   }
 
-  Widget _buildOverallSummaryCards() {
+  Widget _buildOverallSummaryCards({Key? key}) {
     return Padding(
+      key: key,
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
@@ -367,7 +414,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
-  Widget _buildHeatmapCalendarCard() {
+  Widget _buildHeatmapCalendarCard({Key? key}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     // Days in current selection
     final DateTime firstDay = DateTime(_currentYear, _currentMonth, 1);
@@ -378,6 +425,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
     final int totalGridItems = leadingEmptyCells + totalDays;
 
     return Container(
+      key: key,
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -640,13 +688,14 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
-  Widget _buildSelectedDateDetailsCard() {
+  Widget _buildSelectedDateDetailsCard({Key? key}) {
     final String dateKey = _getDateKey(_selectedDate);
     final earningData = _earningsMap[dateKey];
     final bool hasData = earningData != null;
     final double earnings = earningData?.amount ?? 0.0;
 
     return Container(
+      key: key,
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -793,12 +842,13 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
-  Widget _buildPendingPaymentsCard() {
+  Widget _buildPendingPaymentsCard({Key? key}) {
     final pendingAmount = _pendingPayments.fold<double>(0, (sum, item) {
       return sum + ((item['amount'] ?? 0) / 100.0);
     });
 
     return Container(
+      key: key,
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(

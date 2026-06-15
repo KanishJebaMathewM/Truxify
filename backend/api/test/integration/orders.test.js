@@ -23,6 +23,26 @@ const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js
 
 const m = createSupabaseMock();
 
+const originalRpc = m.supabase.rpc;
+m.supabase.rpc = vi.fn().mockImplementation(async (fnName, args) => {
+  if (fnName === 'complete_trip_tx') {
+    m.calls.push({ rpc: fnName, args });
+    const orderId = args.p_order_id;
+    const order = m.store.orders.find(o => o.id === orderId);
+    if (order) {
+      order.otp_verified = true;
+      order.status = 'payment_released';
+      order.updated_at = new Date().toISOString();
+      const timeline = m.store.order_timeline.find(t => t.order_display_id === order.order_display_id && t.milestone === 'Delivered');
+      if (timeline) {
+        timeline.completed = true;
+        timeline.milestone_time = new Date().toISOString();
+      }
+    }
+    return { data: null, error: null };
+  }
+  return originalRpc(fnName, args);
+});
 let mockRedis = null;
 
 vi.mock('../../src/config/db.js', () => ({

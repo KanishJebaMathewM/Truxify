@@ -1,0 +1,124 @@
+import * as db from '../config/db.js';
+
+export const TTL_SECONDS = 900; // 15 minutes
+export const TOMBSTONE_TTL_SECONDS = 30; // 30 seconds
+const cacheKey = (firebaseUid) => `user:profile:${firebaseUid}`;
+
+const LAST_LOG_TIMES = {};
+const LOG_THROTTLE_INTERVAL_MS = 60000; // 60 seconds
+
+/**
+ * Throttles logging of cache errors on high-frequency paths to prevent flood.
+ */
+function logCacheError(operation, error) {
+  const now = Date.now();
+  const lastLog = LAST_LOG_TIMES[operation] || 0;
+  if (now - lastLog >= LOG_THROTTLE_INTERVAL_MS) {
+    LAST_LOG_TIMES[operation] = now;
+    const errorDetails = error?.stack ?? error?.message ?? String(error);
+    console.error(`Redis ${operation} error (throttled):`, errorDetails);
+  }
+}
+
+/**
+ * Retrieves the redisClient from the database configuration.
+ * Under Vitest, accessing a property on a mocked namespace module that is not explicitly
+ * returned in the mock factory will throw an error via the mock Proxy. We wrap the access
+ * in a try-catch to allow a graceful fallback to null.
+ * 
+ * @returns {object|null} The Redis client if configured, or null.
+ */
+function getRedisClient() {
+  try {
+    return db.redisClient ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validates the shape of a cached profile.
+ * 
+ * @param {string} firebaseUid - The expected Firebase UID.
+ * @param {any} cachedProfile - The cached profile to validate.
+ * @returns {boolean} True if the cached profile shape is valid, false otherwise.
+ */
+export function isValidCachedProfile(firebaseUid, cachedProfile) {
+  if (!cachedProfile || typeof cachedProfile !== 'object' || Array.isArray(cachedProfile)) {
+    return false;
+  }
+  if (typeof cachedProfile.isActive !== 'boolean') {
+    return false;
+  }
+  if (cachedProfile.isActive === false) {
+    return true; // Valid tombstone
+  }
+  return (
+    cachedProfile.isActive === true &&
+    cachedProfile.uid === firebaseUid &&
+    typeof cachedProfile.id === 'string' &&
+    typeof cachedProfile.role === 'string' &&
+    (cachedProfile.fullName === undefined || cachedProfile.fullName === null || typeof cachedProfile.fullName === 'string') &&
+    (cachedProfile.phone === undefined || cachedProfile.phone === null || typeof cachedProfile.phone === 'string')
+  );
+}
+
+/**
+ * Retrieves a user profile from the Redis cache.
+ * Falls back to null on cache miss or Redis error.
+ * 
+ * @param {string} firebaseUid - The Firebase UID of the user.
+ * @returns {Promise<object|null>} The parsed cached profile, or null.
+ */
+export async function getCachedProfile(firebaseUid) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !firebaseUid) return null;
+  try {
+    const raw = await redisClient.get(cacheKey(firebaseUid));
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    logCacheError('getCachedProfile', err);
+    // On read or parsing failure, attempt a best-effort delete of the corrupted key
+    try {
+      await redisClient.del(cacheKey(firebaseUid));
+    } catch (delErr) {
+      // Ignore failures on background cleanup deletion
+    }
+    return null;
+  }
+}
+
+/**
+ * Stores a user profile in the Redis cache.
+ * Gracefully handles Redis errors.
+ * 
+ * @param {string} firebaseUid - The Firebase UID of the user.
+ * @param {object} profile - The user profile object to cache.
+ * @returns {Promise<void>}
+ */
+export async function setCachedProfile(firebaseUid, profile, ttlSeconds = TTL_SECONDS) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !firebaseUid || !profile) return;
+  try {
+    await redisClient.set(cacheKey(firebaseUid), JSON.stringify(profile), 'EX', ttlSeconds);
+  } catch (err) {
+    logCacheError('setCachedProfile', err);
+  }
+}
+
+/**
+ * Invalidates (deletes) a cached user profile from Redis.
+ * Gracefully handles Redis errors.
+ * 
+ * @param {string} firebaseUid - The Firebase UID of the user.
+ * @returns {Promise<void>}
+ */
+export async function invalidateCachedProfile(firebaseUid) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !firebaseUid) return;
+  try {
+    await redisClient.del(cacheKey(firebaseUid));
+  } catch (err) {
+    logCacheError('invalidateCachedProfile', err);
+  }
+}

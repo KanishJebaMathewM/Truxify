@@ -111,6 +111,40 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
     expect(insertMatches.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('verifies that complete_trip_tx(p_order_id uuid) updates trips, trip_items, and trip_stops on successful verification', async () => {
+    const setupSqlPath = path.resolve(__dirname, '../../../../docs/supabase_setup.sql');
+    const migrationSqlPath = path.resolve(__dirname, '../../../../docs/migration_complete_trip_update.sql');
+
+    const setupSql = await fs.readFile(setupSqlPath, 'utf8');
+    const migrationSql = await fs.readFile(migrationSqlPath, 'utf8');
+
+    for (const [name, sqlContent] of [['supabase_setup.sql', setupSql], ['migration_complete_trip_update.sql', migrationSql]]) {
+      // 1. Check for active trip lookup query
+      expect(
+        /select\s+trip_display_id\s+into\s+v_trip_display_id\s+from\s+trips\s+where\s+driver_id\s*=\s*\w+\.driver_id\s+and\s+status\s*=\s*'active'/i.test(sqlContent),
+        `Active trip lookup not found in ${name}`
+      ).toBe(true);
+
+      // 2. Check for trips status update to completed
+      expect(
+        /update\s+trips\s+set\s+status\s*=\s*'completed'/i.test(sqlContent),
+        `Trips status update to completed not found in ${name}`
+      ).toBe(true);
+
+      // 3. Check for trip_items delivered update
+      expect(
+        /update\s+trip_items\s+set\s+is_delivered\s*=\s*true/i.test(sqlContent),
+        `Trip items update to is_delivered = true not found in ${name}`
+      ).toBe(true);
+
+      // 4. Check for trip_stops completed update
+      expect(
+        /update\s+trip_stops\s+set\s+is_completed\s*=\s*true/i.test(sqlContent),
+        `Trip stops update to is_completed = true not found in ${name}`
+      ).toBe(true);
+    }
+  });
+
   it('contains the processed_batches table required for offline sync idempotency in both setup and migration SQL', async () => {
     const setupSqlPath = path.resolve(__dirname, '../../../../docs/supabase_setup.sql');
     const migrationSqlPath = path.resolve(__dirname, '../../../../docs/migration_add_processed_batches.sql');

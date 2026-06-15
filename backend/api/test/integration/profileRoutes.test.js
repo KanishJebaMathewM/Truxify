@@ -2,6 +2,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 
+vi.mock('../../src/lib/profileCache.js', () => ({
+  invalidateCachedProfile: vi.fn(),
+  getCachedProfile: vi.fn(),
+  setCachedProfile: vi.fn(),
+}));
+
+const { invalidateCachedProfile } = await import('../../src/lib/profileCache.js');
+
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();
 
@@ -41,6 +49,7 @@ describe('Profile Routes', () => {
     m.store.customer_stats = [];
     m.store.driver_details = [];
     m.calls.length = 0;
+    vi.clearAllMocks();
   });
 
   describe('GET /api/profile', () => {
@@ -202,6 +211,7 @@ describe('Profile Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.message).toBe('Profile updated');
       expect(res.body.profile).toEqual(updatedProfileRow);
+      expect(invalidateCachedProfile).toHaveBeenCalledWith('test_firebase_uid_123');
 
       const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
       expect(profileUpdateCall.payload).toEqual({
@@ -261,6 +271,7 @@ describe('Profile Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.message).toBe('Profile updated');
       expect(res.body.profile).toEqual(updatedProfileRow);
+      expect(invalidateCachedProfile).toHaveBeenCalledWith('test_firebase_uid_123');
 
       const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
       expect(profileUpdateCall.payload).toEqual({

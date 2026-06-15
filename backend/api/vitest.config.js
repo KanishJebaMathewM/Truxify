@@ -8,9 +8,27 @@
  * The integration tests use `vi.mock('../../src/config/db.js', ...)` to
  * swap supabase out for the in-memory mock — no live DB required.
  */
+
 import { defineConfig } from 'vitest/config';
+import fs from 'node:fs';
+
+const getSafeRealPath = (dirPath) => {
+  try {
+    return fs.realpathSync(dirPath);
+  } catch (err) {
+    return dirPath;
+  }
+};
 
 export default defineConfig({
+  resolve: {
+    // Preserve symlinks so that testing under workspace directories containing the '#'
+    // character can bypass Vite's URL-based resolution limitations by running
+    // from a safe directory junction or symlink.
+    preserveSymlinks:
+      (!process.cwd().includes('#') && getSafeRealPath(process.cwd()).includes('#')) ||
+      process.env.PRESERVE_SYMLINKS === 'true',
+  },
   plugins: [
     {
       name: 'remove-shebang',

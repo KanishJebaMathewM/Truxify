@@ -772,19 +772,23 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
     // Successful verification — clear failure state
     await clearOtpState(orderId);
 
-    const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update({
-      otp_verified: true, status: 'payment_released', updated_at: new Date().toISOString()
-    }).eq('id', orderId).select('*').single();
+    // Call complete_trip_tx RPC first to atomically update trip, driver stats, wallet, earnings, order status, and timeline.
+    const { error: rpcErr } = await supabase.rpc('complete_trip_tx', { p_order_id: orderId });
+    if (rpcErr) {
+      console.error('complete_trip_tx RPC failed:', rpcErr.message);
+      return res.status(500).json({ error: 'Failed to complete trip and release payment.', details: rpcErr.message });
+    }
 
-    if (updateErr) return res.status(500).json({ error: 'Failed to verify OTP.', details: updateErr.message });
+    // Fetch the updated order directly from the database as the single source of truth
+    const { data: updatedOrder, error: fetchErr } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', orderId)
+      .single();
 
-    await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() }).eq('order_display_id', order.order_display_id).eq('milestone', 'Delivered');
-
-    try {
-      const { error: rpcErr } = await supabase.rpc('complete_trip_tx', { p_order_id: orderId });
-      if (rpcErr) console.warn('complete_trip_tx RPC not available or failed:', rpcErr.message);
-    } catch (rpcErr) {
-      console.warn('complete_trip_tx RPC call error:', rpcErr.message);
+    if (fetchErr) {
+      console.error('Failed to fetch updated order:', fetchErr.message);
+      return res.status(500).json({ error: 'Failed to retrieve completed order details.', details: fetchErr.message });
     }
 
     // Escrow: release funds to driver after successful delivery verification

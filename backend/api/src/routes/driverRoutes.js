@@ -195,7 +195,7 @@ router.get('/earnings/summary', authenticate, requireRole(['driver']), async (re
 
     const { data: summary, error } = await supabase
       .from('earnings_daily')
-      .select('day_date, amount, trip_count')
+      .select('day_date, amount, trip_count, hours_driven')
       .eq('driver_id', req.user.id)
       .gte('day_date', cutoff.toISOString().split('T')[0])
       .order('day_date', { ascending: true });

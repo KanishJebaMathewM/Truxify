@@ -4,9 +4,11 @@ Flutter app for customers to create bookings, track orders, and manage profile d
 
 ## Features
 
-- create freight bookings
-- browse trucks and order details
-- track active shipments
+- create freight bookings with route and cargo details
+- browse truck matches and compare results
+- track active shipments on a live map
+- view shipment timelines, receipts, and order detail cards
+- use voice-based shipment help for live status questions
 - manage saved addresses, payments, and profile data
 
 ## Run Locally
@@ -25,5 +27,5 @@ flutter run --dart-define=TRUXIFY_API_BASE_URL=http://localhost:5000
 ## Useful Notes
 
 - The app uses Supabase configuration passed through `--dart-define`.
-- If you are testing against a local backend, pass the API base URL for your environment.
+- The app includes live tracking, voice assistance, and delivery receipt views.
 - See the root `README.md` and `docs/wiki/Getting-Started-&-Local-Setup.md` for the full setup flow.

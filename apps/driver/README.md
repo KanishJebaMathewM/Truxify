@@ -4,10 +4,12 @@ Flutter app for drivers to manage trips, view available loads, and handle delive
 
 ## Features
 
-- browse available loads
-- view active trips and trip history
-- handle delivery verification flows
-- manage driver profile and documents
+- browse available loads and see matching opportunities
+- view active trips, trip history, and earnings context
+- handle delivery OTP and GPS-based verification flows
+- review en-route load suggestions for deadhead reduction
+- manage driver profile, truck data, and documents
+- inspect demand heatmap and trip-related status
 
 ## Run Locally
 
@@ -26,5 +28,5 @@ flutter run --dart-define=TRUXIFY_API_BASE_URL=http://localhost:5000
 
 - The app uses Supabase configuration passed through `--dart-define`.
 - The login flow currently expects a backend OTP verification step.
-- When testing locally against the backend API, use the local API base URL for your platform.
+- The app includes load browsing, active trip details, mid-trip load suggestions, and delivery verification.
 - See the root `README.md` and `docs/wiki/Getting-Started-&-Local-Setup.md` for the full setup flow.

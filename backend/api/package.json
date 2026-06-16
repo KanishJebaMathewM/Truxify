@@ -16,7 +16,7 @@
     "verify-db": "node scripts/verify-db-schema.js"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.108.0",
+    "@supabase/supabase-js": "^2.108.2",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "ethers": "6.15.0",

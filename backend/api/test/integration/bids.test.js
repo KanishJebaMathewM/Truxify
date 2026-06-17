@@ -575,7 +575,7 @@ describe('Bid Routes', () => {
     m.store.profiles.push({ id: 'driver-1', full_name: 'Driver One' });
     m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null });
 
-    m.programError('Load offer is no longer available');
+    m.programRpcError('Load offer is no longer available');
 
     const app = buildApp();
     const res = await request(app)
@@ -611,7 +611,7 @@ describe('Bid Routes', () => {
     m.store.profiles.push({ id: 'driver-1', full_name: 'Driver One' });
     m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null });
 
-    m.programError('Order is no longer pending');
+    m.programRpcError('Order is no longer pending');
 
     const app = buildApp();
     const res = await request(app).post('/api/orders/order-1/bids/bid-1/accept').set(CUSTOMER);

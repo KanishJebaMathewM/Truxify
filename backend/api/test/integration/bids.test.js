@@ -550,4 +550,74 @@ describe('Bid Routes', () => {
 
     expect(res.status).toBe(403);
   });
+
+  it('POST /:id/bids/:bidId/accept returns 500 when load offer is already claimed', async () => {
+    m.store.orders.push({
+      id: 'order-1',
+      customer_id: 'customer-1',
+      order_display_id: 'OD1',
+    });
+
+    m.store.load_offers.push({
+      id: 'load-1',
+      order_display_id: 'OD1',
+      status: 'claimed',
+    });
+
+    m.store.load_bids.push({
+      id: 'bid-1',
+      load_id: 'load-1',
+      driver_id: 'driver-1',
+      bid_amount: 50000,
+      status: 'pending',
+    });
+
+    m.store.profiles.push({ id: 'driver-1', full_name: 'Driver One' });
+    m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null });
+
+    m.programError('Load offer is no longer available');
+
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/order-1/bids/bid-1/accept')
+      .set(CUSTOMER);
+
+    expect(res.status).toBe(500);
+    expect(res.body.details).toBe('Load offer is no longer available');
+    expect(m.calls.find(c => c.rpc === 'accept_bid_tx')).toBeTruthy();
+  });
+
+  it('POST /:id/bids/:bidId/accept returns 500 when order is no longer pending', async () => {
+    m.store.orders.push({
+      id: 'order-1',
+      customer_id: 'customer-1',
+      order_display_id: 'OD1',
+    });
+
+    m.store.load_offers.push({
+      id: 'load-1',
+      order_display_id: 'OD1',
+      status: 'available',
+    });
+
+    m.store.load_bids.push({
+      id: 'bid-1',
+      load_id: 'load-1',
+      driver_id: 'driver-1',
+      bid_amount: 50000,
+      status: 'pending',
+    });
+
+    m.store.profiles.push({ id: 'driver-1', full_name: 'Driver One' });
+    m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null });
+
+    m.programError('Order is no longer pending');
+
+    const app = buildApp();
+    const res = await request(app).post('/api/orders/order-1/bids/bid-1/accept').set(CUSTOMER);
+
+    expect(res.status).toBe(500);
+    expect(res.body.details).toBe('Order is no longer pending');
+    expect(m.calls.find(c => c.rpc === 'accept_bid_tx')).toBeTruthy();
+  });  
 });

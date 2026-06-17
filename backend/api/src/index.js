@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import tripRoutes from './routes/tripRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
 
-import { closeDbConnections } from './config/db.js';
+import { closeDbConnections, waitForMongoDb } from './config/db.js';
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js';
 
 // Load REST routes
@@ -18,22 +18,28 @@ import supportRoutes from './routes/supportRoutes.js';
 import profileRoutes from './routes/profileRoutes.js';
 import loadRoutes from './routes/loadRoutes.js';
 import truckRoutes from './routes/truckRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+
+import logger from './middleware/logger.js';
+import { requestIdMiddleware, requestLogger } from './middleware/requestId.js';
+import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js';
 
 // Configuration load from root folder is handled in db.js
+
+initSentry();
 
 // ============================================================================
 // STARTUP VALIDATION — crash fast, not at request time
 // ============================================================================
 if (process.env.NODE_ENV === 'production' && process.env.BYPASS_AUTH === 'true') {
-  console.error('FATAL: BYPASS_AUTH is enabled in production. This is a severe security misconfiguration.');
-  console.error('Set BYPASS_AUTH=false (or unset it) and restart the server.');
+  logger.fatal('BYPASS_AUTH is enabled in production. This is a severe security misconfiguration. Set BYPASS_AUTH=false (or unset it) and restart the server.');
   process.exit(1);
 }
 const app = express();
 const server = http.createServer(app);
 
 // Trust proxy required for rate-limiting behind load balancers/Docker
-app.set('trust proxy', 1); 
+app.set('trust proxy', 1);
 
 // ============================================================================
 // 🔒 ADVANCED SECURITY HEADERS (HELMET CONFIGURATION)
@@ -51,17 +57,17 @@ app.use(helmet({
     },
   },
   // HTTP Strict Transport Security (HSTS) - Enforces HTTPS
-  hsts: { 
+  hsts: {
     maxAge: 31536000, // 1 year
-    includeSubDomains: true, 
-    preload: true 
+    includeSubDomains: true,
+    preload: true
   },
   // X-Frame-Options - Prevents clickjacking by disabling iframes
-  frameguard: { 
-    action: "deny" 
+  frameguard: {
+    action: "deny"
   },
   // X-Content-Type-Options - Prevents MIME-sniffing
-  noSniff: true, 
+  noSniff: true,
   // Additional modern security headers
   crossOriginEmbedderPolicy: false, // Set false if breaking third-party images/maps
   crossOriginOpenerPolicy: { policy: "same-origin" },
@@ -134,22 +140,11 @@ app.use(express.json({ limit: '1mb' })); // Added payload limit for security
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
 // ============================================================================
-// REQUEST LOGGER — registered before all routes and rate limiters so that every
-// incoming request (including those that get rate-limited or 404) is logged.
+// REQUEST ID + REQUEST LOGGER — registered before all routes and rate limiters
+// so that every incoming request (including rate-limited or 404) is logged.
 // ============================================================================
-app.use((req, res, next) => {
-  const start = Date.now();
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    const color = res.statusCode >= 500 ? '\x1b[31m'
-                : res.statusCode >= 400 ? '\x1b[33m'
-                : res.statusCode >= 200 ? '\x1b[32m' : '\x1b[0m';
-    console.log(
-      `${color}[${new Date().toISOString()}] ${req.method} ${req.originalUrl} → ${res.statusCode} (${duration}ms)\x1b[0m`
-    );
-  });
-  next();
-});
+app.use(requestIdMiddleware);
+app.use(requestLogger);
 
 // ============================================================================
 // RATE LIMITING
@@ -197,6 +192,7 @@ app.use('/api/support', supportRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/trucks', truckRoutes);
+app.use('/api/auth', authRoutes);
 // Root route
 app.get('/', (req, res) => {
   res.send('<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://localhost:5000/ws/tracking</code></p>');
@@ -207,15 +203,20 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint resource not found.' });
 });
 
+// Sentry error handler must come before the generic error handler;
+// it captures the exception automatically so we don't call captureException here.
+app.use(sentryErrorHandler());
+
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error('Unhandled express exception:', err);
+  logger.error({ requestId: req.requestId, err }, 'Unhandled express exception');
   res.status(500).json({ error: 'Critical Internal Server Error.' });
 });
 
 // ============================================================================
-// WEBSOCKET SERVER INIT
+// WEBSOCKET SERVER INIT (wait for MongoDB before accepting WebSocket connections)
 // ============================================================================
+await waitForMongoDb();
 initWebSocketServer(server);
 
 // ============================================================================
@@ -224,12 +225,7 @@ initWebSocketServer(server);
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, () => {
-  console.log(`================================================================`);
-  console.log(`🚀 Truxify Node.js server is listening on PORT: ${PORT}`);
-  console.log(`🔗 REST API Root: http://localhost:${PORT}`);
-  console.log(`🔌 WebSocket URL: ws://localhost:${PORT}/ws/tracking`);
-  console.log(`🔒 Security Headers: Enabled via Helmet`);
-  console.log(`================================================================`);
+  logger.info(`Truxify API listening on port ${PORT}`);
 });
 
 // ============================================================================
@@ -238,10 +234,10 @@ server.listen(PORT, () => {
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
 async function shutdown(signal) {
-  console.log(`\n[shutdown] ${signal} received — draining connections...`);
+  logger.info(`${signal} received — draining connections...`);
 
   const forceExit = setTimeout(() => {
-    console.error('[shutdown] Timeout exceeded — forcing exit.');
+    logger.error('[shutdown] Timeout exceeded — forcing exit.');
     process.exit(1);
   }, SHUTDOWN_TIMEOUT_MS);
 
@@ -252,22 +248,34 @@ async function shutdown(signal) {
     await new Promise((resolve, reject) =>
       server.close(err => (err ? reject(err) : resolve()))
     );
-    console.log('[shutdown] HTTP server closed.');
+    logger.info('[shutdown] HTTP server closed.');
 
     // 2. Flush buffered telemetry and close WebSocket resources
     await closeWebSocketServer();
-    console.log('[shutdown] WebSocket resources closed.');
+    logger.info('[shutdown] WebSocket resources closed.');
 
     // 3. Close database/cache connections
     await closeDbConnections();
 
-    console.log('[shutdown] Clean exit.');
+    logger.info('[shutdown] Clean exit.');
     process.exit(0);
   } catch (err) {
-    console.error('[shutdown] Error during shutdown:', err);
+    logger.error({ err }, '[shutdown] Error during shutdown');
     process.exit(1);
   }
 }
+
+// Handle uncaught exceptions and unhandled rejections
+process.on('uncaughtException', async (err) => {
+  logger.fatal({ err }, 'Uncaught exception — exiting');
+  await flushSentry(2000);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', async (reason) => {
+  logger.error({ reason }, 'Unhandled promise rejection');
+  await flushSentry(2000);
+});
 
 process.on('SIGTERM', () => shutdown('SIGTERM')); // Docker / Kubernetes stop
 process.on('SIGINT',  () => shutdown('SIGINT'));  // Ctrl+C in dev

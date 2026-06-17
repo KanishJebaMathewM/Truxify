@@ -1,4 +1,5 @@
-import {redisClient} from '../config/db.js';
+import { redisClient } from '../config/db.js';
+import logger from '../middleware/logger.js';
 
 const DEFAULT_OSRM_BASE_URL = 'https://router.project-osrm.org';
 const DEFAULT_TIMEOUT_MS = 1500;
@@ -40,7 +41,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
       if (cached) return JSON.parse(cached);
 
     } catch(err){
-      console.error('[osrm] Redis get error:', err.message);
+      logger.error('[osrm] Redis get error:', err.message);
     }
   }
 
@@ -69,7 +70,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
       try{
         await redisClient.set(cacheKey, JSON.stringify(result), 'EX', CACHE_TTL_SECONDS);
       } catch(err){
-        console.error('[osrm] Redis set error:', err.message);
+        logger.error('[osrm] Redis set error:', err.message);
       }
     }
     return result;

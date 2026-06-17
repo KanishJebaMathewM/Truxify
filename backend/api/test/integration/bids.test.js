@@ -14,10 +14,11 @@ vi.mock('../../src/config/db.js', () => ({
 
 vi.mock('../../src/services/escrow.js', () => ({
   escrowDeposit: vi.fn(),
+  escrowRefund: vi.fn(),
 }));
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
-const { escrowDeposit: mockEscrowDeposit } = await import('../../src/services/escrow.js');
+const { escrowDeposit: mockEscrowDeposit, escrowRefund: mockEscrowRefund } = await import('../../src/services/escrow.js');
 
 function buildApp() {
   const app = express();
@@ -46,6 +47,7 @@ describe('Bid Routes', () => {
     m.store.trucks = [];
     m.calls.length = 0;
     mockEscrowDeposit.mockReset();
+    mockEscrowRefund.mockReset();
   });
 
   it('POST /:id/bids rejects invalid amount', async () => {
@@ -266,6 +268,8 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept executes RPC', async () => {
+    mockEscrowDeposit.mockResolvedValue({ txHash: '0xescrowtest123' });
+
     m.store.orders.push({
       id: 'order-1',
       customer_id: 'customer-1',
@@ -286,15 +290,16 @@ describe('Bid Routes', () => {
       status: 'pending',
     });
 
-    m.store.profiles.push({
-      id: 'driver-1',
-      full_name: 'Driver One',
-    });
+    m.store.profiles.push(
+      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678' },
+      { id: 'driver-1', full_name: 'Driver One' },
+    );
 
     m.store.driver_details.push({
       user_id: 'driver-1',
       rating: 4.9,
       truck_id: null,
+      polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
     });
 
     const app = buildApp();
@@ -368,7 +373,7 @@ describe('Bid Routes', () => {
     expect(order.deposit_tx_hash).toBe('0xescrowtest123');
   });
 
-  it('POST /:id/bids/:bidId/accept sets escrow_status to fund_failed when escrow deposit fails', async () => {
+  it('POST /:id/bids/:bidId/accept returns error when escrow deposit fails before accepting bid', async () => {
     mockEscrowDeposit.mockRejectedValue(new Error('Out of gas'));
 
     m.store.orders.push({
@@ -411,13 +416,84 @@ describe('Bid Routes', () => {
       .post('/api/orders/order-escrow-fail/bids/bid-escrow-fail/accept')
       .set(CUSTOMER);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
+    expect(res.body).toMatchObject({ error: 'Escrow deposit failed. Bid was not accepted.' });
 
     let order = m.store.orders.find(o => o.id === 'order-escrow-fail');
-    expect(order.escrow_status).toBe('fund_failed');
+    expect(order.escrow_status).toBeUndefined();
   });
 
-  it('POST /:id/bids/:bidId/accept skips escrow when customer wallet missing', async () => {
+  it('POST /:id/bids/:bidId/accept executes compensating refund when accept_bid_tx RPC fails after successful escrow deposit', async () => {
+    mockEscrowDeposit.mockResolvedValue({ txHash: '0xescrowtest123' });
+    mockEscrowRefund.mockResolvedValue({ txHash: '0xrefundtest456' });
+
+    const originalRpc = m.supabase.rpc;
+    m.supabase.rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'accept_bid_tx RPC failed' } });
+
+    m.store.orders.push({
+      id: 'order-comp-fail',
+      customer_id: 'customer-1',
+      order_display_id: 'OD-COMP-FAIL',
+    });
+
+    m.store.load_offers.push({
+      id: 'load-comp-fail',
+      order_display_id: 'OD-COMP-FAIL',
+      status: 'available',
+    });
+
+    m.store.load_bids.push({
+      id: 'bid-comp-fail',
+      load_id: 'load-comp-fail',
+      driver_id: 'driver-1',
+      bid_amount: 50000,
+      status: 'pending',
+    });
+
+    m.store.profiles.push(
+      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678' },
+      { id: 'driver-1', full_name: 'Driver One' },
+    );
+
+    m.store.driver_details.push({
+      user_id: 'driver-1',
+      rating: 4.9,
+      total_trips: 100,
+      completion_rate: 98,
+      truck_id: null,
+      polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+    });
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders/order-comp-fail/bids/bid-comp-fail/accept')
+      .set(CUSTOMER);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toMatchObject({
+      error: 'Failed to accept bid atomically.',
+      details: 'accept_bid_tx RPC failed',
+      recovery: 'The escrow deposit has been refunded. Please try again.'
+    });
+
+    expect(mockEscrowDeposit).toHaveBeenCalledWith(
+      'OD-COMP-FAIL',
+      '0x1234567890abcdef1234567890abcdef12345678',
+      '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+      expect.any(BigInt)
+    );
+
+    expect(mockEscrowRefund).toHaveBeenCalledWith('OD-COMP-FAIL');
+
+    let order = m.store.orders.find(o => o.id === 'order-comp-fail');
+    expect(order.escrow_status).toBeUndefined();
+    expect(order.status).toBeUndefined();
+
+    m.supabase.rpc = originalRpc;
+  });
+
+  it('POST /:id/bids/:bidId/accept rejects with 422 when customer wallet missing', async () => {
     m.store.orders.push({
       id: 'order-no-cust-wallet',
       customer_id: 'customer-1',
@@ -458,7 +534,54 @@ describe('Bid Routes', () => {
       .post('/api/orders/order-no-cust-wallet/bids/bid-no-cust/accept')
       .set(CUSTOMER);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('Both customer and driver must connect a wallet before escrow can be initiated.');
+    expect(mockEscrowDeposit).not.toHaveBeenCalled();
+  });
+
+  it('POST /:id/bids/:bidId/accept rejects with 422 when driver wallet missing', async () => {
+    m.store.orders.push({
+      id: 'order-no-driver-wallet',
+      customer_id: 'customer-1',
+      order_display_id: 'OD-NO-DRIV',
+    });
+
+    m.store.load_offers.push({
+      id: 'load-no-driv',
+      order_display_id: 'OD-NO-DRIV',
+      status: 'available',
+    });
+
+    m.store.load_bids.push({
+      id: 'bid-no-driv',
+      load_id: 'load-no-driv',
+      driver_id: 'driver-2',
+      bid_amount: 50000,
+      status: 'pending',
+    });
+
+    m.store.profiles.push(
+      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678' },
+      { id: 'driver-2', full_name: 'Driver Two' },
+    );
+
+    m.store.driver_details.push({
+      user_id: 'driver-2',
+      rating: 4.9,
+      total_trips: 100,
+      completion_rate: 98,
+      truck_id: null,
+      polygon_wallet_address: null,
+    });
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders/order-no-driver-wallet/bids/bid-no-driv/accept')
+      .set(CUSTOMER);
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('Both customer and driver must connect a wallet before escrow can be initiated.');
     expect(mockEscrowDeposit).not.toHaveBeenCalled();
   });
 

@@ -202,6 +202,75 @@ We welcome proposals for new features! When suggesting a feature:
 
 ---
 
+
+
+---
+
+## Local Development with BYPASS_AUTH
+
+Truxify's authentication middleware supports a `BYPASS_AUTH=true` mode for local development that skips Firebase token verification. Even in bypass mode, application endpoints still look up the user profile from the `profiles` table — so you need seeded profiles to make authenticated requests locally.
+
+### Step 1: Enable Bypass Mode
+
+Add the following to your `.env` file:
+
+```env
+BYPASS_AUTH=true
+```
+
+> **Never enable `BYPASS_AUTH` in production.** The server will return `503` if `BYPASS_AUTH=true` and `NODE_ENV=production`.
+
+### Step 2: Seed Development Profiles
+
+Run the seed script to create two predictable test profiles in your local Supabase instance:
+
+```bash
+cd backend/api
+npm run seed:dev
+```
+
+This creates:
+
+| Profile | ID | Role |
+|---------|-----|------|
+| Dev Customer | `11111111-1111-1111-1111-111111111111` | `customer` |
+| Dev Driver | `22222222-2222-2222-2222-222222222222` | `driver` |
+
+The script is **idempotent** — running it multiple times will not create duplicates.
+
+### Step 3: Make Authenticated Requests
+
+Pass the seeded profile ID in the `x-user-id` header along with `x-user-role`:
+
+**Customer request:**
+
+```bash
+curl -H "x-user-id: 11111111-1111-1111-1111-111111111111" \
+     -H "x-user-role: customer" \
+     http://localhost:3000/api/orders
+```
+
+**Driver request:**
+
+```bash
+curl -H "x-user-id: 22222222-2222-2222-2222-222222222222" \
+     -H "x-user-role: driver" \
+     http://localhost:3000/api/trips
+```
+
+### Environment Requirements
+
+The seed script requires these variables in your root `.env` file:
+
+```env
+SUPABASE_URL=http://localhost:54321
+SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
+```
+
+Copy `.env.example` to `.env` and fill in your local Supabase credentials before running the script.
+
+---
+
 ## Community Guidelines
 
 Please be respectful and constructive when interacting with other contributors. We welcome contributors of all experience levels and encourage collaboration, learning, and knowledge sharing.

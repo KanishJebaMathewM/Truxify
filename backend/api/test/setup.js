@@ -10,6 +10,7 @@
 // Required by auth.js middleware to read x-user-id/x-user-role headers
 // directly from the request instead of verifying a Firebase token.
 process.env.BYPASS_AUTH = 'true';
+process.env.MONGODB_SHUTDOWN_WAIT_MS = '0';
 
 // Suppress noisy console.error output from the routes — they log
 // pricing errors and DB failures to stderr when tests trigger them.

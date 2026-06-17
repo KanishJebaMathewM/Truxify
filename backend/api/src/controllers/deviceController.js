@@ -1,4 +1,5 @@
 import { supabase } from '../config/db.js';
+import logger from '../middleware/logger.js';
 
 /**
  * Register / update FCM token for a user device
@@ -27,7 +28,7 @@ export async function registerDeviceToken(req, res) {
     });
 
     if (error) {
-      console.error('[DeviceController] Failed to register device token in database:', error.message);
+      logger.error('[DeviceController] Failed to register device token in database:', error.message);
       return res.status(500).json({
         error: 'Failed to register device'
       });
@@ -38,7 +39,7 @@ export async function registerDeviceToken(req, res) {
       message: 'Device token registered'
     });
   } catch (err) {
-    console.error('[DeviceController] Unexpected error in registerDeviceToken:', err.message);
+    logger.error('[DeviceController] Unexpected error in registerDeviceToken:', err.message);
     return res.status(500).json({
       error: 'An unexpected error occurred'
     });

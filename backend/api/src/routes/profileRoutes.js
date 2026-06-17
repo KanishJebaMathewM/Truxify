@@ -66,6 +66,55 @@ router.get('/:id/name', authenticate, async (req, res) => {
   }
 });
 
+// UPDATE WALLET ADDRESS
+router.put('/wallet', authenticate, async (req, res) => {
+  const userId = req.user.id;
+  const { wallet_address } = req.body;
+
+  if (!wallet_address || typeof wallet_address !== 'string') {
+    return res.status(400).json({ error: 'Invalid wallet address' });
+  }
+
+  const normalized = wallet_address.trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
+    return res.status(400).json({ error: 'Invalid wallet address' });
+  }
+
+  try {
+    const { data: existing, error: checkErr } = await supabase
+      .from('profiles')
+      .select('wallet_address, polygon_wallet_address')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (checkErr) return res.status(500).json({ error: 'Failed to fetch profile.', details: checkErr.message });
+    if (!existing) return res.status(404).json({ error: 'Profile not found.' });
+
+    const { error: updateErr } = await supabase
+      .from('profiles')
+      .update({
+        wallet_address: normalized,
+        polygon_wallet_address: normalized,
+      })
+      .eq('id', userId);
+
+    if (updateErr) {
+      if (updateErr.code === '23505') {
+        return res.status(409).json({ error: 'This wallet address is already registered to another account.' });
+      }
+      return res.status(500).json({ error: 'Failed to update wallet address.', details: updateErr.message });
+    }
+
+    if (req.user && req.user.uid) {
+      void invalidateCachedProfile(req.user.uid);
+    }
+
+    res.json({ success: true, walletAddress: normalized });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error.' });
+  }
+});
+
 // UPDATE PROFILE (basic version)
 router.put('/', authenticate, async (req, res) => {
   try {
@@ -115,6 +164,45 @@ router.put('/', authenticate, async (req, res) => {
       error: 'Failed to update profile',
       details: err.message
     });
+  }
+});
+
+// UPDATE FCM TOKEN
+// Stores or clears the device FCM token for push notification delivery.
+// Invalidates Redis cache so the next authenticated request picks up the new token.
+router.put('/fcm-token', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { fcmToken } = req.body;
+
+    if (fcmToken === undefined) {
+      return res.status(400).json({ error: 'fcmToken is required. To clear, explicitly set to null.' });
+    }
+
+    if (fcmToken !== null && typeof fcmToken !== 'string') {
+      return res.status(400).json({ error: 'fcmToken must be a string or null.' });
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        fcm_token: fcmToken,
+        fcm_token_updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to update FCM token.', details: error.message });
+    }
+
+    // Invalidate Redis cache — next request will refetch the profile with the new token
+    if (req.user.uid) {
+      void invalidateCachedProfile(req.user.uid);
+    }
+
+    return res.json({ success: true, message: 'FCM token updated successfully.' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to update FCM token.', details: err.message });
   }
 });
 

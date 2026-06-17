@@ -5,6 +5,7 @@ import { validateBody } from '../middleware/validate.js';
 import { driverOnlineSchema, withdrawSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
@@ -168,7 +169,7 @@ router.get('/wallet/history', authenticate, requireRole(['driver']), async (req,
     });
 
   } catch (err) {
-    console.error('Wallet history fetch error:', err);
+    logger.error('Wallet history fetch error:', err);
 
     res.status(500).json({
       error: 'Internal Server Error'

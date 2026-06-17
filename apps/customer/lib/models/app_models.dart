@@ -87,6 +87,10 @@ class TruckResultData {
     required this.eta,
     this.badge,
     this.badgeColor = Colors.black,
+    this.baseFreight,
+    this.tollEstimate,
+    this.platformFee,
+    this.isAiEstimate = false,
   });
 
   factory TruckResultData.fromJson(Map<String, dynamic> json) {
@@ -94,6 +98,21 @@ class TruckResultData {
     final priceStr = rawPrice is num
         ? '₹${(rawPrice / 100).round()}'
         : (rawPrice?.toString() ?? '₹0');
+
+    final rawBaseFreight = json['baseFreight'];
+    final baseFreightStr = rawBaseFreight is num
+        ? '₹${(rawBaseFreight / 100).round()}'
+        : null;
+
+    final rawTollEstimate = json['tollEstimate'];
+    final tollEstimateStr = rawTollEstimate is num
+        ? '₹${(rawTollEstimate / 100).round()}'
+        : null;
+
+    final rawPlatformFee = json['platformFee'];
+    final platformFeeStr = rawPlatformFee is num
+        ? '₹${(rawPlatformFee / 100).round()}'
+        : null;
 
     final etaMinutes = json['etaMinutes'];
     final etaStr = etaMinutes != null
@@ -109,6 +128,11 @@ class TruckResultData {
       capacity: json['capacity'] as String? ?? '',
       price: priceStr,
       eta: etaStr,
+      badge: json['badge'] as String?,
+      baseFreight: baseFreightStr,
+      tollEstimate: tollEstimateStr,
+      platformFee: platformFeeStr,
+      isAiEstimate: json['isAiEstimate'] as bool? ?? false,
     );
   }
 
@@ -121,6 +145,10 @@ class TruckResultData {
   final String eta;
   final String? badge;
   final Color badgeColor;
+  final String? baseFreight;
+  final String? tollEstimate;
+  final String? platformFee;
+  final bool isAiEstimate;
 }
 
 class ActiveOrderData {

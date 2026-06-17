@@ -3,6 +3,7 @@ import { supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { getRouteEstimate } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
+import { predictPrice } from '../services/ml.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
@@ -57,6 +58,35 @@ router.get('/search', authenticate, async (req, res) => {
       isStackable: parseBoolean(is_stackable),
     });
 
+    let finalBaseFreight = pricing.baseFreight;
+    let finalTollEstimate = pricing.tollEstimate;
+    let finalPlatformFee = pricing.platformFee;
+    let finalTotalAmount = pricing.totalAmount;
+    let isAiEstimate = false;
+
+    try {
+      const mlResult = await predictPrice({
+        distanceKm: pricing.distanceKm,
+        cargoWeightKg: numWeightTonnes * 1000,
+        truckType: 'medium_truck',
+      });
+      if (mlResult && typeof mlResult.estimated_price === 'number' && mlResult.estimated_price > 0) {
+        const estimatedPrice = Math.round(mlResult.estimated_price * 100);
+        finalTotalAmount = estimatedPrice;
+        finalPlatformFee = Math.round(estimatedPrice * 0.05);
+        finalBaseFreight = estimatedPrice - finalPlatformFee - finalTollEstimate;
+        if (finalBaseFreight < 0) {
+          finalBaseFreight = 0;
+          finalTollEstimate = estimatedPrice - finalPlatformFee;
+        }
+        isAiEstimate = true;
+      } else {
+        console.warn('[ML] Invalid price prediction response during search:', mlResult);
+      }
+    } catch (mlErr) {
+      console.warn('[ML] Price prediction unavailable during search, falling back to base pricing:', mlErr.message);
+    }
+
     const { data: drivers, error: driversErr } = await supabase
       .from('driver_details')
       .select('user_id, rating, total_trips, completion_rate, truck_id')
@@ -97,7 +127,11 @@ router.get('/search', authenticate, async (req, res) => {
         truck: truck.name || 'Unknown Truck',
         truckNumber: truck.number_plate || '',
         capacity: truck.max_capacity_tons ? `${truck.max_capacity_tons} tonnes` : '',
-        price: pricing.totalAmount,
+        price: finalTotalAmount,
+        baseFreight: finalBaseFreight,
+        tollEstimate: finalTollEstimate,
+        platformFee: finalPlatformFee,
+        isAiEstimate,
         etaMinutes,
       };
     });

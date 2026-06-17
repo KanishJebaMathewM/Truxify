@@ -8,6 +8,7 @@ from .models.demand_forecast import (
     train_demand_forecast_model,
     FEATURE_NAMES,
 )
+from .models.price_prediction import predict_price
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,6 +33,19 @@ class DemandForecastOutput(BaseModel):
     predicted_demand: float
     model_version: str = "1.0.0"
     feature_names: List[str] = FEATURE_NAMES
+
+
+class PricePredictInput(BaseModel):
+    distance_km: float = Field(..., gt=0, description="Route distance in kilometres")
+    cargo_weight_kg: float = Field(..., gt=0, description="Cargo weight in kilograms")
+    truck_type: str = Field("medium_truck", description="Type of truck (light_truck, medium_truck, heavy_truck, trailer)")
+    route_origin: str = Field("", description="Origin location name")
+    route_destination: str = Field("", description="Destination location name")
+
+
+class PricePredictOutput(BaseModel):
+    estimated_price: float
+    currency: str = "INR"
 
 
 class TrainResponse(BaseModel):
@@ -68,6 +82,24 @@ async def predict_demand_endpoint(input: DemandForecastInput):
     except Exception as e:
         logger.error("Demand prediction failed: %s", e)
         raise HTTPException(status_code=500, detail="Prediction failed")
+
+
+@app.post("/predict", response_model=PricePredictOutput)
+async def predict_price_endpoint(input: PricePredictInput):
+    try:
+        price = predict_price(
+            distance_km=input.distance_km,
+            cargo_weight_kg=input.cargo_weight_kg,
+            truck_type=input.truck_type,
+            route_origin=input.route_origin,
+            route_destination=input.route_destination,
+        )
+        return PricePredictOutput(estimated_price=price)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error("Price prediction failed: %s", e)
+        raise HTTPException(status_code=500, detail="Price prediction failed")
 
 
 @app.post("/train/demand", response_model=TrainResponse)

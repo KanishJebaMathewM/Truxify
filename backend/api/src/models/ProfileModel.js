@@ -11,7 +11,9 @@ export class ProfileModel {
       avatarUrl: profile.avatar_url,
       language: profile.language,
       darkMode: profile.dark_mode,
-      isActive: profile.is_active
+      isActive: profile.is_active,
+      walletAddress: profile.wallet_address,
+      polygonWalletAddress: profile.polygon_wallet_address
     };
   }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -160,6 +161,53 @@ class MarketplaceRepository {
       spaceAvailable: s('space_available', '—'),
       updatedTotalEarnings: s('updated_total_earnings', '—'),
     );
+  }
+
+  /// Subscribes to new available load offers via Supabase Realtime postgres_changes.
+  /// Returns a stream of [LoadOffer] objects as they are inserted.
+  /// Callers should cancel the [StreamSubscription] when done.
+  Stream<LoadOffer> subscribeToNewLoads() {
+    final controller = StreamController<LoadOffer>.broadcast();
+    RealtimeChannel? channel;
+
+    try {
+      final client = _client;
+      channel = client.channel('new_load_offers');
+      channel.onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'load_offers',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'status',
+          value: 'available',
+        ),
+        callback: (payload) {
+          try {
+            final newRecord = payload.newRecord;
+            if (newRecord != null && newRecord.isNotEmpty) {
+              final offer = _mapLoadOffer(newRecord);
+              controller.add(offer);
+            }
+          } catch (_) {
+            // Error mapping load offer
+          }
+        },
+      ).subscribe();
+    } catch (_) {
+      // Supabase/Realtime not available
+    }
+
+    controller.onCancel = () {
+      if (channel != null) {
+        try {
+          _client.removeChannel(channel);
+        } catch (_) {}
+      }
+      controller.close();
+    };
+
+    return controller.stream;
   }
 
   String _formatCurrency(num value) {

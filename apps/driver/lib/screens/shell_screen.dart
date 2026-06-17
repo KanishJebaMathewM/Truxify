@@ -15,8 +15,17 @@ import 'trip_detail_screen.dart';
 import 'trips_screen.dart';
 import 'my_truck_screen.dart';
 
+import '../services/marketplace_repository.dart';
+
 class ShellScreen extends StatefulWidget {
-  const ShellScreen({super.key});
+  const ShellScreen({
+    super.key,
+    this.marketplaceRepo,
+    this.mockLocationText,
+  });
+
+  final MarketplaceRepository? marketplaceRepo;
+  final String? mockLocationText;
 
   @override
   State<ShellScreen> createState() => _ShellScreenState();
@@ -38,7 +47,13 @@ class _ShellScreenState extends State<ShellScreen> {
   void initState() {
     super.initState();
     _tabs = [
-      _buildTabNavigator(_homeNavigatorKey, const HomeScreen()),
+      _buildTabNavigator(
+        _homeNavigatorKey,
+        HomeScreen(
+          marketplaceRepo: widget.marketplaceRepo,
+          mockLocationText: widget.mockLocationText,
+        ),
+      ),
       _buildTabNavigator(_tripsNavigatorKey, const TripsScreen()),
       _buildTabNavigator(_earningsNavigatorKey, const EarningsScreen()),
       _buildTabNavigator(

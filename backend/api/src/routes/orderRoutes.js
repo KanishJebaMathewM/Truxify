@@ -20,7 +20,7 @@ import { changeDropSchema, cancelOrderSchema } from '../validation/requestSchema
 import { awardReputationPoints } from '../services/reputation.js';
 import { escrowDeposit, escrowRelease, escrowRefund } from '../services/escrow.js';
 import { sendDeliveryOtpNotification } from '../services/notificationService.js';
-import { predictDemand } from '../services/ml.js';
+import { predictDemand, predictPrice } from '../services/ml.js';
 import rateLimit from 'express-rate-limit';
 import logger from '../middleware/logger.js';
 
@@ -180,6 +180,22 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
     });
   }
 
+  let estimatedPrice = null;
+  try {
+    const mlResult = await predictPrice({
+      distanceKm: pricing.distanceKm,
+      cargoWeightKg: Number(weight_tonnes) * 1000,
+      routeOrigin: pickup_address,
+      routeDestination: drop_address,
+    });
+    if (!mlResult || typeof mlResult.estimated_price !== 'number' || mlResult.estimated_price <= 0) {
+      throw new Error(`Invalid or non-positive price prediction: ${JSON.stringify(mlResult)}`);
+    }
+    estimatedPrice = Math.round(mlResult.estimated_price * 100);
+  } catch (mlErr) {
+    console.warn('[ML] Price prediction unavailable, falling back to base pricing:', mlErr.message);
+  }
+
   const orderDisplayId = generateOrderDisplayId();
 
   try {
@@ -198,6 +214,7 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
         toll_estimate: pricing.tollEstimate,
         platform_fee: pricing.platformFee,
         total_amount: pricing.totalAmount,
+        estimated_price: estimatedPrice,
         payment_method_id, upi_id
       })
       .select('id, order_display_id, status, created_at')
@@ -622,6 +639,22 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
     if (!loadOffer) return res.status(404).json({ error: 'Load offer for this order was not found.' });
     if (bid.load_id !== loadOffer.id) return res.status(403).json({ error: 'Access Denied: Bid does not belong to this order.' });
 
+    // Fetch wallet addresses BEFORE any state change to validate escrow readiness
+    const [driverDetailsResult, customerProfileResult] = await Promise.all([
+      supabase.from('driver_details').select('polygon_wallet_address').eq('user_id', bid.driver_id).maybeSingle(),
+      supabase.from('profiles').select('polygon_wallet_address').eq('id', req.user.id).maybeSingle(),
+    ]);
+
+    const driverWallet = driverDetailsResult.data?.polygon_wallet_address ?? null;
+    const customerWallet = customerProfileResult.data?.polygon_wallet_address ?? null;
+
+    if (!driverWallet || !customerWallet) {
+      logger.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — rejecting bid acceptance.`);
+      return res.status(422).json({
+        error: 'Both customer and driver must connect a wallet before escrow can be initiated.'
+      });
+    }
+
     const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', bid.driver_id).maybeSingle();
     const { data: details } = await supabase.from('driver_details').select('rating, truck_id').eq('user_id', bid.driver_id).maybeSingle();
 
@@ -631,15 +664,6 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       if (truckErr) logger.error('Truck lookup error during bid accept:', truckErr.message);
       truckInfo = data;
     }
-
-    // Fetch wallet addresses BEFORE any state change
-    const [driverDetailsResult, customerProfileResult] = await Promise.all([
-      supabase.from('driver_details').select('polygon_wallet_address').eq('user_id', bid.driver_id).maybeSingle(),
-      supabase.from('profiles').select('polygon_wallet_address').eq('id', req.user.id).maybeSingle(),
-    ]);
-
-    const driverWallet = driverDetailsResult.data?.polygon_wallet_address ?? null;
-    const customerWallet = customerProfileResult.data?.polygon_wallet_address ?? null;
 
     // Phase 1: Escrow deposit BEFORE accepting the bid
     let escrowTxHash = null;
@@ -652,7 +676,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
         } else {
           return res.status(500).json({
             error: 'Escrow deposit failed. Bid was not accepted.',
-            recovery: 'Please ensure both you and the driver have valid Polygon wallet addresses configured, then try again.'
+            recovery: 'Please try again or contact support if the issue persists.'
           });
         }
       } catch (depositErr) {
@@ -662,8 +686,6 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
           recovery: 'Check that the customer wallet has sufficient MATIC balance for the deposit and that the Polygon RPC endpoint is reachable.'
         });
       }
-    } else {
-      logger.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — skipping escrow deposit.`);
     }
 
     // Phase 2: Atomically accept the bid
@@ -687,7 +709,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       return res.status(500).json({
         error: 'Failed to accept bid atomically.',
         details: rpcErr.message,
-        recovery: escrowTxHash ? 'The escrow deposit has been refunded. Please try again.' : undefined
+        recovery: 'The escrow deposit has been refunded. Please try again.'
       });
     }
 

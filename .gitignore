@@ -60,3 +60,6 @@ backend/api/coverage/
 __pycache__/
 *.pyc
 venv/
+
+# Local Docker Compose overrides — may contain real credentials
+docker-compose.override.yml

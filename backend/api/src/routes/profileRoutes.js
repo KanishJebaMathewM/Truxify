@@ -66,6 +66,55 @@ router.get('/:id/name', authenticate, async (req, res) => {
   }
 });
 
+// UPDATE WALLET ADDRESS
+router.put('/wallet', authenticate, async (req, res) => {
+  const userId = req.user.id;
+  const { wallet_address } = req.body;
+
+  if (!wallet_address || typeof wallet_address !== 'string') {
+    return res.status(400).json({ error: 'Invalid wallet address' });
+  }
+
+  const normalized = wallet_address.trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
+    return res.status(400).json({ error: 'Invalid wallet address' });
+  }
+
+  try {
+    const { data: existing, error: checkErr } = await supabase
+      .from('profiles')
+      .select('wallet_address, polygon_wallet_address')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (checkErr) return res.status(500).json({ error: 'Failed to fetch profile.', details: checkErr.message });
+    if (!existing) return res.status(404).json({ error: 'Profile not found.' });
+
+    const { error: updateErr } = await supabase
+      .from('profiles')
+      .update({
+        wallet_address: normalized,
+        polygon_wallet_address: normalized,
+      })
+      .eq('id', userId);
+
+    if (updateErr) {
+      if (updateErr.code === '23505') {
+        return res.status(409).json({ error: 'This wallet address is already registered to another account.' });
+      }
+      return res.status(500).json({ error: 'Failed to update wallet address.', details: updateErr.message });
+    }
+
+    if (req.user && req.user.uid) {
+      void invalidateCachedProfile(req.user.uid);
+    }
+
+    res.json({ success: true, walletAddress: normalized });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal Server Error.' });
+  }
+});
+
 // UPDATE PROFILE (basic version)
 router.put('/', authenticate, async (req, res) => {
   try {

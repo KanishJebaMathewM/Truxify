@@ -72,12 +72,12 @@ router.put('/wallet', authenticate, async (req, res) => {
   const { wallet_address } = req.body;
 
   if (!wallet_address || typeof wallet_address !== 'string') {
-    return res.status(400).json({ error: 'wallet_address is required and must be a string.' });
+    return res.status(400).json({ error: 'Invalid wallet address' });
   }
 
   const normalized = wallet_address.trim();
   if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
-    return res.status(400).json({ error: 'Invalid wallet address format. Must be a 0x-prefixed 42-character address.' });
+    return res.status(400).json({ error: 'Invalid wallet address' });
   }
 
   try {
@@ -105,7 +105,11 @@ router.put('/wallet', authenticate, async (req, res) => {
       return res.status(500).json({ error: 'Failed to update wallet address.', details: updateErr.message });
     }
 
-    res.json({ message: 'Wallet address updated successfully.', wallet_address: normalized });
+    if (req.user && req.user.uid) {
+      void invalidateCachedProfile(req.user.uid);
+    }
+
+    res.json({ success: true, walletAddress: normalized });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error.' });
   }

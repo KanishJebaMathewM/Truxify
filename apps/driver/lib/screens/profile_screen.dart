@@ -34,6 +34,33 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _currentLanguage = 'English';
   String _walletAddress = '';
 
+  @override
+  void initState() {
+    super.initState();
+    _loadWalletAddress();
+  }
+
+  Future<void> _loadWalletAddress() async {
+    try {
+      final client = Supabase.instance.client;
+      final userId = client.auth.currentUser?.id;
+      if (userId != null) {
+        final data = await client
+            .from('profiles')
+            .select('wallet_address')
+            .eq('id', userId)
+            .maybeSingle();
+        if (data != null && mounted) {
+          setState(() {
+            _walletAddress = data['wallet_address']?.toString() ?? '';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to load wallet address: $e');
+    }
+  }
+
   Color _borderColor(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark
         ? TruxifyColors.darkBorder

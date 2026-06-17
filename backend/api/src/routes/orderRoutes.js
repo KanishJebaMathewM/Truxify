@@ -631,7 +631,10 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
     const customerWallet = customerProfileResult.data?.polygon_wallet_address ?? null;
 
     if (!driverWallet || !customerWallet) {
-      console.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — skipping escrow deposit.`);
+      console.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — rejecting bid acceptance.`);
+      return res.status(422).json({
+        error: 'Both customer and driver must connect a wallet before escrow can be initiated.'
+      });
     }
 
     const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', bid.driver_id).maybeSingle();

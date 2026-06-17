@@ -73,6 +73,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             'totalOrders': extra?['totalOrders']?.toString() ?? '0',
             'totalSaved': extra?['totalSaved']?.toString() ?? '0',
             'co2ReducedKg': extra?['co2ReducedKg']?.toString() ?? '0',
+            'walletAddress': profile['walletAddress']?.toString() ?? '',
           });
         }
 
@@ -86,6 +87,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _displayName = profile?['fullName']?.toString() ?? '';
           _displayCompany = profile?['companyName']?.toString() ?? '';
           _displayPhone = profile?['phone']?.toString() ?? '';
+          _walletAddress = profile?['walletAddress']?.toString() ?? '';
 
           String? defaultPayment;
           for (final m in methods) {
@@ -139,6 +141,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _totalOrders = int.tryParse(cachedProfile?['totalOrders']?.toString() ?? '0') ?? 0;
       _totalSaved = num.tryParse(cachedProfile?['totalSaved']?.toString() ?? '0') ?? 0;
       _co2ReducedKg = num.tryParse(cachedProfile?['co2ReducedKg']?.toString() ?? '0') ?? 0;
+      _walletAddress = cachedProfile?['walletAddress']?.toString() ?? '';
       _lastUpdatedLabel = cachedProfile?['_cached_at']?.toString();
     });
   }

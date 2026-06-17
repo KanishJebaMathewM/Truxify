@@ -1,4 +1,5 @@
 import { supabase, firebaseAdmin } from '../config/db.js';
+import logger from '../middleware/logger.js';
 
 /**
  * Deliver the delivery OTP to the customer through a secure out-of-band channel.
@@ -8,7 +9,7 @@ import { supabase, firebaseAdmin } from '../config/db.js';
  * @param {string} otp - The 6-digit delivery OTP.
  */
 export async function sendDeliveryOtpNotification(customerId, orderDisplayId, otp) {
-  console.log(
+  logger.info(
     `[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`
   );
 
@@ -27,12 +28,12 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       });
 
     if (error) {
-      console.error('[NotificationService] Database insert failed:', error);
+      logger.error('[NotificationService] Database insert failed:', error);
     } else {
-      console.log('[NotificationService] Notification inserted successfully');
+      logger.info('[NotificationService] Notification inserted successfully');
     }
   } catch (dbErr) {
-    console.error(
+    logger.error(
       '[NotificationService] Database connection error during notification insert:',
       dbErr.message
     );
@@ -45,7 +46,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       // const fcmToken = await getUserFcmToken(customerId);
 
       // Example safe structure (no crash if not configured)
-      console.log(`[FCM] Preparing push for user ${customerId}`);
+      logger.info(`[FCM] Preparing push for user ${customerId}`);
 
       /*
       await firebaseAdmin.messaging().send({
@@ -60,12 +61,12 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       });
       */
 
-      console.log(`[FCM] Push Notification stub executed for ${customerId}`);
+      logger.info(`[FCM] Push Notification stub executed for ${customerId}`);
     } catch (err) {
-      console.warn('[FCM] Skipped due to error:', err.message);
+      logger.warn('[FCM] Skipped due to error:', err.message);
     }
   } else {
-    console.warn('[FCM] Firebase not configured — skipping push notification');
+    logger.warn('[FCM] Firebase not configured — skipping push notification');
   }
 
   // 3. SMS Gateway (e.g. Twilio) Stub
@@ -73,10 +74,10 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     const smsOtpLog = process.env.NODE_DEBUG
       ? `Sending SMS to customer phone containing OTP ${otp}`
       : `Sending SMS to customer phone containing OTP ${otp.slice(0, 2)}***`;
-    console.log(`[NotificationService] [SMS] SMS stub: ${smsOtpLog}`);
+    logger.info(`[NotificationService] [SMS] SMS stub: ${smsOtpLog}`);
   } else {
     const logOtp = process.env.NODE_DEBUG ? otp : `${otp.slice(0, 2)}***`;
-    console.log(
+    logger.info(
       `[NotificationService] [SMS] SMS stub: No SMS gateway configured. Logging OTP out-of-band: ${logOtp}`
     );
   }

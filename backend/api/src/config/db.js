@@ -4,6 +4,7 @@ import { MongoClient } from 'mongodb';
 import Redis from 'ioredis';
 import * as admin from 'firebase-admin';
 import path from 'path';
+import logger from '../middleware/logger.js';
 
 // Load environment variables from root directory .env
 dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
@@ -24,12 +25,12 @@ if (supabaseUrl && supabaseKey) {
         autoRefreshToken: false,
       }
     });
-    console.log('✅ Supabase client initialized successfully.');
+    logger.info('Supabase client initialized successfully.');
   } catch (error) {
-    console.error('❌ Failed to initialize Supabase client:', error.message);
+    logger.error({ err: error }, 'Failed to initialize Supabase client');
   }
 } else {
-  console.warn('⚠️ SUPABASE_URL or keys not found in .env. Supabase integration disabled.');
+  logger.warn('SUPABASE_URL or keys not found in .env. Supabase integration disabled.');
 }
 
 // ============================================================================
@@ -53,20 +54,20 @@ if (mongoUri) {
     mongoClient.connect()
       .then(() => {
         mongoDb = mongoClient.db(mongoDbName);
-        console.log(`✅ Connected to MongoDB Database: "${mongoDbName}"`);
+        logger.info({ db: mongoDbName }, 'Connected to MongoDB');
         if (_mongoDbResolve) _mongoDbResolve();
       })
       .catch(err => {
-        console.error('❌ Failed to connect to MongoDB server:', err.message);
+        logger.error({ err }, 'Failed to connect to MongoDB server');
         if (_mongoDbResolve) _mongoDbResolve();
       });
   } catch (error) {
-    console.error('❌ MongoDB client initialization error:', error.message);
+    logger.error({ err: error }, 'MongoDB client initialization error');
     if (_mongoDbResolve) _mongoDbResolve();
   }
 } else {
   if (_mongoDbResolve) _mongoDbResolve();
-  console.warn('⚠️ MONGODB_URI not found in .env. MongoDB telemetry database disabled.');
+  logger.warn('MONGODB_URI not found in .env. MongoDB telemetry database disabled.');
 }
 
 // ============================================================================
@@ -86,17 +87,17 @@ if (redisUrl) {
     });
 
     redisClient.on('connect', () => {
-      console.log('✅ Connected to Upstash Redis server.');
+      logger.info('Connected to Upstash Redis server.');
     });
 
     redisClient.on('error', (err) => {
-      console.error('❌ Redis connection error:', err.message);
+      logger.error({ err }, 'Redis connection error');
     });
   } catch (error) {
-    console.error('❌ Redis initialization error:', error.message);
+    logger.error({ err: error }, 'Redis initialization error');
   }
 } else {
-  console.warn('⚠️ REDIS_URL not found in .env. Redis session cache disabled.');
+  logger.warn('REDIS_URL not found in .env. Redis session cache disabled.');
 }
 // ============================================================================
 // 4. FIREBASE ADMIN SDK (SAFE OPTIONAL INIT)
@@ -124,18 +125,18 @@ if (serviceAccountRaw) {
           credential: admin.credential.cert(serviceAccount),
         });
 
-        console.log('✅ Firebase Admin SDK initialized successfully.');
+        logger.info('Firebase Admin SDK initialized successfully.');
       }
     } else {
       throw new Error('Invalid Firebase service account format');
     }
 
   } catch (err) {
-    console.warn('⚠️ Firebase disabled (invalid config). Continuing without it.');
+    logger.warn({ err }, 'Firebase disabled (invalid config). Continuing without it.');
     firebaseAdmin = null;
   }
 } else {
-  console.warn('⚠️ Firebase not configured. Skipping initialization.');
+  logger.warn('Firebase not configured. Skipping initialization.');
 }
 
 export async function closeDbConnections() {
@@ -144,9 +145,9 @@ export async function closeDbConnections() {
       await mongoClient.close();
       mongoClient = null;
       mongoDb = null;
-      console.log('[shutdown] MongoDB connection closed.');
+      logger.info('[shutdown] MongoDB connection closed.');
     } catch (err) {
-      console.error('[shutdown] MongoDB close error:', err.message);
+      logger.error({ err }, '[shutdown] MongoDB close error');
     }
   }
 
@@ -155,13 +156,13 @@ export async function closeDbConnections() {
       if (redisClient.status !== 'end') {
         await redisClient.quit();
       }
-      console.log('[shutdown] Redis connection closed.');
+      logger.info('[shutdown] Redis connection closed.');
     } catch (err) {
-      console.error('[shutdown] Redis quit error:', err.message);
+      logger.error({ err }, '[shutdown] Redis quit error');
       try {
         redisClient.disconnect();
       } catch (disconnectErr) {
-        console.error('[shutdown] Redis disconnect error:', disconnectErr.message);
+        logger.error({ err: disconnectErr }, '[shutdown] Redis disconnect error');
       }
     } finally {
       redisClient = null;

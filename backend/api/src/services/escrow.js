@@ -17,6 +17,7 @@
  */
 
 import { ethers } from 'ethers';
+import logger from '../middleware/logger.js';
 
 const ESCROW_ABI = [
   'function deposit(bytes32 bookingId, address payable customer, address payable driver) external payable',
@@ -37,12 +38,12 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const relayer  = new ethers.Wallet(relayerPrivateKey, provider);
     escrowContract = new ethers.Contract(contractAddress, ESCROW_ABI, relayer);
-    console.log('✅ Polygon Escrow contract client initialised.');
+    logger.info('✅ Polygon Escrow contract client initialised.');
   } catch (err) {
-    console.error('❌ Failed to initialise Escrow contract client:', err.message);
+    logger.error('❌ Failed to initialise Escrow contract client:', err.message);
   }
 } else {
-  console.warn(
+  logger.warn(
     '⚠️  POLYGON_RPC_URL / ESCROW_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY ' +
     'not set. Escrow payments disabled.'
   );
@@ -74,24 +75,24 @@ export async function escrowDeposit(orderDisplayId, customerWalletAddress, drive
   const bookingId = getEscrowBookingId(orderDisplayId);
 
   if (!escrowContract) {
-    console.warn('[escrow] Contract not initialised — skipping deposit.');
+    logger.warn('[escrow] Contract not initialised — skipping deposit.');
     return { txHash: null, bookingId };
   }
   if (!ethers.isAddress(customerWalletAddress)) {
-    console.warn(`[escrow] Invalid customer wallet address "${customerWalletAddress}" — skipping deposit.`);
+    logger.warn(`[escrow] Invalid customer wallet address "${customerWalletAddress}" — skipping deposit.`);
     return { txHash: null, bookingId };
   }
   if (!ethers.isAddress(driverWalletAddress)) {
-    console.warn(`[escrow] Invalid driver wallet address "${driverWalletAddress}" — skipping deposit.`);
+    logger.warn(`[escrow] Invalid driver wallet address "${driverWalletAddress}" — skipping deposit.`);
     return { txHash: null, bookingId };
   }
 
   const tx = await escrowContract.deposit(bookingId, customerWalletAddress, driverWalletAddress, {
     value: amountWei,
   });
-  console.log(`[escrow] deposit tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+  logger.info(`[escrow] deposit tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   const receipt = await tx.wait(1);
-  console.log(`[escrow] deposit confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+  logger.info(`[escrow] deposit confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
   return { txHash: receipt.hash, bookingId };
 }
 
@@ -106,14 +107,14 @@ export async function escrowRelease(orderDisplayId) {
   const bookingId = getEscrowBookingId(orderDisplayId);
 
   if (!escrowContract) {
-    console.warn('[escrow] Contract not initialised — skipping releaseFunds.');
+    logger.warn('[escrow] Contract not initialised — skipping releaseFunds.');
     return { txHash: null, bookingId };
   }
 
   const tx = await escrowContract.releaseFunds(bookingId);
-  console.log(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+  logger.info(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   const receipt = await tx.wait(1);
-  console.log(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+  logger.info(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
   return { txHash: receipt.hash, bookingId };
 }
 
@@ -128,13 +129,13 @@ export async function escrowRefund(orderDisplayId) {
   const bookingId = getEscrowBookingId(orderDisplayId);
 
   if (!escrowContract) {
-    console.warn('[escrow] Contract not initialised — skipping refundFunds.');
+    logger.warn('[escrow] Contract not initialised — skipping refundFunds.');
     return { txHash: null, bookingId };
   }
 
   const tx = await escrowContract.refundFunds(bookingId);
-  console.log(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+  logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   const receipt = await tx.wait(1);
-  console.log(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+  logger.info(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
   return { txHash: receipt.hash, bookingId };
 }

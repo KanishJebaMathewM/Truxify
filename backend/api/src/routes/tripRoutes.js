@@ -2,6 +2,7 @@ import express from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
@@ -98,7 +99,7 @@ router.post('/events/batch', authenticate, validateBatchPayload(batchSyncSchema)
       .maybeSingle();
 
     if (existingBatch) {
-      console.log('[SyncEngine] Ignored duplicate batch:', idempotencyKey);
+      logger.info('[SyncEngine] Ignored duplicate batch:', idempotencyKey);
       // Return 202 Accepted so the Flutter app marks them as synced locally
       return res.status(202).json({ message: 'Batch already processed.' });
     }
@@ -107,7 +108,7 @@ router.post('/events/batch', authenticate, validateBatchPayload(batchSyncSchema)
     for (const event of events) {
       const result = validateEventPayload(event.type, event.payload || {});
       if (!result.success) {
-        console.warn('[SyncEngine] Invalid payload for event', event.id, '(type:', event.type, '):', result.error.issues);
+        logger.warn('[SyncEngine] Invalid payload for event', event.id, '(type:', event.type, '):', result.error.issues);
         return res.status(422).json({
           error: 'Unprocessable Entity: Invalid event payload for type ' + event.type,
           details: result.error.issues,
@@ -145,7 +146,7 @@ router.post('/events/batch', authenticate, validateBatchPayload(batchSyncSchema)
       .upsert(recordsToInsert, { onConflict: 'event_id' });
 
     if (insertError) {
-      console.error('[SyncEngine] Bulk Insert Failed:', insertError.message);
+      logger.error('[SyncEngine] Bulk Insert Failed:', insertError.message);
       // Return 500 so the Flutter app knows to apply exponential backoff and retry later
       return res.status(500).json({ error: 'Database failed to process batch.' });
     }
@@ -164,20 +165,20 @@ router.post('/events/batch', authenticate, validateBatchPayload(batchSyncSchema)
 
     if (idempotencyError) {
       // Non-fatal error. We processed the events, but failed to log the key.
-      console.warn('[SyncEngine] Failed to log idempotency key:', idempotencyKey);
+      logger.warn('[SyncEngine] Failed to log idempotency key:', idempotencyKey);
     }
 
     // 5. Respond with 202 Accepted
     // This triggers `return true;` in the Flutter SyncEngine, allowing it to
     // clear the local database queue.
-    console.log('[SyncEngine] Successfully processed batch of', events.length, 'events for User:', userId);
+    logger.info('[SyncEngine] Successfully processed batch of', events.length, 'events for User:', userId);
     return res.status(202).json({
       message: 'Batch processed successfully',
       processed_count: events.length
     });
 
   } catch (err) {
-    console.error('[SyncEngine] Critical processing error:', err.message);
+    logger.error('[SyncEngine] Critical processing error:', err.message);
     // 500 triggers the `_backoffDelay` in the Flutter app
     return res.status(500).json({ error: 'Internal server error during batch processing.' });
   }

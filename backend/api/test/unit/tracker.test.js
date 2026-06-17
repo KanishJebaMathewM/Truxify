@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
+import logger from '../../src/middleware/logger.js';
+
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn() },
+}));
 
 const dbMock = vi.hoisted(() => ({
   store: {
@@ -143,7 +148,7 @@ describe('tracker WebSocket telemetry authorization', () => {
 describe('tracker WebSocket heartbeat messages', () => {
   it('responds to raw client ping messages without attempting JSON parsing', async () => {
     const sentMessages = [];
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
     const ws = {
       isAlive: false,
       send(message) {
@@ -162,7 +167,7 @@ describe('tracker WebSocket heartbeat messages', () => {
 
   it('keeps returning a JSON error for malformed non-heartbeat messages', async () => {
     const sentMessages = [];
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
     const ws = {
       send(message) {
         sentMessages.push(JSON.parse(message));
@@ -199,7 +204,7 @@ describe('tracker graceful shutdown', () => {
     };
     const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
     const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
     __testing.setTelemetryWriteBuffer([{ driver_id: 'driver-1' }]);
     __testing.setShutdownState({
@@ -228,7 +233,7 @@ describe('tracker graceful shutdown', () => {
   });
 
   it('is safe to call when no WebSocket server has been initialized', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
     await closeWebSocketServer();
 
@@ -259,7 +264,7 @@ describe('tracker graceful shutdown', () => {
       t.setMongoDbOverride({ collection });
     }, 50);
 
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
 
     await closeWs();
 
@@ -281,8 +286,8 @@ describe('tracker graceful shutdown', () => {
     process.env.MONGODB_SHUTDOWN_WAIT_MS = '50';
     t.setMongoDbOverride(null);
 
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
     await closeWs();
 
@@ -404,7 +409,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
   });
 
   it('allows upgrades and logs when Redis rate limiting fails', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
@@ -1163,7 +1168,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     const mockOldRecords = Array.from({ length: 10 }, (_, i) => ({ driver_id: `old-driver-${i}` }));
     t.setTelemetryWriteBuffer(mockOldRecords);
 
-    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    logger.warn.mockClear();
 
     await t.flushTelemetryBuffer();
 
@@ -1175,11 +1180,9 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     expect(buffer[4].driver_id).toBe('old-driver-9');
     expect(buffer[5].driver_id).toBe('new-driver-0');
 
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
+    expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('[TRUXIFY BUFFER DROP] Buffer full: dropped 5 oldest records from retry batch.')
     );
-
-    consoleWarnSpy.mockRestore();
   });
 
   it('discards buffer on MongoDB validation error (code 121)', async () => {
@@ -1290,7 +1293,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       __testing.setTelemetryWriteBuffer(mockRecords);
 
       const ws = { driverId: 'driver-new', send: vi.fn() };
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      logger.warn.mockClear();
 
       await handleLocationPing(ws, {
         driver_id: 'driver-new',
@@ -1302,11 +1305,9 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       expect(buffer.length).toBe(9501);
       expect(buffer[0].driver_id).toBe('driver-old-500');
       expect(buffer[9500].driver_id).toBe('driver-new');
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('[TRUXIFY BUFFER WARN] Telemetry buffer full')
       );
-
-      consoleWarnSpy.mockRestore();
     });
   });
 

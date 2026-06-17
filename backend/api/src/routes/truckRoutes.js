@@ -3,6 +3,7 @@ import { supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { getRouteEstimate } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
@@ -63,7 +64,7 @@ router.get('/search', authenticate, async (req, res) => {
       .not('truck_id', 'is', null);
 
     if (driversErr) {
-      console.error('Driver search error:', driversErr.message);
+      logger.error('Driver search error:', driversErr.message);
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -103,7 +104,7 @@ router.get('/search', authenticate, async (req, res) => {
 
     res.json(results);
   } catch (err) {
-    console.error('Truck search error:', err.message);
+    logger.error('Truck search error:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

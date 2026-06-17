@@ -22,6 +22,7 @@ import { escrowDeposit, escrowRelease, escrowRefund } from '../services/escrow.j
 import { sendDeliveryOtpNotification } from '../services/notificationService.js';
 import { predictDemand } from '../services/ml.js';
 import rateLimit from 'express-rate-limit';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
@@ -45,7 +46,7 @@ async function checkOtpLockout(orderId) {
       const isLocked = await redisClient.get(lockKey);
       return !!isLocked;
     } catch (err) {
-      console.error('[OTP] Redis error in checkOtpLockout, falling back to memory:', err.message);
+      logger.error('[OTP] Redis error in checkOtpLockout, falling back to memory:', err.message);
     }
   }
   const record = inMemoryOtpFailedAttempts.get(orderId);
@@ -70,7 +71,7 @@ async function recordOtpFailure(orderId) {
       }
       return count;
     } catch (err) {
-      console.error('[OTP] Redis error in recordOtpFailure, falling back to memory:', err.message);
+      logger.error('[OTP] Redis error in recordOtpFailure, falling back to memory:', err.message);
     }
   }
   
@@ -94,7 +95,7 @@ async function clearOtpState(orderId) {
       await redisClient.del(countKey, lockKey);
       return;
     } catch (err) {
-      console.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);
+      logger.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);
     }
   }
   inMemoryOtpFailedAttempts.delete(orderId);
@@ -172,7 +173,7 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
       isStackable: Boolean(is_stackable),
     });
   } catch (pricingErr) {
-    console.error('Pricing computation error:', pricingErr.message);
+    logger.error('Pricing computation error:', pricingErr.message);
     return res.status(400).json({
       error: 'Unable to compute freight pricing for the given route/cargo.',
       details: pricingErr.message,
@@ -203,7 +204,7 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
       .single();
 
     if (orderErr) {
-      console.error('Order Insertion Error:', orderErr.message);
+      logger.error('Order Insertion Error:', orderErr.message);
       return res.status(500).json({ error: 'Failed to create order record.', details: orderErr.message });
     }
 
@@ -220,7 +221,7 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
     const { error: timelineErr } = await supabase.from('order_timeline').insert(milestones);
 
     if (timelineErr) {
-      console.error('Timeline Insertion Error:', timelineErr.message);
+      logger.error('Timeline Insertion Error:', timelineErr.message);
     }
 
     const { error: offerErr } = await supabase
@@ -243,12 +244,12 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
       });
 
     if (offerErr) {
-      console.error('Load Offer Insertion Error:', offerErr.message);
+      logger.error('Load Offer Insertion Error:', offerErr.message);
     }
 
     res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
   } catch (err) {
-    console.error('Order creation exception:', err.message);
+    logger.error('Order creation exception:', err.message);
     res.status(500).json({ error: 'Internal Server Error.' });
   }
 });
@@ -525,10 +526,10 @@ router.post('/:id/ratings', authenticate, requireRole(['customer']), validatePar
       try {
         await awardReputationPoints(polygonAddress, stars);
       } catch (repErr) {
-        console.error('[reputation] On-chain reputation update failed:', repErr.message);
+        logger.error('[reputation] On-chain reputation update failed:', repErr.message);
       }
     } else {
-      console.warn(
+      logger.warn(
         `[reputation] Driver ${order.driver_id} has no polygon_wallet_address — skipping on-chain update.`
       );
     }
@@ -627,7 +628,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
     let truckInfo = null;
     if (details && details.truck_id) {
       const { data, error: truckErr } = await supabase.from('trucks').select('id, name, number_plate').eq('id', details.truck_id).maybeSingle();
-      if (truckErr) console.error('Truck lookup error during bid accept:', truckErr.message);
+      if (truckErr) logger.error('Truck lookup error during bid accept:', truckErr.message);
       truckInfo = data;
     }
 
@@ -662,7 +663,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
         });
       }
     } else {
-      console.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — skipping escrow deposit.`);
+      logger.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — skipping escrow deposit.`);
     }
 
     // Phase 2: Atomically accept the bid
@@ -678,9 +679,9 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       if (escrowTxHash) {
         try {
           await escrowRefund(order.order_display_id);
-          console.warn(`[escrow] Compensating refund issued for order ${order.order_display_id} after RPC failure.`);
+          logger.warn(`[escrow] Compensating refund issued for order ${order.order_display_id} after RPC failure.`);
         } catch (refundErr) {
-          console.error(`[escrow] CRITICAL: Escrow refund also failed for order ${order.order_display_id}:`, refundErr.message);
+          logger.error(`[escrow] CRITICAL: Escrow refund also failed for order ${order.order_display_id}:`, refundErr.message);
         }
       }
       return res.status(500).json({
@@ -706,7 +707,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       .eq('id', orderId);
 
     if (escrowUpdateErr) {
-      console.warn('[escrow] Failed to update escrow booking reference:', escrowUpdateErr.message);
+      logger.warn('[escrow] Failed to update escrow booking reference:', escrowUpdateErr.message);
     }
 
     res.json({ message: 'Bid accepted. Driver and truck assigned.' });
@@ -808,7 +809,7 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
       const message = remaining > 0
         ? `Invalid OTP. ${remaining} attempt(s) remaining before lockout.`
         : `Invalid OTP. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes due to too many failed attempts.`;
-      console.warn(`[OTP] Failed verification attempt for order ${orderId} by driver ${req.user.id}. ${remaining} attempts remaining.`);
+      logger.warn(`[OTP] Failed verification attempt for order ${orderId} by driver ${req.user.id}. ${remaining} attempts remaining.`);
       return res.status(400).json({ error: message });
     }
 
@@ -835,7 +836,7 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
     // Call complete_trip_tx RPC to atomically update trip, driver stats, wallet, earnings, order status, and timeline.
     const { error: rpcErr } = await supabase.rpc('complete_trip_tx', { p_order_id: orderId });
     if (rpcErr) {
-      console.error('complete_trip_tx RPC failed:', rpcErr.message);
+      logger.error('complete_trip_tx RPC failed:', rpcErr.message);
       return res.status(500).json({ error: 'Failed to complete trip and release payment.', details: rpcErr.message });
     }
 
@@ -847,7 +848,7 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
       .single();
 
     if (fetchErr) {
-      console.error('Failed to fetch updated order:', fetchErr.message);
+      logger.error('Failed to fetch updated order:', fetchErr.message);
       return res.status(500).json({ error: 'Failed to retrieve completed order details.', details: fetchErr.message });
     }
 
@@ -863,10 +864,10 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
           }).eq('id', orderId);
         }
       } catch (releaseErr) {
-        console.error('[escrow] Release failed for order', orderId, ':', releaseErr.message);
+        logger.error('[escrow] Release failed for order', orderId, ':', releaseErr.message);
       }
     } else {
-      console.log(`[escrow] Escrow not funded (status: ${updatedOrder.escrow_status}) — skipping on-chain release.`);
+      logger.info(`[escrow] Escrow not funded (status: ${updatedOrder.escrow_status}) — skipping on-chain release.`);
     }
 
     // Strip delivery_otp from updatedOrder to prevent exposure
@@ -915,7 +916,7 @@ router.put('/:id/change-drop', authenticate, requireRole(['customer']), validate
         isStackable: Boolean(order.is_stackable),
       });
     } catch (pricingErr) {
-      console.error('Pricing computation error for change-drop:', pricingErr.message);
+      logger.error('Pricing computation error for change-drop:', pricingErr.message);
       return res.status(400).json({ error: 'Unable to compute new pricing for the requested drop.', details: pricingErr.message });
     }
 
@@ -936,7 +937,7 @@ router.put('/:id/change-drop', authenticate, requireRole(['customer']), validate
     try {
       await supabase.from('order_timeline').insert({ order_display_id: order.order_display_id, milestone: 'Drop Changed', milestone_time: new Date().toISOString(), completed: true, sort_order: 25 });
     } catch (timelineErr) {
-      console.warn('Failed to update timeline for change-drop:', timelineErr.message);
+      logger.warn('Failed to update timeline for change-drop:', timelineErr.message);
     }
 
     return res.json({
@@ -950,7 +951,7 @@ router.put('/:id/change-drop', authenticate, requireRole(['customer']), validate
       order: updatedOrder,
     });
   } catch (err) {
-    console.error('Change drop exception:', err.message);
+    logger.error('Change drop exception:', err.message);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -999,15 +1000,15 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
           }).eq('order_display_id', orderId);
         }
       } catch (refundErr) {
-        console.error('[escrow] Refund failed for order', orderId, ':', refundErr.message);
+        logger.error('[escrow] Refund failed for order', orderId, ':', refundErr.message);
       }
     } else if (order.escrow_booking_id) {
-      console.log(`[escrow] Escrow not funded (status: ${updatedOrder.escrow_status}) — skipping on-chain refund.`);
+      logger.info(`[escrow] Escrow not funded (status: ${updatedOrder.escrow_status}) — skipping on-chain refund.`);
     }
 
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
   } catch (err) {
-    console.error('Cancel order exception:', err.message);
+    logger.error('Cancel order exception:', err.message);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1020,7 +1021,7 @@ router.post('/predict-demand', authenticate, requireRole(['customer', 'driver'])
     const prediction = await predictDemand(req.body);
     return res.json(prediction);
   } catch (err) {
-    console.error('[ML integration] Demand prediction failed:', err.message);
+    logger.error('[ML integration] Demand prediction failed:', err.message);
     return res.status(502).json({
       error: 'Failed to fetch demand prediction from ML engine.',
       details: err.message,

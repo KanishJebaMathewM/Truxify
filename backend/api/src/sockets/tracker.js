@@ -1,6 +1,7 @@
 import { WebSocketServer } from 'ws';
 import { mongoDb, redisClient, firebaseAdmin, supabase } from '../config/db.js';
 import jwt from 'jsonwebtoken';
+import logger from '../middleware/logger.js';
 
 let mongoDbOverride = null;
 const getMongoDb = () => mongoDbOverride || mongoDb;
@@ -62,7 +63,7 @@ export async function isWebSocketUpgradeAllowed(request) {
 
     return attempts <= WS_UPGRADE_RATE_LIMIT;
   } catch (err) {
-    console.error('Redis WebSocket upgrade rate limit error:', err.message);
+    logger.error('Redis WebSocket upgrade rate limit error:', err.message);
     return true;
   }
 }
@@ -117,7 +118,7 @@ export function initWebSocketServer(server) {
         id: reqUrl.searchParams.get('user_id') || ws.driverId,
         role: reqUrl.searchParams.get('user_role') || 'driver',
       };
-      console.log(`🔓 WS Auth bypassed for driver: ${ws.driverId}`);
+      logger.info(`🔓 WS Auth bypassed for driver: ${ws.driverId}`);
     } else {
       if (!token) {
         ws.close(4001, 'Unauthorized: No token provided');
@@ -195,15 +196,15 @@ export function initWebSocketServer(server) {
         };
         ws.driverId = profile.id;
         await restoreSubscriptions(ws);
-        console.log(`✅ WS Authenticated user: ${ws.user.id}`);
+        logger.info(`✅ WS Authenticated user: ${ws.user.id}`);
       } catch (e) {
-        console.error('WS Auth failed:', e.message);
+        logger.error({ err: e }, 'WS Auth failed');
         ws.close(4001, 'Unauthorized: Invalid token');
         return;
       }
     }
 
-    console.log('🔌 New WebSocket connection established on /ws/tracking');
+    logger.info('🔌 New WebSocket connection established on /ws/tracking');
     ws.isAlive = true;
 
     ws.on('pong', () => {
@@ -215,14 +216,14 @@ export function initWebSocketServer(server) {
     });
 
     ws.on('close', () => {
-      console.log('🔌 WebSocket connection closed.');
+      logger.info('🔌 WebSocket connection closed.');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
       })();
     });
 
     ws.on('error', (err) => {
-      console.error('🔌 WebSocket client error:', err.message);
+      logger.error('🔌 WebSocket client error:', err.message);
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
       })();
@@ -232,7 +233,7 @@ export function initWebSocketServer(server) {
   wsHeartbeatInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        console.log('🔌 Terminating unresponsive WebSocket client.');
+        logger.info('🔌 Terminating unresponsive WebSocket client.');
         return ws.terminate();
       }
       ws.isAlive = false;
@@ -251,7 +252,7 @@ export function initWebSocketServer(server) {
     initTelemetryScheduler();
   }
 
-  console.log('🚀 WebSocket tracking router initialized.');
+  logger.info('🚀 WebSocket tracking router initialized.');
 }
 
 function isMessageRateLimited(ws) {
@@ -302,7 +303,7 @@ export async function handleTrackingMessage(ws, message) {
         ws.send(JSON.stringify({ warning: `Unknown event type: ${event}` }));
     }
   } catch (err) {
-    console.error('WS Message parsing error:', err.message);
+    logger.error('WS Message parsing error:', err.message);
     ws.send(JSON.stringify({ error: 'Invalid JSON payload structure.' }));
   }
 }
@@ -331,7 +332,7 @@ export async function handleLocationPing(ws, data) {
   if (device_timestamp) {
     const parsedEpoch = Date.parse(device_timestamp);
     if (isNaN(parsedEpoch)) {
-      console.error(`[TRUXIFY VALIDATION ERROR] Malformed device_timestamp received from driver: ${driver_id}. Falling back to server time.`);
+      logger.error(`[TRUXIFY VALIDATION ERROR] Malformed device_timestamp received from driver: ${driver_id}. Falling back to server time.`);
       // Prevent poisoning the Redis sequence cache with an incorrect epoch layout
     } else {
       currentPingTime = new Date(parsedEpoch);
@@ -349,14 +350,14 @@ export async function handleLocationPing(ws, data) {
         const lastRecordedEpoch = parseInt(lastRecordedEpochStr, 10);
         
         if (incomingEpoch <= lastRecordedEpoch) {
-          console.warn(`[TRUXIFY SEQUENCE CONTROL] Out-of-order telemetry dropped for Driver: ${driver_id}. Stale jitter detected.`);
+          logger.warn(`[TRUXIFY SEQUENCE CONTROL] Out-of-order telemetry dropped for Driver: ${driver_id}. Stale jitter detected.`);
           return;
         }
       }
       
       await redisClient.set(seqKey, incomingEpoch.toString(), 'EX', 86400); 
     } catch (err) {
-      console.error('Redis sequence verification cache error:', err.message);
+      logger.error('Redis sequence verification cache error:', err.message);
     }
   }
 
@@ -364,7 +365,7 @@ export async function handleLocationPing(ws, data) {
   if (telemetryWriteBuffer.length >= MAX_BUFFER_SIZE) {
     const dropCount = Math.floor(MAX_BUFFER_SIZE * 0.1);
     telemetryWriteBuffer.splice(0, dropCount);
-    console.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} oldest records. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
+    logger.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} oldest records. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
   }
   telemetryWriteBuffer.push({
     driver_id,
@@ -382,9 +383,9 @@ export async function handleLocationPing(ws, data) {
   // Buffer usage monitoring
   const usagePct = (telemetryWriteBuffer.length / MAX_BUFFER_SIZE) * 100;
   if (usagePct >= 80) {
-    console.warn(`[TRUXIFY BUFFER CRITICAL] Buffer at ${usagePct.toFixed(0)}% capacity (${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`);
+    logger.warn(`[TRUXIFY BUFFER CRITICAL] Buffer at ${usagePct.toFixed(0)}% capacity (${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`);
   } else if (usagePct >= 50 && usagePct < 60) {
-    console.warn(`[TRUXIFY BUFFER WARN] Buffer at ${usagePct.toFixed(0)}% capacity (${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`);
+    logger.warn(`[TRUXIFY BUFFER WARN] Buffer at ${usagePct.toFixed(0)}% capacity (${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`);
   }
 
   if (redisClient) {
@@ -397,7 +398,7 @@ export async function handleLocationPing(ws, data) {
         120
       );
     } catch (err) {
-      console.error('Redis cache telemetry error:', err.message);
+      logger.error('Redis cache telemetry error:', err.message);
     }
   }
 
@@ -447,7 +448,7 @@ async function flushTelemetryBuffer() {
   }
 
   if (!getMongoDb()) {
-    console.error('[TRUXIFY STORAGE WARN] MongoDB is not initialized or disconnected. Retaining telemetry logs in memory buffer.');
+    logger.error('[TRUXIFY STORAGE WARN] MongoDB is not initialized or disconnected. Retaining telemetry logs in memory buffer.');
     return;
   }
 
@@ -455,20 +456,20 @@ async function flushTelemetryBuffer() {
     const recordsToFlush = [...telemetryWriteBuffer];
     telemetryWriteBuffer = [];
 
-    console.log(`[TRUXIFY BATCH CONTROL] Committing bulk cluster of ${recordsToFlush.length} spatial rows to MongoDB...`);
+    logger.info(`[TRUXIFY BATCH CONTROL] Committing bulk cluster of ${recordsToFlush.length} spatial rows to MongoDB...`);
 
     try {
       const collection = getMongoDb().collection('live_gps_pings');
       await collection.insertMany(recordsToFlush, { ordered: false });
-      console.log(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB clusters.`);
+      logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB clusters.`);
       flushBackoffMs = 1000;
     } catch (err) {
-      console.error(`[TRUXIFY RETRY LOGIC] Bulk insert failed (backoff: ${flushBackoffMs}ms):`, err.message);
+      logger.error(`[TRUXIFY RETRY LOGIC] Bulk insert failed (backoff: ${flushBackoffMs}ms):`, err.message);
 
       const isValidationError = err.code === 121 || err.message.includes('Document failed validation');
 
       if (isValidationError) {
-        console.error(`[TRUXIFY FATAL DATA DROP] Discarding malformed tracking block payloads to prevent infinite loop memory bloat.`);
+        logger.error(`[TRUXIFY FATAL DATA DROP] Discarding malformed tracking block payloads to prevent infinite loop memory bloat.`);
       } else {
         flushBackoffMs = Math.min(flushBackoffMs * 2, 60000);
 
@@ -476,7 +477,7 @@ async function flushTelemetryBuffer() {
         const recordsToKeep = recordsToFlush.slice(-spaceAvailable);
         const droppedCount = recordsToFlush.length - recordsToKeep.length;
         if (droppedCount > 0) {
-          console.warn(`[TRUXIFY BUFFER DROP] Buffer full: dropped ${droppedCount} oldest records from retry batch.`);
+          logger.warn(`[TRUXIFY BUFFER DROP] Buffer full: dropped ${droppedCount} oldest records from retry batch.`);
         }
         telemetryWriteBuffer = [...recordsToKeep, ...telemetryWriteBuffer];
       }
@@ -491,12 +492,12 @@ async function flushTelemetryBuffer() {
 function monitorBufferSize() {
   const usagePct = telemetryWriteBuffer.length / MAX_BUFFER_SIZE;
   if (usagePct >= BUFFER_CRIT_THRESHOLD) {
-    console.warn(
+    logger.warn(
       `[TRUXIFY BUFFER MONITOR] CRITICAL: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
       `(${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`
     );
   } else if (usagePct >= BUFFER_WARN_THRESHOLD) {
-    console.warn(
+    logger.warn(
       `[TRUXIFY BUFFER MONITOR] WARNING: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
       `(${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`
     );
@@ -552,7 +553,7 @@ export async function closeWebSocketServer() {
     }
     if (!getMongoDb()) {
       const dataLoss = telemetryWriteBuffer.length;
-      console.warn(`[TRUXIFY SHUTDOWN] MongoDB not available after waiting. ${dataLoss} telemetry records will be lost.`);
+      logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available after waiting. ${dataLoss} telemetry records will be lost.`);
     }
   }
 
@@ -568,7 +569,7 @@ export async function closeWebSocketServer() {
   try {
     await flushTelemetryBuffer();
   } catch (err) {
-    console.error('[shutdown] Failed to flush telemetry buffer:', err.message);
+    logger.error('[shutdown] Failed to flush telemetry buffer:', err.message);
   }
 
   if (!wsServer) {
@@ -583,13 +584,13 @@ export async function closeWebSocketServer() {
       try {
         client.close(1001, 'Server shutting down');
       } catch (err) {
-        console.error('[shutdown] Failed to close WebSocket client:', err.message);
+        logger.error('[shutdown] Failed to close WebSocket client:', err.message);
       }
     });
 
     serverToClose.close((err) => {
       if (err) {
-        console.error('[shutdown] WebSocket server close error:', err.message);
+        logger.error('[shutdown] WebSocket server close error:', err.message);
       }
       resolve();
     });
@@ -626,11 +627,11 @@ export async function handleSubscribe(ws, data) {
         await redisClient.persist(`user:subscriptions:${subscriberId}`);
       }
     } catch (err) {
-      console.error('Redis subscription persistence error:', err.message);
+      logger.error('Redis subscription persistence error:', err.message);
     }
   }
 
-  console.log(`🔌 Client subscribed to telemetry updates for: "${targetId}"`);
+  logger.info(`🔌 Client subscribed to telemetry updates for: "${targetId}"`);
   ws.send(JSON.stringify({ status: 'subscribed', target: targetId, reconnect_supported: true }));
 }
 
@@ -686,11 +687,11 @@ async function handleUnsubscribe(ws, data) {
           await redisClient.srem(`user:subscriptions:${subscriberId}`, targetId);
         }
       } catch (err) {
-        console.error('Redis subscription cleanup error:', err.message);
+        logger.error('Redis subscription cleanup error:', err.message);
       }
     }
 
-    console.log(`🔌 Client unsubscribed from updates for: "${targetId}"`);
+    logger.info(`🔌 Client unsubscribed from updates for: "${targetId}"`);
     ws.send(JSON.stringify({ status: 'unsubscribed', target: targetId }));
   }
 }
@@ -699,7 +700,7 @@ async function removeClientFromAllSubscriptions(ws) {
   trackingSubscriptions.forEach((clients, key) => {
     if (clients.has(ws)) {
       clients.delete(ws);
-      console.log(`🔌 Removed socket subscription from "${key}" due to disconnect.`);
+      logger.info(`🔌 Removed socket subscription from "${key}" due to disconnect.`);
     }
     if (clients.size === 0) {
       trackingSubscriptions.delete(key);
@@ -725,7 +726,7 @@ async function removeClientFromAllSubscriptions(ws) {
         try {
           await redisClient.expire(`user:subscriptions:${subscriberId}`, 3600);
         } catch (err) {
-          console.error('Redis subscription expire error on disconnect:', err.message);
+          logger.error('Redis subscription expire error on disconnect:', err.message);
         }
       }
     }
@@ -766,7 +767,7 @@ async function restoreSubscriptions(ws) {
       ws.subscriptionTargets.add(targetId);
     }
   } catch (err) {
-    console.error('Subscription restoration error:', err.message);
+    logger.error('Subscription restoration error:', err.message);
   }
 }
 

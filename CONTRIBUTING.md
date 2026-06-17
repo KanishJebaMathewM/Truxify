@@ -202,10 +202,6 @@ We welcome proposals for new features! When suggesting a feature:
 
 ---
 
-
-
----
-
 ## Local Development with BYPASS_AUTH
 
 Truxify's authentication middleware supports a `BYPASS_AUTH=true` mode for local development that skips Firebase token verification. Even in bypass mode, application endpoints still look up the user profile from the `profiles` table — so you need seeded profiles to make authenticated requests locally.
@@ -268,6 +264,102 @@ SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
 ```
 
 Copy `.env.example` to `.env` and fill in your local Supabase credentials before running the script.
+
+---
+
+## Local Development Environment
+
+### Prerequisites
+
+- Docker Desktop
+- Git
+
+### Setup
+
+1. Copy the environment file:
+
+```bash
+cp .env.example .env
+```
+
+2. Create the local Docker override:
+
+```bash
+cp docker-compose.override.yml.example docker-compose.override.yml
+```
+
+3. Start the stack:
+
+```bash
+docker compose up
+```
+
+4. Verify containers:
+
+```bash
+docker ps
+```
+
+Expected services:
+
+- api
+- ml-engine
+- PostgreSQL/PostGIS
+- MongoDB
+- Redis
+
+All services communicate through the Docker network and no external cloud credentials are required for basic local development.
+
+---
+
+## Health Verification
+
+After starting the stack, verify that the backend is healthy:
+
+```bash
+curl http://localhost:5000/health
+```
+
+Expected response:
+
+```json
+{
+  "status": "healthy"
+}
+```
+
+You can also inspect running containers:
+
+```bash
+docker ps
+```
+
+## Troubleshooting
+
+### Check container logs
+
+```bash
+docker compose logs api
+```
+
+### Restart the API container
+
+```bash
+docker restart truxify-api-1
+```
+
+### Verify backend health again
+
+```bash
+curl http://localhost:5000/health
+```
+
+### Common issues
+
+- If MongoDB fails to start, make sure port `27017` is free.
+- If PostgreSQL fails to start, check whether port `5432` is already in use.
+- If Redis fails to start, verify port `6379` availability.
+- Use `docker compose logs <service>` to inspect service-specific errors.
 
 ---
 

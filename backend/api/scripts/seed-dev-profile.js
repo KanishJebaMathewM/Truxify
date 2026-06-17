@@ -22,7 +22,12 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+const apiRoot = path.resolve(__dirname, '..');
+const repoRoot = path.resolve(apiRoot, '..', '..');
+
+// Load environment variables from both local api folder and root directory
+dotenv.config({ path: path.join(apiRoot, '.env') });
+dotenv.config({ path: path.join(repoRoot, '.env') });
 
 // ── Colour helpers ────────────────────────────────────────────────────
 const c = {

@@ -208,7 +208,7 @@ We welcome proposals for new features! When suggesting a feature:
 
 ## Local Development with BYPASS_AUTH
 
-Truxify's authentication middleware supports a `BYPASS_AUTH=true` mode for local development that skips Firebase token verification. Even in bypass mode, the middleware still looks up the user profile from the `profiles` table — so you need seeded profiles to make authenticated requests locally.
+Truxify's authentication middleware supports a `BYPASS_AUTH=true` mode for local development that skips Firebase token verification. Even in bypass mode, application endpoints still look up the user profile from the `profiles` table — so you need seeded profiles to make authenticated requests locally.
 
 ### Step 1: Enable Bypass Mode
 

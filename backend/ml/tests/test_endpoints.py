@@ -65,6 +65,43 @@ def test_predict_demand_valid():
     assert data["model_version"] == "1.0.0"
 
 
+def test_predict_price_valid():
+    payload = {
+        "distance_km": 500.0,
+        "cargo_weight_kg": 10000.0,
+        "truck_type": "heavy_truck",
+        "route_origin": "Mumbai",
+        "route_destination": "Delhi",
+    }
+    response = client.post("/predict", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert "estimated_price" in data
+    assert isinstance(data["estimated_price"], float)
+    assert data["estimated_price"] > 0
+    assert data["currency"] == "INR"
+
+
+def test_predict_price_minimal():
+    payload = {
+        "distance_km": 100.0,
+        "cargo_weight_kg": 1000.0,
+    }
+    response = client.post("/predict", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["estimated_price"] > 0
+
+
+def test_predict_price_invalid_distance():
+    payload = {
+        "distance_km": 0,
+        "cargo_weight_kg": 1000.0,
+    }
+    response = client.post("/predict", json=payload)
+    assert response.status_code == 422
+
+
 def test_predict_demand_invalid_fields():
     # hour out of bounds (0-23)
     payload = {

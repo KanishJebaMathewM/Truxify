@@ -189,32 +189,43 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                         .titleMedium
                         ?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 14),
-                ...mockBookingPriceLines.map(
-                  (line) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Row(
-                      children: [
-                        Text(line.label,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                    fontWeight: line.isTotal
-                                        ? FontWeight.w800
-                                        : FontWeight.w500)),
-                        const Spacer(),
-                        Text(line.amount,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                    fontWeight: line.isTotal
-                                        ? FontWeight.w800
-                                        : FontWeight.w600)),
-                      ],
+                if (widget.truck.baseFreight != null) ...[
+                  _PriceLineRow(label: 'Base freight', amount: widget.truck.baseFreight!),
+                  if (widget.truck.tollEstimate != null)
+                    _PriceLineRow(label: 'Toll estimate', amount: widget.truck.tollEstimate!),
+                  if (widget.truck.platformFee != null)
+                    _PriceLineRow(label: 'Platform fee', amount: widget.truck.platformFee!),
+                  _PriceLineRow(label: 'Total', amount: widget.truck.price, isTotal: true),
+                ] else ...[
+                  ...mockBookingPriceLines.map(
+                    (line) => _PriceLineRow(
+                      label: line.label,
+                      amount: line.amount,
+                      isTotal: line.isTotal,
                     ),
                   ),
-                ),
+                ],
+                if (widget.truck.isAiEstimate) ...[
+                  const SizedBox(height: 4),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.auto_awesome_rounded,
+                          color: TruxifyColors.accentDark, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'AI Estimated Price',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 4),
                 const Divider(),
                 const SizedBox(height: 8),
@@ -354,6 +365,46 @@ class _SummaryRow extends StatelessWidget {
                       .textTheme
                       .bodyMedium
                       ?.copyWith(fontWeight: FontWeight.w700))),
+        ],
+      ),
+    );
+  }
+}
+
+class _PriceLineRow extends StatelessWidget {
+  const _PriceLineRow({
+    required this.label,
+    required this.amount,
+    this.isTotal = false,
+  });
+
+  final String label;
+  final String amount;
+  final bool isTotal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Text(label,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(
+                      fontWeight: isTotal
+                          ? FontWeight.w800
+                          : FontWeight.w500)),
+          const Spacer(),
+          Text(amount,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(
+                      fontWeight: isTotal
+                          ? FontWeight.w800
+                          : FontWeight.w600)),
         ],
       ),
     );

@@ -3,7 +3,10 @@ import { supabase, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 
 const router = express.Router();
 
-const CHECK_TIMEOUT_MS = Number(process.env.HEALTHCHECK_TIMEOUT_MS || 400);
+const DEFAULT_TIMEOUT_MS = 400;
+const _parsedTimeout = Number(process.env.HEALTHCHECK_TIMEOUT_MS);
+const CHECK_TIMEOUT_MS =
+  Number.isFinite(_parsedTimeout) && _parsedTimeout > 0 ? _parsedTimeout : DEFAULT_TIMEOUT_MS;
 
 function withTimeout(promise) {
   let timer;

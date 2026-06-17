@@ -98,6 +98,8 @@ void main() {
       matching: find.text('Dark'),
     );
     expect(darkText, findsOneWidget);
+    await tester.ensureVisible(darkText);
+    await tester.pump();
     await tester.tap(darkText);
     await tester.pump();
     await tester.pump();

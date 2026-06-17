@@ -26,7 +26,14 @@ import 'destination_picker_screen.dart';
 import '../widgets/pulsing_location_dot.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  HomeScreen({
+    super.key,
+    MarketplaceRepository? marketplaceRepo,
+    this.mockLocationText,
+  }) : marketplaceRepo = marketplaceRepo ?? MarketplaceRepository();
+
+  final MarketplaceRepository marketplaceRepo;
+  final String? mockLocationText;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -55,34 +62,82 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoadingLocation = true;
   String? _locationError;
 
-  final MarketplaceRepository _marketplaceRepo = MarketplaceRepository();
+  late final MarketplaceRepository _marketplaceRepo;
   StreamSubscription<LoadOffer>? _loadSubscription;
+  Timer? _autoHideTimer;
   LoadOffer? _latestNewLoad;
   bool _dismissedNewLoad = false;
 
   @override
   void initState() {
     super.initState();
+    _marketplaceRepo = widget.marketplaceRepo;
+    if (widget.mockLocationText != null) {
+      _currentLocationText = widget.mockLocationText;
+    }
     _initLocation();
     _subscribeToNewLoads();
   }
 
   @override
+  void didUpdateWidget(HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.mockLocationText != oldWidget.mockLocationText) {
+      setState(() {
+        _currentLocationText = widget.mockLocationText;
+      });
+    }
+  }
+
+  @override
   void dispose() {
     _loadSubscription?.cancel();
+    _autoHideTimer?.cancel();
     _mapController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
   }
 
+  bool _isLoadMatching(LoadOffer load) {
+    if (_currentLocationText != null && _currentLocationText!.isNotEmpty) {
+      final locationLower = _currentLocationText!.toLowerCase();
+      final routeLower = load.route.toLowerCase();
+      final pickupLower = load.pickup.toLowerCase();
+
+      final parts = locationLower
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.length >= 3);
+
+      for (final part in parts) {
+        if (routeLower.contains(part) || pickupLower.contains(part)) {
+          return true;
+        }
+      }
+      return false;
+    }
+    return true;
+  }
+
   void _subscribeToNewLoads() {
     try {
       _loadSubscription = _marketplaceRepo.subscribeToNewLoads().listen((load) {
         if (!mounted) return;
+        if (!_isLoadMatching(load)) return;
+
+        _autoHideTimer?.cancel();
         setState(() {
           _latestNewLoad = load;
           _dismissedNewLoad = false;
+        });
+
+        _autoHideTimer = Timer(const Duration(seconds: 6), () {
+          if (mounted) {
+            setState(() {
+              _dismissedNewLoad = true;
+            });
+          }
         });
       });
     } catch (_) {
@@ -92,6 +147,14 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// Called once on startup — fetches GPS and resolves address.
   Future<void> _initLocation() async {
+    if (widget.mockLocationText != null) {
+      setState(() {
+        _currentLocationText = widget.mockLocationText;
+        _isLoadingLocation = false;
+      });
+      return;
+    }
+
     setState(() {
       _isLoadingLocation = true;
       _locationError = null;
@@ -549,18 +612,61 @@ class _HomeScreenState extends State<HomeScreen> {
                                 overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.dmSans(
                                   fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                '${_latestNewLoad!.weight != '—' ? '${_latestNewLoad!.weight} ' : ''}${_latestNewLoad!.goods} • ${_latestNewLoad!.estimatedProfit}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 10,
                                   color: Colors.white.withOpacity(0.85),
                                 ),
                               ),
                             ],
                           ),
                         ),
+                        const SizedBox(width: 10),
                         GestureDetector(
+                          key: const Key('realtime_notification_view_button'),
+                          onTap: () {
+                            setState(() => _dismissedNewLoad = true);
+                            Navigator.of(context).pushNamed(
+                              AppRoutes.loadDetail,
+                              arguments: _latestNewLoad,
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              'View',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: TruxifyColors.accent,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        GestureDetector(
+                          key: const Key('realtime_notification_close_button'),
                           onTap: () {
                             setState(() => _dismissedNewLoad = true);
                           },
-                          child: Icon(Icons.close_rounded,
-                              color: Colors.white.withOpacity(0.7), size: 20),
+                          child: Icon(
+                            Icons.close_rounded,
+                            color: Colors.white.withOpacity(0.7),
+                            size: 20,
+                          ),
                         ),
                       ],
                     ),

@@ -163,19 +163,51 @@ class MarketplaceRepository {
     );
   }
 
-  /// Subscribes to new available load offers via Supabase Realtime.
+  /// Subscribes to new available load offers via Supabase Realtime postgres_changes.
   /// Returns a stream of [LoadOffer] objects as they are inserted.
   /// Callers should cancel the [StreamSubscription] when done.
   Stream<LoadOffer> subscribeToNewLoads() {
-    return _client
-        .from('load_offers')
-        .stream(primaryKey: ['id'])
-        .eq('status', 'available')
-        .map((rows) => rows
-            .cast<Map<String, dynamic>>()
-            .map(_mapLoadOffer)
-            .toList())
-        .expand((offers) => offers);
+    final controller = StreamController<LoadOffer>.broadcast();
+    RealtimeChannel? channel;
+
+    try {
+      final client = _client;
+      channel = client.channel('new_load_offers');
+      channel.onPostgresChanges(
+        event: PostgresChangeEvent.insert,
+        schema: 'public',
+        table: 'load_offers',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'status',
+          value: 'available',
+        ),
+        callback: (payload) {
+          try {
+            final newRecord = payload.newRecord;
+            if (newRecord != null && newRecord.isNotEmpty) {
+              final offer = _mapLoadOffer(newRecord);
+              controller.add(offer);
+            }
+          } catch (_) {
+            // Error mapping load offer
+          }
+        },
+      ).subscribe();
+    } catch (_) {
+      // Supabase/Realtime not available
+    }
+
+    controller.onCancel = () {
+      if (channel != null) {
+        try {
+          _client.removeChannel(channel);
+        } catch (_) {}
+      }
+      controller.close();
+    };
+
+    return controller.stream;
   }
 
   String _formatCurrency(num value) {

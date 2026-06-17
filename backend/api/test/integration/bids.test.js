@@ -556,12 +556,13 @@ describe('Bid Routes', () => {
       id: 'order-1',
       customer_id: 'customer-1',
       order_display_id: 'OD1',
+      status: 'pending',
     });
 
     m.store.load_offers.push({
       id: 'load-1',
       order_display_id: 'OD1',
-      status: 'claimed',
+      status: 'available',
     });
 
     m.store.load_bids.push({
@@ -592,6 +593,7 @@ describe('Bid Routes', () => {
       id: 'order-1',
       customer_id: 'customer-1',
       order_display_id: 'OD1',
+      status: 'pending',
     });
 
     m.store.load_offers.push({

@@ -8,6 +8,7 @@ import '../core/offline/cache/cache_manager.dart';
 import '../repositories/address_repository.dart';
 import '../repositories/payment_repository.dart';
 import '../services/profile_service.dart';
+import '../services/fcm_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
 import 'about_screen.dart';
@@ -148,6 +149,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _logout(BuildContext context) {
+    FcmService.clearToken();
     Navigator.of(context).pushAndRemoveUntil(
       AppPageRoute(builder: (_) => const LoginScreen()),
       (route) => false,

@@ -6,6 +6,7 @@ import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/fcm_service.dart';
 import '../../core/supabase_config.dart';
 import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
 import 'notifications_screen.dart';
@@ -725,6 +726,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           AppCard(
             onTap: () async {
               try {
+                // Clear FCM token on logout
+                await FcmService.clearToken();
+
                 if (SupabaseConfig.isConfigured) {
                   await Supabase.instance.client.auth.signOut();
                 }

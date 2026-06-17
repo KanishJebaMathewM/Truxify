@@ -118,4 +118,43 @@ router.put('/', authenticate, async (req, res) => {
   }
 });
 
+// UPDATE FCM TOKEN
+// Stores or clears the device FCM token for push notification delivery.
+// Invalidates Redis cache so the next authenticated request picks up the new token.
+router.put('/fcm-token', authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { fcmToken } = req.body;
+
+    if (fcmToken === undefined) {
+      return res.status(400).json({ error: 'fcmToken is required. To clear, explicitly set to null.' });
+    }
+
+    if (fcmToken !== null && typeof fcmToken !== 'string') {
+      return res.status(400).json({ error: 'fcmToken must be a string or null.' });
+    }
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        fcm_token: fcmToken,
+        fcm_token_updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to update FCM token.', details: error.message });
+    }
+
+    // Invalidate Redis cache — next request will refetch the profile with the new token
+    if (req.user.uid) {
+      void invalidateCachedProfile(req.user.uid);
+    }
+
+    return res.json({ success: true, message: 'FCM token updated successfully.' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to update FCM token.', details: err.message });
+  }
+});
+
 export default router;

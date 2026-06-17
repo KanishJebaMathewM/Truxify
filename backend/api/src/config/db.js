@@ -40,23 +40,32 @@ const mongoDbName = process.env.MONGODB_DB_NAME || 'truxify_telemetry';
 
 export let mongoDb = null;
 let mongoClient = null;
+let _mongoDbResolve = null;
+const _mongoDbReady = new Promise((resolve) => { _mongoDbResolve = resolve; });
+
+export async function waitForMongoDb() {
+  await _mongoDbReady;
+}
 
 if (mongoUri) {
   try {
     mongoClient = new MongoClient(mongoUri);
-    // Connect to cluster asynchronously; we resolve it, but won't block the file load
     mongoClient.connect()
       .then(() => {
         mongoDb = mongoClient.db(mongoDbName);
         console.log(`✅ Connected to MongoDB Database: "${mongoDbName}"`);
+        if (_mongoDbResolve) _mongoDbResolve();
       })
       .catch(err => {
         console.error('❌ Failed to connect to MongoDB server:', err.message);
+        if (_mongoDbResolve) _mongoDbResolve();
       });
   } catch (error) {
     console.error('❌ MongoDB client initialization error:', error.message);
+    if (_mongoDbResolve) _mongoDbResolve();
   }
 } else {
+  if (_mongoDbResolve) _mongoDbResolve();
   console.warn('⚠️ MONGODB_URI not found in .env. MongoDB telemetry database disabled.');
 }
 

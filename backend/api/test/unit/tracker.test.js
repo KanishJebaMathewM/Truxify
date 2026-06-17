@@ -241,6 +241,61 @@ describe('tracker graceful shutdown', () => {
 
     errorSpy.mockRestore();
   });
+
+  it('waits for MongoDB connection during shutdown and flushes successfully', async () => {
+    const insertMany = vi.fn().mockResolvedValue({});
+    const collection = vi.fn().mockReturnValue({ insertMany });
+
+    const { closeWebSocketServer: closeWs, __testing: t } = await import('../../src/sockets/tracker.js');
+    
+    t.setTelemetryWriteBuffer([{ driver_id: 'driver-delayed' }]);
+
+    // Enable waiting and start with null (no db)
+    process.env.MONGODB_SHUTDOWN_WAIT_MS = '150';
+    t.setMongoDbOverride(null);
+
+    // Simulate MongoDB connecting after 50ms
+    setTimeout(() => {
+      t.setMongoDbOverride({ collection });
+    }, 50);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await closeWs();
+
+    expect(insertMany).toHaveBeenCalled();
+    expect(t.getTelemetryWriteBuffer().length).toBe(0);
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+    t.setMongoDbOverride(null);
+    process.env.MONGODB_SHUTDOWN_WAIT_MS = '0';
+  });
+
+  it('warns about data loss if MongoDB connection fails to become available during shutdown timeout', async () => {
+    const { closeWebSocketServer: closeWs, __testing: t } = await import('../../src/sockets/tracker.js');
+    
+    t.setTelemetryWriteBuffer([{ driver_id: 'driver-lost-1' }, { driver_id: 'driver-lost-2' }]);
+
+    // Set wait timeout to 50ms and ensure DB is null
+    process.env.MONGODB_SHUTDOWN_WAIT_MS = '50';
+    t.setMongoDbOverride(null);
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await closeWs();
+
+    expect(t.getTelemetryWriteBuffer().length).toBe(2);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[TRUXIFY SHUTDOWN] MongoDB not available after waiting. 2 telemetry records will be lost.')
+    );
+
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+    t.setMongoDbOverride(null);
+    process.env.MONGODB_SHUTDOWN_WAIT_MS = '0';
+  });
 });
 
 describe('tracker WebSocket upgrade rate limiting', () => {
@@ -1063,7 +1118,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     const insertMany = vi.fn().mockImplementation(async () => {
       // Simulate a concurrent new ping arriving while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
-      t.setTelemetryWriteBuffer([{ driver_id: 'new-driver' }]);
+      t.getTelemetryWriteBuffer().push({ driver_id: 'new-driver' });
       throw new Error('network timeout');
     });
     const collection = vi.fn().mockReturnValue({ insertMany });
@@ -1092,7 +1147,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
       // Simulate new pings arriving to almost fill the buffer while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
       const mockNewRecords = Array.from({ length: 4995 }, (_, i) => ({ driver_id: `new-driver-${i}` }));
-      t.setTelemetryWriteBuffer(mockNewRecords);
+      t.getTelemetryWriteBuffer().push(...mockNewRecords);
       throw new Error('transient write failure');
     });
     const collection = vi.fn().mockReturnValue({ insertMany });

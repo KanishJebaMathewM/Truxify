@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import tripRoutes from './routes/tripRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
 
-import { closeDbConnections } from './config/db.js';
+import { closeDbConnections, waitForMongoDb } from './config/db.js';
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js';
 
 // Load REST routes
@@ -214,8 +214,9 @@ app.use((err, req, res, next) => {
 });
 
 // ============================================================================
-// WEBSOCKET SERVER INIT
+// WEBSOCKET SERVER INIT (wait for MongoDB before accepting WebSocket connections)
 // ============================================================================
+await waitForMongoDb();
 initWebSocketServer(server);
 
 // ============================================================================

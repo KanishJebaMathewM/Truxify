@@ -33,9 +33,13 @@ jobs:
         working-directory: backend/api
         run: npm ci
 
-      - name: Run tests
+      - name: Run unit tests
         working-directory: backend/api
-        run: npm test
+        run: npm run test:unit
+
+      - name: Run integration tests
+        working-directory: backend/api
+        run: npm run test:integration
 
   customer:
     name: Customer Flutter checks

@@ -77,13 +77,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _subscribeToNewLoads() {
-    _loadSubscription = _marketplaceRepo.subscribeToNewLoads().listen((load) {
-      if (!mounted) return;
-      setState(() {
-        _latestNewLoad = load;
-        _dismissedNewLoad = false;
+    try {
+      _loadSubscription = _marketplaceRepo.subscribeToNewLoads().listen((load) {
+        if (!mounted) return;
+        setState(() {
+          _latestNewLoad = load;
+          _dismissedNewLoad = false;
+        });
       });
-    });
+    } catch (_) {
+      // Supabase not available (e.g. in tests)
+    }
   }
 
   /// Called once on startup — fetches GPS and resolves address.

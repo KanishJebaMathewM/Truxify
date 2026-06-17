@@ -6,7 +6,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
 }));
 
 function makeReq(overrides = {}) {
-  return { requestId: undefined, originalUrl: '/api/test', method: 'GET', ...overrides };
+  return { requestId: undefined, originalUrl: '/api/test', method: 'GET', headers: {}, ...overrides };
 }
 
 function makeRes(statusCode = 200) {
@@ -36,6 +36,14 @@ describe('requestIdMiddleware', () => {
     const res = makeRes();
     requestIdMiddleware(req, res, vi.fn());
     expect(res.setHeader).toHaveBeenCalledWith('X-Request-Id', req.requestId);
+  });
+
+  it('propagates an inbound X-Request-Id header instead of generating a new one', () => {
+    const req = makeReq({ headers: { 'x-request-id': 'upstream-trace-id-abc' } });
+    const res = makeRes();
+    requestIdMiddleware(req, res, vi.fn());
+    expect(req.requestId).toBe('upstream-trace-id-abc');
+    expect(res.setHeader).toHaveBeenCalledWith('X-Request-Id', 'upstream-trace-id-abc');
   });
 
   it('generates a unique ID per request', () => {

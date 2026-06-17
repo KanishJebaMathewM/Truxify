@@ -198,7 +198,7 @@ export function initWebSocketServer(server) {
         await restoreSubscriptions(ws);
         logger.info(`✅ WS Authenticated user: ${ws.user.id}`);
       } catch (e) {
-        logger.error('WS Auth failed:', e.message);
+        logger.error({ err: e }, 'WS Auth failed');
         ws.close(4001, 'Unauthorized: Invalid token');
         return;
       }

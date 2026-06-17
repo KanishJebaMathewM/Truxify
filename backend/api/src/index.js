@@ -21,7 +21,7 @@ import truckRoutes from './routes/truckRoutes.js';
 
 import logger from './middleware/logger.js';
 import { requestIdMiddleware, requestLogger } from './middleware/requestId.js';
-import { initSentry, captureException, sentryErrorHandler } from './middleware/sentry.js';
+import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js';
 
 // Configuration load from root folder is handled in db.js
 
@@ -201,13 +201,13 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Endpoint resource not found.' });
 });
 
-// Sentry error handler must come before the generic error handler
+// Sentry error handler must come before the generic error handler;
+// it captures the exception automatically so we don't call captureException here.
 app.use(sentryErrorHandler());
 
 // Error handling middleware
 app.use((err, req, res, next) => {
   logger.error({ requestId: req.requestId, err }, 'Unhandled express exception');
-  captureException(err, { requestId: req.requestId });
   res.status(500).json({ error: 'Critical Internal Server Error.' });
 });
 
@@ -264,15 +264,15 @@ async function shutdown(signal) {
 }
 
 // Handle uncaught exceptions and unhandled rejections
-process.on('uncaughtException', (err) => {
+process.on('uncaughtException', async (err) => {
   logger.fatal({ err }, 'Uncaught exception — exiting');
-  captureException(err);
+  await flushSentry(2000);
   process.exit(1);
 });
 
-process.on('unhandledRejection', (reason) => {
+process.on('unhandledRejection', async (reason) => {
   logger.error({ reason }, 'Unhandled promise rejection');
-  captureException(reason instanceof Error ? reason : new Error(String(reason)));
+  await flushSentry(2000);
 });
 
 process.on('SIGTERM', () => shutdown('SIGTERM')); // Docker / Kubernetes stop

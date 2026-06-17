@@ -9,12 +9,13 @@ export function initSentry() {
   logger.info('Sentry error tracking initialized.');
 }
 
-export function captureException(err, context = {}) {
+export async function flushSentry(timeoutMs = 2000) {
   if (!process.env.SENTRY_DSN) return;
-  Sentry.withScope((scope) => {
-    Object.entries(context).forEach(([k, v]) => scope.setExtra(k, v));
-    Sentry.captureException(err);
-  });
+  try {
+    await Sentry.flush(timeoutMs);
+  } catch {
+    // ignore flush errors during process teardown
+  }
 }
 
 export function sentryErrorHandler() {

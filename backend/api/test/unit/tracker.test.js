@@ -1168,8 +1168,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     const mockOldRecords = Array.from({ length: 10 }, (_, i) => ({ driver_id: `old-driver-${i}` }));
     t.setTelemetryWriteBuffer(mockOldRecords);
 
-    const { default: logger } = await import('../../src/middleware/logger.js');
-    vi.clearAllMocks();
+    logger.warn.mockClear();
 
     await t.flushTelemetryBuffer();
 
@@ -1294,8 +1293,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       __testing.setTelemetryWriteBuffer(mockRecords);
 
       const ws = { driverId: 'driver-new', send: vi.fn() };
-      const { default: logger } = await import('../../src/middleware/logger.js');
-      vi.clearAllMocks();
+      logger.warn.mockClear();
 
       await handleLocationPing(ws, {
         driver_id: 'driver-new',

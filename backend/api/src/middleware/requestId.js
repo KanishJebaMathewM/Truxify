@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import logger from './logger.js';
 
 export function requestIdMiddleware(req, res, next) {
-  req.requestId = randomUUID();
+  req.requestId = req.headers['x-request-id'] || randomUUID();
   res.setHeader('X-Request-Id', req.requestId);
   next();
 }

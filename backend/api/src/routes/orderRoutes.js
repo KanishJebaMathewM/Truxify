@@ -19,7 +19,7 @@ import {
 } from '../validation/requestSchemas.js';
 import { changeDropSchema, cancelOrderSchema } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
-import { escrowDeposit, escrowRelease, escrowRefund } from '../services/escrow.js';
+import { buildDepositTx, recordDepositTx, escrowRelease, escrowRefund } from '../services/escrow.js';
 import { sendDeliveryOtpNotification } from '../services/notificationService.js';
 import { predictDemand, predictPrice } from '../services/ml.js';
 import rateLimit from 'express-rate-limit';
@@ -666,26 +666,19 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       truckInfo = data;
     }
 
-    // Phase 1: Escrow deposit BEFORE accepting the bid
-    let escrowTxHash = null;
+    // Phase 1: Build unsigned deposit tx for customer to sign
+    let depositTxData = null;
     if (driverWallet && customerWallet) {
       const amountWei = ethers.parseEther((bid.bid_amount / 100).toFixed(2).toString());
-      try {
-        const { txHash } = await escrowDeposit(order.order_display_id, customerWallet, driverWallet, amountWei);
-        if (txHash) {
-          escrowTxHash = txHash;
-        } else {
-          return res.status(500).json({
-            error: 'Escrow deposit failed. Bid was not accepted.',
-            recovery: 'Please try again or contact support if the issue persists.'
-          });
-        }
-      } catch (depositErr) {
-        return res.status(500).json({
-          error: 'Escrow deposit failed. Bid was not accepted.',
-          details: depositErr.message,
-          recovery: 'Check that the customer wallet has sufficient MATIC balance for the deposit and that the Polygon RPC endpoint is reachable.'
-        });
+      const { txData } = await buildDepositTx(
+        order.order_display_id, customerWallet, driverWallet, amountWei,
+      );
+      if (txData) {
+        depositTxData = txData;
+        await supabase.from('orders').update({
+          escrow_booking_id: `escrow:${order.order_display_id}`,
+          escrow_status: 'funding',
+        }).eq('id', orderId);
       }
     }
 
@@ -698,42 +691,17 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
     });
 
     if (rpcErr) {
-      // Compensating transaction: escrow deposit succeeded but DB update failed
-      if (escrowTxHash) {
-        try {
-          await escrowRefund(order.order_display_id);
-          logger.warn(`[escrow] Compensating refund issued for order ${order.order_display_id} after RPC failure.`);
-        } catch (refundErr) {
-          logger.error(`[escrow] CRITICAL: Escrow refund also failed for order ${order.order_display_id}:`, refundErr.message);
-        }
-      }
       return res.status(500).json({
         error: 'Failed to accept bid atomically.',
         details: rpcErr.message,
-        recovery: 'The escrow deposit has been refunded. Please try again.'
+        recovery: 'The pending escrow deposit has been voided. Please try again.'
       });
     }
 
-    // Record escrow booking reference and deposit info
-    const escrowUpdate = {
-      escrow_booking_id: `escrow:${order.order_display_id}`,
-      escrow_status: escrowTxHash ? 'funded' : 'pending',
-    };
-    if (escrowTxHash) {
-      escrowUpdate.deposit_tx_hash = escrowTxHash;
-      escrowUpdate.escrow_deposited_at = new Date().toISOString();
-    }
-
-    const { error: escrowUpdateErr } = await supabase
-      .from('orders')
-      .update(escrowUpdate)
-      .eq('id', orderId);
-
-    if (escrowUpdateErr) {
-      logger.warn('[escrow] Failed to update escrow booking reference:', escrowUpdateErr.message);
-    }
-
-    res.json({ message: 'Bid accepted. Driver and truck assigned.' });
+    res.json({
+      message: 'Bid accepted. Awaiting customer deposit signature.',
+      depositTx: depositTxData,
+    });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }
@@ -1037,7 +1005,46 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
 });
 
 // ============================================================================
-// 16. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
+// 16. CONFIRM ESCROW DEPOSIT (CUSTOMER)
+// ============================================================================
+router.post('/:id/confirm-deposit', authenticate, requireRole(['customer']), validateParams(paramIdSchema), validateBody(
+  z.object({ txHash: z.string().regex(/^0x([A-Fa-f0-9]{64})$/, 'Invalid transaction hash') }),
+), async (req, res) => {
+  const orderId = req.params.id;
+  const { txHash } = req.body;
+
+  try {
+    const { data: order, error: fetchErr } = await supabase
+      .from('orders')
+      .select('id, order_display_id, escrow_booking_id, escrow_status')
+      .eq('id', orderId)
+      .maybeSingle();
+
+    if (fetchErr || !order) return res.status(404).json({ error: 'Order not found' });
+    if (order.escrow_status !== 'funding') {
+      return res.status(400).json({ error: 'Order is not in funding state' });
+    }
+
+    const bookingId = `escrow:${order.order_display_id}`;
+    const result = await recordDepositTx(bookingId, txHash);
+
+    if (result.error) return res.status(422).json({ error: result.error });
+
+    await supabase.from('orders').update({
+      escrow_status: 'funded',
+      deposit_tx_hash: result.txHash,
+      escrow_deposited_at: new Date().toISOString(),
+    }).eq('id', orderId);
+
+    res.json({ message: 'Escrow deposit confirmed', txHash: result.txHash });
+  } catch (err) {
+    console.error('[confirm-deposit] Exception:', err.message);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 17. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
 // ============================================================================
 router.post('/predict-demand', authenticate, requireRole(['customer', 'driver']), predictDemandLimiter, validateBody(predictDemandSchema), async (req, res) => {
   try {

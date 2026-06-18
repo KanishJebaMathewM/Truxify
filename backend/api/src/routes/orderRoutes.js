@@ -783,7 +783,7 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), validatePar
       await sendDeliveryOtpNotification(order.customer_id, order.order_display_id, generatedOtp);
     }
 
-    const response = { message: 'Milestone updated successfully.', order: responseOrder, milestone, status };
+    const response = { message: 'Milestone updated successfully.', order: updatedOrder, milestone, status };
 
     res.json(response);
   } catch (err) {

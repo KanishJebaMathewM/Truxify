@@ -106,6 +106,7 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
       order_id: orderId,
       otp,
       expires_at: expiresAt,
+      verified: false,
     })
     .select('id')
     .single();

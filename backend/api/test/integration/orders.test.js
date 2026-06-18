@@ -710,18 +710,17 @@ describe('GET /api/orders/:id — order details', () => {
     expect(res.body.driver.name).toBe('Test Driver');
   });
 
-  it('exposes delivery_otp to customer but strips it for driver', async () => {
+  it('does not expose delivery_otp on order for any role (isolated table)', async () => {
     m.store.orders.push({
       id: 'order-3',
       customer_id: 'customer-123',
       driver_id: 'driver-123',
       order_display_id: 'OD3',
-      delivery_otp: '654321',
     });
 
     const app = buildApp();
 
-    // 1. Customer request
+    // 1. Customer request — no delivery_otp on order object
     const customerRes = await request(app)
       .get('/api/orders/order-3')
       .set({
@@ -729,9 +728,9 @@ describe('GET /api/orders/:id — order details', () => {
         'x-user-role': 'customer'
       });
     expect(customerRes.status).toBe(200);
-    expect(customerRes.body.order.delivery_otp).toBe('654321');
+    expect(customerRes.body.order).not.toHaveProperty('delivery_otp');
 
-    // 2. Driver request
+    // 2. Driver request — also no delivery_otp
     const driverRes = await request(app)
       .get('/api/orders/order-3')
       .set({
@@ -970,14 +969,13 @@ describe('Delivery OTP Verification and Milestones', () => {
     expect(res.body.error).toBe('Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.');
   });
 
-  it('generates OTP but does not return it in response when moving to In Transit milestone', async () => {
+  it('generates OTP in isolated table but does not return it in response when moving to In Transit milestone', async () => {
     m.store.orders = [{
       id: 'order-1',
       customer_id: 'customer-456',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
-      status: 'picked_up',
-      otp_verified: false
+      status: 'picked_up'
     }];
     m.store.order_timeline = [{
       order_display_id: 'ORD001',
@@ -985,6 +983,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       completed: false
     }];
     m.store.notifications = [];
+    m.store.delivery_otps = []; // ensure no stale OTP from prior tests
 
     const app = buildApp();
     const res = await request(app)
@@ -999,15 +998,16 @@ describe('Delivery OTP Verification and Milestones', () => {
     expect(res.body).not.toHaveProperty('otp');
     expect(res.body.order).not.toHaveProperty('delivery_otp');
 
-    const order = m.store.orders.find(o => o.id === 'order-1');
-    expect(order.delivery_otp).toMatch(/^\d{6}$/); // 6-digit OTP
-    expect(order.otp_verified).toBe(false);
-    expect(order.otp_generated_at).toBeDefined();
+    const otpRecord = m.store.delivery_otps.find(o => o.order_id === 'order-1');
+    expect(otpRecord).toBeTruthy();
+    expect(otpRecord.otp).toMatch(/^\d{6}$/); // 6-digit OTP
+    expect(otpRecord.verified).toBe(false);
+    expect(otpRecord.expires_at).toBeDefined();
 
     // Verify customer notification was created
     const notification = m.store.notifications.find(n => n.user_id === 'customer-456');
     expect(notification).toBeTruthy();
-    expect(notification.body).toContain(order.delivery_otp);
+    expect(notification.body).toContain(otpRecord.otp);
     expect(notification.notif_type).toBe('order_update');
   });
 
@@ -1051,10 +1051,15 @@ describe('Delivery OTP Verification and Milestones', () => {
     m.store.orders = [{
       id: 'order-1',
       driver_id: 'driver-123',
-      order_display_id: 'ORD001',
-      delivery_otp: '123456',
-      otp_verified: false,
-      otp_generated_at: new Date().toISOString()
+      order_display_id: 'ORD001'
+    }];
+    m.store.delivery_otps = [{
+      id: 'otp-1',
+      order_id: 'order-1',
+      otp: '123456',
+      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      verified: false,
+      created_at: new Date().toISOString()
     }];
 
     const app = buildApp();
@@ -1075,10 +1080,15 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: 'order-1',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
-      delivery_otp: '123456',
-      otp_verified: false,
-      status: 'in_transit',
-      otp_generated_at: new Date().toISOString()
+      status: 'in_transit'
+    }];
+    m.store.delivery_otps = [{
+      id: 'otp-1',
+      order_id: 'order-1',
+      otp: '123456',
+      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      verified: false,
+      created_at: new Date().toISOString()
     }];
     m.store.order_timeline = [{
       order_display_id: 'ORD001',
@@ -1097,11 +1107,13 @@ describe('Delivery OTP Verification and Milestones', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/Delivery verified successfully/i);
-    expect(res.body.order).not.toHaveProperty('delivery_otp');
 
     const order = m.store.orders.find(o => o.id === 'order-1');
-    expect(order.otp_verified).toBe(true);
     expect(order.status).toBe('payment_released');
+
+    // OTP record should be marked as verified in isolated table
+    const otpRecord = m.store.delivery_otps.find(o => o.order_id === 'order-1');
+    expect(otpRecord.verified).toBe(true);
 
     const timeline = m.store.order_timeline.find(t => t.order_display_id === 'ORD001' && t.milestone === 'Delivered');
     expect(timeline.completed).toBe(true);
@@ -1116,10 +1128,15 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: 'order-expired',
       driver_id: 'driver-123',
       order_display_id: 'ORD-EXP',
-      delivery_otp: '123456',
-      otp_verified: false,
-      status: 'in_transit',
-      otp_generated_at: new Date(Date.now() - 20 * 60 * 1000).toISOString() // 20 minutes ago (TTL is 15)
+      status: 'in_transit'
+    }];
+    m.store.delivery_otps = [{
+      id: 'otp-expired',
+      order_id: 'order-expired',
+      otp: '123456',
+      expires_at: new Date(Date.now() - 1 * 60 * 1000).toISOString(), // expired 1 minute ago
+      verified: false,
+      created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     }];
 
     const app = buildApp();
@@ -1141,10 +1158,15 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: orderId,
       driver_id: 'driver-123',
       order_display_id: 'ORD-LOCK',
-      delivery_otp: '123456',
-      otp_verified: false,
-      status: 'in_transit',
-      otp_generated_at: new Date().toISOString()
+      status: 'in_transit'
+    }];
+    m.store.delivery_otps = [{
+      id: 'otp-lockout',
+      order_id: orderId,
+      otp: '123456',
+      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      verified: false,
+      created_at: new Date().toISOString()
     }];
 
     const app = buildApp();
@@ -1188,8 +1210,8 @@ describe('Delivery OTP Verification and Milestones', () => {
     const originalNow = Date.now;
     Date.now = () => originalNow() + 31 * 60 * 1000;
 
-    // Update the generated time so the OTP itself isn't expired
-    m.store.orders.find(o => o.id === orderId).otp_generated_at = new Date(Date.now()).toISOString();
+    // Update expires_at so the OTP itself isn't expired after lockout bypass
+    m.store.delivery_otps[0].expires_at = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
     try {
       // Correct OTP should now succeed
@@ -1213,10 +1235,15 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: orderId,
       driver_id: 'driver-123',
       order_display_id: 'ORD-CLEAR',
-      delivery_otp: '123456',
-      otp_verified: false,
-      status: 'in_transit',
-      otp_generated_at: new Date().toISOString()
+      status: 'in_transit'
+    }];
+    m.store.delivery_otps = [{
+      id: 'otp-clear-state',
+      order_id: orderId,
+      otp: '123456',
+      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      verified: false,
+      created_at: new Date().toISOString()
     }];
 
     const app = buildApp();
@@ -1232,7 +1259,7 @@ describe('Delivery OTP Verification and Milestones', () => {
         .send({ otp: '000000' });
     }
 
-    // Succeed
+    // Succeed — this calls verifyDeliveryOtp which marks the OTP as verified
     const resSuccess = await request(app)
       .post(`/api/orders/${orderId}/verify-delivery`)
       .set({
@@ -1242,9 +1269,10 @@ describe('Delivery OTP Verification and Milestones', () => {
       .send({ otp: '123456' });
     expect(resSuccess.status).toBe(200);
 
-    // Reset verification status manually in the mock store to test lockout reset
-    const order = m.store.orders.find(o => o.id === orderId);
-    order.otp_verified = false;
+    // Reset OTP record in isolated table so subsequent verifications can find it
+    const otpRecord = m.store.delivery_otps.find(o => o.order_id === orderId);
+    otpRecord.verified = false;
+    delete otpRecord.verified_at;
 
     // Fail 4 more times (if state wasn't cleared, this would lockout since total failures would be 7)
     for (let i = 1; i <= 4; i++) {
@@ -1260,17 +1288,22 @@ describe('Delivery OTP Verification and Milestones', () => {
     }
   });
 
-  it('regenerates OTP but does not return it in response when milestone In Transit is called and existing OTP has expired', async () => {
+  it('regenerates OTP in isolated table when milestone In Transit is called and existing OTP has expired', async () => {
     const orderId = 'order-regen';
     m.store.orders = [{
       id: orderId,
       customer_id: 'customer-456',
       driver_id: 'driver-123',
       order_display_id: 'ORD-REGEN',
-      delivery_otp: '123456',
-      otp_verified: false,
-      status: 'in_transit',
-      otp_generated_at: new Date(Date.now() - 20 * 60 * 1000).toISOString()
+      status: 'in_transit'
+    }];
+    m.store.delivery_otps = [{
+      id: 'otp-regen-old',
+      order_id: orderId,
+      otp: '123456',
+      expires_at: new Date(Date.now() - 1 * 60 * 1000).toISOString(), // expired
+      verified: false,
+      created_at: new Date(Date.now() - 20 * 60 * 1000).toISOString()
     }];
     m.store.order_timeline = [{
       order_display_id: 'ORD-REGEN',
@@ -1292,15 +1325,22 @@ describe('Delivery OTP Verification and Milestones', () => {
     expect(res.body).not.toHaveProperty('otp');
     expect(res.body.order).not.toHaveProperty('delivery_otp');
 
-    const order = m.store.orders.find(o => o.id === orderId);
-    expect(order.delivery_otp).not.toBe('123456');
-    expect(order.delivery_otp).toMatch(/^\d{6}$/);
-    expect(new Date(order.otp_generated_at).getTime()).toBeGreaterThan(Date.now() - 5000);
+    // The old OTP should still be in the table
+    const oldOtp = m.store.delivery_otps.find(o => o.id === 'otp-regen-old');
+    expect(oldOtp).toBeTruthy();
 
-    // Verify customer notification was created
+    // A new OTP should have been created
+    const newOtps = m.store.delivery_otps.filter(o => o.order_id === orderId && o.otp !== '123456');
+    expect(newOtps.length).toBeGreaterThan(0);
+    const newOtp = newOtps[0];
+    expect(newOtp.otp).toMatch(/^\d{6}$/);
+    expect(newOtp.verified).toBe(false);
+    expect(newOtp.expires_at).toBeDefined();
+
+    // Verify customer notification was created with the new OTP
     const notification = m.store.notifications.find(n => n.user_id === 'customer-456');
     expect(notification).toBeTruthy();
-    expect(notification.body).toContain(order.delivery_otp);
+    expect(notification.body).toContain(newOtp.otp);
   });
 
   describe('Redis-based rate limiting & error fallback resilience', () => {
@@ -1360,10 +1400,15 @@ describe('Delivery OTP Verification and Milestones', () => {
         id: 'order-redis-active',
         driver_id: 'driver-123',
         customer_id: 'customer-456',
-        order_display_id: 'ORD-REDIS',
-        delivery_otp: '123456',
-        otp_verified: false,
-        otp_generated_at: new Date().toISOString()
+        order_display_id: 'ORD-REDIS'
+      }];
+      m.store.delivery_otps = [{
+        id: 'otp-redis-active',
+        order_id: 'order-redis-active',
+        otp: '123456',
+        expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        verified: false,
+        created_at: new Date().toISOString()
       }];
 
       const app = buildApp();
@@ -1396,10 +1441,10 @@ describe('Delivery OTP Verification and Milestones', () => {
       expect(res6.status).toBe(429);
       expect(res6.body.error).toContain('Too many failed OTP attempts');
 
-      // Expire the OTP now, so that the In Transit milestone update triggers regeneration and clear
-      m.store.orders[0].otp_generated_at = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+      // Expire the OTP in the isolated table so the milestone triggers regeneration
+      m.store.delivery_otps[0].expires_at = new Date(Date.now() - 1 * 60 * 1000).toISOString();
 
-      // Milestone change clears lockout in Redis
+      // Milestone change clears lockout in Redis and generates new OTP
       await request(app)
         .put('/api/orders/order-redis-active/milestones')
         .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
@@ -1415,10 +1460,15 @@ describe('Delivery OTP Verification and Milestones', () => {
         id: 'order-redis-failing',
         driver_id: 'driver-123',
         customer_id: 'customer-456',
-        order_display_id: 'ORD-FAIL-REDIS',
-        delivery_otp: '123456',
-        otp_verified: false,
-        otp_generated_at: new Date().toISOString()
+        order_display_id: 'ORD-FAIL-REDIS'
+      }];
+      m.store.delivery_otps = [{
+        id: 'otp-redis-failing',
+        order_id: 'order-redis-failing',
+        otp: '123456',
+        expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        verified: false,
+        created_at: new Date().toISOString()
       }];
 
       const app = buildApp();

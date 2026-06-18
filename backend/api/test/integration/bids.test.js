@@ -623,8 +623,12 @@ describe('Bid Routes', () => {
       status: 'pending',
     });
 
-    m.store.profiles.push({ id: 'driver-1', full_name: 'Driver One' });
-    m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null });
+    m.store.profiles.push(
+      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0xCustomerWallet' },
+      { id: 'driver-1', full_name: 'Driver One' },
+    );
+    m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null, polygon_wallet_address: '0xDriverWallet' });
+    mockEscrowDeposit.mockResolvedValue({ txHash: '0xescrowtest123' });
 
     m.programRpcError('Load offer is no longer available');
 
@@ -660,8 +664,12 @@ describe('Bid Routes', () => {
       status: 'pending',
     });
 
-    m.store.profiles.push({ id: 'driver-1', full_name: 'Driver One' });
-    m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null });
+    m.store.profiles.push(
+      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0xCustomerWallet' },
+      { id: 'driver-1', full_name: 'Driver One' },
+    );
+    m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null, polygon_wallet_address: '0xDriverWallet' });
+    mockEscrowDeposit.mockResolvedValue({ txHash: '0xescrowtest123' });
 
     m.programRpcError('Order is no longer pending');
 

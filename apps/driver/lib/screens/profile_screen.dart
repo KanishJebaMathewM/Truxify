@@ -13,7 +13,6 @@ import '../services/fcm_service.dart';
 import '../../core/supabase_config.dart';
 import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
 import 'notifications_screen.dart';
-import 'package:http/http.dart' as http;
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
@@ -40,7 +39,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadWalletAddress();
+    _fetchReputation();
   }
+
+  static const String _apiBaseUrl = String.fromEnvironment(
+    'TRUXIFY_API_BASE_URL',
+    defaultValue: 'http://localhost:5000',
+  );
+
+  double? _supabaseRating;
+  int? _onChainScore;
+  bool _reputationUnavailable = false;
 
   Future<void> _loadWalletAddress() async {
     try {
@@ -60,6 +69,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } catch (e) {
       debugPrint('Failed to load wallet address: $e');
+    }
+  }
+
+  Future<void> _fetchReputation() async {
+    try {
+      final client = Supabase.instance.client;
+      final userId = client.auth.currentUser?.id;
+      final token = client.auth.currentSession?.accessToken;
+      
+      if (userId == null) return;
+      
+      final response = await http.get(
+        Uri.parse(
+          '$_apiBaseUrl/api/driver/$userId/reputation',
+        ),
+        headers: {
+          if (token != null) 'Authorization': 'Bearer $token',
+          'x-user-id': userId,
+          'x-user-role': 'driver',
+        },
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        
+        if (!mounted) return;
+        
+        setState(() {
+          _supabaseRating =
+            (data['supabaseRating'] as num?)?.toDouble();
+
+          _onChainScore = int.tryParse(
+            data['onChainScore']?.toString() ?? '',
+          );
+            
+          _reputationUnavailable = false;
+        });
+      } else {
+        if (!mounted) return;
+
+        setState(() {
+          _reputationUnavailable = true;
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      
+      setState(() {
+        _reputationUnavailable = true;
+      });
     }
   }
 
@@ -756,6 +815,56 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
 
           const SizedBox(height: 16),
+
+          const SizedBox(height: 16),
+
+AppCard(
+  padding: const EdgeInsets.all(16),
+  child: Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        'Reputation',
+        style: GoogleFonts.dmSans(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          color: Theme.of(context).colorScheme.onSurface,
+        ),
+      ),
+      const SizedBox(height: 12),
+
+      if (_reputationUnavailable)
+        Text(
+          'Unable to fetch reputation.',
+          style: GoogleFonts.dmSans(
+            color: TruxifyColors.errorRed,
+          ),
+        )
+      else
+        Row(
+          children: [
+            Expanded(
+              child: _MetricColumn(
+                label: 'Supabase Rating',
+                value: _supabaseRating?.toStringAsFixed(1) ?? '--',
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 32,
+              color: _borderColor(context),
+            ),
+            Expanded(
+              child: _MetricColumn(
+                label: 'On-chain Score',
+                value: _onChainScore?.toString() ?? '--',
+              ),
+            ),
+          ],
+        ),
+    ],
+  ),
+),
 
           const SectionLabel(label: 'SETTINGS'),
           AppCard(

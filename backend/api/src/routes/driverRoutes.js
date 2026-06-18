@@ -6,6 +6,7 @@ import { driverOnlineSchema, withdrawSchema } from '../validation/requestSchemas
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
+import { getDriverReputation } from '../services/reputation.js';
 
 const router = express.Router();
 
@@ -313,7 +314,81 @@ router.get('/bids', authenticate, requireRole(['driver']), async (req, res) => {
 });
 
 // ============================================================================
-// 10. WITHDRAW FUNDS FROM WALLET (DRIVER)
+// 10. FETCH DRIVER ON-CHAIN REPUTATION
+// ============================================================================
+router.get(
+  '/:driverId/reputation',
+  authenticate,
+  requireRole(['driver']),
+  async (req, res) => {
+    const { driverId } = req.params;
+
+    if (driverId !== req.user.id) {
+      return res.status(403).json({
+        error: 'Forbidden'
+      });
+    }
+
+    if (!supabase) {
+      return res.status(200).json({
+        driverId,
+        walletAddress: null,
+        onChainScore: null,
+        supabaseRating: null
+      });
+    }
+    
+    try {
+      const { data: details, error } = await supabase
+      .from('driver_details')
+      .select('rating, polygon_wallet_address')
+      .eq('user_id', driverId)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({
+        error: 'Failed to fetch driver reputation.',
+        details: error.message
+      });
+    }
+
+    if (!details) {
+      return res.status(404).json({
+        error: 'Driver not found.'
+      });
+    }
+
+    const walletAddress = details.polygon_wallet_address ?? null;
+
+    let onChainScore = null;
+
+    if (walletAddress) {
+      try {
+        onChainScore = await getDriverReputation(walletAddress);
+      } catch (err) {
+        logger.error(
+          `[reputation] Failed to fetch on-chain reputation for ${driverId}: ${err.message}`
+        );
+      }
+    }
+
+    return res.status(200).json({
+      driverId,
+      walletAddress,
+      onChainScore,
+      supabaseRating: details.rating
+    });
+  } catch (err) {
+    logger.error(err);
+
+    return res.status(500).json({
+      error: 'Internal Server Error'
+    });
+  }
+});
+
+// ============================================================================
+// 11. WITHDRAW FUNDS FROM WALLET (DRIVER)
 // ============================================================================
 router.post('/wallet/withdraw', authenticate, requireRole(['driver']), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa

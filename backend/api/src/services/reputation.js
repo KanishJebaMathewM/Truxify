@@ -79,3 +79,29 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
   await tx.wait(1); // wait for 1 confirmation
   logger.info(`[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`);
 }
+
+export async function getDriverReputation(walletAddress) {
+  if (!reputationContract) {
+    return null;
+  }
+
+  if (!walletAddress || !ethers.isAddress(walletAddress)) {
+    return null;
+  }
+
+  try {
+    const score = await Promise.race([
+      reputationContract.getReputation(walletAddress),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('RPC timeout')), 5000)
+      ),
+    ]);
+    
+    return score.toString();
+  } catch (err) {
+    logger.error(
+      `[reputation] Failed to fetch on-chain reputation: ${err.message}`
+    );
+    return null;
+  }
+}

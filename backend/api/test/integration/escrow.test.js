@@ -4,11 +4,10 @@
  * Tests the escrow service layer. Since the ethers.js Contract requires a
  * live blockchain RPC (not available in CI), these tests validate:
  *   - getEscrowBookingId(): deterministic bytes32 derivation
- *   - Graceful no-contract fallback: all functions return {txHash: null, bookingId}
+ *   - Graceful no-contract fallback: buildDepositTx returns {txData: null, bookingId},
+ *     recordDepositTx returns {error}, escrowRelease/Refund return {txHash: null, bookingId}
  *     when POLYGON_RPC_URL / ESCROW_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY
  *     are not configured (the default CI environment)
- *   - Blockchain interactions are mocked via vi.mock in bids.test.js for
- *     full order lifecycle testing (escrowDeposit, escrowRefund on bid accept)
  *
  * Run with:  npm run test:integration -- test/integration/escrow.test.js
  */
@@ -30,7 +29,8 @@ delete process.env.RELAYER_WALLET_PRIVATE_KEY;
 
 const {
   getEscrowBookingId,
-  escrowDeposit,
+  buildDepositTx,
+  recordDepositTx,
   escrowRelease,
   escrowRefund,
 } = await import('../../src/services/escrow.js');
@@ -71,28 +71,40 @@ describe('getEscrowBookingId()', () => {
 // When blockchain env vars are absent, escrowContract is null and all
 // functions return {txHash: null, bookingId} instead of throwing.
 
-describe('escrowDeposit() — no-contract fallback', () => {
-  it('returns {txHash: null, bookingId} when contract not initialised', async () => {
-    const result = await escrowDeposit(ORDER_ID_A, CUSTOMER_ADDR, DRIVER_ADDR, AMOUNT_WEI);
-    expect(result.txHash).toBeNull();
+describe('buildDepositTx() — no-contract fallback', () => {
+  it('returns {txData: null, bookingId} when contract not initialised', async () => {
+    const result = await buildDepositTx(ORDER_ID_A, CUSTOMER_ADDR, DRIVER_ADDR, AMOUNT_WEI);
+    expect(result.txData).toBeNull();
     expect(result.bookingId).toBe(getEscrowBookingId(ORDER_ID_A));
   });
 
-  it('returns {txHash: null} for invalid customer address without throwing', async () => {
-    const result = await escrowDeposit(ORDER_ID_A, 'invalid', DRIVER_ADDR, AMOUNT_WEI);
-    expect(result.txHash).toBeNull();
+  it('returns {txData: null} for invalid customer address without throwing', async () => {
+    const result = await buildDepositTx(ORDER_ID_A, 'invalid', DRIVER_ADDR, AMOUNT_WEI);
+    expect(result.txData).toBeNull();
     expect(result.bookingId).toBe(getEscrowBookingId(ORDER_ID_A));
   });
 
-  it('returns {txHash: null} for invalid driver address without throwing', async () => {
-    const result = await escrowDeposit(ORDER_ID_A, CUSTOMER_ADDR, 'invalid', AMOUNT_WEI);
-    expect(result.txHash).toBeNull();
+  it('returns {txData: null} for invalid driver address without throwing', async () => {
+    const result = await buildDepositTx(ORDER_ID_A, CUSTOMER_ADDR, 'invalid', AMOUNT_WEI);
+    expect(result.txData).toBeNull();
     expect(result.bookingId).toBe(getEscrowBookingId(ORDER_ID_A));
   });
 
   it('bookingId is consistent with getEscrowBookingId()', async () => {
-    const result = await escrowDeposit(ORDER_ID_B, CUSTOMER_ADDR, DRIVER_ADDR, AMOUNT_WEI);
+    const result = await buildDepositTx(ORDER_ID_B, CUSTOMER_ADDR, DRIVER_ADDR, AMOUNT_WEI);
     expect(result.bookingId).toBe(getEscrowBookingId(ORDER_ID_B));
+  });
+});
+
+describe('recordDepositTx() — no-contract fallback', () => {
+  it('returns {error: "Contract not initialised"} when contract not configured', async () => {
+    const result = await recordDepositTx(getEscrowBookingId(ORDER_ID_A), '0x' + 'a'.repeat(64));
+    expect(result.error).toBe('Contract not initialised');
+  });
+
+  it('returns {error} for invalid transaction hash', async () => {
+    const result = await recordDepositTx(getEscrowBookingId(ORDER_ID_A), 'invalid');
+    expect(result.error).toBeDefined();
   });
 });
 

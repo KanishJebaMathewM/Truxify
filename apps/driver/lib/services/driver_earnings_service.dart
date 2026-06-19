@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/earnings_daily_model.dart';
+
 class DriverEarningsService {
   DriverEarningsService({
     SupabaseClient? client,
@@ -167,6 +169,77 @@ class DriverEarningsService {
         .order('created_at', ascending: false);
 
     return List<Map<String, dynamic>>.from(response);
+  }
+
+  /// Fetches today's earnings summary (amount, hours driven, trip count).
+  Future<EarningsDailyModel?> fetchTodayEarningsSummary() async {
+    if (driverId == null) return null;
+
+    final today = DateTime.now();
+    final dayStr = today.toIso8601String().split('T').first;
+
+    final uri = Uri.parse('$_apiBaseUrl/api/driver/earnings/summary').replace(
+      queryParameters: {'days': '1'},
+    );
+
+    final http.Response response;
+    try {
+      response = await _httpClient.get(uri, headers: _authHeaders);
+    } catch (e) {
+      throw Exception('Network error: Failed to fetch today\'s earnings.');
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Failed to load today\'s earnings.');
+    }
+
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } catch (_) {
+      throw Exception('Failed to parse earnings response.');
+    }
+
+    if (decoded is! List) return null;
+
+    for (final entry in decoded) {
+      if (entry is! Map) continue;
+      final dateStr = entry['day_date']?.toString();
+      if (dateStr == dayStr) {
+        return EarningsDailyModel.fromMap(Map<String, dynamic>.from(entry));
+      }
+    }
+
+    return null;
+  }
+
+  /// Fetches driver stats including rating, total trips, completion rate.
+  Future<Map<String, dynamic>> fetchDriverStats() async {
+    if (driverId == null) return {};
+
+    final uri = Uri.parse('$_apiBaseUrl/api/driver/stats');
+
+    final http.Response response;
+    try {
+      response = await _httpClient.get(uri, headers: _authHeaders);
+    } catch (e) {
+      throw Exception('Network error: Failed to fetch driver stats.');
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('Failed to load driver stats.');
+    }
+
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } catch (_) {
+      throw Exception('Failed to parse driver stats response.');
+    }
+
+    if (decoded is! Map) return {};
+
+    return Map<String, dynamic>.from(decoded['stats'] ?? {});
   }
 
   void dispose() {

@@ -1,14 +1,16 @@
 import express from 'express';
-import { supabase } from '../config/db.js';
+import { supabase, redisClient } from '../config/db.js';
+import { getDriverReputation } from '../services/reputation.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+
 import { validateBody } from '../middleware/validate.js';
 import { driverOnlineSchema, withdrawSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
-import { getDriverReputation } from '../services/reputation.js';
 
 const router = express.Router();
+
 
 const loginOtpSchema = z.object({
   phone: z.string().trim().min(10).max(20),
@@ -314,81 +316,7 @@ router.get('/bids', authenticate, requireRole(['driver']), async (req, res) => {
 });
 
 // ============================================================================
-// 10. FETCH DRIVER ON-CHAIN REPUTATION
-// ============================================================================
-router.get(
-  '/:driverId/reputation',
-  authenticate,
-  requireRole(['driver']),
-  async (req, res) => {
-    const { driverId } = req.params;
-
-    if (driverId !== req.user.id) {
-      return res.status(403).json({
-        error: 'Forbidden'
-      });
-    }
-
-    if (!supabase) {
-      return res.status(200).json({
-        driverId,
-        walletAddress: null,
-        onChainScore: null,
-        supabaseRating: null
-      });
-    }
-    
-    try {
-      const { data: details, error } = await supabase
-      .from('driver_details')
-      .select('rating, polygon_wallet_address')
-      .eq('user_id', driverId)
-      .maybeSingle();
-
-    if (error) {
-      return res.status(500).json({
-        error: 'Failed to fetch driver reputation.',
-        details: error.message
-      });
-    }
-
-    if (!details) {
-      return res.status(404).json({
-        error: 'Driver not found.'
-      });
-    }
-
-    const walletAddress = details.polygon_wallet_address ?? null;
-
-    let onChainScore = null;
-
-    if (walletAddress) {
-      try {
-        onChainScore = await getDriverReputation(walletAddress);
-      } catch (err) {
-        logger.error(
-          `[reputation] Failed to fetch on-chain reputation for ${driverId}: ${err.message}`
-        );
-      }
-    }
-
-    return res.status(200).json({
-      driverId,
-      walletAddress,
-      onChainScore,
-      supabaseRating: details.rating
-    });
-  } catch (err) {
-    logger.error(err);
-
-    return res.status(500).json({
-      error: 'Internal Server Error'
-    });
-  }
-});
-
-// ============================================================================
-// 11. WITHDRAW FUNDS FROM WALLET (DRIVER)
+// 10. WITHDRAW FUNDS FROM WALLET (DRIVER)
 // ============================================================================
 router.post('/wallet/withdraw', authenticate, requireRole(['driver']), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa
@@ -437,4 +365,82 @@ router.post('/wallet/withdraw', authenticate, requireRole(['driver']), validateB
   }
 });
 
+// ============================================================================
+// 11. GET DRIVER REPUTATION (DRIVER)
+// ============================================================================
+router.get('/:driverId/reputation', authenticate, requireRole(['driver']), async (req, res) => {
+  const { driverId } = req.params;
+
+  if (driverId !== req.user.id) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+
+  try {
+
+    // Check cache in Redis first if client exists
+    if (redisClient) {
+      try {
+        const cached = await redisClient.get(`driver-reputation:${driverId}`);
+        if (cached) {
+          logger.info(`[reputation] Cache hit for driver ${driverId}`);
+          return res.status(200).json(JSON.parse(cached));
+        }
+      } catch (cacheErr) {
+        logger.error(`[reputation] Redis read error for driver ${driverId}: ${cacheErr.message}`);
+      }
+    }
+
+    // Fetch details from Supabase
+    const { data: details, error } = await supabase
+      .from('driver_details')
+      .select('rating, polygon_wallet_address')
+      .eq('user_id', driverId)
+      .maybeSingle();
+
+    if (error) {
+      logger.error(`[reputation] Supabase query error for driver ${driverId}: ${error.message}`);
+      return res.status(500).json({ error: 'Failed to fetch driver details.', details: error.message });
+    }
+
+    if (!details) {
+      return res.status(404).json({ error: 'Driver not found.' });
+    }
+
+    const walletAddress = details.polygon_wallet_address ?? null;
+    let onChainScore = null;
+
+    if (walletAddress) {
+      onChainScore = await getDriverReputation(walletAddress);
+    }
+
+    const responseData = {
+      driverId,
+      walletAddress,
+      onChainScore,
+      supabaseRating: details.rating
+    };
+
+    // Cache the response in Redis for 30 seconds
+    if (redisClient) {
+      try {
+        await redisClient.set(
+          `driver-reputation:${driverId}`,
+          JSON.stringify(responseData),
+          'EX',
+          30
+        );
+      } catch (cacheErr) {
+        logger.error(`[reputation] Redis write error for driver ${driverId}: ${cacheErr.message}`);
+      }
+    }
+
+    return res.status(200).json(responseData);
+
+  } catch (err) {
+    logger.error(`[reputation] Unexpected error retrieving reputation for driver ${driverId}: ${err.message}`);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 export default router;
+

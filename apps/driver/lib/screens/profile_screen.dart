@@ -1,8 +1,8 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+
 import '../controllers/app_controller.dart';
 import '../core/app_routes.dart';
 import '../data/mock_data.dart';
@@ -35,21 +35,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _currentLanguage = 'English';
   String _walletAddress = '';
 
+  bool _isLoadingReputation = true;
+  double? _platformRating;
+  int? _onChainScore;
+  bool _reputationUnavailable = false;
+
   @override
   void initState() {
     super.initState();
     _loadWalletAddress();
     _fetchReputation();
   }
-
-  static const String _apiBaseUrl = String.fromEnvironment(
-    'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
-  );
-
-  double? _supabaseRating;
-  int? _onChainScore;
-  bool _reputationUnavailable = false;
 
   Future<void> _loadWalletAddress() async {
     try {
@@ -58,12 +54,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (userId != null) {
         final data = await client
             .from('profiles')
-            .select('wallet_address')
+            .select('polygon_wallet_address')
             .eq('id', userId)
             .maybeSingle();
         if (data != null && mounted) {
           setState(() {
-            _walletAddress = data['wallet_address']?.toString() ?? '';
+            _walletAddress = data['polygon_wallet_address']?.toString() ?? '';
           });
         }
       }
@@ -73,56 +69,73 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _fetchReputation() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingReputation = true;
+      _reputationUnavailable = false;
+    });
+
     try {
       final client = Supabase.instance.client;
-      final userId = client.auth.currentUser?.id;
-      final token = client.auth.currentSession?.accessToken;
-      
-      if (userId == null) return;
-      
-      final response = await http.get(
-        Uri.parse(
-          '$_apiBaseUrl/api/driver/$userId/reputation',
-        ),
-        headers: {
-          if (token != null) 'Authorization': 'Bearer $token',
-          'x-user-id': userId,
-          'x-user-role': 'driver',
-        },
+      final driverId = client.auth.currentUser?.id;
+      if (driverId == null) {
+        if (mounted) {
+          setState(() {
+            _isLoadingReputation = false;
+          });
+        }
+        return;
+      }
+
+      const apiBaseUrl = String.fromEnvironment(
+        'TRUXIFY_API_BASE_URL',
+        defaultValue: 'http://localhost:5000',
       );
-      
+
+      final uri = Uri.parse('$apiBaseUrl/api/driver/$driverId/reputation');
+      final token = client.auth.currentSession?.accessToken;
+      final response = await http.get(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null) 'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (!mounted) return;
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        
-        if (!mounted) return;
-        
         setState(() {
-          _supabaseRating =
-            (data['supabaseRating'] as num?)?.toDouble();
-
-          _onChainScore = int.tryParse(
-            data['onChainScore']?.toString() ?? '',
-          );
-            
-          _reputationUnavailable = false;
+          _platformRating = data['supabaseRating'] != null
+              ? (data['supabaseRating'] as num).toDouble()
+              : null;
+          _onChainScore = data['onChainScore'] != null
+              ? (data['onChainScore'] as num).toInt()
+              : null;
+          _walletAddress = data['walletAddress']?.toString() ?? '';
+          _isLoadingReputation = false;
         });
       } else {
-        if (!mounted) return;
-
         setState(() {
           _reputationUnavailable = true;
+          _isLoadingReputation = false;
         });
       }
-    } catch (_) {
-      if (!mounted) return;
-      
-      setState(() {
-        _reputationUnavailable = true;
-      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _reputationUnavailable = true;
+          _isLoadingReputation = false;
+        });
+      }
     }
   }
 
+
   Color _borderColor(BuildContext context) {
+
+
     return Theme.of(context).brightness == Brightness.dark
         ? TruxifyColors.darkBorder
         : TruxifyColors.border;
@@ -814,59 +827,85 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
-          const SizedBox(height: 16),
-
-AppCard(
-  padding: const EdgeInsets.all(16),
-  child: Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        'Reputation',
-        style: GoogleFonts.dmSans(
-          fontSize: 16,
-          fontWeight: FontWeight.bold,
-          color: Theme.of(context).colorScheme.onSurface,
-        ),
-      ),
-      const SizedBox(height: 12),
-
-      if (_reputationUnavailable)
-        Text(
-          'Unable to fetch reputation.',
-          style: GoogleFonts.dmSans(
-            color: TruxifyColors.errorRed,
+          // Reputation Card
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    children: [
+                      const Icon(Icons.star_rounded, color: Colors.amber, size: 24),
+                      const SizedBox(height: 8),
+                      Text(
+                        _isLoadingReputation
+                            ? '...'
+                            : _platformRating != null
+                                ? '${_platformRating!.toStringAsFixed(1)} / 5.0'
+                                : '0.0 / 5.0',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 16,
+                          color: Theme.of(context).colorScheme.onSurface,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Platform Rating',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 11,
+                          color: TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 48,
+                  color: _borderColor(context),
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      const Icon(Icons.link_rounded, color: TruxifyColors.accent, size: 24),
+                      const SizedBox(height: 8),
+                      Text(
+                        _isLoadingReputation
+                            ? '...'
+                            : (_reputationUnavailable || (_walletAddress.isNotEmpty && _onChainScore == null))
+                                ? 'Unavailable'
+                                : _walletAddress.isEmpty
+                                    ? 'Wallet Not Connected'
+                                    : '$_onChainScore / 100',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.dmSans(
+                          fontSize: (_walletAddress.isEmpty || _reputationUnavailable || (_walletAddress.isNotEmpty && _onChainScore == null)) && !_isLoadingReputation ? 12 : 16,
+                          color: Theme.of(context).colorScheme.onSurface,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'On-Chain Reputation',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 11,
+                          color: TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        )
-      else
-        Row(
-          children: [
-            Expanded(
-              child: _MetricColumn(
-                label: 'Supabase Rating',
-                value: _supabaseRating?.toStringAsFixed(1) ?? '--',
-              ),
-            ),
-            Container(
-              width: 1,
-              height: 32,
-              color: _borderColor(context),
-            ),
-            Expanded(
-              child: _MetricColumn(
-                label: 'On-chain Score',
-                value: _onChainScore?.toString() ?? '--',
-              ),
-            ),
-          ],
-        ),
-    ],
-  ),
-),
 
-          const SectionLabel(label: 'SETTINGS'),
+          const SizedBox(height: 16),
+
           AppCard(
             child: Column(
               children: [

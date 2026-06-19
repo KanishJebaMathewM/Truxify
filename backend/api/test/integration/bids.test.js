@@ -681,4 +681,80 @@ describe('Bid Routes', () => {
     expect(res.body.details).toBe('Order is no longer pending');
     expect(m.calls.find(c => c.rpc === 'accept_bid_tx')).toBeTruthy();
   });  
+
+  describe('Confirm Deposit Route', () => {
+    it('POST /:id/confirm-deposit rejects unauthenticated request', async () => {
+      const app = buildApp();
+      const res = await request(app)
+        .post('/api/orders/order-1/confirm-deposit')
+        .send({ txHash: '0x' + '1'.repeat(64) });
+      expect(res.status).toBe(401);
+    });
+
+    it('POST /:id/confirm-deposit returns 400 if order is not in funding state', async () => {
+      m.store.orders.push({
+        id: 'order-1',
+        customer_id: 'customer-1',
+        order_display_id: 'OD1',
+        escrow_status: 'pending',
+      });
+
+      const app = buildApp();
+      const res = await request(app)
+        .post('/api/orders/order-1/confirm-deposit')
+        .set(CUSTOMER)
+        .send({ txHash: '0x' + '1'.repeat(64) });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Order is not in funding state');
+    });
+
+    it('POST /:id/confirm-deposit returns 422 if recordDepositTx fails', async () => {
+      m.store.orders.push({
+        id: 'order-1',
+        customer_id: 'customer-1',
+        order_display_id: 'OD1',
+        escrow_status: 'funding',
+      });
+
+      mockRecordDepositTx.mockResolvedValue({ error: 'Transaction reverted or not found on chain' });
+
+      const app = buildApp();
+      const res = await request(app)
+        .post('/api/orders/order-1/confirm-deposit')
+        .set(CUSTOMER)
+        .send({ txHash: '0x' + '1'.repeat(64) });
+
+      expect(res.status).toBe(422);
+      expect(res.body.error).toBe('Transaction reverted or not found on chain');
+      expect(mockRecordDepositTx).toHaveBeenCalledWith('escrow:OD1', '0x' + '1'.repeat(64));
+    });
+
+    it('POST /:id/confirm-deposit succeeds and marks order as funded', async () => {
+      m.store.orders.push({
+        id: 'order-1',
+        customer_id: 'customer-1',
+        order_display_id: 'OD1',
+        escrow_status: 'funding',
+      });
+
+      const expectedTx = '0x' + '1'.repeat(64);
+      mockRecordDepositTx.mockResolvedValue({ txHash: expectedTx, bookingId: 'escrow:OD1' });
+
+      const app = buildApp();
+      const res = await request(app)
+        .post('/api/orders/order-1/confirm-deposit')
+        .set(CUSTOMER)
+        .send({ txHash: expectedTx });
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toBe('Escrow deposit confirmed');
+      expect(res.body.txHash).toBe(expectedTx);
+
+      const order = m.store.orders.find(o => o.id === 'order-1');
+      expect(order.escrow_status).toBe('funded');
+      expect(order.deposit_tx_hash).toBe(expectedTx);
+      expect(order.escrow_deposited_at).toBeDefined();
+    });
+  });
 });

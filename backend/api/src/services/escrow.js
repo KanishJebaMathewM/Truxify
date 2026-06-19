@@ -121,15 +121,6 @@ export async function buildDepositTx(orderDisplayId, customerWalletAddress, driv
   return { txData, bookingId };
 }
 
-/**
- * Record a confirmed deposit transaction hash for a booking.
- * Called by the client-facing endpoint after the customer's wallet
- * has signed and submitted the transaction built by buildDepositTx().
- *
- * @param {string} bookingId
- * @param {string} txHash
- * @returns {Promise<{txHash: string, bookingId: string} | {error: string}>}
- */
 export async function recordDepositTx(bookingId, txHash) {
   if (!escrowContract) {
     return { error: 'Contract not initialised' };
@@ -138,9 +129,35 @@ export async function recordDepositTx(bookingId, txHash) {
     return { error: 'Invalid transaction hash' };
   }
 
-  const receipt = await escrowContract.runner.provider.waitForTransaction(txHash, 1);
+  const provider = escrowContract.runner.provider;
+  const receipt = await provider.waitForTransaction(txHash, 1);
   if (!receipt || receipt.status === 0) {
     return { error: 'Transaction reverted or not found on chain' };
+  }
+
+  const tx = await provider.getTransaction(txHash);
+  if (!tx) {
+    return { error: 'Transaction details not found' };
+  }
+
+  if (!tx.to || tx.to.toLowerCase() !== contractAddress.toLowerCase()) {
+    return { error: 'Transaction destination is not the Escrow contract' };
+  }
+
+  let decoded;
+  try {
+    decoded = escrowContract.interface.parseTransaction({ data: tx.data, value: tx.value });
+  } catch (err) {
+    return { error: 'Failed to parse transaction data' };
+  }
+
+  if (!decoded || decoded.name !== 'deposit') {
+    return { error: 'Transaction is not a deposit call' };
+  }
+
+  const [txBookingId] = decoded.args;
+  if (txBookingId !== bookingId) {
+    return { error: 'Transaction booking ID does not match' };
   }
 
   logger.info(`[escrow] deposit confirmed for booking ${bookingId} in block ${receipt.blockNumber}`);

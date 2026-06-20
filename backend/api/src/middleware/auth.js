@@ -1,6 +1,7 @@
 import { firebaseAdmin, supabase } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import { getCachedProfile, setCachedProfile, invalidateCachedProfile, TOMBSTONE_TTL_SECONDS, isValidCachedProfile } from '../lib/profileCache.js';
+import logger from './logger.js';
 
 /**
  * Authentication middleware to verify requests using Firebase ID Tokens.
@@ -168,7 +169,7 @@ export async function authenticate(req, res, next) {
 
     next();
   } catch (error) {
-    console.error('Auth verification error:', error.message);
+    logger.error({ err: error, requestId: req.requestId }, 'Auth verification error');
     res.status(401).json({ error: 'Invalid or expired authentication token.' });
   }
 }

@@ -1,4 +1,9 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from 'vitest';
+import logger from '../../src/middleware/logger.js';
+
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), fatal: vi.fn() },
+}));
 
 const dbMock = vi.hoisted(() => ({
   store: {
@@ -143,7 +148,7 @@ describe('tracker WebSocket telemetry authorization', () => {
 describe('tracker WebSocket heartbeat messages', () => {
   it('responds to raw client ping messages without attempting JSON parsing', async () => {
     const sentMessages = [];
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
     const ws = {
       isAlive: false,
       send(message) {
@@ -162,7 +167,7 @@ describe('tracker WebSocket heartbeat messages', () => {
 
   it('keeps returning a JSON error for malformed non-heartbeat messages', async () => {
     const sentMessages = [];
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
     const ws = {
       send(message) {
         sentMessages.push(JSON.parse(message));
@@ -199,7 +204,7 @@ describe('tracker graceful shutdown', () => {
     };
     const clearIntervalSpy = vi.spyOn(global, 'clearInterval');
     const clearTimeoutSpy = vi.spyOn(global, 'clearTimeout');
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
     __testing.setTelemetryWriteBuffer([{ driver_id: 'driver-1' }]);
     __testing.setShutdownState({
@@ -228,7 +233,7 @@ describe('tracker graceful shutdown', () => {
   });
 
   it('is safe to call when no WebSocket server has been initialized', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
     await closeWebSocketServer();
 
@@ -240,6 +245,61 @@ describe('tracker graceful shutdown', () => {
     });
 
     errorSpy.mockRestore();
+  });
+
+  it('waits for MongoDB connection during shutdown and flushes successfully', async () => {
+    const insertMany = vi.fn().mockResolvedValue({});
+    const collection = vi.fn().mockReturnValue({ insertMany });
+
+    const { closeWebSocketServer: closeWs, __testing: t } = await import('../../src/sockets/tracker.js');
+    
+    t.setTelemetryWriteBuffer([{ driver_id: 'driver-delayed' }]);
+
+    // Enable waiting and start with null (no db)
+    process.env.MONGODB_SHUTDOWN_WAIT_MS = '150';
+    t.setMongoDbOverride(null);
+
+    // Simulate MongoDB connecting after 50ms
+    setTimeout(() => {
+      t.setMongoDbOverride({ collection });
+    }, 50);
+
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    await closeWs();
+
+    expect(insertMany).toHaveBeenCalled();
+    expect(t.getTelemetryWriteBuffer().length).toBe(0);
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+    t.setMongoDbOverride(null);
+    process.env.MONGODB_SHUTDOWN_WAIT_MS = '0';
+  });
+
+  it('warns about data loss if MongoDB connection fails to become available during shutdown timeout', async () => {
+    const { closeWebSocketServer: closeWs, __testing: t } = await import('../../src/sockets/tracker.js');
+    
+    t.setTelemetryWriteBuffer([{ driver_id: 'driver-lost-1' }, { driver_id: 'driver-lost-2' }]);
+
+    // Set wait timeout to 50ms and ensure DB is null
+    process.env.MONGODB_SHUTDOWN_WAIT_MS = '50';
+    t.setMongoDbOverride(null);
+
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
+
+    await closeWs();
+
+    expect(t.getTelemetryWriteBuffer().length).toBe(2);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('[TRUXIFY SHUTDOWN] MongoDB not available after waiting. 2 telemetry records will be lost.')
+    );
+
+    warnSpy.mockRestore();
+    errorSpy.mockRestore();
+    t.setMongoDbOverride(null);
+    process.env.MONGODB_SHUTDOWN_WAIT_MS = '0';
   });
 });
 
@@ -349,7 +409,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
   });
 
   it('allows upgrades and logs when Redis rate limiting fails', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
     vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
@@ -453,6 +513,178 @@ describe('handleLocationPing - main telemetry flow', () => {
     expect(ws.send).not.toHaveBeenCalled();
   });
 
+  it('accepts valid coordinates at (0, 0) boundary', async () => {
+    const ws = {
+      driverId: 'driver-1',
+      send: vi.fn(),
+    };
+
+    // (0, 0) would fail a falsy check but must pass proper type validation
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: 0,
+      longitude: 0,
+    });
+
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects null latitude', async () => {
+    const sentMessages = [];
+    const ws = {
+      driverId: 'driver-1',
+      send(msg) { sentMessages.push(JSON.parse(msg)); }
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: null,
+      longitude: 77.5,
+    });
+
+    expect(sentMessages[0].error).toContain('Missing mandatory tracking parameters');
+  });
+
+  it('rejects undefined longitude', async () => {
+    const sentMessages = [];
+    const ws = {
+      driverId: 'driver-1',
+      send(msg) { sentMessages.push(JSON.parse(msg)); }
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: 12.9,
+    });
+
+    expect(sentMessages[0].error).toContain('Missing mandatory tracking parameters');
+  });
+
+  it('rejects non-numeric latitude', async () => {
+    const sentMessages = [];
+    const ws = {
+      driverId: 'driver-1',
+      send(msg) { sentMessages.push(JSON.parse(msg)); }
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: '12.9',
+      longitude: 77.5,
+    });
+
+    expect(sentMessages[0].error).toContain('Missing mandatory tracking parameters');
+  });
+
+  it('rejects coordinates out of range (latitude too low)', async () => {
+    const sentMessages = [];
+    const ws = {
+      driverId: 'driver-1',
+      send(msg) { sentMessages.push(JSON.parse(msg)); }
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: -90.1,
+      longitude: 77.5,
+    });
+
+    expect(sentMessages[0].error).toContain('Coordinates out of valid range');
+  });
+
+  it('rejects coordinates out of range (latitude too high)', async () => {
+    const sentMessages = [];
+    const ws = {
+      driverId: 'driver-1',
+      send(msg) { sentMessages.push(JSON.parse(msg)); }
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: 90.1,
+      longitude: 77.5,
+    });
+
+    expect(sentMessages[0].error).toContain('Coordinates out of valid range');
+  });
+
+  it('rejects coordinates out of range (longitude too low)', async () => {
+    const sentMessages = [];
+    const ws = {
+      driverId: 'driver-1',
+      send(msg) { sentMessages.push(JSON.parse(msg)); }
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: 12.9,
+      longitude: -180.1,
+    });
+
+    expect(sentMessages[0].error).toContain('Coordinates out of valid range');
+  });
+
+  it('rejects coordinates out of range (longitude too high)', async () => {
+    const sentMessages = [];
+    const ws = {
+      driverId: 'driver-1',
+      send(msg) { sentMessages.push(JSON.parse(msg)); }
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: 12.9,
+      longitude: 180.1,
+    });
+
+    expect(sentMessages[0].error).toContain('Coordinates out of valid range');
+  });
+
+  it('accepts boundary coordinate values (-90, -180) and (90, 180)', async () => {
+    const ws = {
+      driverId: 'driver-1',
+      send: vi.fn(),
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: -90,
+      longitude: -180,
+    });
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: 90,
+      longitude: 180,
+    });
+
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-finite coordinate values (NaN, Infinity)', async () => {
+    const sentMessages = [];
+    const ws = {
+      driverId: 'driver-1',
+      send(msg) { sentMessages.push(JSON.parse(msg)); }
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: NaN,
+      longitude: 77.5,
+    });
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: 12.9,
+      longitude: Infinity,
+    });
+
+    expect(sentMessages).toHaveLength(2);
+    expect(sentMessages[0].error).toContain('Missing mandatory tracking parameters');
+    expect(sentMessages[1].error).toContain('Missing mandatory tracking parameters');
+  });
+
   it('handles malformed device_timestamp gracefully', async () => {
     const ws = {
       driverId: 'driver-1',
@@ -532,7 +764,7 @@ describe('handleLocationPing - with Redis', () => {
       driver_id: 'driver-1',
       latitude: 12.9,
       longitude: 77.5,
-      device_timestamp: new Date(1000).toISOString(), // very old timestamp
+      device_timestamp: new Date(Date.now() - 60000).toISOString(), // within tolerance, but sequence will reject
     });
 
     // Should be dropped — no send called
@@ -958,7 +1190,7 @@ describe('handleLocationPing - Redis sequence gate', () => {
       driver_id: 'driver-1',
       latitude: 12.9,
       longitude: 77.5,
-      device_timestamp: new Date(1000).toISOString(),
+      device_timestamp: new Date(Date.now() - 60000).toISOString(),
     });
 
     expect(ws.send).not.toHaveBeenCalled();
@@ -1026,6 +1258,255 @@ describe('handleLocationPing - Redis sequence gate', () => {
   });
 });
 
+describe('handleLocationPing - circuit breaker', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('resets sequence key after too many consecutive dropped telemetry packets', async () => {
+    // Set Redis to always have a future timestamp, causing every ping to be dropped
+    const redisGet = vi.fn().mockResolvedValue('9999999999999');
+    const redisSet = vi.fn().mockResolvedValue('OK');
+    const redisDel = vi.fn().mockResolvedValue(1);
+
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: { get: redisGet, set: redisSet, del: redisDel },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+    const ws = { driverId: 'driver-cb', send: vi.fn() };
+
+    // Send MAX_CONSECUTIVE_DROPS pings — all should be dropped
+    for (let i = 0; i < t.MAX_CONSECUTIVE_DROPS; i++) {
+      await hlp(ws, {
+        driver_id: 'driver-cb',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+    }
+
+    // After the threshold, redisDel should have been called
+    expect(redisDel).toHaveBeenCalledWith('driver:sequence:driver-cb');
+    expect(t.getConsecutiveDropCount('driver-cb')).toBe(0);
+  });
+
+  it('resets drop counter on successful sequence advancement', async () => {
+    let redisGetCalls = 0;
+    const redisGet = vi.fn().mockImplementation(async () => {
+      redisGetCalls++;
+      // Return a future timestamp for the first 3 calls, then null to let it through
+      return redisGetCalls <= 3 ? '9999999999999' : null;
+    });
+    const redisSet = vi.fn().mockResolvedValue('OK');
+    const redisDel = vi.fn().mockResolvedValue(1);
+
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: { get: redisGet, set: redisSet, del: redisDel },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+    const ws = { driverId: 'driver-recover', send: vi.fn() };
+
+    // 3 drops
+    for (let i = 0; i < 3; i++) {
+      await hlp(ws, {
+        driver_id: 'driver-recover',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+    }
+    expect(t.getConsecutiveDropCount('driver-recover')).toBe(3);
+
+    // 4th ping succeeds — counter should reset
+    await hlp(ws, {
+      driver_id: 'driver-recover',
+      latitude: 12.9,
+      longitude: 77.5,
+    });
+    expect(t.getConsecutiveDropCount('driver-recover')).toBe(0);
+  });
+
+  it('does not trigger circuit breaker for isolated drops', async () => {
+    const redisGet = vi.fn().mockResolvedValue('9999999999999');
+    const redisSet = vi.fn().mockResolvedValue('OK');
+    const redisDel = vi.fn().mockResolvedValue(1);
+
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: { get: redisGet, set: redisSet, del: redisDel },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+    const ws = { driverId: 'driver-isolated', send: vi.fn() };
+
+    // Only 1 drop — should NOT trigger circuit breaker
+    await hlp(ws, {
+      driver_id: 'driver-isolated',
+      latitude: 12.9,
+      longitude: 77.5,
+    });
+
+    expect(redisDel).not.toHaveBeenCalled();
+    expect(t.getConsecutiveDropCount('driver-isolated')).toBe(1);
+  });
+});
+
+describe('handleLocationPing - server timestamp handling', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('uses server timestamp for Redis sequence, not device timestamp', async () => {
+    const redisGet = vi.fn().mockResolvedValue(null);
+    const redisSet = vi.fn().mockResolvedValue('OK');
+
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: { get: redisGet, set: redisSet },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
+    const ws = { driverId: 'driver-ts', send: vi.fn() };
+
+    // Use a device timestamp that's within the 5-min clock skew tolerance but would be a
+    // clearly different value than server time for the Redis sequence key
+    const deviceTs = new Date(Date.now() - 120 * 1000); // 2 minutes ago — within tolerance
+    await hlp(ws, {
+      driver_id: 'driver-ts',
+      latitude: 12.9,
+      longitude: 77.5,
+      device_timestamp: deviceTs.toISOString(),
+    });
+
+    // Sequence must be set to a recent server time, not the 2-minute-old device time
+    // redisSet is called for (driver:sequence, <num>) and (driver:location, <json>)
+    // Find the sequence key call
+    const seqCall = redisSet.mock.calls.find(c => c[0] === 'driver:sequence:driver-ts');
+    expect(seqCall).toBeTruthy();
+    const seqValue = parseInt(seqCall[1], 10);
+    expect(seqValue).toBeGreaterThan(Date.now() - 10000); // within last 10 seconds
+    expect(seqValue).toBeGreaterThan(deviceTs.getTime()); // NOT the old device time
+  });
+
+  it('stores device timestamp in buffer record for analytics', async () => {
+    const redisGet = vi.fn().mockResolvedValue(null);
+    const redisSet = vi.fn().mockResolvedValue('OK');
+
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: { get: redisGet, set: redisSet },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+    t.clearTelemetryWriteBuffer();
+
+    const ws = { driverId: 'driver-analytics', send: vi.fn() };
+    const deviceTs = new Date(Date.now() - 60000); // 1 min ago — within tolerance
+
+    await hlp(ws, {
+      driver_id: 'driver-analytics',
+      latitude: 12.9,
+      longitude: 77.5,
+      device_timestamp: deviceTs.toISOString(),
+    });
+
+    const buffer = t.getTelemetryWriteBuffer();
+    expect(buffer).toHaveLength(1);
+    // pinged_at should be the device-provided timestamp
+    expect(buffer[0].pinged_at.getTime()).toBe(deviceTs.getTime());
+    // server_received_at should be server time
+    expect(buffer[0].server_received_at.getTime()).toBeGreaterThan(deviceTs.getTime());
+  });
+});
+
+describe('handleLocationPing - clock skew simulation', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('drops packets with device timestamp far in the future', async () => {
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: null,
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
+    const ws = { driverId: 'driver-skew', send: vi.fn() };
+
+    // Device timestamp 10 minutes in the future exceeds default 5-min tolerance
+    const futureTime = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    await hlp(ws, {
+      driver_id: 'driver-skew',
+      latitude: 12.9,
+      longitude: 77.5,
+      device_timestamp: futureTime,
+    });
+
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('drops packets with device timestamp far in the past', async () => {
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: null,
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
+    const ws = { driverId: 'driver-skew-past', send: vi.fn() };
+
+    // Device timestamp 10 minutes in the past exceeds default 5-min tolerance
+    const pastTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    await hlp(ws, {
+      driver_id: 'driver-skew-past',
+      latitude: 12.9,
+      longitude: 77.5,
+      device_timestamp: pastTime,
+    });
+
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('accepts packets with device timestamp within tolerance window', async () => {
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: null,
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
+    const ws = { driverId: 'driver-ok', send: vi.fn() };
+
+    // Device timestamp 1 minute ago is within 5-min tolerance
+    const recentTime = new Date(Date.now() - 60 * 1000).toISOString();
+    await hlp(ws, {
+      driver_id: 'driver-ok',
+      latitude: 12.9,
+      longitude: 77.5,
+      device_timestamp: recentTime,
+    });
+
+    // Should pass clock skew check and succeed
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+});
+
 describe('flushTelemetryBuffer - with MongoDB', () => {
   beforeEach(() => {
     __testing.clearTelemetryWriteBuffer();
@@ -1063,7 +1544,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     const insertMany = vi.fn().mockImplementation(async () => {
       // Simulate a concurrent new ping arriving while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
-      t.setTelemetryWriteBuffer([{ driver_id: 'new-driver' }]);
+      t.getTelemetryWriteBuffer().push({ driver_id: 'new-driver' });
       throw new Error('network timeout');
     });
     const collection = vi.fn().mockReturnValue({ insertMany });
@@ -1092,7 +1573,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
       // Simulate new pings arriving to almost fill the buffer while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
       const mockNewRecords = Array.from({ length: 4995 }, (_, i) => ({ driver_id: `new-driver-${i}` }));
-      t.setTelemetryWriteBuffer(mockNewRecords);
+      t.getTelemetryWriteBuffer().push(...mockNewRecords);
       throw new Error('transient write failure');
     });
     const collection = vi.fn().mockReturnValue({ insertMany });
@@ -1108,7 +1589,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     const mockOldRecords = Array.from({ length: 10 }, (_, i) => ({ driver_id: `old-driver-${i}` }));
     t.setTelemetryWriteBuffer(mockOldRecords);
 
-    const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    logger.warn.mockClear();
 
     await t.flushTelemetryBuffer();
 
@@ -1120,11 +1601,9 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     expect(buffer[4].driver_id).toBe('old-driver-9');
     expect(buffer[5].driver_id).toBe('new-driver-0');
 
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
+    expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('[TRUXIFY BUFFER DROP] Buffer full: dropped 5 oldest records from retry batch.')
     );
-
-    consoleWarnSpy.mockRestore();
   });
 
   it('discards buffer on MongoDB validation error (code 121)', async () => {
@@ -1235,7 +1714,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       __testing.setTelemetryWriteBuffer(mockRecords);
 
       const ws = { driverId: 'driver-new', send: vi.fn() };
-      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      logger.warn.mockClear();
 
       await handleLocationPing(ws, {
         driver_id: 'driver-new',
@@ -1247,11 +1726,9 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       expect(buffer.length).toBe(9501);
       expect(buffer[0].driver_id).toBe('driver-old-500');
       expect(buffer[9500].driver_id).toBe('driver-new');
-      expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('[TRUXIFY BUFFER WARN] Telemetry buffer full')
       );
-
-      consoleWarnSpy.mockRestore();
     });
   });
 

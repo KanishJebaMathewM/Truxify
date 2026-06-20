@@ -1,4 +1,5 @@
 import * as db from '../config/db.js';
+import logger from '../middleware/logger.js';
 
 export const TTL_SECONDS = 900; // 15 minutes
 export const TOMBSTONE_TTL_SECONDS = 30; // 30 seconds
@@ -16,7 +17,7 @@ function logCacheError(operation, error) {
   if (now - lastLog >= LOG_THROTTLE_INTERVAL_MS) {
     LAST_LOG_TIMES[operation] = now;
     const errorDetails = error?.stack ?? error?.message ?? String(error);
-    console.error(`Redis ${operation} error (throttled):`, errorDetails);
+    logger.error({ operation, error: errorDetails }, 'Redis cache error (throttled)');
   }
 }
 

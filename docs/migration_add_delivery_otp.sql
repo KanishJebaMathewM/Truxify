@@ -1,56 +1,52 @@
--- Migration: Add delivery OTP functionality to orders table
--- Add columns for delivery OTP
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivery_otp TEXT;
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS otp_verified BOOLEAN DEFAULT false;
-ALTER TABLE orders ADD COLUMN IF NOT EXISTS otp_generated_at TIMESTAMPTZ;
+-- Migration: Isolate delivery OTP into a dedicated table with RLS
+-- Removes OTP columns from orders to prevent leak via broad RLS policies.
 
--- RPC Function: Complete trip and release payment to driver (by order ID)
-CREATE OR REPLACE FUNCTION complete_trip_tx(p_order_id UUID)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-  v_order RECORD;
-BEGIN
-  -- Get the order details
-  SELECT * INTO v_order FROM orders WHERE id = p_order_id;
-  
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Order not found';
-  END IF;
-  
-  IF v_order.driver_id IS NULL THEN
-    RAISE EXCEPTION 'No driver assigned to this order';
-  END IF;
+-- 1. Create the isolated delivery_otps table
+CREATE TABLE IF NOT EXISTS delivery_otps (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id      UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  otp_hash      TEXT NOT NULL,
+  expires_at    TIMESTAMPTZ NOT NULL,
+  verified      BOOLEAN NOT NULL DEFAULT false,
+  verified_at   TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
-  -- Update driver's wallet
-  UPDATE driver_details
-  SET 
-    total_trips = total_trips + 1,
-    wallet_confirmed = wallet_confirmed + v_order.total_amount,
-    wallet_total = wallet_total + v_order.total_amount,
-    updated_at = NOW()
-  WHERE user_id = v_order.driver_id;
-  
-  -- Log wallet transaction
-  INSERT INTO wallet_transactions (
-    driver_id, order_display_id, amount, txn_type, status, description
-  ) VALUES (
-    v_order.driver_id,
-    v_order.order_display_id,
-    v_order.total_amount,
-    'credit',
-    'confirmed',
-    'Payout for Order ' || v_order.order_display_id
+CREATE INDEX IF NOT EXISTS idx_delivery_otps_order_id ON delivery_otps(order_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_otps_expires_at ON delivery_otps(expires_at);
+
+-- 2. Enable RLS
+ALTER TABLE delivery_otps ENABLE ROW LEVEL SECURITY;
+
+-- 3. RLS policies
+
+-- Customers can read their own delivery OTPs (needed for verification flow)
+CREATE POLICY customer_select_delivery_otp ON delivery_otps
+  FOR SELECT
+  USING (
+    order_id IN (
+      SELECT id FROM orders WHERE customer_id = auth.uid()
+    )
   );
-  
-  -- Update daily earnings summary
-  INSERT INTO earnings_daily (driver_id, day_date, amount, trip_count)
-  VALUES (v_order.driver_id, CURRENT_DATE, v_order.total_amount, 1)
-  ON CONFLICT (driver_id, day_date)
-  DO UPDATE SET 
-    amount = earnings_daily.amount + EXCLUDED.amount,
-    trip_count = earnings_daily.trip_count + 1;
-END;
-$$;
+
+-- Drivers cannot select delivery OTPs at all
+CREATE POLICY no_driver_select_delivery_otp ON delivery_otps
+  FOR SELECT
+  USING (false);
+
+-- Only the service role (backend) can insert / update delivery OTPs
+CREATE POLICY service_insert_delivery_otp ON delivery_otps
+  FOR INSERT
+  WITH CHECK (auth.role() = 'service_role');
+
+CREATE POLICY service_update_delivery_otp ON delivery_otps
+  FOR UPDATE
+  USING (auth.role() = 'service_role')
+  WITH CHECK (auth.role() = 'service_role');
+
+-- 4. Drop old OTP columns from orders table
+ALTER TABLE orders DROP COLUMN IF EXISTS delivery_otp;
+ALTER TABLE orders DROP COLUMN IF EXISTS otp_verified;
+ALTER TABLE orders DROP COLUMN IF EXISTS otp_generated_at;
+
+-- 5. Update complete_trip_tx RPC (no OTP changes needed — it uses orders.total_amount only)

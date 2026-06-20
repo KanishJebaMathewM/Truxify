@@ -287,4 +287,90 @@ describe('Profile Routes', () => {
       expect(driverUpdateCall.filters).toContainEqual({ col: 'user_id', op: 'eq', val: 'driver-uuid-456' });
     });
   });
+
+  describe('PUT /api/profile/wallet', () => {
+    it('successfully updates user wallet addresses and invalidates cache', async () => {
+      m.store.profiles.push({
+        id: 'customer-uuid-123',
+        firebase_uid: 'firebase-cust-uid',
+        role: 'customer',
+      });
+
+      const res = await request(buildApp())
+        .put('/api/profile/wallet')
+        .set(CUSTOMER_HEADERS)
+        .send({
+          wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        success: true,
+        walletAddress: '0x1234567890abcdef1234567890abcdef12345678',
+      });
+      expect(invalidateCachedProfile).toHaveBeenCalledWith('test_firebase_uid_123');
+
+      const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
+      expect(profileUpdateCall.payload).toEqual({
+        wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
+        polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
+      });
+    });
+
+    it('rejects invalid wallet addresses with 400', async () => {
+      const res = await request(buildApp())
+        .put('/api/profile/wallet')
+        .set(CUSTOMER_HEADERS)
+        .send({
+          wallet_address: 'invalid-address',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body).toEqual({
+        error: 'Invalid wallet address',
+      });
+    });
+
+    it('returns 409 conflict when wallet address is already taken', async () => {
+      m.store.profiles.push({
+        id: 'customer-uuid-123',
+        firebase_uid: 'firebase-cust-uid',
+        role: 'customer',
+      });
+
+      const originalFrom = m.supabase.from;
+      m.supabase.from = (table) => {
+        if (table === 'profiles') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: () => Promise.resolve({
+                  data: { id: 'customer-uuid-123', wallet_address: null, polygon_wallet_address: null },
+                  error: null
+                })
+              })
+            }),
+            update: () => ({
+              eq: () => Promise.resolve({
+                error: { code: '23505', message: 'duplicate key value violates unique constraint' }
+              })
+            })
+          };
+        }
+        return originalFrom(table);
+      };
+
+      const res = await request(buildApp())
+        .put('/api/profile/wallet')
+        .set(CUSTOMER_HEADERS)
+        .send({
+          wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
+        });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('This wallet address is already registered to another account.');
+
+      m.supabase.from = originalFrom;
+    });
+  });
 });

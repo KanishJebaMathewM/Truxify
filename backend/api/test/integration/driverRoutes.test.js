@@ -12,7 +12,15 @@ vi.mock('../../src/config/db.js', () => ({
   mongoDb: null,
 }));
 
+const getDriverReputationMock = vi.fn().mockResolvedValue(92);
+vi.mock('../../src/services/reputation.js', () => ({
+  reputationContract: {},
+  awardReputationPoints: vi.fn(),
+  getDriverReputation: getDriverReputationMock,
+}));
+
 const { default: driverRouter } = await import('../../src/routes/driverRoutes.js');
+
 
 function buildApp() {
   const app = express();
@@ -397,4 +405,90 @@ describe('Driver Routes', () => {
 
     expect(res.status).toBe(400);
   });
+
+  describe('GET /:driverId/reputation', () => {
+    beforeEach(() => {
+      getDriverReputationMock.mockReset();
+    });
+
+    it('returns both platform rating and on-chain score when wallet exists and blockchain responds', async () => {
+      m.store.driver_details.push({
+        user_id: 'driver-1',
+        rating: 4.8,
+        polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+      });
+
+      getDriverReputationMock.mockResolvedValue(92);
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/driver-1/reputation')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        driverId: 'driver-1',
+        walletAddress: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+        onChainScore: 92,
+        supabaseRating: 4.8,
+      });
+      expect(getDriverReputationMock).toHaveBeenCalledWith('0xAbcdef1234567890Abcdef1234567890Abcdef12');
+    });
+
+    it('returns onChainScore null and walletAddress null when driver has no wallet', async () => {
+      m.store.driver_details.push({
+        user_id: 'driver-1',
+        rating: 4.8,
+        polygon_wallet_address: null,
+      });
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/driver-1/reputation')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        driverId: 'driver-1',
+        walletAddress: null,
+        onChainScore: null,
+        supabaseRating: 4.8,
+      });
+      expect(getDriverReputationMock).not.toHaveBeenCalled();
+    });
+
+    it('returns onChainScore null and supabase rating when blockchain/contract fails', async () => {
+      m.store.driver_details.push({
+        user_id: 'driver-1',
+        rating: 4.8,
+        polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+      });
+
+      getDriverReputationMock.mockResolvedValue(null);
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/driver-1/reputation')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        driverId: 'driver-1',
+        walletAddress: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+        onChainScore: null,
+        supabaseRating: 4.8,
+      });
+      expect(getDriverReputationMock).toHaveBeenCalledWith('0xAbcdef1234567890Abcdef1234567890Abcdef12');
+    });
+
+    it('returns 404 if driver profile is not found', async () => {
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/driver-1/reputation')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(404);
+    });
+  });
 });
+

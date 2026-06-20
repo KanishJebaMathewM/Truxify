@@ -272,6 +272,10 @@ export function createSupabaseMock(initialStore = {}) {
     },
     rpc(fnName, args) {
       calls.push({ rpc: fnName, args });
+      if (programmed.nextRpcError) {
+        const err = programmed.nextRpcError; programmed.nextRpcError = null;
+        return Promise.resolve({ data: null, error: err });
+      }
       if (programmed.nextError) {
         const err = programmed.nextError; programmed.nextError = null;
         return Promise.resolve({ data: null, error: err });
@@ -287,7 +291,8 @@ export function createSupabaseMock(initialStore = {}) {
     supabase,
     store,
     calls,
-    programError(msg = 'mock error') { programmed.nextError = { message: msg }; },
-    programData(data)                { programmed.nextData = data; },
+    programError(msg = 'mock error')    { programmed.nextError    = { message: msg }; },
+    programRpcError(msg = 'mock error') { programmed.nextRpcError = { message: msg }; },
+    programData(data)                   { programmed.nextData = data; },
   };
 }

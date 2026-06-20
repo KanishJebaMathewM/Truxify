@@ -1,0 +1,18 @@
+services:
+  api:
+    environment:
+      DATABASE_URL: postgresql://postgres:postgrespassword@db:5432/truxify
+      MONGODB_URI: mongodb://mongo:27017
+      REDIS_URL: redis://redis:6379
+
+  db:
+    ports:
+      - "5432:5432"
+
+  mongo:
+    ports:
+      - "27017:27017"
+
+  redis:
+    ports:
+      - "6379:6379"

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
 describe('profileCache utility', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -69,15 +73,15 @@ describe('profileCache utility', () => {
         redisClient: redisClientMock,
       }));
 
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { default: logger } = await import('../../src/middleware/logger.js');
+      vi.clearAllMocks();
 
       const { getCachedProfile } = await import('../../src/lib/profileCache.js');
       try {
         const profile = await getCachedProfile('firebase-123');
         expect(profile).toBeNull();
-        expect(consoleSpy).toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalled();
       } finally {
-        consoleSpy.mockRestore();
       }
     });
 
@@ -89,15 +93,15 @@ describe('profileCache utility', () => {
         redisClient: redisClientMock,
       }));
 
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { default: logger } = await import('../../src/middleware/logger.js');
+      vi.clearAllMocks();
 
       const { getCachedProfile } = await import('../../src/lib/profileCache.js');
       try {
         const profile = await getCachedProfile('firebase-123');
         expect(profile).toBeNull();
-        expect(consoleSpy).toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalled();
       } finally {
-        consoleSpy.mockRestore();
       }
     });
   });
@@ -153,14 +157,14 @@ describe('profileCache utility', () => {
         redisClient: redisClientMock,
       }));
 
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { default: logger } = await import('../../src/middleware/logger.js');
+      vi.clearAllMocks();
 
       const { setCachedProfile } = await import('../../src/lib/profileCache.js');
       try {
         await setCachedProfile('firebase-123', { id: '123' });
-        expect(consoleSpy).toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalled();
       } finally {
-        consoleSpy.mockRestore();
       }
     });
   });
@@ -209,14 +213,14 @@ describe('profileCache utility', () => {
         redisClient: redisClientMock,
       }));
 
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { default: logger } = await import('../../src/middleware/logger.js');
+      vi.clearAllMocks();
 
       const { invalidateCachedProfile } = await import('../../src/lib/profileCache.js');
       try {
         await invalidateCachedProfile('firebase-123');
-        expect(consoleSpy).toHaveBeenCalled();
+        expect(logger.error).toHaveBeenCalled();
       } finally {
-        consoleSpy.mockRestore();
       }
     });
   });

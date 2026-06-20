@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../controllers/app_controller.dart';
+import '../services/fcm_service.dart';
 import '../theme/app_theme.dart';
 import 'find_trucks_screen.dart';
 import 'home_screen.dart';
@@ -19,6 +20,13 @@ class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
   final GlobalKey<NavigatorState> _findNavigatorKey = GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _ordersNavigatorKey = GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _profileNavigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize push notifications
+    FcmService.initializeAndRegister();
+  }
 
   @override
   Widget build(BuildContext context) {

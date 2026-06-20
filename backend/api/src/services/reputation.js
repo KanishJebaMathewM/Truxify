@@ -20,6 +20,7 @@
  */
 
 import { ethers } from 'ethers';
+import logger from '../middleware/logger.js';
 
 // Minimal ABI — only the subset the backend needs to call.
 const REPUTATION_ABI = [
@@ -39,12 +40,12 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const relayer  = new ethers.Wallet(relayerPrivateKey, provider);
     reputationContract = new ethers.Contract(contractAddress, REPUTATION_ABI, relayer);
-    console.log('✅ Polygon Reputation contract client initialised.');
+    logger.info('✅ Polygon Reputation contract client initialised.');
   } catch (err) {
-    console.error('❌ Failed to initialise Reputation contract client:', err.message);
+    logger.error('❌ Failed to initialise Reputation contract client:', err.message);
   }
 } else {
-  console.warn(
+  logger.warn(
     '⚠️  POLYGON_RPC_URL / REPUTATION_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY ' +
     'not set. On-chain reputation updates disabled.'
   );
@@ -66,15 +67,45 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
  */
 export async function awardReputationPoints(driverWalletAddress, stars) {
   if (!reputationContract) {
-    console.warn('[reputation] Contract not initialised — skipping on-chain update.');
+    logger.warn('[reputation] Contract not initialised — skipping on-chain update.');
     return;
   }
   if (!ethers.isAddress(driverWalletAddress)) {
-    console.warn(`[reputation] Invalid driver wallet address "${driverWalletAddress}" — skipping.`);
+    logger.warn(`[reputation] Invalid driver wallet address "${driverWalletAddress}" — skipping.`);
     return;
   }
   const tx = await reputationContract.increaseReputation(driverWalletAddress, stars);
-  console.log(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
+  logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
   await tx.wait(1); // wait for 1 confirmation
-  console.log(`[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`);
+  logger.info(`[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`);
 }
+
+/**
+ * Fetch the on-chain reputation score for a driver.
+ *
+ * @param {string} walletAddress — 0x-prefixed Polygon address of the driver
+ * @returns {Promise<number|null>}
+ */
+export async function getDriverReputation(walletAddress) {
+  if (!reputationContract) {
+    logger.warn('[reputation] Contract not initialised — skipping on-chain retrieval.');
+    return null;
+  }
+  if (!ethers.isAddress(walletAddress)) {
+    logger.warn(`[reputation] Invalid wallet address "${walletAddress}" — skipping.`);
+    return null;
+  }
+  try {
+    const score = await Promise.race([
+      reputationContract.getReputation(walletAddress),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('RPC timeout')), 5000)
+      ),
+    ]);
+    return Number(score);
+  } catch (err) {
+    logger.error(`[reputation] Failed to fetch on-chain reputation for ${walletAddress}: ${err.message}`);
+    return null;
+  }
+}
+

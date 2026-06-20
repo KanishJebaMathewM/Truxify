@@ -129,3 +129,7 @@ export const changeDropSchema = z.object({
 export const cancelOrderSchema = z.object({
   reason: z.string().max(500).optional().nullable(),
 }).passthrough();
+
+export const updateWalletSchema = z.object({
+  wallet_address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Must be a valid 0x-prefixed 42-character wallet address'),
+}).passthrough();

@@ -24,7 +24,10 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
   Map<String, EarningsDailyModel> _earningsMap = {};
   List<Map<String, dynamic>> _selectedDayTrips = [];
-  List<Map<String, dynamic>> _pendingPayments = [];
+  List<Map<String, dynamic>> _transactions = [];
+  double _confirmedEarnings = 0.0;
+  double _pendingEarnings = 0.0;
+  double _totalEarnings = 0.0;
 
   @override
   void initState() {
@@ -49,7 +52,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
     await Future.wait([
       _loadMonthlyEarnings(),
       _loadSelectedDayTrips(),
-      _loadPendingPayments(),
+      _loadTransactions(),
+      _loadWalletSummary(),
     ]);
 
     final elapsed = DateTime.now().difference(startTime);
@@ -105,18 +109,33 @@ class _EarningsScreenState extends State<EarningsScreen> {
     }
   }
 
-  Future<void> _loadPendingPayments() async {
+  Future<void> _loadTransactions() async {
     try {
       final transactions = await _earningsService.fetchWalletTransactions();
 
       if (!mounted) return;
 
       setState(() {
-        _pendingPayments =
-            transactions.where((txn) => txn['status'] == 'pending').toList();
+        _transactions = transactions;
       });
     } catch (e) {
-      debugPrint('Failed to load pending payments: $e');
+      debugPrint('Failed to load transactions: $e');
+    }
+  }
+
+  Future<void> _loadWalletSummary() async {
+    try {
+      final summary = await _earningsService.fetchWalletSummary();
+
+      if (!mounted) return;
+
+      setState(() {
+        _confirmedEarnings = ((summary['wallet_confirmed'] ?? 0) / 100.0);
+        _pendingEarnings = ((summary['wallet_pending'] ?? 0) / 100.0);
+        _totalEarnings = ((summary['wallet_total'] ?? 0) / 100.0);
+      });
+    } catch (e) {
+      debugPrint('Failed to load wallet summary: $e');
     }
   }
 
@@ -311,7 +330,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                         duration: const Duration(milliseconds: 300),
                         child: _isLoading
                             ? const PendingPaymentsShimmer(key: ValueKey('payments_shimmer'))
-                            : _buildPendingPaymentsCard(key: const ValueKey('payments_content')),
+                            : _buildTransactionHistoryCard(key: const ValueKey('payments_content')),
                       ),
                       const SizedBox(height: 40),
                     ],
@@ -330,27 +349,27 @@ class _EarningsScreenState extends State<EarningsScreen> {
       child: Row(
         children: [
           _buildSummaryCard(
-            value: _formatRupees(_todayAmount),
-            label: 'Today',
-            icon: Icons.today_rounded,
-            iconColor: TruxifyColors.accent,
-            bgColor: TruxifyColors.accentLight,
+            value: _formatRupees(_confirmedEarnings),
+            label: 'Confirmed',
+            icon: Icons.check_circle_outline_rounded,
+            iconColor: TruxifyColors.success,
+            bgColor: TruxifyColors.successLight,
           ),
           const SizedBox(width: 12),
           _buildSummaryCard(
-            value: _formatRupees(_weekAmount),
-            label: 'This Week',
-            icon: Icons.date_range_rounded,
+            value: _formatRupees(_pendingEarnings),
+            label: 'Pending',
+            icon: Icons.timer_outlined,
             iconColor: TruxifyColors.warning,
             bgColor: TruxifyColors.warningLight,
           ),
           const SizedBox(width: 12),
           _buildSummaryCard(
-            value: _formatRupees(_monthAmount),
-            label: 'This Month',
-            icon: Icons.calendar_month_rounded,
-            iconColor: TruxifyColors.success,
-            bgColor: TruxifyColors.successLight,
+            value: _formatRupees(_totalEarnings),
+            label: 'Total',
+            icon: Icons.account_balance_wallet_outlined,
+            iconColor: TruxifyColors.accent,
+            bgColor: TruxifyColors.accentLight,
           ),
         ],
       ),
@@ -842,11 +861,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
-  Widget _buildPendingPaymentsCard({Key? key}) {
-    final pendingAmount = _pendingPayments.fold<double>(0, (sum, item) {
-      return sum + ((item['amount'] ?? 0) / 100.0);
-    });
-
+  Widget _buildTransactionHistoryCard({Key? key}) {
     return Container(
       key: key,
       margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -859,52 +874,103 @@ class _EarningsScreenState extends State<EarningsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Pending Payments',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-              ),
-              Text(
-                _formatRupees(pendingAmount),
-                style: GoogleFonts.dmSans(
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: TruxifyColors.accent,
-                ),
-              ),
-            ],
+          Text(
+            'Transaction History',
+            style: GoogleFonts.dmSans(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
           ),
           const SizedBox(height: 16),
-          if (_pendingPayments.isEmpty)
-            _buildEmptyMessage('No pending payments.')
+          if (_transactions.isEmpty)
+            _buildEmptyMessage('No transactions found.')
           else
-            ..._pendingPayments.map((item) {
+            ..._transactions.map((item) {
               final amount = ((item['amount'] ?? 0) / 100.0);
+              final isConfirmed = item['status'] == 'confirmed';
+              final txHash = item['tx_hash'];
 
               return Material(
                 color: Colors.transparent,
-                child: ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const CircleAvatar(
-                    backgroundColor: TruxifyColors.accentVeryLight,
-                    child: Icon(
-                      Icons.account_balance_wallet_outlined,
-                      color: TruxifyColors.accent,
-                    ),
-                  ),
-                  title: Text(item['description'] ?? 'Pending payment'),
-                  subtitle:
-                      Text(item['trip_display_id'] ?? item['status'] ?? ''),
-                  trailing: Text(
-                    _formatRupees(amount),
-                    style: GoogleFonts.dmSans(fontWeight: FontWeight.bold),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      CircleAvatar(
+                        backgroundColor: isConfirmed
+                            ? TruxifyColors.successLight
+                            : TruxifyColors.accentVeryLight,
+                        child: Icon(
+                          Icons.account_balance_wallet_outlined,
+                          color: isConfirmed
+                              ? TruxifyColors.success
+                              : TruxifyColors.accent,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item['description'] ?? 'Wallet transaction',
+                              style: GoogleFonts.dmSans(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              txHash != null
+                                  ? (txHash.toString().length > 10
+                                      ? '${txHash.toString().substring(0, 10)}...${txHash.toString().substring(txHash.toString().length - 6)}'
+                                      : txHash.toString())
+                                  : item['trip_display_id'] ?? item['order_display_id'] ?? '',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 12,
+                                color: TruxifyColors.adaptiveSecondaryText(context),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            _formatRupees(amount),
+                            style: GoogleFonts.dmSans(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: isConfirmed
+                                  ? TruxifyColors.successLight
+                                  : TruxifyColors.accentVeryLight,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              isConfirmed ? 'Confirmed' : 'Pending',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: isConfirmed
+                                    ? TruxifyColors.success
+                                    : TruxifyColors.accent,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               );

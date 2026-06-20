@@ -1,11 +1,15 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
+
 import '../controllers/app_controller.dart';
 import '../core/app_routes.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/fcm_service.dart';
 import '../../core/supabase_config.dart';
 import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
 import 'notifications_screen.dart';
@@ -29,8 +33,109 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _driverPhone = '+91 98765 43210';
   String _driverEmail = 'kanish.jeba@truxify.com';
   String _currentLanguage = 'English';
+  String _walletAddress = '';
+
+  bool _isLoadingReputation = true;
+  double? _platformRating;
+  int? _onChainScore;
+  bool _reputationUnavailable = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWalletAddress();
+    _fetchReputation();
+  }
+
+  Future<void> _loadWalletAddress() async {
+    try {
+      final client = Supabase.instance.client;
+      final userId = client.auth.currentUser?.id;
+      if (userId != null) {
+        final data = await client
+            .from('profiles')
+            .select('polygon_wallet_address')
+            .eq('id', userId)
+            .maybeSingle();
+        if (data != null && mounted) {
+          setState(() {
+            _walletAddress = data['polygon_wallet_address']?.toString() ?? '';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to load wallet address: $e');
+    }
+  }
+
+  Future<void> _fetchReputation() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingReputation = true;
+      _reputationUnavailable = false;
+    });
+
+    try {
+      final client = Supabase.instance.client;
+      final driverId = client.auth.currentUser?.id;
+      if (driverId == null) {
+        if (mounted) {
+          setState(() {
+            _isLoadingReputation = false;
+          });
+        }
+        return;
+      }
+
+      const apiBaseUrl = String.fromEnvironment(
+        'TRUXIFY_API_BASE_URL',
+        defaultValue: 'http://localhost:5000',
+      );
+
+      final uri = Uri.parse('$apiBaseUrl/api/driver/$driverId/reputation');
+      final token = client.auth.currentSession?.accessToken;
+      final response = await http.get(
+        uri,
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null) 'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          _platformRating = data['supabaseRating'] != null
+              ? (data['supabaseRating'] as num).toDouble()
+              : null;
+          _onChainScore = data['onChainScore'] != null
+              ? (data['onChainScore'] as num).toInt()
+              : null;
+          _walletAddress = data['walletAddress']?.toString() ?? '';
+          _isLoadingReputation = false;
+        });
+      } else {
+        setState(() {
+          _reputationUnavailable = true;
+          _isLoadingReputation = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _reputationUnavailable = true;
+          _isLoadingReputation = false;
+        });
+      }
+    }
+  }
+
 
   Color _borderColor(BuildContext context) {
+
+
     return Theme.of(context).brightness == Brightness.dark
         ? TruxifyColors.darkBorder
         : TruxifyColors.border;
@@ -251,6 +356,152 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             );
           },
+        );
+      },
+    );
+  }
+
+  Future<void> _showWalletSheet(BuildContext context) async {
+    final walletController = TextEditingController(text: _walletAddress);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+              20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const BottomSheetHandle(),
+              const SizedBox(height: 16),
+              Text(
+                'Polygon Wallet Address',
+                style: GoogleFonts.dmSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 16),
+              if (_walletAddress.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: TruxifyColors.accentLight,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.check_circle_rounded,
+                            color: TruxifyColors.success, size: 16),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _walletAddress,
+                            style: GoogleFonts.robotoMono(
+                              fontSize: 12,
+                              color: TruxifyColors.accentDark,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              TextField(
+                controller: walletController,
+                style: GoogleFonts.robotoMono(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.onSurface),
+                decoration: InputDecoration(
+                  labelText: '0x...',
+                  hintText: '0x1234567890abcdef1234567890abcdef12345678',
+                  labelStyle: GoogleFonts.robotoMono(
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                      color: _borderColor(context),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: TruxifyColors.accent),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              PrimaryButton(
+                label: 'Save Wallet Address',
+                onPressed: () async {
+                  final address = walletController.text.trim();
+                  if (address.isEmpty) return;
+                  try {
+                    final client = Supabase.instance.client;
+                    final token = client.auth.currentSession?.accessToken;
+                    final userId = client.auth.currentUser?.id ?? '';
+                    final response = await http.put(
+                      Uri.parse('http://localhost:5000/api/profile/wallet'),
+                      headers: <String, String>{
+                        'Content-Type': 'application/json',
+                        if (token != null) 'Authorization': 'Bearer $token',
+                        'x-user-id': userId,
+                        'x-user-role': 'driver',
+                      },
+                      body: jsonEncode(<String, String>{
+                        'wallet_address': address,
+                      }),
+                    );
+                    if (response.statusCode == 200) {
+                      setState(() {
+                        _walletAddress = address;
+                      });
+                      Navigator.of(context).pop();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content:
+                                Text('Wallet address updated successfully'),
+                            backgroundColor: TruxifyColors.success,
+                          ),
+                        );
+                      }
+                    } else {
+                      final body = jsonDecode(response.body)
+                          as Map<String, dynamic>;
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(body['error']?.toString() ??
+                                'Failed to update wallet'),
+                            backgroundColor: TruxifyColors.errorRed,
+                          ),
+                        );
+                      }
+                    }
+                  } catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Error: $e'),
+                          backgroundColor: TruxifyColors.errorRed,
+                        ),
+                      );
+                    }
+                  }
+                },
+              ),
+            ],
+          ),
         );
       },
     );
@@ -576,9 +827,85 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
 
+          const SizedBox(height: 12),
+
+          // Reputation Card
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    children: [
+                      const Icon(Icons.star_rounded, color: Colors.amber, size: 24),
+                      const SizedBox(height: 8),
+                      Text(
+                        _isLoadingReputation
+                            ? '...'
+                            : _platformRating != null
+                                ? '${_platformRating!.toStringAsFixed(1)} / 5.0'
+                                : '0.0 / 5.0',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 16,
+                          color: Theme.of(context).colorScheme.onSurface,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Platform Rating',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 11,
+                          color: TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 48,
+                  color: _borderColor(context),
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      const Icon(Icons.link_rounded, color: TruxifyColors.accent, size: 24),
+                      const SizedBox(height: 8),
+                      Text(
+                        _isLoadingReputation
+                            ? '...'
+                            : (_reputationUnavailable || (_walletAddress.isNotEmpty && _onChainScore == null))
+                                ? 'Unavailable'
+                                : _walletAddress.isEmpty
+                                    ? 'Wallet Not Connected'
+                                    : '$_onChainScore / 100',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.dmSans(
+                          fontSize: (_walletAddress.isEmpty || _reputationUnavailable || (_walletAddress.isNotEmpty && _onChainScore == null)) && !_isLoadingReputation ? 12 : 16,
+                          color: Theme.of(context).colorScheme.onSurface,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'On-Chain Reputation',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 11,
+                          color: TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           const SizedBox(height: 16),
 
-          const SectionLabel(label: 'SETTINGS'),
           AppCard(
             child: Column(
               children: [
@@ -638,6 +965,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       builder: (_) => const NotificationsScreen(),
                     ),
                   ),
+                ),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  title: Text(
+                    'Wallet Address',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    _walletAddress.isNotEmpty
+                        ? '${_walletAddress.substring(0, 10)}...${_walletAddress.substring(_walletAddress.length - 6)}'
+                        : 'Not set',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+                  ),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                  onTap: () => _showWalletSheet(context),
                 ),
                 Divider(
                   height: 1,
@@ -726,7 +1081,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onTap: () async {
               try {
                 if (SupabaseConfig.isConfigured) {
-                  await Supabase.instance.client.auth.signOut();
+                  final client = Supabase.instance.client;
+                  final session = client.auth.currentSession;
+                  final accessToken = session?.accessToken;
+                  final driverId = client.auth.currentUser?.id;
+
+                  if (accessToken != null && driverId != null) {
+                    const apiBaseUrl = String.fromEnvironment(
+                      'TRUXIFY_API_BASE_URL',
+                      defaultValue: 'http://localhost:5000',
+                    );
+                    try {
+                      await http.post(
+                        Uri.parse('$apiBaseUrl/api/auth/logout'),
+                        headers: <String, String>{
+                          'Content-Type': 'application/json',
+                          'Authorization': 'Bearer $accessToken',
+                          'x-user-id': driverId,
+                          'x-user-role': 'driver',
+                        },
+                      ).timeout(const Duration(seconds: 5));
+                    } catch (e) {
+                      debugPrint('Backend logout failed: $e');
+                    }
+                  }
+
+                  // Clear FCM token on logout
+                  await FcmService.clearToken();
+
+                  await client.auth.signOut();
                 }
 
                 if (!context.mounted) {

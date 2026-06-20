@@ -667,6 +667,7 @@ create table if not exists wallet_transactions (
                    check (txn_type in ('credit','debit','withdrawal','refund')),
   status           text not null default 'confirmed'
                    check (status in ('confirmed','pending','failed')),
+  tx_hash          text,                                      -- blockchain payout transaction hash
   description      text,
   created_at       timestamptz not null default now()
 );
@@ -1314,7 +1315,29 @@ create or replace function accept_bid_tx(
 language plpgsql
 security definer          -- runs with table-owner privileges (bypasses RLS)
 as $$
+declare
+  v_load_status text;
+  v_order_status text;
 begin
+    -- Lock load offer row; concurrent calls block here until this transaction completes
+  select status into v_load_status
+    from load_offers
+    where id = p_load_id
+    for update;
+
+  if v_load_status is null or v_load_status <> 'available' then
+    raise exception 'Load offer is no longer available';
+  end if;
+
+  -- Lock order row before modifying driver assignment
+  select status into v_order_status
+    from orders
+    where id = p_order_id
+    for update;
+
+  if v_order_status is null or v_order_status <> 'pending' then
+    raise exception 'Order is no longer pending';
+  end if;
   -- Step 1: Accept the chosen bid
   update load_bids
     set status = 'accepted', updated_at = now()
@@ -1789,6 +1812,27 @@ values
   ('b2222222-2222-2222-2222-222222222222', '#TX20260529001', 3100000, 'credit', 'confirmed', 'Payout for Trip #TX20260529001'),
   ('b2222222-2222-2222-2222-222222222222', '#TX20260530001', 1600000, 'credit', 'confirmed', 'Payout for Trip #TX20260530001')
 on conflict do nothing;
+
+-- Sync wallet_transactions with orders on release_tx_hash update
+CREATE OR REPLACE FUNCTION sync_wallet_tx_hash()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.release_tx_hash IS NOT NULL AND (OLD.release_tx_hash IS NULL OR OLD.release_tx_hash <> NEW.release_tx_hash) THEN
+    UPDATE wallet_transactions
+    SET tx_hash = NEW.release_tx_hash,
+        description = 'Escrow payout for ' || NEW.order_display_id
+    WHERE order_display_id = NEW.order_display_id
+      AND txn_type = 'credit';
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_sync_wallet_tx_hash ON orders;
+CREATE TRIGGER trigger_sync_wallet_tx_hash
+AFTER UPDATE OF release_tx_hash ON orders
+FOR EACH ROW
+EXECUTE FUNCTION sync_wallet_tx_hash();
 
 
 -- ============================================================================

@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
@@ -114,7 +115,7 @@ router.get('/', authenticate, requireRole(['driver']), async (req, res) => {
     const { data: loads, error, count } = await query;
 
     if (error) {
-      console.error('Failed to fetch load offers:', error);
+      logger.error('Failed to fetch load offers:', error);
       return res.status(500).json({ error: 'Failed to fetch load offers.' });
     }
 
@@ -136,7 +137,7 @@ router.get('/', authenticate, requireRole(['driver']), async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Internal Server Error in GET /api/loads:', err);
+    logger.error('Internal Server Error in GET /api/loads:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -155,7 +156,7 @@ router.get('/:id', authenticate, requireRole(['driver']), async (req, res) => {
       .maybeSingle();
 
     if (error) {
-      console.error('Failed to fetch load offer by ID:', error);
+      logger.error('Failed to fetch load offer by ID:', error);
       return res.status(500).json({ error: 'Failed to fetch load offer.' });
     }
     if (!load) {
@@ -174,7 +175,7 @@ router.get('/:id', authenticate, requireRole(['driver']), async (req, res) => {
     res.json({ load: formattedLoad });
 
   } catch (err) {
-    console.error('Internal Server Error in GET /api/loads/:id:', err);
+    logger.error('Internal Server Error in GET /api/loads/:id:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

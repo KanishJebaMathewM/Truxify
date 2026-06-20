@@ -62,6 +62,7 @@ contract Escrow {
         require(customer != address(0), "Invalid customer");
         require(driver != address(0), "Invalid driver");
         require(msg.value > 0, "Deposit required");
+        require(msg.sender == customer, "Only customer can deposit");
         require(escrows[bookingId].status == EscrowStatus.None, "Escrow exists");
 
         escrows[bookingId] = BookingEscrow({

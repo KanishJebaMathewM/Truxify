@@ -13,11 +13,14 @@ vi.mock('../../src/config/db.js', () => ({
 }));
 
 vi.mock('../../src/services/escrow.js', () => ({
-  escrowDeposit: vi.fn(),
+  buildDepositTx: vi.fn(),
+  recordDepositTx: vi.fn(),
+  escrowRelease: vi.fn(),
+  escrowRefund: vi.fn(),
 }));
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
-const { escrowDeposit: mockEscrowDeposit } = await import('../../src/services/escrow.js');
+const { buildDepositTx: mockBuildDepositTx, recordDepositTx: mockRecordDepositTx, escrowRefund: mockEscrowRefund } = await import('../../src/services/escrow.js');
 
 function buildApp() {
   const app = express();
@@ -45,7 +48,9 @@ describe('Bid Routes', () => {
     m.store.driver_details = [];
     m.store.trucks = [];
     m.calls.length = 0;
-    mockEscrowDeposit.mockReset();
+    mockBuildDepositTx.mockReset();
+    mockRecordDepositTx.mockReset();
+    mockEscrowRefund.mockReset();
   });
 
   it('POST /:id/bids rejects invalid amount', async () => {
@@ -266,6 +271,8 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept executes RPC', async () => {
+    mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef' });
+
     m.store.orders.push({
       id: 'order-1',
       customer_id: 'customer-1',
@@ -286,15 +293,16 @@ describe('Bid Routes', () => {
       status: 'pending',
     });
 
-    m.store.profiles.push({
-      id: 'driver-1',
-      full_name: 'Driver One',
-    });
+    m.store.profiles.push(
+      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678' },
+      { id: 'driver-1', full_name: 'Driver One' },
+    );
 
     m.store.driver_details.push({
       user_id: 'driver-1',
       rating: 4.9,
       truck_id: null,
+      polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
     });
 
     const app = buildApp();
@@ -312,7 +320,7 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept triggers escrow deposit when wallet addresses present', async () => {
-    mockEscrowDeposit.mockResolvedValue({ txHash: '0xescrowtest123' });
+    mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef' });
 
     m.store.orders.push({
       id: 'order-escrow',
@@ -355,8 +363,9 @@ describe('Bid Routes', () => {
       .set(CUSTOMER);
 
     expect(res.status).toBe(200);
+    expect(res.body.depositTx).toBe('0xdeadbeef');
 
-    expect(mockEscrowDeposit).toHaveBeenCalledWith(
+    expect(mockBuildDepositTx).toHaveBeenCalledWith(
       'OD-ESCROW',
       '0x1234567890abcdef1234567890abcdef12345678',
       '0xAbcdef1234567890Abcdef1234567890Abcdef12',
@@ -364,12 +373,12 @@ describe('Bid Routes', () => {
     );
 
     let order = m.store.orders.find(o => o.id === 'order-escrow');
-    expect(order.escrow_status).toBe('funded');
-    expect(order.deposit_tx_hash).toBe('0xescrowtest123');
+    expect(order.escrow_status).toBe('funding');
+    expect(order.escrow_booking_id).toBe('escrow:OD-ESCROW');
   });
 
-  it('POST /:id/bids/:bidId/accept sets escrow_status to fund_failed when escrow deposit fails', async () => {
-    mockEscrowDeposit.mockRejectedValue(new Error('Out of gas'));
+  it('POST /:id/bids/:bidId/accept returns error when escrow deposit fails before accepting bid', async () => {
+    mockBuildDepositTx.mockRejectedValue(new Error('Out of gas'));
 
     m.store.orders.push({
       id: 'order-escrow-fail',
@@ -411,13 +420,83 @@ describe('Bid Routes', () => {
       .post('/api/orders/order-escrow-fail/bids/bid-escrow-fail/accept')
       .set(CUSTOMER);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(500);
+    expect(res.body).toMatchObject({ error: 'Internal Server Error' });
 
     let order = m.store.orders.find(o => o.id === 'order-escrow-fail');
-    expect(order.escrow_status).toBe('fund_failed');
+    expect(order.escrow_status).toBeUndefined();
   });
 
-  it('POST /:id/bids/:bidId/accept skips escrow when customer wallet missing', async () => {
+  it('POST /:id/bids/:bidId/accept returns 500 when RPC fails after buildDepositTx succeeds', async () => {
+    mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef' });
+
+    const originalRpc = m.supabase.rpc;
+    try {
+      m.supabase.rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'accept_bid_tx RPC failed' } });
+
+      m.store.orders.push({
+        id: 'order-comp-fail',
+        customer_id: 'customer-1',
+        order_display_id: 'OD-COMP-FAIL',
+      });
+
+      m.store.load_offers.push({
+        id: 'load-comp-fail',
+        order_display_id: 'OD-COMP-FAIL',
+        status: 'available',
+      });
+
+      m.store.load_bids.push({
+        id: 'bid-comp-fail',
+        load_id: 'load-comp-fail',
+        driver_id: 'driver-1',
+        bid_amount: 50000,
+        status: 'pending',
+      });
+
+      m.store.profiles.push(
+        { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678' },
+        { id: 'driver-1', full_name: 'Driver One' },
+      );
+
+      m.store.driver_details.push({
+        user_id: 'driver-1',
+        rating: 4.9,
+        total_trips: 100,
+        completion_rate: 98,
+        truck_id: null,
+        polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+      });
+
+      const app = buildApp();
+
+      const res = await request(app)
+        .post('/api/orders/order-comp-fail/bids/bid-comp-fail/accept')
+        .set(CUSTOMER);
+
+      expect(res.status).toBe(500);
+      expect(res.body).toMatchObject({
+        error: 'Failed to accept bid atomically.',
+        details: 'accept_bid_tx RPC failed',
+        recovery: 'The pending escrow deposit has been voided. Please try again.'
+      });
+
+      expect(mockBuildDepositTx).toHaveBeenCalledWith(
+        'OD-COMP-FAIL',
+        '0x1234567890abcdef1234567890abcdef12345678',
+        '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+        expect.any(BigInt)
+      );
+
+      let order = m.store.orders.find(o => o.id === 'order-comp-fail');
+      expect(order.escrow_status).toBe('funding');
+      expect(order.status).toBeUndefined();
+    } finally {
+      m.supabase.rpc = originalRpc;
+    }
+  });
+
+  it('POST /:id/bids/:bidId/accept rejects with 422 when customer wallet missing', async () => {
     m.store.orders.push({
       id: 'order-no-cust-wallet',
       customer_id: 'customer-1',
@@ -458,8 +537,55 @@ describe('Bid Routes', () => {
       .post('/api/orders/order-no-cust-wallet/bids/bid-no-cust/accept')
       .set(CUSTOMER);
 
-    expect(res.status).toBe(200);
-    expect(mockEscrowDeposit).not.toHaveBeenCalled();
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('Both customer and driver must connect a wallet before escrow can be initiated.');
+    expect(mockBuildDepositTx).not.toHaveBeenCalled();
+  });
+
+  it('POST /:id/bids/:bidId/accept rejects with 422 when driver wallet missing', async () => {
+    m.store.orders.push({
+      id: 'order-no-driver-wallet',
+      customer_id: 'customer-1',
+      order_display_id: 'OD-NO-DRIV',
+    });
+
+    m.store.load_offers.push({
+      id: 'load-no-driv',
+      order_display_id: 'OD-NO-DRIV',
+      status: 'available',
+    });
+
+    m.store.load_bids.push({
+      id: 'bid-no-driv',
+      load_id: 'load-no-driv',
+      driver_id: 'driver-2',
+      bid_amount: 50000,
+      status: 'pending',
+    });
+
+    m.store.profiles.push(
+      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678' },
+      { id: 'driver-2', full_name: 'Driver Two' },
+    );
+
+    m.store.driver_details.push({
+      user_id: 'driver-2',
+      rating: 4.9,
+      total_trips: 100,
+      completion_rate: 98,
+      truck_id: null,
+      polygon_wallet_address: null,
+    });
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders/order-no-driver-wallet/bids/bid-no-driv/accept')
+      .set(CUSTOMER);
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('Both customer and driver must connect a wallet before escrow can be initiated.');
+    expect(mockBuildDepositTx).not.toHaveBeenCalled();
   });
 
   it('POST /:id/bids/:bidId/accept rejects invalid ownership', async () => {
@@ -476,5 +602,161 @@ describe('Bid Routes', () => {
       .set(CUSTOMER);
 
     expect(res.status).toBe(403);
+  });
+
+  it('POST /:id/bids/:bidId/accept returns 500 when load offer is already claimed', async () => {
+    m.store.orders.push({
+      id: 'order-1',
+      customer_id: 'customer-1',
+      order_display_id: 'OD1',
+      status: 'pending',
+    });
+
+    m.store.load_offers.push({
+      id: 'load-1',
+      order_display_id: 'OD1',
+      status: 'available',
+    });
+
+    m.store.load_bids.push({
+      id: 'bid-1',
+      load_id: 'load-1',
+      driver_id: 'driver-1',
+      bid_amount: 50000,
+      status: 'pending',
+    });
+
+    m.store.profiles.push(
+      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0xCustomerWallet' },
+      { id: 'driver-1', full_name: 'Driver One' },
+    );
+    m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null, polygon_wallet_address: '0xDriverWallet' });
+    mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef' });
+
+    m.programRpcError('Load offer is no longer available');
+
+    const app = buildApp();
+    const res = await request(app)
+      .post('/api/orders/order-1/bids/bid-1/accept')
+      .set(CUSTOMER);
+
+    expect(res.status).toBe(500);
+    expect(res.body.details).toBe('Load offer is no longer available');
+    expect(m.calls.find(c => c.rpc === 'accept_bid_tx')).toBeTruthy();
+  });
+
+  it('POST /:id/bids/:bidId/accept returns 500 when order is no longer pending', async () => {
+    m.store.orders.push({
+      id: 'order-1',
+      customer_id: 'customer-1',
+      order_display_id: 'OD1',
+      status: 'pending',
+    });
+
+    m.store.load_offers.push({
+      id: 'load-1',
+      order_display_id: 'OD1',
+      status: 'available',
+    });
+
+    m.store.load_bids.push({
+      id: 'bid-1',
+      load_id: 'load-1',
+      driver_id: 'driver-1',
+      bid_amount: 50000,
+      status: 'pending',
+    });
+
+    m.store.profiles.push(
+      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0xCustomerWallet' },
+      { id: 'driver-1', full_name: 'Driver One' },
+    );
+    m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null, polygon_wallet_address: '0xDriverWallet' });
+    mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef' });
+
+    m.programRpcError('Order is no longer pending');
+
+    const app = buildApp();
+    const res = await request(app).post('/api/orders/order-1/bids/bid-1/accept').set(CUSTOMER);
+
+    expect(res.status).toBe(500);
+    expect(res.body.details).toBe('Order is no longer pending');
+    expect(m.calls.find(c => c.rpc === 'accept_bid_tx')).toBeTruthy();
+  });  
+
+  describe('Confirm Deposit Route', () => {
+    it('POST /:id/confirm-deposit rejects unauthenticated request', async () => {
+      const app = buildApp();
+      const res = await request(app)
+        .post('/api/orders/order-1/confirm-deposit')
+        .send({ txHash: '0x' + '1'.repeat(64) });
+      expect(res.status).toBe(401);
+    });
+
+    it('POST /:id/confirm-deposit returns 400 if order is not in funding state', async () => {
+      m.store.orders.push({
+        id: 'order-1',
+        customer_id: 'customer-1',
+        order_display_id: 'OD1',
+        escrow_status: 'pending',
+      });
+
+      const app = buildApp();
+      const res = await request(app)
+        .post('/api/orders/order-1/confirm-deposit')
+        .set(CUSTOMER)
+        .send({ txHash: '0x' + '1'.repeat(64) });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Order is not in funding state');
+    });
+
+    it('POST /:id/confirm-deposit returns 422 if recordDepositTx fails', async () => {
+      m.store.orders.push({
+        id: 'order-1',
+        customer_id: 'customer-1',
+        order_display_id: 'OD1',
+        escrow_status: 'funding',
+      });
+
+      mockRecordDepositTx.mockResolvedValue({ error: 'Transaction reverted or not found on chain' });
+
+      const app = buildApp();
+      const res = await request(app)
+        .post('/api/orders/order-1/confirm-deposit')
+        .set(CUSTOMER)
+        .send({ txHash: '0x' + '1'.repeat(64) });
+
+      expect(res.status).toBe(422);
+      expect(res.body.error).toBe('Transaction reverted or not found on chain');
+      expect(mockRecordDepositTx).toHaveBeenCalledWith('escrow:OD1', '0x' + '1'.repeat(64));
+    });
+
+    it('POST /:id/confirm-deposit succeeds and marks order as funded', async () => {
+      m.store.orders.push({
+        id: 'order-1',
+        customer_id: 'customer-1',
+        order_display_id: 'OD1',
+        escrow_status: 'funding',
+      });
+
+      const expectedTx = '0x' + '1'.repeat(64);
+      mockRecordDepositTx.mockResolvedValue({ txHash: expectedTx, bookingId: 'escrow:OD1' });
+
+      const app = buildApp();
+      const res = await request(app)
+        .post('/api/orders/order-1/confirm-deposit')
+        .set(CUSTOMER)
+        .send({ txHash: expectedTx });
+
+      expect(res.status).toBe(200);
+      expect(res.body.message).toBe('Escrow deposit confirmed');
+      expect(res.body.txHash).toBe(expectedTx);
+
+      const order = m.store.orders.find(o => o.id === 'order-1');
+      expect(order.escrow_status).toBe('funded');
+      expect(order.deposit_tx_hash).toBe(expectedTx);
+      expect(order.escrow_deposited_at).toBeDefined();
+    });
   });
 });

@@ -1,4 +1,5 @@
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
+const DEFAULT_ML_SERVICE_URL = 'http://localhost:8001';
 
 /**
  * Predicts ride/truck demand by calling the FastAPI ML engine service.
@@ -28,6 +29,44 @@ export async function predictDemand(features) {
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`ML Engine prediction request failed: ${response.statusText} (${text})`);
+  }
+
+  return response.json();
+}
+
+/**
+ * Predicts freight price by calling the FastAPI ML engine service.
+ *
+ * @param {object} params
+ * @param {number} params.distanceKm - Route distance in kilometres
+ * @param {number} params.cargoWeightKg - Cargo weight in kilograms
+ * @param {string} [params.truckType] - Type of truck
+ * @param {string} [params.routeOrigin] - Origin location
+ * @param {string} [params.routeDestination] - Destination location
+ * @returns {Promise<{estimated_price: number, currency: string}>} price prediction
+ */
+export async function predictPrice({ distanceKm, cargoWeightKg, truckType, routeOrigin, routeDestination } = {}) {
+  const baseUrl = process.env.ML_SERVICE_URL || process.env.ML_ENGINE_URL || DEFAULT_ML_SERVICE_URL;
+  const url = `${baseUrl}/predict`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      distance_km: distanceKm,
+      cargo_weight_kg: cargoWeightKg,
+      truck_type: truckType || 'medium_truck',
+      route_origin: routeOrigin || '',
+      route_destination: routeDestination || '',
+    }),
+    signal: AbortSignal.timeout(5000),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`ML Engine price prediction failed: ${response.statusText} (${text})`);
   }
 
   return response.json();

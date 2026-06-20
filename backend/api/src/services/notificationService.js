@@ -54,7 +54,7 @@ function isInvalidTokenError(code) {
   return INVALID_TOKEN_CODES.has(code);
 }
 
-async function sendFcmNotification(userId, notification, data = {}) {
+export async function sendFcmNotification(userId, notification, data = {}) {
   if (!firebaseAdmin || !firebaseAdmin.messaging) {
     logger.warn('[FCM] Firebase not configured — skipping push notification');
     return { success: false, error: 'Firebase not configured' };

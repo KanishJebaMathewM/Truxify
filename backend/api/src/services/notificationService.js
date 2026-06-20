@@ -1,83 +1,173 @@
 import { supabase, firebaseAdmin } from '../config/db.js';
+import logger from '../middleware/logger.js';
 
-/**
- * Deliver the delivery OTP to the customer through a secure out-of-band channel.
- *
- * @param {string} customerId - The customer's profile UUID.
- * @param {string} orderDisplayId - The display identifier of the order (e.g. #FFYYYYMMDDXXXX).
- * @param {string} otp - The 6-digit delivery OTP.
- */
-export async function sendDeliveryOtpNotification(customerId, orderDisplayId, otp) {
-  console.log(
-    `[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`
+const TRANSIENT_ERROR_CODES = new Set([
+  'messaging/too-many-topics',
+  'messaging/internal-error',
+  'messaging/unavailable',
+  'messaging/server-unavailable',
+]);
+
+const INVALID_TOKEN_CODES = new Set([
+  'messaging/registration-token-not-registered',
+  'messaging/invalid-registration-token',
+  'messaging/invalid-argument',
+]);
+
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [1000, 2000, 4000];
+
+async function getUserFcmToken(userId) {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('fcm_token')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error || !data?.fcm_token) return null;
+    return data.fcm_token;
+  } catch (err) {
+    logger.error(`[NotificationService] Failed to fetch FCM token: ${err.message}`);
+    return null;
+  }
+}
+
+async function clearInvalidToken(userId) {
+  if (!supabase) return;
+  try {
+    await supabase
+      .from('profiles')
+      .update({ fcm_token: null, fcm_token_updated_at: new Date().toISOString() })
+      .eq('id', userId);
+  } catch (dbErr) {
+    logger.error(`[FCM] Failed to clear invalid FCM token for user ${userId}: ${dbErr.message}`);
+  }
+}
+
+function isTransientError(code) {
+  return TRANSIENT_ERROR_CODES.has(code);
+}
+
+function isInvalidTokenError(code) {
+  return INVALID_TOKEN_CODES.has(code);
+}
+
+async function sendFcmNotification(userId, notification, data = {}) {
+  if (!firebaseAdmin || !firebaseAdmin.messaging) {
+    logger.warn('[FCM] Firebase not configured — skipping push notification');
+    return { success: false, error: 'Firebase not configured' };
+  }
+
+  const fcmToken = await getUserFcmToken(userId);
+  if (!fcmToken) {
+    logger.warn(`[FCM] No FCM token for user ${userId} — skipping push notification`);
+    return { success: false, error: 'No FCM token' };
+  }
+
+  const stringData = Object.fromEntries(
+    Object.entries(data).map(([k, v]) => [k, String(v)])
   );
 
-  // 1. Database Notification Persistence
+  let lastError = null;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const messageId = await firebaseAdmin.messaging().send({
+        token: fcmToken,
+        notification: {
+          title: notification.title,
+          body: notification.body,
+        },
+        data: stringData,
+      });
+
+      logger.info(`[FCM] Push notification sent to user ${userId} — messageId: ${messageId}`);
+      return { success: true, messageId };
+    } catch (err) {
+      lastError = err;
+      logger.error(`[FCM] Delivery failed for user ${userId} (attempt ${attempt + 1}/${MAX_RETRIES}) — errorCode: ${err.code ?? 'unknown'} — ${err.message}`);
+
+      if (isInvalidTokenError(err.code)) {
+        logger.warn(`[FCM] Clearing invalid FCM token for user ${userId} due to error: ${err.code}`);
+        await clearInvalidToken(userId);
+        return { success: false, error: err.message, errorCode: err.code };
+      }
+
+      if (isTransientError(err.code) && attempt < MAX_RETRIES - 1) {
+        logger.info(`[FCM] Retrying after ${RETRY_DELAYS[attempt]}ms for user ${userId}`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS[attempt]));
+      }
+    }
+  }
+
+  return { success: false, error: lastError?.message || 'Unknown error', errorCode: lastError?.code };
+}
+
+export async function sendDeliveryOtpNotification(customerId, orderDisplayId, otp) {
+  logger.info(`[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`);
+
+  const title = 'Delivery Verification OTP';
+  const body = `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`;
+
+  let dbSuccess = false;
   try {
     const { error } = await supabase
       .from('notifications')
       .insert({
         user_id: customerId,
-        title: 'Delivery Verification OTP',
-        body: `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`,
+        title,
+        body,
         notif_type: 'order_update',
-        metadata: {
-          order_display_id: orderDisplayId,
-        },
+        metadata: { order_display_id: orderDisplayId },
       });
 
     if (error) {
-      console.error('[NotificationService] Database insert failed:', error);
+      logger.error('[NotificationService] Database insert failed:', error);
     } else {
-      console.log('[NotificationService] Notification inserted successfully');
+      logger.info('[NotificationService] Notification inserted successfully');
+      dbSuccess = true;
     }
   } catch (dbErr) {
-    console.error(
-      '[NotificationService] Database connection error during notification insert:',
-      dbErr.message
-    );
+    logger.error('[NotificationService] Database connection error during notification insert:', dbErr.message);
   }
 
-  // 2. Firebase Cloud Messaging (FCM) Push Notification
-  if (firebaseAdmin && firebaseAdmin.messaging) {
-    try {
-      // In production: fetch user FCM token from DB
-      // const fcmToken = await getUserFcmToken(customerId);
+  const fcmResult = await sendFcmNotification(
+    customerId,
+    {
+      title: 'Delivery Verification OTP',
+      body: `A delivery OTP has been generated for order ${orderDisplayId}. Open the app to view the code.`,
+    },
+    { orderDisplayId, notifType: 'delivery_otp' }
+  );
 
-      // Example safe structure (no crash if not configured)
-      console.log(`[FCM] Preparing push for user ${customerId}`);
-
-      /*
-      await firebaseAdmin.messaging().send({
-        token: fcmToken,
-        notification: {
-          title: 'Delivery Verification OTP',
-          body: `Your OTP is ${otp}`
-        },
-        data: {
-          orderDisplayId
-        }
-      });
-      */
-
-      console.log(`[FCM] Push Notification stub executed for ${customerId}`);
-    } catch (err) {
-      console.warn('[FCM] Skipped due to error:', err.message);
-    }
-  } else {
-    console.warn('[FCM] Firebase not configured — skipping push notification');
-  }
-
-  // 3. SMS Gateway (e.g. Twilio) Stub
   if (process.env.TWILIO_AUTH_TOKEN) {
     const smsOtpLog = process.env.NODE_DEBUG
       ? `Sending SMS to customer phone containing OTP ${otp}`
       : `Sending SMS to customer phone containing OTP ${otp.slice(0, 2)}***`;
-    console.log(`[NotificationService] [SMS] SMS stub: ${smsOtpLog}`);
+    logger.info(`[NotificationService] [SMS] SMS stub: ${smsOtpLog}`);
   } else {
     const logOtp = process.env.NODE_DEBUG ? otp : `${otp.slice(0, 2)}***`;
-    console.log(
-      `[NotificationService] [SMS] SMS stub: No SMS gateway configured. Logging OTP out-of-band: ${logOtp}`
-    );
+    logger.info(`[NotificationService] [SMS] SMS stub: No SMS gateway configured. Logging OTP out-of-band: ${logOtp}`);
   }
+
+  return { success: dbSuccess || fcmResult.success, fcm: fcmResult };
+}
+
+export async function sendPushNotification(userId, title, body, notifType, metadata = {}) {
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .insert({ user_id: userId, title, body, notif_type: notifType, metadata });
+
+      if (error) {
+        logger.error(`[NotificationService] Database insert failed: ${error.message}`);
+      }
+    } catch (dbErr) {
+      logger.error(`[NotificationService] Database error: ${dbErr.message}`);
+    }
+  }
+
+  const fcmResult = await sendFcmNotification(userId, { title, body }, { notifType, ...metadata });
+  return { success: fcmResult.success, fcm: fcmResult };
 }

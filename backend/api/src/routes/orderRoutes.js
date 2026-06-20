@@ -730,7 +730,14 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), validatePar
     if (timelineErr) return res.status(500).json({ error: 'Failed to update order timeline.', details: timelineErr.message });
 
     if (generatedOtp) {
-      await sendDeliveryOtpNotification(order.customer_id, order.order_display_id, generatedOtp);
+      const notifResult = await sendDeliveryOtpNotification(order.customer_id, order.order_display_id, generatedOtp);
+      if (!notifResult.success) {
+        logger.warn(`[OrderRoutes] Delivery OTP notification failed for order ${order.order_display_id} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
+        await supabase.from('orders').update({
+          notification_failed: true,
+          updated_at: new Date().toISOString(),
+        }).eq('id', orderId);
+      }
     }
 
     // Strip delivery_otp from updatedOrder to prevent exposure to drivers

@@ -45,6 +45,20 @@ fi
 write_json() {
   local target="$1"
   python3 - <<PY > "$target"
+# Detect Python command
+PYTHON_CMD="python3"
+if ! command -v python3 &>/dev/null; then
+  if command -v python &>/dev/null; then
+    PYTHON_CMD="python"
+  else
+    echo "Error: Python is required but not installed."
+    exit 1
+  fi
+fi
+
+write_json() {
+  local target="$1"
+  "$PYTHON_CMD" - <<PY > "$target"
 import json
 import sys
 import os

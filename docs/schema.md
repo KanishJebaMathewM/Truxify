@@ -231,6 +231,7 @@ erDiagram
         int amount
         text txn_type
         text status
+        text tx_hash
     }
 
     demand_routes {

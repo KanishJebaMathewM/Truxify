@@ -441,67 +441,69 @@ describe('Bid Routes', () => {
     mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef' });
 
     const originalRpc = m.supabase.rpc;
-    m.supabase.rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'accept_bid_tx RPC failed' } });
+    try {
+      m.supabase.rpc = vi.fn().mockResolvedValue({ data: null, error: { message: 'accept_bid_tx RPC failed' } });
 
-    m.store.orders.push({
-      id: 'order-comp-fail',
-      customer_id: 'customer-1',
-      order_display_id: 'OD-COMP-FAIL',
-    });
+      m.store.orders.push({
+        id: 'order-comp-fail',
+        customer_id: 'customer-1',
+        order_display_id: 'OD-COMP-FAIL',
+      });
 
-    m.store.load_offers.push({
-      id: 'load-comp-fail',
-      order_display_id: 'OD-COMP-FAIL',
-      status: 'available',
-    });
+      m.store.load_offers.push({
+        id: 'load-comp-fail',
+        order_display_id: 'OD-COMP-FAIL',
+        status: 'available',
+      });
 
-    m.store.load_bids.push({
-      id: 'bid-comp-fail',
-      load_id: 'load-comp-fail',
-      driver_id: 'driver-1',
-      bid_amount: 50000,
-      status: 'pending',
-    });
+      m.store.load_bids.push({
+        id: 'bid-comp-fail',
+        load_id: 'load-comp-fail',
+        driver_id: 'driver-1',
+        bid_amount: 50000,
+        status: 'pending',
+      });
 
-    m.store.profiles.push(
-      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678' },
-      { id: 'driver-1', full_name: 'Driver One' },
-    );
+      m.store.profiles.push(
+        { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678' },
+        { id: 'driver-1', full_name: 'Driver One' },
+      );
 
-    m.store.driver_details.push({
-      user_id: 'driver-1',
-      rating: 4.9,
-      total_trips: 100,
-      completion_rate: 98,
-      truck_id: null,
-      polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
-    });
+      m.store.driver_details.push({
+        user_id: 'driver-1',
+        rating: 4.9,
+        total_trips: 100,
+        completion_rate: 98,
+        truck_id: null,
+        polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+      });
 
-    const app = buildApp();
+      const app = buildApp();
 
-    const res = await request(app)
-      .post('/api/orders/order-comp-fail/bids/bid-comp-fail/accept')
-      .set(CUSTOMER);
+      const res = await request(app)
+        .post('/api/orders/order-comp-fail/bids/bid-comp-fail/accept')
+        .set(CUSTOMER);
 
-    expect(res.status).toBe(500);
-    expect(res.body).toMatchObject({
-      error: 'Failed to accept bid atomically.',
-      details: 'accept_bid_tx RPC failed',
-      recovery: 'The pending escrow deposit has been voided. Please try again.'
-    });
+      expect(res.status).toBe(500);
+      expect(res.body).toMatchObject({
+        error: 'Failed to accept bid atomically.',
+        details: 'accept_bid_tx RPC failed',
+        recovery: 'The pending escrow deposit has been voided. Please try again.'
+      });
 
-    expect(mockBuildDepositTx).toHaveBeenCalledWith(
-      'OD-COMP-FAIL',
-      '0x1234567890abcdef1234567890abcdef12345678',
-      '0xAbcdef1234567890Abcdef1234567890Abcdef12',
-      expect.any(BigInt)
-    );
+      expect(mockBuildDepositTx).toHaveBeenCalledWith(
+        'OD-COMP-FAIL',
+        '0x1234567890abcdef1234567890abcdef12345678',
+        '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+        expect.any(BigInt)
+      );
 
-    let order = m.store.orders.find(o => o.id === 'order-comp-fail');
-    expect(order.escrow_status).toBe('funding');
-    expect(order.status).toBeUndefined();
-
-    m.supabase.rpc = originalRpc;
+      let order = m.store.orders.find(o => o.id === 'order-comp-fail');
+      expect(order.escrow_status).toBe('funding');
+      expect(order.status).toBeUndefined();
+    } finally {
+      m.supabase.rpc = originalRpc;
+    }
   });
 
   it('POST /:id/bids/:bidId/accept rejects with 422 when customer wallet missing', async () => {

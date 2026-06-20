@@ -1,3 +1,4 @@
+import hmac
 import logging
 import os
 from fastapi import FastAPI, HTTPException, Header, Depends
@@ -18,7 +19,7 @@ async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     ml_api_key = os.environ.get("ML_API_KEY")
     if not ml_api_key:
         return
-    if not x_api_key or x_api_key != ml_api_key:
+    if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 app = FastAPI(

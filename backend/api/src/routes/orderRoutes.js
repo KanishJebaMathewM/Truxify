@@ -650,7 +650,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       .eq('id', orderId);
 
     if (escrowBookingErr) {
-      console.warn('[escrow] Failed to update escrow_booking_id:', escrowBookingErr.message);
+      logger.warn('[escrow] Failed to update escrow_booking_id:', escrowBookingErr.message);
     }
 
     // Fetch driver's and customer's Polygon wallet addresses for escrow deposit
@@ -674,13 +674,13 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
           }).eq('id', orderId);
         }
       } catch (depositErr) {
-        console.error('[escrow] Deposit failed for order', orderId, ':', depositErr.message);
+        logger.error('[escrow] Deposit failed for order', orderId, ':', depositErr.message);
         await supabase.from('orders').update({
           escrow_status: 'fund_failed',
         }).eq('id', orderId);
       }
     } else {
-      console.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — skipping escrow deposit.`);
+      logger.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — skipping escrow deposit.`);
     }
 
     res.json({ message: 'Bid accepted. Driver and truck assigned.' });
@@ -942,6 +942,42 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
     if (!order) return res.status(404).json({ error: 'Order not found.' });
     if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
 
+    // Phase 1: Process escrow refund BEFORE changing order status
+    if (order.escrow_status === 'funded') {
+      let refundTxHash = null;
+      try {
+        const { txHash } = await escrowRefund(order.order_display_id);
+        refundTxHash = txHash;
+      } catch (refundErr) {
+        logger.error('[escrow] Refund failed for order', orderId, ':', refundErr.message);
+        return res.status(502).json({
+          error: 'Escrow refund failed. Order was not cancelled.',
+          details: 'The blockchain transaction could not be completed. Please try again or contact support.',
+        });
+      }
+
+      if (!refundTxHash) {
+        logger.error('[escrow] Refund returned null txHash for order', orderId);
+        return res.status(502).json({
+          error: 'Escrow refund could not be processed. Order was not cancelled.',
+        });
+      }
+
+      // Phase 2: Update escrow record
+      const { error: escrowUpdateErr } = await supabase.from('orders').update({
+        escrow_status: 'refunded',
+        refund_tx_hash: refundTxHash,
+        escrow_refunded_at: new Date().toISOString(),
+      }).eq('order_display_id', orderId);
+
+      if (escrowUpdateErr) {
+        logger.error('[escrow] Failed to update escrow refund status:', escrowUpdateErr.message);
+      }
+    } else if (order.escrow_booking_id) {
+      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain refund.`);
+    }
+
+    // Phase 3: Change order status to cancelled (only after escrow is handled)
     const { data: updatedOrder, error: updateErr } = await supabase.from('orders')
       .update({ status: 'cancelled', cancellation_reason: reason, updated_at: new Date().toISOString() })
       .eq('order_display_id', orderId)
@@ -962,26 +998,9 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
       .eq('order_display_id', order.order_display_id)
       .eq('milestone', 'Order Placed');
 
-    if (updatedOrder.escrow_status === 'funded') {
-      try {
-        const { txHash } = await escrowRefund(order.order_display_id);
-        if (txHash) {
-          await supabase.from('orders').update({
-            escrow_status: 'refunded',
-            refund_tx_hash: txHash,
-            escrow_refunded_at: new Date().toISOString(),
-          }).eq('order_display_id', orderId);
-        }
-      } catch (refundErr) {
-        console.error('[escrow] Refund failed for order', orderId, ':', refundErr.message);
-      }
-    } else if (order.escrow_booking_id) {
-      console.log(`[escrow] Escrow not funded (status: ${updatedOrder.escrow_status}) — skipping on-chain refund.`);
-    }
-
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
   } catch (err) {
-    console.error('Cancel order exception:', err.message);
+    logger.error('Cancel order exception:', err.message);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });

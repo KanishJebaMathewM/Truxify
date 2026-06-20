@@ -50,6 +50,8 @@ app.*.map.json
 **/__pycache__/
 **/*.pyc
 **/.env
+apps/customer/dart_define.json
+apps/driver/dart_define.json
 *.log
 
 # Vitest coverage reports
@@ -62,4 +64,4 @@ __pycache__/
 venv/
 
 # Local Docker Compose overrides — may contain real credentials
-docker-compose.override.yml
+docker-compose.override.yml

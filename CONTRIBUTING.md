@@ -94,6 +94,33 @@ Copy the example environment file and update the variables (Supabase, Firebase, 
 cp .env.example .env
 ```
 
+#### Flutter Configuration Setup
+Both Flutter apps use a shared dart-define JSON file generated from the repository root `.env`.
+
+1. Copy `.env.example` to `.env` and fill in the required values:
+  ```bash
+  cp .env.example .env
+  ```
+2. Generate app configuration files:
+  ```bash
+  ./scripts/generate_dart_defines.sh
+  ```
+3. Run the Customer app:
+  ```bash
+  cd apps/customer
+  flutter run --dart-define-from-file=dart_define.json
+  ```
+4. Run the Driver app:
+  ```bash
+  cd apps/driver
+  flutter run --dart-define-from-file=dart_define.json
+  ```
+
+Required configuration keys:
+  * `SUPABASE_URL`
+  * `SUPABASE_ANON_KEY`
+  * `TRUXIFY_API_BASE_URL`
+
 #### Start Backend Dev Server
 ```bash
 npm run dev

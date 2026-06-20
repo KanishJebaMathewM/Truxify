@@ -1146,12 +1146,17 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: 'order-2',
       driver_id: 'driver-456',
       order_display_id: 'ORD002',
-      delivery_otp: '123456',
-      otp_verified: false,
       status: 'in_transit',
       total_amount: 125000,
       escrow_status: 'funded',
-      otp_generated_at: new Date().toISOString(),
+    }];
+    m.store.delivery_otps = [{
+      id: 'otp-2',
+      order_id: 'order-2',
+      otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
+      expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      verified: false,
+      created_at: new Date().toISOString(),
     }];
     m.store.order_timeline = [{
       order_display_id: 'ORD002',

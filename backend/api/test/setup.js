@@ -11,6 +11,8 @@
 // directly from the request instead of verifying a Firebase token.
 process.env.BYPASS_AUTH = 'true';
 process.env.MONGODB_SHUTDOWN_WAIT_MS = '0';
+process.env.ESCROW_MATIC_PER_PAISA = '0.01';
+process.env.MAX_ESCROW_MATIC = '1000';
 
 // Suppress noisy console.error output from the routes — they log
 // pricing errors and DB failures to stderr when tests trigger them.

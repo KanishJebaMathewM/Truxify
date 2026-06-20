@@ -864,15 +864,15 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
             escrow_released_at: new Date().toISOString(),
           }).eq('id', orderId);
 
-          if (updatedOrder.driver_id) {
+          if (order.driver_id) {
             const { error: walletErr } = await supabase
               .from('wallet_transactions')
               .update({
                 tx_hash: txHash,
-                description: `Escrow payout for ${updatedOrder.order_display_id}`,
+                description: `Escrow payout for ${order.order_display_id}`,
               })
-              .eq('driver_id', updatedOrder.driver_id)
-              .eq('order_display_id', updatedOrder.order_display_id)
+              .eq('driver_id', order.driver_id)
+              .eq('order_display_id', order.order_display_id)
               .eq('txn_type', 'credit');
 
             if (walletErr) {

@@ -46,6 +46,6 @@ void main() {
 
     // The actual content widgets should now be present
     expect(find.text('Earning Calendar'), findsOneWidget);
-    expect(find.text('Pending Payments'), findsOneWidget);
+    expect(find.text('Transaction History'), findsOneWidget);
   });
 }

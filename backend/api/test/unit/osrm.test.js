@@ -5,8 +5,18 @@ const mockRedis = vi.hoisted(() => ({
   set: vi.fn(),
 }));
 
+const mockLogger = vi.hoisted(() => ({
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+}));
+
 vi.mock('../../src/config/db.js', () => ({
   redisClient: mockRedis,
+}));
+
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: mockLogger,
 }));
 
 import { getRouteEstimate, __testing } from '../../src/services/osrm.js';
@@ -182,6 +192,7 @@ describe('osrm - getRouteEstimate', () => {
     });
 
     expect(result).toBeNull();
+    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Fetch error:', 'AbortError');
   });
 
   it('uses OSRM_TIMEOUT_MS env variable', async () => {
@@ -255,6 +266,7 @@ describe('osrm - getRouteEstimate', () => {
 
     expect(result).toEqual({ distanceKm: 20, durationSeconds: 900 });
     expect(fetch).toHaveBeenCalledOnce();
+    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Redis get error:', 'Redis connection refused');
   });
 
   it('returns result even when Redis set throws after successful OSRM response', async () => {
@@ -269,6 +281,7 @@ describe('osrm - getRouteEstimate', () => {
     });
 
     expect(result).toEqual({ distanceKm: 10, durationSeconds: 600 });
+    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Redis set error:', 'Redis write failed');
   });
 
   it('does not cache null when OSRM returns a non-ok response', async () => {

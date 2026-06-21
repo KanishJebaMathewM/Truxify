@@ -1,5 +1,6 @@
 import { supabase, firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import crypto from 'crypto';
 
 /**
  * Fetch a user's FCM token from the profiles table.
@@ -89,7 +90,107 @@ export async function sendFcmNotification(userId, notification, data = {}) {
 }
 
 /**
- * Deliver the delivery OTP to the customer through a secure out-of-band channel.
+ * Persist a delivery OTP in the isolated delivery_otps table.
+ * Called when the order transitions to 'In Transit' and a fresh OTP is needed.
+ *
+ * @param {string} orderId - The order UUID.
+ * @param {string} otp - The 6-digit delivery OTP.
+ * @param {number} ttlMinutes - Time-to-live for the OTP (defaults to 15).
+ * @returns {Promise<{id: string} | null>}
+ */
+export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
+  const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
+  const otpHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
+
+  const { data, error } = await supabase
+    .from('delivery_otps')
+    .insert({
+      order_id: orderId,
+      otp_hash: otpHash,
+      expires_at: expiresAt,
+      verified: false,
+    })
+    .select('id')
+    .single();
+
+  if (error) {
+    console.error('[NotificationService] Failed to store OTP:', error.message);
+    return null;
+  }
+
+  console.log(`[NotificationService] OTP stored for order ${orderId}, expires at ${expiresAt}`);
+  return data;
+}
+
+/**
+ * Retrieve the latest active (unexpired, unverified) OTP for an order.
+ *
+ * @param {string} orderId
+ * @returns {Promise<{id: string, otp_hash: string, expires_at: string} | null>}
+ */
+export async function getActiveDeliveryOtp(orderId) {
+  const { data, error } = await supabase
+    .from('delivery_otps')
+    .select('id, otp_hash, expires_at')
+    .eq('order_id', orderId)
+    .eq('verified', false)
+    .gte('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error('[NotificationService] Failed to fetch active OTP:', error.message);
+    return null;
+  }
+
+  return data;
+}
+
+/**
+ * Mark a delivery OTP as verified.
+ *
+ * @param {string} orderId
+ * @returns {Promise<boolean>}
+ */
+export async function verifyDeliveryOtp(orderId) {
+  const { error } = await supabase
+    .from('delivery_otps')
+    .update({
+      verified: true,
+      verified_at: new Date().toISOString(),
+    })
+    .eq('order_id', orderId)
+    .eq('verified', false);
+
+  if (error) {
+    console.error('[NotificationService] Failed to verify OTP:', error.message);
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Invalidate (expire) all active OTPs for an order.
+ *
+ * @param {string} orderId
+ * @returns {Promise<void>}
+ */
+export async function expireDeliveryOtps(orderId) {
+  const { error } = await supabase
+    .from('delivery_otps')
+    .update({ expires_at: new Date().toISOString() })
+    .eq('order_id', orderId)
+    .eq('verified', false);
+
+  if (error) {
+    console.error('[NotificationService] Failed to expire OTPs:', error.message);
+  }
+}
+
+/**
+ * Deliver the delivery OTP to the customer through out-of-band channels.
  *
  * @param {string} customerId - The customer's profile UUID.
  * @param {string} orderDisplayId - The display identifier of the order (e.g. #FFYYYYMMDDXXXX).
@@ -163,7 +264,6 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
  * @param {object} [metadata={}] - Optional metadata to persist.
  */
 export async function sendPushNotification(userId, title, body, notifType, metadata = {}) {
-  // 1. Persist notification record
   if (supabase) {
     try {
       const { error } = await supabase
@@ -178,6 +278,5 @@ export async function sendPushNotification(userId, title, body, notifType, metad
     }
   }
 
-  // 2. FCM delivery (fire-and-forget)
   void sendFcmNotification(userId, { title, body }, { notifType, ...metadata });
 }

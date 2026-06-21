@@ -75,7 +75,8 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
     }
     return result;
     
-  } catch {
+  } catch (err) {
+    logger.error('[osrm] Fetch error:', err.message);
     return null;
   } finally {
     clearTimeout(timeout);

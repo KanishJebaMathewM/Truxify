@@ -1,5 +1,6 @@
 import express from 'express';
 import { supabase, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
@@ -25,7 +26,8 @@ async function checkSupabase() {
       supabase.from('profiles').select('id').limit(1)
     );
     return error ? 'failed' : 'connected';
-  } catch {
+  } catch (err) {
+    logger.error('[health] Supabase check failed:', err.message);
     return 'failed';
   }
 }
@@ -35,7 +37,8 @@ async function checkMongo() {
   try {
     await withTimeout(mongoDb.admin().ping());
     return 'connected';
-  } catch {
+  } catch (err) {
+    logger.error('[health] MongoDB check failed:', err.message);
     return 'failed';
   }
 }
@@ -45,7 +48,8 @@ async function checkRedis() {
   try {
     const reply = await withTimeout(redisClient.ping());
     return reply === 'PONG' ? 'connected' : 'failed';
-  } catch {
+  } catch (err) {
+    logger.error('[health] Redis check failed:', err.message);
     return 'failed';
   }
 }

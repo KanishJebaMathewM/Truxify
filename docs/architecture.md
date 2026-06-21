@@ -110,6 +110,15 @@ sequenceDiagram
     API->>BC: Write reputation on-chain
 ```
 
+Wallet history and earnings views now also surface escrow payout transaction hashes when a release is completed on-chain. Example wallet history payload fields:
+
+```json
+{
+  "tx_hash": "0xabc123...",
+  "trip_display_id": "TRIP-2026-0001"
+}
+```
+
 ---
 
 ## Service Responsibilities

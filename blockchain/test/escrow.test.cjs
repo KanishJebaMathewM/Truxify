@@ -86,6 +86,23 @@ describe("Escrow", function () {
     await assertRejectsWith(escrow.connect(outsider).refundFunds(id), "Not authorized relayer");
   });
 
+  it("rejects deposit from non-customer wallets (relayer / outsider)", async function () {
+    const { escrow, relayer, customer, driver, outsider } = await deployEscrow();
+    const id = bookingId("only-customer-deposit");
+    const amount = ethers.parseEther("0.1");
+
+    await assertRejectsWith(
+      escrow.connect(relayer).deposit(id, customer.address, driver.address, { value: amount }),
+      "Only customer can deposit"
+    );
+    await assertRejectsWith(
+      escrow.connect(outsider).deposit(id, customer.address, driver.address, { value: amount }),
+      "Only customer can deposit"
+    );
+    const tx = await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount });
+    await tx.wait();  // should succeed
+  });
+
   it("blocks invalid state transitions and duplicate deposits", async function () {
     const { escrow, relayer, customer, driver } = await deployEscrow();
     const id = bookingId("invalid-state");

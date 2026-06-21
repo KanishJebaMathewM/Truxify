@@ -242,6 +242,20 @@ class DriverEarningsService {
     return Map<String, dynamic>.from(decoded['stats'] ?? {});
   }
 
+  Future<Map<String, dynamic>> fetchWalletSummary() async {
+    if (driverId == null) return {};
+
+    final response = await _client
+        .from('driver_details')
+        .select('wallet_confirmed, wallet_pending, wallet_total')
+        .eq('user_id', driverId!);
+
+    if (response is List && response.isNotEmpty) {
+      return Map<String, dynamic>.from(response.first as Map);
+    }
+    return {};
+  }
+
   void dispose() {
     if (_isClientOwned) {
       _httpClient.close();

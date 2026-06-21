@@ -245,5 +245,34 @@ void main() {
       
       service.dispose();
     });
+
+    test('fetchWalletSummary queries driver_details table via supabase client', () async {
+      bool databaseCalled = false;
+      final supabaseClient = FakeSupabaseClient(
+        auth: mockAuth,
+        onFrom: (relation) {
+          expect(relation, equals('driver_details'));
+          databaseCalled = true;
+        },
+        queryResult: (relation) {
+          return Future.value([
+            {
+              'wallet_confirmed': 4500000,
+              'wallet_pending': 850000,
+              'wallet_total': 5350000
+            }
+          ]);
+        },
+      );
+
+      final service = DriverEarningsService(client: supabaseClient);
+      final result = await service.fetchWalletSummary();
+      expect(databaseCalled, isTrue);
+      expect(result['wallet_confirmed'], equals(4500000));
+      expect(result['wallet_pending'], equals(850000));
+      expect(result['wallet_total'], equals(5350000));
+      
+      service.dispose();
+    });
   });
 }

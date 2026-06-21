@@ -185,7 +185,7 @@ class MarketplaceRepository {
         callback: (payload) {
           try {
             final newRecord = payload.newRecord;
-            if (newRecord != null && newRecord.isNotEmpty) {
+            if (newRecord.isNotEmpty) {
               final offer = _mapLoadOffer(newRecord);
               controller.add(offer);
             }

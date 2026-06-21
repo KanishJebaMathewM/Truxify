@@ -10,6 +10,13 @@ const getMongoDb = () => mongoDbOverride || mongoDb;
 const trackingSubscriptions = new Map();
 
 // =====================================================================
+// CLOCK SKEW & CIRCUIT BREAKER CONFIGURATION (#596)
+// =====================================================================
+const CLOCK_SKEW_TOLERANCE_MS = parseInt(process.env.CLOCK_SKEW_TOLERANCE_MS, 10) || 300000; // default ±5 min
+const MAX_CONSECUTIVE_DROPS = 10;
+const consecutiveDropCount = new Map();
+
+// =====================================================================
 // EXTRA STORAGE & BUFFER CONFIGURATIONS (#269)
 // =====================================================================
 const MAX_BUFFER_SIZE = 5000;
@@ -323,39 +330,72 @@ export async function handleLocationPing(ws, data) {
     return ws.send(JSON.stringify({ error: 'Unauthorized: driver_id does not match authenticated WebSocket identity.' }));
   }
 
-  if (!latitude || !longitude) {
+  // Fix 3: Coordinate validation — proper null/undefined, type, and range validation
+  if (latitude === null || latitude === undefined || typeof latitude !== 'number' || !Number.isFinite(latitude) ||
+      longitude === null || longitude === undefined || typeof longitude !== 'number' || !Number.isFinite(longitude)) {
     return ws.send(JSON.stringify({ error: 'Missing mandatory tracking parameters (lat, lng).' }));
   }
 
-  // 🛡️ ADJUSTMENT 2: Device Timestamp Strict Validation
-  let currentPingTime = new Date();
+  // Range validation
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+    return ws.send(JSON.stringify({ error: 'Coordinates out of valid range' }));
+  }
+
+  // Parse device timestamp for analytics and clock skew check only (Fix 1)
+  let deviceTime = null;
   if (device_timestamp) {
     const parsedEpoch = Date.parse(device_timestamp);
     if (isNaN(parsedEpoch)) {
       logger.error(`[TRUXIFY VALIDATION ERROR] Malformed device_timestamp received from driver: ${driver_id}. Falling back to server time.`);
-      // Prevent poisoning the Redis sequence cache with an incorrect epoch layout
     } else {
-      currentPingTime = new Date(parsedEpoch);
+      deviceTime = new Date(parsedEpoch);
     }
   }
-  const incomingEpoch = currentPingTime.getTime();
 
-  // 🛡️ 1. IDEMPOTENCY GATE & OUT-OF-ORDER SEQUENCER
+  // Clock skew validation — compare device time against server time with a configurable tolerance
+  const skewCheckTime = deviceTime || new Date();
+  const skewMs = Math.abs(skewCheckTime.getTime() - Date.now());
+  if (skewMs > CLOCK_SKEW_TOLERANCE_MS) {
+    logger.warn(
+      `[TRUXIFY CLOCK SKEW] Driver ${driver_id} clock skew ${skewMs}ms exceeds tolerance ` +
+      `${CLOCK_SKEW_TOLERANCE_MS}ms — ignoring update.`
+    );
+    return;
+  }
+
+  // Fix 1: Always use server time for sequence comparison
+  const serverNow = Date.now();
+
+  // Fix 4: IDEMPOTENCY GATE & OUT-OF-ORDER SEQUENCER + Circuit breaker
   if (redisClient) {
     try {
       const seqKey = `driver:sequence:${driver_id}`;
       const lastRecordedEpochStr = await redisClient.get(seqKey);
-      
+
       if (lastRecordedEpochStr) {
         const lastRecordedEpoch = parseInt(lastRecordedEpochStr, 10);
-        
-        if (incomingEpoch <= lastRecordedEpoch) {
+
+        if (serverNow <= lastRecordedEpoch) {
           logger.warn(`[TRUXIFY SEQUENCE CONTROL] Out-of-order telemetry dropped for Driver: ${driver_id}. Stale jitter detected.`);
+
+          // Circuit breaker: if too many consecutive drops, reset the sequence
+          const currentCount = (consecutiveDropCount.get(driver_id) || 0) + 1;
+          consecutiveDropCount.set(driver_id, currentCount);
+          if (currentCount >= MAX_CONSECUTIVE_DROPS) {
+            logger.warn(
+              `[TRUXIFY CIRCUIT BREAKER] Driver ${driver_id} exceeded max consecutive drops ` +
+              `(${MAX_CONSECUTIVE_DROPS}). Resetting sequence.`
+            );
+            await redisClient.del(seqKey);
+            consecutiveDropCount.delete(driver_id);
+          }
           return;
         }
       }
-      
-      await redisClient.set(seqKey, incomingEpoch.toString(), 'EX', 86400); 
+
+      // Reset circuit breaker on successful sequence advancement
+      consecutiveDropCount.delete(driver_id);
+      await redisClient.set(seqKey, serverNow.toString(), 'EX', 86400);
     } catch (err) {
       logger.error('Redis sequence verification cache error:', err.message);
     }
@@ -376,8 +416,9 @@ export async function handleLocationPing(ws, data) {
     },
     speed_kmh: speed || 0,
     bearing_deg: bearing || 0,
-    pinged_at: currentPingTime,
-    buffered_at: new Date()
+    pinged_at: deviceTime || new Date(),
+    buffered_at: new Date(),
+    server_received_at: new Date(serverNow),
   });
 
   // Buffer usage monitoring
@@ -393,7 +434,7 @@ export async function handleLocationPing(ws, data) {
       const redisKey = `driver:location:${driver_id}`;
       await redisClient.set(
         redisKey,
-        JSON.stringify({ latitude, longitude, speed, bearing, updated_at: currentPingTime }),
+        JSON.stringify({ latitude, longitude, speed, bearing, updated_at: new Date(serverNow) }),
         'EX',
         120
       );
@@ -411,7 +452,7 @@ export async function handleLocationPing(ws, data) {
       longitude,
       speed,
       bearing,
-      timestamp: currentPingTime
+      timestamp: new Date(serverNow)
     }
   });
 
@@ -808,5 +849,14 @@ export const __testing = {
   },
   setMongoDbOverride(val) {
     mongoDbOverride = val;
+  },
+  getConsecutiveDropCount(driverId) {
+    return consecutiveDropCount.get(driverId) || 0;
+  },
+  clearConsecutiveDropCount() {
+    consecutiveDropCount.clear();
+  },
+  get MAX_CONSECUTIVE_DROPS() {
+    return MAX_CONSECUTIVE_DROPS;
   },
 };

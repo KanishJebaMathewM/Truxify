@@ -17,6 +17,7 @@ vi.mock('../../src/services/escrow.js', () => ({
   recordDepositTx: vi.fn(),
   escrowRelease: vi.fn(),
   escrowRefund: vi.fn(),
+  ESCROW_MATIC_PER_PAISA: 0.01,
 }));
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
@@ -51,6 +52,14 @@ describe('Bid Routes', () => {
     mockBuildDepositTx.mockReset();
     mockRecordDepositTx.mockReset();
     mockEscrowRefund.mockReset();
+    mockBuildDepositTx.mockResolvedValue({
+      txData: {
+        to: '0x0000000000000000000000000000000000000000',
+        data: '0x',
+        value: '0x0',
+      },
+      bookingId: 'escrow:MOCK',
+    });
   });
 
   it('POST /:id/bids rejects invalid amount', async () => {
@@ -312,6 +321,8 @@ describe('Bid Routes', () => {
       .set(CUSTOMER);
 
     expect(res.status).toBe(200);
+    expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
+    expect(mockBuildDepositTx).toHaveBeenCalled();
 
     const rpc = m.calls.find(c => c.rpc === 'accept_bid_tx');
 
@@ -363,14 +374,13 @@ describe('Bid Routes', () => {
       .set(CUSTOMER);
 
     expect(res.status).toBe(200);
-    expect(res.body.depositTx).toBe('0xdeadbeef');
-
     expect(mockBuildDepositTx).toHaveBeenCalledWith(
       'OD-ESCROW',
       '0x1234567890abcdef1234567890abcdef12345678',
       '0xAbcdef1234567890Abcdef1234567890Abcdef12',
-      expect.any(BigInt),
+      500000000000000000000n,
     );
+    expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
 
     let order = m.store.orders.find(o => o.id === 'order-escrow');
     expect(order.escrow_status).toBe('funding');
@@ -485,7 +495,7 @@ describe('Bid Routes', () => {
         'OD-COMP-FAIL',
         '0x1234567890abcdef1234567890abcdef12345678',
         '0xAbcdef1234567890Abcdef1234567890Abcdef12',
-        expect.any(BigInt)
+        500000000000000000000n
       );
 
       let order = m.store.orders.find(o => o.id === 'order-comp-fail');

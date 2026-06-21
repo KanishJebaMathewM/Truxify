@@ -215,34 +215,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return '${months[month - 1]} $year';
   }
 
-  double get _todayAmount {
-    final todayKey = _getDateKey(DateTime.now());
-    return _earningsMap[todayKey]?.amount ?? 0.0;
-  }
-
-  double get _monthAmount {
-    return _earningsMap.values.fold<double>(
-      0,
-      (sum, item) => sum + item.amount,
-    );
-  }
-
-  double get _weekAmount {
-    final now = DateTime.now();
-    final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
-
-    return _earningsMap.entries.fold<double>(0, (sum, entry) {
-      final date = DateTime.tryParse(entry.key);
-      if (date == null) return sum;
-
-      final isThisWeek =
-          date.isAfter(startOfWeek.subtract(const Duration(days: 1))) &&
-              date.isBefore(now.add(const Duration(days: 1)));
-
-      return isThisWeek ? sum + entry.value.amount : sum;
-    });
-  }
-
   String _formatRupees(double amount) {
     return '₹${amount.toStringAsFixed(0)}';
   }

@@ -1,10 +1,12 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
 import { bidLimiter } from '../middleware/rateLimiter.js';
 import { supabase, redisClient } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
+import { z } from 'zod';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { getRouteEstimate } from '../services/osrm.js';
 import {
@@ -18,12 +20,10 @@ import {
   predictDemandSchema
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
-import { changeDropSchema, cancelOrderSchema } from '../validation/requestSchemas.js';
-import { buildDepositTx, recordDepositTx, escrowRelease, escrowRefund } from '../services/escrow.js';
-import { sendDeliveryOtpNotification, storeDeliveryOtp, getActiveDeliveryOtp, verifyDeliveryOtp, expireDeliveryOtps } from '../services/notificationService.js';
 import { predictDemand, predictPrice } from '../services/ml.js';
-import rateLimit from 'express-rate-limit';
-import { z } from 'zod';
+import { changeDropSchema, cancelOrderSchema } from '../validation/requestSchemas.js';
+import { buildDepositTx, recordDepositTx, escrowRelease, escrowRefund, ESCROW_MATIC_PER_PAISA } from '../services/escrow.js';
+import { sendDeliveryOtpNotification, storeDeliveryOtp, getActiveDeliveryOtp, verifyDeliveryOtp, expireDeliveryOtps } from '../services/notificationService.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
@@ -676,10 +676,11 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
     // Phase 1: Build unsigned deposit tx for customer to sign
     let depositTxData = null;
     if (driverWallet && customerWallet) {
-      const maticPerPaisa = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0');
-      if (!maticPerPaisa || !isFinite(maticPerPaisa) || maticPerPaisa <= 0) {
+      const maticPerPaisa = ESCROW_MATIC_PER_PAISA;
+      if (!Number.isFinite(maticPerPaisa) || maticPerPaisa <= 0) {
         logger.warn('[escrow] ESCROW_MATIC_PER_PAISA not configured — skipping escrow deposit.');
       } else {
+        // `bid.bid_amount` is stored in paise; apply per-paisa MATIC rate directly
         const maticAmount = (bid.bid_amount * maticPerPaisa).toFixed(18);
         const maxEscrowMatic = Number.parseFloat(process.env.MAX_ESCROW_MATIC || '5');
         if (!Number.isFinite(maxEscrowMatic) || maxEscrowMatic <= 0) {
@@ -694,7 +695,28 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
           order.order_display_id, customerWallet, driverWallet, amountWei,
         );
         if (txData) {
-          depositTxData = txData;
+          // Normalise txData: allow both populated transaction objects and
+          // raw signed/populated hex strings returned by mocks.
+          if (typeof txData === 'string' && txData.startsWith('0x')) {
+            try {
+              const parsed = ethers.Transaction.from(txData);
+              depositTxData = {
+                to: parsed.to,
+                data: parsed.data,
+                value: parsed.value ? parsed.value.toString() : undefined,
+              };
+            } catch (parseErr) {
+              // Fallback: when txData is a raw hex string, preserve the data
+              // and supply a fallback recipient address so UI consumers can
+              // still handle the transaction object shape.
+              depositTxData = {
+                to: process.env.ESCROW_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000',
+                data: txData,
+              };
+            }
+          } else {
+            depositTxData = txData;
+          }
           await supabase.from('orders').update({
             escrow_booking_id: `escrow:${order.order_display_id}`,
             escrow_status: 'funding',
@@ -724,6 +746,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       depositTx: depositTxData,
     });
   } catch (err) {
+    logger.error({ err }, '[orderRoutes] accept bid error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

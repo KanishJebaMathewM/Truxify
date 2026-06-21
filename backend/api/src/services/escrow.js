@@ -11,8 +11,8 @@
  * directly — the contract requires msg.sender == customer to
  * prevent the relayer from bearing the escrow cost.
  *
- * The escrowDeposit() function below builds the deposit transaction
- * and returns it as an unsigned popultated transaction so the
+ * The buildDepositTx() function below builds the deposit transaction
+ * and returns it as an unsigned populated transaction so the
  * customer's wallet can sign and submit it. After the customer
  * confirms the on-chain deposit, the backend records the txHash.
  *
@@ -35,6 +35,7 @@ const ESCROW_ABI = [
 const rpcUrl            = process.env.POLYGON_RPC_URL;
 const contractAddress   = process.env.ESCROW_CONTRACT_ADDRESS;
 const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
+export const ESCROW_MATIC_PER_PAISA = parseFloat(process.env.ESCROW_MATIC_PER_PAISA ?? '0.01');
 
 /** @type {ethers.Contract | null} */
 let escrowContract = null;
@@ -81,42 +82,27 @@ export function getEscrowBookingId(orderDisplayId) {
  */
 export async function buildDepositTx(orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
   const bookingId = getEscrowBookingId(orderDisplayId);
-
+  // Graceful fallback when contract is not configured (CI / dev environments)
   if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — cannot build deposit tx.');
-    return { txData: null, bookingId };
-  }
-  if (!ethers.isAddress(customerWalletAddress)) {
-    logger.warn(`[escrow] Invalid customer wallet address "${customerWalletAddress}" — skipping deposit.`);
-    return { txData: null, bookingId };
-  }
-  if (!ethers.isAddress(driverWalletAddress)) {
-    logger.warn(`[escrow] Invalid driver wallet address "${driverWalletAddress}" — skipping deposit.`);
     return { txData: null, bookingId };
   }
 
-  const contractInterface = escrowContract.interface;
-  const data = contractInterface.encodeFunctionData('deposit', [
+  // Validate inputs; for robustness return a null txData rather than throwing
+  if (!ethers.isAddress(customerWalletAddress) || !ethers.isAddress(driverWalletAddress)) {
+    return { txData: null, bookingId };
+  }
+  if (!amountWei || BigInt(amountWei) <= 0n) {
+    return { txData: null, bookingId };
+  }
+
+  const txData = await escrowContract.populateTransaction.deposit(
     bookingId,
     customerWalletAddress,
     driverWalletAddress,
-  ]);
-
-  const feeData = await escrowContract.runner.provider.getFeeData();
-  const block = await escrowContract.runner.provider.getBlock('latest');
-
-  const txData = {
-    to: contractAddress,
-    data,
-    value: amountWei,
-    gasLimit: 300000n,
-    maxFeePerGas: feeData.maxFeePerGas ?? undefined,
-    maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?? undefined,
-    nonce: undefined,
-    chainId: block.chainId ?? undefined,
-    type: 2,
-  };
-
+    {
+      value: amountWei,
+    }
+  );
   logger.info(`[escrow] Deposit tx built for booking ${orderDisplayId}`);
   return { txData, bookingId };
 }

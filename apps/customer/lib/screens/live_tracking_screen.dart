@@ -657,12 +657,25 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   List<Widget> _buildTimelineWidgets() {
     if (_timeline.isEmpty) {
       return const [
-        TimelineMilestone(label: 'Order Placed', done: true),
-        TimelineConnector(),
-        TimelineMilestone(label: 'In Transit', done: true, current: true),
-        TimelineConnector(),
-        TimelineMilestone(label: 'Delivered', done: false),
-      ];
+  TimelineMilestone(
+    label: 'Order Placed',
+    timestamp: '10:15 AM',
+    done: true,
+  ),
+  TimelineConnector(),
+  TimelineMilestone(
+    label: 'In Transit',
+    timestamp: '12:30 PM',
+    done: true,
+    current: true,
+  ),
+  TimelineConnector(),
+  TimelineMilestone(
+    label: 'Delivered',
+    timestamp: 'Pending',
+    done: false,
+  ),
+];
     }
 
     final widgets = <Widget>[];
@@ -674,13 +687,19 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       final isCurrent = completed &&
           (i == _timeline.length - 1 || _timeline[i + 1]['completed'] != true);
 
-      widgets.add(
-        TimelineMilestone(
-          label: step['milestone']?.toString() ?? '',
-          done: completed,
-          current: isCurrent,
-        ),
-      );
+      final timestamp =
+    step['completed_at']?.toString() ??
+    step['estimated_time']?.toString() ??
+    '';
+
+widgets.add(
+  TimelineMilestone(
+    label: step['milestone']?.toString() ?? '',
+    timestamp: timestamp,
+    done: completed,
+    current: isCurrent,
+  ),
+);
 
       if (i != _timeline.length - 1) {
         widgets.add(const TimelineConnector());

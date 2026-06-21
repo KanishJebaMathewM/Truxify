@@ -680,8 +680,8 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       if (!Number.isFinite(maticPerPaisa) || maticPerPaisa <= 0) {
         logger.warn('[escrow] ESCROW_MATIC_PER_PAISA not configured — skipping escrow deposit.');
       } else {
-        // `bid.bid_amount` is stored in paise; convert to rupees before applying per-paisa MATIC rate
-        const maticAmount = ((bid.bid_amount / 100) * maticPerPaisa).toFixed(18);
+        // `bid.bid_amount` is stored in paise; apply per-paisa MATIC rate directly
+        const maticAmount = (bid.bid_amount * maticPerPaisa).toFixed(18);
         const maxEscrowMatic = Number.parseFloat(process.env.MAX_ESCROW_MATIC || '5');
         if (!Number.isFinite(maxEscrowMatic) || maxEscrowMatic <= 0) {
           logger.error('[escrow] MAX_ESCROW_MATIC is invalid — refusing deposit.');

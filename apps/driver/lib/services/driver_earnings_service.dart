@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -26,8 +27,8 @@ class DriverEarningsService {
 
   String? get driverId => _client.auth.currentUser?.id;
 
-  Map<String, String> get _authHeaders {
-    final token = _client.auth.currentSession?.accessToken;
+  Future<Map<String, String>> get _authHeaders async {
+    final token = await FirebaseAuth.instance.currentUser?.getIdToken();
     return {
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
@@ -46,7 +47,7 @@ class DriverEarningsService {
 
     final http.Response response;
     try {
-      response = await _httpClient.get(uri, headers: _authHeaders);
+      response = await _httpClient.get(uri, headers: await _authHeaders);
     } catch (e) {
       throw Exception('Network error: Failed to fetch wallet history.');
     }
@@ -114,7 +115,7 @@ class DriverEarningsService {
 
     final http.Response response;
     try {
-      response = await _httpClient.get(uri, headers: _authHeaders);
+      response = await _httpClient.get(uri, headers: await _authHeaders);
     } catch (e) {
       throw Exception('Network error: Failed to fetch earnings summary.');
     }

@@ -1,32 +1,29 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/app_routes.dart';
+import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/common_widgets.dart';
 
 class OtpScreen extends StatefulWidget {
-  const OtpScreen({super.key, required this.phone});
+  const OtpScreen({super.key, required this.phone, required this.verificationId});
 
   final String phone;
+  final String verificationId;
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
 }
 
 class _OtpScreenState extends State<OtpScreen> {
-  static const String _apiBaseUrl = String.fromEnvironment(
-    'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
-  );
-
   late final List<TextEditingController> _controllers =
-      List.generate(4, (_) => TextEditingController());
-  late final List<FocusNode> _focusNodes = List.generate(4, (_) => FocusNode());
+      List.generate(6, (_) => TextEditingController());
+  late final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
+  final AuthService _authService = AuthService();
   bool _loading = false;
 
   @override
@@ -45,47 +42,35 @@ class _OtpScreenState extends State<OtpScreen> {
 
     final code =
         _controllers.map((c) => c.text.replaceAll('\u200B', '')).join();
-    if (!RegExp(r'^\d{4}$').hasMatch(code)) {
+    if (!RegExp(r'^\d{6}$').hasMatch(code)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid 4-digit OTP')),
+        const SnackBar(content: Text('Enter a valid 6-digit OTP')),
       );
       return;
     }
 
     setState(() => _loading = true);
     try {
-      final uri = Uri.parse('$_apiBaseUrl/api/driver/otp/verify');
-      final response = await http.post(
-        uri,
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode(<String, String>{
-          'phone': widget.phone,
-          'otp': code,
-        }),
-      ).timeout(const Duration(seconds: 15));
+      await _authService.verifyOtp(widget.verificationId, code);
 
       if (!mounted) return;
-
-      final success = response.statusCode >= 200 && response.statusCode < 300;
-      if (!success) {
-        final message = response.body.isNotEmpty
-            ? _extractErrorMessage(response.body)
-            : 'OTP verification failed.';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
-        );
-        return;
-      }
 
       Navigator.of(context).pushReplacementNamed(AppRoutes.shell);
-    } on TimeoutException {
+    } on FirebaseAuthException catch (e) {
       if (!mounted) return;
+      String message;
+      switch (e.code) {
+        case 'invalid-verification-code':
+          message = 'Invalid OTP. Please check and try again.';
+          break;
+        case 'session-expired':
+          message = 'Code expired. Please request a new OTP.';
+          break;
+        default:
+          message = e.message ?? 'Verification failed. Please try again.';
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Verification timed out. Please check your connection and try again.',
-          ),
-        ),
+        SnackBar(content: Text(message)),
       );
     } catch (e) {
       if (!mounted) return;
@@ -97,21 +82,6 @@ class _OtpScreenState extends State<OtpScreen> {
         setState(() => _loading = false);
       }
     }
-  }
-
-  String _extractErrorMessage(String body) {
-    try {
-      final decoded = jsonDecode(body);
-      if (decoded is Map<String, dynamic>) {
-        final error = decoded['error']?.toString();
-        if (error != null && error.isNotEmpty) {
-          return error;
-        }
-      }
-    } catch (_) {
-      // Fall through to generic error message.
-    }
-    return 'OTP verification failed.';
   }
 
   @override
@@ -141,7 +111,7 @@ class _OtpScreenState extends State<OtpScreen> {
               const TruxifyLogo(size: 28),
               const SizedBox(height: 30),
               Text(
-                'Enter the 4-digit OTP',
+                'Enter the 6-digit OTP',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                       color: colorScheme.onSurface,
                     ),

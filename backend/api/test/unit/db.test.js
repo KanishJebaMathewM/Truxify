@@ -13,6 +13,12 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+vi.mock('dotenv', () => ({
+  default: {
+    config: vi.fn(),
+  },
+}));
+
 describe('db config — env-var guards', () => {
   const originalEnv = {};
 
@@ -92,12 +98,30 @@ describe('db config — env-var guards', () => {
 });
 
 describe('db config — waitForMongoDb', () => {
+  const originalEnv = {};
+  const ENV_VARS = [
+    'SUPABASE_URL',
+    'MONGODB_URI',
+    'REDIS_URL',
+    'FIREBASE_SERVICE_ACCOUNT_JSON',
+  ];
+
   beforeEach(() => {
     vi.resetModules();
-    delete process.env.MONGODB_URI;
-    delete process.env.REDIS_URL;
-    delete process.env.SUPABASE_URL;
-    delete process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    ENV_VARS.forEach((k) => {
+      originalEnv[k] = process.env[k];
+      delete process.env[k];
+    });
+  });
+
+  afterEach(() => {
+    ENV_VARS.forEach((k) => {
+      if (originalEnv[k] !== undefined) {
+        process.env[k] = originalEnv[k];
+      } else {
+        delete process.env[k];
+      }
+    });
   });
 
   it('resolves immediately when MONGODB_URI is not set', async () => {

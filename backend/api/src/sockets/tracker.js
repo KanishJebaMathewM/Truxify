@@ -445,6 +445,7 @@ export async function handleLocationPing(ws, data) {
     speed_kmh: speed || 0,
     bearing_deg: bearing || 0,
     timestamp: deviceTime || new Date(),
+    pinged_at: deviceTime || new Date(),
     buffered_at: new Date(),
     server_received_at: new Date(serverNow),
   });

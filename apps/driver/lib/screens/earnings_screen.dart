@@ -219,6 +219,20 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return '₹${amount.toStringAsFixed(0)}';
   }
 
+  double _calculateAverageEarningsPerTrip() {
+  int totalTrips = 0;
+  double totalTripEarnings = 0;
+
+  for (final earning in _earningsMap.values) {
+    totalTrips += earning.tripCount;
+    totalTripEarnings += earning.amount;
+  }
+
+  if (totalTrips == 0) return 0;
+
+  return totalTripEarnings / totalTrips;
+}
+
   String _tripRoute(Map<String, dynamic> trip) {
     return trip['route_label']?.toString() ?? 'Route unavailable';
   }
@@ -315,6 +329,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   Widget _buildOverallSummaryCards({Key? key}) {
+    final averageTripEarning = _calculateAverageEarningsPerTrip();
     return Padding(
       key: key,
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -342,6 +357,15 @@ class _EarningsScreenState extends State<EarningsScreen> {
             icon: Icons.account_balance_wallet_outlined,
             iconColor: TruxifyColors.accent,
             bgColor: TruxifyColors.accentLight,
+          ),
+          const SizedBox(width: 12),
+
+          _buildSummaryCard(
+            value: _formatRupees(averageTripEarning),
+            label: 'Avg / Trip',
+            icon: Icons.trending_up_rounded,
+            iconColor: TruxifyColors.success,
+            bgColor: TruxifyColors.successLight,
           ),
         ],
       ),

@@ -537,7 +537,7 @@ describe('requireRole middleware', () => {
     vi.resetModules();
   });
 
-  it('returns 501 when req.user is not set', async () => {
+  it('returns 401 when req.user is not set', async () => {
     vi.doMock('../../src/config/db.js', () => ({
       firebaseAdmin: null,
       supabase: null,
@@ -554,7 +554,7 @@ describe('requireRole middleware', () => {
 
     middleware(req, res, vi.fn());
 
-    expect(res.status).toHaveBeenCalledWith(501);
+    expect(res.status).toHaveBeenCalledWith(401);
   });
 
   it('returns 403 when user role is not in allowedRoles', async () => {

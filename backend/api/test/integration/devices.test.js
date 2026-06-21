@@ -113,5 +113,32 @@ describe('Device Routes Integration Tests', () => {
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('Failed to register device');
     });
+
+    it('enforces rate limits after 10 requests within the window', async () => {
+      const app = buildApp();
+      const headers = {
+        ...CUSTOMER_HEADERS,
+        'x-user-id': 'rate-limited-user-uuid',
+      };
+
+      // Make 10 successful requests
+      for (let i = 0; i < 10; i++) {
+        const res = await request(app)
+          .post('/api/devices/register')
+          .set(headers)
+          .send({ fcmToken: `token-${i}` });
+        expect(res.status).toBe(200);
+      }
+
+      // The 11th request should exceed the limit and return 429
+      const res = await request(app)
+        .post('/api/devices/register')
+        .set(headers)
+        .send({ fcmToken: 'token-11' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.error).toBe('Rate limit exceeded');
+      expect(res.body.retryAfter).toBe(600);
+    });
   });
 });

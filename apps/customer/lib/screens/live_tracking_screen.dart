@@ -44,6 +44,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   LatLng? _currentPosition;
   ResilientWebSocket? _trackingWebSocket;
   StreamSubscription? _trackingSubscription;
+  RealtimeChannel? _supabaseRealtimeChannel;
 
   @override
   void initState() {
@@ -66,8 +67,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   @override
   void dispose() {
     _movementController.dispose();
-    if (SupabaseConfig.isConfigured && _ordersChannel != null) {
-      Supabase.instance.client.removeChannel(_ordersChannel!);
+    if (SupabaseConfig.isConfigured) {
+      if (_ordersChannel != null) {
+        Supabase.instance.client.removeChannel(_ordersChannel!);
+      }
+      if (_supabaseRealtimeChannel != null) {
+        Supabase.instance.client.removeChannel(_supabaseRealtimeChannel!);
+      }
     }
     _trackingSubscription?.cancel();
     _trackingWebSocket?.close();
@@ -238,9 +244,56 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
       if (order != null) {
         await _fetchDriverAndTruck(order['driver_id'], order['truck_id']);
+        if (order['id'] != null) {
+          _subscribeToSupabaseRealtime(order['id'] as String);
+          _fetchInitialDriverLocation();
+        }
       }
     } catch (e) {
       debugPrint('Failed to load order: $e');
+    }
+  }
+
+  void _subscribeToSupabaseRealtime(String orderUuid) {
+    if (_supabaseRealtimeChannel != null) {
+      return;
+    }
+
+    debugPrint('Subscribing to Supabase Realtime channel driver-location:$orderUuid');
+
+    _supabaseRealtimeChannel = Supabase.instance.client
+        .channel('driver-location:$orderUuid');
+
+    _supabaseRealtimeChannel!.onBroadcast(
+      event: 'location',
+      callback: (payload) {
+        debugPrint('Received Supabase Realtime location update: $payload');
+        final lat = (payload['lat'] as num?)?.toDouble();
+        final lng = (payload['lng'] as num?)?.toDouble();
+        if (lat != null && lng != null && mounted) {
+          _updateTruckPosition(LatLng(lat, lng));
+        }
+      },
+    ).subscribe((status, error) {
+      if (error != null) {
+        debugPrint('Supabase Realtime subscription error: $error');
+      } else {
+        debugPrint('Supabase Realtime subscription status: $status');
+      }
+    });
+  }
+
+  Future<void> _fetchInitialDriverLocation() async {
+    try {
+      final locData = await _orderService.fetchDriverLocation(widget.orderId);
+      final data = locData['data'] ?? locData;
+      final lat = (data['lat'] as num?)?.toDouble();
+      final lng = (data['lng'] as num?)?.toDouble();
+      if (lat != null && lng != null && mounted) {
+        _updateTruckPosition(LatLng(lat, lng));
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch initial driver location: $e');
     }
   }
 

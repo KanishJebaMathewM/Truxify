@@ -8,6 +8,8 @@ import 'package:truxify_driver/screens/destination_picker_screen.dart';
 import 'package:truxify_driver/screens/shell_screen.dart';
 import 'package:truxify_driver/services/marketplace_repository.dart';
 import 'package:truxify_driver/theme/app_theme.dart';
+import 'package:truxify_driver/services/driver_earnings_service.dart';
+import 'package:truxify_driver/models/earnings_daily_model.dart';
 
 class FakeMarketplaceRepository extends MarketplaceRepository {
   final _controller = StreamController<LoadOffer>.broadcast();
@@ -26,8 +28,37 @@ class FakeMarketplaceRepository extends MarketplaceRepository {
   }
 }
 
+class FakeDriverEarningsService extends Fake implements DriverEarningsService {
+  final EarningsDailyModel? mockTodayEarnings;
+  final Map<String, dynamic> mockStats;
+
+  FakeDriverEarningsService({
+    EarningsDailyModel? mockTodayEarnings,
+    this.mockStats = const {'rating': 4.85},
+  }) : mockTodayEarnings = mockTodayEarnings ?? EarningsDailyModel(
+          dayDate: DateTime.now(),
+          amount: 4800,
+          hoursDriven: 6.2,
+          tripCount: 3,
+        );
+
+  @override
+  Future<EarningsDailyModel?> fetchTodayEarningsSummary() async {
+    return mockTodayEarnings;
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchDriverStats() async {
+    return mockStats;
+  }
+
+  @override
+  void dispose() {}
+}
+
 Widget _buildTestApp({
   MarketplaceRepository? marketplaceRepo,
+  DriverEarningsService? earningsService,
   String? mockLocationText,
 }) {
   final controller = TruxifyController();
@@ -38,6 +69,7 @@ Widget _buildTestApp({
       theme: TruxifyTheme.light(),
       home: ShellScreen(
         marketplaceRepo: marketplaceRepo,
+        earningsService: earningsService ?? FakeDriverEarningsService(),
         mockLocationText: mockLocationText,
       ),
       onGenerateRoute: (settings) {

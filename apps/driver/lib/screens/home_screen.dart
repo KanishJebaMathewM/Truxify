@@ -32,10 +32,13 @@ class HomeScreen extends StatefulWidget {
   HomeScreen({
     super.key,
     MarketplaceRepository? marketplaceRepo,
+    DriverEarningsService? earningsService,
     this.mockLocationText,
-  }) : marketplaceRepo = marketplaceRepo ?? MarketplaceRepository();
+  }) : marketplaceRepo = marketplaceRepo ?? MarketplaceRepository(),
+       earningsService = earningsService ?? DriverEarningsService();
 
   final MarketplaceRepository marketplaceRepo;
+  final DriverEarningsService earningsService;
   final String? mockLocationText;
 
   @override
@@ -71,7 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
   LoadOffer? _latestNewLoad;
   bool _dismissedNewLoad = false;
 
-  final DriverEarningsService _earningsService = DriverEarningsService();
+  late final DriverEarningsService _earningsService;
   EarningsDailyModel? _todayEarnings;
   double? _driverRating;
   bool _isLoadingMetrics = true;
@@ -80,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _earningsService = widget.earningsService;
     _marketplaceRepo = widget.marketplaceRepo;
     if (widget.mockLocationText != null) {
       _currentLocationText = widget.mockLocationText;

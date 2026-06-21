@@ -16,15 +16,18 @@ import 'trips_screen.dart';
 import 'my_truck_screen.dart';
 
 import '../services/marketplace_repository.dart';
+import '../services/driver_earnings_service.dart';
 
 class ShellScreen extends StatefulWidget {
   const ShellScreen({
     super.key,
     this.marketplaceRepo,
+    this.earningsService,
     this.mockLocationText,
   });
 
   final MarketplaceRepository? marketplaceRepo;
+  final DriverEarningsService? earningsService;
   final String? mockLocationText;
 
   @override
@@ -51,6 +54,7 @@ class _ShellScreenState extends State<ShellScreen> {
         _homeNavigatorKey,
         HomeScreen(
           marketplaceRepo: widget.marketplaceRepo,
+          earningsService: widget.earningsService,
           mockLocationText: widget.mockLocationText,
         ),
       ),

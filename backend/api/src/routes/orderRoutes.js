@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
 import { bidLimiter } from '../middleware/rateLimiter.js';
-import { supabase, redisClient } from '../config/db.js';
+import { supabase, redisClient, mongoDb } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
@@ -1120,6 +1120,70 @@ router.post('/predict-demand', authenticate, requireRole(['customer', 'driver'])
       error: 'Failed to fetch demand prediction from ML engine.',
       details: err.message,
     });
+  }
+});
+
+// ============================================================================
+// 17. GET DRIVER LOCATION (CUSTOMER OR DRIVER)
+// ============================================================================
+router.get('/:id/driver-location', authenticate, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id; // this is order_display_id from client
+  
+  try {
+    // 1. Resolve order and check authentication / authorization
+    const { data: order, error: orderErr } = await supabase
+      .from('orders')
+      .select('id, customer_id, driver_id, status')
+      .eq('order_display_id', orderId)
+      .maybeSingle();
+
+    if (orderErr) {
+      return res.status(500).json({ error: 'Failed to fetch order details.' });
+    }
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    // Authorization: User must be either the customer who owns the order or the assigned driver
+    if (req.user.role === 'customer' && order.customer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
+    }
+    if (req.user.role === 'driver' && order.driver_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
+    }
+
+    if (!order.driver_id) {
+      return res.status(404).json({ error: 'No driver assigned to this order.' });
+    }
+
+    // 2. Query MongoDB telemetry collection
+    if (!mongoDb) {
+      return res.status(503).json({ error: 'Telemetry database not available.' });
+    }
+
+    const latestTelemetry = await mongoDb
+      .collection('telemetry')
+      .find({ driver_id: order.driver_id })
+      .sort({ timestamp: -1 })
+      .limit(1)
+      .toArray();
+
+    if (!latestTelemetry || latestTelemetry.length === 0) {
+      return res.status(404).json({ error: 'No live telemetry found for this driver.' });
+    }
+
+    const telemetry = latestTelemetry[0];
+    return res.json({
+      driverId: telemetry.driver_id,
+      orderId: telemetry.order_id || order.id,
+      lat: telemetry.lat,
+      lng: telemetry.lng,
+      timestamp: telemetry.timestamp
+    });
+
+  } catch (err) {
+    logger.error({ err }, 'Fetch driver location exception');
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

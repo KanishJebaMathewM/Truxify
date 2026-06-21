@@ -378,7 +378,7 @@ describe('Bid Routes', () => {
       'OD-ESCROW',
       '0x1234567890abcdef1234567890abcdef12345678',
       '0xAbcdef1234567890Abcdef1234567890Abcdef12',
-      expect.any(BigInt),
+      500000000000000000000n,
     );
     expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
 
@@ -495,7 +495,7 @@ describe('Bid Routes', () => {
         'OD-COMP-FAIL',
         '0x1234567890abcdef1234567890abcdef12345678',
         '0xAbcdef1234567890Abcdef1234567890Abcdef12',
-        expect.any(BigInt)
+        500000000000000000000n
       );
 
       let order = m.store.orders.find(o => o.id === 'order-comp-fail');

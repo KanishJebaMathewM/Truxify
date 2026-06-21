@@ -42,9 +42,6 @@ if [[ ${#missing[@]} -gt 0 ]]; then
   exit 1
 fi
 
-write_json() {
-  local target="$1"
-  python3 - <<PY > "$target"
 # Detect Python command
 PYTHON_CMD="python3"
 if ! command -v python3 &>/dev/null; then

@@ -136,7 +136,7 @@ export const updateWalletSchema = z.object({
 
 export const registerDeviceSchema = z.object({
   fcmToken: z.string()
-    .min(4, { message: 'fcmToken must be at least 4 characters' })
+    .min(10, { message: 'fcmToken must be at least 10 characters' })
     .max(4096, { message: 'fcmToken is too long' }),
   platform: z.enum(['android', 'ios', 'web'], {
     invalid_type_error: 'platform must be one of: android, ios, web',

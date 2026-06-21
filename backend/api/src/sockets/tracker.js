@@ -204,8 +204,8 @@ export function initWebSocketServer(server) {
         ws.driverId = profile.id;
         await restoreSubscriptions(ws);
         logger.info(`✅ WS Authenticated user: ${ws.user.id}`);
-      } catch (e) {
-        logger.error({ err: e }, 'WS Auth failed');
+      } catch (err) {
+        logger.error({ err }, 'WS Auth failed');
         ws.close(4001, 'Unauthorized: Invalid token');
         return;
       }

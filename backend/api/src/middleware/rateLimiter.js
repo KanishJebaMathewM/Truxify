@@ -59,3 +59,17 @@ export const bidLimiter = rateLimit({
   store: buildStore('rl:bid:'),
   message: { error: 'Rate limit exceeded', retryAfter: 60 },
 });
+
+export const deviceLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    if (req.user?.id) return `user:${req.user.id}`;
+    if (req.user?.uid) return `uid:${req.user.uid}`;
+    return ipKeyGenerator(req);
+  },
+  store: buildStore('rl:device:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 600 },
+});

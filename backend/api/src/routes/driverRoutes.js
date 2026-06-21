@@ -55,10 +55,12 @@ router.post('/otp/verify', verifyLoginOtpLimiter, validateBody(loginOtpSchema), 
 router.get('/stats', authenticate, requireRole(['driver']), async (req, res) => {
   try {
     const { data: details, error } = await supabase
-      .from('driver_details')
-      .select('rating, total_trips, completion_rate, is_online, wallet_confirmed, wallet_pending, wallet_total, truck_id')
-      .eq('user_id', req.user.id)
-      .maybeSingle();
+  .from('driver_details')
+  .select(
+    'rating, total_trips, completion_rate, is_online, wallet_confirmed, wallet_pending, wallet_total, truck_id'
+  )
+  .eq('user_id', req.user.id)
+  .maybeSingle();
 
     if (error) {
       return res.status(500).json({ error: 'Failed to fetch driver stats.', details: error.message });
@@ -80,9 +82,12 @@ router.get('/stats', authenticate, requireRole(['driver']), async (req, res) => 
     }
 
     res.json({
-      stats: details,
-      truck
-    });
+  stats: {
+    ...details,
+    successfulDeliveries: details.total_trips ?? 0, 
+  },
+  truck,
+});
 
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });

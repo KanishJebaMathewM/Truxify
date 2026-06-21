@@ -77,6 +77,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late final DriverEarningsService _earningsService;
   EarningsDailyModel? _todayEarnings;
   double? _driverRating;
+  int? _successfulDeliveries;
   bool _isLoadingMetrics = true;
   String? _metricsError;
 
@@ -175,11 +176,15 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
 
       setState(() {
-        _todayEarnings = results[0] as EarningsDailyModel?;
-        final stats = results[1] as Map<String, dynamic>;
-        _driverRating = (stats['rating'] as num?)?.toDouble();
-        _isLoadingMetrics = false;
-      });
+  _todayEarnings = results[0] as EarningsDailyModel?;
+  final stats = results[1] as Map<String, dynamic>;
+
+  _driverRating = (stats['rating'] as num?)?.toDouble();
+  _successfulDeliveries =
+      (stats['successfulDeliveries'] as num?)?.toInt();
+
+  _isLoadingMetrics = false;
+});
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -1283,6 +1288,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ? _driverRating!.toStringAsFixed(2)
         : '—';
 
+    final deliveryValue = _successfulDeliveries != null
+        ? _successfulDeliveries.toString()
+        : '—';
+
     return Row(
       children: [
         Expanded(
@@ -1308,6 +1317,16 @@ class _HomeScreenState extends State<HomeScreen> {
             label: 'Rating',
           ),
         ),
+        const SizedBox(width: 8),
+
+Expanded(
+  child: _buildShiftMetric(
+    icon: Icons.local_shipping_outlined,
+    value: deliveryValue,
+    label: 'Deliveries',
+  ),
+),
+
       ],
     );
   }

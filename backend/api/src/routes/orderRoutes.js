@@ -205,7 +205,7 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
     }
     estimatedPrice = Math.round(mlResult.estimated_price * 100);
   } catch (mlErr) {
-    console.warn('[ML] Price prediction unavailable, falling back to base pricing:', mlErr.message);
+    logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
   }
 
   const orderDisplayId = generateOrderDisplayId();

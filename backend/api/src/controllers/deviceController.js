@@ -21,11 +21,14 @@ export async function registerDeviceToken(req, res) {
       });
     }
 
-    const { error } = await supabase.from('user_devices').upsert({
-      user_id: userId,
-      fcm_token: fcmToken,
-      platform: platform || 'android'
-    });
+    const { error } = await supabase.from('user_devices').upsert(
+      {
+        user_id: userId,
+        fcm_token: fcmToken,
+        platform: platform || 'android'
+      },
+      { onConflict: 'fcm_token' }
+    );
 
     if (error) {
       logger.error('[DeviceController] Failed to register device token in database:', error.message);

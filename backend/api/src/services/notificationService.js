@@ -118,7 +118,7 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
     return null;
   }
 
-  console.log(`[NotificationService] OTP stored for order ${orderId}, expires at ${expiresAt}`);
+  logger.info({ orderId, expiresAt }, 'OTP stored for order');
   return data;
 }
 

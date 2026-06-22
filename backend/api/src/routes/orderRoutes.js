@@ -13,6 +13,7 @@ import {
   submitRatingSchema,
   paramIdSchema,
   acceptBidParamsSchema,
+  acceptBidSchema,
   updateMilestoneSchema,
   verifyDeliverySchema,
   predictDemandSchema
@@ -631,11 +632,22 @@ router.get('/:id/bids', authenticate, requireRole(['customer']), validateParams(
 // ============================================================================
 // 11. ACCEPT BID (CUSTOMER)
 // ============================================================================
-router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
+router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), validateParams(acceptBidParamsSchema), validateBody(acceptBidSchema), async (req, res) => {
   const orderId = req.params.id;
   const bidId = req.params.bidId;
+  const idempotencyKey = req.body?.idempotency_key;
 
   try {
+    // Idempotency check — prevent duplicate bid acceptance from concurrent requests
+    if (idempotencyKey) {
+      const idempKey = `bid_accept:${idempotencyKey}`;
+      const alreadyProcessed = await redisClient.get(idempKey);
+      if (alreadyProcessed) {
+        return res.json({ message: 'Bid already accepted.', alreadyProcessed: true });
+      }
+      await redisClient.set(idempKey, 'processing', 'EX', 300);
+    }
+
     const { data: order } = await supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
     if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
 
@@ -673,50 +685,56 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       truckInfo = data;
     }
 
-    // Phase 1: Build unsigned deposit tx for customer to sign
-    let depositTxData = null;
-    if (driverWallet && customerWallet) {
-      const maticPerPaisa = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0');
-      if (!maticPerPaisa || !isFinite(maticPerPaisa) || maticPerPaisa <= 0) {
-        logger.warn('[escrow] ESCROW_MATIC_PER_PAISA not configured — skipping escrow deposit.');
-      } else {
-        const maticAmount = (bid.bid_amount * maticPerPaisa).toFixed(18);
-        const maxEscrowMatic = Number.parseFloat(process.env.MAX_ESCROW_MATIC || '5');
-        if (!Number.isFinite(maxEscrowMatic) || maxEscrowMatic <= 0) {
-          logger.error('[escrow] MAX_ESCROW_MATIC is invalid — refusing deposit.');
-          return res.status(500).json({ error: 'Escrow configuration error. Please contact support.' });
-        }
-        if (Number.parseFloat(maticAmount) > maxEscrowMatic) {
-          return res.status(400).json({ error: 'Computed escrow amount exceeds safety cap. Check ESCROW_MATIC_PER_PAISA configuration.' });
-        }
-        const amountWei = ethers.parseEther(maticAmount);
-        const { txData } = await buildDepositTx(
-          order.order_display_id, customerWallet, driverWallet, amountWei,
-        );
-        if (txData) {
-          depositTxData = txData;
-          await supabase.from('orders').update({
-            escrow_booking_id: `escrow:${order.order_display_id}`,
-            escrow_status: 'funding',
-          }).eq('id', orderId);
-        }
-      }
-    }
-
-    // Phase 2: Atomically accept the bid
+    // Atomically accept the bid — the RPC uses SELECT FOR UPDATE on both
+    // load_offers and orders, so concurrent requests block until the first
+    // transaction completes. The second request then sees the updated status
+    // and raises an exception.
+    const escrowBookingId = `escrow:${order.order_display_id}`;
     const { error: rpcErr } = await supabase.rpc('accept_bid_tx', {
       p_bid_id: bidId, p_order_id: orderId, p_load_id: bid.load_id, p_driver_id: bid.driver_id,
       p_truck_id: truckInfo?.id || null, p_driver_name: profile?.full_name || 'Assigned Driver',
       p_driver_rating: details?.rating || 0.00, p_truck_number: truckInfo?.number_plate || 'N/A',
-      p_bid_amount: bid.bid_amount, p_order_display_id: order.order_display_id
+      p_bid_amount: bid.bid_amount, p_order_display_id: order.order_display_id,
+      p_escrow_booking_id: escrowBookingId
     });
 
     if (rpcErr) {
       return res.status(500).json({
         error: 'Failed to accept bid atomically.',
-        details: rpcErr.message,
-        recovery: 'The pending escrow deposit has been voided. Please try again.'
+        details: rpcErr.message
       });
+    }
+
+    // Phase 2: Build unsigned deposit tx for customer to sign (no side effects)
+    let depositTxData = null;
+    if (driverWallet && customerWallet) {
+      const maticPerPaisa = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0');
+      if (maticPerPaisa && isFinite(maticPerPaisa) && maticPerPaisa > 0) {
+        const maticAmount = (bid.bid_amount * maticPerPaisa).toFixed(18);
+        const maxEscrowMatic = Number.parseFloat(process.env.MAX_ESCROW_MATIC || '5');
+        if (Number.isFinite(maxEscrowMatic) && maxEscrowMatic > 0) {
+          if (Number.parseFloat(maticAmount) <= maxEscrowMatic) {
+            const amountWei = ethers.parseEther(maticAmount);
+            const { txData } = await buildDepositTx(
+              order.order_display_id, customerWallet, driverWallet, amountWei,
+            );
+            if (txData) {
+              depositTxData = txData;
+              // Update escrow state now that bid acceptance is confirmed
+              await supabase.from('orders').update({
+                escrow_booking_id: escrowBookingId,
+                escrow_status: 'funding',
+              }).eq('id', orderId);
+            }
+          }
+        }
+      }
+    }
+
+    // Mark idempotency key as completed
+    if (idempotencyKey) {
+      const idempKey = `bid_accept:${idempotencyKey}`;
+      await redisClient.set(idempKey, 'completed', 'EX', 86400);
     }
 
     res.json({

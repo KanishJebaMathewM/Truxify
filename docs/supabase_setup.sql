@@ -1301,25 +1301,26 @@ create trigger trg_support_tickets_updated_at
 -- Called from: POST /api/orders/:id/bids/:bidId/accept
 -- ────────────────────────────────────────────────────────────────────────────
 create or replace function accept_bid_tx(
-  p_bid_id        uuid,
-  p_order_id      uuid,
-  p_load_id       uuid,
-  p_driver_id     uuid,
-  p_truck_id      uuid,
-  p_driver_name   text,
-  p_driver_rating numeric,
-  p_truck_number  text,
-  p_bid_amount    int,
-  p_order_display_id text
+  p_bid_id           uuid,
+  p_order_id         uuid,
+  p_load_id          uuid,
+  p_driver_id        uuid,
+  p_truck_id         uuid,
+  p_driver_name      text,
+  p_driver_rating    numeric,
+  p_truck_number     text,
+  p_bid_amount       int,
+  p_order_display_id text,
+  p_escrow_booking_id text default null
 ) returns void
 language plpgsql
-security definer          -- runs with table-owner privileges (bypasses RLS)
+security definer
 as $$
 declare
   v_load_status text;
   v_order_status text;
 begin
-    -- Lock load offer row; concurrent calls block here until this transaction completes
+  -- Lock load offer row; concurrent calls block until this transaction completes
   select status into v_load_status
     from load_offers
     where id = p_load_id
@@ -1338,6 +1339,7 @@ begin
   if v_order_status is null or v_order_status <> 'pending' then
     raise exception 'Order is no longer pending';
   end if;
+
   -- Step 1: Accept the chosen bid
   update load_bids
     set status = 'accepted', updated_at = now()
@@ -1354,16 +1356,17 @@ begin
     set status = 'claimed', updated_at = now()
     where id = p_load_id;
 
-  -- Step 4: Assign driver + truck to order, update pricing
+  -- Step 4: Assign driver + truck to order, update pricing and escrow
   update orders
-    set driver_id     = p_driver_id,
-        truck_id      = p_truck_id,
-        status        = 'truck_assigned',
-        driver_name   = p_driver_name,
-        driver_rating = p_driver_rating,
-        truck_number  = p_truck_number,
-        total_amount  = p_bid_amount,
-        updated_at    = now()
+    set driver_id        = p_driver_id,
+        truck_id         = p_truck_id,
+        status           = 'truck_assigned',
+        driver_name      = p_driver_name,
+        driver_rating    = p_driver_rating,
+        truck_number     = p_truck_number,
+        total_amount     = p_bid_amount,
+        escrow_booking_id = coalesce(p_escrow_booking_id, escrow_booking_id),
+        updated_at       = now()
     where id = p_order_id;
 
   -- Step 5: Mark "Truck Assigned" milestone as completed

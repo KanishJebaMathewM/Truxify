@@ -70,6 +70,10 @@ export const acceptBidParamsSchema = z.object({
   bidId: uuidSchema.or(z.string().min(1, "Bid ID is required"))
 });
 
+export const acceptBidSchema = z.object({
+  idempotency_key: z.string().min(1, "Idempotency key is required to prevent duplicate bid acceptance").optional(),
+}).passthrough();
+
 export const driverOnlineSchema = z.object({
   is_online: z.boolean(),
 }).passthrough();

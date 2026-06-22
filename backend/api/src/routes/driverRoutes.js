@@ -27,13 +27,13 @@ const verifyLoginOtpLimiter = rateLimit({
 
 router.post('/otp/verify', verifyLoginOtpLimiter, validateBody(loginOtpSchema), async (req, res) => {
   const { phone, otp } = req.body;
-  const expectedOtp = (process.env.DRIVER_LOGIN_OTP || '1234').trim();
-
-  if (process.env.NODE_ENV === 'production' && !process.env.DRIVER_LOGIN_OTP) {
+  if (!process.env.DRIVER_LOGIN_OTP) {
     return res.status(503).json({
       error: 'Driver login OTP verification is not configured on this server.',
     });
   }
+
+  const expectedOtp = process.env.DRIVER_LOGIN_OTP.trim();
 
   if (process.env.DRIVER_LOGIN_PHONE && phone !== process.env.DRIVER_LOGIN_PHONE.trim()) {
     return res.status(400).json({ error: 'Invalid phone number for OTP verification.' });
@@ -443,4 +443,3 @@ router.get('/:driverId/reputation', authenticate, requireRole(['driver']), async
 });
 
 export default router;
-

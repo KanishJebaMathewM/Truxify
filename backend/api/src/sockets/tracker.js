@@ -2,9 +2,15 @@ import { WebSocketServer } from 'ws';
 import { mongoDb, redisClient, firebaseAdmin, supabase } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';
+import os from 'os';
+import path from 'path';
+import fs from 'fs';
 
 let mongoDbOverride = null;
 const getMongoDb = () => mongoDbOverride || mongoDb;
+
+let telemetryDropCounter = 0;
+const RECOVERY_FILE_PATH = path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
 
 // In-memory mapping of active client subscriptions
 const trackingSubscriptions = new Map();
@@ -405,7 +411,8 @@ export async function handleLocationPing(ws, data) {
   if (telemetryWriteBuffer.length >= MAX_BUFFER_SIZE) {
     const dropCount = Math.floor(MAX_BUFFER_SIZE * 0.1);
     telemetryWriteBuffer.splice(0, dropCount);
-    logger.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} oldest records. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
+    telemetryDropCounter += dropCount;
+    logger.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} oldest records. Total dropped: ${telemetryDropCounter}. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
   }
   telemetryWriteBuffer.push({
     driver_id,
@@ -505,22 +512,44 @@ async function flushTelemetryBuffer() {
       logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB clusters.`);
       flushBackoffMs = 1000;
     } catch (err) {
-      logger.error(`[TRUXIFY RETRY LOGIC] Bulk insert failed (backoff: ${flushBackoffMs}ms):`, err.message);
+      const isBulkWriteError = err.code === 121 || err.name === 'BulkWriteError' || err.message.includes('Document failed validation');
 
-      const isValidationError = err.code === 121 || err.message.includes('Document failed validation');
-
-      if (isValidationError) {
-        logger.error(`[TRUXIFY FATAL DATA DROP] Discarding malformed tracking block payloads to prevent infinite loop memory bloat.`);
+      if (isBulkWriteError) {
+        // Log individual failure details without dropping entire batch
+        if (err.writeErrors && err.writeErrors.length > 0) {
+          const sampleErrors = err.writeErrors.slice(0, 5).map(e =>
+            `doc ${e.index}: ${e.err?.message || 'unknown'}`
+          ).join('; ');
+          logger.error(`[TRUXIFY VALIDATION] ${err.writeErrors.length} documents failed validation. Samples: ${sampleErrors}`);
+        } else {
+          logger.error(`[TRUXIFY VALIDATION] Bulk insert validation error: ${err.message}`);
+        }
+        // Only drop the failing records; retry the rest
+        const succeeded = err.writeErrors
+          ? recordsToFlush.filter((_, i) => !err.writeErrors.some(e => e.index === i))
+          : [];
+        if (succeeded.length > 0) {
+          telemetryWriteBuffer = [...succeeded, ...telemetryWriteBuffer];
+          if (telemetryWriteBuffer.length > MAX_BUFFER_SIZE) {
+            const overflowDrop = telemetryWriteBuffer.length - MAX_BUFFER_SIZE;
+            telemetryWriteBuffer.splice(0, overflowDrop);
+            telemetryDropCounter += overflowDrop;
+            logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after partial insert.`);
+          }
+        }
       } else {
         flushBackoffMs = Math.min(flushBackoffMs * 2, 60000);
 
-        const spaceAvailable = Math.max(0, MAX_BUFFER_SIZE - telemetryWriteBuffer.length);
-        const recordsToKeep = recordsToFlush.slice(-spaceAvailable);
-        const droppedCount = recordsToFlush.length - recordsToKeep.length;
-        if (droppedCount > 0) {
-          logger.warn(`[TRUXIFY BUFFER DROP] Buffer full: dropped ${droppedCount} oldest records from retry batch.`);
+        // Atomic buffer swap: snapshot current buffer and merge with retry batch
+        const currentSnapshot = telemetryWriteBuffer;
+        telemetryWriteBuffer = recordsToFlush;
+        const overflow = telemetryWriteBuffer.length + currentSnapshot.length - MAX_BUFFER_SIZE;
+        if (overflow > 0) {
+          telemetryWriteBuffer.splice(0, overflow);
+          telemetryDropCounter += overflow;
+          logger.warn(`[TRUXIFY BUFFER DROP] Capacity limit: dropped ${overflow} oldest records from retry merge. Total dropped: ${telemetryDropCounter}`);
         }
-        telemetryWriteBuffer = [...recordsToKeep, ...telemetryWriteBuffer];
+        telemetryWriteBuffer.push(...currentSnapshot);
       }
     } finally {
       currentFlushPromise = null;
@@ -557,7 +586,27 @@ function scheduleNextFlush() {
   }, Math.max(BUFFER_FLUSH_INTERVAL_MS, flushBackoffMs));
 }
 
+function loadRecoveryFile() {
+  try {
+    if (fs.existsSync(RECOVERY_FILE_PATH)) {
+      const content = fs.readFileSync(RECOVERY_FILE_PATH, 'utf-8').trim();
+      if (content) {
+        const records = content.split('\n').filter(Boolean).map(line => JSON.parse(line));
+        if (records.length > 0) {
+          telemetryWriteBuffer = [...records, ...telemetryWriteBuffer].slice(-MAX_BUFFER_SIZE);
+          logger.info(`[TRUXIFY RECOVERY] Loaded ${records.length} telemetry records from recovery file. Buffer size: ${telemetryWriteBuffer.length}`);
+        }
+      }
+      fs.unlinkSync(RECOVERY_FILE_PATH);
+    }
+  } catch (err) {
+    logger.error('[TRUXIFY RECOVERY] Failed to load recovery file:', err.message);
+    try { fs.unlinkSync(RECOVERY_FILE_PATH); } catch (_) { /* ignore */ }
+  }
+}
+
 function initTelemetryScheduler() {
+  loadRecoveryFile();
   isSchedulerActive = true;
   scheduleNextFlush();
   
@@ -594,7 +643,15 @@ export async function closeWebSocketServer() {
     }
     if (!getMongoDb()) {
       const dataLoss = telemetryWriteBuffer.length;
-      logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available after waiting. ${dataLoss} telemetry records will be lost.`);
+      if (dataLoss > 0) {
+        try {
+          const lines = telemetryWriteBuffer.map(r => JSON.stringify(r)).join('\n');
+          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', 'utf-8');
+          logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available. Wrote ${dataLoss} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`);
+        } catch (fileErr) {
+          logger.error(`[TRUXIFY SHUTDOWN] Failed to write recovery file: ${fileErr.message}. ${dataLoss} records lost.`);
+        }
+      }
     }
   }
 

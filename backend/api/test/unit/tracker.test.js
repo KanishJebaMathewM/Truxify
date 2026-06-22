@@ -293,7 +293,7 @@ describe('tracker graceful shutdown', () => {
 
     expect(t.getTelemetryWriteBuffer().length).toBe(2);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[TRUXIFY SHUTDOWN] MongoDB not available after waiting. 2 telemetry records will be lost.')
+      expect.stringContaining('[TRUXIFY SHUTDOWN] MongoDB not available.')
     );
 
     warnSpy.mockRestore();
@@ -1602,7 +1602,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     expect(buffer[5].driver_id).toBe('new-driver-0');
 
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('[TRUXIFY BUFFER DROP] Buffer full: dropped 5 oldest records from retry batch.')
+      expect.stringContaining('[TRUXIFY BUFFER DROP] Capacity limit: dropped 5 oldest records from retry merge.')
     );
   });
 

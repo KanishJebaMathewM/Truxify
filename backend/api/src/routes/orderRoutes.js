@@ -15,7 +15,6 @@ import {
   submitRatingSchema,
   paramIdSchema,
   acceptBidParamsSchema,
-  acceptBidSchema,
   updateMilestoneSchema,
   verifyDeliverySchema,
   predictDemandSchema
@@ -632,22 +631,10 @@ router.get('/:id/bids', authenticate, requireRole(['customer']), validateParams(
 // ============================================================================
 // 11. ACCEPT BID (CUSTOMER)
 // ============================================================================
-router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), validateParams(acceptBidParamsSchema), validateBody(acceptBidSchema), async (req, res) => {
+router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
   const orderId = req.params.id;
   const bidId = req.params.bidId;
-  const idempotencyKey = req.body?.idempotency_key;
-
   try {
-    // Idempotency check — prevent duplicate bid acceptance from concurrent requests
-    if (idempotencyKey) {
-      const idempKey = `bid_accept:${idempotencyKey}`;
-      const alreadyProcessed = await redisClient.get(idempKey);
-      if (alreadyProcessed) {
-        return res.json({ message: 'Bid already accepted.', alreadyProcessed: true });
-      }
-      await redisClient.set(idempKey, 'processing', 'EX', 300);
-    }
-
     const { data: order } = await supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
     if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
 

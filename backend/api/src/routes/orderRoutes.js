@@ -205,7 +205,7 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
     }
     estimatedPrice = Math.round(mlResult.estimated_price * 100);
   } catch (mlErr) {
-    console.warn('[ML] Price prediction unavailable, falling back to base pricing:', mlErr.message);
+    logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
   }
 
   const orderDisplayId = generateOrderDisplayId();
@@ -1102,7 +1102,7 @@ router.post('/:id/confirm-deposit', authenticate, requireRole(['customer']), val
 
     res.json({ message: 'Escrow deposit confirmed', txHash: result.txHash });
   } catch (err) {
-    console.error('[confirm-deposit] Exception:', err.message);
+    logger.error('[confirm-deposit] Exception:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

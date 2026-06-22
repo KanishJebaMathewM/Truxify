@@ -27,29 +27,39 @@ const REPUTATION_ABI = [
   'function increaseReputation(address driver, uint256 points) external',
   'function getReputation(address driver) external view returns (uint256)',
 ];
-
-const rpcUrl             = process.env.POLYGON_RPC_URL;
-const contractAddress    = process.env.REPUTATION_CONTRACT_ADDRESS;
-const relayerPrivateKey  = process.env.RELAYER_WALLET_PRIVATE_KEY;
-
 /** @type {ethers.Contract | null} */
 export let reputationContract = null;
 
-if (rpcUrl && contractAddress && relayerPrivateKey) {
-  try {
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const relayer  = new ethers.Wallet(relayerPrivateKey, provider);
-    reputationContract = new ethers.Contract(contractAddress, REPUTATION_ABI, relayer);
-    logger.info('✅ Polygon Reputation contract client initialised.');
-  } catch (err) {
-    logger.error('❌ Failed to initialise Reputation contract client:', err.message);
+/**
+ * Initialises or resets the Reputation contract client.
+ * Exposed for testing and runtime reconfiguration.
+ */
+export function initReputationContract() {
+  const rpcUrl             = process.env.POLYGON_RPC_URL;
+  const contractAddress    = process.env.REPUTATION_CONTRACT_ADDRESS;
+  const relayerPrivateKey  = process.env.RELAYER_WALLET_PRIVATE_KEY;
+
+  if (rpcUrl && contractAddress && relayerPrivateKey) {
+    try {
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const relayer  = new ethers.Wallet(relayerPrivateKey, provider);
+      reputationContract = new ethers.Contract(contractAddress, REPUTATION_ABI, relayer);
+      logger.info('✅ Polygon Reputation contract client initialised.');
+    } catch (err) {
+      reputationContract = null;
+      logger.error('❌ Failed to initialise Reputation contract client:', err.message);
+    }
+  } else {
+    reputationContract = null;
+    logger.warn(
+      '⚠️  POLYGON_RPC_URL / REPUTATION_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY ' +
+      'not set. On-chain reputation updates disabled.'
+    );
   }
-} else {
-  logger.warn(
-    '⚠️  POLYGON_RPC_URL / REPUTATION_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY ' +
-    'not set. On-chain reputation updates disabled.'
-  );
 }
+
+// Initialise on load
+initReputationContract();
 
 /**
  * Award on-chain reputation points to a driver after a completed rating.

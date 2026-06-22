@@ -39,7 +39,7 @@ describe('Device Routes Integration Tests', () => {
     it('returns 401 if x-user-id header is missing when BYPASS_AUTH is enabled', async () => {
       const res = await request(buildApp())
         .post('/api/devices/register')
-        .send({ fcmToken: 'token123', platform: 'ios' });
+        .send({ fcmToken: 'token1234567890', platform: 'ios' });
 
       expect(res.status).toBe(401);
       expect(res.body.error).toBe('Authentication bypassed but x-user-id header is missing.');
@@ -49,7 +49,7 @@ describe('Device Routes Integration Tests', () => {
       const res = await request(buildApp())
         .post('/api/devices/register')
         .set(CUSTOMER_HEADERS)
-        .send({ fcmToken: 'token123', platform: 'ios' });
+        .send({ fcmToken: 'token1234567890', platform: 'ios' });
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
@@ -60,7 +60,7 @@ describe('Device Routes Integration Tests', () => {
       // Verify the record was stored in user_devices table
       const stored = m.store.user_devices.find(d => d.user_id === 'customer-uuid-123');
       expect(stored).toBeTruthy();
-      expect(stored.fcm_token).toBe('token123');
+      expect(stored.fcm_token).toBe('token1234567890');
       expect(stored.platform).toBe('ios');
     });
 
@@ -68,12 +68,12 @@ describe('Device Routes Integration Tests', () => {
       const res = await request(buildApp())
         .post('/api/devices/register')
         .set(CUSTOMER_HEADERS)
-        .send({ fcmToken: 'token999' });
+        .send({ fcmToken: 'token9999999999' });
 
       expect(res.status).toBe(200);
       const stored = m.store.user_devices.find(d => d.user_id === 'customer-uuid-123');
       expect(stored).toBeTruthy();
-      expect(stored.fcm_token).toBe('token999');
+      expect(stored.fcm_token).toBe('token9999999999');
       expect(stored.platform).toBe('android');
     });
 
@@ -84,7 +84,22 @@ describe('Device Routes Integration Tests', () => {
         .send({ platform: 'android' });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toBe('fcmToken is required');
+      expect(res.body.error).toBe('Validation failed');
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'fcmToken' }),
+        ])
+      );
+    });
+
+    it('returns 400 if platform is not one of the allowed values', async () => {
+      const res = await request(buildApp())
+        .post('/api/devices/register')
+        .set(CUSTOMER_HEADERS)
+        .send({ fcmToken: 'token1234567890', platform: 'smart-fridge' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation failed');
     });
 
     it('returns 500 if database upsert fails and does not expose internal error details', async () => {
@@ -93,10 +108,37 @@ describe('Device Routes Integration Tests', () => {
       const res = await request(buildApp())
         .post('/api/devices/register')
         .set(CUSTOMER_HEADERS)
-        .send({ fcmToken: 'token_err' });
+        .send({ fcmToken: 'token_err_database' });
 
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('Failed to register device');
+    });
+
+    it('enforces rate limits after 10 requests within the window', async () => {
+      const app = buildApp();
+      const headers = {
+        ...CUSTOMER_HEADERS,
+        'x-user-id': 'rate-limited-user-uuid',
+      };
+
+      // Make 10 successful requests
+      for (let i = 0; i < 10; i++) {
+        const res = await request(app)
+          .post('/api/devices/register')
+          .set(headers)
+          .send({ fcmToken: `token-${i}-1234567890` });
+        expect(res.status).toBe(200);
+      }
+
+      // The 11th request should exceed the limit and return 429
+      const res = await request(app)
+        .post('/api/devices/register')
+        .set(headers)
+        .send({ fcmToken: 'token-11-1234567890' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.error).toBe('Rate limit exceeded');
+      expect(res.body.retryAfter).toBe(600);
     });
   });
 });

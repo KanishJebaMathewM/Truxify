@@ -41,7 +41,7 @@ function getRedisClient() {
  * Validates the shape of a cached profile.
  * 
  * @param {string} firebaseUid - The expected Firebase UID.
- * @param {any} cachedProfile - The cached profile to validate.
+ * @param {object|null} cachedProfile - The cached profile to validate.
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedProfile(firebaseUid, cachedProfile) {

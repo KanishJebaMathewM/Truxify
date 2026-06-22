@@ -1,7 +1,10 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/widgets/order_card.dart';
+import '../constants/supabase_config.dart';
 import '../services/order_service.dart';
+import '../services/supabase_service.dart';
 import '../controllers/app_controller.dart';
 import '../core/offline/cache/cache_manager.dart';
 import '../models/app_models.dart';
@@ -72,6 +75,7 @@ class _OrdersScreenState extends State<OrdersScreen>
       }
     });
     _loadOrders();
+    _subscribeToOrdersListUpdates();
   }
 
   String _formatLastUpdated(String? updatedAt) {
@@ -225,10 +229,40 @@ class _OrdersScreenState extends State<OrdersScreen>
     _loadOrders();
   }
 
+  RealtimeChannel? _ordersChannel;
+
+  void _subscribeToOrdersListUpdates() {
+    if (!SupabaseConfig.isConfigured) return;
+    
+    final userId = SupabaseService.currentUserId;
+    if (userId == null) return;
+
+    _ordersChannel = Supabase.instance.client
+        .channel('customer_orders_list_$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'orders',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'customer_id',
+            value: userId,
+          ),
+          callback: (payload) {
+            debugPrint('Realtime customer orders list update: ${payload.newRecord}');
+            _loadOrders();
+          },
+        )
+        .subscribe();
+  }
+
   @override
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
+    if (SupabaseConfig.isConfigured && _ordersChannel != null) {
+      Supabase.instance.client.removeChannel(_ordersChannel!);
+    }
     super.dispose();
   }
 

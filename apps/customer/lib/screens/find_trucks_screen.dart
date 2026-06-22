@@ -10,6 +10,7 @@ import '../widgets/common_widgets.dart';
 import 'location_picker_screen.dart';
 import 'truck_results_screen.dart';
 import 'package:truxify_shared/shimmer_widget.dart';
+import '../services/order_service.dart';
 
 class FindTrucksScreen extends StatefulWidget {
   const FindTrucksScreen({super.key});
@@ -44,6 +45,12 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
 
   String? _weightErrorText;
   bool _isLoading = false;
+
+  // Estimated price state
+  bool _estimateLoading = false;
+  String? _estimateError;
+  int? _estimateMinPrice;
+  int? _estimateMaxPrice;
 
   static const _goodsTypes = <String>[
     'Textile',
@@ -303,6 +310,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     });
 
     _formKey.currentState?.validate();
+    _estimatePrice();
   }
 
   String? _validatePickup(String? value) {
@@ -358,7 +366,13 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) setState(() => _weightErrorText = error);
+      if (mounted) {
+        setState(() => _weightErrorText = error);
+        // Trigger estimate update after validation
+        if (error == null) {
+          _estimatePrice();
+        }
+      }
     });
 
     return error;
@@ -398,6 +412,74 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
         });
       }
     });
+  }
+
+  Future<void> _estimatePrice() async {
+    // Check if we have required data for estimation
+    if (_pickupPoint == null || _dropPoint == null) {
+      setState(() {
+        _estimateError = null;
+        _estimateMinPrice = null;
+        _estimateMaxPrice = null;
+      });
+      return;
+    }
+
+    final weight = double.tryParse(_weightController.text.trim());
+    if (weight == null || weight <= 0) {
+      setState(() {
+        _estimateError = null;
+        _estimateMinPrice = null;
+        _estimateMaxPrice = null;
+      });
+      return;
+    }
+
+    setState(() {
+      _estimateLoading = true;
+      _estimateError = null;
+    });
+
+    try {
+      final service = OrderService();
+      final result = await service.estimatePriceRange(
+        pickupLat: _pickupPoint!.latitude,
+        pickupLng: _pickupPoint!.longitude,
+        dropLat: _dropPoint!.latitude,
+        dropLng: _dropPoint!.longitude,
+        weightTonnes: weight,
+        isFragile: _fragile,
+        isStackable: _stacked,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _estimateLoading = false;
+        if (result != null) {
+          _estimateMinPrice = result['minPrice'] as int?;
+          _estimateMaxPrice = result['maxPrice'] as int?;
+          _estimateError = null;
+        } else {
+          _estimateError = 'Estimate unavailable';
+          _estimateMinPrice = null;
+          _estimateMaxPrice = null;
+        }
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _estimateLoading = false;
+          _estimateError = 'Estimate unavailable';
+          _estimateMinPrice = null;
+          _estimateMaxPrice = null;
+        });
+      }
+    }
+  }
+
+  String _formatPrice(int paise) {
+    return '₹${(paise / 100).round().toString().replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (m) => ',')}';
   }
 
   @override
@@ -670,7 +752,10 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                             icon: Icons.layers_rounded,
                             label: 'Stackable',
                             isSelected: _stacked,
-                            onPressed: () => setState(() => _stacked = !_stacked),
+                            onPressed: () {
+                              setState(() => _stacked = !_stacked);
+                              _estimatePrice();
+                            },
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -679,7 +764,10 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                             icon: Icons.warning_rounded,
                             label: 'Fragile',
                             isSelected: _fragile,
-                            onPressed: () => setState(() => _fragile = !_fragile),
+                            onPressed: () {
+                              setState(() => _fragile = !_fragile);
+                              _estimatePrice();
+                            },
                           ),
                         ),
                       ],
@@ -793,32 +881,64 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                               'Estimated Price Range',
                               style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                             ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: TruxifyColors.accentLight,
-                                borderRadius: BorderRadius.circular(8),
+                            if (!_estimateLoading && _estimateError == null && _estimateMinPrice != null)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: TruxifyColors.accentLight,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  'Stable this week',
+                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                        color: TruxifyColors.accentDark,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                ),
                               ),
-                              child: Text(
-                                'Stable this week',
-                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                      color: TruxifyColors.accentDark,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                              ),
-                            ),
                           ],
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          '₹6,200 — ₹7,800',
-                          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                color: Theme.of(context).brightness == Brightness.dark
-                                    ? TruxifyColors.accent
-                                    : TruxifyColors.accentDark,
-                              ),
-                        ),
+                        if (_estimateLoading)
+                          Text(
+                            'Estimating price...',
+                            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? TruxifyColors.accent
+                                      : TruxifyColors.accentDark,
+                                ),
+                          )
+                        else if (_estimateError != null)
+                          Text(
+                            _estimateError!,
+                            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? TruxifyColors.accent
+                                      : TruxifyColors.accentDark,
+                                ),
+                          )
+                        else if (_estimateMinPrice != null && _estimateMaxPrice != null)
+                          Text(
+                            '${_formatPrice(_estimateMinPrice!)} — ${_formatPrice(_estimateMaxPrice!)}',
+                            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? TruxifyColors.accent
+                                      : TruxifyColors.accentDark,
+                                ),
+                          )
+                        else
+                          Text(
+                            'Enter route details to view estimate',
+                            style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? TruxifyColors.accent
+                                      : TruxifyColors.accentDark,
+                                ),
+                          ),
                         const SizedBox(height: 4),
                         Text(
                           'Based on current demand + route',

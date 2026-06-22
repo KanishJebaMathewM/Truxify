@@ -250,7 +250,7 @@ class DriverEarningsService {
         .select('wallet_confirmed, wallet_pending, wallet_total')
         .eq('user_id', driverId!);
 
-    if (response is List && response.isNotEmpty) {
+    if (response.isNotEmpty) {
       return Map<String, dynamic>.from(response.first as Map);
     }
     return {};

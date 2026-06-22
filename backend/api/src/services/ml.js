@@ -13,25 +13,40 @@ const DEFAULT_ML_SERVICE_URL = 'http://localhost:8001';
  * @param {number} features.nearby_drivers
  * @returns {Promise<object>} response from the ML engine
  */
+function getHeaders() {
+  const headers = {
+    'Content-Type': 'application/json',
+  };
+  if (process.env.ML_API_KEY) {
+    headers['X-API-Key'] = process.env.ML_API_KEY;
+  }
+  return headers;
+}
+
+async function handleResponse(response) {
+  if (response.status === 401 || response.status === 403) {
+    const text = await response.text();
+    throw new Error(`ML Engine authentication failed: ${response.status} — check ML_API_KEY configuration`);
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`ML Engine request failed: ${response.statusText} (${text})`);
+  }
+  return response.json();
+}
+
 export async function predictDemand(features) {
   const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
   const url = `${baseUrl}/predict/demand`;
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getHeaders(),
     body: JSON.stringify(features),
     signal: AbortSignal.timeout(5000),
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`ML Engine prediction request failed: ${response.statusText} (${text})`);
-  }
-
-  return response.json();
+  return handleResponse(response);
 }
 
 /**
@@ -51,9 +66,7 @@ export async function predictPrice({ distanceKm, cargoWeightKg, truckType, route
 
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: getHeaders(),
     body: JSON.stringify({
       distance_km: distanceKm,
       cargo_weight_kg: cargoWeightKg,
@@ -64,10 +77,5 @@ export async function predictPrice({ distanceKm, cargoWeightKg, truckType, route
     signal: AbortSignal.timeout(5000),
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`ML Engine price prediction failed: ${response.statusText} (${text})`);
-  }
-
-  return response.json();
+  return handleResponse(response);
 }

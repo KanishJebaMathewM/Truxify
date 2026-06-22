@@ -8,7 +8,7 @@
  *
  * Run with:  npm test -- test/unit/escrow.test.js
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { getEscrowBookingId, buildDepositTx, ESCROW_MATIC_PER_PAISA } from '../../src/services/escrow.js';
 
 describe('escrow service — getEscrowBookingId', () => {
@@ -37,8 +37,39 @@ describe('escrow service — getEscrowBookingId', () => {
     expect(getEscrowBookingId(id1)).not.toBe(getEscrowBookingId(id2));
   });
 
-  it('ESCROW_MATIC_PER_PAISA defaults to 0.01 when env var is absent', () => {
+  it('ESCROW_MATIC_PER_PAISA parses the configured env var correctly', () => {
+    // process.env.ESCROW_MATIC_PER_PAISA is set to '0.01' in setup.js
     expect(ESCROW_MATIC_PER_PAISA).toBe(0.01);
+  });
+
+  it('ESCROW_MATIC_PER_PAISA defaults to 0.01 when env var is absent', async () => {
+    const originalEnv = process.env.ESCROW_MATIC_PER_PAISA;
+    delete process.env.ESCROW_MATIC_PER_PAISA;
+    
+    vi.resetModules();
+    const { ESCROW_MATIC_PER_PAISA: defaultVal } = await import('../../src/services/escrow.js');
+    expect(defaultVal).toBe(0.01);
+
+    if (originalEnv !== undefined) {
+      process.env.ESCROW_MATIC_PER_PAISA = originalEnv;
+    }
+    vi.resetModules();
+  });
+
+  it('ESCROW_MATIC_PER_PAISA parses a custom value correctly', async () => {
+    const originalEnv = process.env.ESCROW_MATIC_PER_PAISA;
+    process.env.ESCROW_MATIC_PER_PAISA = '0.05';
+
+    vi.resetModules();
+    const { ESCROW_MATIC_PER_PAISA: customVal } = await import('../../src/services/escrow.js');
+    expect(customVal).toBe(0.05);
+
+    if (originalEnv !== undefined) {
+      process.env.ESCROW_MATIC_PER_PAISA = originalEnv;
+    } else {
+      delete process.env.ESCROW_MATIC_PER_PAISA;
+    }
+    vi.resetModules();
   });
 });
 

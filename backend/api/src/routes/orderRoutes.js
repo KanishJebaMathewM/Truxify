@@ -1,10 +1,12 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
 import { bidLimiter } from '../middleware/rateLimiter.js';
-import { supabase, redisClient } from '../config/db.js';
+import { supabase, redisClient, mongoDb } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
+import { z } from 'zod';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { getRouteEstimate } from '../services/osrm.js';
 import {
@@ -19,12 +21,10 @@ import {
   predictDemandSchema
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
-import { changeDropSchema, cancelOrderSchema } from '../validation/requestSchemas.js';
-import { buildDepositTx, recordDepositTx, escrowRelease, escrowRefund } from '../services/escrow.js';
-import { sendDeliveryOtpNotification, storeDeliveryOtp, getActiveDeliveryOtp, verifyDeliveryOtp, expireDeliveryOtps } from '../services/notificationService.js';
 import { predictDemand, predictPrice } from '../services/ml.js';
-import rateLimit from 'express-rate-limit';
-import { z } from 'zod';
+import { changeDropSchema, cancelOrderSchema } from '../validation/requestSchemas.js';
+import { buildDepositTx, recordDepositTx, escrowRelease, escrowRefund, ESCROW_MATIC_PER_PAISA } from '../services/escrow.js';
+import { sendDeliveryOtpNotification, storeDeliveryOtp, getActiveDeliveryOtp, verifyDeliveryOtp, expireDeliveryOtps } from '../services/notificationService.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
@@ -206,7 +206,7 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
     }
     estimatedPrice = Math.round(mlResult.estimated_price * 100);
   } catch (mlErr) {
-    console.warn('[ML] Price prediction unavailable, falling back to base pricing:', mlErr.message);
+    logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
   }
 
   const orderDisplayId = generateOrderDisplayId();
@@ -685,56 +685,66 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       truckInfo = data;
     }
 
-    // Atomically accept the bid — the RPC uses SELECT FOR UPDATE on both
-    // load_offers and orders, so concurrent requests block until the first
-    // transaction completes. The second request then sees the updated status
-    // and raises an exception.
-    const escrowBookingId = `escrow:${order.order_display_id}`;
+    // Phase 1: Build unsigned deposit tx for customer to sign
+    let depositTxData = null;
+    if (driverWallet && customerWallet) {
+      const maticPerPaisa = ESCROW_MATIC_PER_PAISA;
+      if (!Number.isFinite(maticPerPaisa) || maticPerPaisa <= 0) {
+        logger.warn('[escrow] ESCROW_MATIC_PER_PAISA not configured — skipping escrow deposit.');
+      } else {
+        const maticAmount = (bid.bid_amount * maticPerPaisa).toFixed(18);
+        const maxEscrowMatic = Number.parseFloat(process.env.MAX_ESCROW_MATIC || '5');
+        if (!Number.isFinite(maxEscrowMatic) || maxEscrowMatic <= 0) {
+          logger.error('[escrow] MAX_ESCROW_MATIC is invalid — refusing deposit.');
+          return res.status(500).json({ error: 'Escrow configuration error. Please contact support.' });
+        }
+        if (Number.parseFloat(maticAmount) > maxEscrowMatic) {
+          return res.status(400).json({ error: 'Computed escrow amount exceeds safety cap. Check ESCROW_MATIC_PER_PAISA configuration.' });
+        }
+        const amountWei = ethers.parseEther(maticAmount);
+        const { txData } = await buildDepositTx(
+          order.order_display_id, customerWallet, driverWallet, amountWei,
+        );
+        if (txData) {
+          if (typeof txData === 'string' && txData.startsWith('0x')) {
+            try {
+              const parsed = ethers.Transaction.from(txData);
+              depositTxData = {
+                to: parsed.to,
+                data: parsed.data,
+                value: parsed.value ? parsed.value.toString() : undefined,
+              };
+            } catch (parseErr) {
+              depositTxData = {
+                to: process.env.ESCROW_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000',
+                data: txData,
+              };
+            }
+          } else {
+            depositTxData = txData;
+          }
+          await supabase.from('orders').update({
+            escrow_booking_id: `escrow:${order.order_display_id}`,
+            escrow_status: 'funding',
+          }).eq('id', orderId);
+        }
+      }
+    }
+
+    // Phase 2: Atomically accept the bid
     const { error: rpcErr } = await supabase.rpc('accept_bid_tx', {
       p_bid_id: bidId, p_order_id: orderId, p_load_id: bid.load_id, p_driver_id: bid.driver_id,
       p_truck_id: truckInfo?.id || null, p_driver_name: profile?.full_name || 'Assigned Driver',
       p_driver_rating: details?.rating || 0.00, p_truck_number: truckInfo?.number_plate || 'N/A',
-      p_bid_amount: bid.bid_amount, p_order_display_id: order.order_display_id,
-      p_escrow_booking_id: escrowBookingId
+      p_bid_amount: bid.bid_amount, p_order_display_id: order.order_display_id
     });
 
     if (rpcErr) {
       return res.status(500).json({
         error: 'Failed to accept bid atomically.',
-        details: rpcErr.message
+        details: rpcErr.message,
+        recovery: 'The pending escrow deposit has been voided. Please try again.'
       });
-    }
-
-    // Phase 2: Build unsigned deposit tx for customer to sign (no side effects)
-    let depositTxData = null;
-    if (driverWallet && customerWallet) {
-      const maticPerPaisa = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0');
-      if (maticPerPaisa && isFinite(maticPerPaisa) && maticPerPaisa > 0) {
-        const maticAmount = (bid.bid_amount * maticPerPaisa).toFixed(18);
-        const maxEscrowMatic = Number.parseFloat(process.env.MAX_ESCROW_MATIC || '5');
-        if (Number.isFinite(maxEscrowMatic) && maxEscrowMatic > 0) {
-          if (Number.parseFloat(maticAmount) <= maxEscrowMatic) {
-            const amountWei = ethers.parseEther(maticAmount);
-            const { txData } = await buildDepositTx(
-              order.order_display_id, customerWallet, driverWallet, amountWei,
-            );
-            if (txData) {
-              depositTxData = txData;
-              // Update escrow state now that bid acceptance is confirmed
-              await supabase.from('orders').update({
-                escrow_booking_id: escrowBookingId,
-                escrow_status: 'funding',
-              }).eq('id', orderId);
-            }
-          }
-        }
-      }
-    }
-
-    // Mark idempotency key as completed
-    if (idempotencyKey) {
-      const idempKey = `bid_accept:${idempotencyKey}`;
-      await redisClient.set(idempKey, 'completed', 'EX', 86400);
     }
 
     res.json({
@@ -742,6 +752,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
       depositTx: depositTxData,
     });
   } catch (err) {
+    logger.error({ err }, '[orderRoutes] accept bid error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1097,7 +1108,7 @@ router.post('/:id/confirm-deposit', authenticate, requireRole(['customer']), val
 
     res.json({ message: 'Escrow deposit confirmed', txHash: result.txHash });
   } catch (err) {
-    console.error('[confirm-deposit] Exception:', err.message);
+    logger.error('[confirm-deposit] Exception:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1115,6 +1126,70 @@ router.post('/predict-demand', authenticate, requireRole(['customer', 'driver'])
       error: 'Failed to fetch demand prediction from ML engine.',
       details: err.message,
     });
+  }
+});
+
+// ============================================================================
+// 17. GET DRIVER LOCATION (CUSTOMER OR DRIVER)
+// ============================================================================
+router.get('/:id/driver-location', authenticate, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id; // this is order_display_id from client
+  
+  try {
+    // 1. Resolve order and check authentication / authorization
+    const { data: order, error: orderErr } = await supabase
+      .from('orders')
+      .select('id, customer_id, driver_id, status')
+      .eq('order_display_id', orderId)
+      .maybeSingle();
+
+    if (orderErr) {
+      return res.status(500).json({ error: 'Failed to fetch order details.' });
+    }
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    // Authorization: User must be either the customer who owns the order or the assigned driver
+    if (req.user.role === 'customer' && order.customer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
+    }
+    if (req.user.role === 'driver' && order.driver_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
+    }
+
+    if (!order.driver_id) {
+      return res.status(404).json({ error: 'No driver assigned to this order.' });
+    }
+
+    // 2. Query MongoDB telemetry collection
+    if (!mongoDb) {
+      return res.status(503).json({ error: 'Telemetry database not available.' });
+    }
+
+    const latestTelemetry = await mongoDb
+      .collection('telemetry')
+      .find({ driver_id: order.driver_id })
+      .sort({ timestamp: -1 })
+      .limit(1)
+      .toArray();
+
+    if (!latestTelemetry || latestTelemetry.length === 0) {
+      return res.status(404).json({ error: 'No live telemetry found for this driver.' });
+    }
+
+    const telemetry = latestTelemetry[0];
+    return res.json({
+      driverId: telemetry.driver_id,
+      orderId: telemetry.order_id || order.id,
+      lat: telemetry.lat,
+      lng: telemetry.lng,
+      timestamp: telemetry.timestamp
+    });
+
+  } catch (err) {
+    logger.error({ err }, 'Fetch driver location exception');
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

@@ -114,11 +114,11 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
     .single();
 
   if (error) {
-    console.error('[NotificationService] Failed to store OTP:', error.message);
+    logger.error('[NotificationService] Failed to store OTP:', error.message);
     return null;
   }
 
-  console.log(`[NotificationService] OTP stored for order ${orderId}, expires at ${expiresAt}`);
+  logger.info(`[NotificationService] OTP stored for order ${orderId}, expires at ${expiresAt}`);
   return data;
 }
 
@@ -140,7 +140,7 @@ export async function getActiveDeliveryOtp(orderId) {
     .maybeSingle();
 
   if (error) {
-    console.error('[NotificationService] Failed to fetch active OTP:', error.message);
+    logger.error('[NotificationService] Failed to fetch active OTP:', error.message);
     return null;
   }
 
@@ -164,7 +164,7 @@ export async function verifyDeliveryOtp(orderId) {
     .eq('verified', false);
 
   if (error) {
-    console.error('[NotificationService] Failed to verify OTP:', error.message);
+    logger.error('[NotificationService] Failed to verify OTP:', error.message);
     return false;
   }
 
@@ -185,7 +185,7 @@ export async function expireDeliveryOtps(orderId) {
     .eq('verified', false);
 
   if (error) {
-    console.error('[NotificationService] Failed to expire OTPs:', error.message);
+    logger.error('[NotificationService] Failed to expire OTPs:', error.message);
   }
 }
 

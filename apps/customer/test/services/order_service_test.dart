@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/core/api_client.dart';
@@ -80,5 +80,87 @@ void main() {
         .thenThrow(const ApiException(404, 'Not Found'));
     final order404 = await orderService.fetchOrderById('ORD-404');
     expect(order404, isNull);
+  });
+
+  group('estimatePriceRange', () {
+    test('returns correct min and max when prices are integers', () async {
+      when(() => apiClient.get(
+            any(that: startsWith('/api/trucks/search')),
+            headers: any(named: 'headers'),
+          )).thenAnswer((_) async => [
+            {'price': 5000},
+            {'price': 8000},
+            {'price': 6500},
+          ]);
+
+      final result = await orderService.estimatePriceRange(
+        pickupLat: 12.3,
+        pickupLng: 45.6,
+        dropLat: 78.9,
+        dropLng: 12.3,
+        weightTonnes: 5.5,
+      );
+
+      expect(result, isNotNull);
+      expect(result!['minPrice'], equals(5000));
+      expect(result['maxPrice'], equals(8000));
+    });
+
+    test('returns correct rounded min and max when prices are doubles', () async {
+      when(() => apiClient.get(
+            any(that: startsWith('/api/trucks/search')),
+            headers: any(named: 'headers'),
+          )).thenAnswer((_) async => [
+            {'price': 5000.7},
+            {'price': 8000.2},
+            {'price': 6500.0},
+          ]);
+
+      final result = await orderService.estimatePriceRange(
+        pickupLat: 12.3,
+        pickupLng: 45.6,
+        dropLat: 78.9,
+        dropLng: 12.3,
+        weightTonnes: 5.5,
+      );
+
+      expect(result, isNotNull);
+      expect(result!['minPrice'], equals(5001)); // 5000.7 rounded
+      expect(result['maxPrice'], equals(8000)); // 8000.2 rounded
+    });
+
+    test('returns null when search results are empty', () async {
+      when(() => apiClient.get(
+            any(that: startsWith('/api/trucks/search')),
+            headers: any(named: 'headers'),
+          )).thenAnswer((_) async => []);
+
+      final result = await orderService.estimatePriceRange(
+        pickupLat: 12.3,
+        pickupLng: 45.6,
+        dropLat: 78.9,
+        dropLng: 12.3,
+        weightTonnes: 5.5,
+      );
+
+      expect(result, isNull);
+    });
+
+    test('returns null when api client throws exception', () async {
+      when(() => apiClient.get(
+            any(that: startsWith('/api/trucks/search')),
+            headers: any(named: 'headers'),
+          )).thenThrow(const ApiException(500, 'Server Error'));
+
+      final result = await orderService.estimatePriceRange(
+        pickupLat: 12.3,
+        pickupLng: 45.6,
+        dropLat: 78.9,
+        dropLng: 12.3,
+        weightTonnes: 5.5,
+      );
+
+      expect(result, isNull);
+    });
   });
 }

@@ -94,32 +94,77 @@ Copy the example environment file and update the variables (Supabase, Firebase, 
 cp .env.example .env
 ```
 
-#### Flutter Configuration Setup
-Both Flutter apps use a shared dart-define JSON file generated from the repository root `.env`.
+#### Flutter Development Setup
 
-1. Copy `.env.example` to `.env` and fill in the required values:
-  ```bash
-  cp .env.example .env
-  ```
-2. Generate app configuration files:
-  ```bash
-  ./scripts/generate_dart_defines.sh
-  ```
-3. Run the Customer app:
-  ```bash
-  cd apps/customer
-  flutter run --dart-define-from-file=dart_define.json
-  ```
-4. Run the Driver app:
-  ```bash
-  cd apps/driver
-  flutter run --dart-define-from-file=dart_define.json
-  ```
+Both Flutter applications (Customer & Driver) require:
+- **Flutter SDK**: `3.x` or higher.
+- **Android Studio**: Android SDK and emulator configured.
+- **Xcode (macOS only)**: Required for building/running iOS apps.
 
-Required configuration keys:
-  * `SUPABASE_URL`
-  * `SUPABASE_ANON_KEY`
-  * `TRUXIFY_API_BASE_URL`
+##### Required Environment Variables
+
+You must document and set the following minimum environment variables inside your `.env` configuration file:
+
+| Variable | Purpose |
+|----------|---------|
+| `TRUXIFY_API_BASE_URL` | Backend API URL (default: `http://localhost:5000` for local run) |
+| `SUPABASE_URL` | Supabase project endpoint |
+| `SUPABASE_ANON_KEY` | Public Supabase client key |
+| `FIREBASE_PROJECT_ID` | Firebase project identifier |
+| `FIREBASE_API_KEY` | Firebase API key |
+| `FIREBASE_MESSAGING_SENDER_ID` | Firebase messaging sender identifier |
+
+##### Example Local Development Workflow
+
+1. Clone the repository and navigate to the project root:
+   ```bash
+   git clone <repo-url>
+   cd Truxify
+   ```
+
+2. Copy the environment configuration template:
+   ```bash
+   cp .env.example .env
+   ```
+   *(Update the values in `.env` with your local config/tokens. Refer to [ENVIRONMENT_SETUP.md](file:///c:/Users/Admin/Desktop/Truxify/docs/ENVIRONMENT_SETUP.md) for more details.)*
+
+3. Launch the applications using one of the following methods:
+
+   **Method A: Using Makefile (Quickest)**
+   Ensure you have configured `.env` at the root, then run:
+   ```bash
+   # Run Driver App
+   make run-driver
+   
+   # Run Customer App
+   make run-customer
+   ```
+
+   **Method B: Using VS Code Launch Configurations**
+   Open the workspace in VS Code. Go to the "Run and Debug" panel, and select either:
+   - `Driver App (Auto Env)` or `Driver App (Manual)`
+   - `Customer App (Auto Env)` or `Customer App (Manual)`
+
+   **Method C: Manual terminal command**
+   Generate the configuration JSON files first:
+   ```bash
+   ./scripts/generate_dart_defines.sh
+   ```
+   Then launch the desired app:
+   ```bash
+   # Customer App
+   cd apps/customer
+   flutter run --dart-define-from-file=dart_define.json
+   
+   # Driver App
+   cd apps/driver
+   flutter run --dart-define-from-file=dart_define.json
+   ```
+
+##### Security Guidance
+- **Never commit your `.env` file** to version control (it is ignored by default via `.gitignore`).
+- **Never commit production credentials** or Firebase configuration secrets.
+- Use only example/mock values in documentation.
 
 #### Start Backend Dev Server
 ```bash

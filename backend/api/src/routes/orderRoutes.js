@@ -983,6 +983,26 @@ router.put('/:id/change-drop', authenticate, requireRole(['customer']), validate
       logger.warn('Failed to update timeline for change-drop:', timelineErr.message);
     }
 
+    const loadOfferUpdates = {
+      drop_address,
+      drop_lat: Number(drop_lat),
+      drop_lng: Number(drop_lng),
+      freight_value: pricing.baseFreight,
+      fuel_cost: pricing.fuelCost,
+      toll_cost: pricing.tollEstimate,
+      net_profit: pricing.netProfit,
+      route_label: `${order.pickup_address.split(',')[0]} \u2192 ${drop_address.split(',')[0]}`,
+    };
+
+    const { error: loadOfferErr } = await supabase
+      .from('load_offers')
+      .update(loadOfferUpdates)
+      .eq('order_display_id', orderId);
+
+    if (loadOfferErr) {
+      logger.warn('Failed to update load_offers for change-drop:', loadOfferErr.message);
+    }
+
     return res.json({
       message: 'Drop location updated successfully.',
       pricing: {

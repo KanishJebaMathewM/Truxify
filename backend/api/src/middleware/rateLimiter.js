@@ -85,7 +85,7 @@ function buildStore(prefix) {
 export function userKeyGenerator(req) {
   if (req.user?.id) return `user:${req.user.id}`;
   if (req.user?.uid) return `uid:${req.user.uid}`;
-  return ipKeyGenerator(req);
+  return ipKeyGenerator(req.ip);
 }
 
 // Coarse, pre-auth IP limiter. It runs before authentication, so it can only
@@ -151,7 +151,7 @@ export const deviceLimiter = rateLimit({
   keyGenerator: (req) => {
     if (req.user?.id) return `user:${req.user.id}`;
     if (req.user?.uid) return `uid:${req.user.uid}`;
-    return ipKeyGenerator(req);
+    return ipKeyGenerator(req.ip);
   },
   store: buildStore('rl:device:'),
   message: { error: 'Rate limit exceeded', retryAfter: 600 },

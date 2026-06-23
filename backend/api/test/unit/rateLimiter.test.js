@@ -21,8 +21,45 @@ vi.mock('rate-limit-redis', () => ({
   RedisStore: redisStoreCtor,
 }));
 
-const { userKeyGenerator, __testing } = await import('../../src/middleware/rateLimiter.js');
+const {
+  globalLimiter,
+  userLimiter,
+  healthLimiter,
+  authLimiter,
+  bidLimiter,
+  deviceLimiter,
+  userKeyGenerator,
+  __testing,
+} = await import('../../src/middleware/rateLimiter.js');
+
 const { DeferredRedisStore } = __testing;
+
+function makeReq(overrides = {}) {
+  return {
+    path: '/api/test',
+    ip: '127.0.0.1',
+    user: undefined,
+    headers: {},
+    app: {
+      get: vi.fn(),
+    },
+    ...overrides,
+  };
+}
+
+function makeRes() {
+  return {
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn().mockReturnThis(),
+    setHeader: vi.fn(),
+    end: vi.fn(),
+    statusCode: 200,
+  };
+}
+
+function makeNext() {
+  return vi.fn();
+}
 
 describe('userKeyGenerator', () => {
   it('keys by the authenticated user id', () => {
@@ -35,11 +72,28 @@ describe('userKeyGenerator', () => {
     expect(userKeyGenerator(req)).toBe('uid:fb-uid-9');
   });
 
+  it('falls back to IP when no user is present', () => {
+    const req = { ip: '203.0.113.7' };
+    expect(userKeyGenerator(req)).toBe('203.0.113.7');
+  });
+
   it('gives two users behind the same IP independent keys', () => {
     const ip = '203.0.113.7';
     const a = userKeyGenerator({ user: { id: 'user-a' }, ip });
     const b = userKeyGenerator({ user: { id: 'user-b' }, ip });
     expect(a).not.toBe(b);
+  });
+});
+
+describe('isRedisReady', () => {
+  it('returns true when redisClient is ready', () => {
+    redisClientMock.status = 'ready';
+    expect(__testing.isRedisReady()).toBe(true);
+  });
+
+  it('returns false when redisClient is not ready', () => {
+    redisClientMock.status = 'connecting';
+    expect(__testing.isRedisReady()).toBe(false);
   });
 });
 
@@ -86,7 +140,9 @@ describe('DeferredRedisStore', () => {
   });
 
   it('falls back to memory and does not retry if RedisStore construction throws', async () => {
-    redisStoreCtor.mockImplementationOnce(() => { throw new Error('boom'); });
+    redisStoreCtor.mockImplementationOnce(() => {
+      throw new Error('boom');
+    });
     const store = new DeferredRedisStore('rl:test:');
     store.init({ windowMs: 1000 });
     redisClientMock.status = 'ready';
@@ -96,5 +152,193 @@ describe('DeferredRedisStore', () => {
 
     await store.increment('client-a');
     expect(redisStoreCtor).toHaveBeenCalledTimes(1); // not retried
+  });
+});
+
+describe('Limiters as Express Middleware', () => {
+  let incrementSpy;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    incrementSpy = vi.spyOn(DeferredRedisStore.prototype, 'increment');
+  });
+
+  describe('globalLimiter', () => {
+    it('is a function', () => {
+      expect(typeof globalLimiter).toBe('function');
+    });
+
+    it('calls next() and increments the store for normal requests', async () => {
+      const req = makeReq({ path: '/api/orders' });
+      const res = makeRes();
+      const next = makeNext();
+
+      await globalLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(incrementSpy).toHaveBeenCalled();
+    });
+
+    it('calls next() and skips store increment for /health', async () => {
+      const req = makeReq({ path: '/health' });
+      const res = makeRes();
+      const next = makeNext();
+
+      await globalLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(incrementSpy).not.toHaveBeenCalled();
+    });
+
+    it('calls next() and skips store increment for /health/live', async () => {
+      const req = makeReq({ path: '/health/live' });
+      const res = makeRes();
+      const next = makeNext();
+
+      await globalLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(incrementSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('userLimiter', () => {
+    it('is a function', () => {
+      expect(typeof userLimiter).toBe('function');
+    });
+
+    it('calls next() without throwing for user.id request', async () => {
+      const req = makeReq({ user: { id: 'user-123' } });
+      const res = makeRes();
+      const next = makeNext();
+
+      await userLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('calls next() without throwing for user.uid request', async () => {
+      const req = makeReq({ user: { uid: 'uid-456' } });
+      const res = makeRes();
+      const next = makeNext();
+
+      await userLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('calls next() without throwing for IP-only request', async () => {
+      const req = makeReq({ ip: '10.0.0.1' });
+      const res = makeRes();
+      const next = makeNext();
+
+      await userLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+  });
+
+  describe('healthLimiter', () => {
+    it('is a function', () => {
+      expect(typeof healthLimiter).toBe('function');
+    });
+
+    it('calls next() without throwing', async () => {
+      const req = makeReq();
+      const res = makeRes();
+      const next = makeNext();
+
+      await healthLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+  });
+
+  describe('authLimiter', () => {
+    it('is a function', () => {
+      expect(typeof authLimiter).toBe('function');
+    });
+
+    it('calls next() without throwing', async () => {
+      const req = makeReq();
+      const res = makeRes();
+      const next = makeNext();
+
+      await authLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+  });
+
+  describe('bidLimiter', () => {
+    it('is a function', () => {
+      expect(typeof bidLimiter).toBe('function');
+    });
+
+    it('calls next() without throwing for a request with user.id', async () => {
+      const req = makeReq({ user: { id: 'user-123', uid: 'uid-456' } });
+      const res = makeRes();
+      const next = makeNext();
+
+      await bidLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('calls next() without throwing for a request with user.uid but no user.id', async () => {
+      const req = makeReq({ user: { uid: 'uid-456' } });
+      const res = makeRes();
+      const next = makeNext();
+
+      await bidLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('calls next() without throwing for a request without user (falls back to IP)', async () => {
+      const req = makeReq({ ip: '10.0.0.1' });
+      const res = makeRes();
+      const next = makeNext();
+
+      await bidLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+  });
+
+  describe('deviceLimiter', () => {
+    it('is a function', () => {
+      expect(typeof deviceLimiter).toBe('function');
+    });
+
+    it('calls next() without throwing for a request with user.id', async () => {
+      const req = makeReq({ user: { id: 'user-123', uid: 'uid-456' } });
+      const res = makeRes();
+      const next = makeNext();
+
+      await deviceLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('calls next() without throwing for a request with user.uid but no user.id', async () => {
+      const req = makeReq({ user: { uid: 'uid-456' } });
+      const res = makeRes();
+      const next = makeNext();
+
+      await deviceLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('calls next() without throwing for a request without user (falls back to IP)', async () => {
+      const req = makeReq({ ip: '10.0.0.1' });
+      const res = makeRes();
+      const next = makeNext();
+
+      await deviceLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
   });
 });

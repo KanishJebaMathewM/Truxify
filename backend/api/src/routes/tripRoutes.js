@@ -2,6 +2,7 @@ import express from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
@@ -79,7 +80,7 @@ const validateBatchPayload = (schema) => (req, res, next) => {
  * Handles batched telemetry and trip events uploaded by the mobile client
  * after recovering from network loss.
  */
-router.post('/events/batch', authenticate, validateBatchPayload(batchSyncSchema), async (req, res) => {
+router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(batchSyncSchema), async (req, res) => {
   const { events, idempotencyKey } = req.body;
   const userId = req.user.id;
 

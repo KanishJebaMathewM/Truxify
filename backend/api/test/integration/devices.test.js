@@ -114,6 +114,25 @@ describe('Device Routes Integration Tests', () => {
       expect(res.body.error).toBe('Failed to register device');
     });
 
+    it('successfully registers multiple devices for the same user', async () => {
+      const resA = await request(buildApp())
+        .post('/api/devices/register')
+        .set(CUSTOMER_HEADERS)
+        .send({ fcmToken: 'tokenA123456', platform: 'ios' });
+      expect(resA.status).toBe(200);
+
+      const resB = await request(buildApp())
+        .post('/api/devices/register')
+        .set(CUSTOMER_HEADERS)
+        .send({ fcmToken: 'tokenB123456', platform: 'android' });
+      expect(resB.status).toBe(200);
+
+      const stored = m.store.user_devices.filter(d => d.user_id === 'customer-uuid-123');
+      expect(stored.length).toBe(2);
+      expect(stored.map(d => d.fcm_token)).toContain('tokenA123456');
+      expect(stored.map(d => d.fcm_token)).toContain('tokenB123456');
+    });
+
     it('enforces rate limits after 10 requests within the window', async () => {
       const app = buildApp();
       const headers = {

@@ -1,3 +1,5 @@
+<img width="1536" height="1024" alt="Cover img Truxify" src="https://github.com/user-attachments/assets/eb96ea33-edb3-433a-b6b5-ecaddfc34306" />
+
 # 🚛 Truxify
 
 ### Broker-Free · ML-Powered · Blockchain-Secured Freight Platform
@@ -22,6 +24,30 @@ India has 1.4 crore registered trucks. Most drive back empty after every deliver
 
 Truxify fixes all three problems simultaneously — with a platform that is open source, self-hostable, and built for the people every existing solution has ignored.
 
+## 🏗️ Architecture Preview
+
+```mermaid
+graph TD
+    Customer[Customer Flutter App]
+    Driver[Driver Flutter App]
+
+    API[Node.js + Express API]
+
+    Supabase[(Supabase)]
+    ML[FastAPI ML Engine]
+    Blockchain[Polygon Smart Contracts]
+
+    Customer --> API
+    Driver --> API
+
+    API --> Supabase
+    API --> ML
+    API --> Blockchain
+```
+
+For the complete system architecture, data flows, infrastructure layers, and service responsibilities, see:
+
+👉 [docs/architecture.md](docs/architecture.md)
 ## 🔴 The Problem
 ```text
 Manufacturer -> Broker -> Sub-Broker -> Truck Owner -> Driver
@@ -362,3 +388,4 @@ Thanks to all contributors ❤️
 [Report Bug](https://github.com/KanishJebaMathewM/Truxify/issues) · [Request Feature](https://github.com/KanishJebaMathewM/Truxify/issues)
 
 </div>
+

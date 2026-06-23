@@ -1850,7 +1850,9 @@ describe('POST /api/orders/predict-demand — ML demand prediction', () => {
     const route = orderRouter.stack.find(s => s.route && s.route.path === '/predict-demand');
     expect(route).toBeDefined();
 
-    const rateLimitLayer = route.route.stack.find(
+    // The route carries the shared per-user limiter (userLimiter) followed by
+    // the endpoint-specific predictDemandLimiter; target the latter.
+    const rateLimitLayer = route.route.stack.findLast(
       layer => layer.name === 'rateLimit' || (layer.handle && typeof layer.handle.resetKey === 'function')
     );
     expect(rateLimitLayer).toBeDefined();

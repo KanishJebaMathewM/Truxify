@@ -36,6 +36,21 @@ export async function registerDeviceToken(req, res) {
         error: 'Failed to register device'
       });
     }
+    
+    const { error: profileSyncError } = await supabase
+      .from('profiles')
+      .update({
+        fcm_token: fcmToken,
+        fcm_token_updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (profileSyncError) {
+      logger.error(
+        '[DeviceController] Device token saved but failed to sync profiles.fcm_token:',
+        profileSyncError.message
+      );
+    }
 
     return res.json({
       success: true,

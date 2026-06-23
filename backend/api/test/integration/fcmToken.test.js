@@ -18,6 +18,7 @@ const supabaseUpdateMock = vi.fn();
 
 vi.mock('../../src/lib/profileCache.js', () => ({
   invalidateCachedProfile: invalidateCachedProfileMock,
+  invalidateCachedSupabaseProfile: vi.fn().mockResolvedValue(undefined),
   getCachedProfile: vi.fn().mockResolvedValue(null),
   setCachedProfile: vi.fn().mockResolvedValue(undefined),
   isValidCachedProfile: vi.fn().mockReturnValue(true),

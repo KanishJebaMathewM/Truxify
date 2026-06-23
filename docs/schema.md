@@ -1,6 +1,6 @@
 # 📊 Truxify — Database Schema
 
-> **27 tables · 4 RPC functions · 27 foreign keys**
+> **28 tables · 4 RPC functions · 28 foreign keys**
 > Critical business entities now use physical referential integrity for core joins and audit trails.
 
 ---
@@ -21,6 +21,15 @@ erDiagram
         text language
         boolean dark_mode
         boolean is_active
+        timestamptz created_at
+        timestamptz updated_at
+    }
+
+    user_devices {
+        uuid id PK
+        uuid user_id
+        text fcm_token UK
+        text platform
         timestamptz created_at
         timestamptz updated_at
     }
@@ -299,6 +308,7 @@ erDiagram
     profiles ||--o| driver_details : "user_id"
     profiles ||--o| customer_stats : "user_id"
     profiles ||--o{ trucks : "driver_id"
+    profiles ||--o{ user_devices : "user_id"
     profiles ||--o{ documents : "user_id"
     profiles ||--o{ saved_addresses : "user_id"
     profiles ||--o{ payment_methods : "user_id"
@@ -345,6 +355,7 @@ graph LR
         DD[driver_details]
         CS[customer_stats]
         DOC[documents]
+        UD[user_devices]
     end
 
     subgraph VEHICLE["🚛 Vehicle Layer"]
@@ -394,6 +405,7 @@ graph LR
     P --> DD
     P --> CS
     P --> DOC
+    P --> UD
     DD --> T
     T --> TD
     T --> TMT
@@ -422,7 +434,7 @@ graph LR
 
 ## Table Reference
 
-### 👤 User Layer (4 tables)
+### 👤 User Layer (5 tables)
 
 | Table | Purpose | Key Columns | Links To |
 |-------|---------|-------------|----------|
@@ -430,6 +442,7 @@ graph LR
 | `driver_details` | Driver-specific stats & wallet | `user_id`, `rating`, `wallet_confirmed` | `profiles.id` |
 | `customer_stats` | Customer metrics | `user_id`, `total_orders`, `total_saved` | `profiles.id` |
 | `documents` | KYC/compliance doc metadata | `user_id`, `doc_type`, `status`, `file_url` | `profiles.id` |
+| `user_devices` | FCM push tokens per device | `user_id`, `fcm_token`, `platform` | `profiles.id` |
 
 ### 🚛 Vehicle Layer (3 tables)
 

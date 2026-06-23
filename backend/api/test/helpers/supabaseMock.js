@@ -55,9 +55,10 @@ class SupabaseQueryBuilder {
     this._payload = payload;
     return this;
   }
-  upsert(payload) {
+  upsert(payload, options) {
     this._mode = 'upsert';
     this._payload = payload;
+    this._options = options;
     return this;
   }
   select(columns = '*') {
@@ -175,13 +176,18 @@ class SupabaseQueryBuilder {
       if (!this._store[this._table]) {
         this._store[this._table] = [];
       }
+      const onConflict = this._options?.onConflict;
       for (const row of rows) {
-        const pkFields = ['id', 'user_id', 'event_id'];
         let foundIdx = -1;
-        for (const pk of pkFields) {
-          if (row[pk] !== undefined) {
-            foundIdx = this._store[this._table].findIndex(r => r[pk] === row[pk]);
-            if (foundIdx !== -1) break;
+        if (onConflict) {
+          foundIdx = this._store[this._table].findIndex(r => r[onConflict] === row[onConflict]);
+        } else {
+          const pkFields = ['id', 'user_id', 'event_id'];
+          for (const pk of pkFields) {
+            if (row[pk] !== undefined) {
+              foundIdx = this._store[this._table].findIndex(r => r[pk] === row[pk]);
+              if (foundIdx !== -1) break;
+            }
           }
         }
         if (foundIdx !== -1) {

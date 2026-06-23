@@ -1,5 +1,7 @@
+import hmac
 import logging
-from fastapi import FastAPI, HTTPException
+import os
+from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
@@ -12,6 +14,13 @@ from .models.price_prediction import predict_price
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
+    ml_api_key = os.environ.get("ML_API_KEY")
+    if not ml_api_key:
+        return
+    if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 app = FastAPI(
     title="Truxify ML Engine",
@@ -54,7 +63,7 @@ class TrainResponse(BaseModel):
 
 
 @app.get("/")
-async def root():
+async def root(_auth=Depends(verify_api_key)):
     return {"message": "Truxify ML Engine is running"}
 
 
@@ -64,7 +73,7 @@ async def health():
 
 
 @app.post("/predict/demand", response_model=DemandForecastOutput)
-async def predict_demand_endpoint(input: DemandForecastInput):
+async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(verify_api_key)):
     features = [
         input.hour,
         input.day_of_week,
@@ -85,7 +94,7 @@ async def predict_demand_endpoint(input: DemandForecastInput):
 
 
 @app.post("/predict", response_model=PricePredictOutput)
-async def predict_price_endpoint(input: PricePredictInput):
+async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_api_key)):
     try:
         price = predict_price(
             distance_km=input.distance_km,
@@ -103,7 +112,7 @@ async def predict_price_endpoint(input: PricePredictInput):
 
 
 @app.post("/train/demand", response_model=TrainResponse)
-async def train_demand_endpoint():
+async def train_demand_endpoint(_auth=Depends(verify_api_key)):
     try:
         metrics = train_demand_forecast_model()
         return TrainResponse(status="success", metrics=metrics)
@@ -113,7 +122,7 @@ async def train_demand_endpoint():
 
 
 @app.get("/models")
-async def list_models():
+async def list_models(_auth=Depends(verify_api_key)):
     from .models.base import MODEL_STORAGE_DIR
     import os, json
     models = []

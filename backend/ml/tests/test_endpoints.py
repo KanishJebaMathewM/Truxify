@@ -25,6 +25,50 @@ def test_health():
     assert response.json() == {"status": "healthy"}
 
 
+def _auth_payload():
+    return {
+        "hour": 15.5,
+        "day_of_week": 4.0,
+        "temperature": 28.0,
+        "precipitation": 0.0,
+        "historical_volume": 35.0,
+        "nearby_drivers": 10.0
+    }
+
+
+def test_auth_missing_key(monkeypatch):
+    monkeypatch.setenv("ML_API_KEY", "test-secret-key")
+    response = client.post("/predict/demand", json=_auth_payload())
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Unauthorized"}
+
+
+def test_auth_invalid_key(monkeypatch):
+    monkeypatch.setenv("ML_API_KEY", "test-secret-key")
+    response = client.post("/predict/demand", json=_auth_payload(), headers={"X-API-Key": "wrong-key"})
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Unauthorized"}
+
+
+def test_auth_valid_key(monkeypatch):
+    monkeypatch.setenv("ML_API_KEY", "test-secret-key")
+    response = client.post("/predict/demand", json=_auth_payload(), headers={"X-API-Key": "test-secret-key"})
+    assert response.status_code == 200
+
+
+def test_auth_dev_mode_bypass(monkeypatch):
+    monkeypatch.delenv("ML_API_KEY", raising=False)
+    response = client.post("/predict/demand", json=_auth_payload())
+    assert response.status_code == 200
+
+
+def test_health_no_auth_required(monkeypatch):
+    monkeypatch.setenv("ML_API_KEY", "test-secret-key")
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "healthy"}
+
+
 def test_train_demand():
     response = client.post("/train/demand")
     assert response.status_code == 200

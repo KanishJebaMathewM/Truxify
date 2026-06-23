@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:developer' as developer;
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -69,7 +70,22 @@ class ApiClient {
 
   // ── Token helpers ─────────────────────────────────────────────────
 
-  String? get _accessToken => _supabase.auth.currentSession?.accessToken;
+  /// Firebase ID token for authenticated API requests.
+  /// Falls back to Supabase session token if no Firebase user is signed in.
+  String? _cachedFirebaseToken;
+
+  Future<String?> get _accessTokenAsync async {
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    if (firebaseUser != null) {
+      _cachedFirebaseToken = await firebaseUser.getIdToken();
+      return _cachedFirebaseToken;
+    }
+    _cachedFirebaseToken = null;
+    return _supabase.auth.currentSession?.accessToken;
+  }
+
+  String? get _accessToken =>
+      _cachedFirebaseToken ?? _supabase.auth.currentSession?.accessToken;
 
   Map<String, String> _headers({String? token, Map<String, String>? additionalHeaders}) {
     final t = token ?? _accessToken;
@@ -82,6 +98,14 @@ class ApiClient {
 
   Future<String?> _refreshedToken() async {
     try {
+      // Prefer Firebase token refresh.
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      if (firebaseUser != null) {
+        final token = await firebaseUser.getIdToken(true);
+        _cachedFirebaseToken = token;
+        return token;
+      }
+      // Fall back to Supabase session refresh.
       final res = await _supabase.auth.refreshSession();
       return res.session?.accessToken;
     } catch (e) {
@@ -99,6 +123,10 @@ class ApiClient {
     Map<String, String>? additionalHeaders,
     bool isRetry = false,
   }) async {
+    // Ensure we have a fresh Firebase token before making the request.
+    if (!isRetry) {
+      await _accessTokenAsync;
+    }
     final response = await fn(_headers(additionalHeaders: additionalHeaders));
 
     if (response.statusCode == 401 && !isRetry) {

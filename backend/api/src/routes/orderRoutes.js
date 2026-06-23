@@ -635,6 +635,18 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
   const orderId = req.params.id;
   const bidId = req.params.bidId;
 
+  // Acquire a distributed lock on this order to prevent concurrent bid acceptance
+  const lockKey = `bid_accept_lock:${orderId}`;
+  const lockTimeoutMs = 10000;
+  let lockValue = null;
+  if (redisClient) {
+    lockValue = crypto.randomUUID();
+    const acquired = await redisClient.set(lockKey, lockValue, 'PX', lockTimeoutMs, 'NX');
+    if (!acquired) {
+      return res.status(409).json({ error: 'Another bid acceptance is in progress for this order. Please try again.' });
+    }
+  }
+
   try {
     const { data: order } = await supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
     if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
@@ -748,6 +760,21 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
   } catch (err) {
     logger.error({ err }, '[orderRoutes] accept bid error');
     res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    if (redisClient && lockValue) {
+      const luaScript = `
+        if redis.call('GET', KEYS[1]) == ARGV[1] then
+          redis.call('DEL', KEYS[1])
+          return 1
+        end
+        return 0
+      `;
+      try {
+        await redisClient.eval(luaScript, 1, lockKey, lockValue);
+      } catch {
+        // Lock expiry will handle cleanup if the DEL fails
+      }
+    }
   }
 });
 

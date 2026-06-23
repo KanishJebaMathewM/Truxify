@@ -385,6 +385,10 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
 
     if (!history || history.length === 0) return res.json([]);
 
+    for (const order of history) {
+      order.driver_name = null;
+    }
+
     const driverIds = [...new Set(history.map(o => o.driver_id).filter(Boolean))];
     if (driverIds.length > 0) {
       const { data: profiles } = await supabase
@@ -394,7 +398,9 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
 
       const profileMap = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
       for (const order of history) {
-        order.driver_name = profileMap[order.driver_id] || null;
+        if (order.driver_id && profileMap[order.driver_id]) {
+          order.driver_name = profileMap[order.driver_id];
+        }
       }
     }
 

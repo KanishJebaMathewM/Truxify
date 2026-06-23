@@ -209,6 +209,56 @@ class OrderService {
     }
   }
 
+  /// Estimates the price range for a shipment.
+  /// Returns a map with estimated total price in paise.
+  /// Returns null if estimation fails or parameters are invalid.
+  Future<Map<String, dynamic>?> estimatePriceRange({
+    required double pickupLat,
+    required double pickupLng,
+    required double dropLat,
+    required double dropLng,
+    required double weightTonnes,
+    bool isFragile = false,
+    bool isStackable = true,
+  }) async {
+    try {
+      final results = await searchTrucks(
+        pickupLat: pickupLat,
+        pickupLng: pickupLng,
+        dropLat: dropLat,
+        dropLng: dropLng,
+        weightTonnes: weightTonnes,
+        isFragile: isFragile,
+        isStackable: isStackable,
+      );
+
+      if (results.isEmpty) return null;
+
+      // Extract price values from results and calculate min/max
+      final prices = results
+          .map((r) => r['price'] as num?)
+          .whereType<num>()
+          .map((p) => p.round())
+          .toList();
+
+      if (prices.isEmpty) return null;
+
+      prices.sort();
+      final minPrice = prices.first;
+      final maxPrice = prices.last;
+
+      return {
+        'minPrice': minPrice,
+        'maxPrice': maxPrice,
+      };
+    } on StateError {
+      return null;
+    } catch (e) {
+      debugPrint('Failed to estimate price: $e');
+      return null;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> fetchHistoryOrders() async {
     try {
       final body = await _apiClient.get(

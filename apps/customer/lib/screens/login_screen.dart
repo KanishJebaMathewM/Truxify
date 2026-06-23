@@ -1,7 +1,8 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../data/mock_data.dart';
+import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/app_page_route.dart';
@@ -16,13 +17,17 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final TextEditingController _phoneController = TextEditingController(
-    text: mockPhoneNumber.replaceFirst('+91 ', '').replaceAll(' ', ''),
-  );
+  final AuthService _authService = AuthService();
+  final TextEditingController _phoneController = TextEditingController();
   final List<TextEditingController> _otpControllers =
-      List.generate(4, (_) => TextEditingController());
-  final List<FocusNode> _otpFocusNodes = List.generate(4, (_) => FocusNode());
+      List.generate(6, (_) => TextEditingController());
+  final List<FocusNode> _otpFocusNodes = List.generate(6, (_) => FocusNode());
+
   bool _showOtp = false;
+  bool _sendingOtp = false;
+  bool _verifyingOtp = false;
+  String? _verificationId;
+  int? _resendToken;
 
   @override
   void dispose() {
@@ -39,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 6; i++) {
       final index = i;
       _otpFocusNodes[index].onKeyEvent = (node, event) {
         if (event is KeyDownEvent &&
@@ -55,7 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  void _sendOtp() {
+  void _sendOtp() async {
     FocusScope.of(context).unfocus();
     final phone = _phoneController.text.replaceAll(' ', '').trim();
 
@@ -83,20 +88,103 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       return;
     }
-    setState(() => _showOtp = true);
+
+    setState(() => _sendingOtp = true);
+
+    try {
+      await _authService.verifyPhoneNumber(
+        phoneNumber: '+91$phone',
+        forceResendingToken: _resendToken,
+        onCodeSent: (verificationId, resendToken) {
+          if (!mounted) return;
+          setState(() {
+            _verificationId = verificationId;
+            _resendToken = resendToken;
+            _showOtp = true;
+            _sendingOtp = false;
+          });
+        },
+        onVerificationFailed: (e) {
+          if (!mounted) return;
+          setState(() => _sendingOtp = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                e.message ?? 'Phone verification failed. Please try again.',
+              ),
+            ),
+          );
+        },
+        onAutoVerification: (credential) async {
+          // Auto-verification (e.g. on Android with SMS auto-retrieval)
+          if (!mounted) return;
+          try {
+            await FirebaseAuth.instance.signInWithCredential(credential);
+            if (!mounted) return;
+            Navigator.of(context).pushReplacement(
+                AppPageRoute(builder: (_) => const TruxifyShellScreen()));
+          } catch (e) {
+            if (!mounted) return;
+            setState(() => _sendingOtp = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Auto-verification failed: $e')),
+            );
+          }
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _sendingOtp = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send OTP: $e')),
+      );
+    }
   }
 
-  void _verifyOtp() {
+  void _verifyOtp() async {
     final otp = _otpControllers.map((controller) => controller.text).join();
-    if (otp == mockOtp) {
-      Navigator.of(context).pushReplacement(
-          AppPageRoute(builder: (_) => const TruxifyShellScreen()));
+
+    if (otp.length != 6 || !RegExp(r'^\d{6}$').hasMatch(otp)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid 6-digit OTP')),
+      );
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Use mock OTP 1234 to continue.')),
-    );
+    if (_verificationId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Verification session expired. Please resend OTP.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _verifyingOtp = true);
+
+    try {
+      await _authService.verifyOtp(_verificationId!, otp);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+          AppPageRoute(builder: (_) => const TruxifyShellScreen()));
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() => _verifyingOtp = false);
+      final message = switch (e.code) {
+        'invalid-verification-code' => 'Invalid OTP. Please try again.',
+        'session-expired' => 'OTP has expired. Please request a new one.',
+        _ => e.message ?? 'Verification failed. Please try again.',
+      };
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _verifyingOtp = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Verification failed: $e')),
+      );
+    }
   }
 
   @override
@@ -122,7 +210,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Sign in to manage your freight bookings offline with mock data.',
+                'Sign in to manage your freight bookings.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
@@ -186,7 +274,10 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
         const SizedBox(height: 18),
-        PrimaryButton(label: 'Send OTP', onPressed: _sendOtp),
+        PrimaryButton(
+          label: _sendingOtp ? 'Sending OTP...' : 'Send OTP',
+          onPressed: _sendingOtp ? null : _sendOtp,
+        ),
         const SizedBox(height: 18),
         InfoCard(
           child: Row(
@@ -195,7 +286,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Mock verification is enabled. Use 1234 on the next screen.',
+                  'A verification code will be sent via SMS to verify your phone number.',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: TruxifyColors.adaptiveSecondaryText(context),
                       ),
@@ -221,12 +312,19 @@ class _LoginScreenState extends State<LoginScreen> {
                 fontWeight: FontWeight.w800,
               ),
         ),
+        const SizedBox(height: 4),
+        Text(
+          'Sent to +91 ${_phoneController.text}',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: TruxifyColors.adaptiveSecondaryText(context),
+              ),
+        ),
         const SizedBox(height: 12),
         Row(
-          children: List.generate(4, (index) {
+          children: List.generate(6, (index) {
             return Expanded(
               child: Padding(
-                padding: EdgeInsets.only(right: index == 3 ? 0 : 10),
+                padding: EdgeInsets.only(right: index == 5 ? 0 : 8),
                 child: TextField(
                   controller: _otpControllers[index],
                   focusNode: _otpFocusNodes[index],
@@ -239,7 +337,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                   decoration: const InputDecoration(counterText: ''),
                   onChanged: (value) {
-                    if (value.isNotEmpty && index < 3) {
+                    if (value.isNotEmpty && index < 5) {
                       _otpFocusNodes[index + 1].requestFocus();
                     }
                     if (value.isEmpty && index > 0) {
@@ -252,11 +350,28 @@ class _LoginScreenState extends State<LoginScreen> {
           }),
         ),
         const SizedBox(height: 18),
-        PrimaryButton(label: 'Verify OTP', onPressed: _verifyOtp),
+        PrimaryButton(
+          label: _verifyingOtp ? 'Verifying...' : 'Verify OTP',
+          onPressed: _verifyingOtp ? null : _verifyOtp,
+        ),
         const SizedBox(height: 14),
-        TextButton(
-          onPressed: () => setState(() => _showOtp = false),
-          child: const Text('Change phone number'),
+        Row(
+          children: [
+            TextButton(
+              onPressed: () {
+                for (final c in _otpControllers) {
+                  c.clear();
+                }
+                setState(() => _showOtp = false);
+              },
+              child: const Text('Change phone number'),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: _sendingOtp ? null : _sendOtp,
+              child: Text(_sendingOtp ? 'Sending...' : 'Resend OTP'),
+            ),
+          ],
         ),
       ],
     );

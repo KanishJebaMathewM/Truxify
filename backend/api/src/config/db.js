@@ -10,12 +10,15 @@ import logger from '../middleware/logger.js';
 dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
 
 // ============================================================================
-// 1. SUPABASE CLIENT
+// 1. SUPABASE CLIENTS — anon key for public access (RLS enforced),
+//    service role key for admin operations only (bypasses RLS)
 // ============================================================================
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export let supabase = null;
+export let supabaseAdmin = null;
 
 if (supabaseUrl && supabaseKey) {
   try {
@@ -25,12 +28,26 @@ if (supabaseUrl && supabaseKey) {
         autoRefreshToken: false,
       }
     });
-    logger.info('Supabase client initialized successfully.');
+    logger.info('Supabase client initialized successfully (anon key).');
   } catch (error) {
     logger.error({ err: error }, 'Failed to initialize Supabase client');
   }
 } else {
   logger.warn('SUPABASE_URL or keys not found in .env. Supabase integration disabled.');
+}
+
+if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseKey) {
+  try {
+    supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      }
+    });
+    logger.info('Supabase admin client initialized successfully (service role key).');
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to initialize Supabase admin client');
+  }
 }
 
 // ============================================================================

@@ -1,8 +1,7 @@
 import 'dart:convert';
-import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http;
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 
 class FcmService {
@@ -13,10 +12,6 @@ class FcmService {
 
   static Future<void> initializeAndRegister() async {
     try {
-      if (Firebase.apps.isEmpty) {
-        await Firebase.initializeApp();
-      }
-
       final messaging = FirebaseMessaging.instance;
 
       final settings = await messaging.requestPermission(
@@ -56,14 +51,14 @@ class FcmService {
   }
 
   static Future<void> _sendTokenToBackend(String? token) async {
-    final client = Supabase.instance.client;
-    final userId = client.auth.currentUser?.id;
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    final userId = firebaseUser?.uid;
     if (userId == null) {
       debugPrint('[FCM] No authenticated user, skipping token upload.');
       return;
     }
-    final accessToken = client.auth.currentSession?.accessToken;
-    final fullName = client.auth.currentUser?.userMetadata?['full_name']?.toString();
+    final accessToken = await firebaseUser?.getIdToken();
+    final fullName = firebaseUser?.displayName;
 
     final response = await http.put(
       Uri.parse('$_apiBaseUrl/api/profile/fcm-token'),

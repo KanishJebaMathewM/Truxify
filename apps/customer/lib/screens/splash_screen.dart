@@ -1,11 +1,13 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/app_page_route.dart';
 import 'login_screen.dart';
+import 'shell_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -22,7 +24,17 @@ class _SplashScreenState extends State<SplashScreen> {
     super.initState();
     _navigationTimer = Timer(const Duration(seconds: 2), () {
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(AppPageRoute(builder: (_) => const LoginScreen()));
+
+      // If the user is already authenticated, skip login.
+      final isAuthenticated = FirebaseAuth.instance.currentUser != null;
+
+      Navigator.of(context).pushReplacement(
+        AppPageRoute(
+          builder: (_) => isAuthenticated
+              ? const TruxifyShellScreen()
+              : const LoginScreen(),
+        ),
+      );
     });
   }
 

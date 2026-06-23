@@ -55,7 +55,7 @@ jobs:
       driver: ${{ steps.changes.outputs.driver }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
 
@@ -113,7 +113,7 @@ jobs:
       changed: ${{ steps.analyze.outputs.changed }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -147,7 +147,7 @@ jobs:
       changed: ${{ steps.analyze.outputs.changed }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -177,7 +177,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Write hash files and commit
         run: |

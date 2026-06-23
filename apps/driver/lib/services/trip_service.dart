@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -35,9 +36,8 @@ class TripService {
     return value.endsWith('/') ? value.substring(0, value.length - 1) : value;
   }
 
-  Map<String, String> _authHeaders() {
-    final session = _client.auth.currentSession;
-    final accessToken = session?.accessToken;
+  Future<Map<String, String>> _authHeaders() async {
+    final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
     return <String, String>{
       'Content-Type': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',
@@ -65,7 +65,7 @@ class TripService {
       uriString += '?status=${Uri.encodeQueryComponent(status)}';
     }
     final uri = Uri.parse(uriString);
-    final response = await _httpClient.get(uri, headers: _authHeaders());
+    final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Failed to fetch trips');
@@ -79,7 +79,7 @@ class TripService {
     String tripDisplayId,
   ) async {
     final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/items');
-    final response = await _httpClient.get(uri, headers: _authHeaders());
+    final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Failed to fetch trip items');
@@ -93,7 +93,7 @@ class TripService {
     String tripDisplayId,
   ) async {
     final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/stops');
-    final response = await _httpClient.get(uri, headers: _authHeaders());
+    final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Failed to fetch trip stops');
@@ -107,7 +107,7 @@ class TripService {
     String tripDisplayId,
   ) async {
     final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/route-points');
-    final response = await _httpClient.get(uri, headers: _authHeaders());
+    final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Failed to fetch route map points');

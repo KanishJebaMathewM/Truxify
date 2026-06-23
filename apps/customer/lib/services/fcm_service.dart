@@ -1,8 +1,7 @@
 import 'dart:convert';
-import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:http/http.dart' as http;
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 
 class FcmService {
@@ -13,9 +12,7 @@ class FcmService {
 
   static Future<void> initializeAndRegister() async {
     try {
-      if (Firebase.apps.isEmpty) {
-        await Firebase.initializeApp();
-      }
+      // Firebase is already initialized in main.dart.
 
       final messaging = FirebaseMessaging.instance;
 
@@ -56,23 +53,20 @@ class FcmService {
   }
 
   static Future<void> _sendTokenToBackend(String? token) async {
-    final client = Supabase.instance.client;
-    final userId = client.auth.currentUser?.id;
-    if (userId == null) {
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    if (firebaseUser == null) {
       debugPrint('[FCM] No authenticated user, skipping token upload.');
       return;
     }
-    final accessToken = client.auth.currentSession?.accessToken;
-    final fullName = client.auth.currentUser?.userMetadata?['full_name']?.toString();
+
+    final idToken = await firebaseUser.getIdToken();
 
     final response = await http.put(
       Uri.parse('$_apiBaseUrl/api/profile/fcm-token'),
       headers: <String, String>{
         'Content-Type': 'application/json',
-        if (accessToken != null && accessToken.isNotEmpty) 'Authorization': 'Bearer $accessToken',
-        'x-user-id': userId,
-        'x-user-role': 'customer',
-        if (fullName != null && fullName.isNotEmpty) 'x-user-name': fullName,
+        if (idToken != null && idToken.isNotEmpty)
+          'Authorization': 'Bearer $idToken',
       },
       body: jsonEncode(<String, dynamic>{
         'fcmToken': token,

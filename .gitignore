@@ -65,3 +65,6 @@ venv/
 
 # Local Docker Compose overrides — may contain real credentials
 docker-compose.override.yml
+
+# Google Services config file (contains API keys/secrets)
+**/google-services.json

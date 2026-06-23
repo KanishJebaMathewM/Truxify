@@ -1163,7 +1163,7 @@ router.get('/:id/driver-location', authenticate, requireRole(['customer', 'drive
 
     const latestTelemetry = await mongoDb
       .collection('telemetry')
-      .find({ driver_id: order.driver_id })
+      .find({ driver_id: order.driver_id, order_id: order.id })
       .sort({ timestamp: -1 })
       .limit(1)
       .toArray();

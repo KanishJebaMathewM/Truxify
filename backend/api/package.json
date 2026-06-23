@@ -21,7 +21,7 @@
     "@supabase/supabase-js": "^2.108.2",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
-    "ethers": "6.16.0",
+    "ethers": "6.17.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "firebase-admin": "^14.0.0",

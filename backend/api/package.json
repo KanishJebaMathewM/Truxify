@@ -17,7 +17,7 @@
     "seed:dev": "node scripts/seed-dev-profile.js"
   },
   "dependencies": {
-    "@sentry/node": "^10.58.0",
+    "@sentry/node": "^10.60.0",
     "@supabase/supabase-js": "^2.108.2",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",

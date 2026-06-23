@@ -383,11 +383,19 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
 
     if (error) return res.status(500).json({ error: 'Failed to fetch history.', details: error.message });
 
-    const driverIds = [...new Set((history || []).filter(o => o.driver_id).map(o => o.driver_id))];
+    if (!history || history.length === 0) return res.json([]);
+
+    const driverIds = [...new Set(history.map(o => o.driver_id).filter(Boolean))];
     if (driverIds.length > 0) {
-      const { data: profiles } = await supabase.from('profiles').select('id, full_name').in('id', driverIds);
-      const driverMap = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
-      (history || []).forEach(o => { o.driver_name = driverMap[o.driver_id] || 'Driver Assigned'; });
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id, full_name')
+        .in('id', driverIds);
+
+      const profileMap = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
+      for (const order of history) {
+        order.driver_name = profileMap[order.driver_id] || null;
+      }
     }
 
     res.json(history);

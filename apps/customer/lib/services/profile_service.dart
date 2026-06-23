@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import '../core/api_client.dart';
 import 'supabase_service.dart';
 
@@ -9,17 +10,8 @@ class ProfileService {
   final ApiClient _apiClient;
 
   Future<Map<String, dynamic>> fetchProfile() async {
-    final userId = SupabaseService.requireUserId();
-    final fullName = SupabaseService.currentUser?.userMetadata?['full_name']?.toString();
-
-    final headers = <String, String>{
-      'x-user-id': userId,
-      'x-user-role': 'customer',
-      if (fullName != null && fullName.isNotEmpty) 'x-user-name': fullName,
-    };
-
     try {
-      final result = await _apiClient.get('/api/profile', headers: headers);
+      final result = await _apiClient.get('/api/profile');
       if (result is Map<String, dynamic>) {
         return result;
       }
@@ -34,25 +26,27 @@ class ProfileService {
   }
 
   Future<void> logout() async {
-    final userId = SupabaseService.client.auth.currentUser?.id;
+    final userId = FirebaseAuth.instance.currentUser?.uid ?? SupabaseService.client.auth.currentUser?.id;
 
-    if (userId == null) {
-      await SupabaseService.client.auth.signOut();
-      return;
+    if (userId != null) {
+      try {
+        await _apiClient.post(
+          '/api/auth/logout',
+          headers: <String, String>{
+            'x-user-id': userId,
+            'x-user-role': 'customer',
+          },
+        );
+      } catch (e) {
+        // ignore: avoid_print
+        print('Backend logout failed: $e');
+      }
     }
 
-    try {
-      await _apiClient.post(
-        '/api/auth/logout',
-        headers: <String, String>{
-          'x-user-id': userId,
-          'x-user-role': 'customer',
-        },
-      );
-    } catch (e) {
-      print('Backend logout failed: $e');
-    } finally {
-      await SupabaseService.client.auth.signOut();
-    }
+    // Sign out from local clients
+    await Future.wait([
+      FirebaseAuth.instance.signOut(),
+      SupabaseService.client.auth.signOut(),
+    ]);
   }
 }

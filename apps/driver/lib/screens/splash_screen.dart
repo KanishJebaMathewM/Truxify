@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/app_routes.dart';
 import '../data/mock_data.dart';
@@ -22,7 +23,12 @@ class _SplashScreenState extends State<SplashScreen> {
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pushReplacementNamed(AppRoutes.login);
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        Navigator.of(context).pushReplacementNamed(AppRoutes.shell);
+      } else {
+        Navigator.of(context).pushReplacementNamed(AppRoutes.login);
+      }
     });
   }
 

@@ -21,17 +21,35 @@ export async function registerDeviceToken(req, res) {
       });
     }
 
-    const { error } = await supabase.from('user_devices').upsert({
-      user_id: userId,
-      fcm_token: fcmToken,
-      platform: platform || 'android'
-    });
+    const { error } = await supabase.from('user_devices').upsert(
+      {
+        user_id: userId,
+        fcm_token: fcmToken,
+        platform: platform || 'android'
+      },
+      { onConflict: 'fcm_token' }
+    );
 
     if (error) {
       logger.error('[DeviceController] Failed to register device token in database:', error.message);
       return res.status(500).json({
         error: 'Failed to register device'
       });
+    }
+    
+    const { error: profileSyncError } = await supabase
+      .from('profiles')
+      .update({
+        fcm_token: fcmToken,
+        fcm_token_updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (profileSyncError) {
+      logger.error(
+        '[DeviceController] Device token saved but failed to sync profiles.fcm_token:',
+        profileSyncError.message
+      );
     }
 
     return res.json({

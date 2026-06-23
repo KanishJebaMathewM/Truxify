@@ -4,6 +4,7 @@ import logger from '../middleware/logger.js';
 export const TTL_SECONDS = 900; // 15 minutes
 export const TOMBSTONE_TTL_SECONDS = 30; // 30 seconds
 const cacheKey = (firebaseUid) => `user:profile:${firebaseUid}`;
+const supabaseCacheKey = (userId) => `user:profile:sb:${userId}`;
 
 const LAST_LOG_TIMES = {};
 const LOG_THROTTLE_INTERVAL_MS = 60000; // 60 seconds
@@ -65,9 +66,38 @@ export function isValidCachedProfile(firebaseUid, cachedProfile) {
 }
 
 /**
+ * Validates the shape of a cached Supabase profile.
+ *
+ * Supabase identities are keyed by the profile UUID (req.user.id) rather than
+ * a Firebase UID, so the identity field checked here is `id`.
+ *
+ * @param {string} userId - The expected Supabase profile UUID.
+ * @param {any} cachedProfile - The cached profile to validate.
+ * @returns {boolean} True if the cached profile shape is valid, false otherwise.
+ */
+export function isValidCachedSupabaseProfile(userId, cachedProfile) {
+  if (!cachedProfile || typeof cachedProfile !== 'object' || Array.isArray(cachedProfile)) {
+    return false;
+  }
+  if (typeof cachedProfile.isActive !== 'boolean') {
+    return false;
+  }
+  if (cachedProfile.isActive === false) {
+    return true; // Valid tombstone
+  }
+  return (
+    cachedProfile.isActive === true &&
+    cachedProfile.id === userId &&
+    typeof cachedProfile.role === 'string' &&
+    (cachedProfile.fullName === undefined || cachedProfile.fullName === null || typeof cachedProfile.fullName === 'string') &&
+    (cachedProfile.phone === undefined || cachedProfile.phone === null || typeof cachedProfile.phone === 'string')
+  );
+}
+
+/**
  * Retrieves a user profile from the Redis cache.
  * Falls back to null on cache miss or Redis error.
- * 
+ *
  * @param {string} firebaseUid - The Firebase UID of the user.
  * @returns {Promise<object|null>} The parsed cached profile, or null.
  */
@@ -121,5 +151,67 @@ export async function invalidateCachedProfile(firebaseUid) {
     await redisClient.del(cacheKey(firebaseUid));
   } catch (err) {
     logCacheError('invalidateCachedProfile', err);
+  }
+}
+
+/**
+ * Retrieves a Supabase user profile from the Redis cache.
+ * Falls back to null on cache miss or Redis error.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {Promise<object|null>} The parsed cached profile, or null.
+ */
+export async function getCachedSupabaseProfile(userId) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId) return null;
+  try {
+    const raw = await redisClient.get(supabaseCacheKey(userId));
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    logCacheError('getCachedSupabaseProfile', err);
+    try {
+      await redisClient.del(supabaseCacheKey(userId));
+    } catch (delErr) {
+      // Ignore failures on background cleanup deletion
+    }
+    return null;
+  }
+}
+
+/**
+ * Stores a Supabase user profile in the Redis cache.
+ * Gracefully handles Redis errors.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @param {object} profile - The user profile object to cache.
+ * @param {number} [ttlSeconds] - TTL in seconds; callers should clamp this to
+ *   the access token's remaining lifetime so a revoked session cannot outlive
+ *   its token.
+ * @returns {Promise<void>}
+ */
+export async function setCachedSupabaseProfile(userId, profile, ttlSeconds = TTL_SECONDS) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId || !profile || ttlSeconds <= 0) return;
+  try {
+    await redisClient.set(supabaseCacheKey(userId), JSON.stringify(profile), 'EX', ttlSeconds);
+  } catch (err) {
+    logCacheError('setCachedSupabaseProfile', err);
+  }
+}
+
+/**
+ * Invalidates (deletes) a cached Supabase user profile from Redis.
+ * Gracefully handles Redis errors.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {Promise<void>}
+ */
+export async function invalidateCachedSupabaseProfile(userId) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId) return;
+  try {
+    await redisClient.del(supabaseCacheKey(userId));
+  } catch (err) {
+    logCacheError('invalidateCachedSupabaseProfile', err);
   }
 }

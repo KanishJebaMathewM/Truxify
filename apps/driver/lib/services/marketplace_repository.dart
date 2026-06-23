@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -29,9 +30,8 @@ class MarketplaceRepository {
   final http.Client _httpClient;
   final String _apiBaseUrl;
 
-  Map<String, String> _authHeaders() {
-    final session = _client.auth.currentSession;
-    final accessToken = session?.accessToken;
+  Future<Map<String, String>> _authHeaders() async {
+    final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
     final userId = _client.auth.currentUser?.id ?? '';
     return <String, String>{
       'Content-Type': 'application/json',
@@ -43,7 +43,7 @@ class MarketplaceRepository {
 
   Future<List<LoadOffer>> fetchLoadOffers() async {
     final uri = Uri.parse('$_apiBaseUrl/api/orders/load-offers');
-    final response = await _httpClient.get(uri, headers: _authHeaders());
+    final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Failed to fetch load offers');
@@ -55,7 +55,7 @@ class MarketplaceRepository {
 
   Future<List<LoadOffer>> fetchEnRouteLoads() async {
     final uri = Uri.parse('$_apiBaseUrl/api/orders/load-offers/en-route');
-    final response = await _httpClient.get(uri, headers: _authHeaders());
+    final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Failed to fetch en-route loads');
@@ -71,8 +71,7 @@ class MarketplaceRepository {
     required num amount,
   }) async {
     final uri = Uri.parse('$_apiBaseUrl/api/orders/$loadId/bids');
-    final session = _client.auth.currentSession;
-    final accessToken = session?.accessToken;
+    final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
     final response = await _httpClient.post(
       uri,
       headers: <String, String>{
@@ -96,7 +95,7 @@ class MarketplaceRepository {
 
   Future<List<DriverBid>> fetchDriverBids({required String driverId}) async {
     final uri = Uri.parse('$_apiBaseUrl/api/bids');
-    final response = await _httpClient.get(uri, headers: _authHeaders());
+    final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Failed to fetch driver bids');

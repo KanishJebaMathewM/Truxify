@@ -2,12 +2,22 @@ import { supabase, firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
 
-/**
- * Fetch a user's FCM token from the profiles table.
- *
- * @param {string} userId - The user's profile UUID.
- * @returns {Promise<string|null>} The FCM token, or null if not set.
- */
+const TRANSIENT_ERROR_CODES = new Set([
+  'messaging/too-many-topics',
+  'messaging/internal-error',
+  'messaging/unavailable',
+  'messaging/server-unavailable',
+]);
+
+const INVALID_TOKEN_CODES = new Set([
+  'messaging/registration-token-not-registered',
+  'messaging/invalid-registration-token',
+  'messaging/invalid-argument',
+]);
+
+const MAX_RETRIES = 3;
+const RETRY_DELAYS = [1000, 2000, 4000];
+
 async function getUserFcmToken(userId) {
   if (!supabase) return null;
   try {
@@ -24,80 +34,76 @@ async function getUserFcmToken(userId) {
   }
 }
 
-/**
- * Send a push notification via Firebase Cloud Messaging.
- * Gracefully handles missing tokens, expired tokens, and Firebase errors.
- * FCM delivery failure never throws — it is always logged and swallowed.
- *
- * @param {string} userId - The recipient's profile UUID.
- * @param {object} notification - { title, body }
- * @param {object} [data={}] - Optional key-value data payload.
- */
+async function clearInvalidToken(userId) {
+  if (!supabase) return;
+  try {
+    await supabase
+      .from('profiles')
+      .update({ fcm_token: null, fcm_token_updated_at: new Date().toISOString() })
+      .eq('id', userId);
+  } catch (dbErr) {
+    logger.error(`[FCM] Failed to clear invalid FCM token for user ${userId}: ${dbErr.message}`);
+  }
+}
+
+function isTransientError(code) {
+  return TRANSIENT_ERROR_CODES.has(code);
+}
+
+function isInvalidTokenError(code) {
+  return INVALID_TOKEN_CODES.has(code);
+}
+
 export async function sendFcmNotification(userId, notification, data = {}) {
   if (!firebaseAdmin || !firebaseAdmin.messaging) {
     logger.warn('[FCM] Firebase not configured — skipping push notification');
-    return;
+    return { success: false, error: 'Firebase not configured' };
   }
 
   const fcmToken = await getUserFcmToken(userId);
   if (!fcmToken) {
     logger.warn(`[FCM] No FCM token for user ${userId} — skipping push notification`);
-    return;
+    return { success: false, error: 'No FCM token' };
   }
 
-  try {
-    const stringData = Object.fromEntries(
-      Object.entries(data).map(([k, v]) => [k, String(v)])
-    );
+  const stringData = Object.fromEntries(
+    Object.entries(data).map(([k, v]) => [k, String(v)])
+  );
 
-    const messageId = await firebaseAdmin.messaging().send({
-      token: fcmToken,
-      notification: {
-        title: notification.title,
-        body: notification.body,
-      },
-      data: stringData,
-    });
+  let lastError = null;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      const messageId = await firebaseAdmin.messaging().send({
+        token: fcmToken,
+        notification: {
+          title: notification.title,
+          body: notification.body,
+        },
+        data: stringData,
+      });
 
-    logger.info(`[FCM] Push notification sent to user ${userId} — messageId: ${messageId}`);
-  } catch (err) {
-    // Log the failure but never propagate — FCM errors must not block HTTP responses
-    logger.error(
-      `[FCM] Delivery failed for user ${userId} — errorCode: ${err.code ?? 'unknown'} — ${err.message}`
-    );
+      logger.info(`[FCM] Push notification sent to user ${userId} — messageId: ${messageId}`);
+      return { success: true, messageId };
+    } catch (err) {
+      lastError = err;
+      logger.error(`[FCM] Delivery failed for user ${userId} (attempt ${attempt + 1}/${MAX_RETRIES}) — errorCode: ${err.code ?? 'unknown'} — ${err.message}`);
 
-    // Clear permanently invalid/expired tokens (CodeRabbit feedback)
-    if (
-      err.code === 'messaging/registration-token-not-registered' ||
-      err.code === 'messaging/invalid-registration-token'
-    ) {
-      logger.warn(`[FCM] Clearing invalid FCM token for user ${userId} due to error: ${err.code}`);
-      if (supabase) {
-        try {
-          await supabase
-            .from('profiles')
-            .update({
-              fcm_token: null,
-              fcm_token_updated_at: new Date().toISOString(),
-            })
-            .eq('id', userId);
-        } catch (dbErr) {
-          logger.error(`[FCM] Failed to clear invalid FCM token for user ${userId}: ${dbErr.message}`);
-        }
+      if (isInvalidTokenError(err.code)) {
+        logger.warn(`[FCM] Clearing invalid FCM token for user ${userId} due to error: ${err.code}`);
+        await clearInvalidToken(userId);
+        return { success: false, error: err.message, errorCode: err.code };
+      }
+
+      if (isTransientError(err.code) && attempt < MAX_RETRIES - 1) {
+        logger.info(`[FCM] Retrying after ${RETRY_DELAYS[attempt]}ms for user ${userId}`);
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS[attempt]));
       }
     }
   }
+
+  return { success: false, error: lastError?.message || 'Unknown error', errorCode: lastError?.code };
 }
 
-/**
- * Persist a delivery OTP in the isolated delivery_otps table.
- * Called when the order transitions to 'In Transit' and a fresh OTP is needed.
- *
- * @param {string} orderId - The order UUID.
- * @param {string} otp - The 6-digit delivery OTP.
- * @param {number} ttlMinutes - Time-to-live for the OTP (defaults to 15).
- * @returns {Promise<{id: string} | null>}
- */
 export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
   const otpHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
@@ -122,12 +128,6 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
   return data;
 }
 
-/**
- * Retrieve the latest active (unexpired, unverified) OTP for an order.
- *
- * @param {string} orderId
- * @returns {Promise<{id: string, otp_hash: string, expires_at: string} | null>}
- */
 export async function getActiveDeliveryOtp(orderId) {
   const { data, error } = await supabase
     .from('delivery_otps')
@@ -147,12 +147,6 @@ export async function getActiveDeliveryOtp(orderId) {
   return data;
 }
 
-/**
- * Mark a delivery OTP as verified.
- *
- * @param {string} orderId
- * @returns {Promise<boolean>}
- */
 export async function verifyDeliveryOtp(orderId) {
   const { error } = await supabase
     .from('delivery_otps')
@@ -171,12 +165,6 @@ export async function verifyDeliveryOtp(orderId) {
   return true;
 }
 
-/**
- * Invalidate (expire) all active OTPs for an order.
- *
- * @param {string} orderId
- * @returns {Promise<void>}
- */
 export async function expireDeliveryOtps(orderId) {
   const { error } = await supabase
     .from('delivery_otps')
@@ -189,22 +177,13 @@ export async function expireDeliveryOtps(orderId) {
   }
 }
 
-/**
- * Deliver the delivery OTP to the customer through out-of-band channels.
- *
- * @param {string} customerId - The customer's profile UUID.
- * @param {string} orderDisplayId - The display identifier of the order (e.g. #FFYYYYMMDDXXXX).
- * @param {string} otp - The 6-digit delivery OTP.
- */
 export async function sendDeliveryOtpNotification(customerId, orderDisplayId, otp) {
-  logger.info(
-    `[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`
-  );
+  logger.info(`[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`);
 
   const title = 'Delivery Verification OTP';
-  const body  = `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`;
+  const body = `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`;
 
-  // 1. Database Notification Persistence (always attempted first)
+  let dbSuccess = false;
   try {
     const { error } = await supabase
       .from('notifications')
@@ -220,26 +199,21 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       logger.error('[NotificationService] Database insert failed:', error);
     } else {
       logger.info('[NotificationService] Notification inserted successfully');
+      dbSuccess = true;
     }
   } catch (dbErr) {
-    logger.error(
-      '[NotificationService] Database connection error during notification insert:',
-      dbErr.message
-    );
+    logger.error('[NotificationService] Database connection error during notification insert:', dbErr.message);
   }
 
-  // 2. FCM Push Notification (fire-and-forget — never blocks the caller)
-  // Secure: Do not include raw OTP values in push notification text (CodeRabbit feedback)
-  void sendFcmNotification(
+  const fcmResult = await sendFcmNotification(
     customerId,
     {
       title: 'Delivery Verification OTP',
-      body: `A delivery OTP has been generated for order ${orderDisplayId}. Open the app to view the code.`
+      body: `A delivery OTP has been generated for order ${orderDisplayId}. Open the app to view the code.`,
     },
     { orderDisplayId, notifType: 'delivery_otp' }
   );
 
-  // 3. SMS Gateway (e.g. Twilio) Stub
   if (process.env.TWILIO_AUTH_TOKEN) {
     const smsOtpLog = process.env.NODE_DEBUG
       ? `Sending SMS to customer phone containing OTP ${otp}`
@@ -247,22 +221,12 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     logger.info(`[NotificationService] [SMS] SMS stub: ${smsOtpLog}`);
   } else {
     const logOtp = process.env.NODE_DEBUG ? otp : `${otp.slice(0, 2)}***`;
-    logger.info(
-      `[NotificationService] [SMS] SMS stub: No SMS gateway configured. Logging OTP out-of-band: ${logOtp}`
-    );
+    logger.info(`[NotificationService] [SMS] SMS stub: No SMS gateway configured. Logging OTP out-of-band: ${logOtp}`);
   }
+
+  return { success: dbSuccess || fcmResult.success, fcm: fcmResult };
 }
 
-/**
- * Send a generic push notification to any user.
- * Persists the notification record and delivers via FCM.
- *
- * @param {string} userId - The recipient's profile UUID.
- * @param {string} title - Notification title.
- * @param {string} body - Notification body.
- * @param {string} notifType - Notification type for categorisation.
- * @param {object} [metadata={}] - Optional metadata to persist.
- */
 export async function sendPushNotification(userId, title, body, notifType, metadata = {}) {
   if (supabase) {
     try {
@@ -278,5 +242,6 @@ export async function sendPushNotification(userId, title, body, notifType, metad
     }
   }
 
-  void sendFcmNotification(userId, { title, body }, { notifType, ...metadata });
+  const fcmResult = await sendFcmNotification(userId, { title, body }, { notifType, ...metadata });
+  return { success: fcmResult.success, fcm: fcmResult };
 }

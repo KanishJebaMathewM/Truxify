@@ -4,6 +4,7 @@ import express from 'express';
 
 vi.mock('../../src/lib/profileCache.js', () => ({
   invalidateCachedProfile: vi.fn(),
+  invalidateCachedSupabaseProfile: vi.fn(),
   getCachedProfile: vi.fn(),
   setCachedProfile: vi.fn(),
 }));

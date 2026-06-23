@@ -67,9 +67,12 @@ class _TruxifyAppState extends State<TruxifyApp> {
               );
 
             case AppRoutes.otp:
-              final phone = settings.arguments as String? ?? '';
+              final args = settings.arguments as Map<String, String>? ?? {};
               return truxifyPageRoute(
-                (context) => OtpScreen(phone: phone),
+                (context) => OtpScreen(
+                  phone: args['phone'] ?? '',
+                  verificationId: args['verificationId'] ?? '',
+                ),
               );
 
             case AppRoutes.shell:

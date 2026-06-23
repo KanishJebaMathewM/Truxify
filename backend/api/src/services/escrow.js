@@ -82,12 +82,10 @@ export function getEscrowBookingId(orderDisplayId) {
  */
 export async function buildDepositTx(orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
   const bookingId = getEscrowBookingId(orderDisplayId);
-  // Graceful fallback when contract is not configured (CI / dev environments)
   if (!escrowContract) {
     return { txData: null, bookingId };
   }
 
-  // Validate inputs; for robustness return a null txData rather than throwing
   if (!ethers.isAddress(customerWalletAddress) || !ethers.isAddress(driverWalletAddress)) {
     return { txData: null, bookingId };
   }
@@ -95,7 +93,7 @@ export async function buildDepositTx(orderDisplayId, customerWalletAddress, driv
     return { txData: null, bookingId };
   }
 
-  const txData = await escrowContract.populateTransaction.deposit(
+  const txData = await escrowContract.deposit.populateTransaction(
     bookingId,
     customerWalletAddress,
     driverWalletAddress,

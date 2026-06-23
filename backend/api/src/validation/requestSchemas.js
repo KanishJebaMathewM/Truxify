@@ -142,3 +142,31 @@ export const registerDeviceSchema = z.object({
     invalid_type_error: 'platform must be one of: android, ios, web',
   }).default('android'),
 }).passthrough();
+
+// Support ticket schemas
+const SUPPORT_CATEGORIES = ['billing', 'booking', 'payment', 'order', 'technical', 'general', 'account'];
+const TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
+
+export const createTicketSchema = z.object({
+  subject: z.string().min(1, 'Subject is required').max(200, 'Subject must be 200 characters or less'),
+  category: z.string()
+    .min(1, 'Category is required')
+    .transform(v => v.trim())
+    .refine((v) => SUPPORT_CATEGORIES.includes(v.toLowerCase()), {
+      message: `Category must be one of: ${SUPPORT_CATEGORIES.join(', ')}`,
+    }),
+  description: z.string().max(2000, 'Description must be 2000 characters or less').optional(),
+});
+
+export const updateTicketSchema = z.object({
+  subject: z.string().min(1, 'Subject cannot be empty').max(200, 'Subject must be 200 characters or less').optional(),
+  description: z.string().max(2000, 'Description must be 2000 characters or less').optional(),
+  category: z.string()
+    .transform(v => v.trim())
+    .refine((v) => SUPPORT_CATEGORIES.includes(v.toLowerCase()), {
+      message: `Category must be one of: ${SUPPORT_CATEGORIES.join(', ')}`,
+    }).optional(),
+  status: z.enum(TICKET_STATUSES, {
+    invalid_type_error: `Status must be one of: ${TICKET_STATUSES.join(', ')}`,
+  }).optional(),
+});

@@ -250,10 +250,13 @@ router.patch('/tickets/:id', authenticate, userLimiter, async (req, res) => {
           error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}`,
         });
       }
-      if (req.user.role !== 'admin' && normalizedStatus !== ticket.status && normalizedStatus !== 'closed') {
-        return res.status(403).json({
-          error: 'Access Denied: Only admins can change tickets to this status.',
-        });
+      const USER_ALLOWED_STATUSES = ['resolved'];
+      if (req.user.role !== 'admin' && normalizedStatus !== ticket.status) {
+        if (!USER_ALLOWED_STATUSES.includes(normalizedStatus)) {
+          return res.status(403).json({
+            error: 'Access Denied: Only admins can change tickets to this status.',
+          });
+        }
       }
       updates.status = normalizedStatus;
     }

@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -47,7 +48,7 @@ router.get('/faqs', async (req, res) => {
 // ============================================================================
 // 2. CREATE SUPPORT TICKET (AUTHENTICATED USER)
 // ============================================================================
-router.post('/tickets', authenticate, async (req, res) => {
+router.post('/tickets', authenticate, userLimiter, async (req, res) => {
   const subject = normalizeRequiredText(req.body.subject);
   const category = normalizeRequiredText(req.body.category);
   const description = normalizeRequiredText(req.body.description) || subject;
@@ -104,7 +105,7 @@ router.post('/tickets', authenticate, async (req, res) => {
 // ============================================================================
 // 3. LIST CURRENT USER'S SUPPORT TICKETS (AUTHENTICATED USER)
 // ============================================================================
-router.get('/tickets', authenticate, async (req, res) => {
+router.get('/tickets', authenticate, userLimiter, async (req, res) => {
   const { status, category, page = '1', limit = '20' } = req.query;
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
@@ -152,7 +153,7 @@ router.get('/tickets', authenticate, async (req, res) => {
 // ============================================================================
 // 4. GET SINGLE SUPPORT TICKET (AUTHENTICATED USER - OWNER)
 // ============================================================================
-router.get('/tickets/:id', authenticate, async (req, res) => {
+router.get('/tickets/:id', authenticate, userLimiter, async (req, res) => {
   const ticketId = req.params.id;
 
   try {
@@ -186,7 +187,7 @@ router.get('/tickets/:id', authenticate, async (req, res) => {
 // ============================================================================
 // 5. UPDATE SUPPORT TICKET (AUTHENTICATED USER - OWNER OR ADMIN)
 // ============================================================================
-router.patch('/tickets/:id', authenticate, async (req, res) => {
+router.patch('/tickets/:id', authenticate, userLimiter, async (req, res) => {
   const ticketId = req.params.id;
   const { subject, description, category, status } = req.body;
 
@@ -283,7 +284,7 @@ router.patch('/tickets/:id', authenticate, async (req, res) => {
 // ============================================================================
 // 6. LIST ALL TICKETS (ADMIN ONLY)
 // ============================================================================
-router.get('/admin/tickets', authenticate, requireRole(['admin']), async (req, res) => {
+router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), async (req, res) => {
   const { status, category, user_id, page = '1', limit = '20' } = req.query;
   const pageNum = Math.max(1, parseInt(page, 10) || 1);
   const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));

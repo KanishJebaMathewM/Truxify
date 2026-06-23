@@ -76,14 +76,43 @@ function buildStore(prefix) {
   return new DeferredRedisStore(prefix);
 }
 
+/**
+ * Keys a limiter by the authenticated principal, falling back to the client IP
+ * for unauthenticated requests. Used wherever req.user is available so that
+ * users sharing a public IP (e.g. mobile clients behind carrier-grade NAT) are
+ * limited independently rather than against one shared bucket.
+ */
+export function userKeyGenerator(req) {
+  if (req.user?.id) return `user:${req.user.id}`;
+  if (req.user?.uid) return `uid:${req.user.uid}`;
+  return ipKeyGenerator(req);
+}
+
+// Coarse, pre-auth IP limiter. It runs before authentication, so it can only
+// key by IP; kept generous so that legitimate users sharing a NAT'd IP are not
+// throttled by each other. Per-user fairness is enforced by userLimiter once
+// the request is authenticated.
 export const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
   store: buildStore('rl:global:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
   skip: (req) => req.path === '/health' || req.path.startsWith('/health/'),
+});
+
+// Per-user limiter, applied in the route chains immediately after the
+// authenticate middleware so req.user is populated and each user gets an
+// independent bucket regardless of shared IPs.
+export const userLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  store: buildStore('rl:user:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
 });
 
 export const healthLimiter = rateLimit({
@@ -109,11 +138,7 @@ export const bidLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    if (req.user?.id) return `user:${req.user.id}`;
-    if (req.user?.uid) return `uid:${req.user.uid}`;
-    return ipKeyGenerator(req);
-  },
+  keyGenerator: userKeyGenerator,
   store: buildStore('rl:bid:'),
   message: { error: 'Rate limit exceeded', retryAfter: 60 },
 });

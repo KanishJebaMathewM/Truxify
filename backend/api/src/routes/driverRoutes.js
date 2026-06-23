@@ -2,6 +2,7 @@ import express from 'express';
 import { supabase, redisClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 
 import { validateBody } from '../middleware/validate.js';
 import { driverOnlineSchema, withdrawSchema } from '../validation/requestSchemas.js';
@@ -52,7 +53,7 @@ router.post('/otp/verify', verifyLoginOtpLimiter, validateBody(loginOtpSchema), 
 // ============================================================================
 // 1. GET DRIVER STATS (DRIVER)
 // ============================================================================
-router.get('/stats', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/stats', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   try {
     const { data: details, error } = await supabase
       .from('driver_details')
@@ -92,7 +93,7 @@ router.get('/stats', authenticate, requireRole(['driver']), async (req, res) => 
 // ============================================================================
 // 2. TOGGLE ONLINE / OFFLINE STATUS (DRIVER)
 // ============================================================================
-router.put('/online', authenticate, requireRole(['driver']), validateBody(driverOnlineSchema), async (req, res) => {
+router.put('/online', authenticate, userLimiter, requireRole(['driver']), validateBody(driverOnlineSchema), async (req, res) => {
   const { is_online } = req.body;
 
   if (typeof is_online !== 'boolean') {
@@ -124,7 +125,7 @@ router.put('/online', authenticate, requireRole(['driver']), validateBody(driver
 // ============================================================================
 // 3. FETCH WALLET TRANSACTION HISTORY (DRIVER)
 // ============================================================================
-router.get('/wallet/history', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/wallet/history', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   try {
     const page = parseInt(req.query.page || '1', 10);
     const limit = parseInt(req.query.limit || '20', 10);
@@ -183,7 +184,7 @@ router.get('/wallet/history', authenticate, requireRole(['driver']), async (req,
 // ============================================================================
 // 4. FETCH Aggregated daily/weekly earnings summaries for chart (DRIVER)
 // ============================================================================
-router.get('/earnings/summary', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   const daysParam = req.query.days ?? '30';
   const limitDays = typeof daysParam === 'string' ? Number(daysParam) : NaN;
 
@@ -218,7 +219,7 @@ router.get('/earnings/summary', authenticate, requireRole(['driver']), async (re
 // ============================================================================
 // 5. FETCH DRIVER TRIPS (DRIVER)
 // ============================================================================
-router.get('/trips', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   const { status } = req.query;
 
   try {
@@ -243,7 +244,7 @@ router.get('/trips', authenticate, requireRole(['driver']), async (req, res) => 
 // ============================================================================
 // 6. FETCH TRIP ITEMS (DRIVER)
 // ============================================================================
-router.get('/trips/:tripDisplayId/items', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   const { tripDisplayId } = req.params;
 
   try {
@@ -262,7 +263,7 @@ router.get('/trips/:tripDisplayId/items', authenticate, requireRole(['driver']),
 // ============================================================================
 // 7. FETCH TRIP STOPS (DRIVER)
 // ============================================================================
-router.get('/trips/:tripDisplayId/stops', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   const { tripDisplayId } = req.params;
 
   try {
@@ -281,7 +282,7 @@ router.get('/trips/:tripDisplayId/stops', authenticate, requireRole(['driver']),
 // ============================================================================
 // 8. FETCH ROUTE MAP POINTS (DRIVER)
 // ============================================================================
-router.get('/trips/:tripDisplayId/route-points', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   const { tripDisplayId } = req.params;
 
   try {
@@ -300,7 +301,7 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, requireRole(['dri
 // ============================================================================
 // 9. FETCH DRIVER BIDS (DRIVER)
 // ============================================================================
-router.get('/bids', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   try {
     const { data: bids, error } = await supabase
       .from('load_bids')
@@ -318,7 +319,7 @@ router.get('/bids', authenticate, requireRole(['driver']), async (req, res) => {
 // ============================================================================
 // 10. WITHDRAW FUNDS FROM WALLET (DRIVER)
 // ============================================================================
-router.post('/wallet/withdraw', authenticate, requireRole(['driver']), validateBody(withdrawSchema), async (req, res) => {
+router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver']), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa
 
   try {
@@ -368,7 +369,7 @@ router.post('/wallet/withdraw', authenticate, requireRole(['driver']), validateB
 // ============================================================================
 // 11. GET DRIVER REPUTATION (DRIVER)
 // ============================================================================
-router.get('/:driverId/reputation', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   const { driverId } = req.params;
 
   if (driverId !== req.user.id) {

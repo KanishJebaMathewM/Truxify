@@ -2,7 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
-import { bidLimiter } from '../middleware/rateLimiter.js';
+import { bidLimiter, userLimiter } from '../middleware/rateLimiter.js';
 import { supabase, redisClient, mongoDb } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
@@ -152,7 +152,7 @@ function generateOrderDisplayId() {
 // ============================================================================
 // 1. CREATE AN ORDER (CUSTOMER)
 // ============================================================================
-router.post('/', authenticate, requireRole(['customer']), validateBody(createOrderSchema), async (req, res) => {
+router.post('/', authenticate, userLimiter, requireRole(['customer']), validateBody(createOrderSchema), async (req, res) => {
   const {
     pickup_address, pickup_lat, pickup_lng,
     drop_address, drop_lat, drop_lng,
@@ -286,7 +286,7 @@ router.post('/', authenticate, requireRole(['customer']), validateBody(createOrd
 // ============================================================================
 // 2. FETCH MY ACTIVE ORDERS (CUSTOMER)
 // ============================================================================
-router.get('/my/active', authenticate, requireRole(['customer']), async (req, res) => {
+router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
   const activeStatuses = ['pending', 'active', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving'];
 
   try {
@@ -315,7 +315,7 @@ router.get('/my/active', authenticate, requireRole(['customer']), async (req, re
 // ============================================================================
 // 3. FETCH LOAD OFFERS (MARKETPLACE)
 // ============================================================================
-router.get('/load-offers', authenticate, async (req, res) => {
+router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
   try {
     const { data: offers, error } = await supabase
       .from('load_offers')
@@ -333,7 +333,7 @@ router.get('/load-offers', authenticate, async (req, res) => {
 // ============================================================================
 // 4. FETCH EN-ROUTE LOADS (MARKETPLACE)
 // ============================================================================
-router.get('/load-offers/en-route', authenticate, async (req, res) => {
+router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) => {
   try {
     const { data: offers, error } = await supabase
       .from('load_offers')
@@ -351,7 +351,7 @@ router.get('/load-offers/en-route', authenticate, async (req, res) => {
 // ============================================================================
 // 5. FETCH MY ORDER HISTORY (CUSTOMER)
 // ============================================================================
-router.get('/history', authenticate, requireRole(['customer']), async (req, res) => {
+router.get('/history', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
   try {
     const { data: history, error } = await supabase
       .from('orders')
@@ -369,7 +369,7 @@ router.get('/history', authenticate, requireRole(['customer']), async (req, res)
 // ============================================================================
 // 6. FETCH SPECIFIC ORDER DETAILS AND TIMELINE (CUSTOMER OR DRIVER)
 // ============================================================================
-router.get('/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
@@ -409,7 +409,7 @@ router.get('/:id', authenticate, validateParams(paramIdSchema), async (req, res)
 // ============================================================================
 // 7. FETCH ORDER TIMELINE (CUSTOMER OR DRIVER)
 // ============================================================================
-router.get('/:id/timeline', authenticate, validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
@@ -444,7 +444,7 @@ router.get('/:id/timeline', authenticate, validateParams(paramIdSchema), async (
 // ============================================================================
 // 8. SUBMIT BID FOR LOAD OFFER (DRIVER)
 // ============================================================================
-router.post('/:id/bids', authenticate, requireRole(['driver']), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
+router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
   const loadOfferId = req.params.id;
   const { bid_amount } = req.body;
 
@@ -478,7 +478,7 @@ router.post('/:id/bids', authenticate, requireRole(['driver']), bidLimiter, vali
 // ============================================================================
 // 9. SUBMIT RATING FOR A DELIVERED ORDER (CUSTOMER)
 // ============================================================================
-router.post('/:id/ratings', authenticate, requireRole(['customer']), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
+router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
   const orderId = req.params.id;
   const { stars, comment = null } = req.body;
 
@@ -577,7 +577,7 @@ router.post('/:id/ratings', authenticate, requireRole(['customer']), validatePar
 // ============================================================================
 // 10. VIEW BIDS FOR AN ORDER (CUSTOMER)
 // ============================================================================
-router.get('/:id/bids', authenticate, requireRole(['customer']), validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
@@ -631,7 +631,7 @@ router.get('/:id/bids', authenticate, requireRole(['customer']), validateParams(
 // ============================================================================
 // 11. ACCEPT BID (CUSTOMER)
 // ============================================================================
-router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
+router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
   const orderId = req.params.id;
   const bidId = req.params.bidId;
 
@@ -754,7 +754,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
 // ============================================================================
 // 12. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 // ============================================================================
-router.put('/:id/milestones', authenticate, requireRole(['driver']), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
+router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver']), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   const orderId = req.params.id;
   const { milestone } = req.body;
 
@@ -819,7 +819,7 @@ router.put('/:id/milestones', authenticate, requireRole(['driver']), milestoneLi
 // ============================================================================
 // 13. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
 // ============================================================================
-router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verifyDeliveryLimiter, validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
+router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['driver']), verifyDeliveryLimiter, validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   const orderId = req.params.id;
   const { otp } = req.body;
 
@@ -929,7 +929,7 @@ router.post('/:id/verify-delivery', authenticate, requireRole(['driver']), verif
 // ============================================================================
 // 14. CHANGE DROP (CUSTOMER)
 // ============================================================================
-router.put('/:id/change-drop', authenticate, requireRole(['customer']), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
+router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
   const orderId = req.params.id; // this is order_display_id from client
   const { drop_address, drop_lat, drop_lng } = req.body;
 
@@ -1009,7 +1009,7 @@ router.put('/:id/change-drop', authenticate, requireRole(['customer']), validate
 // ============================================================================
 // 15. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
 // ============================================================================
-router.post('/:id/cancel', authenticate, requireRole(['customer']), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
+router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
   const orderId = req.params.id; // this is order_display_id from client
   const { reason = null } = req.body || {};
 
@@ -1098,7 +1098,7 @@ router.post('/:id/cancel', authenticate, requireRole(['customer']), validatePara
 // ============================================================================
 // 16. CONFIRM ESCROW DEPOSIT (CUSTOMER)
 // ============================================================================
-router.post('/:id/confirm-deposit', authenticate, requireRole(['customer']), validateParams(paramIdSchema), validateBody(
+router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(
   z.object({ txHash: z.string().regex(/^0x([A-Fa-f0-9]{64})$/, 'Invalid transaction hash') }),
 ), async (req, res) => {
   const orderId = req.params.id;
@@ -1137,7 +1137,7 @@ router.post('/:id/confirm-deposit', authenticate, requireRole(['customer']), val
 // ============================================================================
 // 17. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
 // ============================================================================
-router.post('/predict-demand', authenticate, requireRole(['customer', 'driver']), predictDemandLimiter, validateBody(predictDemandSchema), async (req, res) => {
+router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer', 'driver']), predictDemandLimiter, validateBody(predictDemandSchema), async (req, res) => {
   try {
     const prediction = await predictDemand(req.body);
     return res.json(prediction);

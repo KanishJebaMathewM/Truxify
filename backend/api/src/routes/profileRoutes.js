@@ -1,5 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 import {
   getProfile,
   getCustomerStats,
@@ -12,7 +13,7 @@ import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib
 const router = express.Router();
 
 // GET PROFILE
-router.get('/', authenticate, async (req, res) => {
+router.get('/', authenticate, userLimiter, async (req, res) => {
   try {
     const userId = req.user.id;
     const role = req.user.role;
@@ -49,7 +50,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // GET PROFILE NAME BY ID
-router.get('/:id/name', authenticate, async (req, res) => {
+router.get('/:id/name', authenticate, userLimiter, async (req, res) => {
   try {
     const { data: profile, error } = await supabase
       .from('profiles')
@@ -67,7 +68,7 @@ router.get('/:id/name', authenticate, async (req, res) => {
 });
 
 // UPDATE WALLET ADDRESS
-router.put('/wallet', authenticate, async (req, res) => {
+router.put('/wallet', authenticate, userLimiter, async (req, res) => {
   const userId = req.user.id;
   const { wallet_address } = req.body;
 
@@ -119,7 +120,7 @@ router.put('/wallet', authenticate, async (req, res) => {
 });
 
 // UPDATE PROFILE (basic version)
-router.put('/', authenticate, async (req, res) => {
+router.put('/', authenticate, userLimiter, async (req, res) => {
   try {
     const userId = req.user.id;
     const { full_name, language, dark_mode, is_online } = req.body;
@@ -176,7 +177,7 @@ router.put('/', authenticate, async (req, res) => {
 // UPDATE FCM TOKEN
 // Stores or clears the device FCM token for push notification delivery.
 // Invalidates Redis cache so the next authenticated request picks up the new token.
-router.put('/fcm-token', authenticate, async (req, res) => {
+router.put('/fcm-token', authenticate, userLimiter, async (req, res) => {
   try {
     const userId = req.user.id;
     const { fcmToken } = req.body;

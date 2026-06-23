@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
@@ -9,7 +10,7 @@ const router = express.Router();
 // 1. GET ALL AVAILABLE LOAD OFFERS (DRIVER)
 // GET /api/loads
 // ============================================================================
-router.get('/', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   try {
     const pageVal = req.query.page || '1';
     const limitVal = req.query.limit || '10';
@@ -146,7 +147,7 @@ router.get('/', authenticate, requireRole(['driver']), async (req, res) => {
 // 2. GET SINGLE LOAD OFFER BY ID (DRIVER)
 // GET /api/loads/:id
 // ============================================================================
-router.get('/:id', authenticate, requireRole(['driver']), async (req, res) => {
+router.get('/:id', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   try {
     const { data: load, error } = await supabase
       .from('load_offers')

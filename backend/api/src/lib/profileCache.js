@@ -53,7 +53,7 @@ export function isValidCachedProfile(firebaseUid, cachedProfile) {
     return false;
   }
   if (cachedProfile.isActive === false) {
-    return true; // Valid tombstone
+    return false;
   }
   return (
     cachedProfile.isActive === true &&

@@ -11,6 +11,7 @@ services:
       MONGODB_URI: mongodb://mongo:27017
       MONGODB_DB_NAME: truxify_telemetry
       REDIS_URL: redis://redis:6379
+      ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
     volumes:
       - ./backend/api:/app
       - /app/node_modules
@@ -31,6 +32,8 @@ services:
     container_name: truxify-ml-engine
     ports:
       - "8001:8000"
+    environment:
+      ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
     volumes:
       - ./backend/ml:/app
   db:

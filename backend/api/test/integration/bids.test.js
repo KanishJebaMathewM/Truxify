@@ -642,7 +642,6 @@ describe('Bid Routes', () => {
     );
     m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null, polygon_wallet_address: '0xDriverWallet' });
     mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef' });
-
     m.programRpcError('Load offer is no longer available');
 
     const app = buildApp();
@@ -683,7 +682,6 @@ describe('Bid Routes', () => {
     );
     m.store.driver_details.push({ user_id: 'driver-1', rating: 4.9, truck_id: null, polygon_wallet_address: '0xDriverWallet' });
     mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef' });
-
     m.programRpcError('Order is no longer pending');
 
     const app = buildApp();

@@ -1,6 +1,6 @@
 import { firebaseAdmin, supabase } from '../config/db.js';
 import jwt from 'jsonwebtoken';
-import { getCachedProfile, setCachedProfile, invalidateCachedProfile, TOMBSTONE_TTL_SECONDS, isValidCachedProfile } from '../lib/profileCache.js';
+import { getCachedProfile, setCachedProfile, invalidateCachedProfile, TOMBSTONE_TTL_SECONDS, TTL_SECONDS, isValidCachedProfile, getCachedSupabaseProfile, setCachedSupabaseProfile, invalidateCachedSupabaseProfile, isValidCachedSupabaseProfile } from '../lib/profileCache.js';
 import logger from './logger.js';
 
 /**
@@ -63,6 +63,7 @@ export async function authenticate(req, res, next) {
     let userProfile = null;
     let decoded = null;
     let firebaseUid = null;
+    let supabaseUserId = null;
 
     try {
       decoded = jwt.decode(token);
@@ -79,6 +80,25 @@ export async function authenticate(req, res, next) {
       const { data: { user }, error: authError } = await supabase.auth.getUser(token);
       if (authError || !user) {
         return res.status(401).json({ error: 'Invalid or expired Supabase authentication token.', details: authError?.message });
+      }
+      supabaseUserId = user.id;
+
+      // Token is verified above; the cache only skips the profile lookup, keyed
+      // by the verified user id. Cache entries are bounded by the token's own
+      // expiry (see TTL calculation below) so a revoked session cannot be served.
+      const cachedProfile = await getCachedSupabaseProfile(supabaseUserId);
+      if (cachedProfile) {
+        if (!isValidCachedSupabaseProfile(supabaseUserId, cachedProfile)) {
+          void invalidateCachedSupabaseProfile(supabaseUserId);
+        } else if (cachedProfile.isActive === false) {
+          return res.status(403).json({
+            error: 'User profile not found in database.',
+            hint: 'Register user in profiles table first.'
+          });
+        } else {
+          req.user = cachedProfile;
+          return next();
+        }
       }
 
       // Fetch corresponding profile from Supabase by user.id
@@ -146,9 +166,12 @@ export async function authenticate(req, res, next) {
         // Cache the inactive/not-found status as a tombstone to prevent DB load on subsequent requests
         void setCachedProfile(firebaseUid, { isActive: false }, TOMBSTONE_TTL_SECONDS);
       }
-      return res.status(403).json({ 
-        error: 'User profile not found in database.', 
-        hint: 'Register user in profiles table first.' 
+      if (supabaseUserId) {
+        void setCachedSupabaseProfile(supabaseUserId, { isActive: false }, TOMBSTONE_TTL_SECONDS);
+      }
+      return res.status(403).json({
+        error: 'User profile not found in database.',
+        hint: 'Register user in profiles table first.'
       });
     }
 
@@ -166,6 +189,15 @@ export async function authenticate(req, res, next) {
     if (userProfile.firebase_uid) {
       void setCachedProfile(userProfile.firebase_uid, req.user);
     }
+    if (supabaseUserId) {
+      // Clamp the cache lifetime to the token's remaining validity so a cached
+      // profile can never outlive the access token that authorised it.
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const ttlSeconds = Number.isFinite(decoded?.exp)
+        ? Math.min(TTL_SECONDS, decoded.exp - nowSeconds)
+        : TTL_SECONDS;
+      void setCachedSupabaseProfile(supabaseUserId, req.user, ttlSeconds);
+    }
 
     next();
   } catch (error) {
@@ -179,9 +211,13 @@ export async function authenticate(req, res, next) {
  * Must be used after authenticate middleware.
  */
 export function requireRole(allowedRoles) {
+  if (!Array.isArray(allowedRoles) || allowedRoles.length === 0) {
+    throw new Error('requireRole middleware requires a non-empty array of allowed roles.');
+  }
+
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({ error: 'Security middleware configuration error.' });
+      return res.status(500).json({ error: 'Security middleware configuration error: missing req.user.' });
     }
 
     if (!allowedRoles.includes(req.user.role)) {

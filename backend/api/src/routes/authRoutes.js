@@ -13,6 +13,7 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { invalidateCachedProfile } from '../lib/profileCache.js';
 import { firebaseAdmin } from '../config/db.js';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
@@ -34,7 +35,7 @@ router.post('/logout', authenticate, async (req, res) => {
       ),
     ]);
   } catch (err) {
-    console.warn(`[auth/logout] Cache invalidation skipped for uid=${uid}: ${err?.message}`);
+    logger.warn(`[auth/logout] Cache invalidation skipped for uid=${uid}: ${err?.message}`);
   }
 
   // ── 2. Firebase refresh token revocation (optional) ────────────────
@@ -48,7 +49,7 @@ router.post('/logout', authenticate, async (req, res) => {
         ),
       ]);
     } catch (err) {
-      console.error(`[auth/logout] Firebase token revocation failed for uid=${uid}: ${err?.message}`);
+      logger.error(`[auth/logout] Firebase token revocation failed for uid=${uid}: ${err?.message}`);
     }
   }
 

@@ -8,14 +8,15 @@ environment:
   sdk: ">=3.3.0 <4.0.0"
 
 dependencies:
-  firebase_core: ^3.0.0
-  firebase_messaging: ^15.0.0
+  firebase_core: ^4.11.0
+  firebase_messaging: ^16.4.1
   flutter:
     sdk: flutter
   truxify_shared:
     path: ../../packages/truxify_shared
 
   supabase_flutter: ^2.9.1
+  web_socket_channel: ^3.0.0
 
   google_fonts: ^8.1.0
   flutter_map: ^8.1.1

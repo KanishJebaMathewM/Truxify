@@ -1,0 +1,76 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+/// Centralized Firebase Phone Authentication service for the Customer app.
+///
+/// Wraps [FirebaseAuth] to provide a clean API for phone number verification,
+/// OTP confirmation, token management, and sign-out.
+class AuthService {
+  AuthService({FirebaseAuth? auth, SupabaseClient? supabase})
+      : _auth = auth ?? FirebaseAuth.instance,
+        _supabase = supabase ?? Supabase.instance.client;
+
+  final FirebaseAuth _auth;
+  final SupabaseClient _supabase;
+
+  /// Current authenticated user, or null if not signed in.
+  User? get currentUser => _auth.currentUser;
+
+  /// Stream of auth state changes (sign-in / sign-out events).
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+  /// Get the current Firebase ID token for API calls.
+  ///
+  /// Returns null if no user is signed in.
+  /// Set [forceRefresh] to true to force a token refresh even if the
+  /// cached token has not expired.
+  Future<String?> getIdToken({bool forceRefresh = false}) async {
+    return _auth.currentUser?.getIdToken(forceRefresh);
+  }
+
+  /// Initiate phone number verification via Firebase.
+  ///
+  /// [phoneNumber] must include the country code (e.g., '+919876543210').
+  /// Firebase will send an SMS with a 6-digit verification code.
+  Future<void> verifyPhoneNumber({
+    required String phoneNumber,
+    required void Function(String verificationId, int? resendToken) onCodeSent,
+    required void Function(FirebaseAuthException e) onVerificationFailed,
+    required void Function(PhoneAuthCredential credential) onAutoVerification,
+    int? forceResendingToken,
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    await _auth.verifyPhoneNumber(
+      phoneNumber: phoneNumber,
+      timeout: timeout,
+      forceResendingToken: forceResendingToken,
+      verificationCompleted: onAutoVerification,
+      verificationFailed: onVerificationFailed,
+      codeSent: onCodeSent,
+      codeAutoRetrievalTimeout: (_) {},
+    );
+  }
+
+  /// Verify the SMS OTP code and sign in.
+  ///
+  /// Returns the [UserCredential] on success.
+  /// Throws [FirebaseAuthException] on invalid code, expired code, etc.
+  Future<UserCredential> verifyOtp(
+      String verificationId, String smsCode) async {
+    final credential = PhoneAuthProvider.credential(
+      verificationId: verificationId,
+      smsCode: smsCode,
+    );
+    return _auth.signInWithCredential(credential);
+  }
+
+  /// Sign out the current user.
+  Future<void> signOut() async {
+    await _auth.signOut();
+    try {
+      await _supabase.auth.signOut();
+    } catch (_) {
+      // Ignore if Supabase is not initialized or configured
+    }
+  }
+}

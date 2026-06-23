@@ -29,6 +29,7 @@ DO $$ BEGIN
   EXECUTE 'ALTER TABLE IF EXISTS notifications ENABLE ROW LEVEL SECURITY';
   EXECUTE 'ALTER TABLE IF EXISTS driver_documents ENABLE ROW LEVEL SECURITY';
   EXECUTE 'ALTER TABLE IF EXISTS ratings ENABLE ROW LEVEL SECURITY';
+  EXECUTE 'ALTER TABLE IF EXISTS user_devices ENABLE ROW LEVEL SECURITY';
 END $$;
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -206,3 +207,16 @@ DROP POLICY IF EXISTS "Drivers view ratings about themselves" ON ratings;
 CREATE POLICY "Drivers view ratings about themselves"
   ON ratings FOR SELECT TO authenticated
   USING (driver_id = get_profile_id());
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 12. USER DEVICES
+-- ────────────────────────────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Service role full access on user_devices" ON user_devices;
+CREATE POLICY "Service role full access on user_devices"
+  ON user_devices FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Users access own user_devices" ON user_devices;
+CREATE POLICY "Users access own user_devices"
+  ON user_devices FOR ALL TO authenticated
+  USING (user_id = get_profile_id())
+  WITH CHECK (user_id = get_profile_id());

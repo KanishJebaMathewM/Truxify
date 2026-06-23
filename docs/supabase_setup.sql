@@ -7,7 +7,7 @@
 --   2. Go to SQL Editor → New Query
 --   3. Paste this ENTIRE file and click "Run"
 --   4. Copy your project URL + anon key into .env
---   5. You're done! All 27 tables, indexes, RLS policies, RPC functions,
+--   5. You're done! All 28 tables, indexes, RLS policies, RPC functions,
 --      and seed data are ready.
 --
 -- DESIGN PRINCIPLES:
@@ -54,7 +54,7 @@ $$;
 
 
 -- ############################################################################
--- PART 1: TABLE DEFINITIONS (27 tables)
+-- PART 1: TABLE DEFINITIONS (28 tables)
 -- ############################################################################
 
 
@@ -788,6 +788,22 @@ create table if not exists earnings_daily (
 create unique index if not exists idx_earnings_daily_driver_day on earnings_daily (driver_id, day_date);
 
 
+-- ────────────────────────────────────────────────────────────────────────────
+-- 25. USER DEVICES  (FCM push tokens per device)
+-- ────────────────────────────────────────────────────────────────────────────
+create table if not exists user_devices (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references profiles(id) on delete cascade,
+  fcm_token     text unique not null,
+  platform      text not null default 'android',
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create index if not exists idx_user_devices_user_id on user_devices (user_id);
+create index if not exists idx_user_devices_fcm_token on user_devices (fcm_token);
+
+
 -- ############################################################################
 -- PART 2: ENABLE ROW LEVEL SECURITY ON ALL TABLES
 -- ############################################################################
@@ -817,6 +833,7 @@ alter table notifications           enable row level security;
 alter table faqs                    enable row level security;
 alter table support_tickets         enable row level security;
 alter table earnings_daily          enable row level security;
+alter table user_devices            enable row level security;
 
 
 -- ############################################################################
@@ -1224,6 +1241,19 @@ create policy "Drivers view own earnings daily"
   using (driver_id = get_profile_id());
 
 
+-- 25. USER DEVICES
+create policy "Service role full access on user_devices"
+  on user_devices for all
+  to service_role
+  using (true) with check (true);
+
+create policy "Users access own user_devices"
+  on user_devices for all
+  to authenticated
+  using (user_id = get_profile_id())
+  with check (user_id = get_profile_id());
+
+
 
 -- ############################################################################
 -- PART 4: AUTO-UPDATE `updated_at` TRIGGERS
@@ -1288,6 +1318,10 @@ create trigger trg_demand_routes_updated_at
 
 create trigger trg_support_tickets_updated_at
   before update on support_tickets
+  for each row execute function set_updated_at();
+
+create trigger trg_user_devices_updated_at
+  before update on user_devices
   for each row execute function set_updated_at();
 
 
@@ -1839,7 +1873,7 @@ EXECUTE FUNCTION sync_wallet_tx_hash();
 -- ✅ SETUP COMPLETE
 -- ============================================================================
 -- Your Supabase database now has:
---   • 25 tables with indexes
+--   • 26 tables with indexes
 --   • Row Level Security enabled + permissive policies
 --   • Auto-updating `updated_at` triggers
 --   • 4 RPC functions: accept_bid_tx, withdraw_funds_tx, complete_trip_tx, submit_rating_tx

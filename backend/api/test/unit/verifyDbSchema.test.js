@@ -192,12 +192,12 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
     const schemaMd = await fs.readFile(schemaMdPath, 'utf8');
 
     // supabase_setup.sql counts
-    expect(setupSql).toContain('All 27 tables');
-    expect(setupSql).toContain('PART 1: TABLE DEFINITIONS (27 tables)');
-    expect(setupSql).toContain('25 tables with indexes');
+    expect(setupSql).toContain('All 28 tables');
+    expect(setupSql).toContain('PART 1: TABLE DEFINITIONS (28 tables)');
+    expect(setupSql).toContain('26 tables with indexes');
 
     // schema.md counts
-    expect(schemaMd).toContain('27 tables · 4 RPC functions');
+    expect(schemaMd).toContain('28 tables · 4 RPC functions');
     expect(schemaMd).not.toContain('0 foreign keys');
   });
 });

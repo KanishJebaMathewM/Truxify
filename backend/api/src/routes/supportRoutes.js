@@ -250,7 +250,7 @@ router.patch('/tickets/:id', authenticate, userLimiter, async (req, res) => {
           error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}`,
         });
       }
-      const USER_ALLOWED_STATUSES = ['resolved'];
+      const USER_ALLOWED_STATUSES = ['closed'];
       if (req.user.role !== 'admin' && normalizedStatus !== ticket.status) {
         if (!USER_ALLOWED_STATUSES.includes(normalizedStatus)) {
           return res.status(403).json({

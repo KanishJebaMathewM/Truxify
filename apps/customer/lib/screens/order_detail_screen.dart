@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../constants/supabase_config.dart';
 import '../controllers/app_controller.dart';
 import '../data/mock_data.dart';
 import '../models/app_models.dart';
+import '../services/order_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/timeline_row.dart';
@@ -19,11 +22,248 @@ class OrderDetailScreen extends StatefulWidget {
 class _OrderDetailScreenState extends State<OrderDetailScreen> {
   int _rating = 0;
   final TextEditingController _commentController = TextEditingController();
+  late HistoryOrderData _currentOrder;
+  final OrderService _orderService = OrderService();
+  RealtimeChannel? _ordersChannel;
+  bool _ratingDialogShown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentOrder = widget.order;
+    _loadOrderAndTimeline();
+    _subscribeToOrderUpdates();
+  }
 
   @override
   void dispose() {
     _commentController.dispose();
+    if (SupabaseConfig.isConfigured && _ordersChannel != null) {
+      Supabase.instance.client.removeChannel(_ordersChannel!);
+    }
     super.dispose();
+  }
+
+  String _formatStatus(String status) {
+    switch (status) {
+      case 'driver_assigned':
+        return 'Driver Assigned';
+      case 'in_transit':
+        return 'In Transit';
+      case 'payment_released':
+        return 'Payment Released';
+      case 'completed':
+      case 'delivered':
+        return 'Delivered';
+      case 'cancelled':
+        return 'Cancelled';
+      case 'pending':
+        return 'Pending';
+      default:
+        return status
+            .split('_')
+            .map((word) => word.isEmpty
+                ? word
+                : '${word[0].toUpperCase()}${word.substring(1)}')
+            .join(' ');
+    }
+  }
+
+  String _resolveDriverName(Map<String, dynamic> order) {
+    final profile = order['profiles'];
+    if (profile is Map<String, dynamic>) {
+      final name = profile['full_name']?.toString().trim();
+      if (name != null && name.isNotEmpty) return name;
+    }
+
+    final driverName = order['driver_name']?.toString().trim();
+    if (driverName != null && driverName.isNotEmpty) return driverName;
+
+    return 'Driver Assigned';
+  }
+
+  String _formatTime(DateTime dateTime) {
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+
+  Future<void> _loadOrderAndTimeline() async {
+    try {
+      final orderMap = await _orderService.fetchOrderById(_currentOrder.orderId);
+      final timelineList = await _orderService.fetchOrderTimeline(_currentOrder.orderId);
+      if (!mounted) return;
+
+      if (orderMap != null) {
+        setState(() {
+          final rawAmount = orderMap['total_amount'] ?? 0;
+          final amountInRupees = (rawAmount is num)
+              ? (rawAmount / 100).toStringAsFixed(0)
+              : rawAmount.toString();
+          
+          final driverName = _resolveDriverName(orderMap);
+          final truckNumber = orderMap['truck_number']?.toString().trim().isNotEmpty == true
+              ? orderMap['truck_number'].toString().trim()
+              : '—';
+
+          final parsedTimeline = timelineList.map((step) {
+            final completed = step['completed'] == true;
+            final updatedAt = step['updated_at']?.toString() ?? '';
+            String timeStr = '';
+            if (updatedAt.isNotEmpty) {
+              final parsedDate = DateTime.tryParse(updatedAt);
+              if (parsedDate != null) {
+                timeStr = _formatTime(parsedDate.toLocal());
+              }
+            }
+            return TimelineStepData(
+              title: _formatStatus(step['milestone']?.toString() ?? ''),
+              timestamp: timeStr,
+              completed: completed,
+            );
+          }).toList();
+
+          _currentOrder = HistoryOrderData(
+            orderId: orderMap['order_display_id']?.toString() ?? _currentOrder.orderId,
+            route: '${orderMap['pickup_address']} → ${orderMap['drop_address']}',
+            date: orderMap['pickup_date']?.toString() ?? _currentOrder.date,
+            amount: '₹$amountInRupees',
+            status: _formatStatus(orderMap['status']?.toString() ?? 'pending'),
+            driver: driverName,
+            truckNumber: truckNumber,
+            timeline: parsedTimeline,
+          );
+
+          // Trigger rating flow if status becomes completed and rating dialog hasn't been shown yet
+          final orderStatus = orderMap['status']?.toString() ?? '';
+          if (orderStatus == 'completed' || orderStatus == 'delivered' || orderStatus == 'payment_released') {
+            _checkAndShowRatingDialog();
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading order detail: $e');
+    }
+  }
+
+  void _subscribeToOrderUpdates() {
+    if (!SupabaseConfig.isConfigured) return;
+
+    _ordersChannel = Supabase.instance.client
+        .channel('order_detail_updates_${_currentOrder.orderId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'orders',
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'order_display_id',
+            value: _currentOrder.orderId,
+          ),
+          callback: (payload) {
+            debugPrint('Realtime order detail update: ${payload.newRecord}');
+            _loadOrderAndTimeline();
+          },
+        )
+        .subscribe();
+  }
+
+  void _checkAndShowRatingDialog() {
+    if (_ratingDialogShown) return;
+    _ratingDialogShown = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showRatingDialog();
+    });
+  }
+
+  void _showRatingDialog() {
+    int localRating = 0;
+    final localCommentController = TextEditingController();
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: const Text(
+                'Rate Your Driver',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('How was your experience with the delivery?'),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(5, (index) {
+                      final selected = index < localRating;
+                      return IconButton(
+                        onPressed: () {
+                          setDialogState(() {
+                            localRating = index + 1;
+                          });
+                        },
+                        icon: Icon(
+                          selected ? Icons.star_rounded : Icons.star_border_rounded,
+                          color: Colors.amber,
+                          size: 36,
+                        ),
+                      );
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: localCommentController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      hintText: 'Leave a comment (optional)',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: TruxifyColors.accentDark,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () {
+                    if (localRating == 0) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Please select a rating.')),
+                      );
+                      return;
+                    }
+                    Navigator.of(dialogContext).pop();
+                    setState(() {
+                      _rating = localRating;
+                      _commentController.text = localCommentController.text;
+                    });
+                    _submitRating();
+                  },
+                  child: const Text('Submit'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ).then((_) {
+      localCommentController.dispose();
+    });
   }
 
   void _submitRating() {
@@ -75,7 +315,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isSuccess = widget.order.status == 'Delivered' || widget.order.status == 'Payment Released';
+    final isSuccess = _currentOrder.status == 'Delivered' || _currentOrder.status == 'Payment Released';
 
     return Scaffold(
       appBar: AppBar(
@@ -90,14 +330,14 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(widget.order.orderId, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                Text(_currentOrder.orderId, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 8),
-                Text(widget.order.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
+                Text(_currentOrder.route, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                 const SizedBox(height: 8),
-                Text('Date: ${widget.order.date}', style: Theme.of(context).textTheme.bodyMedium),
+                Text('Date: ${_currentOrder.date}', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 8),
                 StatusBadge(
-                  label: isSuccess ? '✅ ${widget.order.status}' : '❌ Cancelled',
+                  label: isSuccess ? '✅ ${_currentOrder.status}' : '❌ Cancelled',
                   color: isSuccess ? TruxifyColors.accentDark : TruxifyColors.error,
                   filled: true,
                 ),
@@ -119,11 +359,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(widget.order.driver, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                      Text(_currentOrder.driver, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                       const SizedBox(height: 4),
                       Text('⭐ 4.8', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                       const SizedBox(height: 4),
-                      Text(widget.order.truckNumber, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
+                      Text(_currentOrder.truckNumber, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                     ],
                   ),
                 ),
@@ -133,7 +373,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           const SizedBox(height: 16),
           Text('Timeline', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
           const SizedBox(height: 12),
-          ...widget.order.timeline.map(
+          ..._currentOrder.timeline.map(
             (step) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: TimelineRow(step: step),
@@ -167,15 +407,15 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
           PrimaryButton(
             label: 'Rebook This Route',
             onPressed: () {
-              final routeParts = widget.order.route.split(' → ');
-              final pickup = routeParts.length == 2 ? routeParts.first : widget.order.route;
-              final drop = routeParts.length == 2 ? routeParts.last : widget.order.route;
+              final routeParts = _currentOrder.route.split(' → ');
+              final pickup = routeParts.length == 2 ? routeParts.first : _currentOrder.route;
+              final drop = routeParts.length == 2 ? routeParts.last : _currentOrder.route;
 
               TruxifyScope.of(context).openFindTrucks(
                 draft: RouteDraft(
                   pickup: pickup,
                   drop: drop,
-                  dateLabel: widget.order.date,
+                  dateLabel: _currentOrder.date,
                   goodsType: 'Textile',
                   weightTonnes: '3',
                   dimensions: '12 × 6 × 6',

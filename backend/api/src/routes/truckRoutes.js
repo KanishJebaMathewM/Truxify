@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 import { getRouteEstimate } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { predictPrice } from '../services/ml.js';
@@ -13,7 +14,7 @@ function parseBoolean(value) {
   return ['true', '1', 'yes'].includes(String(value).trim().toLowerCase());
 }
 
-router.get('/search', authenticate, async (req, res) => {
+router.get('/search', authenticate, userLimiter, async (req, res) => {
   const {
     pickup_lat, pickup_lng,
     drop_lat, drop_lng,
@@ -81,10 +82,10 @@ router.get('/search', authenticate, async (req, res) => {
         }
         isAiEstimate = true;
       } else {
-        console.warn('[ML] Invalid price prediction response during search:', mlResult);
+        logger.warn({ mlResult }, 'Invalid price prediction response during search');
       }
     } catch (mlErr) {
-      console.warn('[ML] Price prediction unavailable during search, falling back to base pricing:', mlErr.message);
+      logger.warn({ err: mlErr.message }, 'Price prediction unavailable during search, falling back to base pricing');
     }
 
     const { data: drivers, error: driversErr } = await supabase
@@ -144,7 +145,7 @@ router.get('/search', authenticate, async (req, res) => {
 });
 
 // GET TRUCK NUMBER PLATE BY ID
-router.get('/:id/number', authenticate, async (req, res) => {
+router.get('/:id/number', authenticate, userLimiter, async (req, res) => {
   try {
     const { data: truck, error } = await supabase
       .from('trucks')

@@ -36,6 +36,9 @@ if (process.env.NODE_ENV === 'production' && process.env.BYPASS_AUTH === 'true')
   logger.fatal('BYPASS_AUTH is enabled in production. This is a severe security misconfiguration. Set BYPASS_AUTH=false (or unset it) and restart the server.');
   process.exit(1);
 }
+if (!process.env.DRIVER_LOGIN_OTP) {
+  logger.warn('DRIVER_LOGIN_OTP is not set. Driver OTP login will be disabled until it is configured in production.');
+}
 const app = express();
 const server = http.createServer(app);
 

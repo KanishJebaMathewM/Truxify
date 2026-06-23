@@ -133,3 +133,12 @@ export const cancelOrderSchema = z.object({
 export const updateWalletSchema = z.object({
   wallet_address: z.string().regex(/^0x[a-fA-F0-9]{40}$/, 'Must be a valid 0x-prefixed 42-character wallet address'),
 }).passthrough();
+
+export const registerDeviceSchema = z.object({
+  fcmToken: z.string()
+    .min(10, { message: 'fcmToken must be at least 10 characters' })
+    .max(4096, { message: 'fcmToken is too long' }),
+  platform: z.enum(['android', 'ios', 'web'], {
+    invalid_type_error: 'platform must be one of: android, ios, web',
+  }).default('android'),
+}).passthrough();

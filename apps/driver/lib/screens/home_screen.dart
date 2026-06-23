@@ -21,6 +21,7 @@ import '../services/geocode_service.dart';
 import '../services/marketplace_repository.dart';
 import '../services/route_service.dart';
 import '../services/trip_service.dart';
+import '../services/location_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/earnings_shimmer.dart';
@@ -219,6 +220,9 @@ class _HomeScreenState extends State<HomeScreen> {
         _currentLocationText = address;
       });
       await _loadActiveTrip();
+      if (_isOnline) {
+        await LocationService.instance.startTracking();
+      }
     } else {
       setState(() {
         _isLoadingLocation = false;
@@ -445,7 +449,9 @@ class _HomeScreenState extends State<HomeScreen> {
       await _tripService.updateOnlineStatus(newStatus);
       if (newStatus) {
         await _loadActiveTrip();
+        await LocationService.instance.startTracking();
       } else {
+        LocationService.instance.stopTracking();
         if (mounted) {
           setState(() {
             _activeTripId = null;

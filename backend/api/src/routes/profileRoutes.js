@@ -1,8 +1,6 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
-import { validateBody } from '../middleware/validate.js';
-import { updateProfileSchema } from '../validation/requestSchemas.js';
 import {
   getProfile,
   getCustomerStats,

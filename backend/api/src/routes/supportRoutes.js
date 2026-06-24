@@ -2,6 +2,8 @@ import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import { validateBody } from '../middleware/validate.js';
+import { createTicketSchema, updateTicketSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
@@ -48,16 +50,10 @@ router.get('/faqs', async (req, res) => {
 // ============================================================================
 // 2. CREATE SUPPORT TICKET (AUTHENTICATED USER)
 // ============================================================================
-router.post('/tickets', authenticate, userLimiter, async (req, res) => {
+router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSchema), async (req, res) => {
   const subject = normalizeRequiredText(req.body.subject);
   const category = normalizeRequiredText(req.body.category);
   const description = normalizeRequiredText(req.body.description) || subject;
-
-  if (!subject || !category) {
-    return res.status(400).json({
-      error: 'subject and category are required.',
-    });
-  }
 
   // Map user-friendly/frontend categories to database-constrained values
   const CATEGORY_MAP = {
@@ -187,7 +183,7 @@ router.get('/tickets/:id', authenticate, userLimiter, async (req, res) => {
 // ============================================================================
 // 5. UPDATE SUPPORT TICKET (AUTHENTICATED USER - OWNER OR ADMIN)
 // ============================================================================
-router.patch('/tickets/:id', authenticate, userLimiter, async (req, res) => {
+router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicketSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { subject, description, category, status } = req.body;
 

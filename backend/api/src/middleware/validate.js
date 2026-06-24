@@ -39,16 +39,30 @@ export function validateParams(schema) {
 
 export function validateQuery(schema) {
   return (req, res, next) => {
-    const result = schema.safeParse(req.query);
+    try {
+      const result = schema.safeParse(req.query);
 
-    if (!result.success) {
-      return res.status(400).json({
-        error: 'Validation failed',
-        details: formatValidationIssues(result.error),
+      if (!result.success) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          details: formatValidationIssues(result.error),
+        });
+      }
+
+      // req.query may be a read-only getter in some Node.js / express versions;
+      // define it as a configurable writable property before assigning.
+      Object.defineProperty(req, 'query', {
+        value: result.data,
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      });
+      return next();
+    } catch (err) {
+      return res.status(500).json({
+        error: 'Internal query validation error',
+        details: err.message,
       });
     }
-
-    req.query = result.data;
-    return next();
   };
 }

@@ -172,9 +172,11 @@ export const updateTicketSchema = z.object({
   }).optional(),
 }).strict();
 
-export const updateProfileSchema = z.object({
-  full_name: z.string().max(100, 'Name must be 100 characters or fewer').optional(),
-  language: z.string().max(10, 'Language code must be 10 characters or fewer').optional(),
-  dark_mode: z.boolean().optional(),
-  is_online: z.boolean().optional(),
+export const driverStatementSchema = z.object({
+  start_date: z.string().refine(value => !Number.isNaN(Date.parse(value)), {
+    message: 'Must be a valid date string',
+  }).optional(),
+  end_date: z.string().refine(value => !Number.isNaN(Date.parse(value)), {
+    message: 'Must be a valid date string',
+  }).optional(),
 }).strict();

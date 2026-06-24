@@ -34,15 +34,15 @@ const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/; // HH:MM or HH:MM:SS
 const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
 
 export const createOrderSchema = z.object({
-  pickup_address: z.string().min(5, "Pickup address is too short").max(255, "Pickup address is too long").optional(),
+  pickup_address: z.string().min(5, "Pickup address is too short").max(255, "Pickup address is too long"),
   pickup_lat: latitudeSchema,
   pickup_lng: longitudeSchema,
-  drop_address: z.string().min(5, "Drop address is too short").max(255, "Drop address is too long").optional(),
+  drop_address: z.string().min(5, "Drop address is too short").max(255, "Drop address is too long"),
   drop_lat: latitudeSchema,
   drop_lng: longitudeSchema,
   pickup_date: isoDateStringSchema,
   pickup_time: z.string().regex(timeRegex, "Time must be in HH:MM format").optional(),
-  goods_type: z.string().min(2, "Goods type must be specified").optional(),
+  goods_type: z.string().min(2, "Goods type must be specified"),
   weight_tonnes: coerceNumber(z.number().positive({ message: 'Must be greater than 0' }).max(100, "Weight exceeds maximum legal limits")),
   length_ft: coerceNumber(z.number().positive().max(60)).optional(),
   width_ft: coerceNumber(z.number().positive().max(15)).optional(),

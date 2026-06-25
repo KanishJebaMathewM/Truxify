@@ -331,7 +331,7 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept triggers escrow deposit when wallet addresses present', async () => {
-    mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef' });
+    mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef', bookingId: 'escrow:MOCK' });
 
     m.store.orders.push({
       id: 'order-escrow',
@@ -384,7 +384,7 @@ describe('Bid Routes', () => {
 
     let order = m.store.orders.find(o => o.id === 'order-escrow');
     expect(order.escrow_status).toBe('funding');
-    expect(order.escrow_booking_id).toBe('escrow:OD-ESCROW');
+    expect(order.escrow_booking_id).toBe('escrow:MOCK');
   });
 
   it('POST /:id/bids/:bidId/accept returns error when escrow deposit fails before accepting bid', async () => {

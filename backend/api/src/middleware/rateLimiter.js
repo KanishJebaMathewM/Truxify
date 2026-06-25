@@ -82,10 +82,16 @@ function buildStore(prefix) {
  * users sharing a public IP (e.g. mobile clients behind carrier-grade NAT) are
  * limited independently rather than against one shared bucket.
  */
+// Returns the fixed client IP from the TCP socket, bypassing X-Forwarded-For
+// which is client-controlled and allows rate-limit bypass.
+function fixedClientIp(req) {
+  return req.socket?.remoteAddress || req.connection?.remoteAddress || req.ip;
+}
+
 export function userKeyGenerator(req) {
   if (req.user?.id) return `user:${req.user.id}`;
   if (req.user?.uid) return `uid:${req.user.uid}`;
-  return ipKeyGenerator(req.ip);
+  return ipKeyGenerator(fixedClientIp(req));
 }
 
 // Coarse, pre-auth IP limiter. It runs before authentication, so it can only
@@ -97,6 +103,7 @@ export const globalLimiter = rateLimit({
   max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(fixedClientIp(req)),
   store: buildStore('rl:global:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
   skip: (req) => req.path === '/health' || req.path.startsWith('/health/'),
@@ -120,6 +127,7 @@ export const healthLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(fixedClientIp(req)),
   store: buildStore('rl:health:'),
   message: { error: 'Rate limit exceeded', retryAfter: 60 },
 });
@@ -129,6 +137,7 @@ export const authLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(fixedClientIp(req)),
   store: buildStore('rl:auth:'),
   message: { error: 'Rate limit exceeded', retryAfter: 3600 },
 });
@@ -151,7 +160,7 @@ export const deviceLimiter = rateLimit({
   keyGenerator: (req) => {
     if (req.user?.id) return `user:${req.user.id}`;
     if (req.user?.uid) return `uid:${req.user.uid}`;
-    return ipKeyGenerator(req.ip);
+    return ipKeyGenerator(fixedClientIp(req));
   },
   store: buildStore('rl:device:'),
   message: { error: 'Rate limit exceeded', retryAfter: 600 },

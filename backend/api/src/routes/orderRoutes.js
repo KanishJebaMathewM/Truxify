@@ -948,7 +948,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
       logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
     }
 
-    if (escrowReleased) {
+    if (order.escrow_status !== 'funded' || escrowReleased) {
       res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
     } else {
       res.status(500).json({ error: 'Delivery verified but on-chain escrow release failed. Contact support.' });

@@ -145,7 +145,7 @@ function generateOrderDisplayId() {
   const prefix = '#FF';
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
-  const random = Math.floor(1000 + Math.random() * 9000); // 4 random digits
+  const random = Math.floor(100000 + Math.random() * 900000); // 6 random digits
   return `${prefix}${dateStr}${random}`;
 }
 

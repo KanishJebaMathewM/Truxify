@@ -183,3 +183,10 @@ export const registerTruckSchema = z.object({
     .positive({ message: 'Capacity must be greater than 0' })
     .max(100, 'Capacity must be 100 tonnes or fewer'),
 }).strict();
+
+export const updateProfileSchema = z.object({
+  full_name: z.string().min(1, 'Name cannot be empty').max(100, 'Name must be 100 characters or fewer').optional(),
+  language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').optional(),
+  dark_mode: z.boolean().optional(),
+  is_online: z.boolean().optional(),
+}).strict();

@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import logging
 import os
@@ -128,9 +129,16 @@ async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_
 
 @app.post("/train/demand", response_model=TrainResponse)
 async def train_demand_endpoint(_auth=Depends(verify_api_key)):
+    timeout = int(os.environ.get("ML_TRAINING_TIMEOUT_SECONDS", 300))
     try:
-        metrics = train_demand_forecast_model()
+        metrics = await asyncio.wait_for(
+            asyncio.to_thread(train_demand_forecast_model),
+            timeout=timeout,
+        )
         return TrainResponse(status="success", metrics=metrics)
+    except asyncio.TimeoutError:
+        logger.error("Demand model training timed out after %d seconds", timeout)
+        raise HTTPException(status_code=504, detail="Training timed out")
     except Exception as e:
         logger.error("Demand model training failed: %s", e)
         raise HTTPException(status_code=500, detail="Training failed")

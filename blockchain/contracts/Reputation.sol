@@ -6,6 +6,8 @@ contract Reputation {
     mapping(address => bool) public authorizedRelayers;
     mapping(address => uint256) private scores;
 
+    uint256 public constant MAX_REPUTATION = 10000;
+
     event RelayerUpdated(address indexed relayer, bool authorized);
     event ReputationIncreased(address indexed driver, uint256 points, uint256 score);
     event ReputationDecreased(address indexed driver, uint256 points, uint256 score);
@@ -36,7 +38,8 @@ contract Reputation {
 
     function increaseReputation(address driver, uint256 points) external onlyRelayer {
         require(driver != address(0), "Invalid driver");
-        scores[driver] += points;
+        uint256 newScore = scores[driver] + points;
+        scores[driver] = newScore > MAX_REPUTATION ? MAX_REPUTATION : newScore;
         emit ReputationIncreased(driver, points, scores[driver]);
     }
 

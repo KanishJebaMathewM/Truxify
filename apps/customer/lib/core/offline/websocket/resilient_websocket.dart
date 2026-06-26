@@ -46,6 +46,7 @@ class ResilientWebSocket {
         onDone: _scheduleReconnect,
         onError: (_) => _scheduleReconnect(),
       );
+      _attempt = 0;
       _startHeartbeat();
       onConnect?.call();
     } catch (_) {

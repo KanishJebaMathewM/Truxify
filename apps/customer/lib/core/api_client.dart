@@ -75,10 +75,14 @@ class ApiClient {
   String? _cachedFirebaseToken;
 
   Future<String?> get _accessTokenAsync async {
-    final firebaseUser = FirebaseAuth.instance.currentUser;
-    if (firebaseUser != null) {
-      _cachedFirebaseToken = await firebaseUser.getIdToken();
-      return _cachedFirebaseToken;
+    try {
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      if (firebaseUser != null) {
+        _cachedFirebaseToken = await firebaseUser.getIdToken();
+        return _cachedFirebaseToken;
+      }
+    } catch (_) {
+      // Firebase not initialised; fall through to Supabase session
     }
     _cachedFirebaseToken = null;
     return _supabase.auth.currentSession?.accessToken;

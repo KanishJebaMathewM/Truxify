@@ -52,10 +52,15 @@ export const createOrderSchema = z.object({
   special_requirements: z.string().max(500).optional().nullable(),
   payment_method_id: z.string().optional(),
   upi_id: z.string().regex(upiRegex, "Invalid UPI ID format").optional().or(z.literal('')).nullable()
-}).strict();
+}).passthrough();
 
 export const paramIdSchema = z.object({
-  id: uuidSchema.or(z.string().min(1, "ID is required"))
+  id: uuidSchema
+});
+
+// Strict UUID-only param schema for routes whose :id maps directly to orders.id (a uuid).
+export const uuidParamSchema = z.object({
+  id: uuidSchema
 });
 
 export const submitBidSchema = z.object({
@@ -137,13 +142,6 @@ export const updateWalletSchema = z.object({
   ),
 }).strict();
 
-export const updateProfileSchema = z.object({
-  full_name: z.string().min(1, "Name is required").max(255, "Name is too long").optional(),
-  language: z.string().max(50, "Language is too long").optional(),
-  dark_mode: z.boolean().optional(),
-  is_online: z.boolean().optional(),
-}).strict();
-
 export const registerDeviceSchema = z.object({
   fcmToken: z.string()
     .min(10, { message: 'fcmToken must be at least 10 characters' })
@@ -172,3 +170,28 @@ export const updateTicketSchema = z.object({
   }).optional(),
 }).strict();
 
+
+// Indian vehicle registration plate: 2 letters, 2 digits, up to 3 letters, up to 4 digits
+// e.g. MH12AB1234 or DL01C1234
+const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
+
+export const registerTruckSchema = z.object({
+  name: z.string()
+    .min(2, 'Truck name must be at least 2 characters')
+    .max(100, 'Truck name must be 100 characters or fewer'),
+  number_plate: z.string()
+    .transform((v) => v.trim().toUpperCase())
+    .pipe(
+      z.string().regex(numberPlateRegex, 'Invalid number plate format (e.g. MH12AB1234)')
+    ),
+  max_capacity_tons: z.number()
+    .positive({ message: 'Capacity must be greater than 0' })
+    .max(100, 'Capacity must be 100 tonnes or fewer'),
+}).strict();
+
+export const updateProfileSchema = z.object({
+  full_name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name must be 100 characters or fewer').optional(),
+  language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').optional(),
+  dark_mode: z.boolean().optional(),
+  is_online: z.boolean().optional(),
+}).strict();

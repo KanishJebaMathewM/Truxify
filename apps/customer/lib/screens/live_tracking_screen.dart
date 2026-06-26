@@ -46,6 +46,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   StreamSubscription? _trackingSubscription;
   RealtimeChannel? _supabaseRealtimeChannel;
 
+  // ── Route polyline state ──────────────────────────────────────────────
+  Timer? _routeRefreshTimer;
+  bool _isFetchingRoute = false;
+  DateTime? _lastRouteFetchAt;
+  bool _isRouteLoading = false;
+  static const Duration _routeRefreshInterval = Duration(seconds: 30);
+
   @override
   void initState() {
     super.initState();
@@ -58,6 +65,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
     _loadOrder();
     _loadTimeline();
+    _loadRoute();
+    _routeRefreshTimer = Timer.periodic(
+      _routeRefreshInterval,
+      (_) => _loadRoute(),
+    );
     if (SupabaseConfig.isConfigured) {
       _subscribeToOrderUpdates();
       _subscribeToTracking();
@@ -66,6 +78,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   @override
   void dispose() {
+    _routeRefreshTimer?.cancel();
     _movementController.dispose();
     if (SupabaseConfig.isConfigured) {
       if (_ordersChannel != null) {
@@ -295,6 +308,72 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     } catch (e) {
       debugPrint('Failed to fetch initial driver location: $e');
     }
+  }
+  Future<void> _loadRoute() async {
+    if (!mounted) return;
+
+    if (_isFetchingRoute) return;
+
+    final lastFetch = _lastRouteFetchAt;
+    if (lastFetch != null &&
+        DateTime.now().difference(lastFetch) < _routeRefreshInterval) {
+      return;
+    }
+
+    _isFetchingRoute = true;
+    final isFirstLoad = _lastRouteFetchAt == null;
+    _lastRouteFetchAt = DateTime.now();
+    if (isFirstLoad && mounted) {
+      setState(() => _isRouteLoading = true);
+    }
+
+    try {
+      final routeData = await _orderService.fetchOrderRoute(widget.orderId);
+
+      final geometry = routeData['geometry'] as Map<String, dynamic>?;
+      final coordinates = geometry?['coordinates'] as List<dynamic>?;
+
+      if (coordinates == null || coordinates.length < 2) {
+        debugPrint('Route response missing usable coordinates, keeping current route.');
+        return;
+      }
+
+      final points = <LatLng>[];
+      for (final coord in coordinates) {
+        if (coord is List && coord.length >= 2) {
+          final lng = (coord[0] as num?)?.toDouble();
+          final lat = (coord[1] as num?)?.toDouble();
+          if (lat != null && lng != null) {
+            points.add(LatLng(lat, lng));
+          }
+        }
+      }
+
+      if (points.length < 2 || !mounted) return;
+
+      if (!_routePointsEqual(_routePoints, points)) {
+        setState(() {
+          _routePoints = points;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load route: $e');
+    } finally {
+      _isFetchingRoute = false;
+      if (isFirstLoad && mounted) {
+        setState(() => _isRouteLoading = false);
+      }
+    }
+  }
+
+  bool _routePointsEqual(List<LatLng> a, List<LatLng> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].latitude != b[i].latitude || a[i].longitude != b[i].longitude) {
+        return false;
+      }
+    }
+    return true;
   }
 
   Future<void> _fetchDriverAndTruck(dynamic driverId, dynamic truckId) async {
@@ -870,19 +949,39 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                                   const SizedBox(height: 2),
                                   Row(
                                     children: [
-                                      const LiveDot(
-                                        color: TruxifyColors.accent,
-                                        size: 8,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'Live',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: TruxifyColors.accent,
-                                          fontWeight: FontWeight.w700,
+                                      if (_isRouteLoading) ...[
+                                        const SizedBox(
+                                          width: 10,
+                                          height: 10,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 1.5,
+                                            color: TruxifyColors.accent,
+                                          ),
                                         ),
-                                      ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Loading route...',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: TruxifyColors.accent,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ] else ...[
+                                        const LiveDot(
+                                          color: TruxifyColors.accent,
+                                          size: 8,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Live',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: TruxifyColors.accent,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
                                     ],
                                   ),
                                 ],

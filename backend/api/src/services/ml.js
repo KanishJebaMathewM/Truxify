@@ -1,6 +1,12 @@
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 const DEFAULT_ML_SERVICE_URL = 'http://localhost:8001';
 
+// Startup validation: warn if ML_API_KEY is not set
+if (!process.env.ML_API_KEY) {
+  // Use console.warn here since logger may not be initialized at module load time
+  console.warn('[ML] WARNING: ML_API_KEY is not set. ML features will be unavailable.');
+}
+
 /**
  * Predicts ride/truck demand by calling the FastAPI ML engine service.
  *

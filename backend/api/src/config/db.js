@@ -196,3 +196,26 @@ export async function closeDbConnections() {
     }
   }
 }
+
+/**
+ * Validates that all required environment variables are present for production.
+ * Logs warnings for missing optional vars, throws for missing required vars.
+ */
+export function validateConfig() {
+  const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY'];
+  const recommended = ['REDIS_URL', 'MONGODB_URI', 'FIREBASE_SERVICE_ACCOUNT_JSON'];
+  const missing = required.filter((key) => !process.env[key]);
+  const missingRecommended = recommended.filter((key) => !process.env[key]);
+
+  if (missing.length > 0) {
+    const msg = `Missing required env vars: ${missing.join(', ')}`;
+    logger.error(msg);
+    throw new Error(msg);
+  }
+
+  if (missingRecommended.length > 0) {
+    logger.warn(`Missing optional env vars (features disabled): ${missingRecommended.join(', ')}`);
+  }
+
+  logger.info('Config validation passed');
+}

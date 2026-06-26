@@ -328,3 +328,113 @@ describe('Trip Routes', () => {
         expect(upsertCall.payload[0].metadata.lat).toBe(19.076);
     });
 });
+
+// ============================================================================
+// GET /api/trips/:id/events - Trip Events Retrieval
+// ============================================================================
+
+const CUSTOMER_HEADERS = {
+  'x-user-id': 'customer-1',
+  'x-user-role': 'customer',
+};
+
+const ADMIN_HEADERS = {
+  'x-user-id': 'admin-1',
+  'x-user-role': 'admin',
+};
+
+function buildEventsApp() {
+  const app = express();
+  app.use(express.json());
+  // Mount on /api/trips so /:id/events resolves correctly
+  app.use('/api/trips', tripRouter);
+  return app;
+}
+
+describe('GET /api/trips/:id/events', () => {
+  beforeEach(() => {
+    process.env.BYPASS_AUTH = 'true';
+    process.env.NODE_ENV = 'test';
+    m.store.trip_events = [];
+    m.store.orders = [];
+    m.calls.length = 0;
+  });
+
+  it('returns 404 when trip has no events and no matching order', async () => {
+    const res = await request(buildEventsApp())
+      .get('/api/trips/nonexistent-trip/events')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('Trip not found.');
+  });
+
+  it('returns events for the driver who uploaded them', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: 'trip-abc', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+      { event_id: 'ev-2', user_id: 'driver-1', trip_id: 'trip-abc', event_type: 'milestone', event_timestamp: '2026-06-01T11:00:00Z', latitude: null, longitude: null, metadata: { milestone: 'Delivered' }, created_at: '2026-06-01T11:00:00Z' },
+    );
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/trip-abc/events')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body.trip_id).toBe('trip-abc');
+    expect(res.body.events).toHaveLength(2);
+  });
+
+  it('returns 403 for a user who is neither driver, customer, nor admin', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: 'trip-abc', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+    );
+    // No order => customer_id won't match
+    const res = await request(buildEventsApp())
+      .get('/api/trips/trip-abc/events')
+      .set(CUSTOMER_HEADERS);
+
+    expect(res.status).toBe(403);
+  });
+
+  it('allows the order customer to access trip events', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: 'trip-xyz', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+    );
+    m.store.orders.push({ id: 'trip-xyz', driver_id: 'driver-1', customer_id: 'customer-1' });
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/trip-xyz/events')
+      .set(CUSTOMER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body.events).toHaveLength(1);
+  });
+
+  it('allows admins to access any trip events', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: 'trip-admin', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+    );
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/trip-admin/events')
+      .set(ADMIN_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body.events).toHaveLength(1);
+  });
+
+  it('filters events by type when ?type query param is provided', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: 'trip-filter', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+      { event_id: 'ev-2', user_id: 'driver-1', trip_id: 'trip-filter', event_type: 'milestone', event_timestamp: '2026-06-01T11:00:00Z', latitude: null, longitude: null, metadata: {}, created_at: '2026-06-01T11:00:00Z' },
+    );
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/trip-filter/events?type=gpsUpdate')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body.events).toHaveLength(1);
+    expect(res.body.events[0].event_type).toBe('gpsUpdate');
+  });
+});

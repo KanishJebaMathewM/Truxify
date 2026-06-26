@@ -6,6 +6,8 @@ import 'package:truxify_driver/screens/login_screen.dart';
 import 'package:truxify_driver/screens/shell_screen.dart';
 import 'package:truxify_driver/theme/app_theme.dart';
 
+import 'setup.dart';
+
 Widget _buildTestApp() {
   final controller = TruxifyController();
 
@@ -41,6 +43,10 @@ Future<void> _pumpTransition(WidgetTester tester) async {
 }
 
 void main() {
+  setUpAll(() async {
+    await setupTests();
+  });
+
   testWidgets('logout clears the shell stack and returns to login', (
     WidgetTester tester,
   ) async {

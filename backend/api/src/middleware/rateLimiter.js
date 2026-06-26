@@ -1,4 +1,4 @@
-import rateLimit, { ipKeyGenerator, MemoryStore } from 'express-rate-limit';
+import rateLimit, { MemoryStore } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
@@ -77,6 +77,17 @@ function buildStore(prefix) {
 }
 
 /**
+ * Generates a rate-limit key from the actual TCP connection address instead of
+ * req.ip (which trusts the client-controlled X-Forwarded-For header). This
+ * prevents attackers from bypassing rate limits by rotating the header value.
+ */
+export function safeIpKeyGenerator(req) {
+  return req.socket?.remoteAddress
+    || req.connection?.remoteAddress
+    || 'unknown';
+}
+
+/**
  * Keys a limiter by the authenticated principal, falling back to the client IP
  * for unauthenticated requests. Used wherever req.user is available so that
  * users sharing a public IP (e.g. mobile clients behind carrier-grade NAT) are
@@ -85,7 +96,7 @@ function buildStore(prefix) {
 export function userKeyGenerator(req) {
   if (req.user?.id) return `user:${req.user.id}`;
   if (req.user?.uid) return `uid:${req.user.uid}`;
-  return ipKeyGenerator(req.ip);
+  return safeIpKeyGenerator(req);
 }
 
 // Coarse, pre-auth IP limiter. It runs before authentication, so it can only
@@ -97,6 +108,7 @@ export const globalLimiter = rateLimit({
   max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
   store: buildStore('rl:global:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
   skip: (req) => req.path === '/health' || req.path.startsWith('/health/'),
@@ -120,6 +132,7 @@ export const healthLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
   store: buildStore('rl:health:'),
   message: { error: 'Rate limit exceeded', retryAfter: 60 },
 });
@@ -129,6 +142,7 @@ export const authLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
   store: buildStore('rl:auth:'),
   message: { error: 'Rate limit exceeded', retryAfter: 3600 },
 });
@@ -151,7 +165,7 @@ export const deviceLimiter = rateLimit({
   keyGenerator: (req) => {
     if (req.user?.id) return `user:${req.user.id}`;
     if (req.user?.uid) return `uid:${req.user.uid}`;
-    return ipKeyGenerator(req.ip);
+    return safeIpKeyGenerator(req);
   },
   store: buildStore('rl:device:'),
   message: { error: 'Rate limit exceeded', retryAfter: 600 },

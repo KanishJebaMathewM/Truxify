@@ -1,24 +1,35 @@
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide User;
 
 /// Centralized Firebase Phone Authentication service for the Driver app.
 class AuthService {
   AuthService({FirebaseAuth? auth, SupabaseClient? supabase})
-      : _auth = auth ?? FirebaseAuth.instance,
-        _supabase = supabase ?? Supabase.instance.client;
+      : _auth = _resolveAuth(auth),
+        _supabase = _resolveSupabase(supabase);
 
-  final FirebaseAuth _auth;
-  final SupabaseClient _supabase;
+  static FirebaseAuth? _resolveAuth(FirebaseAuth? provided) {
+    if (provided != null) return provided;
+    try { return FirebaseAuth.instance; } catch (_) { return null; }
+  }
+
+  static SupabaseClient? _resolveSupabase(SupabaseClient? provided) {
+    if (provided != null) return provided;
+    try { return Supabase.instance.client; } catch (_) { return null; }
+  }
+
+  final FirebaseAuth? _auth;
+  final SupabaseClient? _supabase;
 
   /// Current authenticated user.
-  User? get currentUser => _auth.currentUser;
+  User? get currentUser => _auth?.currentUser;
 
   /// Stream of auth state changes.
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  Stream<User?> get authStateChanges =>
+      _auth?.authStateChanges() ?? const Stream.empty();
 
   /// Get the current Firebase ID token for API calls.
   Future<String?> getIdToken({bool forceRefresh = false}) async {
-    return _auth.currentUser?.getIdToken(forceRefresh);
+    return _auth?.currentUser?.getIdToken(forceRefresh);
   }
 
   /// Initiate phone number verification.
@@ -30,6 +41,15 @@ class AuthService {
     int? forceResendingToken,
     Duration timeout = const Duration(seconds: 60),
   }) async {
+    if (_auth == null) {
+      onVerificationFailed(
+        FirebaseAuthException(
+          code: 'auth-unavailable',
+          message: 'Firebase Auth is not available.',
+        ),
+      );
+      return;
+    }
     await _auth.verifyPhoneNumber(
       phoneNumber: phoneNumber,
       timeout: timeout,
@@ -43,6 +63,7 @@ class AuthService {
 
   /// Verify the OTP code and sign in.
   Future<UserCredential> verifyOtp(String verificationId, String smsCode) async {
+    if (_auth == null) throw Exception('Firebase Auth is not available');
     final credential = PhoneAuthProvider.credential(
       verificationId: verificationId,
       smsCode: smsCode,
@@ -52,9 +73,9 @@ class AuthService {
 
   /// Sign out.
   Future<void> signOut() async {
-    await _auth.signOut();
+    await _auth?.signOut();
     try {
-      await _supabase.auth.signOut();
+      await _supabase?.auth.signOut();
     } catch (_) {
       // Ignore if Supabase is not initialized or configured
     }

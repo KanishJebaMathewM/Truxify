@@ -361,6 +361,13 @@ create index if not exists idx_orders_driver       on orders (driver_id);
 create index if not exists idx_orders_status       on orders (status);
 create index if not exists idx_orders_pickup_date  on orders (pickup_date);
 create index if not exists idx_orders_display_id   on orders (order_display_id);
+alter table orders add column if not exists escrow_refund_error text;
+alter table orders add column if not exists escrow_refund_attempts integer not null default 0;
+alter table orders add column if not exists escrow_refund_last_attempt_at timestamptz;
+alter table orders add column if not exists escrow_refund_submitted_at timestamptz;
+alter table orders add column if not exists escrow_release_error text;
+alter table orders add column if not exists escrow_release_attempts integer not null default 0;
+alter table orders add column if not exists escrow_release_last_attempt_at timestamptz;
 alter table orders
   add constraint orders_customer_id_fkey
   foreign key (customer_id) references profiles(id)

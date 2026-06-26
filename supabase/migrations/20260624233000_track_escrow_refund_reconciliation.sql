@@ -1,0 +1,8 @@
+BEGIN;
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS escrow_refund_error TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS escrow_refund_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS escrow_refund_last_attempt_at TIMESTAMPTZ;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS escrow_refund_submitted_at TIMESTAMPTZ;
+
+COMMIT;

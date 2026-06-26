@@ -1,8 +1,7 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody } from '../middleware/validate.js';
-import { updateProfileSchema } from '../validation/requestSchemas.js';
 import {
   getProfile,
   getCustomerStats,
@@ -11,7 +10,8 @@ import {
 import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
-import { validateBody } from '../middleware/validate.js';
+import { validateParams } from '../middleware/validate.js';
+import { paramIdSchema } from '../validation/requestSchemas.js';
 import { updateProfileSchema, updateWalletSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
@@ -54,7 +54,7 @@ router.get('/', authenticate, userLimiter, async (req, res) => {
 });
 
 // GET PROFILE NAME BY ID
-router.get('/:id/name', authenticate, userLimiter, async (req, res) => {
+router.get('/:id/name', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   try {
     const { data: profile, error } = await supabase
       .from('profiles')
@@ -119,7 +119,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
 
     if (req.user && req.user.uid) {
-      void invalidateCachedProfile(req.user.uid);
+      try { await invalidateCachedProfile(req.user.uid); } catch (_) { logger.error('Cache invalidation failed', _); }
     }
     if (req.user && req.user.id) {
       void invalidateCachedSupabaseProfile(req.user.id);
@@ -162,12 +162,9 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     }
 
     // Invalidate the profile cache so that the next request retrieves fresh profile data.
-    // We intentionally do not await here (making it fire-and-forget) to avoid adding
-    // Redis network round-trip latency to the response path. Since invalidateCachedProfile
-    // catches and logs errors internally, and the client receives the updated profile in the
-    // response payload, fire-and-forget is the optimal choice.
+    // We await to ensure cache consistency — failures are caught and logged internally.
     if (req.user && req.user.uid) {
-      void invalidateCachedProfile(req.user.uid);
+      try { await invalidateCachedProfile(req.user.uid); } catch (_) { /* logged internally */ }
     }
     if (req.user && req.user.id) {
       void invalidateCachedSupabaseProfile(req.user.id);
@@ -216,7 +213,7 @@ router.put('/fcm-token', authenticate, userLimiter, async (req, res) => {
 
     // Invalidate Redis cache — next request will refetch the profile with the new token
     if (req.user.uid) {
-      void invalidateCachedProfile(req.user.uid);
+      try { await invalidateCachedProfile(req.user.uid); } catch (_) { /* logged internally */ }
     }
     if (req.user.id) {
       void invalidateCachedSupabaseProfile(req.user.id);
@@ -225,6 +222,28 @@ router.put('/fcm-token', authenticate, userLimiter, async (req, res) => {
     return res.json({ success: true, message: 'FCM token updated successfully.' });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to update FCM token.', details: err.message });
+  }
+});
+
+// ADMIN CACHE INVALIDATION
+// Invalidates the profile cache for a specific user, forcing the next
+// authenticated request to refetch from Supabase. Use this after admin
+// operations that change role, status, or other cached profile fields.
+router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), async (req, res) => {
+  try {
+    const targetUserId = req.params.userId;
+    if (!targetUserId) {
+      return res.status(400).json({ error: 'userId path parameter is required.' });
+    }
+
+    await Promise.all([
+      invalidateCachedProfile(targetUserId),
+      invalidateCachedSupabaseProfile(targetUserId),
+    ]);
+
+    return res.json({ success: true, message: `Cache invalidated for user ${targetUserId}.` });
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to invalidate profile cache.', details: err.message });
   }
 });
 

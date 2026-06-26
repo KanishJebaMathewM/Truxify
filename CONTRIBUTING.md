@@ -510,52 +510,6 @@ SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
 Copy `.env.example` to `.env` and fill in your local Supabase credentials before running the script.
 
 ---
-
-## Local Development Environment
-
-### Prerequisites
-
-- Docker Desktop
-- Git
-
-### Setup
-
-1. Copy the environment file:
-
-```bash
-cp .env.example .env
-```
-
-2. Create the local Docker override:
-
-```bash
-cp docker-compose.override.yml.example docker-compose.override.yml
-```
-
-3. Start the stack:
-
-```bash
-docker compose up
-```
-
-4. Verify containers:
-
-```bash
-docker ps
-```
-
-Expected services:
-
-- api
-- ml-engine
-- PostgreSQL/PostGIS
-- MongoDB
-- Redis
-
-All services communicate through the Docker network and no external cloud credentials are required for basic local development.
-
----
-
 ## Health Verification
 
 After starting the stack, verify that the backend is healthy:

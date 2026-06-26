@@ -192,7 +192,10 @@ describe('osrm - getRouteEstimate', () => {
     });
 
     expect(result).toBeNull();
-    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Fetch error:', 'AbortError');
+    // After retries are exhausted, error is logged with 'after all retries' message
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      '[osrm] Fetch error after all retries:', 'AbortError'
+    );
   });
 
   it('uses OSRM_TIMEOUT_MS env variable', async () => {

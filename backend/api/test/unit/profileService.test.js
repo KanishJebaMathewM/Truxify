@@ -2,12 +2,12 @@
  * Unit tests for backend/api/src/services/profileService.js
  *
  * Coverage:
- *   - getProfile returns test fallback when supabase is null
+ *   - getProfile throws when supabase is null (fail-fast on misconfiguration)
  *   - getProfile calls supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
  *   - getProfile throws when supabase query returns an error
- *   - getCustomerStats returns zero-values fallback when supabase is null
+ *   - getCustomerStats throws when supabase is null (fail-fast on misconfiguration)
  *   - getCustomerStats queries customer_stats table correctly
- *   - getDriverDetails returns fallback when supabase is null
+ *   - getDriverDetails throws when supabase is null (fail-fast on misconfiguration)
  *   - getDriverDetails queries driver_details table correctly
  *
  * Run with:  npm run test:unit -- test/unit/profileService.test.js
@@ -33,15 +33,8 @@ describe('getProfile', () => {
     supabaseRef.current = null;
   });
 
-  it('returns a test fallback when supabase is not configured', async () => {
-    const result = await getProfile('user-123');
-    expect(result).toEqual({
-      id: 'user-123',
-      firebase_uid: 'test',
-      role: 'customer',
-      full_name: 'Test User',
-      phone: '+919999999999',
-    });
+  it('throws when supabase is not configured', async () => {
+    await expect(getProfile('user-123')).rejects.toThrow('Supabase client not configured');
   });
 
   it('calls supabase.from("profiles").select("*").eq("id", userId).maybeSingle()', async () => {
@@ -76,9 +69,8 @@ describe('getCustomerStats', () => {
     supabaseRef.current = null;
   });
 
-  it('returns zero-values fallback when supabase is not configured', async () => {
-    const result = await getCustomerStats('user-123');
-    expect(result).toEqual({ total_orders: 0, total_saved: 0, co2_reduced_kg: 0 });
+  it('throws when supabase is not configured', async () => {
+    await expect(getCustomerStats('user-123')).rejects.toThrow('Supabase client not configured');
   });
 
   it('calls supabase.from("customer_stats").select("*").eq("user_id", userId).maybeSingle()', async () => {
@@ -110,15 +102,8 @@ describe('getDriverDetails', () => {
     supabaseRef.current = null;
   });
 
-  it('returns fallback when supabase is not configured', async () => {
-    const result = await getDriverDetails('driver-789');
-    expect(result).toMatchObject({
-      truck_id: null,
-      rating: 0,
-      total_trips: 0,
-      completion_rate: 0,
-      is_online: false,
-    });
+  it('throws when supabase is not configured', async () => {
+    await expect(getDriverDetails('driver-789')).rejects.toThrow('Supabase client not configured');
   });
 
   it('calls supabase.from("driver_details").select("*").eq("user_id", userId).maybeSingle()', async () => {

@@ -63,6 +63,22 @@ erDiagram
 });
 
 describe('Database Schema Constraints and RPC Upsert validation in supabase_setup.sql', () => {
+  it('includes durable escrow refund reconciliation fields', async () => {
+    const setupSqlPath = path.resolve(__dirname, '../../../../docs/supabase_setup.sql');
+    const migrationSqlPath = path.resolve(
+      __dirname,
+      '../../../../supabase/migrations/20260624233000_track_escrow_refund_reconciliation.sql'
+    );
+
+    for (const sqlPath of [setupSqlPath, migrationSqlPath]) {
+      const sqlContent = await fs.readFile(sqlPath, 'utf8');
+      expect(sqlContent).toMatch(/escrow_refund_error\s+text/i);
+      expect(sqlContent).toMatch(/escrow_refund_attempts\s+integer\s+not\s+null\s+default\s+0/i);
+      expect(sqlContent).toMatch(/escrow_refund_last_attempt_at\s+timestamptz/i);
+      expect(sqlContent).toMatch(/escrow_refund_submitted_at\s+timestamptz/i);
+    }
+  });
+
   it('includes the referential integrity migration file', async () => {
     const migrationSqlPath = path.resolve(__dirname, '../../../../docs/migration_add_referential_integrity.sql');
     await expect(fs.stat(migrationSqlPath)).resolves.toBeDefined();
@@ -181,6 +197,20 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
         /create\s+policy\s+"Users view own processed batches"\s+on\s+processed_batches/i.test(sqlContent),
         `Users view own processed batches policy not found in ${name}`
       ).toBe(true);
+    }
+  });
+
+  it('contains durable escrow release failure metadata in setup and migration SQL', async () => {
+    const setupSqlPath = path.resolve(__dirname, '../../../../docs/supabase_setup.sql');
+    const migrationSqlPath = path.resolve(__dirname, '../../../../supabase/migrations/20260624230000_track_escrow_release_failures.sql');
+
+    const setupSql = await fs.readFile(setupSqlPath, 'utf8');
+    const migrationSql = await fs.readFile(migrationSqlPath, 'utf8');
+
+    for (const [name, sqlContent] of [['supabase_setup.sql', setupSql], ['escrow release migration', migrationSql]]) {
+      expect(sqlContent).toMatch(/escrow_release_error\s+text/i);
+      expect(sqlContent).toMatch(/escrow_release_attempts\s+integer\s+not\s+null\s+default\s+0/i);
+      expect(sqlContent).toMatch(/escrow_release_last_attempt_at\s+timestamptz/i);
     }
   });
 

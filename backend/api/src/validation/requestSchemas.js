@@ -55,7 +55,7 @@ export const createOrderSchema = z.object({
 }).passthrough();
 
 export const paramIdSchema = z.object({
-  id: uuidSchema.or(z.string().min(1, "ID is required"))
+  id: uuidSchema
 });
 
 export const submitBidSchema = z.object({

@@ -8,7 +8,7 @@ import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimi
 import tripRoutes from './routes/tripRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
 
-import { closeDbConnections, waitForMongoDb } from './config/db.js';
+import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js';
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js';
 
 // Load REST routes
@@ -33,11 +33,23 @@ import {
 
 initSentry();
 
+// Validate required env vars at startup
+try {
+  validateConfig();
+} catch (err) {
+  logger.fatal(err.message);
+  process.exit(1);
+}
+
 // ============================================================================
 // STARTUP VALIDATION — crash fast, not at request time
 // ============================================================================
 if (process.env.NODE_ENV === 'production' && process.env.BYPASS_AUTH === 'true') {
   logger.fatal('BYPASS_AUTH is enabled in production. This is a severe security misconfiguration. Set BYPASS_AUTH=false (or unset it) and restart the server.');
+  process.exit(1);
+}
+if (process.env.NODE_ENV === 'production' && !process.env.ML_API_KEY) {
+  logger.fatal('ML_API_KEY is not set. ML engine calls will fail with 401 errors. Set ML_API_KEY and restart.');
   process.exit(1);
 }
 if (!process.env.DRIVER_LOGIN_OTP) {

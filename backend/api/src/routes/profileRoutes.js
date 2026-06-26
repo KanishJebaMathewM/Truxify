@@ -10,6 +10,8 @@ import {
 import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
+import { validateParams } from '../middleware/validate.js';
+import { paramIdSchema } from '../validation/requestSchemas.js';
 import { updateProfileSchema, updateWalletSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
@@ -52,7 +54,7 @@ router.get('/', authenticate, userLimiter, async (req, res) => {
 });
 
 // GET PROFILE NAME BY ID
-router.get('/:id/name', authenticate, userLimiter, async (req, res) => {
+router.get('/:id/name', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   try {
     const { data: profile, error } = await supabase
       .from('profiles')
@@ -117,7 +119,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
 
     if (req.user && req.user.uid) {
-      void invalidateCachedProfile(req.user.uid);
+      try { await invalidateCachedProfile(req.user.uid); } catch (_) { logger.error('Cache invalidation failed', _); }
     }
     if (req.user && req.user.id) {
       void invalidateCachedSupabaseProfile(req.user.id);
@@ -160,12 +162,9 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     }
 
     // Invalidate the profile cache so that the next request retrieves fresh profile data.
-    // We intentionally do not await here (making it fire-and-forget) to avoid adding
-    // Redis network round-trip latency to the response path. Since invalidateCachedProfile
-    // catches and logs errors internally, and the client receives the updated profile in the
-    // response payload, fire-and-forget is the optimal choice.
+    // We await to ensure cache consistency — failures are caught and logged internally.
     if (req.user && req.user.uid) {
-      void invalidateCachedProfile(req.user.uid);
+      try { await invalidateCachedProfile(req.user.uid); } catch (_) { /* logged internally */ }
     }
     if (req.user && req.user.id) {
       void invalidateCachedSupabaseProfile(req.user.id);
@@ -214,7 +213,7 @@ router.put('/fcm-token', authenticate, userLimiter, async (req, res) => {
 
     // Invalidate Redis cache — next request will refetch the profile with the new token
     if (req.user.uid) {
-      void invalidateCachedProfile(req.user.uid);
+      try { await invalidateCachedProfile(req.user.uid); } catch (_) { /* logged internally */ }
     }
     if (req.user.id) {
       void invalidateCachedSupabaseProfile(req.user.id);

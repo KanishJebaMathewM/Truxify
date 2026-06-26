@@ -48,7 +48,22 @@ router.get('/faqs', async (req, res) => {
 });
 
 // ============================================================================
-// 2. CREATE SUPPORT TICKET (AUTHENTICATED USER)
+// 2. LIST VALID TICKET CATEGORIES (PUBLIC)
+// ============================================================================
+const VALID_CATEGORIES = [
+  { value: 'billing', label: 'Billing and Payment', description: 'Issues related to payments, invoices, and charges' },
+  { value: 'booking', label: 'Booking and Orders', description: 'Issues related to load bookings and order management' },
+  { value: 'technical', label: 'Technical Issues', description: 'App crashes, bugs, and technical difficulties' },
+  { value: 'account', label: 'Account and Access', description: 'Login problems, account settings, and access issues' },
+  { value: 'general', label: 'General Inquiry', description: 'Questions and inquiries not covered by other categories' },
+];
+
+router.get('/categories', async (req, res) => {
+  res.json(VALID_CATEGORIES);
+});
+
+// ============================================================================
+// 3. CREATE SUPPORT TICKET (AUTHENTICATED USER)
 // ============================================================================
 router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSchema), async (req, res) => {
   const subject = normalizeRequiredText(req.body.subject);
@@ -99,7 +114,7 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
 });
 
 // ============================================================================
-// 3. LIST CURRENT USER'S SUPPORT TICKETS (AUTHENTICATED USER)
+// 4. LIST CURRENT USER'S SUPPORT TICKETS (AUTHENTICATED USER)
 // ============================================================================
 router.get('/tickets', authenticate, userLimiter, async (req, res) => {
   const { status, category, page = '1', limit = '20' } = req.query;
@@ -147,7 +162,7 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
 });
 
 // ============================================================================
-// 4. GET SINGLE SUPPORT TICKET (AUTHENTICATED USER - OWNER)
+// 5. GET SINGLE SUPPORT TICKET (AUTHENTICATED USER - OWNER)
 // ============================================================================
 router.get('/tickets/:id', authenticate, userLimiter, async (req, res) => {
   const ticketId = req.params.id;
@@ -181,7 +196,7 @@ router.get('/tickets/:id', authenticate, userLimiter, async (req, res) => {
 });
 
 // ============================================================================
-// 5. UPDATE SUPPORT TICKET (AUTHENTICATED USER - OWNER OR ADMIN)
+// 6. UPDATE SUPPORT TICKET (AUTHENTICATED USER - OWNER OR ADMIN)
 // ============================================================================
 router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicketSchema), async (req, res) => {
   const ticketId = req.params.id;
@@ -240,7 +255,7 @@ router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicke
       if (req.user.role !== 'admin' && normalizedStatus !== ticket.status) {
         if (!USER_ALLOWED_STATUSES.includes(normalizedStatus)) {
           return res.status(403).json({
-            error: 'Access Denied: Only admins can change tickets to this status.',
+            error: 'Access Denied: Only admins can change ticket status.',
           });
         }
       }
@@ -271,7 +286,7 @@ router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicke
 });
 
 // ============================================================================
-// 6. LIST ALL TICKETS (ADMIN ONLY)
+// 7. LIST ALL TICKETS (ADMIN ONLY)
 // ============================================================================
 router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), async (req, res) => {
   const { status, category, user_id, page = '1', limit = '20' } = req.query;

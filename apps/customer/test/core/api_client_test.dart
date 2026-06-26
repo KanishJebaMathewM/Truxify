@@ -5,6 +5,8 @@ import 'package:mocktail/mocktail.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/core/api_client.dart';
 
+import '../setup.dart';
+
 // ── Mocks ─────────────────────────────────────────────────────────────
 
 class MockHttpClient extends Mock implements http.Client {}
@@ -41,7 +43,8 @@ void main() {
   late MockGoTrueClient authClient;
   late MockSession session;
 
-  setUpAll(() {
+  setUpAll(() async {
+    await setupTests();
     registerFallbackValue(Uri());
     registerFallbackValue(<String, String>{});
   });

@@ -46,7 +46,15 @@ class AuthService {
     int? forceResendingToken,
     Duration timeout = const Duration(seconds: 60),
   }) async {
-    if (_auth == null) return;
+    if (_auth == null) {
+      onVerificationFailed(
+        FirebaseAuthException(
+          code: 'auth-unavailable',
+          message: 'Firebase Auth is not available.',
+        ),
+      );
+      return;
+    }
     await _auth.verifyPhoneNumber(
       phoneNumber: phoneNumber,
       timeout: timeout,

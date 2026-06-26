@@ -346,7 +346,7 @@ describe('Support Routes', () => {
         .send({ status: 'in_progress' });
 
       expect(res.status).toBe(403);
-      expect(res.body.error).toBe('Access Denied: Only admins can change tickets to this status.');
+      expect(res.body.error).toBe('Access Denied: Only admins can change ticket status.');
     });
 
     it('allows admin to change status to in_progress or resolved', async () => {

@@ -55,7 +55,12 @@ export const createOrderSchema = z.object({
 }).passthrough();
 
 export const paramIdSchema = z.object({
-  id: uuidSchema.or(z.string().min(1, "ID is required"))
+  id: uuidSchema
+});
+
+// Strict UUID-only param schema for routes whose :id maps directly to orders.id (a uuid).
+export const uuidParamSchema = z.object({
+  id: uuidSchema
 });
 
 export const submitBidSchema = z.object({
@@ -185,7 +190,7 @@ export const registerTruckSchema = z.object({
 }).strict();
 
 export const updateProfileSchema = z.object({
-  full_name: z.string().min(1, 'Name cannot be empty').max(100, 'Name must be 100 characters or fewer').optional(),
+  full_name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name must be 100 characters or fewer').optional(),
   language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').optional(),
   dark_mode: z.boolean().optional(),
   is_online: z.boolean().optional(),

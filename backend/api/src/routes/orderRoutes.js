@@ -8,12 +8,13 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 import { computeOrderPricing } from '../lib/pricing.js';
-import { getRouteEstimate } from '../services/osrm.js';
+import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import {
   createOrderSchema,
   submitBidSchema,
   submitRatingSchema,
   paramIdSchema,
+  uuidParamSchema,
   acceptBidParamsSchema,
   updateMilestoneSchema,
   verifyDeliverySchema,
@@ -215,29 +216,41 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), validateB
     logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
   }
 
-  const orderDisplayId = generateOrderDisplayId();
+  const MAX_ID_RETRIES = 3;
+  let order = null;
+  let orderErr = null;
+  let orderDisplayId = null;
 
   try {
-    const { data: order, error: orderErr } = await supabase
-      .from('orders')
-      .insert({
-        order_display_id: orderDisplayId,
-        customer_id: req.user.id,
-        status: 'pending',
-        pickup_address, pickup_lat, pickup_lng,
-        drop_address, drop_lat, drop_lng,
-        pickup_date, pickup_time,
-        goods_type, weight_tonnes, length_ft, width_ft, height_ft,
-        is_stackable, is_fragile, special_requirements,
-        base_freight: pricing.baseFreight,
-        toll_estimate: pricing.tollEstimate,
-        platform_fee: pricing.platformFee,
-        total_amount: pricing.totalAmount,
-        estimated_price: estimatedPrice,
-        payment_method_id, upi_id
-      })
-      .select('id, order_display_id, status, created_at')
-      .single();
+    for (let attempt = 0; attempt < MAX_ID_RETRIES; attempt++) {
+      orderDisplayId = generateOrderDisplayId();
+      const result = await supabase
+        .from('orders')
+        .insert({
+          order_display_id: orderDisplayId,
+          customer_id: req.user.id,
+          status: 'pending',
+          pickup_address, pickup_lat, pickup_lng,
+          drop_address, drop_lat, drop_lng,
+          pickup_date, pickup_time,
+          goods_type, weight_tonnes, length_ft, width_ft, height_ft,
+          is_stackable, is_fragile, special_requirements,
+          base_freight: pricing.baseFreight,
+          toll_estimate: pricing.tollEstimate,
+          platform_fee: pricing.platformFee,
+          total_amount: pricing.totalAmount,
+          estimated_price: estimatedPrice,
+          payment_method_id, upi_id
+        })
+        .select('id, order_display_id, status, created_at')
+        .single();
+
+      order = result.data;
+      orderErr = result.error;
+
+      if (!orderErr || orderErr.code !== '23505') break;
+      logger.warn(`[Orders] display ID collision on ${orderDisplayId}, retrying (attempt ${attempt + 1}/${MAX_ID_RETRIES})`);
+    }
 
     if (orderErr) {
       logger.error('Order Insertion Error:', orderErr.message);
@@ -1079,12 +1092,12 @@ router.post('/:id/resend-otp', authenticate, userLimiter, requireRole(['driver']
 // ============================================================================
 // 15. CHANGE DROP (CUSTOMER)
 // ============================================================================
-router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
-  const orderId = req.params.id; // this is order_display_id from client
+router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer']), validateParams(uuidParamSchema), validateBody(changeDropSchema), async (req, res) => {
+  const orderId = req.params.id;
   const { drop_address, drop_lat, drop_lng } = req.body;
 
   try {
-    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
+    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (orderErr) return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
     if (!order) return res.status(404).json({ error: 'Order not found.' });
     if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
@@ -1131,7 +1144,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer
       updated_at: new Date().toISOString(),
     };
 
-    const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update(updates).eq('order_display_id', orderId).select('*').single();
+    const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update(updates).eq('id', order.id).select('*').single();
     if (updateErr) return res.status(500).json({ error: 'Failed to update order.', details: updateErr.message });
 
     const { error: offerUpdateErr } = await supabase
@@ -1147,7 +1160,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer
         net_profit: pricing.netProfit,
         extra_distance_km: pricing.distanceKm,
       })
-      .eq('order_display_id', orderId);
+      .eq('order_display_id', order.order_display_id);
 
     if (offerUpdateErr) {
       logger.error('Load offer update failed for change-drop:', offerUpdateErr.message);
@@ -1178,12 +1191,12 @@ router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer
 // ============================================================================
 // 16. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
 // ============================================================================
-router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
-  const orderId = req.params.id; // this is order_display_id from client
+router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']), validateParams(uuidParamSchema), validateBody(cancelOrderSchema), async (req, res) => {
+  const orderId = req.params.id;
   const { reason = null } = req.body || {};
 
   try {
-    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
+    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (orderErr) return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
     if (!order) return res.status(404).json({ error: 'Order not found.' });
     if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
@@ -1227,7 +1240,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           escrow_refund_last_attempt_at: attemptAt,
           updated_at: attemptAt,
         })
-        .eq('order_display_id', orderId)
+        .eq('id', order.id)
         .not('status', 'in', '("delivered","payment_released")')
         .select('*')
         .single();
@@ -1267,7 +1280,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
               escrow_refund_submitted_at: submittedAt,
               updated_at: submittedAt,
             })
-            .eq('order_display_id', orderId)
+            .eq('id', order.id)
             .eq('escrow_status', 'refund_pending');
 
           if (hashErr) {
@@ -1288,7 +1301,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
             escrow_refund_error: null,
             updated_at: refundedAt,
           })
-          .eq('order_display_id', orderId)
+          .eq('id', order.id)
           .in('escrow_status', ['refund_pending', 'refund_failed'])
           .select('cancellation_fee, order_display_id, status, cancellation_reason, escrow_status, refund_tx_hash')
           .single();
@@ -1323,7 +1336,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
           escrow_refund_last_attempt_at: failedAt,
           updated_at: failedAt,
-        }).eq('order_display_id', orderId);
+        }).eq('id', order.id);
 
         return res.status(202).json({
           message: 'Order cancelled. Escrow refund requires reconciliation.',
@@ -1344,7 +1357,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
 
     const { data: updatedOrder, error: updateErr } = await supabase.from('orders')
       .update(updatePayload)
-      .eq('order_display_id', orderId)
+      .eq('id', order.id)
       .not('status', 'in', '("delivered","payment_released","cancelled")')
       .select('cancellation_fee, order_display_id, status, cancellation_reason, escrow_status')
       .single();
@@ -1431,15 +1444,15 @@ router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer
 // ============================================================================
 // 19. GET DRIVER LOCATION (CUSTOMER OR DRIVER)
 // ============================================================================
-router.get('/:id/driver-location', authenticate, userLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
-  const orderId = req.params.id; // this is order_display_id from client
-  
+router.get('/:id/driver-location', authenticate, userLimiter, requireRole(['customer', 'driver']), validateParams(uuidParamSchema), async (req, res) => {
+  const orderId = req.params.id;
+
   try {
     // 1. Resolve order and check authentication / authorization
     const { data: order, error: orderErr } = await supabase
       .from('orders')
       .select('id, customer_id, driver_id, status')
-      .eq('order_display_id', orderId)
+      .eq('id', orderId)
       .maybeSingle();
 
     if (orderErr) {
@@ -1488,6 +1501,98 @@ router.get('/:id/driver-location', authenticate, userLimiter, requireRole(['cust
 
   } catch (err) {
     logger.error({ err }, 'Fetch driver location exception');
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 20. GET LIVE ROUTE GEOMETRY (CUSTOMER OR DRIVER)
+// ============================================================================
+
+router.get('/:id/route', authenticate, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id; // this is order_display_id from client
+
+  try {
+    // 1. Resolve order and check authentication / authorization
+    const { data: order, error: orderErr } = await supabase
+      .from('orders')
+      .select('id, customer_id, driver_id, status, pickup_lat, pickup_lng, drop_lat, drop_lng')
+      .eq('order_display_id', orderId)
+      .maybeSingle();
+
+    if (orderErr) {
+      return res.status(500).json({ error: 'Failed to fetch order details.' });
+    }
+    if (!order) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    // Authorization: User must be either the customer who owns the order or the assigned driver
+    if (req.user.role === 'customer' && order.customer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
+    }
+    if (req.user.role === 'driver' && order.driver_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
+    }
+
+    if (order.drop_lat == null || order.drop_lng == null) {
+      return res.status(500).json({ error: 'Order is missing destination coordinates.' });
+    }
+
+    if (!order.driver_id) {
+      return res.status(404).json({ error: 'No driver assigned to this order.' });
+    }
+
+    // 2. Query MongoDB telemetry collection for the driver's latest position
+    if (!mongoDb) {
+      return res.status(503).json({ error: 'Telemetry database not available.' });
+    }
+
+    const latestTelemetry = await mongoDb
+      .collection('telemetry')
+      .find({ driver_id: order.driver_id })
+      .sort({ timestamp: -1 })
+      .limit(1)
+      .toArray();
+
+    if (!latestTelemetry || latestTelemetry.length === 0) {
+      return res.status(404).json({ error: 'No live telemetry found for this driver.' });
+    }
+
+    const originLat = Number(latestTelemetry[0].lat);
+    const originLng = Number(latestTelemetry[0].lng);
+
+    if (!Number.isFinite(originLat) || !Number.isFinite(originLng)) {
+      return res.status(404).json({ error: 'Latest telemetry record is missing valid coordinates.' });
+    }
+
+    const destLat = Number(order.drop_lat);
+    const destLng = Number(order.drop_lng);
+
+    if (!Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+      logger.error(`[route] Order ${order.id} has non-numeric destination coordinates.`);
+      return res.status(500).json({ error: 'Order has invalid destination coordinates.' });
+    }
+
+    // 3. Call OSRM for a road-following route, falling back to a straight
+    // line if OSRM is unavailable so the tracking screen never goes blank.
+    let feature = await getRouteGeometry({ originLat, originLng, destLat, destLng });
+    let usedFallback = false;
+
+    if (!feature) {
+      logger.warn(`[route] OSRM unavailable for order ${order.id}, falling back to straight line.`);
+      feature = buildStraightLineGeometry({ originLat, originLng, destLat, destLng });
+      usedFallback = true;
+    }
+
+    if (!feature) {
+      return res.status(502).json({ error: 'Failed to compute route.' });
+    }
+
+    return res.json({ ...feature, fallback: usedFallback });
+
+  } catch (err) {
+    logger.error({ err }, 'Fetch order route exception');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });

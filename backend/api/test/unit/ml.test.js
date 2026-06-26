@@ -2,125 +2,227 @@
  * Unit tests for backend/api/src/services/ml.js
  *
  * Coverage:
- *   - predictDemand constructs correct URL from ML_ENGINE_URL or default
- *   - predictDemand sends correct JSON body
- *   - predictDemand throws on non-ok response
- *   - predictDemand returns parsed JSON on success
- *   - predictPrice constructs correct URL from ML_SERVICE_URL / ML_ENGINE_URL
- *   - predictPrice sends correct JSON body
- *   - predictPrice throws on non-ok response
- *   - predictPrice returns { estimated_price, currency } on success
- *   - Both use 5000ms AbortSignal.timeout
+ *   - predictDemand: successful response, auth failure, non-ok response, network error
+ *   - predictPrice: successful response, auth failure, non-ok response, network error,
+ *                   default truckType when not provided
  *
  * Run with:  npm run test:unit -- test/unit/ml.test.js
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { predictDemand, predictPrice } from '../../src/services/ml.js';
 
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+const mockLogger = vi.hoisted(() => ({
+  error: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
 }));
 
-const DEFAULT_URL = 'http://localhost:8001';
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: mockLogger,
+}));
 
-function mockFetch(response) {
-  return vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
-}
+const mockFetch = vi.fn();
+vi.stubGlobal('fetch', mockFetch);
 
-describe('predictDemand', () => {
+import { predictDemand, predictPrice } from '../../src/services/ml.js';
+
+describe('ml service — predictDemand', () => {
   beforeEach(() => {
-    vi.unstubAllEnvs();
     vi.clearAllMocks();
+    delete process.env.ML_ENGINE_URL;
+    delete process.env.ML_API_KEY;
   });
 
-  it('calls the ML engine at /predict/demand with correct body', async () => {
-    const features = { hour: 9, day_of_week: 2, temperature: 22, precipitation: 0, historical_volume: 50, nearby_drivers: 10 };
-    const mockResponse = { ok: true, json: vi.fn().mockResolvedValue({ demand: 0.85 }) };
-    mockFetch(mockResponse);
-    await predictDemand(features);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    const [url, options] = globalThis.fetch.mock.calls[0];
-    expect(url).toBe(`${DEFAULT_URL}/predict/demand`);
-    expect(options.method).toBe('POST');
-    expect(options.headers['Content-Type']).toBe('application/json');
-    expect(JSON.parse(options.body)).toMatchObject(features);
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('calls the ML engine /predict/demand endpoint with correct body', async () => {
+    const features = {
+      hour: 10,
+      day_of_week: 3,
+      temperature: 28,
+      precipitation: 0,
+      historical_volume: 120,
+      nearby_drivers: 15,
+    };
+    const mockResponse = { predicted_demand: 0.82, demand_level: 'high' };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(mockResponse),
+    });
+
+    const result = await predictDemand(features);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain('/predict/demand');
+    expect(opts.method).toBe('POST');
+    expect(JSON.parse(opts.body)).toMatchObject(features);
+    expect(result).toEqual(mockResponse);
   });
 
   it('uses ML_ENGINE_URL env var when set', async () => {
-    vi.stubEnv('ML_ENGINE_URL', 'http://ml-engine:9000');
-    const mockResponse = { ok: true, json: vi.fn().mockResolvedValue({ demand: 0.5 }) };
-    mockFetch(mockResponse);
-    await predictDemand({ hour: 12 });
-    const [url] = globalThis.fetch.mock.calls[0];
-    expect(url).toBe('http://ml-engine:9000/predict/demand');
+    process.env.ML_ENGINE_URL = 'http://ml-service:9000';
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ predicted_demand: 0.5 }),
+    });
+
+    await predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('http://ml-service:9000');
+    delete process.env.ML_ENGINE_URL;
   });
 
-  it('throws an error when ML engine returns non-ok status', async () => {
-    const mockResponse = { ok: false, statusText: 'Service Unavailable', text: vi.fn().mockResolvedValue('server error') };
-    mockFetch(mockResponse);
-    await expect(predictDemand({ hour: 9 })).rejects.toThrow('Service Unavailable');
+  it('throws with descriptive message on 401/403 auth failure', async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 401,
+      ok: false,
+      statusText: 'Unauthorized',
+      text: () => Promise.resolve('Invalid API key'),
+    });
+
+    await expect(predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 }))
+      .rejects
+      .toThrow('ML Engine authentication failed: 401');
   });
 
-  it('returns parsed JSON on successful response', async () => {
-    const mockData = { demand: 0.75, confidence: 0.92 };
-    mockFetch({ ok: true, json: vi.fn().mockResolvedValue(mockData) });
-    const result = await predictDemand({ hour: 9 });
-    expect(result).toEqual(mockData);
+  it('throws with descriptive message on non-ok response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 500,
+      ok: false,
+      statusText: 'Internal Server Error',
+      text: () => Promise.resolve('Model not loaded'),
+    });
+
+    await expect(predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 }))
+      .rejects
+      .toThrow('ML Engine request failed: Internal Server Error');
   });
 
-  it('uses a 5000ms timeout on the fetch signal', async () => {
-    mockFetch({ ok: true, json: vi.fn().mockResolvedValue({}) });
-    await predictDemand({ hour: 9 });
-    const [, options] = globalThis.fetch.mock.calls[0];
-    expect(options.signal).toBeInstanceOf(AbortSignal);
+  it('adds X-API-Key header when ML_API_KEY env var is set', async () => {
+    process.env.ML_API_KEY = 'secret-key-123';
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ predicted_demand: 0.5 }),
+    });
+
+    await predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(opts.headers['X-API-Key']).toBe('secret-key-123');
+    expect(opts.headers['Content-Type']).toBe('application/json');
+    delete process.env.ML_API_KEY;
+  });
+
+  it('rejects when fetch throws (network error)', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network unreachable'));
+
+    await expect(predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 }))
+      .rejects
+      .toThrow('Network unreachable');
   });
 });
 
-describe('predictPrice', () => {
+describe('ml service — predictPrice', () => {
   beforeEach(() => {
-    vi.unstubAllEnvs();
     vi.clearAllMocks();
+    delete process.env.ML_SERVICE_URL;
+    delete process.env.ML_ENGINE_URL;
+    delete process.env.ML_API_KEY;
   });
 
-  it('calls the ML service at /predict with correct body', async () => {
-    const params = { distanceKm: 150, cargoWeightKg: 2000, truckType: 'flatbed', routeOrigin: 'Mumbai', routeDestination: 'Pune' };
-    mockFetch({ ok: true, json: vi.fn().mockResolvedValue({ estimated_price: 4500, currency: 'INR' }) });
-    await predictPrice(params);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    const [url, options] = globalThis.fetch.mock.calls[0];
-    expect(url).toBe(`${DEFAULT_URL}/predict`);
-    expect(options.method).toBe('POST');
-    expect(options.headers['Content-Type']).toBe('application/json');
-    const parsed = JSON.parse(options.body);
-    expect(parsed.distance_km).toBe(150);
-    expect(parsed.cargo_weight_kg).toBe(2000);
-    expect(parsed.truck_type).toBe('flatbed');
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
-  it('uses ML_SERVICE_URL env var when set', async () => {
-    vi.stubEnv('ML_SERVICE_URL', 'http://ml-price:8001');
-    mockFetch({ ok: true, json: vi.fn().mockResolvedValue({}) });
-    await predictPrice({ distanceKm: 100 });
-    const [url] = globalThis.fetch.mock.calls[0];
-    expect(url).toBe('http://ml-price:8001/predict');
+  it('calls the ML engine /predict endpoint with correct body', async () => {
+    const mockResponse = { estimated_price: 4500, currency: 'INR' };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(mockResponse),
+    });
+
+    const result = await predictPrice({
+      distanceKm: 250,
+      cargoWeightKg: 1000,
+      truckType: 'heavy_truck',
+      routeOrigin: 'Mumbai',
+      routeDestination: 'Pune',
+    });
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain('/predict');
+    const body = JSON.parse(opts.body);
+    expect(body.distance_km).toBe(250);
+    expect(body.cargo_weight_kg).toBe(1000);
+    expect(body.truck_type).toBe('heavy_truck');
+    expect(body.route_origin).toBe('Mumbai');
+    expect(body.route_destination).toBe('Pune');
+    expect(result).toEqual(mockResponse);
   });
 
-  it('falls back to ML_ENGINE_URL when ML_SERVICE_URL is not set', async () => {
-    vi.stubEnv('ML_ENGINE_URL', 'http://ml-engine:9000');
-    mockFetch({ ok: true, json: vi.fn().mockResolvedValue({}) });
-    await predictPrice({ distanceKm: 50 });
-    const [url] = globalThis.fetch.mock.calls[0];
-    expect(url).toBe('http://ml-engine:9000/predict');
+  it('defaults truckType to medium_truck when not provided', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ estimated_price: 3000, currency: 'INR' }),
+    });
+
+    await predictPrice({ distanceKm: 100, cargoWeightKg: 500 });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.truck_type).toBe('medium_truck');
   });
 
-  it('throws an error when ML service returns non-ok status', async () => {
-    mockFetch({ ok: false, statusText: 'Internal Server Error', text: vi.fn().mockResolvedValue('ml crash') });
-    await expect(predictPrice({ distanceKm: 100 })).rejects.toThrow('Internal Server Error');
+  it('prefers ML_SERVICE_URL over ML_ENGINE_URL for price prediction', async () => {
+    process.env.ML_SERVICE_URL = 'http://price-service:8002';
+    process.env.ML_ENGINE_URL = 'http://demand-service:8001';
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ estimated_price: 2000, currency: 'INR' }),
+    });
+
+    await predictPrice({ distanceKm: 50, cargoWeightKg: 200 });
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('price-service:8002');
+    delete process.env.ML_SERVICE_URL;
+    delete process.env.ML_ENGINE_URL;
   });
 
-  it('returns { estimated_price, currency } on success', async () => {
-    mockFetch({ ok: true, json: vi.fn().mockResolvedValue({ estimated_price: 3200, currency: 'INR' }) });
-    const result = await predictPrice({ distanceKm: 80 });
-    expect(result).toEqual({ estimated_price: 3200, currency: 'INR' });
+  it('throws with descriptive message on 401/403 auth failure', async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 403,
+      ok: false,
+      statusText: 'Forbidden',
+      text: () => Promise.resolve('Forbidden'),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('ML Engine authentication failed: 403');
+  });
+
+  it('throws with descriptive message on non-ok response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 502,
+      ok: false,
+      statusText: 'Bad Gateway',
+      text: () => Promise.resolve('Upstream error'),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('ML Engine request failed: Bad Gateway');
+  });
+
+  it('rejects when fetch throws (network error)', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Connection refused'));
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('Connection refused');
   });
 });

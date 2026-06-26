@@ -130,7 +130,7 @@ export async function authenticate(req, res, next) {
       const cachedProfile = await getCachedProfile(firebaseUid);
       if (cachedProfile) {
         if (!isValidCachedProfile(firebaseUid, cachedProfile)) {
-          void invalidateCachedProfile(firebaseUid);
+          try { await invalidateCachedProfile(firebaseUid); } catch (_) { logger.error('Cache invalidation failed', _); }
         } else {
           if (cachedProfile.isActive === false) {
             return res.status(403).json({ 
@@ -163,8 +163,7 @@ export async function authenticate(req, res, next) {
 
     if (!userProfile) {
       if (firebaseUid) {
-        // Cache the inactive/not-found status as a tombstone to prevent DB load on subsequent requests
-        void setCachedProfile(firebaseUid, { isActive: false }, TOMBSTONE_TTL_SECONDS);
+        try { await setCachedProfile(firebaseUid, { isActive: false }, TOMBSTONE_TTL_SECONDS); } catch (_) { logger.error('Cache set failed', _); }
       }
       if (supabaseUserId) {
         void setCachedSupabaseProfile(supabaseUserId, { isActive: false }, TOMBSTONE_TTL_SECONDS);
@@ -185,9 +184,9 @@ export async function authenticate(req, res, next) {
       isActive: true
     };
 
-    // Populate cache on successful DB fetch (fire-and-forget to avoid delaying the request critical path)
+    // Populate cache on successful DB fetch
     if (userProfile.firebase_uid) {
-      void setCachedProfile(userProfile.firebase_uid, req.user);
+      try { await setCachedProfile(userProfile.firebase_uid, req.user); } catch (_) { logger.error('Cache set failed', _); }
     }
     if (supabaseUserId) {
       // Clamp the cache lifetime to the token's remaining validity so a cached

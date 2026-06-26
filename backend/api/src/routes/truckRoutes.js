@@ -2,6 +2,8 @@ import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import { validateParams } from '../middleware/validate.js';
+import { paramIdSchema } from '../validation/requestSchemas.js';
 import { validateBody } from '../middleware/validate.js';
 import { registerTruckSchema } from '../validation/requestSchemas.js';
 import { getRouteEstimate } from '../services/osrm.js';
@@ -220,7 +222,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
 });
 
 // GET TRUCK NUMBER PLATE BY ID
-router.get('/:id/number', authenticate, userLimiter, async (req, res) => {
+router.get('/:id/number', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   try {
     const { data: truck, error } = await supabase
       .from('trucks')

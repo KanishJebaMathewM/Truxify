@@ -2012,7 +2012,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
   it('allows customer to change drop and returns recalculated pricing', async () => {
     m.store.orders.push({
-      id: 'order-change-1',
+      id: 'aaaa0001-0000-4000-8000-000000000001',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-CHANGE-1',
       pickup_lat: 19.0760,
@@ -2028,14 +2028,14 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/OD-CHANGE-1/change-drop')
+      .put('/api/orders/aaaa0001-0000-4000-8000-000000000001/change-drop')
       .set(CUSTOMER_HEADERS)
       .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('pricing');
     expect(res.body.pricing).toHaveProperty('total_amount');
-    const stored = m.store.orders.find(o => o.id === 'order-change-1');
+    const stored = m.store.orders.find(o => o.id === 'aaaa0001-0000-4000-8000-000000000001');
     expect(stored.drop_address).toBe('New Drop Place');
     expect(stored.drop_lat).toBe(22.22);
     expect(stored.drop_lng).toBe(88.88);
@@ -2043,7 +2043,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
   it('blocks change-drop with 409 when escrow is already funded', async () => {
     m.store.orders.push({
-      id: 'order-funded-1',
+      id: 'aaaa0002-0000-4000-8000-000000000002',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-FUNDED-1',
       pickup_lat: 19.0760,
@@ -2058,7 +2058,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/OD-FUNDED-1/change-drop')
+      .put('/api/orders/aaaa0002-0000-4000-8000-000000000002/change-drop')
       .set(CUSTOMER_HEADERS)
       .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
 
@@ -2069,7 +2069,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
   it('allows customer to cancel order and returns cancellation_fee and persists reason', async () => {
     m.store.orders.push({
-      id: 'order-cancel-1',
+      id: 'aaaa0003-0000-4000-8000-000000000003',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-CANCEL-1',
       status: 'pending',
@@ -2079,21 +2079,21 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .post('/api/orders/OD-CANCEL-1/cancel')
+      .post('/api/orders/aaaa0003-0000-4000-8000-000000000003/cancel')
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('cancellation_fee');
     expect(res.body.cancellation_fee).toBe(500);
-    const stored = m.store.orders.find(o => o.id === 'order-cancel-1');
+    const stored = m.store.orders.find(o => o.id === 'aaaa0003-0000-4000-8000-000000000003');
     expect(stored.status).toBe('cancelled');
     expect(stored.cancellation_reason).toBe('Change of plans');
   });
 
   it('persists cancellation before submitting a funded escrow refund', async () => {
     m.store.orders.push({
-      id: 'order-funded-cancel',
+      id: 'aaaa0004-0000-4000-8000-000000000004',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-FUNDED-CANCEL',
       status: 'in_transit',
@@ -2102,7 +2102,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       cancellation_fee: 500,
     });
     submitEscrowRefundMock.mockImplementation(async () => {
-      const stored = m.store.orders.find(o => o.id === 'order-funded-cancel');
+      const stored = m.store.orders.find(o => o.id === 'aaaa0004-0000-4000-8000-000000000004');
       expect(stored.status).toBe('cancelled');
       expect(stored.escrow_status).toBe('refund_pending');
       return {
@@ -2112,12 +2112,12 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     });
 
     const res = await request(buildApp())
-      .post('/api/orders/OD-FUNDED-CANCEL/cancel')
+      .post('/api/orders/aaaa0004-0000-4000-8000-000000000004/cancel')
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
     expect(res.status).toBe(200);
-    const stored = m.store.orders.find(o => o.id === 'order-funded-cancel');
+    const stored = m.store.orders.find(o => o.id === 'aaaa0004-0000-4000-8000-000000000004');
     expect(stored.status).toBe('cancelled');
     expect(stored.escrow_status).toBe('refunded');
     expect(stored.refund_tx_hash).toBe(`0x${'a'.repeat(64)}`);
@@ -2126,7 +2126,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
   it('keeps the order cancelled when escrow refund submission fails', async () => {
     m.store.orders.push({
-      id: 'order-refund-fails',
+      id: 'aaaa0005-0000-4000-8000-000000000005',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-REFUND-FAILS',
       status: 'in_transit',
@@ -2136,14 +2136,14 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     submitEscrowRefundMock.mockRejectedValue(new Error('Polygon unavailable'));
 
     const res = await request(buildApp())
-      .post('/api/orders/OD-REFUND-FAILS/cancel')
+      .post('/api/orders/aaaa0005-0000-4000-8000-000000000005/cancel')
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
     expect(res.status).toBe(202);
     expect(res.body.escrow_status).toBe('refund_failed');
     expect(res.body.retryable).toBe(true);
-    const stored = m.store.orders.find(o => o.id === 'order-refund-fails');
+    const stored = m.store.orders.find(o => o.id === 'aaaa0005-0000-4000-8000-000000000005');
     expect(stored.status).toBe('cancelled');
     expect(stored.escrow_status).toBe('refund_failed');
     expect(stored.escrow_refund_error).toContain('Polygon unavailable');
@@ -2152,7 +2152,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
   it('reconciles a previously submitted refund without submitting it twice', async () => {
     const txHash = `0x${'b'.repeat(64)}`;
     m.store.orders.push({
-      id: 'order-refund-pending',
+      id: 'aaaa0006-0000-4000-8000-000000000006',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-REFUND-PENDING',
       status: 'cancelled',
@@ -2163,7 +2163,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     confirmEscrowRefundMock.mockResolvedValue({ hash: txHash, status: 1 });
 
     const res = await request(buildApp())
-      .post('/api/orders/OD-REFUND-PENDING/cancel')
+      .post('/api/orders/aaaa0006-0000-4000-8000-000000000006/cancel')
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
@@ -2175,7 +2175,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
   it('rejects cancel when requester is not the order owner', async () => {
     m.store.orders.push({
-      id: 'order-cancel-2',
+      id: 'aaaa0007-0000-4000-8000-000000000007',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-CANCEL-2',
       status: 'pending',
@@ -2185,7 +2185,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .post('/api/orders/OD-CANCEL-2/cancel')
+      .post('/api/orders/aaaa0007-0000-4000-8000-000000000007/cancel')
       .set({ 'x-user-id': 'some-other-user', 'x-user-role': 'customer' })
       .send({ reason: 'Not owner' });
 
@@ -2194,7 +2194,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
   it('rejects change-drop when requester is not the order owner', async () => {
     m.store.orders.push({
-      id: 'order-change-2',
+      id: 'aaaa0008-0000-4000-8000-000000000008',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-CHANGE-2',
       pickup_lat: 19.0760,
@@ -2210,7 +2210,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/OD-CHANGE-2/change-drop')
+      .put('/api/orders/aaaa0008-0000-4000-8000-000000000008/change-drop')
       .set({ 'x-user-id': 'some-other-user', 'x-user-role': 'customer' })
       .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
 
@@ -2219,7 +2219,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
   it('rejects cancel when order is already delivered', async () => {
     m.store.orders.push({
-      id: 'order-cancel-delivered',
+      id: 'aaaa0009-0000-4000-8000-000000000009',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-CANCEL-DELIVERED',
       status: 'delivered',
@@ -2229,7 +2229,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .post('/api/orders/OD-CANCEL-DELIVERED/cancel')
+      .post('/api/orders/aaaa0009-0000-4000-8000-000000000009/cancel')
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'delivered' });
 
@@ -2239,7 +2239,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
   it('rejects cancel when payment is already released', async () => {
     m.store.orders.push({
-      id: 'order-cancel-released',
+      id: 'aaaa0010-0000-4000-8000-000000000010',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-CANCEL-RELEASED',
       status: 'payment_released',
@@ -2249,7 +2249,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .post('/api/orders/OD-CANCEL-RELEASED/cancel')
+      .post('/api/orders/aaaa0010-0000-4000-8000-000000000010/cancel')
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'payment released' });
 
@@ -2259,7 +2259,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
   it('returns 400 when route estimate computation fails during change-drop', async () => {
     m.store.orders.push({
-      id: 'order-change-fail',
+      id: 'aaaa0011-0000-4000-8000-000000000011',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-CHANGE-FAIL',
       pickup_lat: 19.0760,
@@ -2277,7 +2277,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/OD-CHANGE-FAIL/change-drop')
+      .put('/api/orders/aaaa0011-0000-4000-8000-000000000011/change-drop')
       .set(CUSTOMER_HEADERS)
       .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
 
@@ -2288,7 +2288,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
 
   it('returns 500 when weight_tonnes is missing in DB during change-drop', async () => {
     m.store.orders.push({
-      id: 'order-change-no-weight',
+      id: 'aaaa0012-0000-4000-8000-000000000012',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD-CHANGE-NO-WEIGHT',
       pickup_lat: 19.0760,
@@ -2304,7 +2304,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/OD-CHANGE-NO-WEIGHT/change-drop')
+      .put('/api/orders/aaaa0012-0000-4000-8000-000000000012/change-drop')
       .set(CUSTOMER_HEADERS)
       .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
 
@@ -2316,7 +2316,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/OD-NONEXISTENT/change-drop')
+      .put('/api/orders/aaaa9999-0000-4000-8000-000000009999/change-drop')
       .set(CUSTOMER_HEADERS)
       .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
 
@@ -2328,7 +2328,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .post('/api/orders/OD-NONEXISTENT/cancel')
+      .post('/api/orders/aaaa9999-0000-4000-8000-000000009999/cancel')
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Non-existent' });
 

@@ -958,7 +958,9 @@ async function removeClientFromAllSubscriptions(ws) {
       if (locationChannels.has(key)) {
         const { channel } = locationChannels.get(key);
         channel.unsubscribe();
-        supabase.removeChannel(channel);
+        if (supabase) {
+          supabase.removeChannel(channel);
+        }
         locationChannels.delete(key);
         logger.info(`Removed Supabase Realtime channel for order "${key}" on last subscriber disconnect.`);
       }

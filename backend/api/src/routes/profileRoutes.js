@@ -124,7 +124,11 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
       try { await invalidateCachedProfile(req.user.uid); } catch (_) { logger.error('Cache invalidation failed', _); }
     }
     if (req.user && req.user.id) {
-      try { await invalidateCachedSupabaseProfile(req.user.id); } catch (_) { /* logged internally */ }
+      try {
+        await invalidateCachedSupabaseProfile(req.user.id);
+      } catch (err) {
+        logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
+      }
     }
 
     res.json({ success: true, walletAddress: normalized });
@@ -169,7 +173,11 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
       try { await invalidateCachedProfile(req.user.uid); } catch (_) { /* logged internally */ }
     }
     if (req.user && req.user.id) {
-      try { await invalidateCachedSupabaseProfile(req.user.id); } catch (_) { /* logged internally */ }
+      try {
+        await invalidateCachedSupabaseProfile(req.user.id);
+      } catch (err) {
+        logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
+      }
     }
 
     res.json({
@@ -218,7 +226,11 @@ router.put('/fcm-token', authenticate, userLimiter, async (req, res) => {
       try { await invalidateCachedProfile(req.user.uid); } catch (_) { /* logged internally */ }
     }
     if (req.user.id) {
-      try { await invalidateCachedSupabaseProfile(req.user.id); } catch (_) { /* logged internally */ }
+      try {
+        await invalidateCachedSupabaseProfile(req.user.id);
+      } catch (err) {
+        logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
+      }
     }
 
     return res.json({ success: true, message: 'FCM token updated successfully.' });

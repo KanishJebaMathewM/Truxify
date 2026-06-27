@@ -143,9 +143,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   return ShipmentCard(
                     shipment: shipment,
                     onTap: () {
-                      Navigator.of(context).push(
-                        AppPageRoute(builder: (_) => LiveTrackingScreen(orderId: mockActiveOrders[index].orderId)),
-                      );
+                      if (index < mockActiveOrders.length) {
+                        Navigator.of(context).push(
+                          AppPageRoute(builder: (_) => LiveTrackingScreen(orderId: mockActiveOrders[index].orderId)),
+                        );
+                      }
                     },
                   );
                 },

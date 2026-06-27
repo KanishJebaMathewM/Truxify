@@ -238,7 +238,7 @@ router.put('/fcm-token', authenticate, userLimiter, async (req, res) => {
 // GET DRIVER STATEMENT
 router.get('/driver/statement', authenticate, requireRole(['driver']), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
   const userId = req.user.id;
-  const { start_date, end_date } = req.query;
+  const { start_date, end_date, format } = req.query;
 
   try {
     let query = supabase
@@ -290,6 +290,16 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
         status: trip.status
       };
     });
+
+    if (format === 'csv') {
+      const csvRows = [
+        ['ID', 'Order Display ID', 'Pickup Address', 'Drop Address', 'Pickup Date', 'Base Freight', 'Platform Fee', 'Toll Estimate', 'Net Earnings', 'Status'],
+        ...tripsList.map(t => [t.id, t.order_display_id, t.pickup_address, t.drop_address, t.pickup_date, t.base_freight, t.platform_fee, t.toll_estimate, t.net_earnings, t.status])
+      ];
+      const csvString = csvRows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\n');
+      res.setHeader('Content-Type', 'text/csv');
+      return res.send(csvString);
+    }
 
     res.json({
       summary: {

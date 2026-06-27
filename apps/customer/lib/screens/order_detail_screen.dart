@@ -3,7 +3,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../constants/supabase_config.dart';
 import '../controllers/app_controller.dart';
-import '../data/mock_data.dart';
 import '../models/app_models.dart';
 import '../services/order_service.dart';
 import '../theme/app_theme.dart';
@@ -132,6 +131,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             driver: driverName,
             truckNumber: truckNumber,
             timeline: parsedTimeline,
+            blockchainTxHash: orderMap['blockchain_tx_hash']?.toString(),
+            baseFare: orderMap['base_fare'] != null ? '₹${(orderMap['base_fare'] as num / 100).toStringAsFixed(0)}' : null,
+            distanceCharge: orderMap['distance_charge'] != null ? '₹${(orderMap['distance_charge'] as num / 100).toStringAsFixed(0)}' : null,
+            tollCharge: orderMap['toll_charge'] != null ? '₹${(orderMap['toll_charge'] as num / 100).toStringAsFixed(0)}' : null,
+            platformFee: orderMap['platform_fee'] != null ? '₹${(orderMap['platform_fee'] as num / 100).toStringAsFixed(0)}' : null,
           );
 
           // Trigger rating flow if status becomes completed and rating dialog hasn't been shown yet
@@ -303,7 +307,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               const SizedBox(height: 10),
               const Text('Transaction hash'),
               const SizedBox(height: 6),
-              SelectableText('0x8ab9f2c7e9f5d41a3d0b7f4d2c0e91f9c7d48abca7712c4f2c1d8b7f9a1c0e55'),
+              SelectableText(_currentOrder.blockchainTxHash ?? 'Blockchain data pending'),
               const SizedBox(height: 16),
               PrimaryButton(label: 'Close', onPressed: () => Navigator.of(context).pop()),
             ],
@@ -386,18 +390,17 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
               children: [
                 Text('Price breakdown', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 12),
-                ...mockOrderDetailPriceLines.map(
-                  (line) => Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Row(
-                      children: [
-                        Text(line.label, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: line.isTotal ? FontWeight.w800 : FontWeight.w500)),
-                        const Spacer(),
-                        Text(line.amount, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: line.isTotal ? FontWeight.w800 : FontWeight.w600)),
-                      ],
-                    ),
-                  ),
-                ),
+                if (_currentOrder.baseFare != null || _currentOrder.distanceCharge != null || _currentOrder.tollCharge != null || _currentOrder.platformFee != null) ...[
+                  if (_currentOrder.baseFare != null)
+                    _PriceLine(label: 'Base Fare', amount: _currentOrder.baseFare!),
+                  if (_currentOrder.distanceCharge != null)
+                    _PriceLine(label: 'Distance Charge', amount: _currentOrder.distanceCharge!),
+                  if (_currentOrder.tollCharge != null)
+                    _PriceLine(label: 'Toll Charges', amount: _currentOrder.tollCharge!),
+                  if (_currentOrder.platformFee != null)
+                    _PriceLine(label: 'Platform Fee', amount: _currentOrder.platformFee!),
+                ],
+                _PriceLine(label: 'Total', amount: _currentOrder.amount, isTotal: true),
               ],
             ),
           ),
@@ -444,6 +447,28 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             const SizedBox(height: 12),
             PrimaryButton(label: 'Submit Rating', onPressed: _submitRating),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _PriceLine extends StatelessWidget {
+  const _PriceLine({required this.label, required this.amount, this.isTotal = false});
+
+  final String label;
+  final String amount;
+  final bool isTotal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Text(label, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: isTotal ? FontWeight.w800 : FontWeight.w500)),
+          const Spacer(),
+          Text(amount, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: isTotal ? FontWeight.w800 : FontWeight.w600)),
         ],
       ),
     );

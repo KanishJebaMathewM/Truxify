@@ -18,9 +18,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _nameController = TextEditingController(text: 'Karthik Murugan');
-    _companyController = TextEditingController(text: 'Sri Murugan Textiles');
-    _phoneController = TextEditingController(text: '+91 98765 43210');
+    _nameController = TextEditingController();
+    _companyController = TextEditingController();
+    _phoneController = TextEditingController();
   }
 
   @override

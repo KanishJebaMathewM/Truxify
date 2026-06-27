@@ -90,6 +90,7 @@ class TruckResultData {
     this.baseFreight,
     this.tollEstimate,
     this.platformFee,
+    this.truckNumber,
     this.isAiEstimate = false,
   });
 
@@ -132,6 +133,7 @@ class TruckResultData {
       baseFreight: baseFreightStr,
       tollEstimate: tollEstimateStr,
       platformFee: platformFeeStr,
+      truckNumber: json['truckNumber'] as String? ?? json['number_plate'] as String?,
       isAiEstimate: json['isAiEstimate'] as bool? ?? false,
     );
   }
@@ -148,6 +150,7 @@ class TruckResultData {
   final String? baseFreight;
   final String? tollEstimate;
   final String? platformFee;
+  final String? truckNumber;
   final bool isAiEstimate;
 }
 
@@ -179,6 +182,11 @@ class HistoryOrderData {
     required this.driver,
     required this.truckNumber,
     required this.timeline,
+    this.blockchainTxHash,
+    this.baseFare,
+    this.distanceCharge,
+    this.tollCharge,
+    this.platformFee,
   });
 
   final String orderId;
@@ -189,6 +197,11 @@ class HistoryOrderData {
   final String driver;
   final String truckNumber;
   final List<TimelineStepData> timeline;
+  final String? blockchainTxHash;
+  final String? baseFare;
+  final String? distanceCharge;
+  final String? tollCharge;
+  final String? platformFee;
 }
 
 class TimelineStepData {

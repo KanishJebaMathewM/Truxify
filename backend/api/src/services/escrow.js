@@ -178,6 +178,18 @@ export async function escrowRelease(orderDisplayId) {
  * @returns {Promise<{txHash: string|null, bookingId: string}>}
  */
 export async function escrowRefund(orderDisplayId) {
+  const submitted = await submitEscrowRefund(orderDisplayId);
+  if (!submitted.txHash) return submitted;
+
+  const receipt = await submitted.waitForConfirmation();
+  return { txHash: receipt.hash, bookingId: submitted.bookingId };
+}
+
+/**
+ * Submit an escrow refund and return its hash before confirmation.
+ * Callers can persist the hash before waiting on the network.
+ */
+export async function submitEscrowRefund(orderDisplayId) {
   const bookingId = getEscrowBookingId(orderDisplayId);
 
   if (!escrowContract) {
@@ -187,7 +199,34 @@ export async function escrowRefund(orderDisplayId) {
 
   const tx = await escrowContract.refundFunds(bookingId);
   logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
-  const receipt = await tx.wait(1);
-  logger.info(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
-  return { txHash: receipt.hash, bookingId };
+  return {
+    txHash: tx.hash,
+    bookingId,
+    waitForConfirmation: async () => {
+      const receipt = await tx.wait(1);
+      if (!receipt || receipt.status === 0) {
+        throw new Error('Escrow refund transaction reverted or was not found.');
+      }
+      logger.info(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+      return receipt;
+    },
+  };
+}
+
+/**
+ * Confirm a previously submitted refund transaction during a retry.
+ */
+export async function confirmEscrowRefund(txHash) {
+  if (!escrowContract) {
+    throw new Error('Escrow contract is not initialised.');
+  }
+  if (!ethers.isHexString(txHash, 32)) {
+    throw new Error('Invalid escrow refund transaction hash.');
+  }
+
+  const receipt = await escrowContract.runner.provider.waitForTransaction(txHash, 1);
+  if (!receipt || receipt.status === 0) {
+    throw new Error('Escrow refund transaction reverted or was not found.');
+  }
+  return receipt;
 }

@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 
 MODEL_NAME = "demand_forecast"
 
+# NOTE: This module currently trains on synthetic (randomly generated) data
+# as a placeholder. Replace generate_synthetic_demand_data() with a real
+# data pipeline that loads historical trip/demand data from PostgreSQL or
+# MongoDB to make predictions meaningful.
+
 
 def generate_synthetic_demand_data(n_samples: int = 2000) -> tuple:
     np.random.seed(42)

@@ -3,6 +3,12 @@ import math
 
 logger = logging.getLogger(__name__)
 
+# NOTE: This module uses hardcoded base rates (BASE_RATE_PER_KM, BASE_RATE_PER_KG)
+# and static truck-type multipliers rather than a trained ML model. Replace these
+# constants with model-based predictions trained on actual completed trip pricing
+# data (distance, time-of-day, demand level, driver availability, etc.) for
+# accurate, data-driven price estimation.
+
 TRUCK_TYPE_MULTIPLIERS = {
     "light_truck": 1.0,
     "medium_truck": 1.2,

@@ -15,7 +15,7 @@ dependencies:
     sdk: flutter
   truxify_shared:
     path: ../../packages/truxify_shared
-  supabase_flutter: ^2.8.4
+  supabase_flutter: ^2.9.1
   flutter_map: ^8.3.0
   flutter_map_cancellable_tile_provider: ^3.0.0
   google_fonts: ^8.1.0
@@ -37,6 +37,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   mocktail: ^1.0.4
+  firebase_core_platform_interface: any
 
 flutter:
   uses-material-design: true

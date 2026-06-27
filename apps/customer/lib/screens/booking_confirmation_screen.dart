@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/order_service.dart';
 import '../controllers/app_controller.dart';
-import '../data/mock_data.dart';
 import '../models/app_models.dart';
 import '../models/payment_method.dart';
 import '../models/saved_address.dart';
@@ -184,7 +183,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                     label: 'Driver',
                     value:
                         '${widget.truck.driver} ⭐ ${widget.truck.rating.toStringAsFixed(1)}'),
-                _SummaryRow(label: 'Truck', value: mockDefaultTruckNumber),
+                _SummaryRow(label: 'Truck', value: widget.truck.truckNumber ?? widget.truck.truck),
               ],
             ),
           ),
@@ -206,15 +205,8 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                   if (widget.truck.platformFee != null)
                     _PriceLineRow(label: 'Platform fee', amount: widget.truck.platformFee!),
                   _PriceLineRow(label: 'Total', amount: widget.truck.price, isTotal: true),
-                ] else ...[
-                  ...mockBookingPriceLines.map(
-                    (line) => _PriceLineRow(
-                      label: line.label,
-                      amount: line.amount,
-                      isTotal: line.isTotal,
-                    ),
-                  ),
-                ],
+                ] else
+                  _PriceLineRow(label: 'Total', amount: widget.truck.price, isTotal: true),
                 if (widget.truck.isAiEstimate) ...[
                   const SizedBox(height: 4),
                   const Divider(),
@@ -350,7 +342,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   }
 }
 
-const mockDefaultTruckNumber = 'TN 45 AB 1234';
+const widget.truck.truckNumber ?? widget.truck.truck = 'TN 45 AB 1234';
 
 class _SummaryRow extends StatelessWidget {
   const _SummaryRow({required this.label, required this.value});

@@ -73,7 +73,7 @@ describe('userKeyGenerator', () => {
   });
 
   it('falls back to IP when no user is present', () => {
-    const req = { ip: '203.0.113.7' };
+    const req = { socket: { remoteAddress: '203.0.113.7' } };
     expect(userKeyGenerator(req)).toBe('203.0.113.7');
   });
 

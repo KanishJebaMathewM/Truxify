@@ -1,9 +1,12 @@
+import asyncio
 import hmac
 import logging
 import os
 from fastapi import FastAPI, HTTPException, Header, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from .models.eta_prediction import eta_predictor
 
 from .models.demand_forecast import (
     predict_demand,
@@ -26,6 +29,20 @@ app = FastAPI(
     title="Truxify ML Engine",
     description="Machine Learning microservice for Truxify",
     version="1.0.0",
+)
+
+# CORS: restrict to known origins — no wildcard "*" to prevent unauthorized cross-origin access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5000",   # Node.js API development
+        "http://127.0.0.1:5000",
+        "http://localhost:8000",   # FastAPI itself (browser testing)
+        "http://127.0.0.1:8000",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["X-API-Key", "Content-Type"],
 )
 
 
@@ -56,6 +73,17 @@ class PricePredictOutput(BaseModel):
     estimated_price: float
     currency: str = "INR"
 
+class ETAPredictInput(BaseModel):
+    route_distance: float = Field(..., gt=0)
+    time_of_day: int = Field(..., ge=0, le=23)
+    day_of_week: int = Field(..., ge=0, le=6)
+    route_type: str = Field(..., description="highway or city")
+    historical_speed: float = Field(..., gt=0)
+
+
+class ETAPredictOutput(BaseModel):
+    eta_minutes: float
+    confidence_interval: dict
 
 class TrainResponse(BaseModel):
     status: str
@@ -110,12 +138,35 @@ async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_
         logger.error("Price prediction failed: %s", e)
         raise HTTPException(status_code=500, detail="Price prediction failed")
 
-
+@app.post("/predict/eta", response_model=ETAPredictOutput)
+async def predict_eta_endpoint(input: ETAPredictInput, _auth=Depends(verify_api_key)):
+    try:
+        result = eta_predictor.predict(
+            distance=input.route_distance,
+            time_of_day=input.time_of_day,
+            day_of_week=input.day_of_week,
+            route_type=input.route_type,
+            historical_speed=input.historical_speed,
+        )
+        return ETAPredictOutput(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error("ETA prediction failed: %s", e)
+        raise HTTPException(status_code=500, detail="ETA prediction failed")
+    
 @app.post("/train/demand", response_model=TrainResponse)
 async def train_demand_endpoint(_auth=Depends(verify_api_key)):
+    timeout = int(os.environ.get("ML_TRAINING_TIMEOUT_SECONDS", 300))
     try:
-        metrics = train_demand_forecast_model()
+        metrics = await asyncio.wait_for(
+            asyncio.to_thread(train_demand_forecast_model),
+            timeout=timeout,
+        )
         return TrainResponse(status="success", metrics=metrics)
+    except asyncio.TimeoutError:
+        logger.error("Demand model training timed out after %d seconds", timeout)
+        raise HTTPException(status_code=504, detail="Training timed out")
     except Exception as e:
         logger.error("Demand model training failed: %s", e)
         raise HTTPException(status_code=500, detail="Training failed")

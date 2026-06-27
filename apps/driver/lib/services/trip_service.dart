@@ -4,7 +4,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../core/driver_session.dart';
 
 class TripService {
   TripService({
@@ -27,9 +26,9 @@ class TripService {
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
 
   String get _driverId {
-    final id = DriverSession.driverId;
-    if (id.isEmpty) throw Exception('Driver session not initialised');
-    return id;
+    final user = _client.auth.currentUser;
+    if (user == null) throw Exception('Driver not authenticated');
+    return user.id;
   }
 
   static String _normalizeBaseUrl(String value) {
@@ -38,10 +37,11 @@ class TripService {
 
   Future<Map<String, String>> _authHeaders() async {
     final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
+    final userId = _client.auth.currentUser?.id ?? '';
     return <String, String>{
       'Content-Type': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',
-      'x-user-id': _driverId,
+      'x-user-id': userId,
       'x-user-role': 'driver',
     };
   }

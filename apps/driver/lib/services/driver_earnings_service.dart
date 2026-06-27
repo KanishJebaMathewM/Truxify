@@ -30,7 +30,13 @@ class DriverEarningsService {
   String? get driverId => _client.auth.currentUser?.id;
 
   Future<Map<String, String>> get _authHeaders async {
-    final token = await FirebaseAuth.instance.currentUser?.getIdToken();
+    String? token;
+    try {
+      token = await FirebaseAuth.instance.currentUser?.getIdToken();
+    } catch (_) {
+      // Firebase not initialised; fall through to Supabase session
+    }
+    token ??= _client.auth.currentSession?.accessToken;
     return {
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',

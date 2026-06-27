@@ -1,10 +1,33 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:truxify_driver/core/driver_session.dart';
 import 'package:truxify_driver/services/trip_service.dart';
 
 http.Client createUnusedHttpClient() => http.Client();
+
+class MockGoTrueClient implements GoTrueClient {
+  final User? mockUser;
+  final Session? mockSession;
+  MockGoTrueClient({this.mockUser, this.mockSession});
+
+  @override
+  User? get currentUser => mockUser;
+
+  @override
+  Session? get currentSession => mockSession;
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+class FakeUser implements User {
+  final String _id;
+  FakeUser(this._id);
+  @override
+  String get id => _id;
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 class FakePostgrestTransformBuilder<T> implements PostgrestTransformBuilder<T> {
   final Future<dynamic> _futureValue;
@@ -102,8 +125,13 @@ class FakeSupabaseQueryBuilder implements SupabaseQueryBuilder {
 
 class FakeSupabaseClient implements SupabaseClient {
   final FakeSupabaseQueryBuilder Function(String relation) onFrom;
+  final GoTrueClient _auth;
 
-  FakeSupabaseClient({required this.onFrom});
+  FakeSupabaseClient({required this.onFrom, GoTrueClient? auth})
+      : _auth = auth ?? MockGoTrueClient();
+
+  @override
+  GoTrueClient get auth => _auth;
 
   @override
   SupabaseQueryBuilder from(String relation) {
@@ -121,9 +149,8 @@ void main() {
   const tripDisplayId = 'trip-display-456';
   const stopId = 'stop-789';
 
-  setUp(() {
-    DriverSession.driverId = driverId;
-  });
+  final mockUser = FakeUser(driverId);
+  final mockAuth = MockGoTrueClient(mockUser: mockUser);
 
   group('TripService.markStopCompleted Tests', () {
     test('Successfully completes stop and sets next stop as current', () async {
@@ -133,6 +160,7 @@ void main() {
       int tripStopsCallCount = 0;
 
       final client = FakeSupabaseClient(
+        auth: mockAuth,
         onFrom: (relation) {
           if (relation == 'trips') {
             return FakeSupabaseQueryBuilder(
@@ -186,6 +214,7 @@ void main() {
       int tripStopsCallCount = 0;
 
       final client = FakeSupabaseClient(
+        auth: mockAuth,
         onFrom: (relation) {
           if (relation == 'trips') {
             return FakeSupabaseQueryBuilder(
@@ -230,6 +259,7 @@ void main() {
       bool tripsQueryChecked = false;
 
       final client = FakeSupabaseClient(
+        auth: mockAuth,
         onFrom: (relation) {
           if (relation == 'trips') {
             tripsQueryChecked = true;
@@ -267,6 +297,7 @@ void main() {
 
     test('Throws exception if driver does not own the trip', () async {
       final client = FakeSupabaseClient(
+        auth: mockAuth,
         onFrom: (relation) {
           if (relation == 'trips') {
             // Return null for ownership check
@@ -292,6 +323,7 @@ void main() {
       final eqParams = <String, dynamic>{};
 
       final client = FakeSupabaseClient(
+        auth: mockAuth,
         onFrom: (relation) {
           if (relation == 'driver_details') {
             return FakeSupabaseQueryBuilder(
@@ -314,6 +346,7 @@ void main() {
 
     test('Throws exception if driver_details update returns null', () async {
       final client = FakeSupabaseClient(
+        auth: mockAuth,
         onFrom: (relation) {
           if (relation == 'driver_details') {
             return FakeSupabaseQueryBuilder(
@@ -339,6 +372,7 @@ void main() {
       int tripStopsCallCount = 0;
 
       final client = FakeSupabaseClient(
+        auth: mockAuth,
         onFrom: (relation) {
           if (relation == 'trips') {
             return FakeSupabaseQueryBuilder(
@@ -375,6 +409,7 @@ void main() {
 
     test('Throws exception if startTrip finds no active stops', () async {
       final client = FakeSupabaseClient(
+        auth: mockAuth,
         onFrom: (relation) {
           if (relation == 'trips') {
             return FakeSupabaseQueryBuilder(

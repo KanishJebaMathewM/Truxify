@@ -361,6 +361,13 @@ create index if not exists idx_orders_driver       on orders (driver_id);
 create index if not exists idx_orders_status       on orders (status);
 create index if not exists idx_orders_pickup_date  on orders (pickup_date);
 create index if not exists idx_orders_display_id   on orders (order_display_id);
+alter table orders add column if not exists escrow_refund_error text;
+alter table orders add column if not exists escrow_refund_attempts integer not null default 0;
+alter table orders add column if not exists escrow_refund_last_attempt_at timestamptz;
+alter table orders add column if not exists escrow_refund_submitted_at timestamptz;
+alter table orders add column if not exists escrow_release_error text;
+alter table orders add column if not exists escrow_release_attempts integer not null default 0;
+alter table orders add column if not exists escrow_release_last_attempt_at timestamptz;
 alter table orders
   add constraint orders_customer_id_fkey
   foreign key (customer_id) references profiles(id)
@@ -1517,8 +1524,10 @@ declare
   v_order record;
   v_trip_display_id text;
   v_active_trip_count int;
+  v_updated_count int;
 begin
-  select * into v_order from orders where id = p_order_id;
+  -- Use FOR UPDATE to lock the order row and prevent concurrent modifications
+  select * into v_order from orders where id = p_order_id for update;
 
   if not found then
     raise exception 'Order not found';
@@ -1531,6 +1540,16 @@ begin
   -- Idempotency guard: check if the order status is already payment_released
   if v_order.status = 'payment_released' then
     return;
+  end if;
+
+  -- Check if the order was cancelled
+  if v_order.status = 'cancelled' then
+    raise exception 'Order has been cancelled — cannot complete trip';
+  end if;
+
+  -- Check if the order was already delivered — prevents double-processing
+  if v_order.status = 'delivered' then
+    raise exception 'Order has already been delivered';
   end if;
 
   -- Safe lookup for the driver's active trip
@@ -1568,12 +1587,20 @@ begin
     where trip_display_id = v_trip_display_id;
   end if;
 
-  -- Update order status to payment_released
+  -- Update order status to payment_released with defensive WHERE guards
   update orders
   set otp_verified = true,
       status = 'payment_released',
       updated_at = now()
-  where id = p_order_id;
+  where id = p_order_id
+    and status != 'cancelled'
+    and status != 'payment_released';
+
+  -- Verify the update actually affected a row
+  get diagnostics v_updated_count = row_count;
+  if v_updated_count = 0 then
+    raise exception 'Order status changed during processing — possible concurrent cancellation';
+  end if;
 
   -- Update order timeline milestone 'Delivered'
   update order_timeline

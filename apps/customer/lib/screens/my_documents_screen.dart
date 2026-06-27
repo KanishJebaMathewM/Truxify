@@ -47,7 +47,15 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
 
     try {
       final user = _supabase.auth.currentUser;
-      final userId = user?.id ?? 'b1111111-1111-1111-1111-111111111111'; // Fallback to seed customer
+      if (user == null) {
+        if (!mounted) return;
+        setState(() {
+          _error = 'Please sign in to view your documents.';
+          _isLoading = false;
+        });
+        return;
+      }
+      final userId = user.id;
       
       final response = await _supabase
           .from('documents')
@@ -174,7 +182,16 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
 
                   try {
                     final user = _supabase.auth.currentUser;
-                    final userId = user?.id ?? 'b1111111-1111-1111-1111-111111111111'; 
+                    if (user == null) {
+                      if (context.mounted) {
+                        setSheetState(() {
+                          isError = true;
+                          statusText = 'Upload Failed: Please sign in first.';
+                        });
+                      }
+                      return;
+                    }
+                    final userId = user.id;
                     final dbDocType = _mapUiToDbDocType(docType);
 
                     final existingDocs = await _supabase

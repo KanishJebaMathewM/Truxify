@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
-import '../core/driver_session.dart';
 
 class LocationService {
   LocationService._privateConstructor();
@@ -61,8 +60,8 @@ class LocationService {
 
   Future<void> _sendLocationPing(Position position) async {
     try {
-      final driverId = DriverSession.driverId;
-      if (driverId.isEmpty) return;
+      final driverId = Supabase.instance.client.auth.currentUser?.id;
+      if (driverId == null || driverId.isEmpty) return;
 
       // 1. Resolve active order if not cached
       if (_activeOrderId == null) {
@@ -125,7 +124,7 @@ class LocationService {
 
     final session = Supabase.instance.client.auth.currentSession;
     final token = session?.accessToken ?? '';
-    final driverId = DriverSession.driverId;
+    final driverId = Supabase.instance.client.auth.currentUser?.id ?? '';
 
     final baseUri = Uri.parse(defaultApiBaseUrl);
     final wsScheme = baseUri.scheme == 'https' ? 'wss' : 'ws';

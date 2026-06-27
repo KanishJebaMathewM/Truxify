@@ -13,8 +13,8 @@ export async function flushSentry(timeoutMs = 2000) {
   if (!process.env.SENTRY_DSN) return;
   try {
     await Sentry.flush(timeoutMs);
-  } catch {
-    // ignore flush errors during process teardown
+  } catch (err) {
+    logger.warn('[sentry] Sentry.flush failed during teardown: %s', err.message);
   }
 }
 

@@ -9,7 +9,7 @@
  * Run with:  npm test -- test/unit/escrow.test.js
  */
 import { describe, it, expect, vi } from 'vitest';
-import { getEscrowBookingId, buildDepositTx, ESCROW_MATIC_PER_PAISA } from '../../src/services/escrow.js';
+import { getEscrowBookingId, buildDepositTx, escrowRelease, escrowRefund, confirmEscrowRefund, ESCROW_MATIC_PER_PAISA } from '../../src/services/escrow.js';
 
 describe('escrow service — getEscrowBookingId', () => {
   it('returns a hex string prefixed with 0x', () => {
@@ -148,5 +148,52 @@ describe('escrow service — buildDepositTx (contract unconfigured)', () => {
     expect(txData).toBeNull();
     expect(typeof bookingId).toBe('string');
     expect(bookingId.startsWith('0x')).toBe(true);
+  });
+});
+
+// escrowContract is null in the test environment (no POLYGON_RPC_URL / ESCROW_CONTRACT_ADDRESS /
+// RELAYER_WALLET_PRIVATE_KEY set in setup.js) — test the graceful fallback paths.
+
+describe('escrow service \u2014 escrowRelease (contract unconfigured)', () => {
+  it('returns txHash: null and a valid bookingId when contract is not initialised', async () => {
+    const { txHash, bookingId } = await escrowRelease('#FF20260527');
+    expect(txHash).toBeNull();
+    expect(typeof bookingId).toBe('string');
+    expect(bookingId.startsWith('0x')).toBe(true);
+  });
+
+  it('returns the same bookingId as getEscrowBookingId', async () => {
+    const { bookingId } = await escrowRelease('#FF20260528');
+    const expected = getEscrowBookingId('#FF20260528');
+    expect(bookingId).toBe(expected);
+  });
+});
+
+describe('escrow service \u2014 escrowRefund (contract unconfigured)', () => {
+  it('returns txHash: null and a valid bookingId when contract is not initialised', async () => {
+    const result = await escrowRefund('#FF20260529');
+    expect(result.txHash).toBeNull();
+    expect(typeof result.bookingId).toBe('string');
+    expect(result.bookingId.startsWith('0x')).toBe(true);
+  });
+
+  it('returns the same bookingId as getEscrowBookingId', async () => {
+    const result = await escrowRefund('#FF20260530');
+    const expected = getEscrowBookingId('#FF20260530');
+    expect(result.bookingId).toBe(expected);
+  });
+});
+
+describe('escrow service \u2014 confirmEscrowRefund (contract unconfigured)', () => {
+  it('throws when contract is not initialised', async () => {
+    await expect(confirmEscrowRefund('0x' + 'a'.repeat(64))).rejects.toThrow(
+      'Escrow contract is not initialised.'
+    );
+  });
+
+  it('throws for non-hex string input', async () => {
+    await expect(confirmEscrowRefund('not-a-hash')).rejects.toThrow(
+      'Escrow contract is not initialised.'
+    );
   });
 });

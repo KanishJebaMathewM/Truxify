@@ -72,7 +72,7 @@ export function isValidCachedProfile(firebaseUid, cachedProfile) {
  * a Firebase UID, so the identity field checked here is `id`.
  *
  * @param {string} userId - The expected Supabase profile UUID.
- * @param {any} cachedProfile - The cached profile to validate.
+ * @param {object|null} cachedProfile - The cached profile to validate.
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedSupabaseProfile(userId, cachedProfile) {

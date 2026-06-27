@@ -12,6 +12,7 @@ services:
       MONGODB_DB_NAME: truxify_telemetry
       REDIS_URL: redis://redis:6379
       ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
+      ML_ENGINE_URL: http://ml-engine:8000
     volumes:
       - ./backend/api:/app
       - /app/node_modules

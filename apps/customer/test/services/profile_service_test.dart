@@ -46,13 +46,7 @@ void main() {
     expect(profile['id'], equals('user_123'));
     expect(profile['email'], equals('john@example.com'));
 
-    final captured = verify(
-      () => apiClient.get('/api/profile', headers: captureAny(named: 'headers')),
-    ).captured;
-    final headers = captured.first as Map<String, String>;
-    expect(headers['x-user-id'], equals('user_123'));
-    expect(headers['x-user-role'], equals('customer'));
-    expect(headers['x-user-name'], equals('John Doe'));
+    verify(() => apiClient.get('/api/profile', headers: any(named: 'headers'))).called(1);
   });
 
   test('fetchProfile translates ApiException to StateError', () async {

@@ -37,7 +37,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final connectivity = await Connectivity().checkConnectivity();
     final hasNetwork = connectivity.isNotEmpty && !connectivity.contains(ConnectivityResult.none);
     await _cacheManager.open();
-    await _cacheManager.cacheLastLocation(21.1702, 72.8311);
+    final existingLocation = await _cacheManager.getLastLocation();
+    if (existingLocation == null) {
+      await _cacheManager.cacheLastLocation(21.1702, 72.8311);
+    }
     final cachedLocation = await _cacheManager.getLastLocation();
     if (!mounted) return;
 

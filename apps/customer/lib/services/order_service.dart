@@ -35,6 +35,7 @@ class OrderService {
     required double weightTonnes,
     String? paymentMethodId,
     String? upiId,
+    DateTime? pickupDate,
   }) async {
     final user = SupabaseService.currentUser;
     final fullName = user?.userMetadata?['full_name']?.toString();
@@ -54,7 +55,7 @@ class OrderService {
           'drop_address': dropAddress,
           'drop_lat': dropLat,
           'drop_lng': dropLng,
-          'pickup_date': DateTime.now().toIso8601String(),
+          'pickup_date': (pickupDate ?? DateTime.now()).toIso8601String(),
           'pickup_time': pickupTime,
           'goods_type': goodsType,
           'weight_tonnes': weightTonnes,

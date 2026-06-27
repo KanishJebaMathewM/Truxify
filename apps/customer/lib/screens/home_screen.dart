@@ -37,7 +37,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final connectivity = await Connectivity().checkConnectivity();
     final hasNetwork = connectivity.isNotEmpty && !connectivity.contains(ConnectivityResult.none);
     await _cacheManager.open();
-    await _cacheManager.cacheLastLocation(21.1702, 72.8311);
+    final existingLocation = await _cacheManager.getLastLocation();
+    if (existingLocation == null) {
+      await _cacheManager.cacheLastLocation(21.1702, 72.8311);
+    }
     final cachedLocation = await _cacheManager.getLastLocation();
     if (!mounted) return;
 
@@ -104,7 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   children: [
                     const Icon(Icons.place_rounded, size: 16, color: TruxifyColors.accentDark),
                     const SizedBox(width: 6),
-                    Text(_isOffline ? _locationLabel : 'Surat, Gujarat', style: const TextStyle(fontWeight: FontWeight.w700)),
+                    Text(_locationLabel, style: const TextStyle(fontWeight: FontWeight.w700)),
                   ],
                 ),
               ),
@@ -143,9 +146,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   return ShipmentCard(
                     shipment: shipment,
                     onTap: () {
-                      Navigator.of(context).push(
-                        AppPageRoute(builder: (_) => LiveTrackingScreen(orderId: mockActiveOrders[index].orderId)),
-                      );
+                      if (index < mockActiveOrders.length) {
+                        Navigator.of(context).push(
+                          AppPageRoute(builder: (_) => LiveTrackingScreen(orderId: mockActiveOrders[index].orderId)),
+                        );
+                      }
                     },
                   );
                 },

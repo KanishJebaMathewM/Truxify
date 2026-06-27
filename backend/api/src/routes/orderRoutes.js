@@ -330,6 +330,7 @@ router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), a
 
     res.json(orders);
   } catch (err) {
+    logger.error('[orderRoutes] Failed to fetch active orders:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -348,6 +349,7 @@ router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
     if (error) return res.status(500).json({ error: 'Failed to fetch load offers.', details: error.message });
     res.json(offers);
   } catch (err) {
+    logger.error('[orderRoutes] Failed to fetch load offers:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -366,6 +368,7 @@ router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) 
     if (error) return res.status(500).json({ error: 'Failed to fetch en-route loads.', details: error.message });
     res.json(offers);
   } catch (err) {
+    logger.error('[orderRoutes] Failed to fetch en-route loads:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -392,6 +395,7 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
 
     res.json(history);
   } catch (err) {
+    logger.error('[orderRoutes] Failed to fetch order history:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -432,6 +436,7 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
 
     res.json({ order: responseOrder, timeline: timeline || [], driver: driverProfile });
   } catch (err) {
+    logger.error('[orderRoutes] Failed to fetch order details:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -467,6 +472,7 @@ router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSch
     if (timelineErr) return res.status(500).json({ error: 'Failed to fetch timeline.', details: timelineErr.message });
     res.json(timeline || []);
   } catch (err) {
+    logger.error('[orderRoutes] Failed to fetch order timeline:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -501,6 +507,7 @@ router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bid
 
     res.status(201).json({ message: 'Bid submitted successfully.', bid });
   } catch (err) {
+    logger.error('[orderRoutes] Failed to submit bid:', err.message);
     res.status(500).json({ error: 'Internal Server Error.' });
   }
 });
@@ -600,6 +607,7 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
       },
     });
   } catch (err) {
+    logger.error('[orderRoutes] Failed to submit rating:', err.message);
     return res.status(500).json({ error: 'Internal Server Error.' });
   }
 });
@@ -1528,7 +1536,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, requireRole(['cust
 // 20. GET LIVE ROUTE GEOMETRY (CUSTOMER OR DRIVER)
 // ============================================================================
 
-router.get('/:id/route', authenticate, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id/route', authenticate, userLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id; // this is order_display_id from client
 
   try {

@@ -105,7 +105,7 @@ export const predictDemandSchema = z.object({
 }).strict();
 
 export const updateMilestoneSchema = z.object({
-  milestone: z.enum(['Truck Assigned', 'En Route to Pickup', 'Arrived at Pickup', 'Goods Loaded', 'In Transit', 'Arriving', 'Delivered'], {
+  milestone: z.enum(['Truck Assigned', 'En Route to Pickup', 'Arrived at Pickup', 'Goods Loaded', 'In Transit', 'Arriving'], {
     invalid_type_error: 'Invalid milestone supplied.'
   })
 });

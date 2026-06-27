@@ -1,12 +1,13 @@
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
+import { validateBody } from '../middleware/validate.js';
 import {
   getProfile,
   getCustomerStats,
   getDriverDetails
 } from '../services/profileService.js';
 import { supabase } from '../config/db.js';
-
+import { updateProfileSchema } from '../schemas/profile.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 
 const router = express.Router();
@@ -49,7 +50,7 @@ router.get('/', authenticate, async (req, res) => {
 });
 
 // UPDATE PROFILE (basic version)
-router.put('/', authenticate, async (req, res) => {
+router.put('/', authenticate, validateBody(updateProfileSchema), async (req, res) => {
   try {
     const userId = req.user.id;
     const { full_name, language, dark_mode, is_online } = req.body;

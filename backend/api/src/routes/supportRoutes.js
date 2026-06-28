@@ -72,10 +72,19 @@ const CATEGORY_LABELS = {
   account: 'Account Management',
 };
 
+const CATEGORY_DESCRIPTIONS = {
+  payment: 'Issues related to payments, invoices, billing, and refunds.',
+  order: 'Issues related to load bookings, orders, and shipment tracking.',
+  technical: 'App crashes, bugs, and technical difficulties.',
+  general: 'General questions and inquiries.',
+  account: 'Login problems, account settings, and profile access.',
+};
+
 router.get('/categories', (_req, res) => {
   res.json({
     categories: VALID_CATEGORIES,
     labels: CATEGORY_LABELS,
+    descriptions: CATEGORY_DESCRIPTIONS,
   });
 });
 

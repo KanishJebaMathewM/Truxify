@@ -1270,6 +1270,8 @@ router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer
       logger.warn('Failed to update timeline for change-drop:', timelineErr.message);
     }
 
+    await expireDeliveryOtps(order.order_display_id);
+
     return res.json({
       message: 'Drop location updated successfully.',
       pricing: {
@@ -1597,6 +1599,16 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
       .select('id, customer_id, driver_id, status')
       .eq('id', orderId)
       .maybeSingle();
+    if (!order && !orderErr) {
+      const result = await supabase
+        .from('orders')
+        .select('id, customer_id, driver_id, status')
+        .eq('order_display_id', orderId)
+        .maybeSingle();
+      order = result.data;
+      orderErr = result.error;
+    }
+
     if (!order && !orderErr) {
       const result = await supabase
         .from('orders')

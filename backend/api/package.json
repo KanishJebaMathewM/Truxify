@@ -13,6 +13,7 @@
     "test:integration": "vitest run test/integration",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "lint": "eslint . --max-warnings=0",
     "verify-db": "node scripts/verify-db-schema.js",
     "seed:dev": "node scripts/seed-dev-profile.js"
   },

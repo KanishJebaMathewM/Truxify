@@ -72,6 +72,12 @@ const CATEGORY_LABELS = {
   account: 'Account Management',
 };
 
+const CATEGORY_SLA = {
+  payment: 24,
+  order: 12,
+  technical: 4,
+  general: 48,
+  account: 24,
 const CATEGORY_DESCRIPTIONS = {
   payment: 'Issues related to payments, invoices, billing, and refunds.',
   order: 'Issues related to load bookings, orders, and shipment tracking.',
@@ -84,6 +90,7 @@ router.get('/categories', (_req, res) => {
   res.json({
     categories: VALID_CATEGORIES,
     labels: CATEGORY_LABELS,
+    sla_hours: CATEGORY_SLA,
     descriptions: CATEGORY_DESCRIPTIONS,
   });
 });

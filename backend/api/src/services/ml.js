@@ -38,7 +38,7 @@ function getBaseUrl() {
 }
 
 function getPriceBaseUrl() {
-  return process.env.ML_SERVICE_URL || process.env.ML_ENGINE_URL || DEFAULT_ML_SERVICE_URL;
+  return process.env.ML_SERVICE_URL || process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
 }
 
 /**

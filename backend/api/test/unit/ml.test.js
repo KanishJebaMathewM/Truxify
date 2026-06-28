@@ -176,9 +176,9 @@ describe('ml service — predictPrice', () => {
     expect(body.truck_type).toBe('medium_truck');
   });
 
-  it('prefers ML_SERVICE_URL over ML_ENGINE_URL for price prediction', async () => {
-    process.env.ML_SERVICE_URL = 'http://price-service:8002';
+  it('prefers ML_ENGINE_URL over ML_SERVICE_URL for price prediction', async () => {
     process.env.ML_ENGINE_URL = 'http://demand-service:8001';
+    process.env.ML_SERVICE_URL = 'http://price-service:8002';
     mockFetch.mockResolvedValueOnce({
       ok: true,
       json: () => Promise.resolve({ estimated_price: 2000, currency: 'INR' }),
@@ -187,9 +187,9 @@ describe('ml service — predictPrice', () => {
     await predictPrice({ distanceKm: 50, cargoWeightKg: 200 });
 
     const [url] = mockFetch.mock.calls[0];
-    expect(url).toContain('price-service:8002');
-    delete process.env.ML_SERVICE_URL;
+    expect(url).toContain('demand-service:8001');
     delete process.env.ML_ENGINE_URL;
+    delete process.env.ML_SERVICE_URL;
   });
 
   it('throws with descriptive message on 401/403 auth failure', async () => {

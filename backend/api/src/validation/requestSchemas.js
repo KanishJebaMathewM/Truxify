@@ -188,6 +188,7 @@ export const driverStatementSchema = z.object({
   end_date: z.string().refine(value => !Number.isNaN(Date.parse(value)), {
     message: 'Must be a valid date string',
   }).optional(),
+  format: z.enum(['json', 'csv']).optional(),
   sort_by: z.enum(['pickup_date', 'net_earnings', 'base_freight']).optional(),
 }).strict();
 

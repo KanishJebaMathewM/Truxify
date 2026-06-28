@@ -456,6 +456,27 @@ describe('Profile Routes', () => {
       expect(res.body.trips[0].id).toBe('order-2');
     });
 
+    it('returns CSV formatting when format=csv is passed', async () => {
+      m.store.orders.push({
+        id: 'order-1',
+        driver_id: 'driver-uuid-456',
+        status: 'delivered',
+        pickup_address: 'A',
+        drop_address: 'B',
+        pickup_date: '2026-06-01',
+        base_freight: 10000,
+        platform_fee: 500,
+        toll_estimate: 1500
+      });
+
+      const res = await request(buildApp())
+        .get('/api/profile/driver/statement?format=csv')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/csv');
+      expect(res.text).toContain('"order-1"');
+      expect(res.text).toContain('"10000"');
     it('sorts statement trips by net earnings when sort_by=net_earnings is passed', async () => {
       m.store.orders.push(
         {

@@ -231,21 +231,32 @@ router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   const { status } = req.query;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
 
   try {
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
     let query = supabase
       .from('trips')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('driver_id', req.user.id);
 
     if (status) {
       query = query.eq('status', status);
     }
 
-    const { data: trips, error } = await query.order('trip_date', { ascending: false });
+    const { data: trips, error, count } = await query.order('trip_date', { ascending: false }).range(from, to);
 
     if (error) return res.status(500).json({ error: 'Failed to fetch trips.', details: error.message });
-    res.json(trips || []);
+    res.json({
+      page,
+      limit,
+      total: count || 0,
+      totalPages: Math.ceil((count || 0) / limit),
+      trips: trips || []
+    });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }

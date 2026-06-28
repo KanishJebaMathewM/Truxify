@@ -426,6 +426,11 @@ final Map<String, LoadOffer> loadOfferById = {
 
 const List<Trip> mockTrips = [
   Trip(
+    id: 'mock-trip-1',
+    route: 'Surat → Jaipur',
+    date: 'Today · 6:00 AM',
+    items: ['Textile 3t', 'Electronics 2t'],
+  Trip(
     route: 'Surat → Jaipur',
     date: 'Today · 6:00 AM',
     items: ['Textile 3t', 'Electronics 2t'],

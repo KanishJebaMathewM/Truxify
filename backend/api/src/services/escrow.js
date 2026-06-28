@@ -163,6 +163,16 @@ export async function escrowRelease(orderDisplayId) {
     return { txHash: null, bookingId };
   }
 
+  try {
+    const escrow = await escrowContract.escrows(bookingId);
+    if (escrow && (escrow.status === 2 || Number(escrow.status) === 2)) {
+      logger.info(`[escrow] Already released for booking ${orderDisplayId}, skipping.`);
+      return { txHash: null, bookingId, alreadyReleased: true };
+    }
+  } catch (err) {
+    logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with release.`);
+  }
+
   const tx = await escrowContract.releaseFunds(bookingId);
   logger.info(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   const receipt = await tx.wait(1);
@@ -178,6 +188,23 @@ export async function escrowRelease(orderDisplayId) {
  * @returns {Promise<{txHash: string|null, bookingId: string}>}
  */
 export async function escrowRefund(orderDisplayId) {
+  const bookingId = getEscrowBookingId(orderDisplayId);
+
+  if (!escrowContract) {
+    logger.warn('[escrow] Contract not initialised — skipping refundFunds.');
+    return { txHash: null, bookingId };
+  }
+
+  try {
+    const escrow = await escrowContract.escrows(bookingId);
+    if (escrow && (escrow.status === 3 || Number(escrow.status) === 3)) {
+      logger.info(`[escrow] Already refunded for booking ${orderDisplayId}, skipping.`);
+      return { txHash: null, bookingId, alreadyRefunded: true };
+    }
+  } catch (err) {
+    logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with refund.`);
+  }
+
   const submitted = await submitEscrowRefund(orderDisplayId);
   if (!submitted.txHash) return submitted;
 
@@ -190,6 +217,7 @@ export async function escrowRefund(orderDisplayId) {
  * Callers can persist the hash before waiting on the network.
  */
 export async function submitEscrowRefund(orderDisplayId) {
+>>>>>>> cee50d84ee35ba421622671eb4cfdb880e46d016
   const bookingId = getEscrowBookingId(orderDisplayId);
 
   if (!escrowContract) {
@@ -199,6 +227,11 @@ export async function submitEscrowRefund(orderDisplayId) {
 
   const tx = await escrowContract.refundFunds(bookingId);
   logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+<<<<<<< HEAD
+  const receipt = await tx.wait(1);
+  logger.info(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+  return { txHash: receipt.hash, bookingId };
+=======
   return {
     txHash: tx.hash,
     bookingId,
@@ -229,4 +262,5 @@ export async function confirmEscrowRefund(txHash) {
     throw new Error('Escrow refund transaction reverted or was not found.');
   }
   return receipt;
+>>>>>>> cee50d84ee35ba421622671eb4cfdb880e46d016
 }

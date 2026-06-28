@@ -14,7 +14,10 @@ dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
 //    service role key for admin operations only (bypasses RLS)
 // ============================================================================
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+if (!supabaseKey) {
+  logger.error('SUPABASE_SERVICE_ROLE_KEY is not set. Elevated operations will fail.');
+}
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export let supabase = null;
@@ -28,7 +31,7 @@ if (supabaseUrl && supabaseKey) {
         autoRefreshToken: false,
       }
     });
-    logger.info('Supabase client initialized successfully (anon key).');
+    logger.info('Supabase client initialized successfully (service role key).');
   } catch (error) {
     logger.error({ err: error }, 'Failed to initialize Supabase client');
   }
@@ -36,7 +39,7 @@ if (supabaseUrl && supabaseKey) {
   logger.warn('SUPABASE_URL or keys not found in .env. Supabase integration disabled.');
 }
 
-if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseKey) {
+if (supabaseUrl && supabaseServiceKey) {
   try {
     supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {

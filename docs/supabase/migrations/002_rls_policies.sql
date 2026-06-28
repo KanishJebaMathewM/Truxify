@@ -41,6 +41,11 @@ DO $$ BEGIN
   EXECUTE 'ALTER TABLE IF EXISTS notifications     ENABLE ROW LEVEL SECURITY';
   EXECUTE 'ALTER TABLE IF EXISTS documents         ENABLE ROW LEVEL SECURITY';
   EXECUTE 'ALTER TABLE IF EXISTS ratings           ENABLE ROW LEVEL SECURITY';
+  EXECUTE 'ALTER TABLE IF EXISTS wallet_transactions ENABLE ROW LEVEL SECURITY';
+  EXECUTE 'ALTER TABLE IF EXISTS earnings_daily      ENABLE ROW LEVEL SECURITY';
+  EXECUTE 'ALTER TABLE IF EXISTS trip_events         ENABLE ROW LEVEL SECURITY';
+  EXECUTE 'ALTER TABLE IF EXISTS route_map_points    ENABLE ROW LEVEL SECURITY';
+  EXECUTE 'ALTER TABLE IF EXISTS processed_batches   ENABLE ROW LEVEL SECURITY';
 END $$;
 
 
@@ -269,22 +274,66 @@ CREATE POLICY "Drivers view ratings about themselves"
   USING (driver_id = get_profile_id());
 
 -- ────────────────────────────────────────────────────────────────────────────
--- Helper: Trigger function to prevent non-service-role users from modifying
--- pricing columns on load_offers table (Issue #1031)
+-- 12. WALLET TRANSACTIONS
+--     Drivers can read their own wallet transactions only.
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE OR REPLACE FUNCTION check_load_offer_update_allowed()
-RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
-BEGIN
-  IF (OLD.freight_value IS DISTINCT FROM NEW.freight_value
-   OR OLD.net_profit IS DISTINCT FROM NEW.net_profit
-   OR OLD.fuel_cost IS DISTINCT FROM NEW.fuel_cost
-   OR OLD.toll_cost IS DISTINCT FROM NEW.toll_cost
-   OR OLD.extra_distance_km IS DISTINCT FROM NEW.extra_distance_km)
-  AND current_role <> 'service_role' THEN
-    RAISE EXCEPTION 'Pricing columns cannot be modified by non-service-role users';
-  END IF;
-  RETURN NEW;
-END;
-$$;
+DROP POLICY IF EXISTS "Service role full access on wallet_transactions" ON wallet_transactions;
+CREATE POLICY "Service role full access on wallet_transactions"
+  ON wallet_transactions FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Drivers read own wallet_transactions" ON wallet_transactions;
+CREATE POLICY "Drivers read own wallet_transactions"
+  ON wallet_transactions FOR SELECT TO authenticated
+  USING (driver_id = get_profile_id());
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 13. EARNINGS DAILY
+--     Drivers can read their own daily earnings only.
+-- ────────────────────────────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Service role full access on earnings_daily" ON earnings_daily;
+CREATE POLICY "Service role full access on earnings_daily"
+  ON earnings_daily FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Drivers read own earnings_daily" ON earnings_daily;
+CREATE POLICY "Drivers read own earnings_daily"
+  ON earnings_daily FOR SELECT TO authenticated
+  USING (driver_id = get_profile_id());
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 14. TRIP EVENTS
+--     Users can read trip events for orders they are involved in.
+-- ────────────────────────────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Service role full access on trip_events" ON trip_events;
+CREATE POLICY "Service role full access on trip_events"
+  ON trip_events FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Users read own trip_events" ON trip_events;
+CREATE POLICY "Users read own trip_events"
+  ON trip_events FOR SELECT TO authenticated
+  USING (order_display_id IN (
+    SELECT order_display_id FROM orders
+    WHERE driver_id = get_profile_id() OR customer_id = get_profile_id()
+  ));
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 15. ROUTE MAP POINTS
+--     Service role only — route points are accessed via tracking WebSocket.
+-- ────────────────────────────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Service role full access on route_map_points" ON route_map_points;
+CREATE POLICY "Service role full access on route_map_points"
+  ON route_map_points FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 16. PROCESSED BATCHES
+--     Service role only — batch processing metadata.
+-- ────────────────────────────────────────────────────────────────────────────
+DROP POLICY IF EXISTS "Service role full access on processed_batches" ON processed_batches;
+CREATE POLICY "Service role full access on processed_batches"
+  ON processed_batches FOR ALL TO service_role USING (true) WITH CHECK (true);
+
 
 COMMIT;

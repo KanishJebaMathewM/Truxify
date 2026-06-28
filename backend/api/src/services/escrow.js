@@ -217,7 +217,6 @@ export async function escrowRefund(orderDisplayId) {
  * Callers can persist the hash before waiting on the network.
  */
 export async function submitEscrowRefund(orderDisplayId) {
->>>>>>> cee50d84ee35ba421622671eb4cfdb880e46d016
   const bookingId = getEscrowBookingId(orderDisplayId);
 
   if (!escrowContract) {
@@ -227,11 +226,6 @@ export async function submitEscrowRefund(orderDisplayId) {
 
   const tx = await escrowContract.refundFunds(bookingId);
   logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
-<<<<<<< HEAD
-  const receipt = await tx.wait(1);
-  logger.info(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
-  return { txHash: receipt.hash, bookingId };
-=======
   return {
     txHash: tx.hash,
     bookingId,
@@ -262,5 +256,4 @@ export async function confirmEscrowRefund(txHash) {
     throw new Error('Escrow refund transaction reverted or was not found.');
   }
   return receipt;
->>>>>>> cee50d84ee35ba421622671eb4cfdb880e46d016
 }

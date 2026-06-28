@@ -477,6 +477,8 @@ describe('Profile Routes', () => {
       expect(res.headers['content-type']).toContain('text/csv');
       expect(res.text).toContain('"order-1"');
       expect(res.text).toContain('"10000"');
+    });
+
     it('sorts statement trips by net earnings when sort_by=net_earnings is passed', async () => {
       m.store.orders.push(
         {

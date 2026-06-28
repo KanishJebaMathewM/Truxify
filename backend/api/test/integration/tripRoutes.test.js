@@ -451,6 +451,8 @@ describe('GET /api/trips/:id/events', () => {
     expect(res.status).toBe(200);
     expect(res.body.events).toHaveLength(2);
     expect(res.body.events[0].event_id).toBe('ev-2');
+  });
+
   it('filters events within a geographic bounding box when coordinates are provided', async () => {
     m.store.trip_events.push(
       { event_id: 'ev-in', user_id: 'driver-1', trip_id: 'trip-bbox', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.5, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },

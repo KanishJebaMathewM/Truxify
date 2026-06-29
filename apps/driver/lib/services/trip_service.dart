@@ -41,8 +41,6 @@ class TripService {
     return <String, String>{
       'Content-Type': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',
-      'x-user-id': userId,
-      'x-user-role': 'driver',
     };
   }
 

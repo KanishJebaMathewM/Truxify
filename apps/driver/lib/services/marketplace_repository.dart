@@ -36,8 +36,6 @@ class MarketplaceRepository {
     return <String, String>{
       'Content-Type': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',
-      'x-user-id': userId,
-      'x-user-role': 'driver',
     };
   }
 
@@ -77,8 +75,6 @@ class MarketplaceRepository {
       headers: <String, String>{
         'Content-Type': 'application/json',
         if (accessToken != null) 'Authorization': 'Bearer $accessToken',
-        'x-user-id': driverId,
-        'x-user-role': 'driver',
       },
       body: jsonEncode(<String, dynamic>{
         'bid_amount': (amount * 100).round(),

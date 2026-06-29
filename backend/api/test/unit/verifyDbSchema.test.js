@@ -35,10 +35,11 @@ erDiagram
         '/profiles': {},
         '/rpc/accept_bid_tx': {},
         '/rpc/withdraw_funds_tx': {},
+        '/rpc/submit_rating_tx': {},
       },
     });
 
-    expect(functions).toEqual(new Set(['accept_bid_tx', 'withdraw_funds_tx']));
+    expect(functions).toEqual(new Set(['accept_bid_tx', 'withdraw_funds_tx', 'submit_rating_tx']));
   });
 
   it('summarizes missing tables and functions', () => {

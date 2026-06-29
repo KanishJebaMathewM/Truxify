@@ -1,5 +1,6 @@
 require("@nomicfoundation/hardhat-ethers");
 require("@nomicfoundation/hardhat-verify");
+require("@nomicfoundation/hardhat-toolbox");
 
 const POLYGON_RPC_URL = process.env.POLYGON_RPC_URL || "";
 const DEPLOYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || "";
@@ -34,6 +35,39 @@ module.exports = {
     apiKey: {
       amoy: POLYGONSCAN_API_KEY,
       polygon: POLYGONSCAN_API_KEY,
+    },
+  },
+};
+
+/** @type import('hardhat/config').HardhatUserConfig */
+module.exports = {
+  solidity: {
+    version: "0.8.20",
+    settings: {
+      optimizer: {
+        enabled: true,
+        runs: 200,
+      },
+    },
+  },
+  networks: {
+    // Local Hardhat network for testing
+    hardhat: {},
+
+    // Polygon Mumbai testnet (for staging)
+    polygonMumbai: {
+      url: process.env.POLYGON_MUMBAI_RPC_URL || "",
+      accounts: process.env.DEPLOYER_PRIVATE_KEY
+        ? [process.env.DEPLOYER_PRIVATE_KEY]
+        : [],
+    },
+
+    // Polygon Mainnet (production)
+    polygon: {
+      url: process.env.POLYGON_MAINNET_RPC_URL || "",
+      accounts: process.env.DEPLOYER_PRIVATE_KEY
+        ? [process.env.DEPLOYER_PRIVATE_KEY]
+        : [],
     },
   },
 };

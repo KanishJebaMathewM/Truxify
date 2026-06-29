@@ -28,7 +28,6 @@ void main() {
     when(() => supabaseClient.auth).thenReturn(authClient);
     when(() => authClient.currentUser).thenReturn(user);
     when(() => user.id).thenReturn('user_123');
-    when(() => user.userMetadata).thenReturn({'full_name': 'John Doe'});
 
     orderService = OrderService(apiClient: apiClient);
   });
@@ -38,7 +37,7 @@ void main() {
   });
 
   test('createOrder delegates post to ApiClient', () async {
-    when(() => apiClient.post(any(), body: any(named: 'body'), headers: any(named: 'headers')))
+    when(() => apiClient.post(any(), body: any(named: 'body')))
         .thenAnswer((_) async => {'order': {'order_display_id': 'ORD-123'}});
 
     final orderId = await orderService.createOrder(
@@ -55,28 +54,23 @@ void main() {
 
     expect(orderId, equals('ORD-123'));
 
-    final captured = verify(
+    verify(
       () => apiClient.post(
         '/api/orders',
-        headers: captureAny(named: 'headers'),
         body: any(named: 'body'),
       ),
-    ).captured;
-    final headers = captured.first as Map<String, String>;
-    expect(headers['x-user-id'], equals('user_123'));
-    expect(headers['x-user-role'], equals('customer'));
-    expect(headers['x-user-name'], equals('John Doe'));
+    ).called(1);
   });
 
   test('fetchOrderById handles success and 404', () async {
-    when(() => apiClient.get('/api/orders/ORD-123', headers: any(named: 'headers')))
+    when(() => apiClient.get('/api/orders/ORD-123'))
         .thenAnswer((_) async => {'order': {'id': 'ORD-123', 'status': 'pending'}});
 
     final order = await orderService.fetchOrderById('ORD-123');
     expect(order?['id'], equals('ORD-123'));
 
     // 404 error case
-    when(() => apiClient.get('/api/orders/ORD-404', headers: any(named: 'headers')))
+    when(() => apiClient.get('/api/orders/ORD-404'))
         .thenThrow(const ApiException(404, 'Not Found'));
     final order404 = await orderService.fetchOrderById('ORD-404');
     expect(order404, isNull);
@@ -86,7 +80,6 @@ void main() {
     test('returns correct min and max when prices are integers', () async {
       when(() => apiClient.get(
             any(that: startsWith('/api/trucks/search')),
-            headers: any(named: 'headers'),
           )).thenAnswer((_) async => [
             {'price': 5000},
             {'price': 8000},
@@ -109,7 +102,6 @@ void main() {
     test('returns correct rounded min and max when prices are doubles', () async {
       when(() => apiClient.get(
             any(that: startsWith('/api/trucks/search')),
-            headers: any(named: 'headers'),
           )).thenAnswer((_) async => [
             {'price': 5000.7},
             {'price': 8000.2},
@@ -132,7 +124,6 @@ void main() {
     test('returns null when search results are empty', () async {
       when(() => apiClient.get(
             any(that: startsWith('/api/trucks/search')),
-            headers: any(named: 'headers'),
           )).thenAnswer((_) async => []);
 
       final result = await orderService.estimatePriceRange(
@@ -149,7 +140,6 @@ void main() {
     test('returns null when api client throws exception', () async {
       when(() => apiClient.get(
             any(that: startsWith('/api/trucks/search')),
-            headers: any(named: 'headers'),
           )).thenThrow(const ApiException(500, 'Server Error'));
 
       final result = await orderService.estimatePriceRange(

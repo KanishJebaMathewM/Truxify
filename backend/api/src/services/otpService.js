@@ -17,8 +17,12 @@ export async function generateAndStoreOtp(phone) {
 
 export async function verifyOtp(phone, otp) {
   if (!redisClient) {
+    if (process.env.NODE_ENV === 'production') {
+      logger.error('[otp] Redis unavailable in production — rejecting OTP verification.');
+      return false;
+    }
     logger.warn('[otp] Redis not available, cannot verify OTP.');
-    return Boolean(process.env.DRIVER_LOGIN_OTP) && otp === process.env.DRIVER_LOGIN_OTP;
+    return false;
   }
   const stored = await redisClient.get(`otp:${phone}`);
   if (!stored || stored !== otp) return false;

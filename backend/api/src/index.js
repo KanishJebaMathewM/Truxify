@@ -8,6 +8,8 @@ import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimi
 import tripRoutes from './routes/tripRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
 
+
+
 import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js';
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js';
 
@@ -211,6 +213,10 @@ app.use((err, req, res, next) => {
 // ============================================================================
 await waitForMongoDb();
 initWebSocketServer(server);
+
+await waitForMongoDb();
+initWebSocketServer(server); // Keep existing
+const io = attachLocationServer(server); // Add new one
 
 // ============================================================================
 // START SERVER

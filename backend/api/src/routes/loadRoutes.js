@@ -4,6 +4,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
+import { escapeLike } from '../lib/escapeLike.js';
 
 const router = express.Router();
 
@@ -48,14 +49,20 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
 
     // Handle vehicle_type filtering in JS to avoid database column errors.
     // Default mapped vehicle_type is 'Truck'. If they filter by something else, return empty.
-    if (req.query.vehicle_type && req.query.vehicle_type.toLowerCase() !== 'truck') {
-      return res.json({
-        page,
-        limit,
-        total: 0,
-        totalPages: 0,
-        loads: []
-      });
+    if (req.query.vehicle_type) {
+      if (typeof req.query.vehicle_type !== 'string') {
+        return res.status(400).json({ error: 'vehicle_type must be a single string' });
+      }
+
+      if (req.query.vehicle_type.toLowerCase() !== 'truck') {
+        return res.json({
+          page,
+          limit,
+          total: 0,
+          totalPages: 0,
+          loads: []
+        });
+      }
     }
 
     const from = (page - 1) * limit;
@@ -65,7 +72,6 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
       .from('load_offers')
       .select('*', { count: 'exact' });
 
-    // Status filter - map 'open'/'available' to the DB's status 'available'
     let statusFilter = 'available';
     if (req.query.status) {
       if (typeof req.query.status !== 'string') {
@@ -85,12 +91,23 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
     }
     query = query.eq('status', statusFilter);
 
+    // Escape LIKE special chars in user input to prevent injection
+    const escapeLike = (s) => String(s).replace(/[%_\\]/g, '\\$&');
+
     // Filters
     if (req.query.pickup_location) {
-      query = query.ilike('pickup_address', `%${req.query.pickup_location}%`);
+      const pickupLocation = Array.isArray(req.query.pickup_location) ? req.query.pickup_location[0] : req.query.pickup_location;
+      if (pickupLocation.length > 200) {
+        return res.status(400).json({ error: 'pickup_location too long (max 200 chars)' });
+      }
+      query = query.ilike('pickup_address', `%${escapeLike(pickupLocation)}%`);
     }
     if (req.query.destination) {
-      query = query.ilike('drop_address', `%${req.query.destination}%`);
+      const destination = Array.isArray(req.query.destination) ? req.query.destination[0] : req.query.destination;
+      if (destination.length > 200) {
+        return res.status(400).json({ error: 'destination too long (max 200 chars)' });
+      }
+      query = query.ilike('drop_address', `%${escapeLike(destination)}%`);
     }
     if (req.query.goods_type) {
       query = query.eq('goods_type', req.query.goods_type);

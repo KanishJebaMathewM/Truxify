@@ -248,8 +248,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         headers: <String, String>{
                           'Content-Type': 'application/json',
                           if (token != null) 'Authorization': 'Bearer $token',
-                          'x-user-id': userId,
-                          'x-user-role': 'customer',
                         },
                         body: jsonEncode(<String, String>{
                           'wallet_address': address,

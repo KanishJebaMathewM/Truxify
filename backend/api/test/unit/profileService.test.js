@@ -62,6 +62,8 @@ vi.mock('../../src/config/db.js', () => ({
   },
 }));
 
+const useMockSupabase = () => { supabaseRef.current = defaultMockSupabase; };
+
 import { getProfile, getCustomerStats, getDriverDetails } from '../../src/services/profileService.js';
 
 describe('getProfile', () => {

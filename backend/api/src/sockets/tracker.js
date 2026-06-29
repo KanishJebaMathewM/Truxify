@@ -17,7 +17,6 @@ const trackingSubscriptions = new Map();
 
 // Cached Supabase Realtime channels keyed by orderUUID to avoid creating a new
 // channel per location ping. Reused across pings and cleaned up on disconnect.
-const MAX_LOCATION_CHANNELS = 1000;
 const locationChannels = new Map();
 
 // =====================================================================
@@ -43,13 +42,11 @@ let telemetryFlushTimeout = null;
 let wsServer = null;
 let wsHeartbeatInterval = null;
 let telemetryMonitorInterval = null;
-let driverOnlineExpiryInterval = null;
 
 const WS_UPGRADE_RATE_LIMIT = 5;
 const WS_UPGRADE_RATE_WINDOW_SECONDS = 60;
 const MAX_MSG_PER_SECOND = 10;
-const MAX_WS_PAYLOAD_BYTES = 64 * 1024; // 64KB for telemetry payloads
-const messageRateTracker = new Map();
+const messageRateTracker = new WeakMap();
 
 function getClientIp(request) {
   const forwardedFor = request.headers?.['x-forwarded-for'];
@@ -101,10 +98,7 @@ export function rejectWebSocketUpgrade(socket) {
  * Initialize WebSockets Server and bind event handlers
  */
 export function initWebSocketServer(server) {
-  const wss = new WebSocketServer({
-    noServer: true,
-    maxPayload: MAX_WS_PAYLOAD_BYTES,
-  });
+  const wss = new WebSocketServer({ noServer: true });
   wsServer = wss;
 
   server.on('upgrade', async (request, socket, head) => {
@@ -141,7 +135,7 @@ export function initWebSocketServer(server) {
         id: reqUrl.searchParams.get('user_id') || ws.driverId,
         role: reqUrl.searchParams.get('user_role') || 'driver',
       };
-      logger.info(`WS Auth bypassed for driver: ${ws.driverId}`);
+      logger.info(`🔓 WS Auth bypassed for driver: ${ws.driverId}`);
     } else {
       if (!token) {
         ws.close(4001, 'Unauthorized: No token provided');
@@ -219,7 +213,7 @@ export function initWebSocketServer(server) {
         };
         ws.driverId = profile.id;
         await restoreSubscriptions(ws);
-        logger.info(`WS Authenticated user: ${ws.user.id}`);
+        logger.info(`✅ WS Authenticated user: ${ws.user.id}`);
       } catch (err) {
         logger.error({ err }, 'WS Auth failed');
         ws.close(4001, 'Unauthorized: Invalid token');
@@ -227,7 +221,7 @@ export function initWebSocketServer(server) {
       }
     }
 
-    logger.info('New WebSocket connection established on /ws/tracking');
+    logger.info('🔌 New WebSocket connection established on /ws/tracking');
     ws.isAlive = true;
 
     ws.on('pong', () => {
@@ -239,20 +233,24 @@ export function initWebSocketServer(server) {
     });
 
     ws.on('close', () => {
-      logger.info('WebSocket connection closed.');
-      removeClientFromAllSubscriptions(ws).catch(err => logger.error('Subscription cleanup error on close:', err.message));
+      logger.info('🔌 WebSocket connection closed.');
+      void (async () => {
+        await removeClientFromAllSubscriptions(ws);
+      })();
     });
 
     ws.on('error', (err) => {
-      logger.error('WebSocket client error:', err.message);
-      removeClientFromAllSubscriptions(ws).catch(err => logger.error('Subscription cleanup error on error:', err.message));
+      logger.error('🔌 WebSocket client error:', err.message);
+      void (async () => {
+        await removeClientFromAllSubscriptions(ws);
+      })();
     });
   });
 
   wsHeartbeatInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        logger.info('Terminating unresponsive WebSocket client.');
+        logger.info('🔌 Terminating unresponsive WebSocket client.');
         return ws.terminate();
       }
       ws.isAlive = false;
@@ -271,78 +269,30 @@ export function initWebSocketServer(server) {
     initTelemetryScheduler();
   }
 
-  initDriverOnlineExpiry();
-
-  logger.info(' WebSocket tracking router initialized.');
+  logger.info('🚀 WebSocket tracking router initialized.');
 }
 
-async function isMessageRateLimited(ws) {
-  const key = ws.user?.id
-    ? `ws:msg:${ws.user.id}`
-    : `ws:msg:ip:${ws.driverId || 'unknown'}`;
-
-  if (!redisClient) {
-    const now = Date.now();
-    let state = messageRateTracker.get(ws);
-    if (!state || now - state.windowStart >= 1000) {
-      state = { count: 0, windowStart: now };
-      messageRateTracker.set(ws, state);
-    }
-    state.count += 1;
-    return state.count > MAX_MSG_PER_SECOND;
+function isMessageRateLimited(ws) {
+  const now = Date.now();
+  let state = messageRateTracker.get(ws);
+  if (!state || now - state.windowStart >= 1000) {
+    state = { count: 0, windowStart: now };
+    messageRateTracker.set(ws, state);
   }
-
-  try {
-    const count = await redisClient.incr(key);
-    if (count === 1) {
-      await redisClient.expire(key, 1);
-    }
-    return count > MAX_MSG_PER_SECOND;
-  } catch (err) {
-    logger.error('[ws] Rate limit check error:', err.message);
-    return false;
-  }
-}
-
-const DRIVER_ONLINE_TIMEOUT_MS = parseInt(process.env.DRIVER_ONLINE_TIMEOUT_MS, 10) || 5 * 60 * 1000; // 5 minutes
-
-async function expireStaleDriverOnlineStatus() {
-  if (!supabase) return;
-  try {
-    const cutoff = new Date(Date.now() - DRIVER_ONLINE_TIMEOUT_MS).toISOString();
-    const { error } = await supabase
-      .from('driver_details')
-      .update({ is_online: false })
-      .eq('is_online', true)
-      .lt('last_seen_at', cutoff);
-    if (error) {
-      logger.error('[tracker] Failed to expire stale driver online status:', error.message);
-    }
-  } catch (err) {
-    logger.error('[tracker] Driver online expiry error:', err.message);
-  }
-}
-
-function initDriverOnlineExpiry() {
-  const intervalMs = Math.max(DRIVER_ONLINE_TIMEOUT_MS, 60000);
-  driverOnlineExpiryInterval = setInterval(expireStaleDriverOnlineStatus, intervalMs);
+  state.count++;
+  return state.count > MAX_MSG_PER_SECOND;
 }
 
 export async function handleTrackingMessage(ws, message) {
+  if (isMessageRateLimited(ws)) {
+    return;
+  }
+
   const messageText = message.toString();
 
   if (messageText === 'ping') {
     ws.isAlive = true;
     return ws.send('pong');
-  }
-
-  if (await isMessageRateLimited(ws)) {
-    return;
-  }
-
-  if (Buffer.byteLength(messageText, 'utf8') > MAX_WS_PAYLOAD_BYTES) {
-    ws.close(1009, 'Message too large');
-    return;
   }
 
   try {
@@ -384,25 +334,8 @@ export async function handleLocationPing(ws, data) {
 
   const { driver_id: payloadDriverId, speed, bearing, device_timestamp } = data;
 
-  // CRITICAL SECURITY: Validate driver ID matches authenticated user
   if (payloadDriverId && payloadDriverId !== driver_id) {
-    const clientIp = ws.upgradeReq?.socket?.remoteAddress || 'unknown';
-    logger.error({
-      event: 'SPOOFED_LOCATION_ATTEMPT',
-      authenticatedDriver: driver_id,
-      attemptedDriver: payloadDriverId,
-      ip: clientIp,
-      timestamp: new Date().toISOString(),
-    }, 'Location spoofing attempt detected: Driver ID mismatch');
-
-    ws.close(4010, 'Spoofed location detected: Driver ID mismatch');
-    return;
-  }
-
-  // Also validate if payload provides driver_id that it must not be different
-  if (!payloadDriverId) {
-    // If not provided, add the authenticated driver_id to data
-    data.driver_id = driver_id;
+    return ws.send(JSON.stringify({ error: 'Unauthorized: driver_id does not match authenticated WebSocket identity.' }));
   }
 
   const lat = data.lat !== undefined ? data.lat : data.latitude;
@@ -550,20 +483,6 @@ export async function handleLocationPing(ws, data) {
     }
   }
 
-  // Update last_seen_at for driver online status auto-expiry
-  if (supabase) {
-    try {
-      const driverDetailsQuery = supabase.from('driver_details');
-      if (typeof driverDetailsQuery.update === 'function') {
-        await driverDetailsQuery
-          .update({ last_seen_at: new Date(serverNow).toISOString() })
-          .eq('user_id', driver_id);
-      }
-    } catch (err) {
-      logger.error('[tracker] Failed to update last_seen_at:', err.message);
-    }
-  }
-
   const broadcastPayload = JSON.stringify({
     event: 'location_update',
     data: {
@@ -598,30 +517,24 @@ export async function handleLocationPing(ws, data) {
   // Publish to Supabase Realtime channel driver-location:{orderId}
   // Reuse cached channel to avoid creating a new channel per ping.
   if (supabase && orderUUID) {
-    const existing = locationChannels.get(orderUUID);
-    if (existing) {
-      existing.lastUsed = Date.now();
-    } else if (trackingSubscriptions.has(orderDisplayId) || locationChannels.size < MAX_LOCATION_CHANNELS) {
+    if (!locationChannels.has(orderUUID)) {
       const channel = supabase.channel(`driver-location:${orderUUID}`);
-      channel.subscribe();
-      locationChannels.set(orderUUID, { channel, lastUsed: Date.now() });
+      locationChannels.set(orderUUID, channel);
     }
-    const entry = locationChannels.get(orderUUID);
-    if (entry) {
-      entry.channel.send({
-        type: 'broadcast',
-        event: 'location',
-        payload: {
-          orderId: orderUUID,
-          driverId: driver_id,
-          lat,
-          lng,
-          timestamp: new Date(serverNow).toISOString()
-        }
-      }).catch((err) => {
-        logger.error('Failed to broadcast realtime location to Supabase:', err.message);
-      });
-    }
+    const channel = locationChannels.get(orderUUID);
+    channel.send({
+      type: 'broadcast',
+      event: 'location',
+      payload: {
+        orderId: orderUUID,
+        driverId: driver_id,
+        lat,
+        lng,
+        timestamp: new Date(serverNow).toISOString()
+      }
+    }).catch((err) => {
+      logger.error('Failed to broadcast realtime location to Supabase:', err.message);
+    });
   }
 }
 
@@ -729,31 +642,6 @@ function scheduleNextFlush() {
   }, Math.max(BUFFER_FLUSH_INTERVAL_MS, flushBackoffMs));
 }
 
-const CHANNEL_STALE_MS = 2 * 60 * 1000;
-const CHANNEL_CLEANUP_INTERVAL_MS = 60 * 1000;
-let channelCleanupInterval = null;
-
-function cleanupStaleChannels() {
-  const now = Date.now();
-  for (const [orderUUID, entry] of locationChannels) {
-    if (now - entry.lastUsed > CHANNEL_STALE_MS) {
-      entry.channel.unsubscribe();
-      supabase.removeChannel(entry.channel);
-      locationChannels.delete(orderUUID);
-      logger.info(`Cleaned up stale Supabase channel for order "${orderUUID}"`);
-    }
-  }
-  if (locationChannels.size > 0) {
-    logger.info(`[tracker] Active Supabase channels: ${locationChannels.size}`);
-  }
-}
-
-function startChannelCleanup() {
-  if (channelCleanupInterval) return;
-  channelCleanupInterval = setInterval(cleanupStaleChannels, CHANNEL_CLEANUP_INTERVAL_MS);
-  logger.info('[tracker] Supabase channel cleanup interval started (1 min)');
-}
-
 function loadRecoveryFile() {
   try {
     if (fs.existsSync(RECOVERY_FILE_PATH)) {
@@ -777,7 +665,6 @@ function initTelemetryScheduler() {
   loadRecoveryFile();
   isSchedulerActive = true;
   scheduleNextFlush();
-  startChannelCleanup();
   
   telemetryMonitorInterval = setInterval(() => {
     monitorBufferSize();
@@ -796,19 +683,9 @@ export async function closeWebSocketServer() {
     telemetryMonitorInterval = null;
   }
 
-  if (driverOnlineExpiryInterval) {
-    clearInterval(driverOnlineExpiryInterval);
-    driverOnlineExpiryInterval = null;
-  }
-
   if (wsHeartbeatInterval) {
     clearInterval(wsHeartbeatInterval);
     wsHeartbeatInterval = null;
-  }
-
-  if (channelCleanupInterval) {
-    clearInterval(channelCleanupInterval);
-    channelCleanupInterval = null;
   }
 
   // Wait for MongoDB to be available before final flush
@@ -908,7 +785,7 @@ export async function handleSubscribe(ws, data) {
     }
   }
 
-  logger.info(`Client subscribed to telemetry updates for: "${targetId}"`);
+  logger.info(`🔌 Client subscribed to telemetry updates for: "${targetId}"`);
   ws.send(JSON.stringify({ status: 'subscribed', target: targetId, reconnect_supported: true }));
 }
 
@@ -968,7 +845,7 @@ async function handleUnsubscribe(ws, data) {
       }
     }
 
-    logger.info(`Client unsubscribed from updates for: "${targetId}"`);
+    logger.info(`🔌 Client unsubscribed from updates for: "${targetId}"`);
     ws.send(JSON.stringify({ status: 'unsubscribed', target: targetId }));
   }
 }
@@ -977,20 +854,20 @@ async function removeClientFromAllSubscriptions(ws) {
   trackingSubscriptions.forEach((clients, key) => {
     if (clients.has(ws)) {
       clients.delete(ws);
-      logger.info(`Removed socket subscription from "${key}" due to disconnect.`);
+      logger.info(`🔌 Removed socket subscription from "${key}" due to disconnect.`);
     }
     if (clients.size === 0) {
       trackingSubscriptions.delete(key);
       // Clean up the cached Supabase Realtime channel for this orderUUID
       // so channels do not leak after the last subscriber disconnects.
       if (locationChannels.has(key)) {
-        const { channel } = locationChannels.get(key);
-        channel.unsubscribe();
+        const channel = locationChannels.get(key);
+        // Guard against supabase being null (e.g. not configured in dev/test environments)
         if (supabase) {
           supabase.removeChannel(channel);
         }
         locationChannels.delete(key);
-        logger.info(`Removed Supabase Realtime channel for order "${key}" on last subscriber disconnect.`);
+        logger.info(`🔌 Removed Supabase Realtime channel for order "${key}" on last subscriber disconnect.`);
       }
     }
   });

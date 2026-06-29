@@ -156,6 +156,13 @@ export const registerDeviceSchema = z.object({
   }).default('android'),
 }).strict();
 
+export const updateFcmTokenSchema = z.object({
+  fcmToken: z.string()
+    .min(10, { message: 'fcmToken must be at least 10 characters' })
+    .max(4096, { message: 'fcmToken is too long' })
+    .nullable(),
+}).strict();
+
 export const createTicketSchema = z.object({
   subject: z.string().transform((v) => v.trim()).pipe(
     z.string().min(1, 'Subject is required').max(200, 'Subject must be 200 characters or fewer')

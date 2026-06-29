@@ -53,15 +53,18 @@ describe('tracker WebSocket telemetry authorization', () => {
     dbMock.store.orders = [];
     dbMock.calls = [];
     __testing.resetTrackingSubscriptions();
+    vi.clearAllMocks();
   });
 
   it('rejects a driver_id that does not match the authenticated socket', async () => {
     const sentMessages = [];
     const ws = {
       driverId: 'authenticated-driver',
+      close: vi.fn(),
       send(message) {
         sentMessages.push(JSON.parse(message));
       },
+      close: vi.fn(),
     };
 
     await handleLocationPing(ws, {
@@ -73,11 +76,7 @@ describe('tracker WebSocket telemetry authorization', () => {
       bearing: 90,
     });
 
-    expect(sentMessages).toEqual([
-      {
-        error: 'Unauthorized: driver_id does not match authenticated WebSocket identity.',
-      },
-    ]);
+    expect(ws.close).toHaveBeenCalledWith(4010, 'Spoofed location detected: Driver ID mismatch');
   });
 
   it('rejects an order subscription when the authenticated user is not assigned to the order', async () => {
@@ -146,6 +145,10 @@ describe('tracker WebSocket telemetry authorization', () => {
 });
 
 describe('tracker WebSocket heartbeat messages', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('responds to raw client ping messages without attempting JSON parsing', async () => {
     const sentMessages = [];
     const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});

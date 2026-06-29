@@ -19,12 +19,14 @@ contract Escrow {
     address public owner;
     mapping(address => bool) public authorizedRelayers;
     mapping(bytes32 => BookingEscrow) public escrows;
+    mapping(address => uint256) public pendingWithdrawals;
     bool private locked;
 
     event RelayerUpdated(address indexed relayer, bool authorized);
     event Deposited(bytes32 indexed bookingId, address indexed customer, address indexed driver, uint256 amount);
     event Released(bytes32 indexed bookingId, address indexed driver, uint256 amount);
     event Refunded(bytes32 indexed bookingId, address indexed customer, uint256 amount);
+    event Withdrawn(address indexed recipient, uint256 amount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner");
@@ -83,8 +85,7 @@ contract Escrow {
         uint256 amount = booking.amount;
         booking.amount = 0;
 
-        (bool sent, ) = booking.driver.call{value: amount}("");
-        require(sent, "Driver payout failed");
+        pendingWithdrawals[booking.driver] += amount;
 
         emit Released(bookingId, booking.driver, amount);
     }
@@ -97,9 +98,20 @@ contract Escrow {
         uint256 amount = booking.amount;
         booking.amount = 0;
 
-        (bool sent, ) = booking.customer.call{value: amount}("");
-        require(sent, "Customer refund failed");
+        pendingWithdrawals[booking.customer] += amount;
 
         emit Refunded(bookingId, booking.customer, amount);
+    }
+
+    function withdraw() external nonReentrant {
+        uint256 amount = pendingWithdrawals[msg.sender];
+        require(amount > 0, "Nothing to withdraw");
+
+        pendingWithdrawals[msg.sender] = 0;
+
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        require(sent, "Withdrawal failed");
+
+        emit Withdrawn(msg.sender, amount);
     }
 }

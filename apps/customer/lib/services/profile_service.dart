@@ -32,10 +32,6 @@ class ProfileService {
       try {
         await _apiClient.post(
           '/api/auth/logout',
-          headers: <String, String>{
-            'x-user-id': userId,
-            'x-user-role': 'customer',
-          },
         );
       } catch (e) {
         // ignore: avoid_print

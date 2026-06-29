@@ -24,7 +24,6 @@ import {
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
 import { predictDemand, predictPrice } from '../services/ml.js';
-import { changeDropSchema, cancelOrderSchema } from '../validation/requestSchemas.js';
 import {
   buildDepositTx,
   recordDepositTx,
@@ -42,6 +41,7 @@ const router = express.Router();
 const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
 const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
 const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
+const IN_MEMORY_OTP_MAP_MAX_SIZE = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || '10000', 10);
 
 const inMemoryOtpFailedAttempts = new Map();
 
@@ -87,6 +87,11 @@ async function recordOtpFailure(orderId) {
     }
   }
   
+  if (inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
+    const oldestKey = inMemoryOtpFailedAttempts.keys().next().value;
+    inMemoryOtpFailedAttempts.delete(oldestKey);
+  }
+
   let record = inMemoryOtpFailedAttempts.get(orderId);
   if (!record) {
     record = { count: 0, lockedUntil: null };
@@ -137,15 +142,41 @@ const milestoneLimiter = rateLimit({
 const predictDemandLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 10,
+  keyGenerator: (req) => req.user?.id || 'unauthenticated',
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many demand prediction requests. Please try again later.' },
+});
+
+// Rate limiter for telemetry endpoints
+const telemetryLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 30, // 30 requests per minute should be enough for telemetry
   keyGenerator: (req) => {
     if (!req.user || !req.user.id) {
-      throw new Error('User is not authenticated');
+      return req.ip ?? 'unknown-ip';
     }
     return req.user.id;
   },
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many demand prediction requests. Please try again later.' },
+  message: { error: 'Too many telemetry requests. Please slow down.' },
+});
+
+const resendOtpLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many OTP resend requests. Please try again later.' },
+});
+
+const changeDropLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many drop change requests. Please try again later.' },
 });
 
 /**
@@ -392,11 +423,17 @@ router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) 
 // ============================================================================
 router.get('/history', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
   try {
-    const { data: history, error } = await supabase
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    const { data: history, error, count } = await supabase
       .from('orders')
-      .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, created_at')
+      .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, created_at', { count: 'exact' })
       .eq('customer_id', req.user.id)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(from, to);
 
     if (error) return res.status(500).json({ error: 'Failed to fetch history.', details: error.message });
 
@@ -407,7 +444,13 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
       (history || []).forEach(o => { o.driver_name = driverMap[o.driver_id] || 'Driver Assigned'; });
     }
 
-    res.json(history);
+    res.json({
+      page,
+      limit,
+      total: count || 0,
+      totalPages: Math.ceil((count || 0) / limit),
+      history: history || []
+    });
   } catch (err) {
     logger.error("[orderRoutes] Failed to fetch order history:", err.message);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -599,11 +642,10 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
     const polygonAddress = driverDetails?.polygon_wallet_address ?? null;
 
     if (polygonAddress) {
-      try {
-        await awardReputationPoints(polygonAddress, stars);
-      } catch (repErr) {
+      // Fire-and-forget: blockchain confirmation must never block the HTTP response.
+      void awardReputationPoints(polygonAddress, stars).catch((repErr) => {
         logger.error('[reputation] On-chain reputation update failed:', repErr.message);
-      }
+      });
     } else {
       logger.warn(
         `[reputation] Driver ${order.driver_id} has no polygon_wallet_address — skipping on-chain update.`
@@ -983,7 +1025,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
     }
 
     // Call complete_trip_tx RPC to atomically update trip, driver stats, wallet, earnings, order status, and timeline.
-    const { error: rpcErr } = await supabase.rpc('complete_trip_tx', {
+    const { data: tripData, error: rpcErr } = await supabase.rpc('complete_trip_tx', {
       p_order_id: orderId,
       p_otp_id: otpRecord.id,
     });
@@ -1060,15 +1102,17 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
           });
         }
 
-        if (order.driver_id) {
+        const driverId = tripData?.driver_id || order.driver_id;
+        const displayId = tripData?.order_display_id || order.order_display_id;
+        if (driverId) {
           const { error: walletErr } = await supabase
             .from('wallet_transactions')
             .update({
               tx_hash: txHash,
-              description: `Escrow payout for ${order.order_display_id}`,
+              description: `Escrow payout for ${displayId}`,
             })
-            .eq('driver_id', order.driver_id)
-            .eq('order_display_id', order.order_display_id)
+            .eq('driver_id', driverId)
+            .eq('order_display_id', displayId)
             .eq('txn_type', 'credit');
 
           if (walletErr) {
@@ -1116,7 +1160,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
 // ============================================================================
 // 14. RESEND DELIVERY OTP (DRIVER)
 // ============================================================================
-router.post('/:id/resend-otp', authenticate, userLimiter, requireRole(['driver']), validateParams(paramIdSchema), async (req, res) => {
+router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requireRole(['driver']), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
@@ -1152,12 +1196,17 @@ router.post('/:id/resend-otp', authenticate, userLimiter, requireRole(['driver']
 // ============================================================================
 // 15. CHANGE DROP (CUSTOMER)
 // ============================================================================
-router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer']), validateParams(uuidParamSchema), validateBody(changeDropSchema), async (req, res) => {
+router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
   const orderId = req.params.id;
   const { drop_address, drop_lat, drop_lng } = req.body;
 
   try {
-    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    let { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    if (!order && !orderErr) {
+      const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
+      order = result.data;
+      orderErr = result.error;
+    }
     if (orderErr) return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
     if (!order) return res.status(404).json({ error: 'Order not found.' });
     if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
@@ -1251,12 +1300,17 @@ router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer
 // ============================================================================
 // 16. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
 // ============================================================================
-router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']), validateParams(uuidParamSchema), validateBody(cancelOrderSchema), async (req, res) => {
+router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
   const orderId = req.params.id;
   const { reason = null } = req.body || {};
 
   try {
-    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    let { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    if (!order && !orderErr) {
+      const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
+      order = result.data;
+      orderErr = result.error;
+    }
     if (orderErr) return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
     if (!order) return res.status(404).json({ error: 'Order not found.' });
     if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
@@ -1380,6 +1434,8 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           .eq('order_display_id', order.order_display_id)
           .eq('milestone', 'Order Placed');
 
+        await expireDeliveryOtps(order.order_display_id);
+
         return res.json({
           message: 'Order cancelled and escrow refunded successfully.',
           cancellation_fee: updatedOrder?.cancellation_fee ?? 0,
@@ -1434,6 +1490,8 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
       .eq('order_display_id', order.order_display_id)
       .eq('milestone', 'Order Placed');
 
+    await expireDeliveryOtps(order.order_display_id);
+
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
   } catch (err) {
     logger.error('Cancel order exception:', err.message);
@@ -1453,13 +1511,19 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
   try {
     const { data: order, error: fetchErr } = await supabase
       .from('orders')
-      .select('id, order_display_id, escrow_booking_id, escrow_status')
+      .select('id, order_display_id, customer_id, escrow_booking_id, escrow_status')
       .eq('id', orderId)
       .maybeSingle();
 
     if (fetchErr || !order) return res.status(404).json({ error: 'Order not found' });
+    if (order.customer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
+    }
     if (order.escrow_status !== 'funding') {
       return res.status(400).json({ error: 'Order is not in funding state' });
+    }
+    if (order.customer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
     }
 
     const bookingId = order.escrow_booking_id || `escrow:${order.order_display_id}`;
@@ -1504,9 +1568,8 @@ router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer
 // ============================================================================
 // 19. GET DRIVER LOCATION (CUSTOMER OR DRIVER)
 // ============================================================================
-router.get('/:id/driver-location', authenticate, userLimiter, requireRole(['customer', 'driver']), validateParams(uuidParamSchema), async (req, res) => {
+router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(uuidParamSchema), async (req, res) => {
   const orderId = req.params.id;
-
   try {
     // 1. Resolve order and check authentication / authorization
     const { data: order, error: orderErr } = await supabase
@@ -1569,7 +1632,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, requireRole(['cust
 // 20. GET LIVE ROUTE GEOMETRY (CUSTOMER OR DRIVER)
 // ============================================================================
 
-router.get('/:id/route', authenticate, userLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id; // this is order_display_id from client
 
   try {
@@ -1610,7 +1673,7 @@ router.get('/:id/route', authenticate, userLimiter, requireRole(['customer', 'dr
 
     const latestTelemetry = await mongoDb
       .collection('telemetry')
-      .find({ driver_id: order.driver_id })
+      .find({ driver_id: order.driver_id, order_id: order.id })
       .sort({ timestamp: -1 })
       .limit(1)
       .toArray();

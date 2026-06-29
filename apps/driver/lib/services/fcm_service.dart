@@ -65,9 +65,6 @@ class FcmService {
       headers: <String, String>{
         'Content-Type': 'application/json',
         if (accessToken != null && accessToken.isNotEmpty) 'Authorization': 'Bearer $accessToken',
-        'x-user-id': userId,
-        'x-user-role': 'driver',
-        if (fullName != null && fullName.isNotEmpty) 'x-user-name': fullName,
       },
       body: jsonEncode(<String, dynamic>{
         'fcmToken': token,
@@ -75,7 +72,7 @@ class FcmService {
     );
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      debugPrint('[FCM] Token updated successfully on backend: $token');
+      debugPrint('[FCM] Token updated successfully on backend.');
     } else {
       debugPrint('[FCM] Failed to update token on backend: ${response.body}');
     }

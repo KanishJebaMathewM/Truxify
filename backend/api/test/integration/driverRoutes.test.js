@@ -19,11 +19,12 @@ vi.mock('../../src/services/reputation.js', () => ({
   getDriverReputation: getDriverReputationMock,
 }));
 
-// Set OTP env var before importing the router module.
-// This is required because driverRoutes.js reads DRIVER_LOGIN_OTP at module level.
-process.env.DRIVER_LOGIN_OTP = '1234';
+vi.mock('../../src/services/otpService.js', () => ({
+  generateAndStoreOtp: vi.fn().mockResolvedValue('1234'),
+  verifyOtp: vi.fn((_phone, otp) => Promise.resolve(otp === '1234')),
+}));
 
-const { default: driverRouter } = await import('../../src/routes/driverRoutes.js');
+const { default: driverRouter, otpPhoneKey } = await import('../../src/routes/driverRoutes.js');
 
 
 function buildApp() {
@@ -45,6 +46,20 @@ describe('Driver Routes', () => {
     m.store.earnings_daily = [];
     m.store.trucks = [];
     m.calls.length = 0;
+  });
+
+  describe('otpPhoneKey', () => {
+    it('normalizes equivalent phone number formats to one limiter key', () => {
+      expect(otpPhoneKey('9876543210')).toBe('phone:9876543210');
+      expect(otpPhoneKey(' 98765 43210 ')).toBe('phone:9876543210');
+      expect(otpPhoneKey('+91 98765-43210')).toBe('phone:9876543210');
+      expect(otpPhoneKey('919876543210')).toBe('phone:9876543210');
+    });
+
+    it('uses an unknown fallback for non-string or empty phone values', () => {
+      expect(otpPhoneKey(undefined)).toBe('phone:unknown');
+      expect(otpPhoneKey('---')).toBe('phone:unknown');
+    });
   });
 
   it('GET /stats returns 404 when driver profile does not exist', async () => {

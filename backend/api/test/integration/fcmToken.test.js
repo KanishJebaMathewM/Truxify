@@ -4,6 +4,8 @@
  * Verifies:
  *   - Authenticated users can register an FCM token
  *   - Authenticated users can clear an FCM token (null)
+ *   - Empty string is rejected (min 10 chars)
+ *   - Overly long token is rejected (max 4096 chars)
  *   - Invalid fcmToken type returns 400
  *   - Unauthenticated requests return 401
  *   - Redis cache is invalidated on token update
@@ -119,7 +121,53 @@ describe('PUT /api/profile/fcm-token', () => {
       .send({ fcmToken: 12345 });
 
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/string/i);
+  });
+
+  it('returns 400 for empty string fcmToken', async () => {
+    const res = await request(app)
+      .put('/api/profile/fcm-token')
+      .set('x-user-id', USER_ID)
+      .set('x-user-role', 'customer')
+      .send({ fcmToken: '' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+    const messages = res.body.details.map(d => d.message);
+    expect(messages.some(m => /10 characters/i.test(m))).toBe(true);
+  });
+
+  it('returns 400 for a token shorter than 10 characters', async () => {
+    const res = await request(app)
+      .put('/api/profile/fcm-token')
+      .set('x-user-id', USER_ID)
+      .set('x-user-role', 'customer')
+      .send({ fcmToken: 'short' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+  });
+
+  it('returns 400 for a token exceeding 4096 characters', async () => {
+    const res = await request(app)
+      .put('/api/profile/fcm-token')
+      .set('x-user-id', USER_ID)
+      .set('x-user-role', 'customer')
+      .send({ fcmToken: 'a'.repeat(4097) });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+    const messages = res.body.details.map(d => d.message);
+    expect(messages.some(m => /too long/i.test(m))).toBe(true);
+  });
+
+  it('returns 400 if fcmToken is omitted', async () => {
+    const res = await request(app)
+      .put('/api/profile/fcm-token')
+      .set('x-user-id', USER_ID)
+      .set('x-user-role', 'customer')
+      .send({});
+
+    expect(res.status).toBe(400);
   });
 
   it('invalidates Redis cache after token update', async () => {
@@ -145,16 +193,5 @@ describe('PUT /api/profile/fcm-token', () => {
     expect(updatePayload).toHaveProperty('fcm_token', FCM_TOKEN);
     expect(updatePayload).toHaveProperty('fcm_token_updated_at');
     expect(typeof updatePayload.fcm_token_updated_at).toBe('string');
-  });
-
-  it('returns 400 if fcmToken is omitted', async () => {
-    const res = await request(app)
-      .put('/api/profile/fcm-token')
-      .set('x-user-id', USER_ID)
-      .set('x-user-role', 'customer')
-      .send({});
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/required/i);
   });
 });

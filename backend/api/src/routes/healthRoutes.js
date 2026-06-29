@@ -1,6 +1,8 @@
 import express from 'express';
 import { supabase, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
+import { healthLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
+import { healthLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -65,7 +67,7 @@ function checkPolygon() {
 const CRITICAL_UNHEALTHY = new Set(['failed', 'not_configured']);
 
 // GET /api/health — full dependency check; returns 503 when a critical service fails
-router.get('/', async (req, res) => {
+router.get('/', healthLimiter, async (req, res) => {
   const [supabaseStatus, mongoStatus, redisStatus] = await Promise.all([
     checkSupabase(),
     checkMongo(),
@@ -94,7 +96,7 @@ router.get('/', async (req, res) => {
 });
 
 // GET /api/health/live — liveness probe; always 200 as long as the process is up
-router.get('/live', (req, res) => {
+router.get('/live', healthLimiter, (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 

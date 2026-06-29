@@ -48,7 +48,7 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
 
     // Handle vehicle_type filtering in JS to avoid database column errors.
     // Default mapped vehicle_type is 'Truck'. If they filter by something else, return empty.
-    if (req.query.vehicle_type && req.query.vehicle_type.toLowerCase() !== 'truck') {
+    if (req.query.vehicle_type && (typeof req.query.vehicle_type !== 'string' || req.query.vehicle_type.toLowerCase() !== 'truck')) {
       return res.json({
         page,
         limit,
@@ -65,7 +65,6 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
       .from('load_offers')
       .select('*', { count: 'exact' });
 
-    // Status filter - map 'open'/'available' to the DB's status 'available'
     let statusFilter = 'available';
     if (req.query.status) {
       if (typeof req.query.status !== 'string') {
@@ -85,12 +84,15 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
     }
     query = query.eq('status', statusFilter);
 
+    // Escape LIKE special chars in user input to prevent injection
+    const escapeLike = (s) => String(s).replace(/[%_\\]/g, '\\$&');
+
     // Filters
     if (req.query.pickup_location) {
-      query = query.ilike('pickup_address', `%${req.query.pickup_location}%`);
+      query = query.ilike('pickup_address', `%${escapeLike(req.query.pickup_location)}%`, { escape: '\\' });
     }
     if (req.query.destination) {
-      query = query.ilike('drop_address', `%${req.query.destination}%`);
+      query = query.ilike('drop_address', `%${escapeLike(req.query.destination)}%`, { escape: '\\' });
     }
     if (req.query.goods_type) {
       query = query.eq('goods_type', req.query.goods_type);

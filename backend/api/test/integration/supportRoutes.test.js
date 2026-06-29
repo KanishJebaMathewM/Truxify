@@ -503,6 +503,62 @@ describe('Support Routes', () => {
       expect(res.status).toBe(403);
     });
 
+    it('POST /tickets/:id/comments returns 409 when ticket is closed (owner)', async () => {
+      m.store.support_tickets[0].status = 'closed';
+
+      const res = await request(buildApp())
+        .post('/api/support/tickets/t-123/comments')
+        .set(CUSTOMER_HEADERS)
+        .send({ message: 'New comment after closure' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('Cannot comment on a closed ticket.');
+
+      const commentInsert = m.calls.find(c => c.table === 'support_ticket_comments' && c.mode === 'insert');
+      expect(commentInsert).toBeUndefined();
+    });
+
+    it('POST /tickets/:id/comments returns 409 when ticket is closed (admin)', async () => {
+      m.store.support_tickets[0].status = 'closed';
+
+      const res = await request(buildApp())
+        .post('/api/support/tickets/t-123/comments')
+        .set({
+          'x-user-id': 'admin-1',
+          'x-user-role': 'admin',
+          'x-user-name': 'Test Admin',
+        })
+        .send({ message: 'Admin note on closed ticket' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe('Cannot comment on a closed ticket.');
+
+      const commentInsert = m.calls.find(c => c.table === 'support_ticket_comments' && c.mode === 'insert');
+      expect(commentInsert).toBeUndefined();
+    });
+
+    it('POST /tickets/:id/comments still accepts comments on open tickets', async () => {
+      const res = await request(buildApp())
+        .post('/api/support/tickets/t-123/comments')
+        .set(CUSTOMER_HEADERS)
+        .send({ message: 'Still open, commenting fine' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.comment.message).toBe('Still open, commenting fine');
+    });
+
+    it('POST /tickets/:id/comments still accepts comments on in_progress tickets', async () => {
+      m.store.support_tickets[0].status = 'in_progress';
+
+      const res = await request(buildApp())
+        .post('/api/support/tickets/t-123/comments')
+        .set(CUSTOMER_HEADERS)
+        .send({ message: 'In progress comment' });
+
+      expect(res.status).toBe(201);
+      expect(res.body.comment.message).toBe('In progress comment');
+    });
+
     it('GET /tickets/:id/comments retrieves comments for ticket owner', async () => {
       m.store.support_ticket_comments.push({
         id: 'c-1',
@@ -528,11 +584,11 @@ describe('Support Routes', () => {
       );
 
       const res = await request(buildApp())
-        .get('/api/support/tickets/t-123/comments?limit=1&offset=1')
+        .get('/api/support/tickets/t-123/comments?sort=desc')
         .set(CUSTOMER_HEADERS);
 
       expect(res.status).toBe(200);
-      expect(res.body).toHaveLength(1);
+      expect(res.body).toHaveLength(2);
       expect(res.body[0].message).toBe('Second');
     });
   });

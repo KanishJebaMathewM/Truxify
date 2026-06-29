@@ -13,6 +13,7 @@ import '../services/fcm_service.dart';
 import '../../core/supabase_config.dart';
 import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
 import 'notifications_screen.dart';
+import '../utils/validators.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({
@@ -34,6 +35,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _driverEmail = 'kanish.jeba@truxify.com';
   String _currentLanguage = 'English';
   String _walletAddress = '';
+  String _truckNumber = driverTruckNumber;
 
   bool _isLoadingReputation = true;
   double? _platformRating;
@@ -142,9 +144,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _showEditProfileSheet(BuildContext context) async {
+    final formKey = GlobalKey<FormState>();
     final nameController = TextEditingController(text: _driverName);
     final phoneController = TextEditingController(text: _driverPhone);
     final emailController = TextEditingController(text: _driverEmail);
+    final truckNumberController = TextEditingController(text: _truckNumber);
 
     await showModalBottomSheet<void>(
       context: context,
@@ -172,9 +176,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              TextField(
-                controller: nameController,
-                style: GoogleFonts.dmSans(
+              Form(
+                key: formKey,
+                child: Column(
+                  children: [
+                    TextFormField(
+                      controller: nameController,
+                      style: GoogleFonts.dmSans(
                     fontSize: 14,
                     color: Theme.of(context).colorScheme.onSurface),
                 decoration: InputDecoration(
@@ -192,11 +200,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     borderSide: const BorderSide(color: TruxifyColors.accent),
                   ),
                 ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: phoneController,
-                style: GoogleFonts.dmSans(
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: phoneController,
+                      style: GoogleFonts.dmSans(
                     fontSize: 14,
                     color: Theme.of(context).colorScheme.onSurface),
                 decoration: InputDecoration(
@@ -215,11 +223,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 keyboardType: TextInputType.phone,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: emailController,
-                style: GoogleFonts.dmSans(
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: emailController,
+                      style: GoogleFonts.dmSans(
                     fontSize: 14,
                     color: Theme.of(context).colorScheme.onSurface),
                 decoration: InputDecoration(
@@ -238,23 +246,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 keyboardType: TextInputType.emailAddress,
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: truckNumberController,
+                      style: GoogleFonts.dmSans(
+                          fontSize: 14,
+                          color: Theme.of(context).colorScheme.onSurface),
+                      decoration: InputDecoration(
+                        labelText: 'Vehicle Registration Number',
+                        hintText: 'e.g., DL01AA1234',
+                        labelStyle: GoogleFonts.dmSans(
+                            color: TruxifyColors.adaptiveSecondaryText(context)),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: _borderColor(context),
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: TruxifyColors.accent),
+                        ),
+                      ),
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [
+                        UpperCaseTextFormatter(),
+                      ],
+                      validator: validateRegistrationNumber,
+                      autovalidateMode: AutovalidateMode.onUserInteraction,
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 20),
               PrimaryButton(
                 label: 'Save Changes',
                 onPressed: () {
-                  setState(() {
-                    _driverName = nameController.text.trim();
-                    _driverPhone = phoneController.text.trim();
-                    _driverEmail = emailController.text.trim();
-                  });
-                  Navigator.of(context).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  if (formKey.currentState?.validate() ?? false) {
+                    setState(() {
+                      _driverName = nameController.text.trim();
+                      _driverPhone = phoneController.text.trim();
+                      _driverEmail = emailController.text.trim();
+                      _truckNumber = truckNumberController.text.trim();
+                    });
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
                       content: Text('Profile updated successfully'),
                       backgroundColor: TruxifyColors.success,
                     ),
                   );
+                }
                 },
               ),
             ],
@@ -745,7 +788,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '$driverTruck · $driverTruckNumber',
+                        '$driverTruck · $_truckNumber',
                         style: GoogleFonts.dmSans(
                           fontSize: 12,
                           color: Colors.white.withOpacity(0.85),

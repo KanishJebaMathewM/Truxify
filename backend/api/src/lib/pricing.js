@@ -27,15 +27,25 @@ const DEFAULTS = Object.freeze({
   TOLL_PER_KM: 200,         // paisa per km, proxy for highway toll
 });
 
+/**
+ * Read an environment variable and return a Number, falling back to the
+ * default if the variable is unset or set to an empty string.
+ * Using ?? alone does not catch empty-string values (Number('') = 0).
+ */
+const envOr = (key, fallback) => {
+  const val = process.env[key];
+  return val !== undefined && val !== '' ? Number(val) : fallback;
+};
+
 function readRateCard() {
   return {
-    ratePerTonneKm: Number(process.env.TRUXIFY_RATE_PER_TONNE_KM ?? DEFAULTS.RATE_PER_TONNE_KM),
-    fragileMultiplier: Number(process.env.TRUXIFY_FRAGILE_MULTIPLIER ?? DEFAULTS.FRAGILE_MULTIPLIER),
-    stackableDiscount: Number(process.env.TRUXIFY_STACKABLE_DISCOUNT ?? DEFAULTS.STACKABLE_DISCOUNT),
-    handlingFee: Number(process.env.TRUXIFY_HANDLING_FEE ?? DEFAULTS.HANDLING_FEE),
-    platformFeePct: Number(process.env.TRUXIFY_PLATFORM_FEE_PCT ?? DEFAULTS.PLATFORM_FEE_PCT),
-    fuelCostPct: Number(process.env.TRUXIFY_FUEL_COST_PCT ?? DEFAULTS.FUEL_COST_PCT),
-    tollPerKm: Number(process.env.TRUXIFY_TOLL_PER_KM ?? DEFAULTS.TOLL_PER_KM),
+    ratePerTonneKm: envOr('TRUXIFY_RATE_PER_TONNE_KM', DEFAULTS.RATE_PER_TONNE_KM),
+    fragileMultiplier: envOr('TRUXIFY_FRAGILE_MULTIPLIER', DEFAULTS.FRAGILE_MULTIPLIER),
+    stackableDiscount: envOr('TRUXIFY_STACKABLE_DISCOUNT', DEFAULTS.STACKABLE_DISCOUNT),
+    handlingFee: envOr('TRUXIFY_HANDLING_FEE', DEFAULTS.HANDLING_FEE),
+    platformFeePct: envOr('TRUXIFY_PLATFORM_FEE_PCT', DEFAULTS.PLATFORM_FEE_PCT),
+    fuelCostPct: envOr('TRUXIFY_FUEL_COST_PCT', DEFAULTS.FUEL_COST_PCT),
+    tollPerKm: envOr('TRUXIFY_TOLL_PER_KM', DEFAULTS.TOLL_PER_KM),
   };
 }
 

@@ -2,7 +2,7 @@ import express from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
-import { updateProfileSchema, updateWalletSchema, driverStatementSchema, paramIdSchema } from '../validation/requestSchemas.js';
+import { updateProfileSchema, updateWalletSchema, driverStatementSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import logger from '../middleware/logger.js';
 import {
   getProfile,
@@ -12,6 +12,7 @@ import {
 import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
+
 
 const router = express.Router();
 
@@ -53,7 +54,7 @@ router.get('/', authenticate, userLimiter, async (req, res) => {
 });
 
 // GET PROFILE NAME BY ID
-router.get('/:id/name', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
     const { data: profile, error } = await supabase
       .from('profiles')

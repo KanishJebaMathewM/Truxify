@@ -203,9 +203,8 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
  */
 router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
   const tripId = req.params.id;
-  const { type, sort } = req.query;
+  const { type, sort, min_lat, max_lat, min_lng, max_lng } = req.query;
   const isAscending = sort !== 'desc';
-  const { type, min_lat, max_lat, min_lng, max_lng } = req.query;
 
   try {
     // 1. Fetch the trip to determine the driver

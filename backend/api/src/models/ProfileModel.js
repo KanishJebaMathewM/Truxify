@@ -1,5 +1,6 @@
 export class ProfileModel {
   static fromProfile(profile) {
+    if (!profile) return null;
     return {
       id: profile.id,
       firebaseUid: profile.firebase_uid,

@@ -59,7 +59,7 @@ export async function reconcilePendingEscrowRefunds() {
             p_instance_id: instanceId,
           });
 
-        if ((!claimed || claimed.length === 0) && !claimError) {
+        if ((!claimed || (Array.isArray(claimed) && claimed.length === 0) || (!Array.isArray(claimed) && !claimError)) && !claimError) {
           logger.info(`[escrow-reconciliation] Order ${order.order_display_id} already claimed by another instance, skipping.`);
           continue;
         }

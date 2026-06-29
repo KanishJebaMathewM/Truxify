@@ -106,10 +106,6 @@ router.get('/stats', authenticate, userLimiter, requireRole(['driver']), async (
 router.put('/online', authenticate, userLimiter, requireRole(['driver']), validateBody(driverOnlineSchema), async (req, res) => {
   const { is_online } = req.body;
 
-  if (typeof is_online !== 'boolean') {
-    return res.status(400).json({ error: 'Invalid or missing is_online status.' });
-  }
-
   try {
     const { data: details, error } = await supabase
       .from('driver_details')

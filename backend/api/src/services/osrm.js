@@ -7,8 +7,6 @@ const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 500;
 const CACHE_TTL_SECONDS = 86400;
 const ROUTE_CACHE_TTL_SECONDS = 30;
-const MAX_RETRIES = 1;
-const RETRY_DELAYS_MS = [500, 1000]; // exponential backoff
 
 function parsePositiveNumber(value, fallback) {
   const parsed = Number(value);

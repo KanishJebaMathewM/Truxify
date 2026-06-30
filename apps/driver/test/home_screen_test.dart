@@ -128,18 +128,9 @@ void main() {
     // Look for the search bar
     expect(find.text('Where are you heading?'), findsOneWidget);
     
-    // Look for "Today's Pay" - it might be wrapped in a different widget
-    // Try finding by key or by different text
-    final todayPayFinder = find.byKey(const Key('today_pay_label'));
-    if (todayPayFinder.evaluate().isNotEmpty) {
-      expect(todayPayFinder, findsOneWidget);
-    } else {
-      // Fallback: look for any earnings-related text
-      expect(find.textContaining('Pay'), findsWidgets);
-    }
-    
-    // Look for shift hours
+    // Look for dashboard stats
     expect(find.text('Shift Hours'), findsOneWidget);
+    expect(find.text('Rating'), findsOneWidget);
   });
 
   testWidgets('driver home expands search and opens the destination picker', (

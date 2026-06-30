@@ -1330,6 +1330,7 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icons.account_balance_wallet_outlined,
             value: payValue,
             label: 'Today\'s Pay',
+            labelKey: const Key('today_pay_label'),
           ),
         ),
         const SizedBox(width: 8),
@@ -1383,7 +1384,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildShiftMetric(
       {required IconData icon,
       required String value,
-      required String label}) {
+      required String label,
+      Key? labelKey}) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       decoration: BoxDecoration(
@@ -1407,6 +1409,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           Text(
             label,
+            key: labelKey,
             style: GoogleFonts.dmSans(
               fontSize: 9,
               color: TruxifyColors.adaptiveSecondaryText(context),

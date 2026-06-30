@@ -204,6 +204,9 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
 router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
   const tripId = req.params.id;
   const { type, sort, min_lat, max_lat, min_lng, max_lng } = req.query;
+  if (sort !== undefined && sort !== 'asc' && sort !== 'desc') {
+    return res.status(400).json({ error: 'sort must be asc or desc' });
+  }
   const isAscending = sort !== 'desc';
 
   try {

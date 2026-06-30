@@ -58,7 +58,7 @@ class TripService {
   }
 
   Future<List<Map<String, dynamic>>> fetchTrips({String? status}) async {
-    var uriString = '$_apiBaseUrl/api/trips';
+    var uriString = '$_apiBaseUrl/api/driver/trips';
     if (status != null) {
       uriString += '?status=${Uri.encodeQueryComponent(status)}';
     }
@@ -70,6 +70,9 @@ class TripService {
     }
 
     final body = jsonDecode(response.body);
+    if (body is Map<String, dynamic>) {
+      return List<Map<String, dynamic>>.from(body['trips'] as List? ?? []);
+    }
     return List<Map<String, dynamic>>.from(body as List);
   }
 

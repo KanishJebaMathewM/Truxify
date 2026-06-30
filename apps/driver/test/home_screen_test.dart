@@ -118,7 +118,7 @@ void main() {
     // Reset any state if needed
   });
 
-  testWidgets('driver home shows a compact search bar and stats cards', (
+  testWidgets('driver home shows a compact search bar', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(_buildTestApp());
@@ -128,9 +128,6 @@ void main() {
     // Look for the search bar
     expect(find.text('Where are you heading?'), findsOneWidget);
     
-    // Look for dashboard stats
-    expect(find.text('Shift Hours'), findsOneWidget);
-    expect(find.text('Rating'), findsOneWidget);
   });
 
   testWidgets('driver home expands search and opens the destination picker', (

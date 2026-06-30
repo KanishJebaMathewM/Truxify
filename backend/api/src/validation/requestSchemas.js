@@ -52,7 +52,7 @@ export const createOrderSchema = z.object({
   special_requirements: z.string().max(500).optional().nullable(),
   payment_method_id: z.string().optional(),
   upi_id: z.string().regex(upiRegex, "Invalid UPI ID format").optional().or(z.literal('')).nullable(),
-}).strict();
+}).strip();
 
 export const paramIdSchema = z.object({
   id: uuidSchema.or(z.string().min(1, "ID is required"))

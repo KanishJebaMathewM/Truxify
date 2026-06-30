@@ -49,7 +49,10 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
 
     // Handle vehicle_type filtering in JS to avoid database column errors.
     // Default mapped vehicle_type is 'Truck'. If they filter by something else, return empty.
-    const vehicleType = typeof req.query.vehicle_type === 'string' ? req.query.vehicle_type : '';
+    if (req.query.vehicle_type && typeof req.query.vehicle_type !== 'string') {
+      return res.status(400).json({ error: 'vehicle_type must be a single string' });
+    }
+    const vehicleType = req.query.vehicle_type || '';
     if (vehicleType && vehicleType.toLowerCase() !== 'truck') {
       return res.json({
         page,

@@ -103,6 +103,14 @@ function parseBoolean(value) {
   return ['true', '1', 'yes'].includes(String(value).trim().toLowerCase());
 }
 
+function isLatitude(value) {
+  return Number.isFinite(value) && value >= -90 && value <= 90;
+}
+
+function isLongitude(value) {
+  return Number.isFinite(value) && value >= -180 && value <= 180;
+}
+
 router.get('/search', authenticate, userLimiter, async (req, res) => {
   const {
     pickup_lat, pickup_lng,
@@ -123,6 +131,10 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
 
   if ([numPickupLat, numPickupLng, numDropLat, numDropLng, numWeightTonnes].some(isNaN)) {
     return res.status(400).json({ error: 'Invalid numeric parameters' });
+  }
+
+  if (!isLatitude(numPickupLat) || !isLatitude(numDropLat) || !isLongitude(numPickupLng) || !isLongitude(numDropLng)) {
+    return res.status(400).json({ error: 'Latitude must be between -90 and 90 and longitude must be between -180 and 180' });
   }
 
   if (numWeightTonnes <= 0 || numWeightTonnes > 50) {

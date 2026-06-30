@@ -1,5 +1,5 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
 import { bidLimiter, userLimiter } from '../middleware/rateLimiter.js';
@@ -154,7 +154,7 @@ const telemetryLimiter = rateLimit({
   max: process.env.NODE_ENV === 'test' ? 1000 : 30, // 30 requests per minute should be enough for telemetry
   keyGenerator: (req) => {
     if (!req.user || !req.user.id) {
-      return req.ip ?? 'unknown-ip';
+      return req.ip ? ipKeyGenerator(req.ip) : 'unknown-ip';
     }
     return req.user.id;
   },

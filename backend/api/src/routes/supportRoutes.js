@@ -27,6 +27,20 @@ function normalizeRequiredText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function parsePositiveInteger(value, fallback, field) {
+  if (value === undefined) return { value: fallback };
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return { error: `${field} must be a positive integer` };
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (parsed < 1) {
+    return { error: `${field} must be a positive integer` };
+  }
+
+  return { value: parsed };
+}
+
 // ============================================================================
 // 1. LIST ACTIVE FAQS (PUBLIC)
 // ============================================================================
@@ -142,8 +156,17 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
 // ============================================================================
 router.get('/tickets', authenticate, userLimiter, async (req, res) => {
   const { status, category, page = '1', limit = '20' } = req.query;
-  const pageNum = Math.max(1, parseInt(page, 10) || 1);
-  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  const parsedPage = parsePositiveInteger(page, 1, 'page');
+  if (parsedPage.error) {
+    return res.status(400).json({ error: parsedPage.error });
+  }
+  const parsedLimit = parsePositiveInteger(limit, 20, 'limit');
+  if (parsedLimit.error) {
+    return res.status(400).json({ error: parsedLimit.error });
+  }
+
+  const pageNum = parsedPage.value;
+  const limitNum = Math.min(100, parsedLimit.value);
   const offset = (pageNum - 1) * limitNum;
 
   try {
@@ -309,8 +332,17 @@ router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicke
 // ============================================================================
 router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), async (req, res) => {
   const { status, category, user_id, page = '1', limit = '20' } = req.query;
-  const pageNum = Math.max(1, parseInt(page, 10) || 1);
-  const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+  const parsedPage = parsePositiveInteger(page, 1, 'page');
+  if (parsedPage.error) {
+    return res.status(400).json({ error: parsedPage.error });
+  }
+  const parsedLimit = parsePositiveInteger(limit, 20, 'limit');
+  if (parsedLimit.error) {
+    return res.status(400).json({ error: parsedLimit.error });
+  }
+
+  const pageNum = parsedPage.value;
+  const limitNum = Math.min(100, parsedLimit.value);
   const offset = (pageNum - 1) * limitNum;
 
   try {

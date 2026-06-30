@@ -4,8 +4,8 @@ import 'package:truxify_driver/utils/driver_metrics.dart';
 import 'setup/test_setup.dart';  // ← Changed from '../setup/' to 'setup/'
 
 void main() {
-  setUpAll(() {
-    setupTestEnvironment();
+  setUpAll(() async {
+    await setupTestEnvironment();
   });
 
   test('DriverMetrics.tryParseDate is defensive', () {

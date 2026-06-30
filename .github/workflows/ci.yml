@@ -31,7 +31,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend/api
-        run: npm ci
+        run: npm ci --workspaces=false
 
       - name: Run unit tests
         working-directory: backend/api

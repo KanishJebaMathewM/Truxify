@@ -636,7 +636,9 @@ describe('GET /api/orders/history — order history', () => {
       .set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
+    expect(Array.isArray(res.body.history)).toBe(true);
+    expect(res.body.history).toHaveLength(1);
+    expect(res.body.history[0].id).toBe('order-1');
   });
 
   it('returns 500 on DB error', async () => {

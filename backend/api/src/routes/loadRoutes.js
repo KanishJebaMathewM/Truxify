@@ -108,6 +108,9 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
       query = query.ilike('drop_address', `%${escapeLike(destination)}%`);
     }
     if (req.query.goods_type) {
+      if (typeof req.query.goods_type !== 'string') {
+        return res.status(400).json({ error: 'goods_type must be a single string' });
+      }
       query = query.eq('goods_type', req.query.goods_type);
     }
     if (filters.min_price !== undefined) {

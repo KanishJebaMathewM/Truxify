@@ -78,12 +78,10 @@ class TripService {
     int limit = 20,
     String? status,
   }) async {
-    var uriString = '$_apiBaseUrl/api/trips/history?limit=$limit';
+    final page = int.tryParse(cursor ?? '1') ?? 1;
+    var uriString = '$_apiBaseUrl/api/driver/trips?page=$page&limit=$limit';
     if (status != null) {
       uriString += '&status=${Uri.encodeQueryComponent(status)}';
-    }
-    if (cursor != null) {
-      uriString += '&cursor=${Uri.encodeQueryComponent(cursor)}';
     }
     final uri = Uri.parse(uriString);
     final response = await _httpClient.get(uri, headers: await _authHeaders());
@@ -93,10 +91,13 @@ class TripService {
     }
 
     final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final responsePage = body['page'] as int? ?? page;
+    final totalPages = body['totalPages'] as int? ?? responsePage;
+    final hasMore = responsePage < totalPages;
     return {
       'trips': List<Map<String, dynamic>>.from(body['trips'] as List? ?? []),
-      'nextCursor': body['nextCursor'] as String?,
-      'hasMore': body['hasMore'] as bool? ?? false,
+      'nextCursor': hasMore ? '${responsePage + 1}' : null,
+      'hasMore': hasMore,
     };
   }
 

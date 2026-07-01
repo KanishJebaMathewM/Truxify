@@ -1,8 +1,8 @@
 -- Consume the delivery OTP in the same transaction that completes the trip.
 
-DROP FUNCTION IF EXISTS complete_trip_tx(UUID);
+DROP FUNCTION IF EXISTS complete_trip_tx(UUID, UUID, TEXT);
 
-CREATE OR REPLACE FUNCTION complete_trip_tx(p_order_id UUID, p_otp_id UUID)
+CREATE OR REPLACE FUNCTION complete_trip_tx(p_order_id UUID, p_otp_id UUID, p_release_tx_hash TEXT DEFAULT NULL)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -28,6 +28,11 @@ BEGIN
 
   IF v_order.status = 'payment_released' THEN
     RETURN;
+  END IF;
+
+  -- Only proceed with wallet credit if escrow was released on-chain
+  IF v_order.escrow_status IN ('funded', 'release_failed') AND p_release_tx_hash IS NULL THEN
+    RAISE EXCEPTION 'Blockchain escrow release must complete before crediting driver wallet';
   END IF;
 
   UPDATE delivery_otps

@@ -29,7 +29,6 @@ import {
   recordDepositTx,
   escrowRelease,
   bookingIdFromUuid,
-  releaseEscrowFunds,
   submitEscrowRefund,
   confirmEscrowRefund,
   ESCROW_MATIC_PER_PAISA,
@@ -1026,71 +1025,56 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
       return res.status(500).json({ error: 'Failed to verify OTP.', details: updateErr.message });
     }
 
-    // Call complete_trip_tx RPC to atomically update trip, driver stats, wallet, earnings, order status, and timeline.
-    const { data: tripData, error: rpcErr } = await supabase.rpc('complete_trip_tx', {
-      p_order_id: orderId,
-      p_otp_id: otpRecord.id,
-    });
-    if (rpcErr) {
-      logger.error('complete_trip_tx RPC failed:', rpcErr.message);
-      return res.status(500).json({ error: 'Failed to complete trip and release payment.', details: rpcErr.message });
-    }
-
-    // Clear brute-force state only after the OTP and trip transaction commits.
-    await clearOtpState(orderId);
-    // Post-RPC verification: confirm the order was actually updated to payment_released
-    const { data: verifiedOrder, error: verifyErr } = await supabase
-      .from('orders')
-      .select('status, escrow_status, escrow_release_attempts')
-      .eq('id', orderId)
-      .maybeSingle();
-
-    if (verifyErr || !verifiedOrder) {
-      logger.error(`[verify-delivery] Failed to verify order status after RPC for order ${orderId}`);
-      return res.status(500).json({ error: 'Failed to verify order status after payment release.' });
-    }
-
-    if (verifiedOrder.status !== 'payment_released') {
-      logger.warn(`[verify-delivery] Order ${orderId} status changed to "${verifiedOrder.status}" — payment was not released.`);
-      return res.status(409).json({
-        error: 'Order status changed during processing. Payment was not released.',
-      });
-    }
-
-    // Blockchain pre-check: release escrow funds BEFORE consuming the OTP.
-    // If the on-chain call fails, the OTP stays unconsumed and the driver can retry.
-    let escrowReleased = false;
-    if (verifiedOrder.escrow_status === 'funded' || verifiedOrder.escrow_status === 'release_failed') {
+    // Phase 1: Execute blockchain escrow release BEFORE crediting the driver's wallet.
+    // If the blockchain call fails, the database state is NOT modified and the driver can retry.
+    let releaseTxHash = null;
+    let escrowAlreadyReleased = false;
+    if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
       try {
-        const releaseResult = await releaseEscrowFunds(order.order_display_id);
+        const releaseResult = await escrowRelease(order.order_display_id);
         if (releaseResult.txHash) {
-          escrowReleased = true;
+          releaseTxHash = releaseResult.txHash;
         } else if (releaseResult.alreadyReleased) {
-          escrowReleased = true;
+          escrowAlreadyReleased = true;
         } else {
           throw new Error('Escrow release returned no transaction hash');
         }
       } catch (releaseErr) {
-        logger.error('[escrow] Pre-OTP release failed for order', orderId, ':', releaseErr.message);
+        logger.error('[escrow] Blockchain release failed for order', orderId, ':', releaseErr.message);
         return res.status(503).json({
           error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
           retryable: true,
         });
       }
     } else {
-      logger.info(`[escrow] Escrow not funded (status: ${verifiedOrder.escrow_status}) — skipping on-chain release.`);
+      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
     }
 
-    // OTP is only consumed after the RPC and blockchain release succeed — if either fails the driver can retry
+    // Phase 2: Only on blockchain success (or skip), call complete_trip_tx to credit the driver's wallet.
+    const { data: tripData, error: rpcErr } = await supabase.rpc('complete_trip_tx', {
+      p_order_id: orderId,
+      p_otp_id: otpRecord.id,
+      p_release_tx_hash: releaseTxHash,
+    });
+    if (rpcErr) {
+      logger.error('complete_trip_tx RPC failed:', rpcErr.message);
+      return res.status(500).json({ error: 'Failed to complete trip and release payment.', details: rpcErr.message });
+    }
+
+    // Clear brute-force state only after the RPC commits.
+    await clearOtpState(orderId);
+
+    // OTP is consumed after both blockchain and RPC succeed.
     await verifyDeliveryOtp(orderId);
     await clearOtpState(orderId);
 
-    // Record post-release status in the database (blockchain release already done in pre-check above)
-    if (escrowReleased) {
+    // Record blockchain release status in the database.
+    if (releaseTxHash || escrowAlreadyReleased) {
       const { error: releaseUpdateErr } = await supabase.from('orders').update({
         escrow_status: 'released',
         escrow_release_error: null,
         escrow_released_at: new Date().toISOString(),
+        release_tx_hash: releaseTxHash,
       }).eq('id', orderId);
 
       if (releaseUpdateErr) {

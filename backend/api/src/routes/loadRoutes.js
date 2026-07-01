@@ -4,7 +4,6 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
-import { escapeLike } from '../lib/escapeLike.js';
 
 const router = express.Router();
 

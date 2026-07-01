@@ -10,6 +10,7 @@ const {
 
 const availableLabels = [
   'gssoc:approved',
+  'ECSoC26',
   'level:beginner',
   'level:intermediate',
   'type:bug',
@@ -77,6 +78,46 @@ test('selectLabels adds program label when PR declares GSSoC work', () => {
   assert.deepEqual(labels, ['backend', 'gssoc:approved', 'type:api', 'type:bug', 'type:security']);
 });
 
+test('selectLabels adds program label when PR declares ECSoC work', () => {
+  const labels = selectLabels({
+    prTitle: 'fix: guard auth token parsing',
+    prBody: 'Submitted under ECSoC 2026.',
+    changedFiles: ['backend/api/src/middleware/auth.js'],
+    linkedIssueLabels: [],
+    currentLabels: [],
+    availableLabels
+  });
+
+  assert.deepEqual(labels, ['backend', 'ECSoC26', 'type:api', 'type:bug', 'type:security']);
+});
+
+test('selectLabels does not add program label by default when neither GSSoC nor ECSoC is mentioned', () => {
+  const labels = selectLabels({
+    prTitle: 'fix: guard auth token parsing',
+    prBody: 'Just fixing a regular bug.',
+    changedFiles: ['backend/api/src/middleware/auth.js'],
+    linkedIssueLabels: [],
+    currentLabels: [],
+    availableLabels
+  });
+
+  assert.deepEqual(labels, ['backend', 'type:api', 'type:bug', 'type:security']);
+});
+
+test('selectLabels handles case-insensitivity for GSSoC and ECSoC', () => {
+  const labelsGssoc = selectLabels({
+    prTitle: 'feat: new feature [GsSoC]',
+    availableLabels
+  });
+  assert.equal(labelsGssoc.includes('gssoc:approved'), true);
+
+  const labelsEcsoc = selectLabels({
+    prTitle: 'feat: new feature [ecSoC]',
+    availableLabels
+  });
+  assert.equal(labelsEcsoc.includes('ECSoC26'), true);
+});
+
 test('selectLabels does not duplicate labels already present on the PR', () => {
   const labels = selectLabels({
     prTitle: 'test: cover shipment route',
@@ -97,7 +138,8 @@ test('selectLabels ignores labels that do not exist in the repository', () => {
     changedFiles: ['README.md'],
     linkedIssueLabels: ['level:critical'],
     currentLabels: [],
-    availableLabels
+    availableLabels,
+    detectedPrograms: ['gssoc']
   });
 
   assert.deepEqual(labels, ['gssoc:approved', 'type:docs']);
@@ -106,25 +148,29 @@ test('selectLabels ignores labels that do not exist in the repository', () => {
 test('selectLabels matches new performance, design, devops, and accessibility prefixes', () => {
   const labelsPerf = selectLabels({
     prTitle: 'perf: optimize load time',
-    availableLabels
+    availableLabels,
+    detectedPrograms: ['gssoc']
   });
   assert.deepEqual(labelsPerf, ['gssoc:approved', 'type:performance']);
 
   const labelsDesign = selectLabels({
     prTitle: 'ui: update dashboard layout',
-    availableLabels
+    availableLabels,
+    detectedPrograms: ['gssoc']
   });
   assert.deepEqual(labelsDesign, ['gssoc:approved', 'type:design']);
 
   const labelsDevOps = selectLabels({
     prTitle: 'ci: add test action',
-    availableLabels
+    availableLabels,
+    detectedPrograms: ['gssoc']
   });
   assert.deepEqual(labelsDevOps, ['gssoc:approved', 'type:devops']);
 
   const labelsA11y = selectLabels({
     prTitle: 'a11y: add screen reader labels',
-    availableLabels
+    availableLabels,
+    detectedPrograms: ['gssoc']
   });
   assert.deepEqual(labelsA11y, ['gssoc:approved', 'type:accessibility']);
 });

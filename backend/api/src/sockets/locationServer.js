@@ -1,5 +1,6 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
+import logger from "../middleware/logger.js";
 import { GpsLog } from "../models/GpsLog.js";
 
 /**
@@ -44,7 +45,7 @@ export function attachLocationServer(httpServer) {
   driverNs.on("connection", (socket) => {
     const { driverId, bookingId } = socket.data;
 
-    console.log(`[WS] Driver ${driverId} connected for booking ${bookingId}`);
+    logger.info(`[WS] Driver ${driverId} connected for booking ${bookingId}`);
 
     // Join their booking room (for server-side routing)
     socket.join(`driver:${driverId}`);
@@ -103,17 +104,17 @@ export function attachLocationServer(httpServer) {
           });
 
       } catch (error) {
-        console.error(`[WS] GPS persist error for driver ${driverId}:`, error);
+        logger.error({ driverId, error: error.message }, '[WS] GPS persist error for driver');
         socket.emit("error", { message: "Failed to process location update" });
       }
     });
 
     socket.on("disconnect", (reason) => {
-      console.log(`[WS] Driver ${driverId} disconnected: ${reason}`);
+      logger.info(`[WS] Driver ${driverId} disconnected: ${reason}`);
     });
 
     socket.on("error", (error) => {
-      console.error(`[WS] Driver socket error (${driverId}):`, error);
+      logger.error({ driverId, error: error.message }, `[WS] Driver socket error`);
     });
   });
 
@@ -125,7 +126,7 @@ export function attachLocationServer(httpServer) {
   customerNs.on("connection", (socket) => {
     const { customerId } = socket.data;
 
-    console.log(`[WS] Customer ${customerId} connected`);
+    logger.info(`[WS] Customer ${customerId} connected`);
 
     /**
      * Customer subscribes to a specific booking's live location.
@@ -175,7 +176,7 @@ export function attachLocationServer(httpServer) {
         socket.emit("subscribed", { bookingId });
 
       } catch (error) {
-        console.error(`[WS] Subscribe error for customer ${customerId}:`, error);
+        logger.error({ customerId, error: error.message }, '[WS] Subscribe error for customer');
         socket.emit("error", { message: "Failed to subscribe to booking" });
       }
     });
@@ -185,11 +186,11 @@ export function attachLocationServer(httpServer) {
     });
 
     socket.on("disconnect", (reason) => {
-      console.log(`[WS] Customer ${customerId} disconnected: ${reason}`);
+      logger.info(`[WS] Customer ${customerId} disconnected: ${reason}`);
     });
   });
 
-  console.log("[WS] Truxify Location Server attached (/driver + /customer)");
+  logger.info("[WS] Truxify Location Server attached (/driver + /customer)");
 
   return io;
 }
@@ -281,7 +282,8 @@ async function verifyBookingOwnership(customerId, bookingId) {
 
     if (error || !data) return false;
     return true;
-  } catch {
+  } catch (err) {
+    logger.error({ err }, '[WS] isCustomerAuthorized error');
     return false;
   }
 }

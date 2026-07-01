@@ -393,7 +393,7 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, validateBody(cre
       .insert({
         ticket_id: ticketId,
         user_id: req.user.id,
-        user_name: req.user.name || 'Anonymous',
+        user_name: req.user.fullName || 'Anonymous',
         message: message.trim(),
         created_at: new Date().toISOString()
       })

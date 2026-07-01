@@ -4,7 +4,6 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
-import { escapeLike } from '../lib/escapeLike.js';
 
 const router = express.Router();
 
@@ -49,7 +48,10 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
 
     // Handle vehicle_type filtering in JS to avoid database column errors.
     // Default mapped vehicle_type is 'Truck'. If they filter by something else, return empty.
-    const vehicleType = typeof req.query.vehicle_type === 'string' ? req.query.vehicle_type : '';
+    if (req.query.vehicle_type && typeof req.query.vehicle_type !== 'string') {
+      return res.status(400).json({ error: 'vehicle_type must be a single string' });
+    }
+    const vehicleType = req.query.vehicle_type || '';
     if (vehicleType && vehicleType.toLowerCase() !== 'truck') {
       return res.json({
         page,
@@ -105,6 +107,9 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
       query = query.ilike('drop_address', `%${escapeLike(destination)}%`);
     }
     if (req.query.goods_type) {
+      if (typeof req.query.goods_type !== 'string') {
+        return res.status(400).json({ error: 'goods_type must be a single string' });
+      }
       query = query.eq('goods_type', req.query.goods_type);
     }
     if (filters.min_price !== undefined) {

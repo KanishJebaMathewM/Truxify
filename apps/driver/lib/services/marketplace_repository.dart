@@ -90,14 +90,17 @@ class MarketplaceRepository {
   }
 
   Future<List<DriverBid>> fetchDriverBids({required String driverId}) async {
-    final uri = Uri.parse('$_apiBaseUrl/api/bids');
+    final uri = Uri.parse('$_apiBaseUrl/api/driver/bids');
     final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('Failed to fetch driver bids');
     }
 
-    final body = jsonDecode(response.body) as List;
+    final decoded = jsonDecode(response.body);
+    final body = decoded is Map<String, dynamic>
+        ? decoded['bids'] as List? ?? const []
+        : decoded as List;
     return body.cast<Map<String, dynamic>>().map(DriverBid.fromJson).toList(growable: false);
   }
 

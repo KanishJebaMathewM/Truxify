@@ -20,9 +20,8 @@
     "@types/node": "^22.20.0",
     "chai": "^6.2.2",
     "ethers": "^6.12.1",
-    "hardhat": "^2.22.0"
+    "hardhat": "^2.22.0",
     "forge-std": "github:foundry-rs/forge-std#v1.9.4",
-    "hardhat": "^3.9.0",
     "typescript": "~6.0.3",
     "viem": "^2.53.1"
   },

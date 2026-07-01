@@ -2,7 +2,9 @@ name: PR Labeler
 
 on:
   pull_request_target:
-    types: [opened]
+    types: [opened, edited, reopened, synchronize]
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: read

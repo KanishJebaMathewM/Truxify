@@ -14,6 +14,13 @@ class OrderService {
 
   final ApiClient _apiClient;
 
+  List<Map<String, dynamic>> _historyFromResponse(dynamic body) {
+    if (body is Map<String, dynamic>) {
+      return List<Map<String, dynamic>>.from(body['history'] as List? ?? []);
+    }
+    return List<Map<String, dynamic>>.from(body as List);
+  }
+
   Future<String> createOrder({
     required String pickupAddress,
     required String dropAddress,
@@ -116,7 +123,7 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/history',
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      return _historyFromResponse(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -241,7 +248,7 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/history',
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      return _historyFromResponse(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {

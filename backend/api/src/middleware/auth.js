@@ -162,11 +162,40 @@ export async function authenticate(req, res, next) {
     }
 
     if (!userProfile) {
+      // Check whether the profile exists but is deactivated (is_active=false).
+      // The main queries above filter on is_active=true, so null could mean
+      // missing OR deactivated. We distinguish here to give accurate errors.
+      let profileIsDeactivated = false;
+      if (supabaseUserId) {
+        const { data: inactive } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('id', supabaseUserId)
+          .eq('is_active', false)
+          .maybeSingle();
+        profileIsDeactivated = !!inactive;
+      } else if (firebaseUid && supabase) {
+        const { data: inactive } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('firebase_uid', firebaseUid)
+          .eq('is_active', false)
+          .maybeSingle();
+        profileIsDeactivated = !!inactive;
+      }
+
       if (firebaseUid) {
         try { await setCachedProfile(firebaseUid, { isActive: false }, TOMBSTONE_TTL_SECONDS); } catch (_) { logger.error('Cache set failed', _); }
       }
       if (supabaseUserId) {
         void setCachedSupabaseProfile(supabaseUserId, { isActive: false }, TOMBSTONE_TTL_SECONDS);
+      }
+
+      if (profileIsDeactivated) {
+        return res.status(403).json({
+          error: 'User profile is inactive.',
+          hint: 'Contact support to reactivate your account.'
+        });
       }
       return res.status(403).json({
         error: 'User profile not found in database.',
@@ -192,7 +221,7 @@ export async function authenticate(req, res, next) {
       // Clamp the cache lifetime to the token's remaining validity so a cached
       // profile can never outlive the access token that authorised it.
       const nowSeconds = Math.floor(Date.now() / 1000);
-      const ttlSeconds = Number.isFinite(decoded?.exp)
+      const ttlSeconds = isSupabaseToken && Number.isFinite(decoded?.exp)
         ? Math.min(TTL_SECONDS, decoded.exp - nowSeconds)
         : TTL_SECONDS;
       void setCachedSupabaseProfile(supabaseUserId, req.user, ttlSeconds);
@@ -216,7 +245,7 @@ export function requireRole(allowedRoles) {
 
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(500).json({ error: 'Security middleware configuration error: missing req.user.' });
+      return res.status(401).json({ error: 'Not authenticated: req.user is missing.' });
     }
 
     if (!allowedRoles.includes(req.user.role)) {

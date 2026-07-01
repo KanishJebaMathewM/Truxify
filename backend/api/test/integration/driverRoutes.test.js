@@ -509,5 +509,49 @@ describe('Driver Routes', () => {
       expect(res.status).toBe(404);
     });
   });
+
+  describe('GET /bids', () => {
+    beforeEach(() => {
+      m.store.load_bids = [];
+    });
+
+    it('returns the paginated bids response shape consumed by the driver app', async () => {
+      m.store.load_bids.push(
+        { id: 'bid-1', driver_id: 'driver-1', load_id: 'load-1', bid_amount: 5000, created_at: '2026-01-02T00:00:00.000Z' },
+        { id: 'bid-2', driver_id: 'driver-1', load_id: 'load-2', bid_amount: 7500, created_at: '2026-01-01T00:00:00.000Z' },
+      );
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/bids')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        page: 1,
+        limit: 10,
+        total: 2,
+        totalPages: 1,
+      });
+      expect(Array.isArray(res.body.bids)).toBe(true);
+      expect(res.body.bids).toHaveLength(2);
+      expect(res.body.bids.map((b) => b.id)).toEqual(['bid-1', 'bid-2']);
+    });
+
+    it('only returns bids belonging to the requesting driver', async () => {
+      m.store.load_bids.push(
+        { id: 'bid-mine', driver_id: 'driver-1', load_id: 'load-1', bid_amount: 5000, created_at: '2026-01-01T00:00:00.000Z' },
+        { id: 'bid-other', driver_id: 'driver-2', load_id: 'load-2', bid_amount: 9000, created_at: '2026-01-01T00:00:00.000Z' },
+      );
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/bids')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.bids.map((b) => b.id)).toEqual(['bid-mine']);
+    });
+  });
 });
 

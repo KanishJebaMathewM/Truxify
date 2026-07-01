@@ -1,5 +1,5 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
 import { bidLimiter, userLimiter } from '../middleware/rateLimiter.js';
@@ -28,6 +28,8 @@ import {
   buildDepositTx,
   recordDepositTx,
   escrowRelease,
+  bookingIdFromUuid,
+  releaseEscrowFunds,
   submitEscrowRefund,
   confirmEscrowRefund,
   ESCROW_MATIC_PER_PAISA,
@@ -154,7 +156,7 @@ const telemetryLimiter = rateLimit({
   max: process.env.NODE_ENV === 'test' ? 1000 : 30, // 30 requests per minute should be enough for telemetry
   keyGenerator: (req) => {
     if (!req.user || !req.user.id) {
-      return req.ip ?? 'unknown-ip';
+      return req.ip ? ipKeyGenerator(req.ip) : 'unknown-ip';
     }
     return req.user.id;
   },
@@ -1055,103 +1057,68 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
       });
     }
 
-    // OTP is only consumed after the RPC succeeds — if the RPC fails the driver can retry
-    await verifyDeliveryOtp(orderId);
-    await clearOtpState(orderId);
-    // Escrow: release funds to driver after successful delivery verification
+    // Blockchain pre-check: release escrow funds BEFORE consuming the OTP.
+    // If the on-chain call fails, the OTP stays unconsumed and the driver can retry.
     let escrowReleased = false;
-    if (verifiedOrder.escrow_status === 'funded') {
-      const releaseAttemptedAt = new Date().toISOString();
-      const releaseAttempts = (verifiedOrder.escrow_release_attempts || 0) + 1;
-      const { error: pendingErr } = await supabase.from('orders').update({
-        escrow_status: 'release_pending',
-        escrow_release_error: null,
-        escrow_release_attempts: releaseAttempts,
-        escrow_release_last_attempt_at: releaseAttemptedAt,
-      }).eq('id', orderId);
-
-      if (pendingErr) {
-        logger.error('[escrow] Failed to persist release_pending state:', pendingErr.message);
-        return res.status(202).json({
-          message: 'Delivery verified successfully. Escrow payout is pending reconciliation.',
-          escrow_status: 'release_pending',
-          payment_released: false,
-        });
-      }
-
+    if (verifiedOrder.escrow_status === 'funded' || verifiedOrder.escrow_status === 'release_failed') {
       try {
-        const { txHash } = await escrowRelease(order.order_display_id);
-        if (!txHash) {
-          throw new Error('Escrow release did not return a transaction hash');
-        }
-
-        const { error: releaseUpdateErr } = await supabase.from('orders').update({
-          escrow_status: 'released',
-          release_tx_hash: txHash,
-          escrow_release_error: null,
-          escrow_released_at: new Date().toISOString(),
-        }).eq('id', orderId);
-
-        if (releaseUpdateErr) {
-          logger.error('[escrow] Release confirmed but persistence failed:', releaseUpdateErr.message);
-          return res.status(202).json({
-            message: 'Delivery verified successfully. Escrow release was submitted and requires reconciliation.',
-            escrow_status: 'release_pending',
-            payment_released: false,
-            release_tx_hash: txHash,
-          });
-        }
-
-        const driverId = tripData?.driver_id || order.driver_id;
-        const displayId = tripData?.order_display_id || order.order_display_id;
-        if (driverId) {
-          const { error: walletErr } = await supabase
-            .from('wallet_transactions')
-            .update({
-              tx_hash: txHash,
-              description: `Escrow payout for ${displayId}`,
-            })
-            .eq('driver_id', driverId)
-            .eq('order_display_id', displayId)
-            .eq('txn_type', 'credit');
-
-          if (walletErr) {
-            logger.error(
-              '[wallet] Failed to persist escrow payout:',
-              walletErr.message
-            );
-          }
+        const releaseResult = await releaseEscrowFunds(order.order_display_id);
+        if (releaseResult.txHash) {
           escrowReleased = true;
+        } else if (releaseResult.alreadyReleased) {
+          escrowReleased = true;
+        } else {
+          throw new Error('Escrow release returned no transaction hash');
         }
       } catch (releaseErr) {
-        logger.error('[escrow] Release failed for order', orderId, ':', releaseErr.message);
-        const releaseError = String(releaseErr.message || 'Unknown escrow release error').slice(0, 1000);
-        const { error: failureUpdateErr } = await supabase.from('orders').update({
-          escrow_status: 'release_failed',
-          escrow_release_error: releaseError,
-          escrow_release_last_attempt_at: releaseAttemptedAt,
-        }).eq('id', orderId);
-
-        if (failureUpdateErr) {
-          logger.error('[escrow] Failed to persist release failure:', failureUpdateErr.message);
-        }
-
-        return res.status(202).json({
-          message: 'Delivery verified successfully. Escrow payout is pending retry.',
-          escrow_status: 'release_failed',
-          payment_released: false,
+        logger.error('[escrow] Pre-OTP release failed for order', orderId, ':', releaseErr.message);
+        return res.status(503).json({
+          error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
           retryable: true,
         });
       }
     } else {
-      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
+      logger.info(`[escrow] Escrow not funded (status: ${verifiedOrder.escrow_status}) — skipping on-chain release.`);
     }
 
-    if (order.escrow_status !== 'funded' || escrowReleased) {
-      res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
-    } else {
-      res.status(500).json({ error: 'Delivery verified but on-chain escrow release failed. Contact support.' });
+    // OTP is only consumed after the RPC and blockchain release succeed — if either fails the driver can retry
+    await verifyDeliveryOtp(orderId);
+    await clearOtpState(orderId);
+
+    // Record post-release status in the database (blockchain release already done in pre-check above)
+    if (escrowReleased) {
+      const { error: releaseUpdateErr } = await supabase.from('orders').update({
+        escrow_status: 'released',
+        escrow_release_error: null,
+        escrow_released_at: new Date().toISOString(),
+      }).eq('id', orderId);
+
+      if (releaseUpdateErr) {
+        logger.error('[escrow] Release confirmed but persistence failed:', releaseUpdateErr.message);
+        return res.status(202).json({
+          message: 'Delivery verified successfully. Escrow payout requires reconciliation.',
+          escrow_status: 'released',
+          payment_released: true,
+        });
+      }
+
+      const driverId = tripData?.driver_id || order.driver_id;
+      const displayId = tripData?.order_display_id || order.order_display_id;
+      if (driverId) {
+        const { error: walletErr } = await supabase
+          .from('wallet_transactions')
+          .update({ description: `Escrow payout for ${displayId}` })
+          .eq('driver_id', driverId)
+          .eq('order_display_id', displayId)
+          .eq('txn_type', 'credit');
+
+        if (walletErr) {
+          logger.error('[wallet] Failed to persist escrow payout:', walletErr.message);
+        }
+      }
     }
+
+    res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }

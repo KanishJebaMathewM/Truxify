@@ -1,3 +1,4 @@
+<!-- TEST_COMMENT_AUTO_LABELER -->
 <img width="1536" height="1024" alt="Cover img Truxify" src="https://github.com/user-attachments/assets/eb96ea33-edb3-433a-b6b5-ecaddfc34306" />
 
 # 🚛 Truxify

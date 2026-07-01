@@ -1489,9 +1489,6 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
     if (order.escrow_status !== 'funding') {
       return res.status(400).json({ error: 'Order is not in funding state' });
     }
-    if (order.customer_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    }
 
     const bookingId = order.escrow_booking_id || `escrow:${order.order_display_id}`;
     const result = await recordDepositTx(bookingId, txHash);

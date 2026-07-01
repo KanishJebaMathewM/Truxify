@@ -1,110 +1,99 @@
-// Single source of truth for the ML engine base URL.
-// Both predictDemand and predictPrice resolve from ML_ENGINE_URL.
-// If a dedicated pricing microservice is ever needed, add ML_PRICING_URL explicitly
-// rather than silently checking ML_SERVICE_URL (which was a duplicate of this constant).
+// Single source of truth for ML engine base URL
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 
-// Startup validation: warn if ML_API_KEY is not set
+// Startup validation
 if (!process.env.ML_API_KEY) {
-  // Use console.warn here since logger may not be initialized at module load time
-  console.warn('[ML] WARNING: ML_API_KEY is not set. ML features will be unavailable.');
+    console.warn('[ML] WARNING: ML_API_KEY is not set. ML features will be unavailable.');
 }
 
 /**
- * Predicts ride/truck demand by calling the FastAPI ML engine service.
- *
- * @param {object} features
- * @param {number} features.hour
- * @param {number} features.day_of_week
- * @param {number} features.temperature
- * @param {number} features.precipitation
- * @param {number} features.historical_volume
- * @param {number} features.nearby_drivers
- * @returns {Promise<object>} response from the ML engine
+ * Utility: build headers with optional API key
  */
 function getHeaders() {
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-  if (process.env.ML_API_KEY) {
-    headers['X-API-Key'] = process.env.ML_API_KEY;
-  }
-  return headers;
+    const headers = { 'Content-Type': 'application/json' };
+    if (process.env.ML_API_KEY) {
+        headers['X-API-Key'] = process.env.ML_API_KEY;
+    }
+    return headers;
 }
 
+/**
+ * Utility: handle ML engine responses consistently
+ */
 async function handleResponse(response) {
-  if (response.status === 401 || response.status === 403) {
     const text = await response.text();
-    throw new Error(`ML Engine authentication failed: ${response.status} — check ML_API_KEY configuration`);
-  }
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`ML Engine request failed: ${response.statusText} (${text})`);
-  }
-  return response.json();
+
+    if (response.status === 401 || response.status === 403) {
+        throw new Error(`[ML] Authentication failed (${response.status}): ${text}`);
+    }
+    if (!response.ok) {
+        throw new Error(`[ML] Request failed (${response.status}): ${text}`);
+    }
+
+    try {
+        return JSON.parse(text);
+    } catch {
+        throw new Error('[ML] Invalid JSON response from ML engine');
+    }
 }
 
+/**
+ * Utility: resolve base URL for ML engine
+ */
 function getBaseUrl() {
-  return process.env.ML_ENGINE_URL || process.env.ML_SERVICE_URL || DEFAULT_ML_ENGINE_URL;
-}
-
-function getPriceBaseUrl() {
-  return process.env.ML_SERVICE_URL || process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+    return (
+        process.env.ML_ENGINE_URL ||
+        process.env.ML_SERVICE_URL ||
+        DEFAULT_ML_ENGINE_URL
+    );
 }
 
 /**
- * Predicts ride/truck demand by calling the FastAPI ML engine service.
- *
+ * Predicts ride/truck demand
  * @param {object} features
- * @param {number} features.hour
- * @param {number} features.day_of_week
- * @param {number} features.temperature
- * @param {number} features.precipitation
- * @param {number} features.historical_volume
- * @param {number} features.nearby_drivers
- * @returns {Promise<object>} response from the ML engine
+ * @returns {Promise<object>}
  */
-export async function predictDemand(features) {
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
-  const url = `${baseUrl}/predict/demand`;
+export async function predictDemand(features = {}) {
+    const url = `${getBaseUrl()}/predict/demand`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(features),
-    signal: AbortSignal.timeout(5000),
-  });
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(features),
+        signal: AbortSignal.timeout(5000),
+    });
 
-  return handleResponse(response);
+    return handleResponse(response);
 }
 
 /**
- * Predicts freight price by calling the FastAPI ML engine service.
- *
+ * Predicts freight price
  * @param {object} params
- * @param {number} params.distanceKm - Route distance in kilometres
- * @param {number} params.cargoWeightKg - Cargo weight in kilograms
- * @param {string} [params.truckType] - Type of truck
- * @param {string} [params.routeOrigin] - Origin location
- * @param {string} [params.routeDestination] - Destination location
- * @returns {Promise<{estimated_price: number, currency: string}>} price prediction
+ * @returns {Promise<{estimated_price: number, currency: string}>}
  */
-export async function predictPrice({ distanceKm, cargoWeightKg, truckType, routeOrigin, routeDestination } = {}) {
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
-  const url = `${baseUrl}/predict`;
+export async function predictPrice({
+    distanceKm,
+    cargoWeightKg,
+    truckType = 'medium_truck',
+    routeOrigin = '',
+    routeDestination = '',
+} = {}) {
+    const url = `${getBaseUrl()}/predict`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify({
-      distance_km: distanceKm,
-      cargo_weight_kg: cargoWeightKg,
-      truck_type: truckType || 'medium_truck',
-      route_origin: routeOrigin || '',
-      route_destination: routeDestination || '',
-    }),
-    signal: AbortSignal.timeout(5000),
-  });
+    const payload = {
+        distance_km: distanceKm,
+        cargo_weight_kg: cargoWeightKg,
+        truck_type: truckType,
+        route_origin: routeOrigin,
+        route_destination: routeDestination,
+    };
 
-  return handleResponse(response);
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5000),
+    });
+
+    return handleResponse(response);
 }

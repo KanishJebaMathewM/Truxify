@@ -1,0 +1,1 @@
+# Fix for issue #1010: Supabase Row Level Security policies not enforced for driver location

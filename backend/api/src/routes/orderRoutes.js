@@ -475,10 +475,17 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
 // ============================================================================
 router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   try {
-    let { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
-    if (!order && !orderErr) {
+    let order = null;
+    let orderErr = null;
+    if (uuidRegex.test(orderId)) {
+      const result = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+      order = result.data;
+      orderErr = result.error;
+    }
+    if (!order) {
       const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
       order = result.data;
       orderErr = result.error;
@@ -516,13 +523,15 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
 // ============================================================================
 router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   try {
-    let order;
-    const { data: orderById } = await supabase.from('orders').select('customer_id, driver_id, order_display_id').eq('id', orderId).maybeSingle();
-    if (orderById) {
+    let order = null;
+    if (uuidRegex.test(orderId)) {
+      const { data: orderById } = await supabase.from('orders').select('customer_id, driver_id, order_display_id').eq('id', orderId).maybeSingle();
       order = orderById;
-    } else {
+    }
+    if (!order) {
       const { data: orderByDisplay } = await supabase.from('orders').select('customer_id, driver_id, order_display_id').eq('order_display_id', orderId).maybeSingle();
       order = orderByDisplay;
     }

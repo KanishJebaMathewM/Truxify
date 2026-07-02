@@ -27,10 +27,18 @@ function normalizeRequiredText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function normalizeCategoryAlias(value) {
-  const normalized = normalizeRequiredText(value).toLowerCase();
-  if (!normalized) return null;
-  return CATEGORY_MAP[normalized];
+function parseIntegerQuery(value, fallback, field, { min }) {
+  if (value === undefined) return { value: fallback };
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return { error: `${field} must be an integer greater than or equal to ${min}` };
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (parsed < min) {
+    return { error: `${field} must be an integer greater than or equal to ${min}` };
+  }
+
+  return { value: parsed };
 }
 
 // ============================================================================
@@ -478,6 +486,17 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, async (req, res) 
       return res.status(403).json({ error: 'Access Denied: You do not own this ticket.' });
     }
 
+    const parsedLimit = parseIntegerQuery(req.query.limit, 100, 'limit', { min: 1 });
+    if (parsedLimit.error) {
+      return res.status(400).json({ error: parsedLimit.error });
+    }
+    const parsedOffset = parseIntegerQuery(req.query.offset, 0, 'offset', { min: 0 });
+    if (parsedOffset.error) {
+      return res.status(400).json({ error: parsedOffset.error });
+    }
+
+    const limit = Math.min(100, parsedLimit.value);
+    const offset = parsedOffset.value;
     const rawLimit = req.query.limit;
     const rawOffset = req.query.offset;
     if (rawLimit !== undefined && (!Number.isFinite(Number(rawLimit)) || Number(rawLimit) < 1)) {

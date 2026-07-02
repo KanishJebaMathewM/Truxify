@@ -29,6 +29,14 @@ class LocationService {
   // Throttling configuration: send ping if moved 15m+ OR 30 seconds passed
   static const double _minDistanceMeters = 15.0;
   static const Duration _maxInterval = Duration(seconds: 30);
+  static const List<String> _activeOrderStatuses = [
+    'truck_assigned',
+    'en_route_pickup',
+    'arrived_pickup',
+    'picked_up',
+    'in_transit',
+    'arriving',
+  ];
 
   bool get isTracking => _isTracking;
 
@@ -117,20 +125,28 @@ class LocationService {
       final driverId = Supabase.instance.client.auth.currentUser?.id;
       if (driverId == null || driverId.isEmpty) return;
 
+      if (_activeOrderId != null) {
+        final cachedOrder = await Supabase.instance.client
+            .from('orders')
+            .select('id')
+            .eq('id', _activeOrderId!)
+            .eq('driver_id', driverId)
+            .inFilter('status', _activeOrderStatuses)
+            .maybeSingle();
+
+        if (cachedOrder == null) {
+          _activeOrderId = null;
+          _activeOrderDisplayId = null;
+        }
+      }
+
       // 1. Resolve active order if not cached
       if (_activeOrderId == null) {
         final activeOrder = await Supabase.instance.client
             .from('orders')
             .select('id, order_display_id')
             .eq('driver_id', driverId)
-            .inFilter('status', [
-              'truck_assigned',
-              'en_route_pickup',
-              'arrived_pickup',
-              'picked_up',
-              'in_transit',
-              'arriving'
-            ])
+            .inFilter('status', _activeOrderStatuses)
             .maybeSingle();
 
         if (activeOrder != null) {

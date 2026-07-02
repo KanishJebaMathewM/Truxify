@@ -297,13 +297,3 @@ export async function listModels() {
   });
   return handleResponse(response);
 }
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(5000),
-    });
-
-    return handleResponse(response);
-}

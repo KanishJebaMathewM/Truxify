@@ -105,7 +105,7 @@ export async function buildDepositTx(orderDisplayId, customerWalletAddress, driv
   return { txData, bookingId };
 }
 
-export async function recordDepositTx(bookingId, txHash) {
+export async function recordDepositTx(bookingId, txHash, expectedSenderAddress = null) {
   if (!escrowContract) {
     return { error: 'Contract not initialised' };
   }
@@ -147,6 +147,11 @@ export async function recordDepositTx(bookingId, txHash) {
   // Verify the on-chain sender matches the customer address in the deposit call.
   if (tx.from.toLowerCase() !== txCustomer.toLowerCase()) {
     return { error: 'Transaction sender does not match registered customer wallet' };
+  }
+
+  // If an expected sender address was provided (from order record), verify it matches.
+  if (expectedSenderAddress && tx.from.toLowerCase() !== expectedSenderAddress.toLowerCase()) {
+    return { error: 'Transaction sender does not match the registered customer wallet for this order' };
   }
 
   logger.info(`[escrow] deposit confirmed for booking ${bookingId} in block ${receipt.blockNumber}`);

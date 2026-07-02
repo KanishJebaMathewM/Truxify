@@ -44,7 +44,7 @@ class TripService {
     };
   }
 
-  Future<void> _verifyTripOwnership(String tripDisplayId) async {
+  Future<void> verifyTripOwnership(String tripDisplayId) async {
     final tripCheck = await _client
         .from('trips')
         .select('id')
@@ -150,7 +150,7 @@ class TripService {
     String stopId,
     String tripDisplayId,
   ) async {
-    await _verifyTripOwnership(tripDisplayId);
+    await verifyTripOwnership(tripDisplayId);
 
     final updatedStop = await _client.from('trip_stops').update({
       'is_completed': true,
@@ -200,7 +200,7 @@ class TripService {
   }
 
   Future<void> startTrip(String tripDisplayId) async {
-    await _verifyTripOwnership(tripDisplayId);
+    await verifyTripOwnership(tripDisplayId);
 
     // Find the first stop of this trip that is not completed
     final stops = await _client

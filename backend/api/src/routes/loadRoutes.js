@@ -88,9 +88,6 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
     }
     query = query.eq('status', statusFilter);
 
-    // Escape LIKE special chars in user input to prevent injection
-    const escapeLike = (s) => String(s).replace(/[%_\\]/g, '\\$&');
-
     // Filters
     if (req.query.pickup_location) {
       const pickupLocation = Array.isArray(req.query.pickup_location) ? req.query.pickup_location[0] : req.query.pickup_location;

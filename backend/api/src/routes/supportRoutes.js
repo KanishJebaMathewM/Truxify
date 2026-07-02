@@ -167,7 +167,8 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
   const pageNum = parsedPage;
   const limitNum = Math.min(100, parsedLimit);
   const offset = (pageNum - 1) * limitNum;
-  const dbCategory = normalizeCategoryAlias(category);
+  const normalizedCategory = typeof category === 'string' ? category.toLowerCase().trim() : '';
+  const dbCategory = CATEGORY_MAP[normalizedCategory] || null;
 
   if (category && !dbCategory) {
     return res.status(400).json({ error: 'Unsupported support ticket category.' });
@@ -347,7 +348,8 @@ router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), 
   const pageNum = parsedPage;
   const limitNum = Math.min(100, parsedLimit);
   const offset = (pageNum - 1) * limitNum;
-  const dbCategory = normalizeCategoryAlias(category);
+  const normalizedCategory = typeof category === 'string' ? category.toLowerCase().trim() : '';
+  const dbCategory = CATEGORY_MAP[normalizedCategory] || null;
 
   if (category && !dbCategory) {
     return res.status(400).json({ error: 'Unsupported support ticket category.' });

@@ -12,6 +12,7 @@ import deviceRoutes from './routes/deviceRoutes.js';
 
 import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js';
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js';
+import { attachLocationServer } from './sockets/locationServer.js';
 import { startEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js';
 
 // Load REST routes

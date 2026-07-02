@@ -157,6 +157,12 @@ export const registerDeviceSchema = z.object({
   }).default('android'),
 }).strict();
 
+export const unregisterDeviceSchema = z.object({
+  fcmToken: z.string()
+    .min(10, { message: 'fcmToken must be at least 10 characters' })
+    .max(4096, { message: 'fcmToken is too long' }),
+}).strict();
+
 export const updateFcmTokenSchema = z.object({
   fcmToken: z.string()
     .min(10, { message: 'fcmToken must be at least 10 characters' })

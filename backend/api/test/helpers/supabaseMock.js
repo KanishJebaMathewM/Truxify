@@ -61,6 +61,10 @@ class SupabaseQueryBuilder {
     this._options = options;
     return this;
   }
+  delete() {
+    this._mode = 'delete';
+    return this;
+  }
   select(columns = '*') {
     this._mode = this._mode ?? 'select';
     this._select = columns;
@@ -235,6 +239,22 @@ class SupabaseQueryBuilder {
         return { data: updatedRows[0] ?? null, error: updatedRows[0] ? null : { code: 'PGRST116', message: 'no rows' } };
       }
       return { data: updatedRows, error: null };
+    }
+
+    if (this._mode === 'delete') {
+      const rows = this._store[this._table] ?? [];
+      const remaining = [];
+      const deleted = [];
+      for (const row of rows) {
+        const matches = this._filters.every(f => this._matches(row, f));
+        if (matches) {
+          deleted.push(row);
+        } else {
+          remaining.push(row);
+        }
+      }
+      this._store[this._table] = remaining;
+      return { data: deleted, error: null };
     }
 
     if (this._mode === 'select' || this._mode === null) {

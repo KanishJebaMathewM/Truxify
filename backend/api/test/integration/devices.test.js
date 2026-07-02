@@ -197,4 +197,100 @@ describe('Device Routes Integration Tests', () => {
       expect(res.body.retryAfter).toBe(600);
     });
   });
+
+  describe('DELETE /api/devices/unregister', () => {
+    const UNREGISTER_HEADERS = {
+      'x-user-id': 'unregister-test-user-uuid',
+      'x-user-role': 'customer',
+      'x-user-name': 'Test Customer',
+    };
+
+    it('returns 401 if x-user-id header is missing when BYPASS_AUTH is enabled', async () => {
+      const res = await request(buildApp())
+        .delete('/api/devices/unregister')
+        .send({ fcmToken: 'token1234567890' });
+
+      expect(res.status).toBe(401);
+      expect(res.body.error).toBe('Authentication bypassed but x-user-id header is missing.');
+    });
+
+    it('returns 400 if fcmToken is missing', async () => {
+      const res = await request(buildApp())
+        .delete('/api/devices/unregister')
+        .set(UNREGISTER_HEADERS)
+        .send({});
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation failed');
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'fcmToken' }),
+        ])
+      );
+    });
+
+    it('removes the device record and clears the matching profile token', async () => {
+      m.store.user_devices.push({
+        user_id: 'unregister-test-user-uuid',
+        fcm_token: 'logout-token-123456',
+        platform: 'android',
+      });
+      m.store.profiles.push({
+        id: 'unregister-test-user-uuid',
+        fcm_token: 'logout-token-123456',
+        fcm_token_updated_at: '2026-01-01T00:00:00.000Z',
+      });
+
+      const res = await request(buildApp())
+        .delete('/api/devices/unregister')
+        .set(UNREGISTER_HEADERS)
+        .send({ fcmToken: 'logout-token-123456' });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        success: true,
+        message: 'Device token unregistered',
+      });
+
+      const remainingDevice = m.store.user_devices.find(
+        (d) => d.user_id === 'unregister-test-user-uuid' && d.fcm_token === 'logout-token-123456'
+      );
+      expect(remainingDevice).toBeUndefined();
+
+      const profile = m.store.profiles.find((p) => p.id === 'unregister-test-user-uuid');
+      expect(profile.fcm_token).toBeNull();
+    });
+
+    it('does not remove another user\'s device record for the same token', async () => {
+      m.store.user_devices.push({
+        user_id: 'other-user-uuid',
+        fcm_token: 'shared-device-token',
+        platform: 'android',
+      });
+
+      const res = await request(buildApp())
+        .delete('/api/devices/unregister')
+        .set(UNREGISTER_HEADERS)
+        .send({ fcmToken: 'shared-device-token' });
+
+      expect(res.status).toBe(200);
+
+      const stillThere = m.store.user_devices.find(
+        (d) => d.user_id === 'other-user-uuid' && d.fcm_token === 'shared-device-token'
+      );
+      expect(stillThere).toBeTruthy();
+    });
+
+    it('returns 500 if database deletion fails and does not expose internal error details', async () => {
+      m.programError('Database connection lost');
+
+      const res = await request(buildApp())
+        .delete('/api/devices/unregister')
+        .set(UNREGISTER_HEADERS)
+        .send({ fcmToken: 'token_err_database' });
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Failed to unregister device');
+    });
+  });
 });

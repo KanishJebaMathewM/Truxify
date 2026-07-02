@@ -1,0 +1,1 @@
+# Fix for issue #1494: Flutter app shows blank screen with no error when network unavailable

@@ -465,10 +465,10 @@ export async function handleLocationPing(ws, data) {
   // Buffer write with capacity limit (always push to active buffer)
   if (telemetryWriteBuffer.length >= MAX_BUFFER_SIZE) {
     const dropCount = Math.floor(MAX_BUFFER_SIZE * 0.1);
-    telemetryWriteBuffer.splice(telemetryWriteBuffer.length - dropCount, dropCount);
+    telemetryWriteBuffer.splice(0, dropCount);
     telemetryTotalDropped += dropCount;
     telemetryOverflowDropped += dropCount;
-    logger.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} newest records. Total dropped: ${telemetryTotalDropped}. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
+    logger.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} oldest records. Total dropped: ${telemetryTotalDropped}. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
   }
   telemetryWriteBuffer.push({
     driver_id,
@@ -629,10 +629,10 @@ async function flushTelemetryBuffer() {
           telemetryFlushBuffer = [...succeeded, ...telemetryFlushBuffer];
           if (telemetryFlushBuffer.length > MAX_BUFFER_SIZE) {
             const overflowDrop = telemetryFlushBuffer.length - MAX_BUFFER_SIZE;
-            telemetryFlushBuffer.splice(telemetryFlushBuffer.length - overflowDrop, overflowDrop);
+            telemetryFlushBuffer.splice(0, overflowDrop);
             telemetryTotalDropped += overflowDrop;
             telemetryOverflowDropped += overflowDrop;
-            logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} newest records due to capacity after partial insert.`);
+            logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after partial insert.`);
           }
         }
       } else {
@@ -641,10 +641,10 @@ async function flushTelemetryBuffer() {
         telemetryFlushBuffer = [...recordsToFlush, ...telemetryFlushBuffer];
         if (telemetryFlushBuffer.length > MAX_BUFFER_SIZE) {
           const overflowDrop = telemetryFlushBuffer.length - MAX_BUFFER_SIZE;
-          telemetryFlushBuffer.splice(telemetryFlushBuffer.length - overflowDrop, overflowDrop);
+          telemetryFlushBuffer.splice(0, overflowDrop);
           telemetryTotalDropped += overflowDrop;
           telemetryOverflowDropped += overflowDrop;
-          logger.warn(`[TRUXIFY BUFFER DROP] Capacity limit: dropped ${overflowDrop} newest records from retry merge. Total dropped: ${telemetryTotalDropped}`);
+          logger.warn(`[TRUXIFY BUFFER DROP] Capacity limit: dropped ${overflowDrop} oldest records from retry merge. Total dropped: ${telemetryTotalDropped}`);
         }
       }
     } finally {

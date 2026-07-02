@@ -1543,7 +1543,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     expect(t.getTelemetryWriteBuffer().length).toBe(0);
   });
 
-  it.skip('re-queues buffer on transient MongoDB error', async () => {
+  it('re-queues buffer on transient MongoDB error', async () => {
     const insertMany = vi.fn().mockImplementation(async () => {
       // Simulate a concurrent new ping arriving while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
@@ -1571,7 +1571,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     expect(buffer[1].driver_id).toBe('new-driver');
   });
 
-  it.skip('caps retry re-queue depth to prevent geometric growth on persistent failures', async () => {
+  it('caps retry re-queue depth to prevent geometric growth on persistent failures', async () => {
     const insertMany = vi.fn().mockImplementation(async () => {
       // Simulate new pings arriving to almost fill the buffer while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
@@ -1712,7 +1712,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       __testing.clearTelemetryWriteBuffer();
     });
 
-    it.skip('enforces MAX_BUFFER_SIZE by dropping 10% of the oldest telemetry records', async () => {
+    it('enforces MAX_BUFFER_SIZE by dropping 10% of the oldest telemetry records', async () => {
       const mockRecords = Array.from({ length: 10000 }, (_, i) => ({ driver_id: `driver-old-${i}` }));
       __testing.setTelemetryWriteBuffer(mockRecords);
 

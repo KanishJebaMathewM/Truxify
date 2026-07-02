@@ -35,6 +35,17 @@ class AddressRepository {
   /// Set an address as the default, clearing all others.
   Future<void> setDefault(String addressId) async {
     final userId = SupabaseService.requireUserId();
+    final existing = await SupabaseService.client
+        .from(_table)
+        .select('id')
+        .eq('id', addressId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    if (existing == null) {
+      throw StateError('Saved address not found.');
+    }
+
     await _clearDefaults(userId);
     await SupabaseService.client
         .from(_table)

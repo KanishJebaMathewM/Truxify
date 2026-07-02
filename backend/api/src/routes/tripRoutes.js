@@ -279,6 +279,18 @@ router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
     }
 
     if (min_lat !== undefined || max_lat !== undefined || min_lng !== undefined || max_lng !== undefined) {
+      if (min_lat !== undefined && !Number.isFinite(Number(min_lat))) {
+        return res.status(400).json({ error: 'min_lat must be a valid number' });
+      }
+      if (max_lat !== undefined && !Number.isFinite(Number(max_lat))) {
+        return res.status(400).json({ error: 'max_lat must be a valid number' });
+      }
+      if (min_lng !== undefined && !Number.isFinite(Number(min_lng))) {
+        return res.status(400).json({ error: 'min_lng must be a valid number' });
+      }
+      if (max_lng !== undefined && !Number.isFinite(Number(max_lng))) {
+        return res.status(400).json({ error: 'max_lng must be a valid number' });
+      }
       filteredEvents = filteredEvents.filter(e => {
         if (e.latitude === null || e.longitude === null || e.latitude === undefined || e.longitude === undefined) return false;
         const lat = Number(e.latitude);

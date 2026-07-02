@@ -826,7 +826,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
   Future<_RouteResult?> _loadRouteForTrip(String routeLabel) async {
     try {
-      final parts = routeLabel.split('→');
+      final normalized = routeLabel.replaceAll('->', '→').replaceAll('=>', '→');
+      final parts = normalized.split('→');
       final startLabel = parts.isNotEmpty ? parts[0].trim() : '';
       final endLabel = parts.length > 1 ? parts[1].trim() : '';
 

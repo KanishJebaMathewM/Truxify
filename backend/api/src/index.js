@@ -7,6 +7,7 @@ import path from 'path';
 import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimiter.js';
 import tripRoutes from './routes/tripRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
+import documentRoutes from './routes/documentRoutes.js';
 
 
 
@@ -146,6 +147,7 @@ app.use('/api/loads', loadRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/devices', deviceRoutes);
+app.use('/api/driver/documents', documentRoutes);
 app.use('/api/trucks', truckRoutes);
 app.use('/api/auth', authLimiter, authRoutes);
 

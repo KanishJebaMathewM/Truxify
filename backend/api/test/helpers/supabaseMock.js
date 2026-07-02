@@ -297,12 +297,30 @@ export function createSupabaseMock(initialStore = {}) {
       }
       return Promise.resolve({ data: null, error: null });
     },
+    storage: {
+      from(bucket) {
+        return {
+          async upload(path, buffer, options) {
+            calls.push({ storageUpload: { bucket, path, options } });
+            if (programmed.nextStorageError) {
+              const err = programmed.nextStorageError;
+              programmed.nextStorageError = null;
+              return { data: null, error: err };
+            }
+            if (!store.__storageObjects) store.__storageObjects = [];
+            store.__storageObjects.push({ bucket, path, buffer, options });
+            return { data: { path }, error: null };
+          },
+        };
+      },
+    },
   };
   return {
     supabase,
     store,
     calls,
     programError(msg = 'mock error')    { programmed.nextError    = { message: msg }; },
+    programStorageError(msg = 'mock storage error') { programmed.nextStorageError = { message: msg }; },
     programRpcError(msg = 'mock error') { programmed.nextRpcError = { message: msg }; },
     programData(data)                   { programmed.nextData = data; },
   };

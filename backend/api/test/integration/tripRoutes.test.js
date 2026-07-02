@@ -48,6 +48,8 @@ describe('Trip Routes', () => {
     beforeEach(() => {
         m.store.trip_events = [];
         m.store.processed_batches = [];
+        m.store.orders = [{ id: 'trip-1', driver_id: 'driver-1', customer_id: 'customer-1' }];
+        m.store.trips = [];
         m.calls.length = 0;
     });
 
@@ -356,7 +358,14 @@ describe('GET /api/trips/:id/events', () => {
     process.env.BYPASS_AUTH = 'true';
     process.env.NODE_ENV = 'test';
     m.store.trip_events = [];
-    m.store.orders = [];
+    m.store.orders = [
+      { id: 'trip-abc', driver_id: 'driver-1', customer_id: 'customer-other' },
+      { id: 'trip-admin', driver_id: 'driver-other', customer_id: 'customer-other' },
+      { id: 'trip-filter', driver_id: 'driver-1', customer_id: 'customer-other' },
+      { id: 'trip-sort', driver_id: 'driver-1', customer_id: 'customer-other' },
+      { id: 'trip-bbox', driver_id: 'driver-1', customer_id: 'customer-other' },
+    ];
+    m.store.trips = [];
     m.calls.length = 0;
   });
 
@@ -466,5 +475,24 @@ describe('GET /api/trips/:id/events', () => {
     expect(res.status).toBe(200);
     expect(res.body.events).toHaveLength(1);
     expect(res.body.events[0].event_id).toBe('ev-in');
+  });
+
+  it('returns 403 for unauthorized customer who does not own the order', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: 'trip-xyz', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+    );
+    m.store.orders.push({ id: 'trip-xyz', driver_id: 'driver-1', customer_id: 'customer-owner' });
+
+    const UNAUTHORIZED_CUSTOMER = {
+      'x-user-id': 'unauthorized-customer-id',
+      'x-user-role': 'customer',
+    };
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/trip-xyz/events')
+      .set(UNAUTHORIZED_CUSTOMER);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('Access Denied');
   });
 });

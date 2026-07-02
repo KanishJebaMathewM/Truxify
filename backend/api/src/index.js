@@ -25,6 +25,7 @@ import authRoutes from './routes/authRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 
 import logger from './middleware/logger.js';
+import { setupSwagger } from './config/swagger.js';
 import { requestIdMiddleware, requestLogger } from './middleware/requestId.js';
 import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js';
 import {
@@ -146,6 +147,10 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/trucks', truckRoutes);
 app.use('/api/auth', authLimiter, authRoutes);
+
+// Setup Swagger Documentation
+setupSwagger(app);
+
 // Root route
 app.get('/', (req, res) => {
   res.send('<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://localhost:5000/ws/tracking</code></p>');

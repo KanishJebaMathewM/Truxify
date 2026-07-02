@@ -631,5 +631,15 @@ describe('Support Routes', () => {
         expect(res.body.labels[cat]).toBeDefined();
       }
     });
+
+    it('each category in the array has a corresponding description', async () => {
+      const res = await request(buildApp())
+        .get('/api/support/categories');
+
+      expect(res.status).toBe(200);
+      for (const cat of res.body.categories) {
+        expect(res.body.descriptions[cat]).toBeDefined();
+      }
+    });
   });
 });

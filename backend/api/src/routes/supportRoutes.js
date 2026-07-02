@@ -102,6 +102,12 @@ const CATEGORY_DESCRIPTIONS = {
   account: 'Login problems, account settings, and profile access.',
 };
 
+/**
+ * @route GET /api/support/categories
+ * @desc Retrieve the valid support ticket categories, their human-readable labels, descriptions, and SLA response times
+ * @access Public (No authentication required)
+ * @returns {object} 200 - Object containing categories array, labels map, SLA hours map, and descriptions map
+ */
 router.get('/categories', (_req, res) => {
   res.json({
     categories: VALID_CATEGORIES,
@@ -499,16 +505,6 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, async (req, res) 
 
     const limit = Math.min(100, parsedLimit.value);
     const offset = parsedOffset.value;
-    const rawLimit = req.query.limit;
-    const rawOffset = req.query.offset;
-    if (rawLimit !== undefined && (!Number.isFinite(Number(rawLimit)) || Number(rawLimit) < 1)) {
-      return res.status(400).json({ error: 'limit must be a positive integer' });
-    }
-    if (rawOffset !== undefined && (!Number.isFinite(Number(rawOffset)) || Number(rawOffset) < 0)) {
-      return res.status(400).json({ error: 'offset must be a non-negative integer' });
-    }
-    const limit = Math.min(100, Math.max(1, Number(rawLimit) || 100));
-    const offset = Math.max(0, Number(rawOffset) || 0);
 
     const { data: comments, error: commentsError } = await supabase
       .from('support_ticket_comments')

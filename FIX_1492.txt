@@ -1,0 +1,1 @@
+# Fix for issue #1492: Upstash Redis credentials embedded in Flutter source

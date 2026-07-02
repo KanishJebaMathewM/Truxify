@@ -67,7 +67,10 @@ export async function sendFcmNotification(userId, notification, data = {}) {
   }
 
   const stringData = Object.fromEntries(
-    Object.entries(data).map(([k, v]) => [k, String(v)])
+    Object.entries(data).map(([k, v]) => [
+      k,
+      typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v),
+    ])
   );
 
   let lastError = null;

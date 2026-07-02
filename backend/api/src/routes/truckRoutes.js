@@ -76,13 +76,21 @@ router.get('/', authenticate, requireRole(['driver']), userLimiter, async (req, 
       .eq('owner_id', req.user.id);
 
     if (name) {
-      query = query.ilike('name', `%${name}%`);
+      query = query.ilike('name', `%${name.trim()}%`);
+    }
+    const parsedMin = Number(min_capacity);
+    const parsedMax = Number(max_capacity);
+    if (min_capacity && (!Number.isFinite(parsedMin) || parsedMin < 0)) {
+      return res.status(400).json({ error: 'min_capacity must be a non-negative number' });
+    }
+    if (max_capacity && (!Number.isFinite(parsedMax) || parsedMax < 0)) {
+      return res.status(400).json({ error: 'max_capacity must be a non-negative number' });
     }
     if (min_capacity) {
-      query = query.gte('max_capacity_tons', Number(min_capacity));
+      query = query.gte('max_capacity_tons', parsedMin);
     }
     if (max_capacity) {
-      query = query.lte('max_capacity_tons', Number(max_capacity));
+      query = query.lte('max_capacity_tons', parsedMax);
     }
 
     const { data: trucks, error } = await query.order('created_at', { ascending: false });

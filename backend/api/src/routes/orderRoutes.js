@@ -307,6 +307,8 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), validateB
 
     if (timelineErr) {
       logger.error('Timeline Insertion Error:', timelineErr.message);
+      await supabase.from('orders').delete().eq('id', order.id);
+      return res.status(500).json({ error: 'Failed to create order timeline.', details: timelineErr.message });
     }
 
     const { error: offerErr } = await supabase
@@ -331,18 +333,9 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), validateB
 
     if (offerErr) {
       logger.error('Load Offer Insertion Error:', offerErr.message);
-    }
-
-    // Verify pricing was stored correctly (integrity check)
-    const { data: verifyOffer } = await supabase
-      .from('load_offers')
-      .select('freight_value, net_profit, fuel_cost, toll_cost, extra_distance_km')
-      .eq('order_display_id', orderDisplayId)
-      .single();
-
-    if (verifyOffer && verifyOffer.freight_value !== pricing.baseFreight) {
-      logger.error(`[SECURITY] Load offer pricing mismatch for ${orderDisplayId}: ` +
-        `expected ${pricing.baseFreight}, got ${verifyOffer.freight_value}`);
+      await supabase.from('order_timeline').delete().eq('order_display_id', orderDisplayId);
+      await supabase.from('orders').delete().eq('id', order.id);
+      return res.status(500).json({ error: 'Failed to create load offer.', details: offerErr.message });
     }
 
     res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });

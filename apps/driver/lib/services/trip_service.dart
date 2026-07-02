@@ -36,8 +36,14 @@ class TripService {
   }
 
   Future<Map<String, String>> _authHeaders() async {
-    final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
-    final userId = _client.auth.currentUser?.id ?? '';
+    String? accessToken;
+    try {
+      accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
+    } catch (_) {
+      // Firebase may not be initialized (misconfigured build or test
+      // environment); send the request without an Authorization header
+      // instead of crashing the whole trip operation.
+    }
     return <String, String>{
       'Content-Type': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',

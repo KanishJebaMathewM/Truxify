@@ -499,16 +499,6 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, async (req, res) 
 
     const limit = Math.min(100, parsedLimit.value);
     const offset = parsedOffset.value;
-    const rawLimit = req.query.limit;
-    const rawOffset = req.query.offset;
-    if (rawLimit !== undefined && (!Number.isFinite(Number(rawLimit)) || Number(rawLimit) < 1)) {
-      return res.status(400).json({ error: 'limit must be a positive integer' });
-    }
-    if (rawOffset !== undefined && (!Number.isFinite(Number(rawOffset)) || Number(rawOffset) < 0)) {
-      return res.status(400).json({ error: 'offset must be a non-negative integer' });
-    }
-    const limit = Math.min(100, Math.max(1, Number(rawLimit) || 100));
-    const offset = Math.max(0, Number(rawOffset) || 0);
 
     const { data: comments, error: commentsError } = await supabase
       .from('support_ticket_comments')

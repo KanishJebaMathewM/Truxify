@@ -397,9 +397,19 @@ router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), 
   }
 });
 
-// ============================================================================
-// 7. CREATE A COMMENT/REPLY ON A TICKET (CUSTOMER OR DRIVER OWNER OR ADMIN)
-// ============================================================================
+/**
+ * @route POST /api/support/tickets/:id/comments
+ * @desc Create a comment/reply on a support ticket
+ * @access Authenticated (Ticket Owner or Admin)
+ * @param {string} req.params.id - The UUID of the support ticket
+ * @param {string} req.body.message - Comment content/message
+ * @returns {object} 201 - Comment added successfully with comment details
+ * @returns {object} 400 - Validation errors
+ * @returns {object} 403 - Forbidden if user is not the ticket owner or admin
+ * @returns {object} 404 - Support ticket not found
+ * @returns {object} 409 - Cannot comment on a closed ticket
+ * @returns {object} 500 - Internal server error
+ */
 router.post('/tickets/:id/comments', authenticate, userLimiter, validateBody(createTicketCommentSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { message } = req.body;
@@ -461,6 +471,20 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, validateBody(cre
 // ============================================================================
 // 8. GET ALL COMMENTS/REPLIES FOR A TICKET (CUSTOMER OR DRIVER OWNER OR ADMIN)
 // ============================================================================
+/**
+ * @route GET /api/support/tickets/:id/comments
+ * @desc Get all comments/replies for a support ticket
+ * @access Authenticated (Ticket Owner or Admin)
+ * @param {string} req.params.id - The UUID of the support ticket
+ * @param {string} [req.query.sort] - Chronological sort order ('asc' or 'desc', defaults to 'asc')
+ * @param {number} [req.query.limit] - Max comments to fetch (defaults to 100)
+ * @param {number} [req.query.offset] - Offset for pagination (defaults to 0)
+ * @returns {array} 200 - List of comments
+ * @returns {object} 400 - Validation errors for limit/offset
+ * @returns {object} 403 - Forbidden if user is not the ticket owner or admin
+ * @returns {object} 404 - Support ticket not found
+ * @returns {object} 500 - Internal server error
+ */
 router.get('/tickets/:id/comments', authenticate, userLimiter, async (req, res) => {
   const ticketId = req.params.id;
   const { sort } = req.query;
@@ -499,16 +523,6 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, async (req, res) 
 
     const limit = Math.min(100, parsedLimit.value);
     const offset = parsedOffset.value;
-    const rawLimit = req.query.limit;
-    const rawOffset = req.query.offset;
-    if (rawLimit !== undefined && (!Number.isFinite(Number(rawLimit)) || Number(rawLimit) < 1)) {
-      return res.status(400).json({ error: 'limit must be a positive integer' });
-    }
-    if (rawOffset !== undefined && (!Number.isFinite(Number(rawOffset)) || Number(rawOffset) < 0)) {
-      return res.status(400).json({ error: 'offset must be a non-negative integer' });
-    }
-    const limit = Math.min(100, Math.max(1, Number(rawLimit) || 100));
-    const offset = Math.max(0, Number(rawOffset) || 0);
 
     const { data: comments, error: commentsError } = await supabase
       .from('support_ticket_comments')

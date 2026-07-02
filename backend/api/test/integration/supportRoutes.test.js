@@ -591,6 +591,16 @@ describe('Support Routes', () => {
       expect(res.body).toHaveLength(2);
       expect(res.body[0].message).toBe('Second');
     });
+
+    it('POST /tickets/:id/comments returns 404 for commenting on non-existent ticket', async () => {
+      const res = await request(buildApp())
+        .post('/api/support/tickets/non-existent-ticket-id/comments')
+        .set(CUSTOMER_HEADERS)
+        .send({ message: 'Hello' });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toContain('Support ticket not found');
+    });
   });
 
   describe('GET /api/support/categories', () => {

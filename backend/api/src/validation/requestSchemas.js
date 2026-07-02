@@ -52,11 +52,12 @@ export const createOrderSchema = z.object({
   special_requirements: z.string().max(500).optional().nullable(),
   payment_method_id: z.string().optional(),
   upi_id: z.string().regex(upiRegex, "Invalid UPI ID format").optional().or(z.literal('')).nullable(),
-  base_freight: z.any().optional(),
-  toll_estimate: z.any().optional(),
-  platform_fee: z.any().optional(),
-  total_amount: z.any().optional(),
-  estimated_price: z.any().optional(),
+  // Server-computed fields — reject any client-supplied value to prevent price manipulation.
+  base_freight: z.never().optional(),
+  toll_estimate: z.never().optional(),
+  platform_fee: z.never().optional(),
+  total_amount: z.never().optional(),
+  estimated_price: z.never().optional(),
 }).strict();
 
 export const paramIdSchema = z.object({
@@ -154,6 +155,13 @@ export const registerDeviceSchema = z.object({
   platform: z.enum(['android', 'ios', 'web'], {
     invalid_type_error: 'platform must be one of: android, ios, web',
   }).default('android'),
+}).strict();
+
+export const updateFcmTokenSchema = z.object({
+  fcmToken: z.string()
+    .min(10, { message: 'fcmToken must be at least 10 characters' })
+    .max(4096, { message: 'fcmToken is too long' })
+    .nullable(),
 }).strict();
 
 export const createTicketSchema = z.object({

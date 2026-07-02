@@ -25,7 +25,9 @@ export async function reconcilePendingEscrowRefunds() {
       leaseExtender = setInterval(async () => {
         try {
           await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-        } catch (_) {}
+        } catch (err) {
+          logger.warn('[escrow-reconciliation] Failed to extend lock lease:', err.message);
+        }
       }, LEASE_EXTENSION_INTERVAL_MS);
     } catch (err) {
       logger.error('[escrow-reconciliation] Failed to acquire Redis lock:', err.message);

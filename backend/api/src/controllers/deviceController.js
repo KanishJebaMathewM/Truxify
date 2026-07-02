@@ -21,6 +21,22 @@ export async function registerDeviceToken(req, res) {
       });
     }
 
+    const tokenUpdatedAt = new Date().toISOString();
+    const { data: existingDevice, error: lookupError } = await supabase
+      .from('user_devices')
+      .select('user_id')
+      .eq('fcm_token', fcmToken)
+      .maybeSingle();
+
+    if (lookupError) {
+      logger.error('[DeviceController] Failed to look up existing device token owner:', lookupError.message);
+      return res.status(500).json({
+        error: 'Failed to register device'
+      });
+    }
+
+    const previousUserId = existingDevice?.user_id;
+
     const { error } = await supabase.from('user_devices').upsert(
       {
         user_id: userId,
@@ -36,12 +52,30 @@ export async function registerDeviceToken(req, res) {
         error: 'Failed to register device'
       });
     }
-    
+
+    if (previousUserId && previousUserId !== userId) {
+      const { error: staleProfileError } = await supabase
+        .from('profiles')
+        .update({
+          fcm_token: null,
+          fcm_token_updated_at: tokenUpdatedAt,
+        })
+        .eq('id', previousUserId)
+        .eq('fcm_token', fcmToken);
+
+      if (staleProfileError) {
+        logger.error(
+          '[DeviceController] Device token saved but failed to clear previous profiles.fcm_token:',
+          staleProfileError.message
+        );
+      }
+    }
+
     const { error: profileSyncError } = await supabase
       .from('profiles')
       .update({
         fcm_token: fcmToken,
-        fcm_token_updated_at: new Date().toISOString(),
+        fcm_token_updated_at: tokenUpdatedAt,
       })
       .eq('id', userId);
 

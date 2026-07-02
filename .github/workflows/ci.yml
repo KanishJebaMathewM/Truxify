@@ -31,7 +31,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend/api
-        run: npm ci
+        run: npm ci --no-workspaces
 
       - name: Run unit tests
         working-directory: backend/api
@@ -100,3 +100,26 @@ jobs:
       - name: Test
         working-directory: apps/driver
         run: flutter test
+
+  ml:
+    name: ML engine tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/ml/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend/ml
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        working-directory: backend/ml
+        run: python -m pytest tests/ -v

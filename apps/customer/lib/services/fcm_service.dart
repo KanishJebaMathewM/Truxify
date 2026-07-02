@@ -74,7 +74,7 @@ class FcmService {
     );
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      debugPrint('[FCM] Token updated successfully on backend: $token');
+      debugPrint('[FCM] Token updated successfully on backend.');
     } else {
       debugPrint('[FCM] Failed to update token on backend: ${response.body}');
     }

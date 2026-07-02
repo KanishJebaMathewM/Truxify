@@ -9,3 +9,6 @@ analyzer:
     unnecessary_brace_in_string_interps: ignore
     unused_import: ignore
     unused_field: ignore
+    depend_on_referenced_packages: ignore
+    avoid_print: ignore
+    unused_local_variable: ignore

@@ -424,8 +424,13 @@ final Map<String, LoadOffer> loadOfferById = {
 // Trips screen mock data
 // ──────────────────────────────────────────────────
 
+// ──────────────────────────────────────────────────
+// Trips screen mock data
+// ──────────────────────────────────────────────────
+
 const List<Trip> mockTrips = [
   Trip(
+    tripId: 'mock-trip-1',
     route: 'Surat → Jaipur',
     date: 'Today · 6:00 AM',
     items: ['Textile 3t', 'Electronics 2t'],
@@ -433,7 +438,6 @@ const List<Trip> mockTrips = [
     distance: '612 km',
     earnings: '₹6,800',
     status: TripStatusType.active,
-    tripId: '#TX20241205',
     hash: '0x3a574d5c8f2c...31128',
     duration: '9h 45m',
     endTime: '3:45 PM',
@@ -462,6 +466,7 @@ const List<Trip> mockTrips = [
     ],
   ),
   Trip(
+    tripId: 'mock-trip-2',
     route: 'Mumbai → Delhi',
     date: '25 Nov 2024 · 8:00 AM',
     items: ['Machinery 5t'],
@@ -469,7 +474,6 @@ const List<Trip> mockTrips = [
     distance: '1,400 km',
     earnings: '₹8,400',
     status: TripStatusType.completed,
-    tripId: '#TX20241125',
     hash: '0x5b2b1e3a7d...6ad1',
     duration: '18h 30m',
     endTime: '2:30 AM',
@@ -491,6 +495,7 @@ const List<Trip> mockTrips = [
     ],
   ),
   Trip(
+    tripId: 'mock-trip-3',
     route: 'Ahmedabad → Pune',
     date: '20 Nov 2024 · 5:30 AM',
     items: ['Furniture 4t', 'Packaging 1t'],
@@ -498,7 +503,6 @@ const List<Trip> mockTrips = [
     distance: '530 km',
     earnings: '₹4,800',
     status: TripStatusType.completed,
-    tripId: '#TX20241120',
     hash: '0x9cf11a4b5e...1b39',
     duration: '8h 15m',
     endTime: '1:45 PM',
@@ -527,6 +531,7 @@ const List<Trip> mockTrips = [
     ],
   ),
   Trip(
+    tripId: 'mock-trip-4',
     route: 'Vadodara → Mumbai',
     date: '15 Nov 2024 · 7:00 AM',
     items: ['Textile 2t'],
@@ -534,7 +539,6 @@ const List<Trip> mockTrips = [
     distance: '430 km',
     earnings: '₹3,200',
     status: TripStatusType.completed,
-    tripId: '#TX20241115',
     hash: '0x1aa63bce90...c901',
     duration: '7h 10m',
     endTime: '2:10 PM',
@@ -556,6 +560,7 @@ const List<Trip> mockTrips = [
     ],
   ),
   Trip(
+    tripId: 'mock-trip-5',
     route: 'Surat → Hyderabad',
     date: '10 Nov 2024 · 9:00 AM',
     items: [],
@@ -563,7 +568,6 @@ const List<Trip> mockTrips = [
     distance: '—',
     earnings: '₹0',
     status: TripStatusType.cancelled,
-    tripId: '#TX20241110',
     hash: '0x0000000000...0000',
     duration: '—',
     endTime: '—',

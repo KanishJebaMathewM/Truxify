@@ -13,7 +13,6 @@ import 'package:latlong2/latlong.dart' as ll;
 import 'package:truxify_driver/widgets/slide_to_confirm_button.dart';
 
 import '../core/app_routes.dart';
-import '../data/mock_data.dart';
 import '../models/app_models.dart';
 import '../models/earnings_daily_model.dart';
 import '../services/driver_earnings_service.dart';
@@ -66,6 +65,10 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showStatusCard = true;
   final TripService _tripService = TripService();
   String? _activeTripId;
+  String _activeTruckLabel = '';
+  String _activeTripDistance = '';
+  String _activeTripDuration = '';
+  String _activeTripPayout = '';
   bool _isLoadingLocation = true;
   String? _locationError;
 
@@ -78,6 +81,7 @@ class _HomeScreenState extends State<HomeScreen> {
   late final DriverEarningsService _earningsService;
   EarningsDailyModel? _todayEarnings;
   double? _driverRating;
+  List<TripRecord> _tripHistory = [];
   bool _isLoadingMetrics = true;
   String? _metricsError;
 
@@ -171,14 +175,30 @@ class _HomeScreenState extends State<HomeScreen> {
       final results = await Future.wait([
         _earningsService.fetchTodayEarningsSummary(),
         _earningsService.fetchDriverStats(),
+        _tripService.fetchTripHistory(limit: 50),
       ]);
 
       if (!mounted) return;
+
+      final historyData = results[2] as Map<String, dynamic>;
+      final historyList = (historyData['trips'] as List?)
+          ?.map((t) => TripRecord(
+                route: (t['route'] as String?) ?? (t['route_label'] as String?) ?? '',
+                date: (t['date'] as String?) ?? (t['trip_date'] as String?) ?? '',
+                earnings: (t['earnings'] as String?) ?? (t['payout'] as String?) ?? '',
+                statusLabel: (t['status_label'] as String?) ?? (t['status'] as String?) ?? '',
+                tripId: (t['trip_display_id'] as String?) ?? (t['trip_id'] as String?) ?? '',
+                hash: (t['hash'] as String?) ?? (t['blockchain_hash'] as String?) ?? '',
+                verifiedBadge: (t['verified_badge'] as String?) ?? '',
+                completed: (t['completed'] as bool?) ?? (t['is_completed'] as bool?) ?? false,
+              ))
+          .toList() ?? [];
 
       setState(() {
         _todayEarnings = results[0] as EarningsDailyModel?;
         final stats = results[1] as Map<String, dynamic>;
         _driverRating = (stats['rating'] as num?)?.toDouble();
+        _tripHistory = historyList;
         _isLoadingMetrics = false;
       });
     } catch (e) {
@@ -407,9 +427,23 @@ class _HomeScreenState extends State<HomeScreen> {
         final tripId = activeTrip['trip_display_id'] as String;
         final stops = await _tripService.fetchTripStops(tripId);
         if (!mounted) return;
-        
+
+        final truckPlate = (activeTrip['truck_plate'] as String?) ?? '';
+        final truckModel = (activeTrip['truck_model'] as String?) ?? '';
+        final truckLabel = truckPlate.isNotEmpty && truckModel.isNotEmpty
+            ? '$truckPlate · $truckModel'
+            : (activeTrip['truck_label'] as String?) ?? 'Truck assigned';
+
         setState(() {
           _activeTripId = tripId;
+          _activeTruckLabel = truckLabel;
+          _activeTripDistance = (activeTrip['distance'] as String?) ??
+              (activeTrip['trip_distance'] as String?) ?? '';
+          _activeTripDuration = (activeTrip['duration'] as String?) ??
+              (activeTrip['trip_duration'] as String?) ?? '';
+          _activeTripPayout = (activeTrip['estimated_payout'] as String?) ??
+              (activeTrip['price'] as String?) ??
+              (activeTrip['payout'] as String?) ?? '';
           _isTripStarted = stops.any((s) => s['is_completed'] == true || s['is_current'] == true);
         });
         
@@ -828,7 +862,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   String _formatTimeSinceLastTrip() {
     DateTime? latest;
-    for (final record in tripHistory) {
+    for (final record in _tripHistory) {
       if (!record.completed) continue;
       final parsed = _parseTripHistoryDate(record.date);
       if (parsed == null) continue;
@@ -1296,6 +1330,7 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: Icons.account_balance_wallet_outlined,
             value: payValue,
             label: 'Today\'s Pay',
+            labelKey: const Key('today_pay_label'),
           ),
         ),
         const SizedBox(width: 8),
@@ -1324,7 +1359,7 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         color: Theme.of(context).brightness == Brightness.dark
             ? Theme.of(context).colorScheme.surfaceContainerHighest
-            : const Color(0xFFF9F7F7),
+            : TruxifyColors.background,
         border: Border.all(color: TruxifyColors.border),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -1349,13 +1384,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildShiftMetric(
       {required IconData icon,
       required String value,
-      required String label}) {
+      required String label,
+      Key? labelKey}) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       decoration: BoxDecoration(
         color: Theme.of(context).brightness == Brightness.dark
             ? Theme.of(context).colorScheme.surfaceContainerHighest
-            : const Color(0xFFF9F7F7),
+            : TruxifyColors.background,
         border: Border.all(color: TruxifyColors.border),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -1373,6 +1409,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           Text(
             label,
+            key: labelKey,
             style: GoogleFonts.dmSans(
               fontSize: 9,
               color: TruxifyColors.adaptiveSecondaryText(context),
@@ -1460,7 +1497,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: _isTripStarted
-                      ? const Color(0xFFEAFCEE)
+                      ? TruxifyColors.successLight
                       : TruxifyColors.accentLight,
                   borderRadius: BorderRadius.circular(6),
                 ),
@@ -1478,7 +1515,7 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'GJ-05-BY-9898 · Tata Signa',
+                  _activeTruckLabel,
                   style: GoogleFonts.dmSans(
                     fontSize: 11,
                     color: TruxifyColors.adaptiveSecondaryText(context),
@@ -1505,9 +1542,9 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildTripSpec('Distance', '420 km'),
-              _buildTripSpec('Est. Duration', '8.5 hrs'),
-              _buildTripSpec('Est. Payout', '₹8,200'),
+              _buildTripSpec('Distance', _activeTripDistance.isNotEmpty ? _activeTripDistance : '--'),
+              _buildTripSpec('Est. Duration', _activeTripDuration.isNotEmpty ? _activeTripDuration : '--'),
+              _buildTripSpec('Est. Payout', _activeTripPayout.isNotEmpty ? _activeTripPayout : '--'),
             ],
           ),
           const SizedBox(height: 16),

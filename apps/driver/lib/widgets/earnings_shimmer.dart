@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shimmer/shimmer.dart';
+import '../theme/app_theme.dart';
 
 /// A wrapper that applies a consistent, theme-aware shimmer effect.
 class EarningsShimmerWrapper extends StatelessWidget {
@@ -13,12 +14,12 @@ class EarningsShimmerWrapper extends StatelessWidget {
 
     // Adaptive color system matching the Truxify maroon/grey palette
     final Color baseColor = isDark
-        ? const Color(0xFF2B2B2D) // Dark border/card adjacent
-        : const Color(0xFFECE4E4); // Maroon/grey border adjacent
+        ? TruxifyColors.darkBorder
+        : TruxifyColors.border;
 
     final Color highlightColor = isDark
-        ? const Color(0xFF38383C)
-        : const Color(0xFFF7F2F2);
+        ? TruxifyColors.darkSecondaryBackground
+        : TruxifyColors.subtleBorder;
 
     return Shimmer.fromColors(
       baseColor: baseColor,

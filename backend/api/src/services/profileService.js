@@ -6,7 +6,7 @@ export async function getProfile(userId) {
   }
 
   const { data, error } = await supabase
-    .from('profiles')   // ✅ FIXED HERE
+    .from('profiles')
     .select('*')
     .eq('id', userId)
     .maybeSingle();
@@ -38,7 +38,7 @@ export async function getDriverDetails(userId) {
   const { data, error } = await supabase
     .from('driver_details')
     .select('*')
-    .eq('user_id', userId)   // ✅ FIXED LINE
+    .eq('user_id', userId)
     .maybeSingle();
 
   if (error) throw error;

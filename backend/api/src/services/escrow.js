@@ -35,7 +35,7 @@ const ESCROW_ABI = [
 const rpcUrl            = process.env.POLYGON_RPC_URL;
 const contractAddress   = process.env.ESCROW_CONTRACT_ADDRESS;
 const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
-export const ESCROW_MATIC_PER_PAISA = parseFloat(process.env.ESCROW_MATIC_PER_PAISA ?? '0.01');
+export const ESCROW_MATIC_PER_PAISA = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0.01');
 
 /** @type {ethers.Contract | null} */
 let escrowContract = null;
@@ -105,12 +105,23 @@ export async function buildDepositTx(orderDisplayId, customerWalletAddress, driv
   return { txData, bookingId };
 }
 
-export async function recordDepositTx(bookingId, txHash) {
+export async function recordDepositTx(bookingId, txHash, expectedSenderAddress = null) {
   if (!escrowContract) {
     return { error: 'Contract not initialised' };
   }
   if (!ethers.isHexString(txHash, 32)) {
     return { error: 'Invalid transaction hash' };
+  }
+
+  // Idempotency: check if this booking already has a funded escrow on-chain
+  try {
+    const escrow = await escrowContract.escrows(bookingId);
+    if (escrow && (escrow.status === 1 || Number(escrow.status) === 1)) {
+      logger.info(`[escrow] Booking ${bookingId} already has a funded escrow — idempotency skip.`);
+      return { txHash: txHash, bookingId, alreadyFunded: true };
+    }
+  } catch (err) {
+    logger.warn(`[escrow] Failed to check existing escrow status for ${bookingId}: ${err.message}, proceeding.`);
   }
 
   const provider = escrowContract.runner.provider;
@@ -139,9 +150,19 @@ export async function recordDepositTx(bookingId, txHash) {
     return { error: 'Transaction is not a deposit call' };
   }
 
-  const [txBookingId] = decoded.args;
+  const [txBookingId, txCustomer] = decoded.args;
   if (txBookingId !== bookingId) {
     return { error: 'Transaction booking ID does not match' };
+  }
+
+  // Verify the on-chain sender matches the customer address in the deposit call.
+  if (tx.from.toLowerCase() !== txCustomer.toLowerCase()) {
+    return { error: 'Transaction sender does not match registered customer wallet' };
+  }
+
+  // If an expected sender address was provided (from order record), verify it matches.
+  if (expectedSenderAddress && tx.from.toLowerCase() !== expectedSenderAddress.toLowerCase()) {
+    return { error: 'Transaction sender does not match the registered customer wallet for this order' };
   }
 
   logger.info(`[escrow] deposit confirmed for booking ${bookingId} in block ${receipt.blockNumber}`);
@@ -212,12 +233,7 @@ export async function escrowRefund(orderDisplayId) {
   return { txHash: receipt.hash, bookingId: submitted.bookingId };
 }
 
-/**
- * Submit an escrow refund and return its hash before confirmation.
- * Callers can persist the hash before waiting on the network.
- */
 export async function submitEscrowRefund(orderDisplayId) {
->>>>>>> cee50d84ee35ba421622671eb4cfdb880e46d016
   const bookingId = getEscrowBookingId(orderDisplayId);
 
   if (!escrowContract) {
@@ -227,11 +243,6 @@ export async function submitEscrowRefund(orderDisplayId) {
 
   const tx = await escrowContract.refundFunds(bookingId);
   logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
-<<<<<<< HEAD
-  const receipt = await tx.wait(1);
-  logger.info(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
-  return { txHash: receipt.hash, bookingId };
-=======
   return {
     txHash: tx.hash,
     bookingId,
@@ -262,5 +273,12 @@ export async function confirmEscrowRefund(txHash) {
     throw new Error('Escrow refund transaction reverted or was not found.');
   }
   return receipt;
->>>>>>> cee50d84ee35ba421622671eb4cfdb880e46d016
+}
+
+export function bookingIdFromUuid(orderId) {
+  return getEscrowBookingId(orderId);
+}
+
+export async function releaseEscrowFunds(orderDisplayId) {
+  return escrowRelease(orderDisplayId);
 }

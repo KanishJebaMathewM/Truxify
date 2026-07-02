@@ -181,7 +181,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
   logger.info(`[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`);
 
   const title = 'Delivery Verification OTP';
-  const body = `Your delivery OTP for order ${orderDisplayId} is ready. Share this with the driver only after verifying your cargo has arrived safely.`;
+  const body = `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`;
   const otpHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
 
   let dbSuccess = false;
@@ -208,10 +208,10 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
 
   let fcmResult;
   try { fcmResult = await sendFcmNotification(
-    customerId,
-    { title: 'Delivery Verification OTP', body: `A delivery OTP has been generated for order ${orderDisplayId}. Open the app to view the code.` },
+      customerId,
+    { title: 'Delivery Verification OTP', body },
     { orderDisplayId, notifType: 'delivery_otp' }
-  ); } catch (fcmErr) { logger.error(`[NotificationService] FCM delivery OTP send failed: ${fcmErr.message}`); }
+  ); } catch (err) { logger.warn('[NotificationService] Unexpected sendFcmNotification error: %s', err?.message ?? err); }
 
   if (process.env.TWILIO_AUTH_TOKEN) {
     logger.info(`[NotificationService] [SMS] SMS stub: Sending OTP for order ${orderDisplayId} (masked)`);
@@ -238,6 +238,6 @@ export async function sendPushNotification(userId, title, body, notifType, metad
   }
 
   let fcmResult;
-  try { fcmResult = await sendFcmNotification(userId, { title, body }, { notifType, ...metadata }); } catch (fcmErr) { logger.error(`[NotificationService] Push send failed: ${fcmErr.message}`); }
+  try { fcmResult = await sendFcmNotification(userId, { title, body }, { notifType, ...metadata }); } catch (err) { logger.warn('[NotificationService] Unexpected sendFcmNotification error: %s', err?.message ?? err); }
   return { success: fcmResult?.success, fcm: fcmResult };
 }

@@ -36,7 +36,7 @@ class _TripsScreenState extends State<TripsScreen> {
   Map<String, List<Map<String, dynamic>>> _routePointsByTripId = {};
 
   bool _isLoadingTrips = true;
-  bool _isLoadingMoreTrips = false;
+
   String? _tripsError;
   String? _nextTripsCursor;
   bool _hasMoreTrips = true;
@@ -116,55 +116,6 @@ class _TripsScreenState extends State<TripsScreen> {
     }
   }
 
-  Future<void> _loadMoreTrips() async {
-    if (_isLoadingMoreTrips || !_hasMoreTrips || _nextTripsCursor == null) {
-      return;
-    }
-
-    setState(() {
-      _isLoadingMoreTrips = true;
-    });
-
-    try {
-      final result = await _tripService.fetchTripHistory(
-        cursor: _nextTripsCursor,
-        limit: 20,
-      );
-      final newTrips = result['trips'] as List<Map<String, dynamic>>;
-
-      final stopsByTrip = <String, List<Map<String, dynamic>>>{};
-      final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
-
-      await Future.wait(newTrips.map((trip) async {
-        final tripId = trip['trip_display_id']?.toString();
-        if (tripId == null || tripId.isEmpty) return;
-
-        final results = await Future.wait([
-          _tripService.fetchTripStops(tripId),
-          _tripService.fetchRouteMapPoints(tripId),
-        ]);
-        stopsByTrip[tripId] = results[0];
-        routePointsByTrip[tripId] = results[1];
-      }));
-
-      if (!mounted) return;
-
-      setState(() {
-        _trips.addAll(newTrips);
-        _tripStopsByTripId.addAll(stopsByTrip);
-        _routePointsByTripId.addAll(routePointsByTrip);
-        _nextTripsCursor = result['nextCursor'] as String?;
-        _hasMoreTrips = result['hasMore'] as bool? ?? false;
-        _isLoadingMoreTrips = false;
-      });
-    } catch (e) {
-      debugPrint('Failed to load more trips: $e');
-      if (!mounted) return;
-      setState(() {
-        _isLoadingMoreTrips = false;
-      });
-    }
-  }
 
   Future<void> _completeCurrentStop(String tripId) async {
     final stops = _tripStopsByTripId[tripId] ?? [];
@@ -900,7 +851,7 @@ class _TripsScreenState extends State<TripsScreen> {
         break;
       case TripStatusType.completed:
         statusColor = TruxifyColors.success;
-        statusBgColor = const Color(0xFFE8F5E9);
+        statusBgColor = TruxifyColors.successLight;
         statusLabel = 'Completed';
         break;
       case TripStatusType.cancelled:
@@ -1017,7 +968,7 @@ class _TripsScreenState extends State<TripsScreen> {
                                       color: Theme.of(context).brightness ==
                                               Brightness.dark
                                           ? TruxifyColors.darkAccentLight
-                                          : const Color(0xFFFDEAEA),
+                                          : TruxifyColors.accentLight,
                                       border: Border.all(
                                           color: TruxifyColors.border),
                                       borderRadius: BorderRadius.circular(20),
@@ -1075,7 +1026,7 @@ class _TripsScreenState extends State<TripsScreen> {
     if (routePoints.isEmpty) {
       return Container(
         decoration: BoxDecoration(
-          color: const Color(0xFFF0E8E8),
+          color: TruxifyColors.subtleBorder,
           borderRadius: BorderRadius.circular(8),
         ),
         child: const Center(

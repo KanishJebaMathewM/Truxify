@@ -2,7 +2,7 @@ import express from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
-import { updateProfileSchema, updateWalletSchema, driverStatementSchema, paramIdSchema } from '../validation/requestSchemas.js';
+import { updateProfileSchema, updateWalletSchema, driverStatementSchema, paramIdSchema, uuidParamSchema, updateFcmTokenSchema } from '../validation/requestSchemas.js';
 import logger from '../middleware/logger.js';
 import {
   getProfile,
@@ -12,10 +12,6 @@ import {
 import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
-import { validateParams } from '../middleware/validate.js';
-import { paramIdSchema } from '../validation/requestSchemas.js';
-import logger from '../middleware/logger.js';
-
 const router = express.Router();
 
 // GET PROFILE
@@ -56,7 +52,7 @@ router.get('/', authenticate, userLimiter, async (req, res) => {
 });
 
 // GET PROFILE NAME BY ID
-router.get('/:id/name', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
     const { data: profile, error } = await supabase
       .from('profiles')
@@ -196,18 +192,10 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
 // UPDATE FCM TOKEN
 // Stores or clears the device FCM token for push notification delivery.
 // Invalidates Redis cache so the next authenticated request picks up the new token.
-router.put('/fcm-token', authenticate, userLimiter, async (req, res) => {
+router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenSchema), async (req, res) => {
   try {
     const userId = req.user.id;
     const { fcmToken } = req.body;
-
-    if (fcmToken === undefined) {
-      return res.status(400).json({ error: 'fcmToken is required. To clear, explicitly set to null.' });
-    }
-
-    if (fcmToken !== null && typeof fcmToken !== 'string') {
-      return res.status(400).json({ error: 'fcmToken must be a string or null.' });
-    }
 
     const { error } = await supabase
       .from('profiles')
@@ -242,7 +230,7 @@ router.put('/fcm-token', authenticate, userLimiter, async (req, res) => {
 // GET DRIVER STATEMENT
 router.get('/driver/statement', authenticate, requireRole(['driver']), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
   const userId = req.user.id;
-  const { start_date, end_date, sort_by } = req.query;
+  const { start_date, end_date, sort_by, format } = req.query;
 
   try {
     let query = supabase
@@ -303,6 +291,7 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
       const csvString = csvRows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\n');
       res.setHeader('Content-Type', 'text/csv');
       return res.send(csvString);
+    }
     if (sort_by === 'net_earnings') {
       tripsList.sort((a, b) => b.net_earnings - a.net_earnings);
     } else if (sort_by === 'base_freight') {
@@ -320,7 +309,8 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
       trips: tripsList
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+    logger.error(err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -335,12 +325,45 @@ router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), asyn
       return res.status(400).json({ error: 'userId path parameter is required.' });
     }
 
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let profile = null;
+    let profileError = null;
+
+    if (uuidRegex.test(targetUserId)) {
+      const result = await supabase
+        .from('profiles')
+        .select('id, firebase_uid')
+        .eq('id', targetUserId)
+        .maybeSingle();
+      profile = result.data;
+      profileError = result.error;
+    }
+
+    if (!profile && !profileError) {
+      const firebaseLookup = await supabase
+        .from('profiles')
+        .select('id, firebase_uid')
+        .eq('firebase_uid', targetUserId)
+        .maybeSingle();
+
+      profile = firebaseLookup.data;
+      profileError = firebaseLookup.error;
+    }
+
+    if (profileError) {
+      return res.status(500).json({ error: 'Failed to resolve profile cache identity.', details: profileError.message });
+    }
+
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found.' });
+    }
+
     await Promise.all([
-      invalidateCachedProfile(targetUserId),
-      invalidateCachedSupabaseProfile(targetUserId),
+      profile.firebase_uid ? invalidateCachedProfile(profile.firebase_uid) : Promise.resolve(),
+      invalidateCachedSupabaseProfile(profile.id),
     ]);
 
-    return res.json({ success: true, message: `Cache invalidated for user ${targetUserId}.` });
+    return res.json({ success: true, message: `Cache invalidated for user ${profile.id}.` });
   } catch (err) {
     return res.status(500).json({ error: 'Failed to invalidate profile cache.', details: err.message });
   }

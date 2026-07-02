@@ -1,358 +1,308 @@
-// Default URL: localhost works for host-to-container, ML_ENGINE_URL env var
-// overrides for Docker Compose container-to-container communication.
+import logger from '../middleware/logger.js';
+
+// Single source of truth for ML engine base URL
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 
-// Startup validation: warn if ML_API_KEY is not set
+// Startup validation
 if (!process.env.ML_API_KEY) {
-  // Use console.warn here since logger may not be initialized at module load time
-  console.warn('[ML] WARNING: ML_API_KEY is not set. ML features will be unavailable.');
+    logger.warn('[ML] WARNING: ML_API_KEY is not set. ML features will be unavailable.');
 }
 
 /**
- * Returns standard headers including API key authentication.
+ * Utility: build headers with optional API key
  */
 function getHeaders() {
-  const headers = {
-    'Content-Type': 'application/json',
-  };
-  if (process.env.ML_API_KEY) {
-    headers['X-API-Key'] = process.env.ML_API_KEY;
-  }
-  return headers;
+    const headers = { 'Content-Type': 'application/json' };
+    if (process.env.ML_API_KEY) {
+        headers['X-API-Key'] = process.env.ML_API_KEY;
+    }
+    return headers;
 }
 
+/**
+ * Utility: handle ML engine responses consistently
+ */
 async function handleResponse(response) {
-  if (response.status === 401 || response.status === 403) {
     const text = await response.text();
-    throw new Error(`ML Engine authentication failed: ${response.status} — check ML_API_KEY configuration`);
-  }
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`ML Engine request failed: ${response.statusText} (${text})`);
-  }
-  return response.json();
+
+    if (response.status === 401 || response.status === 403) {
+        throw new Error(`[ML] Authentication failed (${response.status}): ${text}`);
+    }
+    if (!response.ok) {
+        throw new Error(`[ML] Request failed (${response.status}): ${text}`);
+    }
+
+    try {
+        return JSON.parse(text);
+    } catch {
+        throw new Error('[ML] Invalid JSON response from ML engine');
+    }
 }
 
+/**
+ * Utility: resolve base URL for ML engine
+ */
 function getBaseUrl() {
-  return process.env.ML_ENGINE_URL || process.env.ML_SERVICE_URL || DEFAULT_ML_ENGINE_URL;
-}
-
-function getPriceBaseUrl() {
-  return process.env.ML_SERVICE_URL || process.env.ML_ENGINE_URL || DEFAULT_ML_SERVICE_URL;
+    return (
+        process.env.ML_ENGINE_URL ||
+        process.env.ML_SERVICE_URL ||
+        DEFAULT_ML_ENGINE_URL
+    );
 }
 
 /**
- * Predicts ride/truck demand by calling the FastAPI ML engine service.
- *
+ * Predicts ride/truck demand
  * @param {object} features
- * @param {number} features.hour
- * @param {number} features.day_of_week
- * @param {number} features.temperature
- * @param {number} features.precipitation
- * @param {number} features.historical_volume
- * @param {number} features.nearby_drivers
- * @returns {Promise<object>} response from the ML engine
+ * @returns {Promise<object>}
  */
-export async function predictDemand(features) {
-  const url = `${getBaseUrl()}/predict/demand`;
+export async function predictDemand(features = {}) {
+    const url = `${getBaseUrl()}/predict/demand`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(features),
-    signal: AbortSignal.timeout(5000),
-  });
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(features),
+        signal: AbortSignal.timeout(5000),
+    });
+
+    return handleResponse(response);
+}
+
+/**
+ * Predicts freight price
+ * @param {object} params
+ * @returns {Promise<{estimated_price: number, currency: string}>}
+ */
+export async function predictPrice({
+    distanceKm,
+    cargoWeightKg,
+    truckType = 'medium_truck',
+    routeOrigin = '',
+    routeDestination = '',
+} = {}) {
+    const url = `${getBaseUrl()}/predict`;
+
+    const payload = {
+        distance_km: distanceKm,
+        cargo_weight_kg: cargoWeightKg,
+        truck_type: truckType,
+        route_origin: routeOrigin,
+        route_destination: routeDestination,
+    };
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5000),
+    });
 
   return handleResponse(response);
 }
 
 /**
- * Predicts freight price by calling the FastAPI ML engine service.
- *
- * @param {object} params
- * @param {number} params.distanceKm - Route distance in kilometres
- * @param {number} params.cargoWeightKg - Cargo weight in kilograms
- * @param {string} [params.truckType] - Type of truck
- * @param {string} [params.routeOrigin] - Origin location
- * @param {string} [params.routeDestination] - Destination location
- * @param {number} [params.hourOfDay] - Hour of day (0-23)
- * @param {number} [params.dayOfWeek] - Day of week (0-6)
- * @param {number} [params.month] - Month (1-12)
- * @param {number} [params.fuelPrice] - Current fuel price in INR/L
- * @param {string} [params.cargoType] - Type of cargo
- * @returns {Promise<{estimated_price: number, min_price: number, max_price: number, currency: string}>} price prediction
+ * Predicts estimated time of arrival for a route.
+ * @param {string} origin - Origin coordinates or address
+ * @param {string} destination - Destination coordinates or address
+ * @param {object} [traffic] - Traffic factor data
+ * @param {object} [weather] - Weather condition data
+ * @returns {Promise<{estimated_minutes: number, confidence: number}>}
  */
-export async function predictPrice({ distanceKm, cargoWeightKg, truckType, routeOrigin, routeDestination, hourOfDay, dayOfWeek, month, fuelPrice, cargoType } = {}) {
-  const url = `${getPriceBaseUrl()}/predict`;
-
+export async function predictEta(origin, destination, traffic = {}, weather = {}) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/predict/eta`;
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({
-      distance_km: distanceKm,
-      cargo_weight_kg: cargoWeightKg,
-      truck_type: truckType || 'medium_truck',
-      route_origin: routeOrigin || '',
-      route_destination: routeDestination || '',
-      hour_of_day: hourOfDay,
-      day_of_week: dayOfWeek,
-      month: month,
-      fuel_price: fuelPrice,
-      cargo_type: cargoType,
-    }),
+    body: JSON.stringify({ origin, destination, traffic, weather }),
     signal: AbortSignal.timeout(5000),
   });
-
   return handleResponse(response);
 }
 
 /**
- * Predicts ETA for a delivery route.
- *
- * @param {object} params
- * @param {number} params.routeDistance - Route distance in km
- * @param {number} params.timeOfDay - Hour of day (0-23)
- * @param {number} params.dayOfWeek - Day of week (0-6)
- * @param {string} params.routeType - 'highway' or 'city'
- * @param {number} params.historicalSpeed - Historical average speed in km/h
- * @returns {Promise<{eta_minutes: number, confidence_interval: object}>}
+ * Matches shipments for bilateral load consolidation.
+ * @param {object} shipmentData - { weight, volume, origin, destination, pickup_time, delivery_time }
+ * @returns {Promise<{matches: Array}>}
  */
-export async function predictEta({ routeDistance, timeOfDay, dayOfWeek, routeType, historicalSpeed } = {}) {
-  const url = `${getBaseUrl()}/predict/eta`;
-
+export async function matchBilateral(shipmentData) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/match/bilateral`;
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({
-      route_distance: routeDistance,
-      time_of_day: timeOfDay,
-      day_of_week: dayOfWeek,
-      route_type: routeType,
-      historical_speed: historicalSpeed,
-    }),
+    body: JSON.stringify(shipmentData),
     signal: AbortSignal.timeout(5000),
   });
-
   return handleResponse(response);
 }
 
 /**
- * Matches loads with drivers using bilateral optimization.
- *
- * @param {object} params
- * @param {Array} params.loads - Available loads with origin/dest/weight/dimensions/deadline
- * @param {Array} params.drivers - Available drivers with location/truck specs/rating
- * @returns {Promise<{assignments: Array, unmatched_loads: Array, unmatched_drivers: Array}>}
+ * Predicts driver profit for a given route.
+ * @param {string} driverId
+ * @param {object} route - { distance_km, origin, destination, tolls }
+ * @returns {Promise<{estimated_profit: number, confidence: number}>}
  */
-export async function matchBilateral({ loads, drivers } = {}) {
-  const url = `${getBaseUrl()}/match/bilateral`;
-
+export async function predictDriverProfit(driverId, route) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/predict/driver-profit`;
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ loads, drivers }),
+    body: JSON.stringify({ driver_id: driverId, ...route }),
+    signal: AbortSignal.timeout(5000),
+  });
+  return handleResponse(response);
+}
+
+/**
+ * Optimises packing of items into bins.
+ * @param {Array<{id: string, w: number, h: number, d: number, weight: number}>} items
+ * @returns {Promise<{bins: Array, efficiency: number}>}
+ */
+export async function optimisePacking(items) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/optimise/packing`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ items }),
     signal: AbortSignal.timeout(10000),
   });
-
   return handleResponse(response);
 }
 
 /**
- * Predicts a driver's net earnings for a load.
- *
- * @param {object} params
- * @param {number} params.routeDistance - Route distance in km
- * @param {number} params.fuelPrice - Fuel price in INR/L
- * @param {number} params.tollEstimate - Estimated toll costs in INR
- * @param {number} params.truckMileage - Truck fuel efficiency in km/L
- * @param {number} params.cargoWeight - Cargo weight in kg
- * @param {number} params.tripDuration - Estimated trip duration in hours
- * @returns {Promise<{predicted_profit: number, confidence_interval: object}>}
+ * Recommends available loads for a truck in a region.
+ * @param {string} truckId
+ * @param {string} region
+ * @returns {Promise<{loads: Array, total_revenue: number}>}
  */
-export async function predictDriverProfit({ routeDistance, fuelPrice, tollEstimate, truckMileage, cargoWeight, tripDuration } = {}) {
-  const url = `${getBaseUrl()}/predict/driver-profit`;
-
+export async function recommendLoads(truckId, region) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/recommend/loads`;
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({
-      route_distance: routeDistance,
-      fuel_price: fuelPrice,
-      toll_estimate: tollEstimate,
-      truck_mileage: truckMileage,
-      cargo_weight: cargoWeight,
-      trip_duration: tripDuration,
-    }),
+    body: JSON.stringify({ truck_id: truckId, region }),
     signal: AbortSignal.timeout(5000),
   });
-
   return handleResponse(response);
 }
 
 /**
- * Optimises packing arrangement and delivery sequence.
- *
- * @param {object} params
- * @param {Array} params.packages - Packages with length/width/height/weight
- * @param {object} params.truck - Truck dimensions and max weight
- * @param {Array} params.deliveryAddresses - Delivery locations with lat/lng
- * @returns {Promise<{packing_arrangement: Array, unpacked_packages: Array, stop_sequence: Array, utilization_pct: number}>}
+ * Recommends suitable trucks for a given load.
+ * @param {string} loadId
+ * @returns {Promise<{trucks: Array, average_price: number}>}
  */
-export async function optimisePacking({ packages, truck, deliveryAddresses } = {}) {
-  const url = `${getBaseUrl()}/optimise/packing`;
-
+export async function recommendTrucks(loadId) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/recommend/trucks`;
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({
-      packages,
-      truck,
-      delivery_addresses: deliveryAddresses,
-    }),
-    signal: AbortSignal.timeout(10000),
-  });
-
-  return handleResponse(response);
-}
-
-/**
- * Recommends loads for a user based on collaborative filtering.
- *
- * @param {object} params
- * @param {string} params.userId - User ID
- * @param {Array} params.bookingHistory - Past bookings
- * @param {Array} params.ratedDrivers - Drivers the user has rated
- * @param {number} [params.topN=5] - Number of recommendations
- * @returns {Promise<{recommendations: Array}>}
- */
-export async function recommendLoads({ userId, bookingHistory, ratedDrivers, topN } = {}) {
-  const url = `${getBaseUrl()}/recommend/loads`;
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify({
-      user_id: userId,
-      booking_history: bookingHistory || [],
-      rated_drivers: ratedDrivers || [],
-      top_n: topN || 5,
-    }),
+    body: JSON.stringify({ load_id: loadId }),
     signal: AbortSignal.timeout(5000),
   });
-
   return handleResponse(response);
 }
 
 /**
- * Recommends trucks/drivers for a user based on collaborative filtering.
- *
- * @param {object} params
- * @param {string} params.userId - User ID
- * @param {Array} params.bookingHistory - Past bookings
- * @param {Array} params.ratedLoads - Loads the user has rated
- * @param {number} [params.topN=5] - Number of recommendations
- * @returns {Promise<{recommendations: Array}>}
+ * Computes a trust score for a driver or customer entity.
+ * @param {string} entityId
+ * @returns {Promise<{trust_score: number, factors: object}>}
  */
-export async function recommendTrucks({ userId, bookingHistory, ratedLoads, topN } = {}) {
-  const url = `${getBaseUrl()}/recommend/trucks`;
-
+export async function scoreTrust(entityId) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/score/trust`;
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({
-      user_id: userId,
-      booking_history: bookingHistory || [],
-      rated_loads: ratedLoads || [],
-      top_n: topN || 5,
-    }),
+    body: JSON.stringify({ entity_id: entityId }),
     signal: AbortSignal.timeout(5000),
   });
-
   return handleResponse(response);
 }
 
 /**
- * Scores a user's trustworthiness and risk level.
- *
- * @param {object} params
- * @param {number} params.cancellationRate - Rate of cancellations (0-1)
- * @param {number} params.onTimePct - On-time delivery percentage (0-100)
- * @param {number} params.avgRating - Average rating (1-5)
- * @param {number} params.disputeCount - Number of disputes
- * @param {boolean} params.isVerified - Whether the user is verified
- * @returns {Promise<{trust_score: number, risk_category: string}>}
+ * Finds deadhead (return-trip) loads for a truck to avoid empty backhauls.
+ * @param {string} truckId
+ * @returns {Promise<{loads: Array, revenue: number}>}
  */
-export async function scoreTrust({ cancellationRate, onTimePct, avgRating, disputeCount, isVerified } = {}) {
-  const url = `${getBaseUrl()}/score/trust`;
-
+export async function matchDeadhead(truckId) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/match/deadhead`;
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({
-      cancellation_rate: cancellationRate,
-      on_time_pct: onTimePct,
-      avg_rating: avgRating,
-      dispute_count: disputeCount,
-      is_verified: isVerified,
-    }),
+    body: JSON.stringify({ truck_id: truckId }),
     signal: AbortSignal.timeout(5000),
   });
-
   return handleResponse(response);
 }
 
 /**
- * Finds return loads to reduce deadhead (empty return) trips.
- *
- * @param {object} params
- * @param {object} params.driverDestination - Driver's destination {lat, lng}
- * @param {object} params.truckSpecs - Truck specifications
- * @param {string} params.arrivalTime - Estimated arrival time (ISO format)
- * @param {Array} params.availableLoads - Available loads near destination
- * @returns {Promise<{recommendations: Array}>}
+ * Optimises a mid-trip route based on real-time conditions.
+ * @param {object} routeData - { current_location, destination, fuel_level, hours_driven }
+ * @returns {Promise<{adjustments: Array, fuel_saving: number}>}
  */
-export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime, availableLoads } = {}) {
-  const url = `${getBaseUrl()}/match/deadhead`;
-
+export async function optimiseMidTrip(routeData) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/optimise/mid-trip`;
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({
-      driver_destination: driverDestination,
-      truck_specs: truckSpecs,
-      arrival_time: arrivalTime,
-      available_loads: availableLoads,
-    }),
+    body: JSON.stringify(routeData),
     signal: AbortSignal.timeout(5000),
   });
-
   return handleResponse(response);
 }
 
 /**
- * Suggests additional pickups during an active trip.
- *
- * @param {object} params
- * @param {object} params.currentLocation - Current location {lat, lng}
- * @param {Array} params.remainingRoute - Remaining route waypoints [{lat, lng}]
- * @param {object} params.availableCapacity - Available truck capacity
- * @param {Array} params.nearbyLoads - Nearby active loads
- * @returns {Promise<{recommendations: Array}>}
+ * Triggers retraining of the demand prediction model.
+ * @param {boolean} [force=false] - Force retrain even if model is current
+ * @returns {Promise<{status: string, model_version: string}>}
  */
-export async function optimiseMidTrip({ currentLocation, remainingRoute, availableCapacity, nearbyLoads } = {}) {
-  const url = `${getBaseUrl()}/optimise/mid-trip`;
-
+export async function trainDemandModel(force = false) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/train/demand`;
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({
-      current_location: currentLocation,
-      remaining_route: remainingRoute,
-      available_capacity: availableCapacity,
-      nearby_loads: nearbyLoads,
-    }),
-    signal: AbortSignal.timeout(10000),
+    body: JSON.stringify({ force }),
+    signal: AbortSignal.timeout(300000),
   });
+  return handleResponse(response);
+}
 
+/**
+ * Triggers retraining of the price prediction model.
+ * @param {boolean} [force=false] - Force retrain even if model is current
+ * @returns {Promise<{status: string, model_version: string}>}
+ */
+export async function trainPriceModel(force = false) {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/train/price`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify({ force }),
+    signal: AbortSignal.timeout(300000),
+  });
+  return handleResponse(response);
+}
+
+/**
+ * Lists all available ML models and their versions.
+ * @returns {Promise<{models: Array}>}
+ */
+export async function listModels() {
+  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const url = `${baseUrl}/models`;
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: getHeaders(),
+    signal: AbortSignal.timeout(5000),
+  });
   return handleResponse(response);
 }

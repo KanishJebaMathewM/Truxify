@@ -32,7 +32,12 @@ export function validateParams(schema) {
       });
     }
 
-    req.params = result.data;
+    Object.defineProperty(req, 'params', {
+      value: result.data,
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
     return next();
   };
 }

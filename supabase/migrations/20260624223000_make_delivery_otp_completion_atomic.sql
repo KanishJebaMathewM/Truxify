@@ -1,8 +1,8 @@
 -- Consume the delivery OTP in the same transaction that completes the trip.
 
-DROP FUNCTION IF EXISTS complete_trip_tx(UUID);
+DROP FUNCTION IF EXISTS complete_trip_tx(UUID, UUID, TEXT);
 
-CREATE OR REPLACE FUNCTION complete_trip_tx(p_order_id UUID, p_otp_id UUID)
+CREATE OR REPLACE FUNCTION complete_trip_tx(p_order_id UUID, p_otp_id UUID, p_release_tx_hash TEXT DEFAULT NULL)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -28,6 +28,11 @@ BEGIN
 
   IF v_order.status = 'payment_released' THEN
     RETURN;
+  END IF;
+
+  -- Only proceed with wallet credit if escrow was released on-chain
+  IF v_order.escrow_status IN ('funded', 'release_failed') AND p_release_tx_hash IS NULL THEN
+    RAISE EXCEPTION 'Blockchain escrow release must complete before crediting driver wallet';
   END IF;
 
   UPDATE delivery_otps
@@ -87,10 +92,11 @@ BEGIN
   WHERE order_display_id = v_order.order_display_id
     AND milestone = 'Delivered';
 
+  -- Use COALESCE to prefer bid_amount (immutable) over total_amount (mutable)
   UPDATE driver_details
   SET total_trips = total_trips + 1,
-      wallet_confirmed = wallet_confirmed + v_order.total_amount,
-      wallet_total = wallet_total + v_order.total_amount,
+      wallet_confirmed = wallet_confirmed + COALESCE(v_order.bid_amount, v_order.total_amount),
+      wallet_total = wallet_total + COALESCE(v_order.bid_amount, v_order.total_amount),
       updated_at = NOW()
   WHERE user_id = v_order.driver_id;
 
@@ -104,14 +110,14 @@ BEGIN
   ) VALUES (
     v_order.driver_id,
     v_order.order_display_id,
-    v_order.total_amount,
+    COALESCE(v_order.bid_amount, v_order.total_amount),
     'credit',
     'confirmed',
     'Payout for Order ' || v_order.order_display_id
   );
 
   INSERT INTO earnings_daily (driver_id, day_date, amount, trip_count)
-  VALUES (v_order.driver_id, CURRENT_DATE, v_order.total_amount, 1)
+  VALUES (v_order.driver_id, CURRENT_DATE, COALESCE(v_order.bid_amount, v_order.total_amount), 1)
   ON CONFLICT (driver_id, day_date)
   DO UPDATE SET
     amount = earnings_daily.amount + EXCLUDED.amount,

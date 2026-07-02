@@ -1,8 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_driver/data/mock_data.dart' as mock;
 import 'package:truxify_driver/utils/driver_metrics.dart';
+import 'setup/test_setup.dart';  // ← Changed from '../setup/' to 'setup/'
 
 void main() {
+  setUpAll(() async {
+    await setupTestEnvironment();
+  });
+
   test('DriverMetrics.tryParseDate is defensive', () {
     expect(DriverMetrics.tryParseDate(null), isNull);
     expect(DriverMetrics.tryParseDate(''), isNull);
@@ -27,4 +32,3 @@ void main() {
     expect(mock.driverTimeSinceLastTripLabel, isNotEmpty);
   });
 }
-

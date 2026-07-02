@@ -1,5 +1,6 @@
-const assert = require("node:assert/strict");
-const { ethers } = require("hardhat");
+import assert from "node:assert/strict";
+import hre from "hardhat";
+const { ethers } = hre;
 
 async function assertRejectsWith(promise, message) {
   await assert.rejects(promise, error => error.message.includes(message));

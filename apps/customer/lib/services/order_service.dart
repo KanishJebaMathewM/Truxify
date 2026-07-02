@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../core/api_client.dart';
-import 'supabase_service.dart';
 
 class OrderService {
   OrderService({
@@ -15,12 +14,13 @@ class OrderService {
 
   final ApiClient _apiClient;
 
-  Map<String, String> _customHeaders() {
-    final userId = SupabaseService.requireUserId();
-    return <String, String>{
-      'x-user-id': userId,
-      'x-user-role': 'customer',
-    };
+  String _encodePathSegment(String value) => Uri.encodeComponent(value);
+
+  List<Map<String, dynamic>> _historyFromResponse(dynamic body) {
+    if (body is Map<String, dynamic>) {
+      return List<Map<String, dynamic>>.from(body['history'] as List? ?? []);
+    }
+    return List<Map<String, dynamic>>.from(body as List);
   }
 
   Future<String> createOrder({
@@ -37,17 +37,9 @@ class OrderService {
     String? upiId,
     DateTime? pickupDate,
   }) async {
-    final user = SupabaseService.currentUser;
-    final fullName = user?.userMetadata?['full_name']?.toString();
-    final headers = _customHeaders();
-    if (fullName != null && fullName.isNotEmpty) {
-      headers['x-user-name'] = fullName;
-    }
-
     try {
       final body = await _apiClient.post(
         '/api/orders',
-        headers: headers,
         body: <String, dynamic>{
           'pickup_address': pickupAddress,
           'pickup_lat': pickupLat,
@@ -80,8 +72,7 @@ class OrderService {
   }) async {
     try {
       final body = await _apiClient.put(
-        '/api/orders/$orderDisplayId/change-drop',
-        headers: _customHeaders(),
+        '/api/orders/${_encodePathSegment(orderDisplayId)}/change-drop',
         body: <String, dynamic>{
           'drop_address': dropAddress,
           'drop_lat': dropLat,
@@ -102,8 +93,7 @@ class OrderService {
   }) async {
     try {
       final body = await _apiClient.post(
-        '/api/orders/$orderDisplayId/cancel',
-        headers: _customHeaders(),
+        '/api/orders/${_encodePathSegment(orderDisplayId)}/cancel',
         body: <String, dynamic>{
           if (reason != null) 'reason': reason,
         },
@@ -119,8 +109,7 @@ class OrderService {
   Future<Map<String, dynamic>?> fetchOrderById(String orderDisplayId) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId',
-        headers: _customHeaders(),
+        '/api/orders/${_encodePathSegment(orderDisplayId)}',
       ) as Map<String, dynamic>?;
       return body?['order'] as Map<String, dynamic>?;
     } on ApiException catch (e) {
@@ -135,9 +124,8 @@ class OrderService {
     try {
       final body = await _apiClient.get(
         '/api/orders/history',
-        headers: _customHeaders(),
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      return _historyFromResponse(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -150,8 +138,7 @@ class OrderService {
   ) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId/timeline',
-        headers: _customHeaders(),
+        '/api/orders/${_encodePathSegment(orderDisplayId)}/timeline',
       );
       return List<Map<String, dynamic>>.from(body as List);
     } on ApiException catch (e) {
@@ -165,7 +152,6 @@ class OrderService {
     try {
       final body = await _apiClient.get(
         '/api/orders/my/active',
-        headers: _customHeaders(),
       );
       return List<Map<String, dynamic>>.from(body as List);
     } on ApiException catch (e) {
@@ -199,7 +185,6 @@ class OrderService {
     try {
       final body = await _apiClient.get(
         path,
-        headers: _customHeaders(),
       );
       final List<dynamic> listBody = body is List<dynamic> ? body : <dynamic>[];
       return listBody.cast<Map<String, dynamic>>();
@@ -264,9 +249,8 @@ class OrderService {
     try {
       final body = await _apiClient.get(
         '/api/orders/history',
-        headers: _customHeaders(),
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      return _historyFromResponse(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -278,7 +262,6 @@ class OrderService {
     try {
       final body = await _apiClient.get(
         '/api/profile/$driverId/name',
-        headers: _customHeaders(),
       ) as Map<String, dynamic>?;
       final fullName = body?['full_name']?.toString().trim();
       return (fullName != null && fullName.isNotEmpty) ? fullName : null;
@@ -292,7 +275,6 @@ class OrderService {
     try {
       final body = await _apiClient.get(
         '/api/trucks/$truckId/number',
-        headers: _customHeaders(),
       ) as Map<String, dynamic>?;
       final numberPlate = body?['number_plate']?.toString().trim();
       return (numberPlate != null && numberPlate.isNotEmpty) ? numberPlate : null;
@@ -305,8 +287,7 @@ class OrderService {
   Future<Map<String, dynamic>> fetchDriverLocation(String orderDisplayId) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId/driver-location',
-        headers: _customHeaders(),
+        '/api/orders/${_encodePathSegment(orderDisplayId)}/driver-location',
       );
       return body is Map<String, dynamic> ? body : <String, dynamic>{};
     } on ApiException catch (e) {
@@ -319,8 +300,7 @@ class OrderService {
   Future<Map<String, dynamic>> fetchOrderRoute(String orderDisplayId) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId/route',
-        headers: _customHeaders(),
+        '/api/orders/${_encodePathSegment(orderDisplayId)}/route',
       );
       return body is Map<String, dynamic> ? body : <String, dynamic>{};
     } on ApiException catch (e) {

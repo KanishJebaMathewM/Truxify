@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const nonNegativeDecimalString = (field) => z
   .string({
-    error: `${field} must be a single numeric string`,
+    invalid_type_error: `${field} must be a single numeric string`,
   })
   .regex(/^(?:\d+|\d*\.\d+)$/, {
     message: `${field} must be a non-negative decimal number`,
@@ -16,7 +16,7 @@ export const loadFilterQuerySchema = z.object({
   min_price: nonNegativeDecimalString('min_price').optional(),
   max_price: nonNegativeDecimalString('max_price').optional(),
   distance: nonNegativeDecimalString('distance').optional(),
-}).passthrough().superRefine((filters, ctx) => {
+}).superRefine((filters, ctx) => {
   if (
     filters.min_price !== undefined
     && filters.max_price !== undefined

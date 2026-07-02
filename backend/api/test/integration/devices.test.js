@@ -32,6 +32,7 @@ describe('Device Routes Integration Tests', () => {
     process.env.BYPASS_AUTH = 'true';
     process.env.NODE_ENV = 'test';
     m.store.user_devices = [];
+    m.store.profiles = [];
     m.calls.length = 0;
   });
 
@@ -62,6 +63,42 @@ describe('Device Routes Integration Tests', () => {
       expect(stored).toBeTruthy();
       expect(stored.fcm_token).toBe('token1234567890');
       expect(stored.platform).toBe('ios');
+    });
+
+    it('clears a reassigned token from the previous user profile', async () => {
+      m.store.user_devices.push({
+        user_id: 'previous-user-uuid',
+        fcm_token: 'shared-token-123456',
+        platform: 'android',
+      });
+      m.store.profiles.push(
+        {
+          id: 'previous-user-uuid',
+          fcm_token: 'shared-token-123456',
+          fcm_token_updated_at: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          id: 'customer-uuid-123',
+          fcm_token: null,
+          fcm_token_updated_at: null,
+        }
+      );
+
+      const res = await request(buildApp())
+        .post('/api/devices/register')
+        .set(CUSTOMER_HEADERS)
+        .send({ fcmToken: 'shared-token-123456', platform: 'ios' });
+
+      expect(res.status).toBe(200);
+
+      const previousProfile = m.store.profiles.find(p => p.id === 'previous-user-uuid');
+      const currentProfile = m.store.profiles.find(p => p.id === 'customer-uuid-123');
+      const device = m.store.user_devices.find(d => d.fcm_token === 'shared-token-123456');
+
+      expect(previousProfile.fcm_token).toBeNull();
+      expect(currentProfile.fcm_token).toBe('shared-token-123456');
+      expect(device.user_id).toBe('customer-uuid-123');
+      expect(device.platform).toBe('ios');
     });
 
     it('uses default platform android if platform is not provided', async () => {
@@ -102,7 +139,7 @@ describe('Device Routes Integration Tests', () => {
       expect(res.body.error).toBe('Validation failed');
     });
 
-    it('returns 500 if database upsert fails and does not expose internal error details', async () => {
+    it('returns 500 if database registration fails and does not expose internal error details', async () => {
       m.programError('Database connection lost');
 
       const res = await request(buildApp())

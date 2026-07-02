@@ -191,7 +191,8 @@ export async function getCachedSupabaseProfile(userId) {
  */
 export async function setCachedSupabaseProfile(userId, profile, ttlSeconds = TTL_SECONDS) {
   const redisClient = getRedisClient();
-  if (!redisClient || !userId || !profile || ttlSeconds <= 0) return;
+  if (!redisClient || !userId || !profile) return;
+  if (ttlSeconds < 1) ttlSeconds = 1;
   try {
     await redisClient.set(supabaseCacheKey(userId), JSON.stringify(profile), 'EX', ttlSeconds);
   } catch (err) {

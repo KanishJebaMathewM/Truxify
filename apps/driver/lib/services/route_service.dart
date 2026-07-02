@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import '../core/config.dart';
 import 'package:latlong2/latlong.dart';
 
 class RouteService {
@@ -11,7 +12,7 @@ class RouteService {
     final coords = points.map((p) => '${p.longitude},${p.latitude}').join(';');
     final url = Uri.parse('https://router.project-osrm.org/route/v1/driving/$coords?overview=full&geometries=geojson');
     try {
-      final resp = await http.get(url).timeout(const Duration(seconds: 8));
+      final resp = await http.get(url).timeout(AppConfig.routeTimeout);
       if (resp.statusCode != 200) return [];
 
       final decoded = json.decode(resp.body);

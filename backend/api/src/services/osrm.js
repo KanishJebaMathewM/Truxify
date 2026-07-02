@@ -5,10 +5,8 @@ const DEFAULT_OSRM_BASE_URL = 'https://router.project-osrm.org';
 const DEFAULT_TIMEOUT_MS = 1500;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 500;
-const CACHE_TTL_SECONDS = 86400;
-const ROUTE_CACHE_TTL_SECONDS = 30;
-const MAX_RETRIES = 1;
-const RETRY_DELAYS_MS = [500, 1000]; // exponential backoff
+const CACHE_TTL_SECONDS = 3600;
+const ROUTE_CACHE_TTL_SECONDS = 300;
 
 function parsePositiveNumber(value, fallback) {
   const parsed = Number(value);
@@ -25,9 +23,9 @@ function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
   return url;
 }
 
-function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng}){
-  const r = (n) => Number(n.toFixed(4));
-  return `osrm:route:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
+function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
+  const r = (n) => Number(n.toFixed(6));
+  return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
 export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng } = {}) {
@@ -40,12 +38,11 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
 
   const cacheKey = buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng });
 
-  if(redisClient){
+  if (redisClient) {
     try {
       const cached = await redisClient.get(cacheKey);
       if (cached) return JSON.parse(cached);
-
-    } catch(err){
+    } catch (err) {
       logger.error('[osrm] Redis get error:', err.message);
     }
   }
@@ -124,8 +121,8 @@ function buildGeometryUrl({ originLat, originLng, destLat, destLng }) {
 }
 
 function buildGeometryCacheKey({ originLat, originLng, destLat, destLng }) {
-  const r = (n) => Number(n.toFixed(4));
-  return `osrm:geometry:${r(originLat)}:${r(originLng)}:${r(destLat)}:${r(destLng)}`;
+  const r = (n) => Number(n.toFixed(6));
+  return `osrm:geometry:v2:${r(originLat)}:${r(originLng)}:${r(destLat)}:${r(destLng)}`;
 }
 
 export async function getRouteGeometry({ originLat, originLng, destLat, destLng } = {}) {

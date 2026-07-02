@@ -21,8 +21,14 @@ from .models.collaborative_filter import collaborative_filter
 from .models.trust_scorer import trust_scorer
 from .models.deadhead_eliminator import find_return_loads
 from .models.mid_trip_reoptimiser import find_mid_trip_loads
+from .models.base import model_exists
+from .models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
+from .models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
@@ -51,6 +57,14 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["X-API-Key", "Content-Type"],
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    from .models.base import preload_all_models
+    logger.info("ML Engine starting, pre-loading models...")
+    await preload_all_models()
+    logger.info("ML Engine startup complete")
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +363,18 @@ async def root(_auth=Depends(verify_api_key)):
 @app.get("/health")
 async def health():
     """Health check endpoint for Docker container orchestration."""
-    return {"status": "healthy", "service": "ml-engine"}
+    models = {
+        "eta_predictor": eta_predictor.model is not None,
+        "demand_forecast": model_exists(DEMAND_MODEL_NAME),
+        "price_forecast": model_exists(PRICE_MODEL_NAME),
+        "driver_profit": model_exists("driver_profit"),
+    }
+    all_ready = all(models.values())
+    return {
+        "status": "healthy" if all_ready else "degraded",
+        "service": "ml-engine",
+        "models": models,
+    }
 
 
 # ---------------------------------------------------------------------------

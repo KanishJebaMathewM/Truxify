@@ -27,15 +27,27 @@ const DEFAULTS = Object.freeze({
   TOLL_PER_KM: 200,         // paisa per km, proxy for highway toll
 });
 
+function parsePositiveInt(raw, fallback) {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+function parsePositiveFloat(raw, fallback) {
+  if (raw === null || raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 function readRateCard() {
   return {
-    ratePerTonneKm: Number(process.env.TRUXIFY_RATE_PER_TONNE_KM ?? DEFAULTS.RATE_PER_TONNE_KM),
-    fragileMultiplier: Number(process.env.TRUXIFY_FRAGILE_MULTIPLIER ?? DEFAULTS.FRAGILE_MULTIPLIER),
-    stackableDiscount: Number(process.env.TRUXIFY_STACKABLE_DISCOUNT ?? DEFAULTS.STACKABLE_DISCOUNT),
-    handlingFee: Number(process.env.TRUXIFY_HANDLING_FEE ?? DEFAULTS.HANDLING_FEE),
-    platformFeePct: Number(process.env.TRUXIFY_PLATFORM_FEE_PCT ?? DEFAULTS.PLATFORM_FEE_PCT),
-    fuelCostPct: Number(process.env.TRUXIFY_FUEL_COST_PCT ?? DEFAULTS.FUEL_COST_PCT),
-    tollPerKm: Number(process.env.TRUXIFY_TOLL_PER_KM ?? DEFAULTS.TOLL_PER_KM),
+    ratePerTonneKm: parsePositiveInt(process.env.TRUXIFY_RATE_PER_TONNE_KM, DEFAULTS.RATE_PER_TONNE_KM),
+    fragileMultiplier: parsePositiveFloat(process.env.TRUXIFY_FRAGILE_MULTIPLIER, DEFAULTS.FRAGILE_MULTIPLIER),
+    stackableDiscount: parsePositiveFloat(process.env.TRUXIFY_STACKABLE_DISCOUNT, DEFAULTS.STACKABLE_DISCOUNT),
+    handlingFee: parsePositiveInt(process.env.TRUXIFY_HANDLING_FEE, DEFAULTS.HANDLING_FEE),
+    platformFeePct: parsePositiveInt(process.env.TRUXIFY_PLATFORM_FEE_PCT, DEFAULTS.PLATFORM_FEE_PCT),
+    fuelCostPct: parsePositiveInt(process.env.TRUXIFY_FUEL_COST_PCT, DEFAULTS.FUEL_COST_PCT),
+    tollPerKm: parsePositiveInt(process.env.TRUXIFY_TOLL_PER_KM, DEFAULTS.TOLL_PER_KM),
   };
 }
 

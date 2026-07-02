@@ -19,10 +19,27 @@ const loginOtpSchema = z.object({
   otp: z.string().regex(/^\d{4}$/, { message: 'OTP must be 4 digits' }),
 });
 
+export function otpPhoneKey(phone) {
+  if (typeof phone !== 'string') {
+    return 'phone:unknown';
+  }
+
+  const digits = phone.replace(/\D/g, '');
+  if (!digits) {
+    return 'phone:unknown';
+  }
+
+  const nationalDigits = digits.length === 12 && digits.startsWith('91')
+    ? digits.slice(2)
+    : digits;
+
+  return `phone:${nationalDigits}`;
+}
+
 function perPhoneLimiter(opts) {
   return rateLimit({
     ...opts,
-    keyGenerator: (req) => `phone:${req.body.phone || 'unknown'}`,
+    keyGenerator: (req) => otpPhoneKey(req.body.phone),
   });
 }
 
@@ -105,10 +122,6 @@ router.get('/stats', authenticate, userLimiter, requireRole(['driver']), async (
 // ============================================================================
 router.put('/online', authenticate, userLimiter, requireRole(['driver']), validateBody(driverOnlineSchema), async (req, res) => {
   const { is_online } = req.body;
-
-  if (typeof is_online !== 'boolean') {
-    return res.status(400).json({ error: 'Invalid or missing is_online status.' });
-  }
 
   try {
     const { data: details, error } = await supabase
@@ -231,21 +244,44 @@ router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   const { status } = req.query;
+  const pageParam = req.query.page ?? '1';
+  const limitParam = req.query.limit ?? '10';
+  const rawPage = req.query.page;
+  const rawLimit = req.query.limit;
+  const parsedPage = parseInt(rawPage, 10);
+  const parsedLimit = parseInt(rawLimit, 10);
+  if (rawPage !== undefined && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
+    return res.status(400).json({ error: 'page must be a positive integer' });
+  }
+  if (rawLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) {
+    return res.status(400).json({ error: 'limit must be a positive integer' });
+  }
+  const page = parsedPage || 1;
+  const limit = Math.min(100, Math.max(1, parsedLimit || 10));
 
   try {
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
     let query = supabase
       .from('trips')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('driver_id', req.user.id);
 
     if (status) {
       query = query.eq('status', status);
     }
 
-    const { data: trips, error } = await query.order('trip_date', { ascending: false });
+    const { data: trips, error, count } = await query.order('trip_date', { ascending: false }).range(from, to);
 
     if (error) return res.status(500).json({ error: 'Failed to fetch trips.', details: error.message });
-    res.json(trips || []);
+    res.json({
+      page,
+      limit,
+      total: count || 0,
+      totalPages: Math.ceil((count || 0) / limit),
+      trips: trips || []
+    });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }
@@ -313,14 +349,36 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
 // ============================================================================
 router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   try {
-    const { data: bids, error } = await supabase
+    const rawPage = req.query.page;
+    const rawLimit = req.query.limit;
+    const parsedPage = parseInt(rawPage, 10);
+    const parsedLimit = parseInt(rawLimit, 10);
+    if (rawPage !== undefined && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
+      return res.status(400).json({ error: 'page must be a positive integer' });
+    }
+    if (rawLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) {
+      return res.status(400).json({ error: 'limit must be a positive integer' });
+    }
+    const page = parsedPage || 1;
+    const limit = Math.min(100, Math.max(1, parsedLimit || 10));
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    const { data: bids, error, count } = await supabase
       .from('load_bids')
-      .select('*')
+      .select('*', { count: 'exact' })
       .eq('driver_id', req.user.id)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(from, to);
 
     if (error) return res.status(500).json({ error: 'Failed to fetch bids.', details: error.message });
-    res.json(bids || []);
+    res.json({
+      page,
+      limit,
+      total: count || 0,
+      totalPages: Math.ceil((count || 0) / limit),
+      bids: bids || []
+    });
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
   }

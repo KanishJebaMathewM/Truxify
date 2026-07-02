@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -42,6 +43,21 @@ class LocationService {
 
   Future<void> startTracking() async {
     if (_isTracking) return;
+
+    // Check location permission before starting tracking (fixes #1491)
+    final permission = await Permission.location.request();
+
+    if (permission.isDenied) {
+      debugPrint('[LocationService] Location permission denied');
+      throw Exception('Location permission is required to start tracking');
+    }
+
+    if (permission.isPermanentlyDenied) {
+      debugPrint('[LocationService] Location permission permanently denied');
+      openAppSettings();
+      throw Exception('Location permissions are permanently denied. Please enable in app settings.');
+    }
+
     _isTracking = true;
     debugPrint('[LocationService] Starting driver location tracking...');
     _startPositionSubscription();

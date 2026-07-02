@@ -259,6 +259,36 @@ router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
     return res.status(400).json({ error: 'sort must be asc or desc' });
   }
   const isAscending = sort !== 'desc';
+  const parseCoordinate = (value, name, min, max) => {
+    if (value === undefined) return { value: undefined };
+    if (typeof value !== 'string' || value.trim() === '') {
+      return { error: `${name} must be a number` };
+    }
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      return { error: `${name} must be a number` };
+    }
+    if (parsed < min || parsed > max) {
+      return { error: `${name} must be between ${min} and ${max}` };
+    }
+    return { value: parsed };
+  };
+  const minLat = parseCoordinate(min_lat, 'min_lat', -90, 90);
+  const maxLat = parseCoordinate(max_lat, 'max_lat', -90, 90);
+  const minLng = parseCoordinate(min_lng, 'min_lng', -180, 180);
+  const maxLng = parseCoordinate(max_lng, 'max_lng', -180, 180);
+
+  for (const result of [minLat, maxLat, minLng, maxLng]) {
+    if (result.error) {
+      return res.status(400).json({ error: result.error });
+    }
+  }
+  if (minLat.value !== undefined && maxLat.value !== undefined && minLat.value > maxLat.value) {
+    return res.status(400).json({ error: 'min_lat must be less than or equal to max_lat' });
+  }
+  if (minLng.value !== undefined && maxLng.value !== undefined && minLng.value > maxLng.value) {
+    return res.status(400).json({ error: 'min_lng must be less than or equal to max_lng' });
+  }
 
   try {
     const [orderResult, tripResult] = await Promise.all([
@@ -334,10 +364,10 @@ router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
         if (e.latitude === null || e.longitude === null || e.latitude === undefined || e.longitude === undefined) return false;
         const lat = Number(e.latitude);
         const lng = Number(e.longitude);
-        if (min_lat !== undefined && lat < Number(min_lat)) return false;
-        if (max_lat !== undefined && lat > Number(max_lat)) return false;
-        if (min_lng !== undefined && lng < Number(min_lng)) return false;
-        if (max_lng !== undefined && lng > Number(max_lng)) return false;
+        if (minLat.value !== undefined && lat < minLat.value) return false;
+        if (maxLat.value !== undefined && lat > maxLat.value) return false;
+        if (minLng.value !== undefined && lng < minLng.value) return false;
+        if (maxLng.value !== undefined && lng > maxLng.value) return false;
         return true;
       });
     }

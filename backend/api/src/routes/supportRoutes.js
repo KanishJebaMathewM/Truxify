@@ -103,6 +103,8 @@ const CATEGORY_DESCRIPTIONS = {
 };
 
 router.get('/categories', (_req, res) => {
+  // Optimize: Add caching header for static support categories
+  res.setHeader('Cache-Control', 'public, max-age=86400');
   res.json({
     categories: VALID_CATEGORIES,
     labels: CATEGORY_LABELS,

@@ -13,11 +13,6 @@ function loadRules(rulesPath = DEFAULT_RULES_PATH) {
   return JSON.parse(fs.readFileSync(rulesPath, 'utf8'));
 }
 
-function hasProgramSignal({ title = '', body = '', rules }) {
-  const source = normalize(`${title}\n${body}`);
-  return (rules.programSignals || []).some((signal) => source.includes(normalize(signal)));
-}
-
 function findLinkedIssueNumbers(text = '') {
   const issueNumbers = new Set();
   const closingKeyword =

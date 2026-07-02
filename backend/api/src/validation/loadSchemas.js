@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const nonNegativeDecimalString = (field) => z
   .string({
-    error: `${field} must be a single numeric string`,
+    invalid_type_error: `${field} must be a single numeric string`,
   })
   .regex(/^(?:\d+|\d*\.\d+)$/, {
     message: `${field} must be a non-negative decimal number`,

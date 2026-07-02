@@ -1,0 +1,1 @@
+# Fix for issue #1493: FCM push notification token not invalidated on logout

@@ -76,7 +76,7 @@ router.get('/', authenticate, requireRole(['driver']), userLimiter, async (req, 
       .eq('owner_id', req.user.id);
 
     if (name) {
-      query = query.ilike('name', `%${name}%`);
+      query = query.ilike('name', `%${name.trim()}%`);
     }
     if (min_capacity) {
       query = query.gte('max_capacity_tons', Number(min_capacity));

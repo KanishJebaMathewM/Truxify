@@ -1248,6 +1248,8 @@ router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer
       logger.warn('Failed to update timeline for change-drop:', timelineErr.message);
     }
 
+    await expireDeliveryOtps(order.order_display_id);
+
     return res.json({
       message: 'Drop location updated successfully.',
       pricing: {
@@ -1535,15 +1537,24 @@ router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer
 // ============================================================================
 // 19. GET DRIVER LOCATION (CUSTOMER OR DRIVER)
 // ============================================================================
-router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(uuidParamSchema), async (req, res) => {
+router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
   try {
-    // 1. Resolve order and check authentication / authorization
-    const { data: order, error: orderErr } = await supabase
+    let { data: order, error: orderErr } = await supabase
       .from('orders')
       .select('id, customer_id, driver_id, status')
       .eq('id', orderId)
       .maybeSingle();
+
+    if (!order && !orderErr) {
+      const result = await supabase
+        .from('orders')
+        .select('id, customer_id, driver_id, status')
+        .eq('order_display_id', orderId)
+        .maybeSingle();
+      order = result.data;
+      orderErr = result.error;
+    }
 
     if (orderErr) {
       return res.status(500).json({ error: 'Failed to fetch order details.' });

@@ -464,6 +464,9 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, validateBody(cre
 router.get('/tickets/:id/comments', authenticate, userLimiter, async (req, res) => {
   const ticketId = req.params.id;
   const { sort } = req.query;
+  if (sort !== undefined && sort !== 'asc' && sort !== 'desc') {
+    return res.status(400).json({ error: "sort parameter must be 'asc' or 'desc'" });
+  }
   const isAscending = sort !== 'desc';
 
   try {

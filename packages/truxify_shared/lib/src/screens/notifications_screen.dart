@@ -85,7 +85,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
   Future<void> _markRead(NotificationItem item) async {
     try {
-      await widget.repository.markNotificationRead(item.id);
+      await widget.repository.markNotificationRead(item.id, widget.userId);
 
       if (!mounted) return;
 

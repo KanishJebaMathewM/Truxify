@@ -202,37 +202,9 @@ export async function escrowRelease(orderDisplayId) {
 }
 
 /**
- * Refund escrowed funds to the customer when an order is cancelled or disputed.
- * Must be called by an authorised relayer.
- *
- * @param {string} orderDisplayId
- * @returns {Promise<{txHash: string|null, bookingId: string}>}
+ * Submit an escrow refund and return its hash before confirmation.
+ * Callers can persist the hash before waiting on the network.
  */
-export async function escrowRefund(orderDisplayId) {
-  const bookingId = getEscrowBookingId(orderDisplayId);
-
-  if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — skipping refundFunds.');
-    return { txHash: null, bookingId };
-  }
-
-  try {
-    const escrow = await escrowContract.escrows(bookingId);
-    if (escrow && (escrow.status === 3 || Number(escrow.status) === 3)) {
-      logger.info(`[escrow] Already refunded for booking ${orderDisplayId}, skipping.`);
-      return { txHash: null, bookingId, alreadyRefunded: true };
-    }
-  } catch (err) {
-    logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with refund.`);
-  }
-
-  const submitted = await submitEscrowRefund(orderDisplayId);
-  if (!submitted.txHash) return submitted;
-
-  const receipt = await submitted.waitForConfirmation();
-  return { txHash: receipt.hash, bookingId: submitted.bookingId };
-}
-
 export async function submitEscrowRefund(orderDisplayId) {
   const bookingId = getEscrowBookingId(orderDisplayId);
 

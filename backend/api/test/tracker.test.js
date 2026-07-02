@@ -15,8 +15,8 @@ const RECOVERY_FILE_PATH = path.join(os.tmpdir(), 'truxify-telemetry-recovery.js
 // In-memory mapping of active client subscriptions
 const trackingSubscriptions = new Map();
 
-// Cached Supabase Realtime channels keyed by orderUUID to avoid creating a new
-// channel per location ping. Reused across pings and cleaned up on disconnect.
+// Cached Supabase Realtime channels keyed by orderUUID.
+// Each channel has a _socketId property to track which WebSocket created it.
 const locationChannels = new Map();
 
 // =====================================================================
@@ -34,9 +34,7 @@ const BUFFER_WARN_THRESHOLD = 0.5;
 const BUFFER_CRIT_THRESHOLD = 0.8;
 const BUFFER_MONITOR_INTERVAL_MS = 30000;
 let telemetryWriteBuffer = [];
-let telemetryFlushBuffer = [];
 let currentFlushPromise = null;
-let flushMutex = false;
 const BUFFER_FLUSH_INTERVAL_MS = 20000;
 let flushBackoffMs = 1000;
 let isSchedulerActive = false;
@@ -45,16 +43,13 @@ let wsServer = null;
 let wsHeartbeatInterval = null;
 let telemetryMonitorInterval = null;
 
-// Observability counters
-let telemetryTotalFlushed = 0;
-let telemetryTotalDropped = 0;
-let telemetryRaceDropped = 0;
-let telemetryOverflowDropped = 0;
-
 const WS_UPGRADE_RATE_LIMIT = 5;
 const WS_UPGRADE_RATE_WINDOW_SECONDS = 60;
 const MAX_MSG_PER_SECOND = 10;
 const messageRateTracker = new WeakMap();
+
+// Simple counter for unique socket IDs
+let socketIdCounter = 0;
 
 function getClientIp(request) {
   const forwardedFor = request.headers?.['x-forwarded-for'];
@@ -129,6 +124,9 @@ export function initWebSocketServer(server) {
   });
 
   wss.on('connection', async (ws, req) => {
+    // Assign a unique ID to this socket for channel ownership tracking
+    ws.socketId = `socket_${Date.now()}_${++socketIdCounter}`;
+
     const reqUrl = new URL(req.url, 'http://localhost');
     const token    = reqUrl.searchParams.get('token');
     const bypassAuth = process.env.BYPASS_AUTH === 'true';
@@ -462,13 +460,12 @@ export async function handleLocationPing(ws, data) {
     }
   }
 
-  // Buffer write with capacity limit (always push to active buffer)
+  // Buffer write with capacity limit
   if (telemetryWriteBuffer.length >= MAX_BUFFER_SIZE) {
     const dropCount = Math.floor(MAX_BUFFER_SIZE * 0.1);
     telemetryWriteBuffer.splice(0, dropCount);
-    telemetryTotalDropped += dropCount;
-    telemetryOverflowDropped += dropCount;
-    logger.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} oldest records. Total dropped: ${telemetryTotalDropped}. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
+    telemetryDropCounter += dropCount;
+    logger.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} oldest records. Total dropped: ${telemetryDropCounter}. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
   }
   telemetryWriteBuffer.push({
     driver_id,
@@ -541,15 +538,20 @@ export async function handleLocationPing(ws, data) {
     });
   }
 
+  // =====================================================================
   // Publish to Supabase Realtime channel driver-location:{orderId}
-  // Reuse cached channel to avoid creating a new channel per ping.
+  // Reuse a cached channel per orderUUID and associate it with this socket.
+  // =====================================================================
   if (supabase && orderUUID) {
-    if (!locationChannels.has(orderUUID)) {
-      const channel = supabase.channel(`driver-location:${orderUUID}`);
-      channel.subscribe();
+    let channel = locationChannels.get(orderUUID);
+    if (!channel) {
+      channel = supabase.channel(`driver-location:${orderUUID}`);
+      // Tag the channel with the socket that created it
+      channel._socketId = ws.socketId;
       locationChannels.set(orderUUID, channel);
     }
-    const channel = locationChannels.get(orderUUID);
+
+    // Broadcast the location event
     channel.send({
       type: 'broadcast',
       event: 'location',
@@ -562,6 +564,9 @@ export async function handleLocationPing(ws, data) {
       }
     }).catch((err) => {
       logger.error('Failed to broadcast realtime location to Supabase:', err.message);
+      // If broadcast fails, remove the channel to allow re-creation on next ping
+      supabase.removeChannel(channel).catch(() => {});
+      locationChannels.delete(orderUUID);
     });
   }
 }
@@ -574,7 +579,7 @@ async function flushTelemetryBuffer() {
     return currentFlushPromise;
   }
 
-  if (telemetryWriteBuffer.length === 0 && telemetryFlushBuffer.length === 0) {
+  if (telemetryWriteBuffer.length === 0) {
     flushBackoffMs = 1000;
     return;
   }
@@ -584,36 +589,22 @@ async function flushTelemetryBuffer() {
     return;
   }
 
-  if (flushMutex) return;
-  flushMutex = true;
-
-  // Atomic double-buffer swap: copy flushBuffer, then swap references so active buffer
-  // becomes the new flush buffer and a fresh active buffer is created.
-  // Any concurrent push to the old active buffer is captured in the flush buffer for next cycle.
-  const recordsToFlush = telemetryFlushBuffer.length > 0 ? telemetryFlushBuffer : telemetryWriteBuffer;
-  if (telemetryFlushBuffer.length > 0) {
-    telemetryFlushBuffer = [];
-  }
-  telemetryFlushBuffer = telemetryWriteBuffer;
-  telemetryWriteBuffer = [];
-
-  flushMutex = false;
-
-  if (recordsToFlush.length === 0) return;
-
   currentFlushPromise = (async () => {
+    const recordsToFlush = [...telemetryWriteBuffer];
+    telemetryWriteBuffer = [];
+
     logger.info(`[TRUXIFY BATCH CONTROL] Committing bulk cluster of ${recordsToFlush.length} spatial rows to MongoDB...`);
 
     try {
       const collection = getMongoDb().collection('telemetry');
       await collection.insertMany(recordsToFlush, { ordered: false });
-      telemetryTotalFlushed += recordsToFlush.length;
-      logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB telemetry collection. Total flushed: ${telemetryTotalFlushed}`);
+      logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB telemetry collection.`);
       flushBackoffMs = 1000;
     } catch (err) {
       const isBulkWriteError = err.code === 121 || err.name === 'BulkWriteError' || err.message.includes('Document failed validation');
 
       if (isBulkWriteError) {
+        // Log individual failure details without dropping entire batch
         if (err.writeErrors && err.writeErrors.length > 0) {
           const sampleErrors = err.writeErrors.slice(0, 5).map(e =>
             `doc ${e.index}: ${e.err?.message || 'unknown'}`
@@ -622,31 +613,32 @@ async function flushTelemetryBuffer() {
         } else {
           logger.error(`[TRUXIFY VALIDATION] Bulk insert validation error: ${err.message}`);
         }
-        // Prepend succeeded records to the FRONT for oldest-first retry priority
+        // Only drop the failing records; retry the rest
         const succeeded = err.writeErrors
           ? recordsToFlush.filter((_, i) => !err.writeErrors.some(e => e.index === i))
           : [];
         if (succeeded.length > 0) {
-          telemetryFlushBuffer = [...succeeded, ...telemetryFlushBuffer];
-          if (telemetryFlushBuffer.length > MAX_BUFFER_SIZE) {
-            const overflowDrop = telemetryFlushBuffer.length - MAX_BUFFER_SIZE;
-            telemetryFlushBuffer.splice(0, overflowDrop);
-            telemetryTotalDropped += overflowDrop;
-            telemetryOverflowDropped += overflowDrop;
+          telemetryWriteBuffer = [...succeeded, ...telemetryWriteBuffer];
+          if (telemetryWriteBuffer.length > MAX_BUFFER_SIZE) {
+            const overflowDrop = telemetryWriteBuffer.length - MAX_BUFFER_SIZE;
+            telemetryWriteBuffer.splice(0, overflowDrop);
+            telemetryDropCounter += overflowDrop;
             logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after partial insert.`);
           }
         }
       } else {
         flushBackoffMs = Math.min(flushBackoffMs * 2, 60000);
-        // Prepend failed records to the FRONT for oldest-first retry priority
-        telemetryFlushBuffer = [...recordsToFlush, ...telemetryFlushBuffer];
-        if (telemetryFlushBuffer.length > MAX_BUFFER_SIZE) {
-          const overflowDrop = telemetryFlushBuffer.length - MAX_BUFFER_SIZE;
-          telemetryFlushBuffer.splice(0, overflowDrop);
-          telemetryTotalDropped += overflowDrop;
-          telemetryOverflowDropped += overflowDrop;
-          logger.warn(`[TRUXIFY BUFFER DROP] Capacity limit: dropped ${overflowDrop} oldest records from retry merge. Total dropped: ${telemetryTotalDropped}`);
+
+        // Atomic buffer swap: snapshot current buffer and merge with retry batch
+        const currentSnapshot = telemetryWriteBuffer;
+        telemetryWriteBuffer = recordsToFlush;
+        const overflow = telemetryWriteBuffer.length + currentSnapshot.length - MAX_BUFFER_SIZE;
+        if (overflow > 0) {
+          telemetryWriteBuffer.splice(0, overflow);
+          telemetryDropCounter += overflow;
+          logger.warn(`[TRUXIFY BUFFER DROP] Capacity limit: dropped ${overflow} oldest records from retry merge. Total dropped: ${telemetryDropCounter}`);
         }
+        telemetryWriteBuffer.push(...currentSnapshot);
       }
     } finally {
       currentFlushPromise = null;
@@ -657,21 +649,16 @@ async function flushTelemetryBuffer() {
 }
 
 function monitorBufferSize() {
-  const activeLen = telemetryWriteBuffer.length;
-  const flushLen = telemetryFlushBuffer.length;
-  const totalLen = activeLen + flushLen;
-  const usagePct = totalLen / MAX_BUFFER_SIZE;
+  const usagePct = telemetryWriteBuffer.length / MAX_BUFFER_SIZE;
   if (usagePct >= BUFFER_CRIT_THRESHOLD) {
     logger.warn(
       `[TRUXIFY BUFFER MONITOR] CRITICAL: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
-      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
-      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
+      `(${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`
     );
   } else if (usagePct >= BUFFER_WARN_THRESHOLD) {
     logger.warn(
       `[TRUXIFY BUFFER MONITOR] WARNING: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
-      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
-      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
+      `(${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`
     );
   }
 }
@@ -897,6 +884,7 @@ async function handleUnsubscribe(ws, data) {
 }
 
 async function removeClientFromAllSubscriptions(ws) {
+  // 1. Remove this socket from all tracking subscriptions
   trackingSubscriptions.forEach((clients, key) => {
     if (clients.has(ws)) {
       clients.delete(ws);
@@ -904,20 +892,31 @@ async function removeClientFromAllSubscriptions(ws) {
     }
     if (clients.size === 0) {
       trackingSubscriptions.delete(key);
-      // Clean up the cached Supabase Realtime channel for this orderUUID
-      // so channels do not leak after the last subscriber disconnects.
-      if (locationChannels.has(key)) {
-        const channel = locationChannels.get(key);
-        // Guard against supabase being null (e.g. not configured in dev/test environments)
-        if (supabase) {
-          supabase.removeChannel(channel);
-        }
-        locationChannels.delete(key);
-        logger.info(`🔌 Removed Supabase Realtime channel for order "${key}" on last subscriber disconnect.`);
-      }
     }
   });
 
+  // 2. Clean up any Supabase Realtime channels owned by this socket
+  const channelsToRemove = [];
+  for (const [orderUUID, channel] of locationChannels.entries()) {
+    if (channel._socketId === ws.socketId) {
+      channelsToRemove.push(orderUUID);
+    }
+  }
+
+  for (const orderUUID of channelsToRemove) {
+    const channel = locationChannels.get(orderUUID);
+    if (channel) {
+      try {
+        await supabase.removeChannel(channel);
+        logger.info(`🔌 Removed Supabase Realtime channel for order "${orderUUID}" (owned by socket ${ws.socketId}).`);
+      } catch (err) {
+        logger.error(`[tracker] Failed to remove channel for ${orderUUID}:`, err.message);
+      }
+      locationChannels.delete(orderUUID);
+    }
+  }
+
+  // 3. Redis cleanup for subscriptions (existing logic)
   if (redisClient) {
     const subscriberId = ws.user?.id || ws.driverId;
     if (subscriberId) {

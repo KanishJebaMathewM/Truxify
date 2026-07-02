@@ -42,7 +42,7 @@ if (supabaseUrl && supabaseAnonKey) {
   );
 }
 
-if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseKey) {
+if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseAnonKey) {
   try {
     supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {

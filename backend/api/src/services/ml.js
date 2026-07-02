@@ -1,9 +1,11 @@
+import logger from '../middleware/logger.js';
+
 // Single source of truth for ML engine base URL
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 
 // Startup validation
 if (!process.env.ML_API_KEY) {
-    console.warn('[ML] WARNING: ML_API_KEY is not set. ML features will be unavailable.');
+    logger.warn('[ML] WARNING: ML_API_KEY is not set. ML features will be unavailable.');
 }
 
 /**
@@ -87,6 +89,13 @@ export async function predictPrice({
         route_origin: routeOrigin,
         route_destination: routeDestination,
     };
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(5000),
+    });
 
   return handleResponse(response);
 }
@@ -296,14 +305,4 @@ export async function listModels() {
     signal: AbortSignal.timeout(5000),
   });
   return handleResponse(response);
-}
-
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(5000),
-    });
-
-    return handleResponse(response);
 }

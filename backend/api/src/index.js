@@ -1,5 +1,5 @@
 import express from 'express';
-import cors from 'cors';
+import { corsMiddleware } from './middleware/cors.js';
 import helmet from 'helmet'; // 🔒 ADDED HELMET IMPORT FOR ISSUES #361 & #944
 import http from 'http';
 import dotenv from 'dotenv';
@@ -12,6 +12,7 @@ import deviceRoutes from './routes/deviceRoutes.js';
 
 import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js';
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js';
+import { attachLocationServer } from './sockets/locationServer.js';
 import { startEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js';
 
 // Load REST routes
@@ -25,6 +26,7 @@ import authRoutes from './routes/authRoutes.js';
 import healthRoutes from './routes/healthRoutes.js';
 
 import logger from './middleware/logger.js';
+import { setupSwagger } from './config/swagger.js';
 import { requestIdMiddleware, requestLogger } from './middleware/requestId.js';
 import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js';
 import {
@@ -101,50 +103,7 @@ app.use(helmet({
   xssFilter: true
 }));
 
-// ============================================================================
-// CORS CONFIGURATION
-// ============================================================================
-// Enable CORS for frontend clients (Flutter Web, mobile, etc.)
-const corsOrigins = process.env.NODE_ENV === 'production'
-  ? (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean)
-  : '*';
-// Enable CORS only for explicitly allowed frontend origins
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
-  .split(',')
-  .map((origin) => origin.trim())
-  .filter((origin) => {
-    if (!origin) return false;
-    try {
-      const parsed = new URL(origin);
-      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-    } catch {
-      return false;
-    }
-  });
-
-// In production, x-user-id / x-user-role / x-user-name must NOT be accepted
-// as authentication headers — only expose them in non-production.
-const corsAllowedHeaders = process.env.NODE_ENV === 'production'
-  ? ['Content-Type', 'Authorization']
-  : ['Content-Type', 'Authorization', 'x-user-id', 'x-user-role', 'x-user-name'];
-
-app.use(cors({
-  origin: (origin, callback) => {
-    // Allow non-browser/same-origin requests with no Origin header
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-
-    // In development/testing, allow localhost or loopback origins
-    if (process.env.NODE_ENV !== 'production') {
-      const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-      if (isLocalhost) return callback(null, true);
-    }
-
-    return callback(null, false);
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: corsAllowedHeaders,
-}));
+app.use(corsMiddleware);
 
 // ── Production header sanitization (defense in depth) ────────────────
 // Even if a proxy or misconfiguration lets dev auth headers through,
@@ -189,6 +148,10 @@ app.use('/api/profile', profileRoutes);
 app.use('/api/devices', deviceRoutes);
 app.use('/api/trucks', truckRoutes);
 app.use('/api/auth', authLimiter, authRoutes);
+
+// Setup Swagger Documentation
+setupSwagger(app);
+
 // Root route
 app.get('/', (req, res) => {
   res.send('<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://localhost:5000/ws/tracking</code></p>');
@@ -214,10 +177,6 @@ app.use((err, req, res, next) => {
 // ============================================================================
 await waitForMongoDb();
 initWebSocketServer(server);
-
-await waitForMongoDb();
-initWebSocketServer(server); // Keep existing
-const io = attachLocationServer(server); // Add new one
 
 // ============================================================================
 // START SERVER

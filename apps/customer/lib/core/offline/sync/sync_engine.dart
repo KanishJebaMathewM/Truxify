@@ -1,11 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
-
+import '../../config.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart'; // ✅ IMPORT SUPABASE
-
 import '../conflict/conflict_resolver.dart';
 import '../db/offline_event_db.dart';
 import '../models/trip_event.dart';
@@ -100,7 +99,7 @@ class SyncEngine {
           'Authorization': 'Bearer $token', // ✅ INJECT ACCESS TOKEN
         },
         body: body,
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(AppConfig.syncTimeout);
 
       if (response.statusCode == 200 || response.statusCode == 202) {
         return true;

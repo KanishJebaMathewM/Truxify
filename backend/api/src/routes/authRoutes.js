@@ -11,7 +11,7 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { invalidateCachedProfile } from '../lib/profileCache.js';
+import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
 import { firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
@@ -29,7 +29,10 @@ router.post('/logout', authenticate, async (req, res) => {
   // Bounded timeout prevents Redis hangs from blocking the logout response.
   try {
     await Promise.race([
-      invalidateCachedProfile(uid),
+      Promise.all([
+        uid ? invalidateCachedProfile(uid) : Promise.resolve(),
+        req.user && req.user.id ? invalidateCachedSupabaseProfile(req.user.id) : Promise.resolve(),
+      ]),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Redis invalidation timeout')), 2000)
       ),

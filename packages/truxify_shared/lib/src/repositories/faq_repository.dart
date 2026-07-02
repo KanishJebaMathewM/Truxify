@@ -13,7 +13,7 @@ class FaqRepository {
         .select()
         .eq('is_active', true)
         .order('sort_order');
-    final rows = (response as List<dynamic>).cast<Map<String, dynamic>>();
+    final List<Map<String, dynamic>> rows = List<Map<String, dynamic>>.from(response as List);
     return rows
         .map(Faq.fromMap)
         .where((faq) => faq.appType == 'both' || faq.appType == appType)

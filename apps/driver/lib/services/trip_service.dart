@@ -44,7 +44,7 @@ class TripService {
     };
   }
 
-  Future<void> _verifyTripOwnership(String tripDisplayId) async {
+  Future<void> verifyTripOwnership(String tripDisplayId) async {
     final tripCheck = await _client
         .from('trips')
         .select('id')
@@ -150,82 +150,38 @@ class TripService {
     String stopId,
     String tripDisplayId,
   ) async {
-    await _verifyTripOwnership(tripDisplayId);
+    await verifyTripOwnership(tripDisplayId);
+    final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/stops/$stopId/complete');
+    final response = await _httpClient.put(uri, headers: await _authHeaders());
 
-    final updatedStop = await _client.from('trip_stops').update({
-      'is_completed': true,
-      'is_current': false,
-    }).eq('id', stopId).eq('trip_display_id', tripDisplayId).select().maybeSingle();
-
-    if (updatedStop == null) {
-      throw Exception('Stop not found or does not belong to this trip');
-    }
-
-    final nextStops = await _client
-        .from('trip_stops')
-        .select()
-        .eq('trip_display_id', tripDisplayId)
-        .eq('is_completed', false)
-        .order('sort_order')
-        .limit(1);
-
-    if (nextStops.isNotEmpty) {
-      await _client
-          .from('trip_stops')
-          .update({'is_current': true})
-          .eq('id', nextStops.first['id'])
-          .eq('trip_display_id', tripDisplayId);
-    } else {
-      await _client
-          .from('trips')
-          .update({'status': 'completed'})
-          .eq('trip_display_id', tripDisplayId)
-          .eq('driver_id', _driverId);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>?;
+      throw Exception(body?['error'] as String? ?? 'Failed to mark stop completed');
     }
   }
-  Future<void> updateOnlineStatus(bool isOnline) async {
-    final updated = await _client
-        .from('driver_details')
-        .update({
-          'is_online': isOnline,
-          'updated_at': DateTime.now().toIso8601String(),
-        })
-        .eq('user_id', _driverId)
-        .select()
-        .maybeSingle();
 
-    if (updated == null) {
-      throw Exception('Driver profile not found or update failed');
+  Future<void> updateOnlineStatus(bool isOnline) async {
+    final uri = Uri.parse('$_apiBaseUrl/api/driver/online');
+    final response = await _httpClient.put(
+      uri,
+      headers: await _authHeaders(),
+      body: jsonEncode(<String, dynamic>{'is_online': isOnline}),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>?;
+      throw Exception(body?['error'] as String? ?? 'Failed to update online status');
     }
   }
 
   Future<void> startTrip(String tripDisplayId) async {
-    await _verifyTripOwnership(tripDisplayId);
+    await verifyTripOwnership(tripDisplayId);
+    final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/start');
+    final response = await _httpClient.put(uri, headers: await _authHeaders());
 
-    // Find the first stop of this trip that is not completed
-    final stops = await _client
-        .from('trip_stops')
-        .select()
-        .eq('trip_display_id', tripDisplayId)
-        .eq('is_completed', false)
-        .order('sort_order')
-        .limit(1);
-
-    if (stops.isEmpty) {
-      throw Exception('No active stops found for this trip');
-    }
-
-    final firstStopId = stops.first['id'];
-    final updatedStop = await _client
-        .from('trip_stops')
-        .update({'is_current': true})
-        .eq('id', firstStopId)
-        .eq('trip_display_id', tripDisplayId)
-        .select()
-        .maybeSingle();
-
-    if (updatedStop == null) {
-      throw Exception('Failed to start trip: Stop not found or update failed');
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>?;
+      throw Exception(body?['error'] as String? ?? 'Failed to start trip');
     }
   }
 }

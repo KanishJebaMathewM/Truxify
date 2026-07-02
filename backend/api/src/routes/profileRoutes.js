@@ -307,9 +307,10 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
         total_net_earnings: totalNetEarnings
       },
       trips: tripsList
+    });
   } catch (err) {
     logger.error(err);
-    res.status(500).json({ error: 'Internal Server Error', details: err.message, stack: err.stack });
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -324,11 +325,19 @@ router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), asyn
       return res.status(400).json({ error: 'userId path parameter is required.' });
     }
 
-    let { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, firebase_uid')
-      .eq('id', targetUserId)
-      .maybeSingle();
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let profile = null;
+    let profileError = null;
+
+    if (uuidRegex.test(targetUserId)) {
+      const result = await supabase
+        .from('profiles')
+        .select('id, firebase_uid')
+        .eq('id', targetUserId)
+        .maybeSingle();
+      profile = result.data;
+      profileError = result.error;
+    }
 
     if (!profile && !profileError) {
       const firebaseLookup = await supabase

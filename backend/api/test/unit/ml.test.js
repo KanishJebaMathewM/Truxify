@@ -85,7 +85,7 @@ describe('ml service — predictDemand', () => {
 
     await expect(predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 }))
       .rejects
-      .toThrow('ML Engine authentication failed: 401');
+      .toThrow('[ML] Authentication failed (401)');
   });
 
   it('throws with descriptive message on non-ok response', async () => {
@@ -98,7 +98,7 @@ describe('ml service — predictDemand', () => {
 
     await expect(predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 }))
       .rejects
-      .toThrow('ML Engine request failed: Internal Server Error');
+      .toThrow('[ML] Request failed (500)');
   });
 
   it('adds X-API-Key header when ML_API_KEY env var is set', async () => {
@@ -202,7 +202,7 @@ describe('ml service — predictPrice', () => {
 
     await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
       .rejects
-      .toThrow('ML Engine authentication failed: 403');
+      .toThrow('[ML] Authentication failed (403)');
   });
 
   it('throws with descriptive message on non-ok response', async () => {
@@ -215,7 +215,7 @@ describe('ml service — predictPrice', () => {
 
     await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
       .rejects
-      .toThrow('ML Engine request failed: Bad Gateway');
+      .toThrow('[ML] Request failed (502)');
   });
 
   it('rejects when fetch throws (network error)', async () => {

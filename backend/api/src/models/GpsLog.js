@@ -59,6 +59,10 @@ const gpsLogSchema = new mongoose.Schema({
         type: Number,
         default: null,
     },
+    metadata: {
+        type: mongoose.Schema.Types.Mixed,
+        default: {},
+    },
 }, {
     timeseries: {
         timeField: "timestamp",
@@ -70,13 +74,5 @@ const gpsLogSchema = new mongoose.Schema({
 
 // Compound index for faster queries by bookingId + timestamp
 gpsLogSchema.index({ bookingId: 1, timestamp: -1 });
-
-// Virtual field to group metadata together
-gpsLogSchema.virtual("metadata").get(function() {
-    return {
-        bookingId: this.bookingId,
-        driverId: this.driverId,
-    };
-});
 
 export const GpsLog = mongoose.model("GpsLog", gpsLogSchema);

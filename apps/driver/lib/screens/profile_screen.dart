@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 
 import '../controllers/app_controller.dart';
 import '../core/app_routes.dart';
+import '../core/config.dart';
+import '../models/app_models.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
@@ -102,7 +104,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           'Content-Type': 'application/json',
           if (token != null) 'Authorization': 'Bearer $token',
         },
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(AppConfig.profileUpdateTimeout);
 
       if (!mounted) return;
 
@@ -1139,7 +1141,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           'Content-Type': 'application/json',
                           'Authorization': 'Bearer $accessToken',
                         },
-                      ).timeout(const Duration(seconds: 5));
+                      ).timeout(AppConfig.quickActionTimeout);
                     } catch (e) {
                       debugPrint('Backend logout failed: $e');
                     }

@@ -91,8 +91,12 @@ def train_demand_forecast_model() -> dict:
 
 
 def predict_demand(features: List[float]) -> Optional[float]:
+    if len(features) != len(FEATURE_NAMES):
+        raise ValueError(f"Invalid input tensor shape. Expected {len(FEATURE_NAMES)} features, got {len(features)}")
+        
     if not model_exists(MODEL_NAME):
         train_demand_forecast_model()
+
 
     loaded = load_model(MODEL_NAME)
     if loaded is None:

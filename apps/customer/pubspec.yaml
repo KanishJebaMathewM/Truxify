@@ -13,6 +13,8 @@ dependencies:
   firebase_messaging: ^16.4.1
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   truxify_shared:
     path: ../../packages/truxify_shared
   supabase_flutter: ^2.9.1
@@ -44,3 +46,4 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  generate: true

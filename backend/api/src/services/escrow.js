@@ -105,12 +105,23 @@ export async function buildDepositTx(orderDisplayId, customerWalletAddress, driv
   return { txData, bookingId };
 }
 
-export async function recordDepositTx(bookingId, txHash) {
+export async function recordDepositTx(bookingId, txHash, expectedSenderAddress = null) {
   if (!escrowContract) {
     return { error: 'Contract not initialised' };
   }
   if (!ethers.isHexString(txHash, 32)) {
     return { error: 'Invalid transaction hash' };
+  }
+
+  // Idempotency: check if this booking already has a funded escrow on-chain
+  try {
+    const escrow = await escrowContract.escrows(bookingId);
+    if (escrow && (escrow.status === 1 || Number(escrow.status) === 1)) {
+      logger.info(`[escrow] Booking ${bookingId} already has a funded escrow — idempotency skip.`);
+      return { txHash: txHash, bookingId, alreadyFunded: true };
+    }
+  } catch (err) {
+    logger.warn(`[escrow] Failed to check existing escrow status for ${bookingId}: ${err.message}, proceeding.`);
   }
 
   const provider = escrowContract.runner.provider;
@@ -147,6 +158,11 @@ export async function recordDepositTx(bookingId, txHash) {
   // Verify the on-chain sender matches the customer address in the deposit call.
   if (tx.from.toLowerCase() !== txCustomer.toLowerCase()) {
     return { error: 'Transaction sender does not match registered customer wallet' };
+  }
+
+  // If an expected sender address was provided (from order record), verify it matches.
+  if (expectedSenderAddress && tx.from.toLowerCase() !== expectedSenderAddress.toLowerCase()) {
+    return { error: 'Transaction sender does not match the registered customer wallet for this order' };
   }
 
   logger.info(`[escrow] deposit confirmed for booking ${bookingId} in block ${receipt.blockNumber}`);

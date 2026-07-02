@@ -70,7 +70,7 @@ class OrderService {
   }) async {
     try {
       final body = await _apiClient.put(
-        '/api/orders/$orderDisplayId/change-drop',
+        '/api/orders/${Uri.encodeComponent(orderDisplayId)}/change-drop',
         body: <String, dynamic>{
           'drop_address': dropAddress,
           'drop_lat': dropLat,
@@ -91,7 +91,7 @@ class OrderService {
   }) async {
     try {
       final body = await _apiClient.post(
-        '/api/orders/$orderDisplayId/cancel',
+        '/api/orders/${Uri.encodeComponent(orderDisplayId)}/cancel',
         body: <String, dynamic>{
           if (reason != null) 'reason': reason,
         },
@@ -107,7 +107,7 @@ class OrderService {
   Future<Map<String, dynamic>?> fetchOrderById(String orderDisplayId) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId',
+        '/api/orders/${Uri.encodeComponent(orderDisplayId)}',
       ) as Map<String, dynamic>?;
       return body?['order'] as Map<String, dynamic>?;
     } on ApiException catch (e) {
@@ -136,7 +136,7 @@ class OrderService {
   ) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId/timeline',
+        '/api/orders/${Uri.encodeComponent(orderDisplayId)}/timeline',
       );
       return List<Map<String, dynamic>>.from(body as List);
     } on ApiException catch (e) {
@@ -285,7 +285,7 @@ class OrderService {
   Future<Map<String, dynamic>> fetchDriverLocation(String orderDisplayId) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId/driver-location',
+        '/api/orders/${Uri.encodeComponent(orderDisplayId)}/driver-location',
       );
       return body is Map<String, dynamic> ? body : <String, dynamic>{};
     } on ApiException catch (e) {
@@ -298,7 +298,7 @@ class OrderService {
   Future<Map<String, dynamic>> fetchOrderRoute(String orderDisplayId) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId/route',
+        '/api/orders/${Uri.encodeComponent(orderDisplayId)}/route',
       );
       return body is Map<String, dynamic> ? body : <String, dynamic>{};
     } on ApiException catch (e) {

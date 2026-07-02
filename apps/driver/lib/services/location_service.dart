@@ -141,6 +141,10 @@ class LocationService {
 
       final orderId = _activeOrderId;
       final orderDisplayId = _activeOrderDisplayId;
+      if (orderId == null || orderDisplayId == null) {
+        debugPrint('[LocationService] No active order found; skipping order telemetry ping');
+        return;
+      }
 
       // 2. Ensure WebSocket is connected
       if (_channel == null) {

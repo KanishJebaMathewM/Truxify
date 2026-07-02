@@ -2,7 +2,6 @@ import { supabase, redisClient } from '../config/db.js';
 import { escrowRelease } from './escrow.js';
 import logger from '../middleware/logger.js';
 import os from 'os';
-import logger from '../middleware/logger.js';
 const DEFAULT_INTERVAL_MS = 60_000;
 const LOCK_KEY = 'escrow:release:reconciliation:lock';
 const LOCK_TTL_SECONDS = 120;

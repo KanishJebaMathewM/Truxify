@@ -55,7 +55,8 @@ function selectLabels({
   linkedIssueLabels = [],
   currentLabels = [],
   availableLabels = [],
-  rules = loadRules()
+  rules = loadRules(),
+  detectedPrograms = []
 }) {
   const selected = new Set();
   const current = new Set(currentLabels.map(normalize));
@@ -68,8 +69,23 @@ function selectLabels({
     }
   }
 
-  // Always apply program labels (like gssoc:approved) to all created PRs
-  addLabels(selected, rules.programLabels);
+  // Determine program from title/body or passed detections
+  const programs = new Set(detectedPrograms);
+  const combinedText = `${prTitle}\n${prBody}`.toLowerCase();
+  if (combinedText.includes('gssoc')) {
+    programs.add('gssoc');
+  }
+  if (combinedText.includes('ecsoc')) {
+    programs.add('ecsoc');
+  }
+
+  // Apply program labels based on the detected program(s)
+  if (programs.has('gssoc')) {
+    addLabels(selected, rules.programLabels || ['gssoc:approved']);
+  }
+  if (programs.has('ecsoc')) {
+    addLabels(selected, ['ECSoC26']);
+  }
 
   addLabels(selected, labelsMatchingRules(prTitle, rules.titleRules));
 
@@ -125,21 +141,126 @@ async function fetchIssueLabels(github, owner, repo, issueNumbers) {
   return [...labels];
 }
 
+async function ensureLabelExists(github, owner, repo, name, color, description) {
+  try {
+    await github.rest.issues.createLabel({
+      owner,
+      repo,
+      name,
+      color,
+      description
+    });
+  } catch (error) {
+    if (error.status !== 422) {
+      throw error;
+    }
+  }
+}
+
 async function run({ github, context, core, rulesPath = DEFAULT_RULES_PATH, dryRun = false }) {
-  const pullRequest = context.payload.pull_request;
+  const { owner, repo } = context.repo;
+
+  let pullRequest = context.payload.pull_request;
   if (!pullRequest) {
-    core.info('No pull_request payload found; skipping PR labeler.');
-    return [];
+    if (context.payload.issue && context.payload.issue.pull_request) {
+      core.info(`Triggered by comment on PR #${context.payload.issue.number}. Fetching PR details...`);
+      const response = await github.rest.pulls.get({
+        owner,
+        repo,
+        pull_number: context.payload.issue.number
+      });
+      pullRequest = response.data;
+    } else {
+      core.info('No pull_request payload found and not an issue comment on a PR; skipping PR labeler.');
+      return [];
+    }
+  } else {
+    core.info(`Fetching latest PR details for PR #${pullRequest.number}...`);
+    const response = await github.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: pullRequest.number
+    });
+    pullRequest = response.data;
   }
 
-  const { owner, repo } = context.repo;
   const pullNumber = pullRequest.number;
   const rules = loadRules(rulesPath);
-  const availableLabels = await fetchPaginatedLabels(github, owner, repo);
+
+  // Fetch comments to scan for GSSOC or ECSoC mentions and the automated message
+  const comments = await github.paginate(github.rest.issues.listComments, {
+    owner,
+    repo,
+    issue_number: pullNumber,
+    per_page: 100
+  });
+
+  const AUTOMATED_COMMENT_BODY = 'Are you a part of GSSOC or ECSoC?';
+  const hasAutomatedComment = comments.some(c => c.body && c.body.includes(AUTOMATED_COMMENT_BODY));
+  const otherComments = comments.filter(c => !(c.body && c.body.includes(AUTOMATED_COMMENT_BODY)));
+
+  // Combine title, body, and all comments (excluding the automated comment) for program detection
+  let searchSource = `${pullRequest.title}\n${pullRequest.body || ''}`;
+  for (const c of otherComments) {
+    searchSource += `\n${c.body || ''}`;
+  }
+  searchSource = searchSource.toLowerCase();
+
+  const hasGssoc = searchSource.includes('gssoc');
+  const hasEcsoc = searchSource.includes('ecsoc');
+
+  const detectedPrograms = [];
+  if (hasGssoc) detectedPrograms.push('gssoc');
+  if (hasEcsoc) detectedPrograms.push('ecsoc');
+
+  core.info(`Detected programs: ${detectedPrograms.join(', ') || 'none'}`);
+
+  // Fetch available labels in the repo
+  let availableLabels = await fetchPaginatedLabels(github, owner, repo);
+
+  // Ensure labels exist if they were detected
+  if (hasGssoc && !availableLabels.map(normalize).includes('gssoc:approved')) {
+    if (!dryRun) {
+      await ensureLabelExists(github, owner, repo, 'gssoc:approved', '0052cc', 'GSSoC approved contribution');
+    }
+    availableLabels.push('gssoc:approved');
+  }
+
+  if (hasEcsoc && !availableLabels.map(normalize).includes('ecsoc26')) {
+    if (!dryRun) {
+      await ensureLabelExists(github, owner, repo, 'ECSoC26', '0284c7', 'ECSoC 2026 pull request');
+    }
+    availableLabels.push('ECSoC26');
+  }
+
+  // Ask automated message if neither was mentioned and the comment hasn't been posted yet
+  if (!hasGssoc && !hasEcsoc) {
+    if (!hasAutomatedComment) {
+      if (!dryRun) {
+        const commentBody = `👋 Hello! Are you a part of GSSOC or ECSoC?
+
+Please reply to this PR with either **GSSOC** or **ECSoC** so we can label it correctly.`;
+        await github.rest.issues.createComment({
+          owner,
+          repo,
+          issue_number: pullNumber,
+          body: commentBody
+        });
+        core.info(`Posted automated comment asking for program membership on PR #${pullNumber}`);
+      } else {
+        core.info(`Dry run: would post automated comment asking for program membership on PR #${pullNumber}`);
+      }
+    } else {
+      core.info(`Automated comment already exists on PR #${pullNumber}`);
+    }
+  }
+
   const changedFiles = await fetchPullRequestFiles(github, owner, repo, pullNumber);
   const linkedIssueNumbers = findLinkedIssueNumbers(`${pullRequest.title}\n${pullRequest.body || ''}`);
   const linkedIssueLabels = await fetchIssueLabels(github, owner, repo, linkedIssueNumbers);
-  const currentLabels = (pullRequest.labels || []).map((label) => label.name);
+  const currentLabels = (pullRequest.labels || []).map((label) =>
+    typeof label === 'string' ? label : label.name
+  );
 
   const labelsToAdd = selectLabels({
     prTitle: pullRequest.title,
@@ -148,8 +269,40 @@ async function run({ github, context, core, rulesPath = DEFAULT_RULES_PATH, dryR
     linkedIssueLabels,
     currentLabels,
     availableLabels,
-    rules
+    rules,
+    detectedPrograms
   });
+
+  // Handle merge conflict label
+  const isConflict = pullRequest.mergeable === false || pullRequest.mergeable_state === 'dirty';
+  const hasConflictLabel = currentLabels.map(normalize).includes('merge conflicts');
+
+  if (isConflict && !hasConflictLabel) {
+    if (!availableLabels.map(normalize).includes('merge conflicts')) {
+      if (!dryRun) {
+        await ensureLabelExists(github, owner, repo, 'merge conflicts', 'd73a4a', 'PR has merge conflicts');
+      }
+      availableLabels.push('merge conflicts');
+    }
+    labelsToAdd.push('merge conflicts');
+  }
+
+  const isClean = pullRequest.mergeable === true;
+  if (isClean && hasConflictLabel) {
+    core.info(`PR is mergeable and has 'merge conflicts' label. Removing the label...`);
+    if (!dryRun) {
+      try {
+        await github.rest.issues.removeLabel({
+          owner,
+          repo,
+          issue_number: pullNumber,
+          name: 'merge conflicts'
+        });
+      } catch (error) {
+        core.warning(`Failed to remove 'merge conflicts' label: ${error.message}`);
+      }
+    }
+  }
 
   core.info(`Changed files: ${changedFiles.join(', ') || 'none'}`);
   core.info(`Linked issues: ${linkedIssueNumbers.join(', ') || 'none'}`);

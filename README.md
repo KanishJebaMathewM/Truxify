@@ -372,7 +372,7 @@ git push origin feature/your-feature-name
 ## 👥 Contributors
 Thanks to all contributors ❤️
 
-[![Contributors](https://contrib.rocks/image?repo=KanishJebaMathewM/Truxify)](https://github.com/KanishJebaMathewM/Truxify/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=KanishJebaMathewM/Truxify&max=100)](https://github.com/KanishJebaMathewM/Truxify/graphs/contributors)
 
 ## 📄 License
 [MIT License](LICENSE) — Truxify is intentionally open source so any state transport department, NGO, or logistics cooperative can self-host it for free.

@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart';
 import '../core/api_client.dart';
 import 'supabase_service.dart';
@@ -35,7 +36,7 @@ class ProfileService {
         );
       } catch (e) {
         // ignore: avoid_print
-        print('Backend logout failed: $e');
+        developer.log('Backend logout failed: $e');
       }
     }
 

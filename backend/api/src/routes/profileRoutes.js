@@ -2,7 +2,7 @@ import express from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
-import { updateProfileSchema, updateWalletSchema, driverStatementSchema, paramIdSchema, updateFcmTokenSchema } from '../validation/requestSchemas.js';
+import { updateProfileSchema, updateWalletSchema, driverStatementSchema, paramIdSchema, uuidParamSchema, updateFcmTokenSchema } from '../validation/requestSchemas.js';
 import logger from '../middleware/logger.js';
 import {
   getProfile,
@@ -309,8 +309,8 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
       trips: tripsList
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal Server Error', details: err.message, stack: err.stack });
+    logger.error(err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -325,11 +325,19 @@ router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), asyn
       return res.status(400).json({ error: 'userId path parameter is required.' });
     }
 
-    let { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, firebase_uid')
-      .eq('id', targetUserId)
-      .maybeSingle();
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let profile = null;
+    let profileError = null;
+
+    if (uuidRegex.test(targetUserId)) {
+      const result = await supabase
+        .from('profiles')
+        .select('id, firebase_uid')
+        .eq('id', targetUserId)
+        .maybeSingle();
+      profile = result.data;
+      profileError = result.error;
+    }
 
     if (!profile && !profileError) {
       const firebaseLookup = await supabase

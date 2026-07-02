@@ -2,7 +2,6 @@ import express from 'express';
 import { supabase, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 import { healthLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
-import { healthLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 

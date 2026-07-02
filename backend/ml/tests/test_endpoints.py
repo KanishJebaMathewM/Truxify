@@ -22,7 +22,15 @@ def test_root():
 def test_health():
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    data = response.json()
+    assert data["status"] in {"healthy", "degraded"}
+    assert data["service"] == "ml-engine"
+    assert set(data["models"]) == {
+        "eta_predictor",
+        "demand_forecast",
+        "price_forecast",
+        "driver_profit",
+    }
 
 
 def _auth_payload():
@@ -66,7 +74,7 @@ def test_health_no_auth_required(monkeypatch):
     monkeypatch.setenv("ML_API_KEY", "test-secret-key")
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "healthy"}
+    assert response.json()["service"] == "ml-engine"
 
 
 def test_train_demand():

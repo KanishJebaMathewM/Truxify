@@ -248,8 +248,30 @@ router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   const { status } = req.query;
-  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+  const pageParam = req.query.page ?? '1';
+  const limitParam = req.query.limit ?? '10';
+  const page = typeof pageParam === 'string' ? Number(pageParam) : NaN;
+  const limit = typeof limitParam === 'string' ? Number(limitParam) : NaN;
+
+  if (!Number.isInteger(page) || page < 1) {
+    return res.status(400).json({ error: 'page must be greater than or equal to 1' });
+  }
+
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+    return res.status(400).json({ error: 'limit must be between 1 and 100' });
+  }
+  const rawPage = req.query.page;
+  const rawLimit = req.query.limit;
+  const parsedPage = parseInt(rawPage, 10);
+  const parsedLimit = parseInt(rawLimit, 10);
+  if (rawPage !== undefined && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
+    return res.status(400).json({ error: 'page must be a positive integer' });
+  }
+  if (rawLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) {
+    return res.status(400).json({ error: 'limit must be a positive integer' });
+  }
+  const page = parsedPage || 1;
+  const limit = Math.min(100, Math.max(1, parsedLimit || 10));
 
   try {
     const from = (page - 1) * limit;
@@ -341,8 +363,18 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
 // ============================================================================
 router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const rawPage = req.query.page;
+    const rawLimit = req.query.limit;
+    const parsedPage = parseInt(rawPage, 10);
+    const parsedLimit = parseInt(rawLimit, 10);
+    if (rawPage !== undefined && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
+      return res.status(400).json({ error: 'page must be a positive integer' });
+    }
+    if (rawLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) {
+      return res.status(400).json({ error: 'limit must be a positive integer' });
+    }
+    const page = parsedPage || 1;
+    const limit = Math.min(100, Math.max(1, parsedLimit || 10));
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 

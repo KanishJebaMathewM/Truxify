@@ -213,9 +213,6 @@ app.use((err, req, res, next) => {
 // WEBSOCKET SERVER INIT (wait for MongoDB before accepting WebSocket connections)
 // ============================================================================
 await waitForMongoDb();
-initWebSocketServer(server);
-
-await waitForMongoDb();
 initWebSocketServer(server); // Keep existing
 const io = attachLocationServer(server); // Add new one
 

@@ -64,6 +64,7 @@ begin
         driver_rating    = p_driver_rating,
         truck_number     = p_truck_number,
         total_amount     = p_bid_amount,
+        bid_amount       = p_bid_amount,
         escrow_booking_id = coalesce(p_escrow_booking_id, escrow_booking_id),
         updated_at       = now()
     where id = p_order_id;

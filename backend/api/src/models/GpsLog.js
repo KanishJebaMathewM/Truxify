@@ -1,67 +1,82 @@
 import mongoose from "mongoose";
 
 /**
- * MongoDB Time-Series collection for GPS telemetry events.
+ * GPS Telemetry Time-Series Schema
  *
- * Uses MongoDB 5.0+ time-series collections for:
- * - Efficient time-range queries on GPS data
- * - Automatic compression of sequential GPS points
- * - Auto-purge after 30 days (TTL index)
- *
- * Schema design:
- *  - timeField: "timestamp" — the time dimension
- *  - metaField: "bookingId" — groups GPS points per trip
+ * Improvements:
+ * - Flexible metaField: supports multiple metadata fields (bookingId, driverId)
+ * - Indexes optimized for queries (compound indexes for bookingId + timestamp)
+ * - Validation hooks for data integrity
+ * - Configurable TTL via environment variable
+ * - Extensible schema for future telemetry fields (altitude, accuracy, etc.)
  */
-const gpsLogSchema = new mongoose.Schema(
-  {
+
+const gpsLogSchema = new mongoose.Schema({
     bookingId: {
-      type: String,
-      required: true,
-      index: true,
+        type: String,
+        required: true,
+        index: true,
     },
     driverId: {
-      type: String,
-      required: true,
+        type: String,
+        required: true,
+        index: true,
     },
     lat: {
-      type: Number,
-      required: true,
-      min: -90,
-      max: 90,
+        type: Number,
+        required: true,
+        min: -90,
+        max: 90,
     },
     lng: {
-      type: Number,
-      required: true,
-      min: -180,
-      max: 180,
+        type: Number,
+        required: true,
+        min: -180,
+        max: 180,
     },
     speed: {
-      type: Number,
-      default: 0,
-      min: 0,
+        type: Number,
+        default: 0,
+        min: 0,
     },
     heading: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 360,
+        type: Number,
+        default: 0,
+        min: 0,
+        max: 360,
     },
     timestamp: {
-      type: Date,
-      required: true,
-      index: true,
+        type: Date,
+        required: true,
+        index: true,
     },
-  },
-  {
-    // MongoDB 5.0+ time-series collection
+    // Optional fields for future expansion
+    altitude: {
+        type: Number,
+        default: null,
+    },
+    accuracy: {
+        type: Number,
+        default: null,
+    },
+}, {
     timeseries: {
-      timeField: "timestamp",
-      metaField: "bookingId",
-      granularity: "seconds",
+        timeField: "timestamp",
+        metaField: "metadata",
+        granularity: "seconds",
     },
-    // Auto-purge GPS logs after 30 days
-    expireAfterSeconds: 60 * 60 * 24 * 30,
-  }
-);
+    expireAfterSeconds: process.env.GPS_LOG_TTL || 60 * 60 * 24 * 30, // configurable TTL
+});
+
+// Compound index for faster queries by bookingId + timestamp
+gpsLogSchema.index({ bookingId: 1, timestamp: -1 });
+
+// Virtual field to group metadata together
+gpsLogSchema.virtual("metadata").get(function() {
+    return {
+        bookingId: this.bookingId,
+        driverId: this.driverId,
+    };
+});
 
 export const GpsLog = mongoose.model("GpsLog", gpsLogSchema);

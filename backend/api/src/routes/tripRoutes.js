@@ -71,6 +71,52 @@ const validateBatchPayload = (schema) => (req, res, next) => {
   }
 };
 
+async function verifyTripIdsBelongToUser(tripIds, user) {
+  const uniqueTripIds = [...new Set(tripIds.filter(Boolean))];
+  if (uniqueTripIds.length === 0) return { ok: true };
+
+  const [ordersResult, tripsResult] = await Promise.all([
+    supabase
+      .from('orders')
+      .select('id, driver_id, customer_id')
+      .in('id', uniqueTripIds),
+    supabase
+      .from('trips')
+      .select('id, driver_id')
+      .in('id', uniqueTripIds),
+  ]);
+
+  if (ordersResult.error) {
+    return { ok: false, status: 500, error: 'Failed to verify order ownership.' };
+  }
+  if (tripsResult.error) {
+    return { ok: false, status: 500, error: 'Failed to verify trip ownership.' };
+  }
+
+  const orderById = new Map((ordersResult.data || []).map(order => [order.id, order]));
+  const tripById = new Map((tripsResult.data || []).map(trip => [trip.id, trip]));
+
+  for (const tripId of uniqueTripIds) {
+    const order = orderById.get(tripId);
+    const trip = tripById.get(tripId);
+
+    if (!order && !trip) {
+      return { ok: false, status: 404, error: `Trip not found: ${tripId}` };
+    }
+
+    if (user.role === 'admin') continue;
+
+    const ownsOrder = order && (order.driver_id === user.id || order.customer_id === user.id);
+    const ownsTrip = trip && trip.driver_id === user.id;
+
+    if (!ownsOrder && !ownsTrip) {
+      return { ok: false, status: 403, error: `Access denied for trip: ${tripId}` };
+    }
+  }
+
+  return { ok: true };
+}
+
 // ============================================================================
 // 📡 OFFLINE SYNC ENDPOINT: BATCH EVENT INGESTION
 // ============================================================================
@@ -115,6 +161,11 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
           details: result.error.issues,
         });
       }
+    }
+
+    const ownershipCheck = await verifyTripIdsBelongToUser(events.map(event => event.trip_id), req.user);
+    if (!ownershipCheck.ok) {
+      return res.status(ownershipCheck.status).json({ error: ownershipCheck.error });
     }
 
     const recordsToInsert = events.map(event => {
@@ -204,9 +255,47 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
 router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
   const tripId = req.params.id;
   const { type, sort, min_lat, max_lat, min_lng, max_lng } = req.query;
+  if (sort !== undefined && sort !== 'asc' && sort !== 'desc') {
+    return res.status(400).json({ error: 'sort must be asc or desc' });
+  }
   const isAscending = sort !== 'desc';
 
   try {
+    const [orderResult, tripResult] = await Promise.all([
+      supabase
+        .from('orders')
+        .select('id, driver_id, customer_id')
+        .eq('id', tripId)
+        .maybeSingle(),
+      supabase
+        .from('trips')
+        .select('id, driver_id')
+        .eq('id', tripId)
+        .maybeSingle(),
+    ]);
+
+    if (orderResult.error) {
+      return res.status(500).json({ error: 'Failed to verify order ownership.', details: orderResult.error.message });
+    }
+    if (tripResult.error) {
+      return res.status(500).json({ error: 'Failed to verify trip ownership.', details: tripResult.error.message });
+    }
+
+    const order = orderResult.data;
+    const trip = tripResult.data;
+    if (!order && !trip) {
+      return res.status(404).json({ error: 'Trip not found.' });
+    }
+
+    if (req.user.role !== 'admin') {
+      const isOrderDriver = order?.driver_id === req.user.id;
+      const isOrderCustomer = order?.customer_id === req.user.id;
+      const isTripDriver = trip?.driver_id === req.user.id;
+      if (!isOrderDriver && !isOrderCustomer && !isTripDriver) {
+        return res.status(403).json({ error: 'Access Denied: You are not authorised to view events for this trip.' });
+      }
+    }
+
     // 1. Fetch the trip to determine the driver
     const { data: events, error: eventsErr } = await supabase
       .from('trip_events')
@@ -219,54 +308,7 @@ router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
     }
 
     if (!events || events.length === 0) {
-      // Check if the trip even exists
-      const { data: existingEvent } = await supabase
-        .from('trip_events')
-        .select('trip_id')
-        .eq('trip_id', tripId)
-        .limit(1)
-        .maybeSingle();
-
-      // If no events found at all, check via orders whether this trip/order exists
-      const { data: order } = await supabase
-        .from('orders')
-        .select('id, driver_id, customer_id')
-        .eq('id', tripId)
-        .maybeSingle();
-
-      if (!order && !existingEvent) {
-        return res.status(404).json({ error: 'Trip not found.' });
-      }
-
-      // Authorisation check even for empty trips
-      if (req.user.role !== 'admin') {
-        const isDriver = order?.driver_id === req.user.id;
-        const isCustomer = order?.customer_id === req.user.id;
-        if (!isDriver && !isCustomer) {
-          return res.status(403).json({ error: 'Access Denied: You are not authorised to view events for this trip.' });
-        }
-      }
-
       return res.json({ trip_id: tripId, events: [] });
-    }
-
-    // 2. Determine trip's driver from the first event's user_id (the driver who uploaded events)
-    const driverUserId = events[0]?.user_id;
-
-    // 3. Also look up the linked order to check customer access
-    const { data: order } = await supabase
-      .from('orders')
-      .select('id, driver_id, customer_id')
-      .eq('id', tripId)
-      .maybeSingle();
-
-    // 4. Access control
-    if (req.user.role !== 'admin') {
-      const isDriver = driverUserId === req.user.id || order?.driver_id === req.user.id;
-      const isCustomer = order?.customer_id === req.user.id;
-      if (!isDriver && !isCustomer) {
-        return res.status(403).json({ error: 'Access Denied: You are not authorised to view events for this trip.' });
-      }
     }
 
     // 5. Optional type filter
@@ -276,6 +318,18 @@ router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
     }
 
     if (min_lat !== undefined || max_lat !== undefined || min_lng !== undefined || max_lng !== undefined) {
+      if (min_lat !== undefined && !Number.isFinite(Number(min_lat))) {
+        return res.status(400).json({ error: 'min_lat must be a valid number' });
+      }
+      if (max_lat !== undefined && !Number.isFinite(Number(max_lat))) {
+        return res.status(400).json({ error: 'max_lat must be a valid number' });
+      }
+      if (min_lng !== undefined && !Number.isFinite(Number(min_lng))) {
+        return res.status(400).json({ error: 'min_lng must be a valid number' });
+      }
+      if (max_lng !== undefined && !Number.isFinite(Number(max_lng))) {
+        return res.status(400).json({ error: 'max_lng must be a valid number' });
+      }
       filteredEvents = filteredEvents.filter(e => {
         if (e.latitude === null || e.longitude === null || e.latitude === undefined || e.longitude === undefined) return false;
         const lat = Number(e.latitude);

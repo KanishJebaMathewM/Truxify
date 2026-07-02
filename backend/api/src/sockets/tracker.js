@@ -34,7 +34,9 @@ const BUFFER_WARN_THRESHOLD = 0.5;
 const BUFFER_CRIT_THRESHOLD = 0.8;
 const BUFFER_MONITOR_INTERVAL_MS = 30000;
 let telemetryWriteBuffer = [];
+let telemetryFlushBuffer = [];
 let currentFlushPromise = null;
+let flushMutex = false;
 const BUFFER_FLUSH_INTERVAL_MS = 20000;
 let flushBackoffMs = 1000;
 let isSchedulerActive = false;
@@ -42,6 +44,12 @@ let telemetryFlushTimeout = null;
 let wsServer = null;
 let wsHeartbeatInterval = null;
 let telemetryMonitorInterval = null;
+
+// Observability counters
+let telemetryTotalFlushed = 0;
+let telemetryTotalDropped = 0;
+let telemetryRaceDropped = 0;
+let telemetryOverflowDropped = 0;
 
 const WS_UPGRADE_RATE_LIMIT = 5;
 const WS_UPGRADE_RATE_WINDOW_SECONDS = 60;
@@ -454,12 +462,13 @@ export async function handleLocationPing(ws, data) {
     }
   }
 
-  // Buffer write with capacity limit
+  // Buffer write with capacity limit (always push to active buffer)
   if (telemetryWriteBuffer.length >= MAX_BUFFER_SIZE) {
     const dropCount = Math.floor(MAX_BUFFER_SIZE * 0.1);
-    telemetryWriteBuffer.splice(0, dropCount);
-    telemetryDropCounter += dropCount;
-    logger.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} oldest records. Total dropped: ${telemetryDropCounter}. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
+    telemetryWriteBuffer.splice(telemetryWriteBuffer.length - dropCount, dropCount);
+    telemetryTotalDropped += dropCount;
+    telemetryOverflowDropped += dropCount;
+    logger.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} newest records. Total dropped: ${telemetryTotalDropped}. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
   }
   telemetryWriteBuffer.push({
     driver_id,
@@ -564,7 +573,7 @@ async function flushTelemetryBuffer() {
     return currentFlushPromise;
   }
 
-  if (telemetryWriteBuffer.length === 0) {
+  if (telemetryWriteBuffer.length === 0 && telemetryFlushBuffer.length === 0) {
     flushBackoffMs = 1000;
     return;
   }
@@ -574,22 +583,36 @@ async function flushTelemetryBuffer() {
     return;
   }
 
-  currentFlushPromise = (async () => {
-    const recordsToFlush = [...telemetryWriteBuffer];
-    telemetryWriteBuffer = [];
+  if (flushMutex) return;
+  flushMutex = true;
 
+  // Atomic double-buffer swap: copy flushBuffer, then swap references so active buffer
+  // becomes the new flush buffer and a fresh active buffer is created.
+  // Any concurrent push to the old active buffer is captured in the flush buffer for next cycle.
+  const recordsToFlush = telemetryFlushBuffer.length > 0 ? telemetryFlushBuffer : telemetryWriteBuffer;
+  if (telemetryFlushBuffer.length > 0) {
+    telemetryFlushBuffer = [];
+  }
+  telemetryFlushBuffer = telemetryWriteBuffer;
+  telemetryWriteBuffer = [];
+
+  flushMutex = false;
+
+  if (recordsToFlush.length === 0) return;
+
+  currentFlushPromise = (async () => {
     logger.info(`[TRUXIFY BATCH CONTROL] Committing bulk cluster of ${recordsToFlush.length} spatial rows to MongoDB...`);
 
     try {
       const collection = getMongoDb().collection('telemetry');
       await collection.insertMany(recordsToFlush, { ordered: false });
-      logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB telemetry collection.`);
+      telemetryTotalFlushed += recordsToFlush.length;
+      logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB telemetry collection. Total flushed: ${telemetryTotalFlushed}`);
       flushBackoffMs = 1000;
     } catch (err) {
       const isBulkWriteError = err.code === 121 || err.name === 'BulkWriteError' || err.message.includes('Document failed validation');
 
       if (isBulkWriteError) {
-        // Log individual failure details without dropping entire batch
         if (err.writeErrors && err.writeErrors.length > 0) {
           const sampleErrors = err.writeErrors.slice(0, 5).map(e =>
             `doc ${e.index}: ${e.err?.message || 'unknown'}`
@@ -598,32 +621,31 @@ async function flushTelemetryBuffer() {
         } else {
           logger.error(`[TRUXIFY VALIDATION] Bulk insert validation error: ${err.message}`);
         }
-        // Only drop the failing records; retry the rest
+        // Prepend succeeded records to the FRONT for oldest-first retry priority
         const succeeded = err.writeErrors
           ? recordsToFlush.filter((_, i) => !err.writeErrors.some(e => e.index === i))
           : [];
         if (succeeded.length > 0) {
-          telemetryWriteBuffer = [...succeeded, ...telemetryWriteBuffer];
-          if (telemetryWriteBuffer.length > MAX_BUFFER_SIZE) {
-            const overflowDrop = telemetryWriteBuffer.length - MAX_BUFFER_SIZE;
-            telemetryWriteBuffer.splice(0, overflowDrop);
-            telemetryDropCounter += overflowDrop;
-            logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after partial insert.`);
+          telemetryFlushBuffer = [...succeeded, ...telemetryFlushBuffer];
+          if (telemetryFlushBuffer.length > MAX_BUFFER_SIZE) {
+            const overflowDrop = telemetryFlushBuffer.length - MAX_BUFFER_SIZE;
+            telemetryFlushBuffer.splice(telemetryFlushBuffer.length - overflowDrop, overflowDrop);
+            telemetryTotalDropped += overflowDrop;
+            telemetryOverflowDropped += overflowDrop;
+            logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} newest records due to capacity after partial insert.`);
           }
         }
       } else {
         flushBackoffMs = Math.min(flushBackoffMs * 2, 60000);
-
-        // Atomic buffer swap: snapshot current buffer and merge with retry batch
-        const currentSnapshot = telemetryWriteBuffer;
-        telemetryWriteBuffer = recordsToFlush;
-        const overflow = telemetryWriteBuffer.length + currentSnapshot.length - MAX_BUFFER_SIZE;
-        if (overflow > 0) {
-          telemetryWriteBuffer.splice(0, overflow);
-          telemetryDropCounter += overflow;
-          logger.warn(`[TRUXIFY BUFFER DROP] Capacity limit: dropped ${overflow} oldest records from retry merge. Total dropped: ${telemetryDropCounter}`);
+        // Prepend failed records to the FRONT for oldest-first retry priority
+        telemetryFlushBuffer = [...recordsToFlush, ...telemetryFlushBuffer];
+        if (telemetryFlushBuffer.length > MAX_BUFFER_SIZE) {
+          const overflowDrop = telemetryFlushBuffer.length - MAX_BUFFER_SIZE;
+          telemetryFlushBuffer.splice(telemetryFlushBuffer.length - overflowDrop, overflowDrop);
+          telemetryTotalDropped += overflowDrop;
+          telemetryOverflowDropped += overflowDrop;
+          logger.warn(`[TRUXIFY BUFFER DROP] Capacity limit: dropped ${overflowDrop} newest records from retry merge. Total dropped: ${telemetryTotalDropped}`);
         }
-        telemetryWriteBuffer.push(...currentSnapshot);
       }
     } finally {
       currentFlushPromise = null;
@@ -634,16 +656,21 @@ async function flushTelemetryBuffer() {
 }
 
 function monitorBufferSize() {
-  const usagePct = telemetryWriteBuffer.length / MAX_BUFFER_SIZE;
+  const activeLen = telemetryWriteBuffer.length;
+  const flushLen = telemetryFlushBuffer.length;
+  const totalLen = activeLen + flushLen;
+  const usagePct = totalLen / MAX_BUFFER_SIZE;
   if (usagePct >= BUFFER_CRIT_THRESHOLD) {
     logger.warn(
       `[TRUXIFY BUFFER MONITOR] CRITICAL: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
-      `(${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`
+      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
+      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
     );
   } else if (usagePct >= BUFFER_WARN_THRESHOLD) {
     logger.warn(
       `[TRUXIFY BUFFER MONITOR] WARNING: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
-      `(${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`
+      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
+      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
     );
   }
 }

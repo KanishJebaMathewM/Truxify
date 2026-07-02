@@ -86,13 +86,13 @@ const CATEGORY_LABELS = {
   account: 'Account Management',
 };
 
-const CATEGORY_SLA = {
+const CATEGORY_SLA = Object.freeze({
   payment: 24,
   order: 12,
   technical: 4,
   general: 48,
   account: 24,
-};
+});
 
 const CATEGORY_DESCRIPTIONS = {
   payment: 'Issues related to payments, invoices, billing, and refunds.',

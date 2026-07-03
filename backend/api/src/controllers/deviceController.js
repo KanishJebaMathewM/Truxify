@@ -7,7 +7,7 @@ import logger from '../middleware/logger.js';
 export async function registerDeviceToken(req, res) {
   try {
     const userId = req.user?.id;
-    const { fcmToken, platform } = req.body;
+    const { fcmToken, platform, metadata } = req.body;
 
     if (!userId) {
       return res.status(401).json({
@@ -41,7 +41,8 @@ export async function registerDeviceToken(req, res) {
       {
         user_id: userId,
         fcm_token: fcmToken,
-        platform: platform || 'android'
+        platform: platform || 'android',
+        metadata: metadata || {}
       },
       { onConflict: 'fcm_token' }
     );

@@ -591,6 +591,16 @@ describe('Support Routes', () => {
       expect(res.body).toHaveLength(2);
       expect(res.body[0].message).toBe('Second');
     });
+
+    it('POST /tickets/:id/comments returns 404 for commenting on non-existent ticket', async () => {
+      const res = await request(buildApp())
+        .post('/api/support/tickets/non-existent-ticket-id/comments')
+        .set(CUSTOMER_HEADERS)
+        .send({ message: 'Hello' });
+
+      expect(res.status).toBe(404);
+      expect(res.body.error).toContain('Support ticket not found');
+    });
   });
 
   describe('GET /api/support/categories', () => {
@@ -629,6 +639,16 @@ describe('Support Routes', () => {
       expect(res.status).toBe(200);
       for (const cat of res.body.categories) {
         expect(res.body.labels[cat]).toBeDefined();
+      }
+    });
+
+    it('each category in the array has a corresponding description', async () => {
+      const res = await request(buildApp())
+        .get('/api/support/categories');
+
+      expect(res.status).toBe(200);
+      for (const cat of res.body.categories) {
+        expect(res.body.descriptions[cat]).toBeDefined();
       }
     });
   });

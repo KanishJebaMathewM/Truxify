@@ -1,6 +1,6 @@
 class SupportTicket {
   const SupportTicket({
-    required this.id,
+    this.id = '',
     required this.userId,
     required this.subject,
     required this.description,

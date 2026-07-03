@@ -55,12 +55,13 @@ class ResilientWebSocket {
   }
 
   void send(dynamic message) {
-    if (_channel == null) {
+    final channel = _channel;
+    if (channel == null) {
       return;
     }
 
     final payload = message is String ? message : jsonEncode(message);
-    _channel!.sink.add(payload);
+    channel.sink.add(payload);
   }
 
   void _scheduleReconnect() {
@@ -81,8 +82,9 @@ class ResilientWebSocket {
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (_channel != null) {
-        _channel!.sink.add('ping');
+      final channel = _channel;
+      if (channel != null) {
+        channel.sink.add('ping');
       }
     });
   }

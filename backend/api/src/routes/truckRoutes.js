@@ -15,10 +15,17 @@ const router = express.Router();
 // REGISTER A TRUCK (DRIVER ONLY)
 // ============================================================================
 /**
- * POST /api/trucks
- * Allows authenticated drivers to register a truck they own.
- * - Validates payload with registerTruckSchema (name, number_plate, max_capacity_tons)
- * - Returns 409 if the number plate is already registered
+ * @route POST /api/trucks
+ * @desc Allows authenticated drivers to register a truck they own.
+ * @access Driver
+ * @param {string} req.body.name - Name of the truck
+ * @param {string} req.body.number_plate - Number plate of the truck (normalised to uppercase)
+ * @param {number} req.body.max_capacity_tons - Maximum capacity of the truck in tons
+ * @returns {object} 201 - Successfully registered truck details
+ * @returns {object} 400 - Validation errors
+ * @returns {object} 403 - Forbidden for non-drivers
+ * @returns {object} 409 - Truck with number plate already registered
+ * @returns {object} 500 - Internal server error
  */
 router.post('/', authenticate, requireRole(['driver']), userLimiter, validateBody(registerTruckSchema), async (req, res) => {
   const { name, number_plate, max_capacity_tons } = req.body;
@@ -62,8 +69,15 @@ router.post('/', authenticate, requireRole(['driver']), userLimiter, validateBod
 // LIST DRIVER'S TRUCKS
 // ============================================================================
 /**
- * GET /api/trucks
- * Returns all trucks owned by the authenticated driver.
+ * @route GET /api/trucks
+ * @desc Returns all trucks owned by the authenticated driver.
+ * @access Driver
+ * @param {string} [req.query.name] - Filter trucks by name (case-insensitive substring)
+ * @param {number} [req.query.min_capacity] - Minimum capacity filter in tons
+ * @param {number} [req.query.max_capacity] - Maximum capacity filter in tons
+ * @returns {object} 200 - Array of trucks
+ * @returns {object} 403 - Forbidden for non-drivers
+ * @returns {object} 500 - Internal server error
  */
 router.get('/', authenticate, requireRole(['driver']), userLimiter, async (req, res) => {
   const { name } = req.query;
@@ -103,6 +117,21 @@ function parseBoolean(value) {
   return ['true', '1', 'yes'].includes(String(value).trim().toLowerCase());
 }
 
+/**
+ * @route GET /api/trucks/search
+ * @desc Search for online drivers with active trucks and calculate price estimates
+ * @access Authenticated
+ * @param {number} req.query.pickup_lat - Pickup latitude
+ * @param {number} req.query.pickup_lng - Pickup longitude
+ * @param {number} req.query.drop_lat - Drop-off latitude
+ * @param {number} req.query.drop_lng - Drop-off longitude
+ * @param {number} req.query.weight_tonnes - Cargo weight in tonnes
+ * @param {boolean} [req.query.is_fragile] - Fragile cargo indicator
+ * @param {boolean} [req.query.is_stackable] - Stackable cargo indicator
+ * @returns {array} 200 - List of matching drivers and their price/ETA estimates
+ * @returns {object} 400 - Validation errors or missing/invalid query parameters
+ * @returns {object} 500 - Internal server error
+ */
 router.get('/search', authenticate, userLimiter, async (req, res) => {
   const {
     pickup_lat, pickup_lng,
@@ -240,7 +269,16 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
   }
 });
 
-// GET TRUCK NUMBER PLATE BY ID
+/**
+ * @route GET /api/trucks/:id/number
+ * @desc Retrieve the number plate of a truck by its UUID
+ * @access Authenticated
+ * @param {string} req.params.id - The UUID of the truck
+ * @returns {object} 200 - Truck number plate
+ * @returns {object} 400 - Invalid UUID format
+ * @returns {object} 404 - Truck not found
+ * @returns {object} 500 - Internal server error
+ */
 router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
     const { data: truck, error } = await supabase

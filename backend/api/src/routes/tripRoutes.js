@@ -240,17 +240,21 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
 // GET TRIP EVENTS (DRIVER, CUSTOMER, OR ADMIN)
 // ============================================================================
 /**
- * GET /api/trips/:id/events
- *
- * Returns all telemetry/milestone events for a given trip, ordered
- * chronologically.
- *
- * Access control:
- *   - The trip's driver (trip_events.user_id === req.user.id)
- *   - The order's customer (orders.customer_id === req.user.id)
- *   - Any admin
- *
- * Optional query param: ?type=gpsUpdate  (filters by event_type)
+ * @route GET /api/trips/:id/events
+ * @desc Returns all telemetry and milestone events for a given trip, ordered chronologically.
+ * @access Authenticated (Driver, Customer owner, or Admin)
+ * @param {string} req.params.id - The UUID of the trip
+ * @param {string} [req.query.type] - Filter by specific event type (e.g. gpsUpdate)
+ * @param {string} [req.query.sort] - Chronological sort order ('asc' or 'desc', defaults to 'asc')
+ * @param {number} [req.query.min_lat] - Minimum latitude for geographical bounding box filtering
+ * @param {number} [req.query.max_lat] - Maximum latitude for geographical bounding box filtering
+ * @param {number} [req.query.min_lng] - Minimum longitude for geographical bounding box filtering
+ * @param {number} [req.query.max_lng] - Maximum longitude for geographical bounding box filtering
+ * @returns {object} 200 - Trip ID and array of events
+ * @returns {object} 400 - Validation errors for coordinates or sorting parameters
+ * @returns {object} 403 - Forbidden if user is not driver, customer owner, or admin
+ * @returns {object} 404 - Trip or order not found
+ * @returns {object} 500 - Internal server error
  */
 router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
   const tripId = req.params.id;

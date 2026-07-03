@@ -36,6 +36,8 @@ class _TripsScreenState extends State<TripsScreen> {
   Map<String, List<Map<String, dynamic>>> _routePointsByTripId = {};
 
   bool _isLoadingTrips = true;
+  bool _isLoadingMoreTrips = false;
+  final ScrollController _scrollController = ScrollController();
 
   String? _tripsError;
   String? _nextTripsCursor;
@@ -59,6 +61,7 @@ class _TripsScreenState extends State<TripsScreen> {
   void initState() {
     super.initState();
     _tripService = TripService();
+    _scrollController.addListener(_onScroll);
     _loadTrips();
     if (SupabaseConfig.isConfigured) {
       _refreshMarketplace();
@@ -116,6 +119,59 @@ class _TripsScreenState extends State<TripsScreen> {
     }
   }
 
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      _loadMoreTrips();
+    }
+  }
+
+  Future<void> _loadMoreTrips() async {
+    if (_isLoadingMoreTrips || !_hasMoreTrips || _isLoadingTrips) return;
+    
+    setState(() {
+      _isLoadingMoreTrips = true;
+    });
+
+    try {
+      final result = await _tripService.fetchTripHistory(
+        cursor: _nextTripsCursor,
+        limit: 20,
+      );
+      final newTrips = result['trips'] as List<Map<String, dynamic>>;
+
+      final stopsByTrip = <String, List<Map<String, dynamic>>>{};
+      final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
+
+      await Future.wait(newTrips.map((trip) async {
+        final tripId = trip['trip_display_id']?.toString();
+        if (tripId == null || tripId.isEmpty) return;
+
+        final results = await Future.wait([
+          _tripService.fetchTripStops(tripId),
+          _tripService.fetchRouteMapPoints(tripId),
+        ]);
+        stopsByTrip[tripId] = results[0];
+        routePointsByTrip[tripId] = results[1];
+      }));
+
+      if (!mounted) return;
+
+      setState(() {
+        _trips.addAll(newTrips);
+        _tripStopsByTripId.addAll(stopsByTrip);
+        _routePointsByTripId.addAll(routePointsByTrip);
+        _nextTripsCursor = result['nextCursor'] as String?;
+        _hasMoreTrips = result['hasMore'] as bool? ?? false;
+        _isLoadingMoreTrips = false;
+      });
+    } catch (e) {
+      debugPrint('Failed to load more trips: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLoadingMoreTrips = false;
+      });
+    }
+  }
 
   Future<void> _completeCurrentStop(String tripId) async {
     final stops = _tripStopsByTripId[tripId] ?? [];
@@ -309,6 +365,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
     if (SupabaseConfig.isConfigured && _bidChannel != null) {
       Supabase.instance.client.removeChannel(_bidChannel!);
     }
@@ -772,12 +829,20 @@ class _TripsScreenState extends State<TripsScreen> {
                                   ],
                                 )
                               : ListView.builder(
+                                  controller: _scrollController,
                                   physics:
                                       const AlwaysScrollableScrollPhysics(),
                                   padding: const EdgeInsets.all(12),
-                                  itemCount: trips.length,
-                                  itemBuilder: (context, index) =>
-                                      _buildTripCard(context, trips[index]),
+                                  itemCount: trips.length + (_hasMoreTrips && trips.isNotEmpty ? 1 : 0),
+                                  itemBuilder: (context, index) {
+                                    if (index == trips.length) {
+                                      return const Padding(
+                                        padding: EdgeInsets.symmetric(vertical: 16.0),
+                                        child: Center(child: CircularProgressIndicator()),
+                                      );
+                                    }
+                                    return _buildTripCard(context, trips[index]);
+                                  },
                                 ),
                 ),
               ),

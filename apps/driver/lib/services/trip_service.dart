@@ -75,11 +75,17 @@ class TripService {
       throw StateError('Failed to fetch trips');
     }
 
-    final body = jsonDecode(response.body);
+    final dynamic body;
+    try {
+      body = jsonDecode(response.body);
+    } catch (_) {
+      throw StateError('Failed to parse trips response');
+    }
     if (body is Map<String, dynamic>) {
       return List<Map<String, dynamic>>.from(body['trips'] as List? ?? []);
     }
-    return List<Map<String, dynamic>>.from(body as List);
+    if (body is! List) throw StateError('Unexpected trips response type');
+    return List<Map<String, dynamic>>.from(body);
   }
 
   Future<Map<String, dynamic>> fetchTripHistory({

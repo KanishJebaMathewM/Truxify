@@ -75,6 +75,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     if (SupabaseConfig.isConfigured) {
       _subscribeToOrderUpdates();
       _subscribeToTracking();
+    } else {
+      debugPrint('[LiveTracking] Supabase not configured — real-time updates disabled');
     }
   }
 

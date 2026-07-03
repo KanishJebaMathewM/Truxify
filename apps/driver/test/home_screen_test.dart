@@ -10,7 +10,7 @@ import 'package:truxify_driver/services/marketplace_repository.dart';
 import 'package:truxify_driver/theme/app_theme.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
 import 'package:truxify_driver/models/earnings_daily_model.dart';
-import 'setup/test_setup.dart';  // ← ADD THIS IMPORT
+import 'setup/test_setup.dart';
 
 // --- FAKE CLASSES ---
 
@@ -108,14 +108,11 @@ Future<void> _pumpTransition(WidgetTester tester) async {
 // --- TESTS ---
 
 void main() {
-  // ADD THIS - Initialize test environment before all tests
   setUpAll(() async {
     await setupTestEnvironment();
   });
 
-  // ADD THIS - Reset mocks between tests
   setUp(() {
-    // Reset any state if needed
   });
 
   testWidgets('driver home shows a compact search bar', (

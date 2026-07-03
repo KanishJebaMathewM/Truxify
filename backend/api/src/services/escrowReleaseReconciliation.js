@@ -66,7 +66,7 @@ export async function reconcilePendingEscrowReleases() {
             p_instance_id: instanceId,
           });
 
-        if ((!claimed || claimed.length === 0) && !claimError) {
+        if ((!claimed || (Array.isArray(claimed) && claimed.length === 0)) && !claimError) {
           logger.info(`[escrow-release-reconciliation] Order ${order.order_display_id} already claimed by another instance, skipping.`);
           continue;
         }
@@ -152,7 +152,11 @@ export async function reconcilePendingEscrowReleases() {
       clearInterval(leaseExtender);
     }
     if (lockAcquired && redisClient) {
-      await redisClient.del(LOCK_KEY).catch(() => {});
+      try {
+        await redisClient.del(LOCK_KEY);
+      } catch (err) {
+        logger.warn('[escrow-release-reconciliation] Failed to release Redis lock:', err.message);
+      }
     }
     if (!lockAcquired) {
       reconciliationRunning = false;

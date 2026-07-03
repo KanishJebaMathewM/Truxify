@@ -26,11 +26,11 @@ export async function reconcilePendingEscrowReleases() {
         try {
           await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
         } catch (err) {
-          logger.warn('[escrow-release-reconciliation] Failed to extend lock lease:', err.message);
+          logger.warn({ err }, '[escrow-release-reconciliation] Failed to extend lock lease');
         }
       }, LEASE_EXTENSION_INTERVAL_MS);
     } catch (err) {
-      logger.error('[escrow-release-reconciliation] Failed to acquire Redis lock:', err.message);
+      logger.error({ err }, '[escrow-release-reconciliation] Failed to acquire Redis lock');
     }
   }
 
@@ -49,7 +49,7 @@ export async function reconcilePendingEscrowReleases() {
       .limit(50);
 
     if (error) {
-      logger.error('[escrow-release-reconciliation] Failed to load failed releases:', error.message);
+      logger.error({ err: error }, '[escrow-release-reconciliation] Failed to load failed releases');
       return;
     }
 
@@ -107,10 +107,7 @@ export async function reconcilePendingEscrowReleases() {
           .eq('escrow_status', 'release_failed');
 
         if (updateError) {
-          logger.error(
-            `[escrow-release-reconciliation] Failed to finalize release for ${order.order_display_id}:`,
-            updateError.message
-          );
+          logger.error({ err: updateError }, `[escrow-release-reconciliation] Failed to finalize release for ${order.order_display_id}`);
         } else {
           logger.info(`[escrow-release-reconciliation] Release succeeded for ${order.order_display_id}`);
         }
@@ -129,10 +126,7 @@ export async function reconcilePendingEscrowReleases() {
           .eq('id', order.id);
 
         if (attemptError) {
-          logger.error(
-            `[escrow-release-reconciliation] Failed to update attempt count for ${order.order_display_id}:`,
-            attemptError.message
-          );
+          logger.error({ err: attemptError }, `[escrow-release-reconciliation] Failed to update attempt count for ${order.order_display_id}`);
         }
 
         if (releaseAttempts >= MAX_RETRIES) {
@@ -155,7 +149,7 @@ export async function reconcilePendingEscrowReleases() {
       try {
         await redisClient.del(LOCK_KEY);
       } catch (err) {
-        logger.warn('[escrow-release-reconciliation] Failed to release Redis lock:', err.message);
+        logger.warn({ err }, '[escrow-release-reconciliation] Failed to release Redis lock');
       }
     }
     if (!lockAcquired) {

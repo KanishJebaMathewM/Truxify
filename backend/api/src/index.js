@@ -154,7 +154,9 @@ setupSwagger(app);
 
 // Root route
 app.get('/', (req, res) => {
-  res.send('<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://localhost:5000/ws/tracking</code></p>');
+  const wsHost = req.hostname || 'localhost';
+  const wsPort = process.env.PORT || 5000;
+  res.send(`<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://${wsHost}:${wsPort}/ws/tracking</code></p>`);
 });
 
 // Handling 404 Route Not Found

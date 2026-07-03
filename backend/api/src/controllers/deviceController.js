@@ -97,3 +97,25 @@ export async function registerDeviceToken(req, res) {
     });
   }
 }
+
+/**
+ * Get list of unique registered device platforms
+ */
+export async function getDevicePlatforms(req, res) {
+  try {
+    const { data, error } = await supabase
+      .from('user_devices')
+      .select('platform');
+
+    if (error) {
+      logger.error('[DeviceController] Failed to query device platforms:', error.message);
+      return res.status(500).json({ error: 'Failed to retrieve platforms' });
+    }
+
+    const platforms = [...new Set((data || []).map((d) => d.platform).filter(Boolean))];
+    return res.json({ platforms });
+  } catch (err) {
+    logger.error('[DeviceController] Unexpected error in getDevicePlatforms:', err.message);
+    return res.status(500).json({ error: 'An unexpected error occurred' });
+  }
+}

@@ -112,15 +112,18 @@ export async function getDriverReputation(walletAddress) {
     logger.warn(`[reputation] Invalid wallet address "${walletAddress}" — skipping.`);
     return null;
   }
+  let timeoutId;
   try {
     const score = await Promise.race([
       reputationContract.getReputation(walletAddress),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('RPC timeout')), 5000)
-      ),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('RPC timeout')), 5000);
+      }),
     ]);
+    clearTimeout(timeoutId);
     return Number(score);
   } catch (err) {
+    clearTimeout(timeoutId);
     logger.error(`[reputation] Failed to fetch on-chain reputation for ${walletAddress}: ${err.message}`);
     return null;
   }

@@ -17,8 +17,12 @@ class NotificationRepository {
     return rows.map(NotificationItem.fromMap).toList();
   }
 
-  Future<void> markNotificationRead(String id) async {
-    await _client.from('notifications').update({'is_read': true}).eq('id', id);
+  Future<void> markNotificationRead(String id, String userId) async {
+    await _client
+        .from('notifications')
+        .update({'is_read': true})
+        .eq('id', id)
+        .eq('user_id', userId);
   }
 }
 

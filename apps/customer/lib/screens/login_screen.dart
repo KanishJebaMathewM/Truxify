@@ -16,6 +16,19 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
+const _countryCodes = [
+  ('+1', 'US +1', 10),
+  ('+91', 'IN +91', 10),
+  ('+44', 'UK +44', 10),
+  ('+61', 'AU +61', 9),
+  ('+81', 'JP +81', 10),
+  ('+86', 'CN +86', 11),
+  ('+49', 'DE +49', 10),
+  ('+33', 'FR +33', 9),
+  ('+55', 'BR +55', 10),
+  ('+7', 'RU +7', 10),
+];
+
 class _LoginScreenState extends State<LoginScreen> {
   final AuthService _authService = AuthService();
   final TextEditingController _phoneController = TextEditingController();
@@ -28,6 +41,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _verifyingOtp = false;
   String? _verificationId;
   int? _resendToken;
+  String _selectedCode = '+91';
+  int _expectedDigits = 10;
 
   @override
   void dispose() {
@@ -71,15 +86,6 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
-    if (phone.length != 10) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Phone number must be exactly 10 digits'),
-        ),
-      );
-      return;
-    }
-
     if (int.tryParse(phone) == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -89,11 +95,21 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    if (phone.length != _expectedDigits) {
+      final msg = _expectedDigits == 10
+          ? 'Phone number must be exactly $_expectedDigits digits for $_selectedCode'
+          : 'Phone number must be $_expectedDigits digits for $_selectedCode';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg)),
+      );
+      return;
+    }
+
     setState(() => _sendingOtp = true);
 
     try {
       await _authService.verifyPhoneNumber(
-        phoneNumber: '+91$phone',
+        phoneNumber: '$_selectedCode$phone',
         forceResendingToken: _resendToken,
         onCodeSent: (verificationId, resendToken) {
           if (!mounted) return;
@@ -249,7 +265,7 @@ class _LoginScreenState extends State<LoginScreen> {
         const SizedBox(height: 12),
         TextField(
           controller: _phoneController,
-          maxLength: 10,
+          maxLength: _expectedDigits,
           keyboardType: TextInputType.phone,
           inputFormatters: [
             FilteringTextInputFormatter.digitsOnly,
@@ -258,17 +274,40 @@ class _LoginScreenState extends State<LoginScreen> {
           decoration: InputDecoration(
             prefixIcon: Container(
               alignment: Alignment.center,
-              width: 70,
+              width: 90,
               margin: const EdgeInsets.only(right: 8),
               decoration: BoxDecoration(
                 border: Border(
                   right: BorderSide(color: borderColor),
                 ),
               ),
-              child: Text('+91',
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<String>(
+                  value: _selectedCode,
+                  isDense: true,
+                  dropdownColor: colorScheme.surface,
                   style: TextStyle(
-                      color: colorScheme.onSurface,
-                      fontWeight: FontWeight.w700)),
+                    color: colorScheme.onSurface,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                  ),
+                  items: _countryCodes.map((c) {
+                    return DropdownMenuItem(
+                      value: c.$1,
+                      child: Text(c.$2),
+                    );
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val == null) return;
+                    final code = _countryCodes.firstWhere((c) => c.$1 == val);
+                    setState(() {
+                      _selectedCode = val;
+                      _expectedDigits = code.$3;
+                      _phoneController.clear();
+                    });
+                  },
+                ),
+              ),
             ),
             hintText: '9876543210',
           ),

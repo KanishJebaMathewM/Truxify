@@ -33,8 +33,8 @@ module.exports = {
   },
   etherscan: {
     apiKey: {
-      amoy: POLYGONSCAN_API_KEY,
-      polygon: POLYGONSCAN_API_KEY,
+      amoy: POLYGONSCAN_API_KEY || "",
+      polygon: POLYGONSCAN_API_KEY || "",
     },
   },
 };

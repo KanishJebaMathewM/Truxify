@@ -58,8 +58,9 @@ class ApiClient {
     const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
     if (envUrl.isNotEmpty) return envUrl;
     if (kReleaseMode) {
-      throw StateError(
-        'TRUXIFY_API_BASE_URL environment variable is required in release builds.',
+      developer.log(
+        '[ApiClient] TRUXIFY_API_BASE_URL not set — falling back to localhost. '
+        'Set --dart-define=TRUXIFY_API_BASE_URL=<url> for production builds.',
       );
     }
     return 'http://localhost:5000';
@@ -240,9 +241,12 @@ class ApiClient {
 
     String message;
     try {
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
-      message = (json['error'] ?? json['message'] ?? response.reasonPhrase)
-          .toString();
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        message = (decoded['error'] ?? decoded['message'] ?? response.reasonPhrase ?? 'Unknown error').toString();
+      } else {
+        message = response.reasonPhrase ?? 'Unknown error';
+      }
     } catch (_) {
       message = response.reasonPhrase ?? 'Unknown error';
     }

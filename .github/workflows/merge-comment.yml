@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Post merge comment
-        uses: actions/github-script@v9
+        uses: actions/github-script@v7
         with:
           script: |
             const comment = `🎉 Thank you for your contribution!

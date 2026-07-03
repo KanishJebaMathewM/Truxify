@@ -252,7 +252,7 @@ describe('osrm - getRouteEstimate', () => {
       'osrm:route:v2:12.9716:77.5946:13.0827:80.2707',
       JSON.stringify(result),
       'EX',
-      3600
+      86400
     );
   });
 

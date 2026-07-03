@@ -177,6 +177,7 @@ app.use((err, req, res, next) => {
 // ============================================================================
 await waitForMongoDb();
 initWebSocketServer(server);
+attachLocationServer(server);
 
 // ============================================================================
 // START SERVER

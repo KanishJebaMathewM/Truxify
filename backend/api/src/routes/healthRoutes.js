@@ -83,10 +83,12 @@ router.get('/', healthLimiter, async (req, res) => {
     polygon: checkPolygon(),
   };
 
+  // Redis is a non-critical cache: every consumer has an in-memory fallback,
+  // so a Redis failure is reported in `services` but does not degrade overall
+  // health. Supabase and MongoDB remain critical.
   const criticalFailed =
     CRITICAL_UNHEALTHY.has(supabaseStatus) ||
-    CRITICAL_UNHEALTHY_OPTIONAL.has(mongoStatus) ||
-    CRITICAL_UNHEALTHY_OPTIONAL.has(redisStatus);
+    CRITICAL_UNHEALTHY_OPTIONAL.has(mongoStatus);
 
   const status = criticalFailed ? 'degraded' : 'ok';
   const httpStatus = criticalFailed ? 503 : 200;

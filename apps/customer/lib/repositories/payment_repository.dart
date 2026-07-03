@@ -29,6 +29,17 @@ class PaymentRepository {
 
   Future<void> setDefault(String methodId) async {
     final userId = SupabaseService.requireUserId();
+    final existing = await SupabaseService.client
+        .from(_table)
+        .select('id')
+        .eq('id', methodId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    if (existing == null) {
+      throw StateError('Payment method not found.');
+    }
+
     await _clearDefaults(userId);
     await SupabaseService.client
         .from(_table)

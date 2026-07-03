@@ -587,19 +587,17 @@ async function flushTelemetryBuffer() {
   if (flushMutex) return;
   flushMutex = true;
 
-  // Atomic double-buffer swap: copy flushBuffer, then swap references so active buffer
-  // becomes the new flush buffer and a fresh active buffer is created.
-  // Any concurrent push to the old active buffer is captured in the flush buffer for next cycle.
-  const recordsToFlush = telemetryFlushBuffer.length > 0 ? telemetryFlushBuffer : telemetryWriteBuffer;
+  const recordsToFlush = [...(telemetryFlushBuffer.length > 0 ? telemetryFlushBuffer : telemetryWriteBuffer)];
   if (telemetryFlushBuffer.length > 0) {
     telemetryFlushBuffer = [];
   }
   telemetryFlushBuffer = telemetryWriteBuffer;
   telemetryWriteBuffer = [];
 
-  flushMutex = false;
-
-  if (recordsToFlush.length === 0) return;
+  if (recordsToFlush.length === 0) {
+    flushMutex = false;
+    return;
+  }
 
   currentFlushPromise = (async () => {
     logger.info(`[TRUXIFY BATCH CONTROL] Committing bulk cluster of ${recordsToFlush.length} spatial rows to MongoDB...`);
@@ -622,15 +620,14 @@ async function flushTelemetryBuffer() {
         } else {
           logger.error(`[TRUXIFY VALIDATION] Bulk insert validation error: ${err.message}`);
         }
-        // Prepend succeeded records to the FRONT for oldest-first retry priority
         const succeeded = err.writeErrors
           ? recordsToFlush.filter((_, i) => !err.writeErrors.some(e => e.index === i))
           : [];
         if (succeeded.length > 0) {
-          telemetryFlushBuffer = [...succeeded, ...telemetryFlushBuffer];
-          if (telemetryFlushBuffer.length > MAX_BUFFER_SIZE) {
-            const overflowDrop = telemetryFlushBuffer.length - MAX_BUFFER_SIZE;
-            telemetryFlushBuffer.splice(0, overflowDrop);
+          telemetryWriteBuffer = [...succeeded, ...telemetryWriteBuffer];
+          if (telemetryWriteBuffer.length > MAX_BUFFER_SIZE) {
+            const overflowDrop = telemetryWriteBuffer.length - MAX_BUFFER_SIZE;
+            telemetryWriteBuffer.splice(0, overflowDrop);
             telemetryTotalDropped += overflowDrop;
             telemetryOverflowDropped += overflowDrop;
             logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after partial insert.`);
@@ -638,7 +635,6 @@ async function flushTelemetryBuffer() {
         }
       } else {
         flushBackoffMs = Math.min(flushBackoffMs * 2, 60000);
-        // Prepend failed records to the FRONT for oldest-first retry priority
         telemetryFlushBuffer = [...recordsToFlush, ...telemetryFlushBuffer];
         if (telemetryFlushBuffer.length > MAX_BUFFER_SIZE) {
           const overflowDrop = telemetryFlushBuffer.length - MAX_BUFFER_SIZE;
@@ -650,6 +646,7 @@ async function flushTelemetryBuffer() {
       }
     } finally {
       currentFlushPromise = null;
+      flushMutex = false;
     }
   })();
 

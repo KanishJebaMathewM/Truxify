@@ -244,10 +244,6 @@ router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   const { status } = req.query;
-  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
-  const pageParam = req.query.page ?? '1';
-  const limitParam = req.query.limit ?? '10';
   const rawPage = req.query.page;
   const rawLimit = req.query.limit;
   const parsedPage = parseInt(rawPage, 10);
@@ -351,8 +347,6 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
 // ============================================================================
 router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
   try {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 10));
     const rawPage = req.query.page;
     const rawLimit = req.query.limit;
     const parsedPage = parseInt(rawPage, 10);

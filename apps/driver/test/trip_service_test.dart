@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/services/trip_service.dart';
 
@@ -153,146 +154,71 @@ void main() {
   final mockAuth = MockGoTrueClient(mockUser: mockUser);
 
   group('TripService.markStopCompleted Tests', () {
-    test('Successfully completes stop and sets next stop as current', () async {
-      final updatedStops = <Map<dynamic, dynamic>>[];
-      final updatedTrips = <Map<dynamic, dynamic>>[];
-      final eqParams = <String, dynamic>{};
-      int tripStopsCallCount = 0;
+    // markStopCompleted now verifies ownership via Supabase and then
+    // delegates the stop completion to the backend API; the progression
+    // logic (next stop / trip completion) lives server-side.
 
-      final client = FakeSupabaseClient(
-        auth: mockAuth,
-        onFrom: (relation) {
-          if (relation == 'trips') {
-            return FakeSupabaseQueryBuilder(
-              Future.value([{'id': 'trip-id-123'}]),
-              onUpdate: (values) => updatedTrips.add(values),
-              onEq: (col, val) => eqParams[col] = val,
-            );
-          } else if (relation == 'trip_stops') {
-            tripStopsCallCount++;
-            if (tripStopsCallCount == 1) {
+    FakeSupabaseClient ownedTripClient() => FakeSupabaseClient(
+          auth: mockAuth,
+          onFrom: (relation) {
+            if (relation == 'trips') {
               return FakeSupabaseQueryBuilder(
-                Future.value([{'id': stopId}]),
-                onUpdate: (values) => updatedStops.add(values),
-                onEq: (col, val) => eqParams[col] = val,
-              );
-            } else if (tripStopsCallCount == 2) {
-              return FakeSupabaseQueryBuilder(
-                Future.value([
-                  {'id': 'next-stop-abc', 'sort_order': 2}
-                ]),
-                onUpdate: (values) => updatedStops.add(values),
-                onEq: (col, val) => eqParams[col] = val,
-              );
-            } else {
-              return FakeSupabaseQueryBuilder(
-                Future.value([{'id': 'next-stop-abc'}]),
-                onUpdate: (values) => updatedStops.add(values),
-                onEq: (col, val) => eqParams[col] = val,
+                Future.value([{'id': 'trip-id-123'}]),
               );
             }
-          }
-          throw UnimplementedError('Table $relation not mocked');
-        },
-      );
+            throw UnimplementedError('Table $relation not mocked');
+          },
+        );
 
-      final service = TripService(client: client, httpClient: createUnusedHttpClient());
+    test('Successfully completes stop and sets next stop as current', () async {
+      final requests = <http.Request>[];
+      final mockHttp = MockClient((request) async {
+        requests.add(request);
+        return http.Response('{}', 200);
+      });
+
+      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
 
       await service.markStopCompleted(stopId, tripDisplayId);
 
-      // Verify that the stop was completed
-      expect(updatedStops.any((s) => s['is_completed'] == true && s['is_current'] == false), isTrue);
-      // Verify that next stop was set as current
-      expect(updatedStops.any((s) => s['is_current'] == true), isTrue);
-      expect(eqParams['id'], equals('next-stop-abc')); // The last eq call was on the next stop
+      expect(requests, hasLength(1));
+      expect(requests.first.method, equals('PUT'));
+      expect(
+        requests.first.url.path,
+        equals('/api/trips/$tripDisplayId/stops/$stopId/complete'),
+      );
     });
 
     test('Successfully completes last stop and completes the trip', () async {
-      final updatedStops = <Map<dynamic, dynamic>>[];
-      final updatedTrips = <Map<dynamic, dynamic>>[];
-      final eqParams = <String, dynamic>{};
-      int tripStopsCallCount = 0;
+      // The server owns the last-stop/trip-completion transition; the client
+      // contract is simply that a 2xx response resolves without error.
+      final mockHttp = MockClient((request) async {
+        return http.Response('{"message": "Trip completed"}', 200);
+      });
 
-      final client = FakeSupabaseClient(
-        auth: mockAuth,
-        onFrom: (relation) {
-          if (relation == 'trips') {
-            return FakeSupabaseQueryBuilder(
-              Future.value([{'id': 'trip-id-123'}]),
-              onUpdate: (values) => updatedTrips.add(values),
-              onEq: (col, val) => eqParams[col] = val,
-            );
-          } else if (relation == 'trip_stops') {
-            tripStopsCallCount++;
-            if (tripStopsCallCount == 1) {
-              return FakeSupabaseQueryBuilder(
-                Future.value([{'id': stopId}]),
-                onUpdate: (values) => updatedStops.add(values),
-                onEq: (col, val) => eqParams[col] = val,
-              );
-            } else {
-              // No next stops (empty list returned)
-              return FakeSupabaseQueryBuilder(
-                Future.value(<Map<String, dynamic>>[]),
-                onUpdate: (values) => updatedStops.add(values),
-                onEq: (col, val) => eqParams[col] = val,
-              );
-            }
-          }
-          throw UnimplementedError('Table $relation not mocked');
-        },
+      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
+
+      await expectLater(
+        service.markStopCompleted(stopId, tripDisplayId),
+        completes,
       );
-
-      final service = TripService(client: client, httpClient: createUnusedHttpClient());
-
-      await service.markStopCompleted(stopId, tripDisplayId);
-
-      // Verify that the stop was completed
-      expect(updatedStops.any((s) => s['is_completed'] == true && s['is_current'] == false), isTrue);
-      // Verify that the trip was marked completed
-      expect(updatedTrips.any((t) => t['status'] == 'completed'), isTrue);
     });
 
     test('Throws exception if stop update returns null (invalid stop ID or not belonging to trip)', () async {
-      final updatedStops = <Map<dynamic, dynamic>>[];
-      final updatedTrips = <Map<dynamic, dynamic>>[];
-      bool tripsQueryChecked = false;
+      final mockHttp = MockClient((request) async {
+        return http.Response(
+          '{"error": "Stop not found or does not belong to this trip"}',
+          404,
+        );
+      });
 
-      final client = FakeSupabaseClient(
-        auth: mockAuth,
-        onFrom: (relation) {
-          if (relation == 'trips') {
-            tripsQueryChecked = true;
-            return FakeSupabaseQueryBuilder(
-              Future.value([{'id': 'trip-id-123'}]),
-              onUpdate: (values) => updatedTrips.add(values),
-            );
-          } else if (relation == 'trip_stops') {
-            // Return empty list so update returns null after maybeSingle()
-            return FakeSupabaseQueryBuilder(
-              Future.value(<Map<String, dynamic>>[]),
-              onUpdate: (values) => updatedStops.add(values),
-            );
-          }
-          throw UnimplementedError('Table $relation not mocked');
-        },
-      );
-
-      final service = TripService(client: client, httpClient: createUnusedHttpClient());
+      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
 
       expect(
         () => service.markStopCompleted(stopId, tripDisplayId),
-        throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('Stop not found or does not belong to this trip'))),
+        throwsA(isA<Exception>().having((e) => e.toString(), 'message',
+            contains('Stop not found or does not belong to this trip'))),
       );
-
-      // Give async tasks a moment to make sure no updates happened
-      await Future.delayed(Duration.zero);
-
-      // Verify that ownership was checked
-      expect(tripsQueryChecked, isTrue);
-      // Verify that the stop was NOT completed/advanced further (no next stops queried/updated)
-      expect(updatedStops.length, equals(1)); // Only the initial update call was made
-      expect(updatedTrips.isEmpty, isTrue); // Trip not completed
     });
 
     test('Throws exception if driver does not own the trip', () async {
@@ -319,45 +245,38 @@ void main() {
 
   group('TripService.updateOnlineStatus Tests', () {
     test('Successfully updates online status', () async {
-      final updatedDetails = <Map<dynamic, dynamic>>[];
-      final eqParams = <String, dynamic>{};
+      final requests = <http.Request>[];
+      final mockHttp = MockClient((request) async {
+        requests.add(request);
+        return http.Response('{}', 200);
+      });
 
-      final client = FakeSupabaseClient(
-        auth: mockAuth,
-        onFrom: (relation) {
-          if (relation == 'driver_details') {
-            return FakeSupabaseQueryBuilder(
-              Future.value([{'user_id': driverId}]),
-              onUpdate: (values) => updatedDetails.add(values),
-              onEq: (col, val) => eqParams[col] = val,
-            );
-          }
-          throw UnimplementedError('Table $relation not mocked');
-        },
-      );
+      final client = FakeSupabaseClient(auth: mockAuth, onFrom: (relation) {
+        throw UnimplementedError('No Supabase access expected');
+      });
 
-      final service = TripService(client: client, httpClient: createUnusedHttpClient());
+      final service = TripService(client: client, httpClient: mockHttp);
       await service.updateOnlineStatus(true);
 
-      expect(eqParams['user_id'], equals(driverId));
-      expect(updatedDetails.first['is_online'], isTrue);
-      expect(updatedDetails.first['updated_at'], isNotNull);
+      expect(requests, hasLength(1));
+      expect(requests.first.method, equals('PUT'));
+      expect(requests.first.url.path, equals('/api/driver/online'));
+      expect(requests.first.body, contains('"is_online":true'));
     });
 
     test('Throws exception if driver_details update returns null', () async {
-      final client = FakeSupabaseClient(
-        auth: mockAuth,
-        onFrom: (relation) {
-          if (relation == 'driver_details') {
-            return FakeSupabaseQueryBuilder(
-              Future.value(<Map<String, dynamic>>[]),
-            );
-          }
-          throw UnimplementedError('Table $relation not mocked');
-        },
-      );
+      final mockHttp = MockClient((request) async {
+        return http.Response(
+          '{"error": "Driver profile not found or update failed"}',
+          404,
+        );
+      });
 
-      final service = TripService(client: client, httpClient: createUnusedHttpClient());
+      final client = FakeSupabaseClient(auth: mockAuth, onFrom: (relation) {
+        throw UnimplementedError('No Supabase access expected');
+      });
+
+      final service = TripService(client: client, httpClient: mockHttp);
       expect(
         () => service.updateOnlineStatus(true),
         throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('Driver profile not found or update failed'))),
@@ -366,65 +285,42 @@ void main() {
   });
 
   group('TripService.startTrip Tests', () {
-    test('Successfully starts a trip by marking first stop as current', () async {
-      final updatedStops = <Map<dynamic, dynamic>>[];
-      final eqParams = <String, dynamic>{};
-      int tripStopsCallCount = 0;
-
-      final client = FakeSupabaseClient(
-        auth: mockAuth,
-        onFrom: (relation) {
-          if (relation == 'trips') {
-            return FakeSupabaseQueryBuilder(
-              Future.value([{'id': 'trip-id-123'}]),
-              onEq: (col, val) => eqParams[col] = val,
-            );
-          } else if (relation == 'trip_stops') {
-            tripStopsCallCount++;
-            if (tripStopsCallCount == 1) {
-              // Fetch first stop
+    FakeSupabaseClient ownedTripClient() => FakeSupabaseClient(
+          auth: mockAuth,
+          onFrom: (relation) {
+            if (relation == 'trips') {
               return FakeSupabaseQueryBuilder(
-                Future.value([{'id': stopId, 'sort_order': 1}]),
-                onEq: (col, val) => eqParams[col] = val,
-              );
-            } else {
-              // Update stop
-              return FakeSupabaseQueryBuilder(
-                Future.value([{'id': stopId}]),
-                onUpdate: (values) => updatedStops.add(values),
-                onEq: (col, val) => eqParams[col] = val,
+                Future.value([{'id': 'trip-id-123'}]),
               );
             }
-          }
-          throw UnimplementedError('Table $relation not mocked');
-        },
-      );
+            throw UnimplementedError('Table $relation not mocked');
+          },
+        );
 
-      final service = TripService(client: client, httpClient: createUnusedHttpClient());
+    test('Successfully starts a trip by marking first stop as current', () async {
+      final requests = <http.Request>[];
+      final mockHttp = MockClient((request) async {
+        requests.add(request);
+        return http.Response('{}', 200);
+      });
+
+      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
       await service.startTrip(tripDisplayId);
 
-      expect(updatedStops.first['is_current'], isTrue);
-      expect(eqParams['trip_display_id'], equals(tripDisplayId));
+      expect(requests, hasLength(1));
+      expect(requests.first.method, equals('PUT'));
+      expect(requests.first.url.path, equals('/api/trips/$tripDisplayId/start'));
     });
 
     test('Throws exception if startTrip finds no active stops', () async {
-      final client = FakeSupabaseClient(
-        auth: mockAuth,
-        onFrom: (relation) {
-          if (relation == 'trips') {
-            return FakeSupabaseQueryBuilder(
-              Future.value([{'id': 'trip-id-123'}]),
-            );
-          } else if (relation == 'trip_stops') {
-            return FakeSupabaseQueryBuilder(
-              Future.value(<Map<String, dynamic>>[]),
-            );
-          }
-          throw UnimplementedError('Table $relation not mocked');
-        },
-      );
+      final mockHttp = MockClient((request) async {
+        return http.Response(
+          '{"error": "No active stops found for this trip"}',
+          404,
+        );
+      });
 
-      final service = TripService(client: client, httpClient: createUnusedHttpClient());
+      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
       expect(
         () => service.startTrip(tripDisplayId),
         throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('No active stops found for this trip'))),

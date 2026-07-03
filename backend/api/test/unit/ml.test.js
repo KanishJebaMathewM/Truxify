@@ -48,7 +48,7 @@ describe('ml service — predictDemand', () => {
     const mockResponse = { predicted_demand: 0.82, demand_level: 'high' };
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve(mockResponse),
+      text: () => Promise.resolve(JSON.stringify(mockResponse)),
     });
 
     const result = await predictDemand(features);
@@ -65,7 +65,7 @@ describe('ml service — predictDemand', () => {
     process.env.ML_ENGINE_URL = 'http://ml-service:9000';
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ predicted_demand: 0.5 }),
+      text: () => Promise.resolve(JSON.stringify({ predicted_demand: 0.5 })),
     });
 
     await predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 });
@@ -105,7 +105,7 @@ describe('ml service — predictDemand', () => {
     process.env.ML_API_KEY = 'secret-key-123';
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ predicted_demand: 0.5 }),
+      text: () => Promise.resolve(JSON.stringify({ predicted_demand: 0.5 })),
     });
 
     await predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 });
@@ -141,7 +141,7 @@ describe('ml service — predictPrice', () => {
     const mockResponse = { estimated_price: 4500, currency: 'INR' };
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve(mockResponse),
+      text: () => Promise.resolve(JSON.stringify(mockResponse)),
     });
 
     const result = await predictPrice({
@@ -166,7 +166,7 @@ describe('ml service — predictPrice', () => {
   it('defaults truckType to medium_truck when not provided', async () => {
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ estimated_price: 3000, currency: 'INR' }),
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 3000, currency: 'INR' })),
     });
 
     await predictPrice({ distanceKm: 100, cargoWeightKg: 500 });
@@ -181,7 +181,7 @@ describe('ml service — predictPrice', () => {
     process.env.ML_SERVICE_URL = 'http://price-service:8002';
     mockFetch.mockResolvedValueOnce({
       ok: true,
-      json: () => Promise.resolve({ estimated_price: 2000, currency: 'INR' }),
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 2000, currency: 'INR' })),
     });
 
     await predictPrice({ distanceKm: 50, cargoWeightKg: 200 });

@@ -189,20 +189,23 @@ describe('POST /api/orders — server-side pricing contract', () => {
     expect(persisted.total_amount).not.toBe(1);
   });
 
-  it('CLIENT PRICING IGNORED: body includes base_freight:1 / total_amount:1 → server values still win', async () => {
+  it('CLIENT PRICING REJECTED: body includes base_freight:1 / total_amount:1 → 400 validation error', async () => {
     const app = buildApp();
     const res = await request(app)
       .post('/api/orders')
       .set(CUSTOMER_HEADERS)
       .send({ ...validOrderBody, base_freight: 1, toll_estimate: 1, platform_fee: 1, total_amount: 1 });
 
-    expect(res.status).toBe(201);
-    const ordersInsert = m.calls.find(c => c.table === 'orders' && c.mode === 'insert');
-    const persisted = ordersInsert.payload;
-    expect(persisted.base_freight).toBeGreaterThan(1);
-    expect(persisted.toll_estimate).toBeGreaterThan(1);
-    expect(persisted.platform_fee).toBeGreaterThan(1);
-    expect(persisted.total_amount).toBeGreaterThan(1);
+    // The schema now declares monetary fields as z.never(), so client-supplied
+    // pricing is rejected outright instead of being silently overwritten.
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation failed');
+    const rejectedFields = res.body.details.map(d => d.field);
+    expect(rejectedFields).toEqual(
+      expect.arrayContaining(['base_freight', 'toll_estimate', 'platform_fee', 'total_amount'])
+    );
+    // Nothing may reach the database on a rejected request
+    expect(m.calls.find(c => c.table === 'orders' && c.mode === 'insert')).toBeFalsy();
   });
 
   it('load_offers mirrors orders: freight_value === orders.base_freight, etc.', async () => {
@@ -331,18 +334,16 @@ describe('POST /api/orders — server-side pricing contract', () => {
   });
 
   it('regression: NO client monetary fields in the orders.insert payload', async () => {
-    // The route should not read base_freight/toll_estimate/platform_fee/total_amount
-    // from req.body at all. If it does, the fix is regressed.
+    // The route must not read base_freight/toll_estimate/platform_fee/total_amount
+    // from req.body at all. The schema now rejects them outright (z.never()),
+    // so a clean body must succeed with server-computed pricing persisted.
     const app = buildApp();
-    await request(app).post('/api/orders').set(CUSTOMER_HEADERS).send({
-      ...validOrderBody,
-      base_freight: 99999, toll_estimate: 99999, platform_fee: 99999, total_amount: 99999,
-    });
+    const res = await request(app).post('/api/orders').set(CUSTOMER_HEADERS).send(validOrderBody);
+    expect(res.status).toBe(201);
     const orderInsert = m.calls.find(c => c.table === 'orders' && c.mode === 'insert').payload;
     expect(orderInsert.base_freight).not.toBe(99999);
-    expect(orderInsert.toll_estimate).not.toBe(99999);
-    expect(orderInsert.platform_fee).not.toBe(99999);
-    expect(orderInsert.total_amount).not.toBe(99999);
+    expect(orderInsert.base_freight).toBeGreaterThan(0);
+    expect(orderInsert.total_amount).toBeGreaterThan(0);
   });
   it('driver can update milestone when assigned to order', async () => {
     m.store.orders = [{
@@ -1105,7 +1106,8 @@ describe('Delivery OTP Verification and Milestones', () => {
     m.store.orders = [{
       id: 'order-1',
       driver_id: 'driver-123',
-      order_display_id: 'ORD001'
+      order_display_id: 'ORD001',
+      status: 'arriving'
     }];
     m.store.delivery_otps = [{
       id: 'otp-1',
@@ -1134,7 +1136,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: 'order-1',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
-      status: 'in_transit'
+      status: 'arriving'
     }];
     m.store.delivery_otps = [{
       id: 'otp-1',
@@ -1177,6 +1179,8 @@ describe('Delivery OTP Verification and Milestones', () => {
     expect(rpcCall.args).toEqual({
       p_order_id: 'order-1',
       p_otp_id: 'otp-1',
+      // Escrow payout hash is only set once the release succeeds
+      p_release_tx_hash: null,
     });
   });
 
@@ -1185,7 +1189,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: 'order-retry',
       driver_id: 'driver-123',
       order_display_id: 'ORD-RETRY',
-      status: 'in_transit'
+      status: 'arriving'
     }];
     m.store.delivery_otps = [{
       id: 'otp-retry',
@@ -1232,7 +1236,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: 'order-2',
       driver_id: 'driver-456',
       order_display_id: 'ORD002',
-      status: 'in_transit',
+      status: 'arriving',
       total_amount: 125000,
       escrow_status: 'funded',
     }];
@@ -1261,10 +1265,19 @@ describe('Delivery OTP Verification and Milestones', () => {
 
     expect(res.status).toBe(200);
 
+    // The release hash now flows through complete_trip_tx and the orders
+    // update; wallet_transactions only receives the payout description.
+    const rpcCall = m.calls.find(c => c.rpc === 'complete_trip_tx');
+    expect(rpcCall).toBeTruthy();
+    expect(rpcCall.args.p_release_tx_hash).toBe('0xtesthash');
+
+    const orderUpdate = m.calls.find(c => c.table === 'orders' && c.mode === 'update' && c.payload.release_tx_hash);
+    expect(orderUpdate).toBeTruthy();
+    expect(orderUpdate.payload.release_tx_hash).toBe('0xtesthash');
+
     const walletUpdate = m.calls.find(c => c.table === 'wallet_transactions' && c.mode === 'update');
     expect(walletUpdate).toBeTruthy();
     expect(walletUpdate.payload).toEqual(expect.objectContaining({
-      tx_hash: '0xtesthash',
       description: 'Escrow payout for ORD002',
     }));
   });
@@ -1276,7 +1289,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: 'order-release-failed',
       driver_id: 'driver-456',
       order_display_id: 'ORD-FAILED',
-      status: 'in_transit',
+      status: 'arriving',
       total_amount: 125000,
       escrow_status: 'funded',
       escrow_release_attempts: 0,
@@ -1299,19 +1312,21 @@ describe('Delivery OTP Verification and Milestones', () => {
       })
       .send({ otp: 123456 });
 
-    expect(res.status).toBe(202);
+    // The route now fails fast with 503 and leaves the database untouched
+    // when the on-chain release fails, so the driver can simply retry.
+    expect(res.status).toBe(503);
     expect(res.body).toEqual(expect.objectContaining({
-      escrow_status: 'release_failed',
-      payment_released: false,
       retryable: true,
     }));
+    expect(res.body.error).toContain('Blockchain escrow release failed');
 
     const order = m.store.orders.find(o => o.id === 'order-release-failed');
-    expect(order.status).toBe('payment_released');
-    expect(order.escrow_status).toBe('release_failed');
-    expect(order.escrow_release_error).toBe('Polygon RPC unavailable');
-    expect(order.escrow_release_attempts).toBe(1);
-    expect(order.escrow_release_last_attempt_at).toBeTruthy();
+    expect(order.status).toBe('arriving');
+    expect(order.escrow_status).toBe('funded');
+    expect(order.escrow_release_attempts).toBe(0);
+    expect(m.calls.find(c => c.rpc === 'complete_trip_tx')).toBeFalsy();
+    const otp = m.store.delivery_otps.find(o => o.id === 'otp-release-failed');
+    expect(otp.verified).toBe(false);
   });
 
   it('does not report payment released when escrow release returns no transaction hash', async () => {
@@ -1324,7 +1339,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: 'order-no-release-hash',
       driver_id: 'driver-456',
       order_display_id: 'ORD-NO-HASH',
-      status: 'in_transit',
+      status: 'arriving',
       total_amount: 125000,
       escrow_status: 'funded',
       escrow_release_attempts: 2,
@@ -1347,13 +1362,16 @@ describe('Delivery OTP Verification and Milestones', () => {
       })
       .send({ otp: 123456 });
 
-    expect(res.status).toBe(202);
-    expect(res.body.payment_released).toBe(false);
-    expect(res.body.escrow_status).toBe('release_failed');
+    // A missing transaction hash is treated like any other release failure:
+    // fail fast with 503 and leave the database untouched for a retry.
+    expect(res.status).toBe(503);
+    expect(res.body.retryable).toBe(true);
+    expect(res.body.error).toContain('Blockchain escrow release failed');
 
     const order = m.store.orders.find(o => o.id === 'order-no-release-hash');
-    expect(order.escrow_release_attempts).toBe(3);
-    expect(order.escrow_release_error).toContain('transaction hash');
+    expect(order.escrow_status).toBe('funded');
+    expect(order.escrow_release_attempts).toBe(2);
+    expect(m.calls.find(c => c.rpc === 'complete_trip_tx')).toBeFalsy();
   });
 
   it('fails OTP verification if OTP is expired', async () => {
@@ -1361,7 +1379,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: 'order-expired',
       driver_id: 'driver-123',
       order_display_id: 'ORD-EXP',
-      status: 'in_transit'
+      status: 'arriving'
     }];
     m.store.delivery_otps = [{
       id: 'otp-expired',
@@ -1391,7 +1409,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: orderId,
       driver_id: 'driver-123',
       order_display_id: 'ORD-LOCK',
-      status: 'in_transit'
+      status: 'arriving'
     }];
     m.store.delivery_otps = [{
       id: 'otp-lockout',
@@ -1468,7 +1486,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       id: orderId,
       driver_id: 'driver-123',
       order_display_id: 'ORD-CLEAR',
-      status: 'in_transit'
+      status: 'arriving'
     }];
     m.store.delivery_otps = [{
       id: 'otp-clear-state',
@@ -1506,6 +1524,10 @@ describe('Delivery OTP Verification and Milestones', () => {
     const otpRecord = m.store.delivery_otps.find(o => o.order_id === orderId);
     otpRecord.verified = false;
     delete otpRecord.verified_at;
+    // Also reset the order status: the successful verification moved it to
+    // payment_released, which would otherwise trip the delivery-location gate.
+    const orderRecord = m.store.orders.find(o => o.id === orderId);
+    orderRecord.status = 'arriving';
 
     // Fail 4 more times (if state wasn't cleared, this would lockout since total failures would be 7)
     for (let i = 1; i <= 4; i++) {
@@ -1528,7 +1550,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       customer_id: 'customer-456',
       driver_id: 'driver-123',
       order_display_id: 'ORD-REGEN',
-      status: 'in_transit'
+      status: 'arriving'
     }];
     m.store.delivery_otps = [{
       id: 'otp-regen-old',
@@ -1637,7 +1659,8 @@ describe('Delivery OTP Verification and Milestones', () => {
         id: 'order-redis-active',
         driver_id: 'driver-123',
         customer_id: 'customer-456',
-        order_display_id: 'ORD-REDIS'
+        order_display_id: 'ORD-REDIS',
+        status: 'arriving'
       }];
       m.store.delivery_otps = [{
         id: 'otp-redis-active',
@@ -1703,7 +1726,8 @@ describe('Delivery OTP Verification and Milestones', () => {
         id: 'order-redis-failing',
         driver_id: 'driver-123',
         customer_id: 'customer-456',
-        order_display_id: 'ORD-FAIL-REDIS'
+        order_display_id: 'ORD-FAIL-REDIS',
+        status: 'arriving'
       }];
       m.store.delivery_otps = [{
         id: 'otp-redis-failing',

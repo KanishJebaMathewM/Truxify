@@ -166,8 +166,8 @@ class LocationService {
             .maybeSingle();
 
         if (activeOrder != null) {
-          _activeOrderId = activeOrder['id'] as String;
-          _activeOrderDisplayId = activeOrder['order_display_id'] as String;
+          _activeOrderId = activeOrder['id']?.toString();
+          _activeOrderDisplayId = activeOrder['order_display_id']?.toString();
         }
       }
 

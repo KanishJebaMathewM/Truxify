@@ -118,11 +118,11 @@ def _pack_packages(
     packed_volume = 0.0
 
     for idx, pkg in indexed:
-        pl, pw, ph = pkg["length"], pkg["width"], pkg["height"]
-        pw_ = pkg["weight"]
+        pkg_length, pkg_width, pkg_height = pkg["length"], pkg["width"], pkg["height"]
+        pkg_weight = pkg["weight"]
 
         # Weight check
-        if packed_weight + pw_ > max_weight:
+        if packed_weight + pkg_weight > max_weight:
             arrangements[idx] = {
                 "package_index": idx,
                 "position": {"x": 0.0, "y": 0.0, "z": 0.0},
@@ -134,7 +134,7 @@ def _pack_packages(
 
         placed = False
         for shelf in shelves:
-            pos = shelf.try_place(pl, pw, ph)
+            pos = shelf.try_place(pkg_length, pkg_width, pkg_height)
             if pos is not None:
                 arrangements[idx] = {
                     "package_index": idx,
@@ -142,8 +142,8 @@ def _pack_packages(
                     "rotated": pos["rotated"],
                     "fits": True,
                 }
-                packed_weight += pw_
-                packed_volume += pl * pw * ph
+                packed_weight += pkg_weight
+                packed_volume += pkg_length * pkg_width * pkg_height
                 placed = True
                 break
 
@@ -169,8 +169,8 @@ def _pack_packages(
                     "rotated": pos["rotated"],
                     "fits": True,
                 }
-                packed_weight += pw_
-                packed_volume += pl * pw * ph
+                packed_weight += pkg_weight
+                packed_volume += pkg_length * pkg_width * pkg_height
                 shelves.append(new_shelf)
             else:
                 arrangements[idx] = {

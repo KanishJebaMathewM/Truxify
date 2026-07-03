@@ -14,7 +14,6 @@ import {
   submitBidSchema,
   submitRatingSchema,
   paramIdSchema,
-  uuidParamSchema,
   acceptBidParamsSchema,
   updateMilestoneSchema,
   verifyDeliverySchema,
@@ -44,6 +43,7 @@ const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || 
 const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
 const IN_MEMORY_OTP_MAP_MAX_SIZE = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || '10000', 10);
 const DELIVERY_OTP_READY_STATUSES = new Set(['arriving']);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const inMemoryOtpFailedAttempts = new Map();
 
@@ -307,6 +307,8 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), validateB
 
     if (timelineErr) {
       logger.error('Timeline Insertion Error:', timelineErr.message);
+      await supabase.from('orders').delete().eq('id', order.id);
+      return res.status(500).json({ error: 'Failed to create order timeline.', details: timelineErr.message });
     }
 
     const { error: offerErr } = await supabase
@@ -331,18 +333,9 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), validateB
 
     if (offerErr) {
       logger.error('Load Offer Insertion Error:', offerErr.message);
-    }
-
-    // Verify pricing was stored correctly (integrity check)
-    const { data: verifyOffer } = await supabase
-      .from('load_offers')
-      .select('freight_value, net_profit, fuel_cost, toll_cost, extra_distance_km')
-      .eq('order_display_id', orderDisplayId)
-      .single();
-
-    if (verifyOffer && verifyOffer.freight_value !== pricing.baseFreight) {
-      logger.error(`[SECURITY] Load offer pricing mismatch for ${orderDisplayId}: ` +
-        `expected ${pricing.baseFreight}, got ${verifyOffer.freight_value}`);
+      await supabase.from('order_timeline').delete().eq('order_display_id', orderDisplayId);
+      await supabase.from('orders').delete().eq('id', order.id);
+      return res.status(500).json({ error: 'Failed to create load offer.', details: offerErr.message });
     }
 
     res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
@@ -475,10 +468,17 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
 // ============================================================================
 router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   try {
-    let { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
-    if (!order && !orderErr) {
+    let order = null;
+    let orderErr = null;
+    if (uuidRegex.test(orderId)) {
+      const result = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+      order = result.data;
+      orderErr = result.error;
+    }
+    if (!order) {
       const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
       order = result.data;
       orderErr = result.error;
@@ -516,13 +516,15 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
 // ============================================================================
 router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   try {
-    let order;
-    const { data: orderById } = await supabase.from('orders').select('customer_id, driver_id, order_display_id').eq('id', orderId).maybeSingle();
-    if (orderById) {
+    let order = null;
+    if (uuidRegex.test(orderId)) {
+      const { data: orderById } = await supabase.from('orders').select('customer_id, driver_id, order_display_id').eq('id', orderId).maybeSingle();
       order = orderById;
-    } else {
+    }
+    if (!order) {
       const { data: orderByDisplay } = await supabase.from('orders').select('customer_id, driver_id, order_display_id').eq('order_display_id', orderId).maybeSingle();
       order = orderByDisplay;
     }
@@ -1144,6 +1146,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
 
     res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
   } catch (err) {
+    logger.error('[verify-delivery] Exception:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1190,7 +1193,7 @@ router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requ
 // ============================================================================
 // 15. CHANGE DROP (CUSTOMER)
 // ============================================================================
-router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
+router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
   const orderId = req.params.id;
   const { drop_address, drop_lat, drop_lng } = req.body;
 
@@ -1277,6 +1280,8 @@ router.put('/:id/change-drop', authenticate, userLimiter, requireRole(['customer
     } catch (timelineErr) {
       logger.warn('Failed to update timeline for change-drop:', timelineErr.message);
     }
+
+    await expireDeliveryOtps(order.id);
 
     return res.json({
       message: 'Drop location updated successfully.',
@@ -1390,7 +1395,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           .eq('order_display_id', workingOrder.order_display_id)
           .eq('milestone', 'Order Placed');
 
-        await expireDeliveryOtps(workingOrder.order_display_id);
+        await expireDeliveryOtps(workingOrder.id);
 
         return res.json({
           message: 'Order cancelled and escrow refunded successfully.',
@@ -1538,13 +1543,17 @@ router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer
 // ============================================================================
 router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
+  const isUuid = UUID_RE.test(orderId);
   try {
     // 1. Resolve order and check authentication / authorization
-    let { data: order, error: orderErr } = await supabase
-      .from('orders')
-      .select('id, customer_id, driver_id, status')
-      .eq('id', orderId)
-      .maybeSingle();
+    let { data: order, error: orderErr } = isUuid
+      ? await supabase
+          .from('orders')
+          .select('id, customer_id, driver_id, status')
+          .eq('id', orderId)
+          .maybeSingle()
+      : { data: null, error: null };
+
     if (!order && !orderErr) {
       const result = await supabase
         .from('orders')

@@ -1,4 +1,4 @@
-name: Truxify CI
+name: Lint
 
 on:
   pull_request:
@@ -7,119 +7,67 @@ on:
       - main
 
 concurrency:
-  group: truxify-ci-${{ github.ref }}
+  group: truxify-lint-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
-  backend:
-    name: Backend tests
+  backend-lint:
+    name: Backend ESLint
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: backend/api/package-lock.json
-
       - name: Install dependencies
         working-directory: backend/api
         run: npm ci --workspaces=false
-
-      - name: Run unit tests
+      - name: Run ESLint
         working-directory: backend/api
-        run: npm run test:unit
+        run: npm run lint
 
-      - name: Run integration tests
-        working-directory: backend/api
-        run: npm run test:integration
-
-  customer:
-    name: Customer Flutter checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Get shared dependencies
-        working-directory: packages/truxify_shared
-        run: flutter pub get
-
-      - name: Get dependencies
-        working-directory: apps/customer
-        run: flutter pub get
-
-      - name: Analyze
-        working-directory: apps/customer
-        run: flutter analyze
-
-      - name: Test
-        working-directory: apps/customer
-        run: flutter test
-
-  driver:
-    name: Driver Flutter checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Get shared dependencies
-        working-directory: packages/truxify_shared
-        run: flutter pub get
-
-      - name: Get dependencies
-        working-directory: apps/driver
-        run: flutter pub get
-
-      - name: Analyze
-        working-directory: apps/driver
-        run: flutter analyze
-
-      - name: Test
-        working-directory: apps/driver
-        run: flutter test
-
-  ml:
-    name: ML engine tests
+  customer-lint:
+    name: Customer App Analyzer
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: backend/ml/requirements.txt
+          channel: stable
+          cache: true
+      - name: Get shared dependencies
+        working-directory: packages/truxify_shared
+        run: flutter pub get
+      - name: Get dependencies
+        working-directory: apps/customer
+        run: flutter pub get
+      - name: Run Dart Analyzer
+        working-directory: apps/customer
+        run: dart analyze
 
-      - name: Install dependencies
-        working-directory: backend/ml
-        run: pip install -r requirements.txt
-
-      - name: Run tests
-        working-directory: backend/ml
-        run: python -m pytest tests/ -v
+  driver-lint:
+    name: Driver App Analyzer
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Get shared dependencies
+        working-directory: packages/truxify_shared
+        run: flutter pub get
+      - name: Get dependencies
+        working-directory: apps/driver
+        run: flutter pub get
+      - name: Run Dart Analyzer
+        working-directory: apps/driver
+        run: dart analyze

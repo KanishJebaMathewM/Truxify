@@ -48,7 +48,12 @@ class GeocodeService {
         return null;
       }
 
-      final item = decoded.first as Map<String, dynamic>;
+      final first = decoded.first;
+      if (first is! Map<String, dynamic>) {
+        _addToCache(key, null);
+        return null;
+      }
+      final item = first;
       final lat = double.tryParse('${item['lat']}');
       final lon = double.tryParse('${item['lon']}');
       if (lat == null || lon == null) {

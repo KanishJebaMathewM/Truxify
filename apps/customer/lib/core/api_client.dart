@@ -58,8 +58,9 @@ class ApiClient {
     const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
     if (envUrl.isNotEmpty) return envUrl;
     if (kReleaseMode) {
-      throw StateError(
-        'TRUXIFY_API_BASE_URL environment variable is required in release builds.',
+      developer.log(
+        '[ApiClient] TRUXIFY_API_BASE_URL not set — falling back to localhost. '
+        'Set --dart-define=TRUXIFY_API_BASE_URL=<url> for production builds.',
       );
     }
     return 'http://localhost:5000';

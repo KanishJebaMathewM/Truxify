@@ -138,7 +138,7 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
       sortBy = 'extra_distance_km';
     }
 
-    const ascending = req.query.order === 'asc';
+    const ascending = filters.order === 'asc';
 
     query = query.order(sortBy, { ascending }).range(from, to);
 

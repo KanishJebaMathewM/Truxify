@@ -16,6 +16,7 @@ export const loadFilterQuerySchema = z.object({
   min_price: nonNegativeDecimalString('min_price').optional(),
   max_price: nonNegativeDecimalString('max_price').optional(),
   distance: nonNegativeDecimalString('distance').optional(),
+  order: z.enum(['asc', 'desc']).optional(),
 }).superRefine((filters, ctx) => {
   if (
     filters.min_price !== undefined

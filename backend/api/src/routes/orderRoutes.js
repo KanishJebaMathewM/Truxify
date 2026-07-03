@@ -994,6 +994,14 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
   }
 
   try {
+    // Acquire row-level lock to serialize concurrent verify-delivery
+    // requests on the same order.
+    const { error: lockErr } = await supabase.rpc('lock_order_for_update', { p_order_id: orderId });
+    if (lockErr) {
+      logger.error('[verify-delivery] Failed to acquire row-level lock for order', orderId, ':', lockErr.message);
+      return res.status(500).json({ error: 'Failed to acquire lock. Please retry.' });
+    }
+
     const { data: order, error: orderErr } = await supabase.from('orders')
       .select('id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status')
       .eq('id', orderId)
@@ -1294,71 +1302,30 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
   const { reason = null } = req.body || {};
 
   try {
-    let { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
-    if (!order && !orderErr) {
-      const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
-      order = result.data;
-      orderErr = result.error;
-    }
-    if (orderErr) return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-    if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-
-    // Prevent cancellation if delivery OTP was already verified
-    const { data: otpCheck, error: otpCheckErr } = await supabase
-      .from('delivery_otps')
-      .select('id')
-      .eq('order_id', order.id)
-      .eq('verified', true)
-      .limit(1)
-      .maybeSingle();
-
-    if (!otpCheckErr && otpCheck) {
-      return res.status(409).json({ error: 'Cannot cancel: delivery OTP has already been verified.' });
-    }
-
-    if (order.status === 'cancelled' && order.escrow_status === 'refunded') {
-      return res.json({
-        message: 'Order was already cancelled and refunded.',
-        cancellation_fee: order.cancellation_fee ?? 0,
-        order,
+    // Acquire row-level lock and atomically transition the order to
+    // cancelled / refund_pending via the cancel_order_tx RPC.
+    const { data: workingOrder, error: cancelErr } = await supabase
+      .rpc('cancel_order_tx', {
+        p_order_id: orderId,
+        p_cancellation_reason: reason,
+        p_customer_id: req.user.id,
       });
-    }
 
-    const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(order.escrow_status);
-    let workingOrder = order;
-
-    // Persist cancellation before touching the blockchain. A failed or delayed
-    // refund must never leave the order available for continued work.
-    if (requiresRefund && (order.status !== 'cancelled' || order.escrow_status !== 'refund_pending')) {
-      const attemptAt = new Date().toISOString();
-      const { data: pendingOrder, error: pendingErr } = await supabase
-        .from('orders')
-        .update({
-          status: 'cancelled',
-          cancellation_reason: reason ?? order.cancellation_reason,
-          escrow_status: 'refund_pending',
-          escrow_refund_error: null,
-          escrow_refund_attempts: (order.escrow_refund_attempts ?? 0) + 1,
-          escrow_refund_last_attempt_at: attemptAt,
-          updated_at: attemptAt,
-        })
-        .eq('id', order.id)
-        .not('status', 'in', '("delivered","payment_released")')
-        .select('*')
-        .single();
-
-      if (pendingErr) {
-        if (pendingErr.code === 'PGRST116') {
-          return res.status(409).json({ error: 'Order was already delivered or payment released. Cannot cancel.' });
-        }
-        return res.status(500).json({
-          error: 'Failed to place the order into refund reconciliation.',
-          details: pendingErr.message,
-        });
+    if (cancelErr) {
+      // Map known RPC error messages to user-friendly responses
+      const msg = cancelErr.message;
+      if (msg.includes('not found')) return res.status(404).json({ error: 'Order not found.' });
+      if (msg.includes('Access Denied')) return res.status(403).json({ error: msg });
+      if (msg.includes('already delivered') || msg.includes('payment released')) {
+        return res.status(409).json({ error: 'Cannot cancel: order was already delivered or payment released.' });
       }
-      workingOrder = pendingOrder;
+      if (msg.includes('does not allow cancellation')) {
+        return res.status(409).json({ error: msg });
+      }
+      return res.status(500).json({ error: 'Failed to cancel order.', details: cancelErr.message });
     }
+
+    const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(workingOrder.escrow_status);
 
     if (requiresRefund) {
       let refundTxHash = workingOrder.refund_tx_hash ?? null;
@@ -1369,7 +1336,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
         if (refundTxHash) {
           receipt = await confirmEscrowRefund(refundTxHash);
         } else {
-          const submitted = await submitEscrowRefund(order.order_display_id);
+          const submitted = await submitEscrowRefund(workingOrder.order_display_id);
           refundTxHash = submitted.txHash;
           if (!refundTxHash || !submitted.waitForConfirmation) {
             throw new Error('Escrow refund transaction was not submitted.');
@@ -1383,7 +1350,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
               escrow_refund_submitted_at: submittedAt,
               updated_at: submittedAt,
             })
-            .eq('id', order.id)
+            .eq('id', workingOrder.id)
             .eq('escrow_status', 'refund_pending');
 
           if (hashErr) {
@@ -1404,7 +1371,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
             escrow_refund_error: null,
             updated_at: refundedAt,
           })
-          .eq('id', order.id)
+          .eq('id', workingOrder.id)
           .in('escrow_status', ['refund_pending', 'refund_failed'])
           .select('cancellation_fee, order_display_id, status, cancellation_reason, escrow_status, refund_tx_hash')
           .single();
@@ -1420,10 +1387,10 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
         }
 
         await supabase.from('order_timeline').update({ completed: true, milestone_time: refundedAt })
-          .eq('order_display_id', order.order_display_id)
+          .eq('order_display_id', workingOrder.order_display_id)
           .eq('milestone', 'Order Placed');
 
-        await expireDeliveryOtps(order.order_display_id);
+        await expireDeliveryOtps(workingOrder.order_display_id);
 
         return res.json({
           message: 'Order cancelled and escrow refunded successfully.',
@@ -1441,7 +1408,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
           escrow_refund_last_attempt_at: failedAt,
           updated_at: failedAt,
-        }).eq('id', order.id);
+        }).eq('id', workingOrder.id);
 
         return res.status(202).json({
           message: 'Order cancelled. Escrow refund requires reconciliation.',
@@ -1450,38 +1417,19 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           retryable: true,
         });
       }
-    } else if (order.escrow_booking_id) {
-      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain refund.`);
+    } else {
+      await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() })
+        .eq('order_display_id', workingOrder.order_display_id)
+        .eq('milestone', 'Order Placed');
+
+      await expireDeliveryOtps(workingOrder.order_display_id);
     }
 
-    const updatePayload = {
-      status: 'cancelled',
-      cancellation_reason: reason,
-      updated_at: new Date().toISOString(),
-    };
-
-    const { data: updatedOrder, error: updateErr } = await supabase.from('orders')
-      .update(updatePayload)
-      .eq('id', order.id)
-      .not('status', 'in', '("delivered","payment_released","cancelled")')
-      .select('cancellation_fee, order_display_id, status, cancellation_reason, escrow_status')
-      .single();
-    if (updateErr) {
-      if (updateErr.code === 'PGRST116') {
-        return res.status(409).json({ error: 'Order was already cancelled, delivered, or payment released. Cannot cancel.' });
-      }
-      return res.status(500).json({ error: 'Failed to cancel order.', details: updateErr.message });
-    }
-
-    const cancellationFee = updatedOrder?.cancellation_fee ?? 0;
-
-    await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() })
-      .eq('order_display_id', order.order_display_id)
-      .eq('milestone', 'Order Placed');
-
-    await expireDeliveryOtps(order.order_display_id);
-
-    return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
+    return res.json({
+      message: 'Order cancelled successfully.',
+      cancellation_fee: workingOrder.cancellation_fee ?? 0,
+      order: workingOrder,
+    });
   } catch (err) {
     logger.error('Cancel order exception:', err.message);
     return res.status(500).json({ error: 'Internal Server Error' });

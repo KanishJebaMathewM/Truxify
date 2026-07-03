@@ -1270,6 +1270,8 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
       logger.warn('Failed to update timeline for change-drop:', timelineErr.message);
     }
 
+    await expireDeliveryOtps(order.id);
+
     return res.json({
       message: 'Drop location updated successfully.',
       pricing: {
@@ -1423,7 +1425,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           .eq('order_display_id', order.order_display_id)
           .eq('milestone', 'Order Placed');
 
-        await expireDeliveryOtps(order.order_display_id);
+        await expireDeliveryOtps(order.id);
 
         return res.json({
           message: 'Order cancelled and escrow refunded successfully.',
@@ -1479,7 +1481,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
       .eq('order_display_id', order.order_display_id)
       .eq('milestone', 'Order Placed');
 
-    await expireDeliveryOtps(order.order_display_id);
+    await expireDeliveryOtps(order.id);
 
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
   } catch (err) {

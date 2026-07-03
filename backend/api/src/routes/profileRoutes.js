@@ -314,7 +314,7 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
     });
   } catch (err) {
     logger.error(err);
-    res.status(500).json({ error: 'Internal Server Error' });
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
 });
 

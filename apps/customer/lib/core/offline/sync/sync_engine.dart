@@ -78,7 +78,7 @@ class SyncEngine {
   Future<bool> _uploadBatch(List<TripEvent> events) async {
     final body = jsonEncode({
       'events': events.map((event) => event.toJson()).toList(),
-      'idempotencyKey': events.map((event) => event.id).join(','),
+      'idempotencyKey': _idempotencyKeyFor(events),
     });
 
     try {
@@ -128,6 +128,11 @@ class SyncEngine {
 
   int _maxRetryCount(List<TripEvent> events) {
     return events.map((event) => event.retryCount).reduce((value, element) => value > element ? value : element);
+  }
+
+  String _idempotencyKeyFor(List<TripEvent> events) {
+    final ids = events.map((event) => event.id).toList()..sort();
+    return ids.join(',');
   }
 
   Duration _backoffDelay(int retryCount) {

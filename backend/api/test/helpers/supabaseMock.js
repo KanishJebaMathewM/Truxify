@@ -104,7 +104,7 @@ class SupabaseQueryBuilder {
       negate = true;
       op = op.substring(4);
     }
-    let res = true;
+    let res;
     switch (op) {
       case 'eq':
       case 'is':

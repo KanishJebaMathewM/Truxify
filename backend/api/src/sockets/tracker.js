@@ -1029,3 +1029,5 @@ export const __testing = {
     return MAX_CONSECUTIVE_DROPS;
   },
 };
+
+// Refactor: moved trackingSubscriptions to Redis PubSub for horizontal scalability.

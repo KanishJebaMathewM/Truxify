@@ -76,6 +76,18 @@ void main() {
     expect(order404, isNull);
   });
 
+  test('fetchDriverName encodes driver id path segment', () async {
+    when(() => apiClient.get('/api/profile/driver%2F123%3Fname%3DA/name'))
+        .thenAnswer((_) async => {'full_name': 'Driver A'});
+
+    final name = await orderService.fetchDriverName('driver/123?name=A');
+
+    expect(name, equals('Driver A'));
+    verify(
+      () => apiClient.get('/api/profile/driver%2F123%3Fname%3DA/name'),
+    ).called(1);
+  });
+
   group('estimatePriceRange', () {
     test('returns correct min and max when prices are integers', () async {
       when(() => apiClient.get(

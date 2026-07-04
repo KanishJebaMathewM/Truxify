@@ -261,7 +261,7 @@ class OrderService {
   Future<String?> fetchDriverName(String driverId) async {
     try {
       final body = await _apiClient.get(
-        '/api/profile/$driverId/name',
+        '/api/profile/${_encodePathSegment(driverId)}/name',
       ) as Map<String, dynamic>?;
       final fullName = body?['full_name']?.toString().trim();
       return (fullName != null && fullName.isNotEmpty) ? fullName : null;

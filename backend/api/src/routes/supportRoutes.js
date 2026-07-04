@@ -3,7 +3,7 @@ import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
-import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
@@ -477,7 +477,7 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, validateBody(cre
 // ============================================================================
 // 8. GET ALL COMMENTS/REPLIES FOR A TICKET (CUSTOMER OR DRIVER OWNER OR ADMIN)
 // ============================================================================
-router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
+router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { sort } = req.query;
   if (sort !== undefined && sort !== 'asc' && sort !== 'desc') {

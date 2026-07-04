@@ -329,6 +329,58 @@ describe('Trip Routes', () => {
         expect(upsertCall.payload[0].metadata).not.toHaveProperty('password');
         expect(upsertCall.payload[0].metadata.lat).toBe(19.076);
     });
+
+    it('POST /events/batch does not map coordinates from non-coordinate events', async () => {
+        const originalFrom = m.supabase.from.bind(m.supabase);
+        m.supabase.from = table => {
+            const builder = originalFrom(table);
+            if (table === 'trip_events') {
+                builder.upsert = vi.fn(async payload => {
+                    m.calls.push({
+                        table: 'trip_events',
+                        mode: 'upsert',
+                        payload,
+                    });
+                    m.store.trip_events.push(...payload);
+                    return { data: payload, error: null };
+                });
+            }
+            return builder;
+        };
+
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-non-coordinate',
+                events: [
+                    {
+                        id: 'event-note',
+                        trip_id: 'trip-1',
+                        type: 'status_note',
+                        occurred_at: new Date().toISOString(),
+                        payload: {
+                            lat: 'not-a-number',
+                            lng: 'still-not-a-number',
+                            note: 'Arrived at dock',
+                        },
+                    },
+                ],
+            });
+
+        m.supabase.from = originalFrom;
+
+        expect(res.status).toBe(202);
+        const upsertCall = m.calls.find(
+            c => c.table === 'trip_events' && c.mode === 'upsert' && c.payload[0].event_id === 'event-note'
+        );
+        expect(upsertCall).toBeTruthy();
+        expect(upsertCall.payload[0].latitude).toBeNull();
+        expect(upsertCall.payload[0].longitude).toBeNull();
+        expect(upsertCall.payload[0].metadata).not.toHaveProperty('lat');
+        expect(upsertCall.payload[0].metadata).not.toHaveProperty('lng');
+        expect(upsertCall.payload[0].metadata.note).toBe('Arrived at dock');
+    });
 });
 
 // ============================================================================

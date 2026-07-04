@@ -71,6 +71,10 @@ const validateBatchPayload = (schema) => (req, res, next) => {
   }
 };
 
+function hasCoordinatePayload(payload = {}) {
+  return payload.lat !== undefined || payload.lng !== undefined;
+}
+
 async function verifyTripIdsBelongToUser(tripIds, user) {
   const uniqueTripIds = [...new Set(tripIds.filter(Boolean))];
   if (uniqueTripIds.length === 0) return { ok: true };
@@ -169,10 +173,15 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     }
 
     const recordsToInsert = events.map(event => {
-      const lat = event.payload?.lat !== undefined ? Number(event.payload.lat) : null;
-      const lng = event.payload?.lng !== undefined ? Number(event.payload.lng) : null;
+      const shouldMapCoordinates = event.type === 'gpsUpdate' || event.type === 'location_update';
+      const lat = shouldMapCoordinates && event.payload?.lat !== undefined ? Number(event.payload.lat) : null;
+      const lng = shouldMapCoordinates && event.payload?.lng !== undefined ? Number(event.payload.lng) : null;
 
       const safeMetadata = { ...event.payload };
+      if (!shouldMapCoordinates && hasCoordinatePayload(safeMetadata)) {
+        delete safeMetadata.lat;
+        delete safeMetadata.lng;
+      }
       for (const field of SENSITIVE_FIELDS) {
         delete safeMetadata[field];
       }

@@ -757,7 +757,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
     }
   }
   try {
-    const { data: order } = await supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
+    const { data: order } = await supabase.from('orders').select('order_display_id, customer_id, version').eq('id', orderId).maybeSingle();
     if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
 
     const { data: bid } = await supabase.from('load_bids').select('*').eq('id', bidId).maybeSingle();
@@ -841,10 +841,14 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
       p_bid_id: bidId, p_order_id: orderId, p_load_id: bid.load_id, p_driver_id: bid.driver_id,
       p_truck_id: truckInfo?.id || null, p_driver_name: profile?.full_name || 'Assigned Driver',
       p_driver_rating: details?.rating || 0.00, p_truck_number: truckInfo?.number_plate || 'N/A',
-      p_bid_amount: bid.bid_amount, p_order_display_id: order.order_display_id
+      p_bid_amount: bid.bid_amount, p_order_display_id: order.order_display_id,
+      p_expected_version: order.version
     });
 
     if (rpcErr) {
+      if (rpcErr.message === 'OPTIMISTIC_LOCK_FAIL') {
+        return res.status(409).json({ error: 'Load already accepted by another driver' });
+      }
       return res.status(500).json({
         error: 'Failed to accept bid atomically.',
         details: rpcErr.message,
@@ -857,7 +861,8 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
       await supabase.from('orders').update({
         escrow_booking_id: bookingId,
         escrow_status: 'funding',
-      }).eq('id', orderId);
+        version: order.version + 2
+      }).eq('id', orderId).eq('version', order.version + 1);
     }
 
     res.json({

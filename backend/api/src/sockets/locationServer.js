@@ -264,9 +264,49 @@ async function verifyDriverToken(socket, next) {
       return next(new Error("bookingId required in handshake auth"));
     }
 
+    // Verify driver is assigned to the booking
+    const isAssigned = await verifyDriverBookingOwnership(profile.id, socket.data.bookingId);
+    if (!isAssigned) {
+      return next(new Error("Forbidden: You are not assigned to this booking"));
+    }
+
     next();
   } catch (error) {
     next(new Error(`Authentication failed: ${error.message}`));
+  }
+}
+
+/**
+ * Verifies that a driver is assigned to a specific booking/order.
+ */
+async function verifyDriverBookingOwnership(driverId, bookingId) {
+  try {
+    const { supabase } = await import("../config/db.js");
+
+    // Try bookings table first
+    const { data: bookingData, error: bookingError } = await supabase
+      .from("bookings")
+      .select("id")
+      .eq("id", bookingId)
+      .eq("driver_id", driverId)
+      .maybeSingle();
+
+    if (bookingData && !bookingError) return true;
+
+    // Fallback to orders table
+    const { data: orderData, error: orderError } = await supabase
+      .from("orders")
+      .select("id")
+      .eq("id", bookingId)
+      .eq("driver_id", driverId)
+      .maybeSingle();
+
+    if (orderData && !orderError) return true;
+
+    return false;
+  } catch (err) {
+    logger.error({ err }, '[WS] verifyDriverBookingOwnership error');
+    return false;
   }
 }
 

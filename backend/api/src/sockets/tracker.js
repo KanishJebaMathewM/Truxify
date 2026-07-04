@@ -444,7 +444,7 @@ export async function handleLocationPing(ws, data) {
 
   if (supabase && (orderUUID || orderDisplayId)) {
     try {
-      let query = supabase.from('orders').select('id, order_display_id');
+      let query = supabase.from('orders').select('id, order_display_id, driver_id');
       if (orderUUID && orderUUID.includes('-')) {
         query = query.eq('id', orderUUID);
       } else if (orderDisplayId) {
@@ -454,6 +454,17 @@ export async function handleLocationPing(ws, data) {
       }
       const { data: order } = await query.maybeSingle();
       if (order) {
+        // Enforce driver assignment check (Spoofing mitigation)
+        if (order.driver_id !== driver_id) {
+          logger.error({
+            event: 'UNAUTHORIZED_LOCATION_PING',
+            driverId: driver_id,
+            orderId: order.id,
+            assignedDriverId: order.driver_id,
+            timestamp: new Date().toISOString()
+          }, 'Driver tried to ping location for an order they are not assigned to');
+          return ws.send(JSON.stringify({ error: 'Forbidden: You are not assigned to this order.' }));
+        }
         orderUUID = order.id;
         orderDisplayId = order.order_display_id;
       }

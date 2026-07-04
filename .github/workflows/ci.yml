@@ -25,13 +25,13 @@ jobs:
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
           cache: npm
           cache-dependency-path: backend/api/package-lock.json
 
       - name: Install dependencies
         working-directory: backend/api
-        run: npm ci --workspaces=false
+        run: npm ci --prefer-offline=false --workspaces=false
 
       - name: Run unit tests
         working-directory: backend/api

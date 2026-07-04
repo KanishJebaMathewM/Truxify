@@ -102,7 +102,11 @@ export async function reconcilePendingEscrowRefunds() {
     }
 
     if (globalLockAcquired && redisClient) {
-      await redisClient.del(GLOBAL_LOCK_KEY).catch(() => {});
+      try {
+        await redisClient.del(GLOBAL_LOCK_KEY);
+      } catch (err) {
+        logger.warn('[escrow-reconciliation] Failed to release global lock:', err.message);
+      }
     }
   } finally {
     reconciliationRunning = false;

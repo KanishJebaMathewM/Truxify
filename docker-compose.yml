@@ -17,8 +17,10 @@ services:
       - ./backend/api:/app
       - /app/node_modules
     depends_on:
-      - mongo
-      - redis
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:5000/api/health/live || curl -sf http://localhost:5000/api/health/live"]
       interval: 30s
@@ -51,6 +53,12 @@ services:
     image: mongo:6-jammy
     ports:
       - "27017:27017"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - mongo_data:/data/db
 
@@ -58,6 +66,12 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
 volumes:
   mongo_data:

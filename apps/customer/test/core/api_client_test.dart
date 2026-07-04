@@ -239,6 +239,23 @@ void main() {
         ),
       );
     });
+
+    test('throws ApiException when a successful response is not valid JSON', () async {
+      when(() => httpClient.get(any(), headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response('not-json', 200));
+
+      final client = buildClient(
+          httpClient: httpClient, supabaseClient: supabaseClient);
+
+      await expectLater(
+        () => client.get('/api/orders'),
+        throwsA(
+          isA<ApiException>()
+              .having((e) => e.statusCode, 'statusCode', 200)
+              .having((e) => e.message, 'message', 'Invalid JSON response'),
+        ),
+      );
+    });
   });
 
   // ── Core enhancements ──────────────────────────────────────────────

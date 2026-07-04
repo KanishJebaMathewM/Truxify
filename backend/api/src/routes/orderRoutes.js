@@ -190,7 +190,7 @@ function generateOrderDisplayId() {
   const prefix = '#FF';
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
-  const random = Math.floor(100000 + Math.random() * 900000); // 6 random digits
+  const random = crypto.randomInt(100000, 999999).toString(); // 6 random digits using CSPRNG
   return `${prefix}${dateStr}${random}`;
 }
 

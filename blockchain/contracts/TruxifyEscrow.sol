@@ -14,6 +14,13 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  *  - ReentrancyGuard on all ETH-transferring functions
  *  - Checks-Effects-Interactions (CEI) pattern enforced
  *  - State updated BEFORE external .call{} to prevent re-entrancy
+ *  - Pull-based withdrawal pattern: funds credited to pendingWithdrawals
+ *    mapping; recipients call withdraw() themselves — eliminates push-to-
+ *    unknown-receiver risk and permanent fund-locking when receiver
+ *    cannot accept ETH (e.g. contract with no receive/fallback).
+ *  - Emergency recovery: owner can recover locked funds for a booking
+ *    that is stuck in Disputed state after a configurable grace period,
+ *    preventing permanent loss of user funds.
  */
 contract TruxifyEscrow is ReentrancyGuard, Ownable {
 
@@ -21,8 +28,8 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
 
     enum BookingStatus {
         Active,       // Payment locked, trip in progress
-        Delivered,    // GPS + OTP confirmed, payment released to driver
-        Cancelled,    // Cancelled before driver started — full refund
+        Delivered,    // GPS + OTP confirmed, payment credited to driver
+        Cancelled,    // Cancelled before driver started — full refund credited
         Disputed      // Under dispute resolution via n8n automation
     }
 
@@ -33,7 +40,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
         address payable driver;     // Truck driver assigned to the booking
         uint256 amount;             // Locked payment amount in wei (MATIC)
         BookingStatus status;       // Current booking lifecycle status
-        bool paid;                  // True after payment has been released
+        bool paid;                  // True after payment has been credited
         uint256 createdAt;          // Block timestamp at booking creation
     }
 
@@ -41,6 +48,15 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
 
     mapping(uint256 => Booking) public bookings;
     uint256 public bookingCount;
+
+    /// @dev Pull-based withdrawal balances. Replaces push-to-address pattern.
+    ///      Accumulated when releasePayment() or cancelBooking() is called.
+    ///      Recipients call withdraw() to pull their own funds out.
+    mapping(address => uint256) public pendingWithdrawals;
+
+    /// @notice Grace period in seconds after which the owner can trigger
+    ///         emergency recovery on a Disputed booking (default: 30 days).
+    uint256 public emergencyGracePeriod = 30 days;
 
     // ─── Events ──────────────────────────────────────────────────────────────
 
@@ -51,10 +67,16 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
         uint256 amount
     );
 
-    event PaymentReleased(
+    event PaymentCredited(
         uint256 indexed bookingId,
         address indexed driver,
         uint256 amount
+    );
+
+    event RefundCredited(
+        uint256 indexed bookingId,
+        address indexed customer,
+        uint256 refundAmount
     );
 
     event BookingCancelled(
@@ -67,6 +89,34 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
         uint256 indexed bookingId,
         address indexed raisedBy
     );
+
+    event Withdrawal(
+        address indexed recipient,
+        uint256 amount
+    );
+
+    event EmergencyRecovery(
+        uint256 indexed bookingId,
+        address indexed recipient,
+        uint256 amount
+    );
+
+    event EmergencyGracePeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
+
+    // ─── Errors ──────────────────────────────────────────────────────────────
+
+    error PaymentRequired();
+    error InvalidDriverAddress();
+    error BookingAlreadyExists();
+    error BookingNotActive();
+    error AlreadyPaid();
+    error NothingToRelease();
+    error NotAuthorised();
+    error CannotCancel();
+    error NothingToWithdraw();
+    error WithdrawalFailed();
+    error GracePeriodNotElapsed();
+    error BookingNotDisputed();
 
     // ─── Constructor ─────────────────────────────────────────────────────────
 
@@ -83,12 +133,9 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
         uint256 bookingId,
         address payable driver
     ) external payable {
-        require(msg.value > 0, "TruxifyEscrow: Payment required");
-        require(driver != address(0), "TruxifyEscrow: Invalid driver address");
-        require(
-            bookings[bookingId].customer == address(0),
-            "TruxifyEscrow: Booking already exists"
-        );
+        if (msg.value == 0) revert PaymentRequired();
+        if (driver == address(0)) revert InvalidDriverAddress();
+        if (bookings[bookingId].customer != address(0)) revert BookingAlreadyExists();
 
         bookings[bookingId] = Booking({
             customer:  payable(msg.sender),
@@ -105,50 +152,45 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
     }
 
     /**
-     * @dev Release payment to driver after GPS geofence + OTP confirmation.
-     *      Called by the Truxify backend (owner) after both conditions are met.
+     * @dev Credit payment to driver's pendingWithdrawals balance after GPS
+     *      geofence + OTP confirmation. Called by the Truxify backend (owner).
      *
-     * Security: nonReentrant + CEI pattern
-     *   State is updated (paid=true, amount=0, status=Delivered) BEFORE
-     *   the external .call{} so a re-entrant driver contract cannot
-     *   call releasePayment again before state is committed.
+     * Security: nonReentrant + CEI pattern + pull-based withdrawal.
+     *   State is zeroed BEFORE crediting pendingWithdrawals. Driver must
+     *   call withdraw() to receive ETH — eliminates risk of re-entrancy via
+     *   a malicious receiver fallback and permanent locking when driver
+     *   contract has no receive function.
      *
      * @param bookingId The booking whose payment to release
      */
     function releasePayment(uint256 bookingId)
         external
         onlyOwner
-        nonReentrant              // ← OpenZeppelin mutex
+        nonReentrant
     {
         Booking storage booking = bookings[bookingId];
 
-        require(
-            booking.status == BookingStatus.Active,
-            "TruxifyEscrow: Booking not active"
-        );
-        require(!booking.paid, "TruxifyEscrow: Already paid");
-        require(booking.amount > 0, "TruxifyEscrow: Nothing to release");
+        if (booking.status != BookingStatus.Active) revert BookingNotActive();
+        if (booking.paid) revert AlreadyPaid();
+        if (booking.amount == 0) revert NothingToRelease();
 
-        // ── CHECKS done above ─────────────────────────────────────────────
-
-        // ── EFFECTS: Update state BEFORE external call (CEI pattern) ──────
+        // ── EFFECTS ───────────────────────────────────────────────────────
         uint256 paymentAmount   = booking.amount;
         address payable driver  = booking.driver;
 
-        booking.paid    = true;                      // ← committed first
-        booking.amount  = 0;                         // ← zero out
-        booking.status  = BookingStatus.Delivered;   // ← status updated
+        booking.paid    = true;
+        booking.amount  = 0;
+        booking.status  = BookingStatus.Delivered;
 
-        // ── INTERACTIONS: External call AFTER state is committed ──────────
-        (bool success, ) = driver.call{value: paymentAmount}("");
-        require(success, "TruxifyEscrow: Transfer failed");
+        // Credit to pull-based mapping — no external call here
+        pendingWithdrawals[driver] += paymentAmount;
 
-        emit PaymentReleased(bookingId, driver, paymentAmount);
+        emit PaymentCredited(bookingId, driver, paymentAmount);
     }
 
     /**
-     * @dev Refund customer when booking is cancelled before driver starts.
-     *      Also secured with nonReentrant + CEI.
+     * @dev Credit refund to customer's pendingWithdrawals balance when
+     *      booking is cancelled before driver starts.
      *
      * @param bookingId The booking to cancel and refund
      */
@@ -158,29 +200,49 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
     {
         Booking storage booking = bookings[bookingId];
 
-        require(
-            booking.customer == msg.sender || owner() == msg.sender,
-            "TruxifyEscrow: Not authorised"
-        );
-        require(
-            booking.status == BookingStatus.Active,
-            "TruxifyEscrow: Cannot cancel - booking not active"
-        );
-        require(!booking.paid, "TruxifyEscrow: Already paid");
+        if (
+            booking.customer != msg.sender && owner() != msg.sender
+        ) revert NotAuthorised();
+        if (booking.status != BookingStatus.Active) revert CannotCancel();
+        if (booking.paid) revert AlreadyPaid();
 
         // ── EFFECTS ───────────────────────────────────────────────────────
-        uint256 refundAmount    = booking.amount;
+        uint256 refundAmount     = booking.amount;
         address payable customer = booking.customer;
 
         booking.amount  = 0;
         booking.paid    = true;
         booking.status  = BookingStatus.Cancelled;
 
-        // ── INTERACTIONS ──────────────────────────────────────────────────
-        (bool success, ) = customer.call{value: refundAmount}("");
-        require(success, "TruxifyEscrow: Refund failed");
+        // Credit to pull-based mapping — no external call here
+        pendingWithdrawals[customer] += refundAmount;
 
+        emit RefundCredited(bookingId, customer, refundAmount);
         emit BookingCancelled(bookingId, customer, refundAmount);
+    }
+
+    /**
+     * @dev Pull-based withdrawal. Recipients call this to receive their
+     *      credited ETH (from releasePayment or cancelBooking).
+     *
+     * Security: nonReentrant + CEI — balance zeroed before .call{}.
+     */
+    function withdraw() external nonReentrant {
+        uint256 amount = pendingWithdrawals[msg.sender];
+        if (amount == 0) revert NothingToWithdraw();
+
+        // ── EFFECTS ───────────────────────────────────────────────────────
+        pendingWithdrawals[msg.sender] = 0;
+
+        // ── INTERACTIONS ──────────────────────────────────────────────────
+        (bool success, ) = payable(msg.sender).call{value: amount}("");
+        if (!success) {
+            // Restore balance on failure so funds are not lost
+            pendingWithdrawals[msg.sender] = amount;
+            revert WithdrawalFailed();
+        }
+
+        emit Withdrawal(msg.sender, amount);
     }
 
     /**
@@ -192,18 +254,56 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
     function raiseDispute(uint256 bookingId) external {
         Booking storage booking = bookings[bookingId];
 
-        require(
-            msg.sender == booking.customer || msg.sender == booking.driver,
-            "TruxifyEscrow: Not a party to this booking"
-        );
-        require(
-            booking.status == BookingStatus.Active,
-            "TruxifyEscrow: Cannot dispute - booking not active"
-        );
+        if (
+            msg.sender != booking.customer && msg.sender != booking.driver
+        ) revert NotAuthorised();
+        if (booking.status != BookingStatus.Active) revert BookingNotActive();
 
         booking.status = BookingStatus.Disputed;
 
         emit BookingDisputed(bookingId, msg.sender);
+    }
+
+    /**
+     * @dev Emergency recovery: owner can reclaim funds from a Disputed
+     *      booking that has exceeded emergencyGracePeriod. Funds are
+     *      returned to the customer to prevent permanent locking.
+     *
+     * @param bookingId The stuck disputed booking
+     */
+    function emergencyRecover(uint256 bookingId)
+        external
+        onlyOwner
+        nonReentrant
+    {
+        Booking storage booking = bookings[bookingId];
+
+        if (booking.status != BookingStatus.Disputed) revert BookingNotDisputed();
+        if (
+            block.timestamp < booking.createdAt + emergencyGracePeriod
+        ) revert GracePeriodNotElapsed();
+        if (booking.amount == 0) revert NothingToRelease();
+
+        // ── EFFECTS ───────────────────────────────────────────────────────
+        uint256 recoveryAmount   = booking.amount;
+        address payable customer = booking.customer;
+
+        booking.amount  = 0;
+        booking.paid    = true;
+
+        // Credit to customer via pull pattern
+        pendingWithdrawals[customer] += recoveryAmount;
+
+        emit EmergencyRecovery(bookingId, customer, recoveryAmount);
+    }
+
+    /**
+     * @dev Update the emergency grace period (owner only).
+     * @param newPeriod New grace period in seconds
+     */
+    function setEmergencyGracePeriod(uint256 newPeriod) external onlyOwner {
+        emit EmergencyGracePeriodUpdated(emergencyGracePeriod, newPeriod);
+        emergencyGracePeriod = newPeriod;
     }
 
     /**

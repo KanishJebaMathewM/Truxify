@@ -65,13 +65,6 @@ export async function predictDemand(features = {}) {
         signal: AbortSignal.timeout(5000),
     });
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(5000),
-  });
-
   return handleResponse(response);
 }
 

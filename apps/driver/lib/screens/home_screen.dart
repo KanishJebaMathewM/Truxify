@@ -160,8 +160,8 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         });
       });
-    } catch (_) {
-      // Supabase not available (e.g. in tests)
+    } catch (e) {
+      debugPrint('_subscribeToNewLoads error: $e');
     }
   }
 

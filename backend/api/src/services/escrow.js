@@ -93,13 +93,20 @@ export async function buildDepositTx(orderDisplayId, customerWalletAddress, driv
     return { txData: null, bookingId };
   }
 
-  const txData = await escrowContract.createBooking.populateTransaction(
-    bookingId,
-    driverWalletAddress,
-    {
-      value: amountWei,
-    }
-  );
+  let txData;
+  try {
+    txData = await escrowContract.deposit.populateTransaction(
+      bookingId,
+      customerWalletAddress,
+      driverWalletAddress,
+      {
+        value: amountWei,
+      }
+    );
+  } catch (err) {
+    logger.error(`[escrow] Failed to build deposit tx for booking ${orderDisplayId}: ${err.message}`);
+    return { txData: null, bookingId, error: err.message };
+  }
   logger.info(`[escrow] Deposit tx built for booking ${orderDisplayId}`);
   return { txData, bookingId };
 }

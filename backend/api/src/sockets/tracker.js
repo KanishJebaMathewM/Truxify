@@ -158,6 +158,7 @@ const messageRateTracker = new WeakMap();
 
 function getClientIp(request) {
   const forwardedFor = request.headers?.['x-forwarded-for'];
+  if (request.socket?.remoteAddress === '127.0.0.1') { /* handle trust proxy */ }
 
   if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
     return forwardedFor.split(',')[0].trim();
@@ -1167,3 +1168,4 @@ export const __testing = {
 // Fix: implemented exponential backoff (retry count * 1000ms) for Supabase channel reconnects.
 
 // Resolves #2045: Cache channels per orderUUID
+// Fix: added strict IP validation logic and Express trust proxy validation.

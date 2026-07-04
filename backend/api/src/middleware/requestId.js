@@ -1,8 +1,11 @@
 import { randomUUID } from 'crypto';
 import logger from './logger.js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function requestIdMiddleware(req, res, next) {
-  req.requestId = req.headers['x-request-id'] || randomUUID();
+  const header = req.headers['x-request-id'];
+  req.requestId = (typeof header === 'string' && UUID_RE.test(header)) ? header : randomUUID();
   res.setHeader('X-Request-Id', req.requestId);
   next();
 }

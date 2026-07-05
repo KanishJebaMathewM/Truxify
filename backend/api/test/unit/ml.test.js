@@ -29,7 +29,7 @@ describe('ml service — predictDemand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.ML_ENGINE_URL;
-    delete process.env.ML_API_KEY;
+    process.env.ML_API_KEY = 'test-key';
     if (mlBreaker) {
       mlBreaker.disable();
     }
@@ -133,7 +133,7 @@ describe('ml service — predictPrice', () => {
     vi.clearAllMocks();
     delete process.env.ML_SERVICE_URL;
     delete process.env.ML_ENGINE_URL;
-    delete process.env.ML_API_KEY;
+    process.env.ML_API_KEY = 'test-key';
     if (mlBreaker) {
       mlBreaker.disable();
     }

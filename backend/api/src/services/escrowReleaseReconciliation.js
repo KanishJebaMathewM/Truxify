@@ -2,7 +2,6 @@ import { supabase, redisClient } from '../config/db.js';
 import { escrowRelease } from './escrow.js';
 import logger from '../middleware/logger.js';
 import os from 'os';
-import logger from '../middleware/logger.js';
 const DEFAULT_INTERVAL_MS = 60_000;
 const LOCK_KEY = 'escrow:release:reconciliation:lock';
 const LOCK_TTL_SECONDS = 120;
@@ -67,7 +66,7 @@ export async function reconcilePendingEscrowReleases() {
             p_instance_id: instanceId,
           });
 
-        if ((!claimed || claimed.length === 0) && !claimError) {
+        if ((!claimed || (Array.isArray(claimed) && claimed.length === 0)) && !claimError) {
           logger.info(`[escrow-release-reconciliation] Order ${order.order_display_id} already claimed by another instance, skipping.`);
           continue;
         }
@@ -105,7 +104,8 @@ export async function reconcilePendingEscrowReleases() {
             updated_at: releasedAt,
           })
           .eq('id', order.id)
-          .eq('escrow_status', 'release_failed');
+          .eq('escrow_status', 'release_failed')
+          .is('reconciled_by', null);
 
         if (updateError) {
           logger.error(
@@ -153,7 +153,11 @@ export async function reconcilePendingEscrowReleases() {
       clearInterval(leaseExtender);
     }
     if (lockAcquired && redisClient) {
-      await redisClient.del(LOCK_KEY).catch(() => {});
+      try {
+        await redisClient.del(LOCK_KEY);
+      } catch (err) {
+        logger.warn('[escrow-release-reconciliation] Failed to release Redis lock:', err.message);
+      }
     }
     if (!lockAcquired) {
       reconciliationRunning = false;

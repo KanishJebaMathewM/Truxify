@@ -5,7 +5,8 @@ import logger from './logger.js';
 
 /**
  * Authentication middleware to verify requests using Firebase ID Tokens.
- * Supports BYPASS_AUTH=true environment variable for easy local testing.
+ * Supports BYPASS_AUTH=true and DEV_ACCESS_TOKEN environment variables
+ * for easy local testing.
  *
  * In production, development auth headers (x-user-id, x-user-role, x-user-name)
  * are unconditionally stripped to prevent any possibility of bypass.
@@ -15,7 +16,7 @@ export async function authenticate(req, res, next) {
   // Strip dev-only authentication headers before any logic runs.
   // This ensures they cannot be used even if BYPASS_AUTH is accidentally
   // enabled or a proxy misconfiguration exposes them.
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV === 'production' || !process.env.BYPASS_AUTH) {
     delete req.headers['x-user-id'];
     delete req.headers['x-user-role'];
     delete req.headers['x-user-name'];
@@ -23,32 +24,37 @@ export async function authenticate(req, res, next) {
 
   const bypassAuth = process.env.BYPASS_AUTH === 'true';
 
-  // Support local development bypass mode
+  // Support local development bypass mode using DEV_ACCESS_TOKEN
   if (bypassAuth) {
     if (process.env.NODE_ENV === 'production') {
       return res.status(503).json({
         error: 'BYPASS_AUTH is enabled in production. This is a misconfiguration and must be disabled before serving traffic.'
       });
     }
-    const testUserId = req.headers['x-user-id']; // e.g. a Supabase profile UUID
-    const testUserRole = req.headers['x-user-role'] || 'customer'; // customer or driver
-    const testFullName = req.headers['x-user-name'] || 'Test User';
 
-    if (testUserId) {
-      req.user = {
-        id: testUserId,
-        uid: 'test_firebase_uid_123',
-        role: testUserRole,
-        fullName: testFullName,
-        phone: '+919999999999'
-      };
-      return next();
-    } else {
-      return res.status(401).json({
-        error: 'Authentication bypassed but x-user-id header is missing.',
-        hint: 'Provide a valid profile UUID in the x-user-id header when BYPASS_AUTH is enabled.'
-      });
+    const devToken = req.headers['x-dev-access-token'];
+    if (devToken && process.env.DEV_ACCESS_TOKEN && devToken === process.env.DEV_ACCESS_TOKEN) {
+      const testUserId = req.headers['x-user-id'];
+      const testUserRole = req.headers['x-user-role'] || 'customer';
+      const testFullName = req.headers['x-user-name'] || 'Test User';
+
+      if (testUserId) {
+        req.user = {
+          id: testUserId,
+          uid: 'test_firebase_uid_123',
+          role: testUserRole,
+          fullName: testFullName,
+          phone: '+919999999999'
+        };
+        logger.warn({ event: 'BYPASS_AUTH_USED', userId: testUserId, role: testUserRole, ip: req.ip }, 'Authentication bypassed via DEV_ACCESS_TOKEN');
+        return next();
+      }
     }
+
+    return res.status(401).json({
+      error: 'Authentication bypass failed.',
+      hint: 'Provide a valid x-dev-access-token header matching DEV_ACCESS_TOKEN, along with x-user-id.'
+    });
   }
 
   // Token Authentication Flow
@@ -130,7 +136,7 @@ export async function authenticate(req, res, next) {
       const cachedProfile = await getCachedProfile(firebaseUid);
       if (cachedProfile) {
         if (!isValidCachedProfile(firebaseUid, cachedProfile)) {
-          try { await invalidateCachedProfile(firebaseUid); } catch (_) { logger.error('Cache invalidation failed', _); }
+          try { await invalidateCachedProfile(firebaseUid); } catch (err) { logger.error({ err }, 'Cache invalidation failed'); }
         } else {
           if (cachedProfile.isActive === false) {
             return res.status(403).json({
@@ -185,7 +191,7 @@ export async function authenticate(req, res, next) {
       }
 
       if (firebaseUid) {
-        try { await setCachedProfile(firebaseUid, { isActive: false }, TOMBSTONE_TTL_SECONDS); } catch (_) { logger.error('Cache set failed', _); }
+        try { await setCachedProfile(firebaseUid, { isActive: false }, TOMBSTONE_TTL_SECONDS); } catch (err) { logger.error({ err }, 'Cache set failed'); }
       }
       if (supabaseUserId) {
         void setCachedSupabaseProfile(supabaseUserId, { isActive: false }, TOMBSTONE_TTL_SECONDS);
@@ -215,7 +221,7 @@ export async function authenticate(req, res, next) {
 
     // Populate cache on successful DB fetch
     if (userProfile.firebase_uid) {
-      try { await setCachedProfile(userProfile.firebase_uid, req.user); } catch (_) { logger.error('Cache set failed', _); }
+      try { await setCachedProfile(userProfile.firebase_uid, req.user); } catch (err) { logger.error({ err }, 'Cache set failed'); }
     }
     if (supabaseUserId) {
       // Clamp the cache lifetime to the token's remaining validity so a cached

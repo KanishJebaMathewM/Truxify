@@ -83,8 +83,8 @@ def _deadline_urgency(load: dict, distance_km: float) -> float:
     return ratio * 100.0  # scale for cost matrix
 
 
-def _destination_affinity(driver: dict, load: dict) -> float:
-    """Reward drivers whose preferred destination is close to load dest."""
+def _destination_penalty(driver: dict, load: dict) -> float:
+    """Penalize drivers whose preferred destination is far from load dest."""
     pref_lat = driver.get("preferred_dest_lat")
     pref_lng = driver.get("preferred_dest_lng")
     if pref_lat is None or pref_lng is None:
@@ -159,7 +159,7 @@ def match_bilateral(
                 + _weight_penalty(driver, load)
                 + _dimension_penalty(driver, load)
                 + _deadline_urgency(load, dist_km)
-                + _destination_affinity(driver, load)
+                + _destination_penalty(driver, load)
                 + _rating_bonus(driver)
             )
             cost[i, j] = c

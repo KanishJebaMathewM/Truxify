@@ -241,7 +241,7 @@ Note: Truxify is in active development (Phase 2). The core platform features are
 ### Run the Customer App
 ```bash
 git clone https://github.com/KanishJebaMathewM/Truxify.git
-cd Truxify
+cd Truxify/customer_app  # (or driver_app)
 flutter pub get
 flutter run
 ```

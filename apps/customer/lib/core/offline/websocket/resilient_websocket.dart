@@ -55,12 +55,13 @@ class ResilientWebSocket {
   }
 
   void send(dynamic message) {
-    if (_channel == null) {
+    final channel = _channel;
+    if (channel == null) {
       return;
     }
 
     final payload = message is String ? message : jsonEncode(message);
-    _channel!.sink.add(payload);
+    channel.sink.add(payload);
   }
 
   void _scheduleReconnect() {
@@ -74,6 +75,10 @@ class ResilientWebSocket {
     _attempt += 1;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(capped, () async {
+      await _cleanupChannel();
+      if (_closed) {
+        return;
+      }
       await _connectOnce();
     });
   }
@@ -81,8 +86,9 @@ class ResilientWebSocket {
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (_channel != null) {
-        _channel!.sink.add('ping');
+      final channel = _channel;
+      if (channel != null) {
+        channel.sink.add('ping');
       }
     });
   }
@@ -91,9 +97,14 @@ class ResilientWebSocket {
     _closed = true;
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
+    await _cleanupChannel();
+    await _controller.close();
+  }
+
+  Future<void> _cleanupChannel() async {
     await _subscription?.cancel();
     await _channel?.sink.close();
+    _subscription = null;
     _channel = null;
-    await _controller.close();
   }
 }

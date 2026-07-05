@@ -9,6 +9,12 @@ import '../conflict/conflict_resolver.dart';
 import '../db/offline_event_db.dart';
 import '../models/trip_event.dart';
 
+enum SyncUploadOutcome {
+  success,
+  retryableFailure,
+  permanentFailure,
+}
+
 class SyncEngine {
   SyncEngine({
     required this.db,
@@ -55,12 +61,19 @@ class SyncEngine {
 
     await _markAsSyncing(resolved);
 
-    final uploaded = await _uploadBatch(resolved);
-    if (uploaded) {
+    final uploadOutcome = await _uploadBatch(resolved);
+    if (uploadOutcome == SyncUploadOutcome.success) {
       for (final event in resolved) {
         await db.markSynced(event.id);
       }
       return resolved.length;
+    }
+
+    if (uploadOutcome == SyncUploadOutcome.permanentFailure) {
+      for (final event in resolved) {
+        await db.markRejected(event.id, reason: 'Server rejected this offline event batch as non-retryable.');
+      }
+      return 0;
     }
 
     for (final event in resolved) {
@@ -75,10 +88,10 @@ class SyncEngine {
     }
   }
 
-  Future<bool> _uploadBatch(List<TripEvent> events) async {
+  Future<SyncUploadOutcome> _uploadBatch(List<TripEvent> events) async {
     final body = jsonEncode({
       'events': events.map((event) => event.toJson()).toList(),
-      'idempotencyKey': events.map((event) => event.id).join(','),
+      'idempotencyKey': _idempotencyKeyFor(events),
     });
 
     try {
@@ -89,7 +102,7 @@ class SyncEngine {
 
       if (token == null) {
         developer.log('[SyncEngine] ⚠️ Cannot sync batch: User session token is null/expired.');
-        return false;
+        return SyncUploadOutcome.retryableFailure;
       }
 
       final response = await http.post(
@@ -102,32 +115,37 @@ class SyncEngine {
       ).timeout(AppConfig.syncTimeout);
 
       if (response.statusCode == 200 || response.statusCode == 202) {
-        return true;
+        return SyncUploadOutcome.success;
       }
 
       if (response.statusCode == 401) {
         developer.log('[SyncEngine] 🚨 Auth rejected by server (401 Unauthorized).');
-        return false;
+        return SyncUploadOutcome.retryableFailure;
       }
 
       if (response.statusCode == 409 || response.statusCode == 422 || response.statusCode == 400) {
-        return false;
+        return SyncUploadOutcome.permanentFailure;
       }
 
       if (response.statusCode == 429 || response.statusCode >= 500) {
         await Future<void>.delayed(_backoffDelay(_maxRetryCount(events)));
-        return false;
+        return SyncUploadOutcome.retryableFailure;
       }
 
-      return false;
+      return SyncUploadOutcome.retryableFailure;
     } catch (_) {
       await Future<void>.delayed(_backoffDelay(_maxRetryCount(events)));
-      return false;
+      return SyncUploadOutcome.retryableFailure;
     }
   }
 
   int _maxRetryCount(List<TripEvent> events) {
     return events.map((event) => event.retryCount).reduce((value, element) => value > element ? value : element);
+  }
+
+  String _idempotencyKeyFor(List<TripEvent> events) {
+    final ids = events.map((event) => event.id).toList()..sort();
+    return ids.join(',');
   }
 
   Duration _backoffDelay(int retryCount) {

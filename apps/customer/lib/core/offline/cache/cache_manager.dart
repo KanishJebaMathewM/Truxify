@@ -8,6 +8,16 @@ class CacheManager {
 
   Database? _database;
 
+  String? _stableId(Map<String, dynamic> item, List<String> keys) {
+    for (final key in keys) {
+      final value = item[key]?.toString().trim();
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+    return null;
+  }
+
   Future<Database> open() async {
     if (_database != null) {
       return _database!;
@@ -79,10 +89,15 @@ class CacheManager {
     final updatedAt = DateTime.now().toUtc().toIso8601String();
 
     for (final item in orders) {
+      final id = _stableId(item, const ['id', 'orderId', 'order_id']);
+      if (id == null) {
+        continue;
+      }
+
       batch.insert(
         'orders',
         {
-          'id': item['id'] ?? item['orderId'] ?? item['order_id'],
+          'id': id,
           'type': item['type'] ?? 'order',
           'payload': jsonEncode(item),
           'updated_at': updatedAt,
@@ -160,10 +175,15 @@ class CacheManager {
     final updatedAt = DateTime.now().toUtc().toIso8601String();
 
     for (final item in documents) {
+      final id = _stableId(item, const ['id', 'documentId']);
+      if (id == null) {
+        continue;
+      }
+
       batch.insert(
         'documents',
         {
-          'id': item['id'] ?? item['documentId'],
+          'id': id,
           'title': item['title'] ?? 'Document',
           'payload': jsonEncode(item),
           'updated_at': updatedAt,

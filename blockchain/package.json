@@ -7,7 +7,7 @@
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ethers": "^4.0.13",
-    "@nomicfoundation/hardhat-ignition": "^3.1.7",
+    "@nomicfoundation/hardhat-ignition": "^3.1.8",
     "@nomicfoundation/hardhat-ignition-viem": "^3.1.6",
     "@nomicfoundation/hardhat-keystore": "^3.0.12",
     "@nomicfoundation/hardhat-network-helpers": "^3.0.10",
@@ -35,5 +35,14 @@
   "type": "module",
   "dependencies": {
     "@openzeppelin/contracts": "^5.6.1"
+  },
+  "overrides": {
+    "@nomicfoundation/ignition-core": {
+      "lodash-es": "4.18.1"
+    },
+    "lodash-es": "4.18.1",
+    "undici": "^7.4.0",
+    "uuid": "^11.1.1",
+    "elliptic": "^6.6.1"
   }
 }

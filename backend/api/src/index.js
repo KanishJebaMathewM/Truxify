@@ -7,12 +7,13 @@ import path from 'path';
 import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimiter.js';
 import tripRoutes from './routes/tripRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
+import documentRoutes from './routes/documentRoutes.js';
 
 
 
 import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js';
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js';
-import { attachLocationServer } from './sockets/locationServer.js';
+import { initLocationServer, closeLocationServer } from './sockets/locationServer.js';
 import { startEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js';
 
 // Load REST routes
@@ -49,8 +50,8 @@ try {
 // ============================================================================
 // STARTUP VALIDATION — crash fast, not at request time
 // ============================================================================
-if (process.env.NODE_ENV === 'production' && process.env.BYPASS_AUTH === 'true') {
-  logger.fatal('BYPASS_AUTH is enabled in production. This is a severe security misconfiguration. Set BYPASS_AUTH=false (or unset it) and restart the server.');
+if (process.env.BYPASS_AUTH === 'true' && process.env.NODE_ENV !== 'development') {
+  logger.fatal('BYPASS_AUTH is enabled outside development. This is a severe security misconfiguration. Set BYPASS_AUTH=false (or unset it), and set NODE_ENV=development if you need local testing.');
   process.exit(1);
 }
 if (process.env.NODE_ENV === 'production' && !process.env.ML_API_KEY) {
@@ -146,6 +147,7 @@ app.use('/api/loads', loadRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/profile', profileRoutes);
 app.use('/api/devices', deviceRoutes);
+app.use('/api/driver/documents', documentRoutes);
 app.use('/api/trucks', truckRoutes);
 app.use('/api/auth', authLimiter, authRoutes);
 
@@ -154,7 +156,9 @@ setupSwagger(app);
 
 // Root route
 app.get('/', (req, res) => {
-  res.send('<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://localhost:5000/ws/tracking</code></p>');
+  const wsHost = req.hostname || 'localhost';
+  const wsPort = process.env.PORT || 5000;
+  res.send(`<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://${wsHost}:${wsPort}/ws/tracking</code></p>`);
 });
 
 // Handling 404 Route Not Found
@@ -177,6 +181,7 @@ app.use((err, req, res, next) => {
 // ============================================================================
 await waitForMongoDb();
 initWebSocketServer(server);
+initLocationServer(server);
 
 // ============================================================================
 // START SERVER
@@ -214,6 +219,7 @@ async function shutdown(signal) {
 
     // 2. Flush buffered telemetry and close WebSocket resources
     await closeWebSocketServer();
+    await closeLocationServer();
     logger.info('[shutdown] WebSocket resources closed.');
 
     // 3. Close database/cache connections
@@ -237,6 +243,7 @@ process.on('uncaughtException', async (err) => {
 process.on('unhandledRejection', async (reason) => {
   logger.error({ reason }, 'Unhandled promise rejection');
   await flushSentry(2000);
+  process.exit(1);
 });
 
 process.on('SIGTERM', () => shutdown('SIGTERM')); // Docker / Kubernetes stop

@@ -71,7 +71,8 @@ describe('ProfileModel.fromProfile', () => {
     const result = ProfileModel.fromProfile(profile);
 
     expect(result.id).toBe('profile-456');
-    expect(result.fullName).toBeNull();
+    // fullName defaults to an empty string (display-safe) rather than null
+    expect(result.fullName).toBe('');
     expect(result.walletAddress).toBeNull();
     expect(result.polygonWalletAddress).toBeNull();
   });

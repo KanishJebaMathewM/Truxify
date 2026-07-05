@@ -126,6 +126,17 @@ describe('Truck Routes', () => {
       expect(res.status).toBe(409);
       expect(res.body.error).toContain('already registered');
     });
+
+    it('normalises number plate to uppercase and trims whitespaces', async () => {
+      const res = await request(buildApp())
+        .post('/api/trucks')
+        .set(DRIVER_HEADERS)
+        .send({ name: 'Big Blue', number_plate: '  mh12ab1234  ', max_capacity_tons: 10 });
+
+      expect(res.status).toBe(201);
+      const insertCall = m.calls.find(c => c.table === 'trucks' && c.mode === 'insert');
+      expect(insertCall.payload.number_plate).toBe('MH12AB1234');
+    });
   });
 
   describe('GET /api/trucks', () => {

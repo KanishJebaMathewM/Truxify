@@ -9,7 +9,7 @@
  * Run with:  npm test -- test/unit/escrow.test.js
  */
 import { describe, it, expect, vi } from 'vitest';
-import { getEscrowBookingId, buildDepositTx, escrowRelease, escrowRefund, confirmEscrowRefund, ESCROW_MATIC_PER_PAISA } from '../../src/services/escrow.js';
+import { getEscrowBookingId, buildDepositTx, escrowRelease, submitEscrowRefund, confirmEscrowRefund, ESCROW_MATIC_PER_PAISA } from '../../src/services/escrow.js';
 
 describe('escrow service — getEscrowBookingId', () => {
   it('returns a hex string prefixed with 0x', () => {
@@ -169,16 +169,16 @@ describe('escrow service \u2014 escrowRelease (contract unconfigured)', () => {
   });
 });
 
-describe('escrow service \u2014 escrowRefund (contract unconfigured)', () => {
+describe('escrow service \u2014 submitEscrowRefund (contract unconfigured)', () => {
   it('returns txHash: null and a valid bookingId when contract is not initialised', async () => {
-    const result = await escrowRefund('#FF20260529');
+    const result = await submitEscrowRefund('#FF20260529');
     expect(result.txHash).toBeNull();
     expect(typeof result.bookingId).toBe('string');
     expect(result.bookingId.startsWith('0x')).toBe(true);
   });
 
   it('returns the same bookingId as getEscrowBookingId', async () => {
-    const result = await escrowRefund('#FF20260530');
+    const result = await submitEscrowRefund('#FF20260530');
     const expected = getEscrowBookingId('#FF20260530');
     expect(result.bookingId).toBe(expected);
   });

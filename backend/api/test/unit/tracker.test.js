@@ -1543,6 +1543,13 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     expect(t.getTelemetryWriteBuffer().length).toBe(0);
   });
 
+  afterEach(async () => {
+    const { __testing: t } = await import('../../src/sockets/tracker.js');
+    t.clearTelemetryWriteBuffer();
+    t.clearTelemetryFlushBuffer();
+    vi.restoreAllMocks();
+  });
+
   it('re-queues buffer on transient MongoDB error', async () => {
     const insertMany = vi.fn().mockImplementation(async () => {
       // Simulate a concurrent new ping arriving while DB write is active
@@ -1564,8 +1571,8 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
 
     await t.flushTelemetryBuffer();
 
-    // Failed records (old-driver) must be prepended and new records (new-driver) appended
-    const buffer = t.getTelemetryWriteBuffer();
+    // Failed records (old-driver) must be prepended and new records (new-driver) appended to flush buffer
+    const buffer = [...t.getTelemetryFlushBuffer(), ...t.getTelemetryWriteBuffer()];
     expect(buffer).toHaveLength(2);
     expect(buffer[0].driver_id).toBe('old-driver');
     expect(buffer[1].driver_id).toBe('new-driver');
@@ -1596,7 +1603,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
 
     await t.flushTelemetryBuffer();
 
-    const buffer = t.getTelemetryWriteBuffer();
+    const buffer = [...t.getTelemetryFlushBuffer(), ...t.getTelemetryWriteBuffer()];
     // 5000 is MAX_BUFFER_SIZE. 4995 new records + 5 kept old records = 5000 records.
     expect(buffer).toHaveLength(5000);
     // The first 5 old records (indices 0 to 4) should be dropped, keeping only indices 5 to 9.

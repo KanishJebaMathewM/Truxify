@@ -406,7 +406,7 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
 # Price Prediction
 # ---------------------------------------------------------------------------
 
-@app.post("/predict", response_model=PricePredictOutput)
+@app.post("/predict/price", response_model=PricePredictOutput)
 async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_api_key)):
     try:
         result = predict_price(

@@ -1,5 +1,6 @@
 import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import crypto from 'crypto';
 
 const OTP_TTL_SECONDS = 300;
 const OTP_LENGTH = 4;
@@ -9,7 +10,9 @@ export async function generateAndStoreOtp(phone) {
     logger.warn('[otp] Redis not available, cannot generate OTP.');
     return null;
   }
-  const otp = String(Math.floor(1000 + Math.random() * 9000)).slice(0, OTP_LENGTH);
+  const min = Math.pow(10, OTP_LENGTH - 1);
+  const max = Math.pow(10, OTP_LENGTH) - 1;
+  const otp = String(Math.floor(min + Math.random() * (max - min + 1)));
   await redisClient.set(`otp:${phone}`, otp, 'EX', OTP_TTL_SECONDS);
   logger.info(`[otp] OTP generated for ${phone}`);
   return otp;

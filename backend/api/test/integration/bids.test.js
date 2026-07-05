@@ -17,6 +17,8 @@ vi.mock('../../src/services/escrow.js', () => ({
   recordDepositTx: vi.fn(),
   escrowRelease: vi.fn(),
   escrowRefund: vi.fn(),
+  // Mirrors the real implementation's escrow:<id> booking id derivation
+  bookingIdFromUuid: vi.fn((orderId) => `escrow:${orderId}`),
   ESCROW_MATIC_PER_PAISA: 0.01,
 }));
 
@@ -384,7 +386,7 @@ describe('Bid Routes', () => {
 
     let order = m.store.orders.find(o => o.id === 'order-escrow');
     expect(order.escrow_status).toBe('funding');
-    expect(order.escrow_booking_id).toBe('escrow:MOCK');
+    expect(order.escrow_booking_id).toBe('escrow:OD-ESCROW');
   });
 
   it('POST /:id/bids/:bidId/accept returns error when escrow deposit fails before accepting bid', async () => {
@@ -448,6 +450,10 @@ describe('Bid Routes', () => {
         id: 'order-comp-fail',
         customer_id: 'customer-1',
         order_display_id: 'OD-COMP-FAIL',
+        // Seed initial escrow state so the assertions below verify the
+        // failed RPC left it unmodified.
+        escrow_status: 'pending',
+        escrow_booking_id: null,
       });
 
       m.store.load_offers.push({
@@ -485,10 +491,11 @@ describe('Bid Routes', () => {
         .set(CUSTOMER);
 
       expect(res.status).toBe(500);
+      // No recovery hint anymore: the deposit tx is only built (never
+      // recorded on-chain) before the RPC, so there is nothing to void.
       expect(res.body).toMatchObject({
         error: 'Failed to accept bid atomically.',
         details: 'accept_bid_tx RPC failed',
-        recovery: 'The pending escrow deposit has been voided. Please try again.'
       });
 
       expect(mockBuildDepositTx).toHaveBeenCalledWith(
@@ -739,7 +746,7 @@ describe('Bid Routes', () => {
 
       expect(res.status).toBe(422);
       expect(res.body.error).toBe('Transaction reverted or not found on chain');
-      expect(mockRecordDepositTx).toHaveBeenCalledWith('escrow:OD1', '0x' + '1'.repeat(64));
+      expect(mockRecordDepositTx).toHaveBeenCalledWith('escrow:OD1', '0x' + '1'.repeat(64), null);
     });
 
     it('POST /:id/confirm-deposit succeeds and marks order as funded', async () => {

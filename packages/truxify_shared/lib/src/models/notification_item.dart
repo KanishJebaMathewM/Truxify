@@ -1,7 +1,7 @@
 class NotificationItem {
   const NotificationItem({
     required this.id,
-    required this.userId,
+    this.userId,
     required this.title,
     required this.body,
     required this.notifType,

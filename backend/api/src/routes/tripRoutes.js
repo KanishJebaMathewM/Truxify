@@ -465,6 +465,13 @@ router.put('/:tripDisplayId/start', authenticate, userLimiter, requireRole(['dri
     const { data: trip } = await supabase.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
     if (!trip) return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
 
+    // ENFORCEMENT CHECK: Ensure order is funded before trip can start
+    const { data: order, error: orderErr } = await supabase.from('orders').select('escrow_status').eq('id', trip.id).maybeSingle();
+    if (orderErr) return res.status(500).json({ error: 'Failed to verify order funding status.' });
+    if (order && order.escrow_status !== 'funded') {
+      return res.status(403).json({ error: `Cannot start trip: Escrow is not funded (current status: ${order.escrow_status}).` });
+    }
+
     const stops = await supabase.from('trip_stops').select()
       .eq('trip_display_id', tripDisplayId)
       .eq('is_completed', false)

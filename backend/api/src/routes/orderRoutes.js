@@ -1057,6 +1057,10 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
 
     // Phase 1: Execute blockchain escrow release BEFORE crediting the driver's wallet.
     // If the blockchain call fails, the database state is NOT modified and the driver can retry.
+    if (order.escrow_status === 'funding') {
+      return res.status(400).json({ error: 'Cannot release payment: Escrow deposit was never completed by the customer.' });
+    }
+
     let releaseTxHash = null;
     let escrowAlreadyReleased = false;
     if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {

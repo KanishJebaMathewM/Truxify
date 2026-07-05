@@ -25,7 +25,7 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install dependencies
         working-directory: backend/api
-        run: npm ci --prefer-offline=false --workspace=backend/api
+        run: npm ci --prefer-offline=false
       - name: Run ESLint
         working-directory: backend/api
         run: npm run lint

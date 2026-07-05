@@ -29,6 +29,7 @@ import {
   escrowRelease,
   bookingIdFromUuid,
   submitEscrowRefund,
+  submitEscrowCancelWithPenalty,
   confirmEscrowRefund,
   ESCROW_MATIC_PER_PAISA,
 } from '../services/escrow.js';
@@ -479,8 +480,7 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
       const result = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
       order = result.data;
       orderErr = result.error;
-    }
-    if (!order) {
+    } else {
       const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
       order = result.data;
       orderErr = result.error;
@@ -1057,6 +1057,10 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
 
     // Phase 1: Execute blockchain escrow release BEFORE crediting the driver's wallet.
     // If the blockchain call fails, the database state is NOT modified and the driver can retry.
+    if (order.escrow_status === 'funding') {
+      return res.status(400).json({ error: 'Cannot release payment: Escrow deposit was never completed by the customer.' });
+    }
+
     let releaseTxHash = null;
     let escrowAlreadyReleased = false;
     if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
@@ -1301,7 +1305,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
     });
   } catch (err) {
     logger.error('Change drop exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
   }
 });
 
@@ -1347,6 +1351,16 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
     const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(order.escrow_status);
     let workingOrder = order;
 
+    let calculatedPenalty = order.cancellation_fee ?? 0;
+    if (order.total_amount) {
+      if (['assigned'].includes(order.status)) {
+        calculatedPenalty = order.total_amount * 0.10;
+      } else if (['arrived_pickup', 'picked_up', 'in_transit', 'arrived_dropoff'].includes(order.status)) {
+        calculatedPenalty = order.total_amount * 0.50;
+      }
+    }
+    calculatedPenalty = Math.round(calculatedPenalty);
+
     // Persist cancellation before touching the blockchain. A failed or delayed
     // refund must never leave the order available for continued work.
     if (requiresRefund && (order.status !== 'cancelled' || order.escrow_status !== 'refund_pending')) {
@@ -1356,6 +1370,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
         .update({
           status: 'cancelled',
           cancellation_reason: reason ?? order.cancellation_reason,
+          cancellation_fee: calculatedPenalty,
           escrow_status: 'refund_pending',
           escrow_refund_error: null,
           escrow_refund_attempts: (order.escrow_refund_attempts ?? 0) + 1,
@@ -1395,7 +1410,14 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           if (refundTxHash) {
             receipt = await confirmEscrowRefund(refundTxHash);
           } else {
-            const submitted = await submitEscrowRefund(order.order_display_id);
+            let submitted;
+            if (calculatedPenalty > 0) {
+              const maticAmount = (calculatedPenalty * ESCROW_MATIC_PER_PAISA).toFixed(18);
+              const driverFeeWei = ethers.parseEther(maticAmount);
+              submitted = await submitEscrowCancelWithPenalty(order.order_display_id, driverFeeWei);
+            } else {
+              submitted = await submitEscrowRefund(order.order_display_id);
+            }
             refundTxHash = submitted.txHash;
             if (!refundTxHash || !submitted.waitForConfirmation) {
               throw new Error('Escrow refund transaction was not submitted.');
@@ -1485,7 +1507,8 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
 
     const updatePayload = {
       status: 'cancelled',
-      cancellation_reason: reason,
+      cancellation_reason: reason ?? order.cancellation_reason,
+      cancellation_fee: calculatedPenalty,
       updated_at: new Date().toISOString(),
     };
 
@@ -1513,7 +1536,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
   } catch (err) {
     logger.error('Cancel order exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
   }
 });
 
@@ -1686,7 +1709,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
 
   } catch (err) {
     logger.error({ err }, 'Fetch driver location exception');
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
   }
 });
 
@@ -1794,7 +1817,7 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRol
 
   } catch (err) {
     logger.error({ err }, 'Fetch order route exception');
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
   }
 });
 

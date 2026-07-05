@@ -31,3 +31,45 @@ main()
     console.error(error);
     process.exit(1);
   });
+
+  // blockchain/scripts/deploy.js
+// Deploys all Truxify contracts to the configured network
+
+const { ethers } = require("hardhat");
+
+async function main() {
+  const [deployer] = await ethers.getSigners();
+  console.log("Deploying contracts with wallet:", deployer.address);
+  console.log("Wallet balance:", ethers.formatEther(await ethers.provider.getBalance(deployer.address)), "MATIC");
+
+  // ── Deploy Escrow ──────────────────────────────────────────────────────────
+  console.log("\nDeploying Escrow...");
+  const Escrow = await ethers.getContractFactory("Escrow");
+  const escrow = await Escrow.deploy();
+  await escrow.waitForDeployment();
+  console.log("✅ Escrow deployed to:", await escrow.getAddress());
+
+  // ── Deploy DocumentHash ────────────────────────────────────────────────────
+  console.log("\nDeploying DocumentHash...");
+  const DocumentHash = await ethers.getContractFactory("DocumentHash");
+  const docHash = await DocumentHash.deploy();
+  await docHash.waitForDeployment();
+  console.log("✅ DocumentHash deployed to:", await docHash.getAddress());
+
+  // ── Deploy DriverReputation ────────────────────────────────────────────────
+  console.log("\nDeploying DriverReputation...");
+  const DriverReputation = await ethers.getContractFactory("DriverReputation");
+  const reputation = await DriverReputation.deploy();
+  await reputation.waitForDeployment();
+  console.log("✅ DriverReputation deployed to:", await reputation.getAddress());
+
+  console.log("\n─── Deployment Summary ───────────────────────────────────────");
+  console.log("Escrow:           ", await escrow.getAddress());
+  console.log("DocumentHash:     ", await docHash.getAddress());
+  console.log("DriverReputation: ", await reputation.getAddress());
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

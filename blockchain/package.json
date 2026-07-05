@@ -3,10 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "test": "hardhat test"
+    "test": "hardhat test",
+    "test:coverage": "npx hardhat coverage",
+    "compile": "npx hardhat compile",
+    "deploy:local": "npx hardhat run scripts/deploy.js --network hardhat",
+    "deploy:amoy": "npx hardhat run scripts/deploy.js --network amoy",
+    "clean": "npx hardhat clean"
   },
   "devDependencies": {
-    "@nomicfoundation/hardhat-ethers": "^4.0.13",
+    "@nomicfoundation/hardhat-ethers": "^4.0.14",
     "@nomicfoundation/hardhat-ignition": "^3.1.8",
     "@nomicfoundation/hardhat-ignition-viem": "^3.1.6",
     "@nomicfoundation/hardhat-keystore": "^3.0.12",
@@ -19,8 +24,11 @@
     "@nomicfoundation/hardhat-viem-assertions": "^3.1.1",
     "@types/node": "^22.20.0",
     "chai": "^6.2.2",
-    "ethers": "^6.12.1",
+    "dotenv": "^17.4.2",
+    "ethers": "^6.17.0",
     "forge-std": "github:foundry-rs/forge-std#v1.9.4",
+    "hardhat": "^2.22.4",
+    "ts-node": "^10.9.2",
     "typescript": "~6.0.3",
     "viem": "^2.53.1"
   },
@@ -32,7 +40,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "module",
   "dependencies": {
     "@openzeppelin/contracts": "^5.6.1"
   },

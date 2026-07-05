@@ -1,14 +1,11 @@
-require("@nomicfoundation/hardhat-ethers");
-require("@nomicfoundation/hardhat-verify");
+// blockchain/hardhat.config.js
 require("@nomicfoundation/hardhat-toolbox");
+require("dotenv").config();
 
-const POLYGON_RPC_URL = process.env.POLYGON_RPC_URL || "";
-const DEPLOYER_PRIVATE_KEY = process.env.RELAYER_PRIVATE_KEY || process.env.DEPLOYER_PRIVATE_KEY || "";
-const POLYGONSCAN_API_KEY = process.env.POLYGONSCAN_API_KEY || "";
-
+/** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
   solidity: {
-    version: "0.8.24",
+    version: "0.8.20",
     settings: {
       optimizer: {
         enabled: true,
@@ -17,24 +14,20 @@ module.exports = {
     },
   },
   networks: {
-    hardhat: {
-      chainId: 31337,
-    },
+    // Local Hardhat network (default — no config needed)
+    hardhat: {},
+
+    // Polygon Amoy Testnet (Phase 2 target)
     amoy: {
-      url: POLYGON_RPC_URL || "https://rpc-amoy.polygon.technology/",
-      accounts: DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : [],
+      url: process.env.POLYGON_AMOY_RPC_URL || "https://rpc-amoy.polygon.technology",
+      accounts: process.env.DEPLOYER_PRIVATE_KEY
+        ? [process.env.DEPLOYER_PRIVATE_KEY]
+        : [],
       chainId: 80002,
     },
-    polygon: {
-      url: POLYGON_RPC_URL || "https://polygon-rpc.com",
-      accounts: DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : [],
-      chainId: 137,
-    },
   },
-  etherscan: {
-    apiKey: {
-      amoy: POLYGONSCAN_API_KEY || "",
-      polygon: POLYGONSCAN_API_KEY || "",
-    },
+  gasReporter: {
+    enabled: true,
+    currency: "USD",
   },
 };

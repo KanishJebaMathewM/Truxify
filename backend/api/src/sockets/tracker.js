@@ -138,12 +138,17 @@ export function initWebSocketServer(server) {
         ws.close(4003, 'BYPASS_AUTH is not allowed in production');
         return;
       }
+      const devToken = reqUrl.searchParams.get('dev_access_token');
+      if (!devToken || !process.env.DEV_ACCESS_TOKEN || devToken !== process.env.DEV_ACCESS_TOKEN) {
+        ws.close(4001, 'Unauthorized: Missing or invalid dev_access_token');
+        return;
+      }
       ws.driverId = reqUrl.searchParams.get('driver_id') || 'test_driver';
       ws.user = {
         id: reqUrl.searchParams.get('user_id') || ws.driverId,
         role: reqUrl.searchParams.get('user_role') || 'driver',
       };
-      logger.info(`🔓 WS Auth bypassed for driver: ${ws.driverId}`);
+      logger.warn({ event: 'WS_BYPASS_AUTH_USED', driverId: ws.driverId, role: ws.user.role }, 'WS Auth bypassed via DEV_ACCESS_TOKEN');
     } else {
       if (!token) {
         ws.close(4001, 'Unauthorized: No token provided');

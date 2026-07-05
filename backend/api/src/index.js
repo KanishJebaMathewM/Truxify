@@ -49,8 +49,8 @@ try {
 // ============================================================================
 // STARTUP VALIDATION — crash fast, not at request time
 // ============================================================================
-if (process.env.NODE_ENV === 'production' && process.env.BYPASS_AUTH === 'true') {
-  logger.fatal('BYPASS_AUTH is enabled in production. This is a severe security misconfiguration. Set BYPASS_AUTH=false (or unset it) and restart the server.');
+if (process.env.BYPASS_AUTH === 'true' && process.env.NODE_ENV !== 'development') {
+  logger.fatal('BYPASS_AUTH is enabled outside development. This is a severe security misconfiguration. Set BYPASS_AUTH=false (or unset it), and set NODE_ENV=development if you need local testing.');
   process.exit(1);
 }
 if (process.env.NODE_ENV === 'production' && !process.env.ML_API_KEY) {

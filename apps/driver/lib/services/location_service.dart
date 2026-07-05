@@ -85,7 +85,7 @@ class LocationService {
       ),
     ).listen(
       (position) {
-        _handleLocationUpdate(position);
+        unawaited(_handleLocationUpdate(position));
       },
       onError: (error) {
         debugPrint('[LocationService] Position stream error: $error');
@@ -97,18 +97,20 @@ class LocationService {
     _maxIntervalTimer = Timer.periodic(_maxInterval, (_) {
       if (_lastSentPosition != null && _isTracking) {
         debugPrint('[LocationService] Max interval elapsed, sending fallback ping');
-        _sendLocationPing(_lastSentPosition!);
+        unawaited(_sendLocationPing(_lastSentPosition!));
       }
     });
   }
 
-  void _handleLocationUpdate(Position position) {
+  Future<void> _handleLocationUpdate(Position position) async {
     // Implement displacement-based throttling
     if (_lastSentPosition == null) {
       // First position, always send
-      _sendLocationPing(position);
-      _lastSentPosition = position;
-      _lastSentTime = DateTime.now();
+      final sent = await _sendLocationPing(position);
+      if (sent) {
+        _lastSentPosition = position;
+        _lastSentTime = DateTime.now();
+      }
       return;
     }
 
@@ -126,9 +128,11 @@ class LocationService {
     // Send if: moved 15m+ OR max interval (30s) has elapsed
     if (distanceMoved >= _minDistanceMeters ||
         timeSinceLastSend.compareTo(_maxInterval) >= 0) {
-      _sendLocationPing(position);
-      _lastSentPosition = position;
-      _lastSentTime = now;
+      final sent = await _sendLocationPing(position);
+      if (sent) {
+        _lastSentPosition = position;
+        _lastSentTime = now;
+      }
     } else {
       debugPrint(
         '[LocationService] Location update throttled (moved ${distanceMoved.toStringAsFixed(1)}m, '
@@ -137,10 +141,10 @@ class LocationService {
     }
   }
 
-  Future<void> _sendLocationPing(Position position) async {
+  Future<bool> _sendLocationPing(Position position) async {
     try {
       final driverId = Supabase.instance.client.auth.currentUser?.id;
-      if (driverId == null || driverId.isEmpty) return;
+      if (driverId == null || driverId.isEmpty) return false;
 
       if (_activeOrderId != null) {
         final cachedOrder = await Supabase.instance.client
@@ -176,7 +180,7 @@ class LocationService {
       final orderDisplayId = _activeOrderDisplayId;
       if (orderId == null || orderDisplayId == null) {
         debugPrint('[LocationService] No active order found; skipping order telemetry ping');
-        return;
+        return false;
       }
 
       // 2. Ensure WebSocket is connected
@@ -204,9 +208,12 @@ class LocationService {
         };
         _channel!.sink.add(jsonEncode(payload));
         debugPrint('[LocationService] Location ping sent: lat=${position.latitude}, lng=${position.longitude}');
+        return true;
       }
+      return false;
     } catch (e) {
       debugPrint('[LocationService] Error sending location ping: $e');
+      return false;
     }
   }
 

@@ -32,7 +32,7 @@ setInterval(async () => {
  *  /customer namespace — Customer app subscribes to booking rooms here
  *
  * Auth:
- *  Both namespaces require a valid JWT in socket.handshake.auth.token
+ *  Both namespaces require a valid Supabase token in socket.handshake.auth.token
  *
  * Flow:
  *  Driver emits "location_update" →
@@ -47,12 +47,33 @@ export function initLocationServer(httpServer) {
     logger.warn('[initLocationServer] Already initialized — skipping duplicate call.');
     return;
   }
+  // Validate ALLOWED_ORIGINS — reject localhost in production
+  const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
+  if (process.env.NODE_ENV === 'production' && allowedOrigins.length === 0) {
+    logger.fatal('[WS] ALLOWED_ORIGINS must be set in production. Refusing to start without explicit CORS origins.');
+    return;
+  }
+
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.ALLOWED_ORIGINS?.split(",") || [
-        "http://localhost:3000",
-        "http://localhost:5000",
-      ],
+      origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, server-to-server)
+        if (!origin) return callback(null, true);
+
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+
+        // In non-production, allow localhost for development
+        if (process.env.NODE_ENV !== 'production') {
+          const isLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+          if (isLocalhost) return callback(null, true);
+        }
+
+        return callback(null, false);
+      },
       methods: ["GET", "POST"],
       credentials: true,
     },

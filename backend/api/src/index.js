@@ -61,6 +61,10 @@ if (process.env.NODE_ENV === 'production' && !process.env.ML_API_KEY) {
 if (!process.env.DRIVER_LOGIN_OTP) {
   logger.warn('DRIVER_LOGIN_OTP is not set. Driver OTP login will be disabled until it is configured in production.');
 }
+if (process.env.NODE_ENV === 'production' && !process.env.ALLOWED_ORIGINS) {
+  logger.fatal('ALLOWED_ORIGINS is not set. The Socket.IO location server will refuse to start without explicit CORS origins. Set ALLOWED_ORIGINS and restart.');
+  process.exit(1);
+}
 const app = express();
 const server = http.createServer(app);
 

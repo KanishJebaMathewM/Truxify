@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     ml_api_key = os.environ.get("ML_API_KEY")
     if not ml_api_key:
-        return
+        logger.warning("ML_API_KEY not set - ML engine running without authentication")
+        raise HTTPException(status_code=503, detail="ML engine not configured: missing ML_API_KEY")
     if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 

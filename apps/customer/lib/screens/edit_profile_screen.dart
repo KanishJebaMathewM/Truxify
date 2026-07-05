@@ -72,8 +72,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       await ApiClient().put(
         '/api/profile',
         body: {
-          'fullName': _nameController.text.trim(),
-          'companyName': _companyController.text.trim(),
+          'full_name': _nameController.text.trim(),
+          'company_name': _companyController.text.trim(),
           'phone': _phoneController.text.trim(),
         },
       );

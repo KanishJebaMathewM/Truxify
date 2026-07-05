@@ -63,12 +63,11 @@ class MarketplaceRepository {
 
     final decoded = jsonDecode(response.body);
     if (decoded is! List) throw StateError('Unexpected response type');
-    return body.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
+    return decoded.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
   }
 
   Future<DriverBid> submitBid({
     required String loadId,
-    required String driverId,
     required num amount,
   }) async {
     final uri = Uri.parse('$_apiBaseUrl/api/orders/$loadId/bids');

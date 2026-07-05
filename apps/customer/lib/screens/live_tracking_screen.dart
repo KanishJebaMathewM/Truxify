@@ -75,6 +75,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     if (SupabaseConfig.isConfigured) {
       _subscribeToOrderUpdates();
       _subscribeToTracking();
+    } else {
+      debugPrint('[LiveTracking] Supabase not configured — real-time updates disabled');
     }
   }
 
@@ -637,7 +639,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   Future<void> _showCancel() async {
     bool isLoading = false;
-    String? feeText = _order?['cancellation_fee'] != null ? 'Cancellation fee ₹${_order!['cancellation_fee']}' : null;
+    final rawFee = _order?['cancellation_fee'];
+    final feeInRupees = rawFee != null ? (rawFee as num) / 100 : null;
+    String? feeText = feeInRupees != null ? 'Cancellation fee ₹${feeInRupees.toStringAsFixed(2)}' : null;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -669,11 +673,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                           setModalState(() => isLoading = true);
                           try {
                             final resp = await _orderService.cancelOrder(orderDisplayId: widget.orderId);
-                            final fee = resp['cancellation_fee'];
+                            final rawFee = resp['cancellation_fee'];
+                            final feeInRupees = rawFee != null ? (rawFee as num) / 100 : 0;
                             await _loadOrder();
                             if (!mounted) return;
                             Navigator.of(context).pop();
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Order cancelled. Fee: ₹${fee ?? 0}')));
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Order cancelled. Fee: ₹${feeInRupees.toStringAsFixed(2)}')));
                           } catch (e) {
                             setModalState(() => isLoading = false);
                             if (!mounted) return;

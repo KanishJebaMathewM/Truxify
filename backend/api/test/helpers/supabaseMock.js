@@ -61,6 +61,10 @@ class SupabaseQueryBuilder {
     this._options = options;
     return this;
   }
+  delete() {
+    this._mode = 'delete';
+    return this;
+  }
   select(columns = '*') {
     this._mode = this._mode ?? 'select';
     this._select = columns;
@@ -163,6 +167,14 @@ class SupabaseQueryBuilder {
     };
     this._calls.push(callRecord);
 
+    const matchingErrorIndex = this._programmed?.matchingErrors?.findIndex(item =>
+      item.table === this._table && item.mode === this._mode
+    ) ?? -1;
+    if (matchingErrorIndex !== -1) {
+      const [match] = this._programmed.matchingErrors.splice(matchingErrorIndex, 1);
+      return { data: null, error: match.error };
+    }
+
     // Programmed error path (e.g. simulate a supabase-side failure)
     if (this._programmed?.nextError) {
       const err = this._programmed.nextError;
@@ -237,6 +249,22 @@ class SupabaseQueryBuilder {
       return { data: updatedRows, error: null };
     }
 
+    if (this._mode === 'delete') {
+      const rows = this._store[this._table] ?? [];
+      const remaining = [];
+      const deleted = [];
+      for (const row of rows) {
+        const matches = this._filters.every(f => this._matches(row, f));
+        if (matches) {
+          deleted.push(row);
+        } else {
+          remaining.push(row);
+        }
+      }
+      this._store[this._table] = remaining;
+      return { data: deleted, error: null };
+    }
+
     if (this._mode === 'select' || this._mode === null) {
       let rows = (this._store[this._table] ?? []).slice();
       for (const f of this._filters) {
@@ -297,12 +325,33 @@ export function createSupabaseMock(initialStore = {}) {
       }
       return Promise.resolve({ data: null, error: null });
     },
+    storage: {
+      from(bucket) {
+        return {
+          async upload(path, buffer, options) {
+            calls.push({ storageUpload: { bucket, path, options } });
+            if (programmed.nextStorageError) {
+              const err = programmed.nextStorageError;
+              programmed.nextStorageError = null;
+              return { data: null, error: err };
+            }
+            if (!store.__storageObjects) store.__storageObjects = [];
+            store.__storageObjects.push({ bucket, path, buffer, options });
+            return { data: { path }, error: null };
+          },
+        };
+      },
+    },
   };
   return {
     supabase,
     store,
     calls,
     programError(msg = 'mock error')    { programmed.nextError    = { message: msg }; },
+    programErrorFor(table, mode, msg = 'mock error') {
+      programmed.matchingErrors ??= [];
+      programmed.matchingErrors.push({ table, mode, error: { message: msg } });
+    },
     programRpcError(msg = 'mock error') { programmed.nextRpcError = { message: msg }; },
     programData(data)                   { programmed.nextData = data; },
   };

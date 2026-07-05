@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api_client.dart';
+import 'fcm_service.dart';
 import 'supabase_service.dart';
 
 class ProfileService {
@@ -56,7 +57,11 @@ class ProfileService {
       }
     }
 
-    // Sign out from local clients
+    // Unregister this device's FCM token first so a signed-out device stops
+    // receiving push notifications intended for the next user of a shared
+    // device, then sign out from local clients.
+    await FcmService.unregisterToken();
+
     await Future.wait([
       FirebaseAuth.instance.signOut(),
       SupabaseService.client.auth.signOut(),

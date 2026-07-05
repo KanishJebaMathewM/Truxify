@@ -123,3 +123,14 @@ jobs:
       - name: Run tests
         working-directory: backend/ml
         run: python -m pytest tests/ -v
+
+  client-credentials-guard:
+    name: No client-side backend credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check for Redis/Upstash credentials in Flutter source
+        run: bash scripts/check-no-client-credentials.sh

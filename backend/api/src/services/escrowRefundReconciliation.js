@@ -1,45 +1,30 @@
 import { supabase, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { confirmEscrowRefund } from './escrow.js';
+import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import os from 'os';
 
 const DEFAULT_INTERVAL_MS = 60_000;
-const LOCK_KEY = 'escrow:reconciliation:lock';
-const LOCK_TTL_SECONDS = 120;
-const LEASE_EXTENSION_INTERVAL_MS = (LOCK_TTL_SECONDS * 1000) / 2;
+const GLOBAL_LOCK_KEY = 'escrow:reconciliation:lock';
+const GLOBAL_LOCK_TTL_SECONDS = 120;
 let reconciliationTimer = null;
 let reconciliationRunning = false;
 
 export async function reconcilePendingEscrowRefunds() {
-  let lockAcquired = false;
-  let leaseExtender = null;
-
-  if (redisClient) {
-    try {
-      const acquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
-      if (!acquired) {
-        logger.info('[escrow-reconciliation] Lock held by another instance, skipping.');
-        return;
-      }
-      lockAcquired = true;
-      leaseExtender = setInterval(async () => {
-        try {
-          await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-        } catch (err) {
-          logger.warn('[escrow-reconciliation] Failed to extend lock lease:', err.message);
-        }
-      }, LEASE_EXTENSION_INTERVAL_MS);
-    } catch (err) {
-      logger.error('[escrow-reconciliation] Failed to acquire Redis lock:', err.message);
-    }
-  }
-
-  if (!lockAcquired) {
-    if (reconciliationRunning) return;
-    reconciliationRunning = true;
-  }
+  if (reconciliationRunning) return;
+  reconciliationRunning = true;
 
   try {
+    // Acquire a global lock just to prevent multiple instances from pulling the exact same batch unnecessarily
+    let globalLockAcquired = false;
+    if (redisClient) {
+      globalLockAcquired = await redisClient.set(GLOBAL_LOCK_KEY, process.pid.toString(), 'NX', 'EX', GLOBAL_LOCK_TTL_SECONDS);
+      if (!globalLockAcquired) {
+        logger.info('[escrow-reconciliation] Global lock held by another instance, skipping batch pull.');
+        return;
+      }
+    }
+
     const instanceId = process.env.HOSTNAME || os.hostname();
     const { data: pendingOrders, error } = await supabase
       .from('orders')
@@ -54,6 +39,13 @@ export async function reconcilePendingEscrowRefunds() {
     }
 
     for (const order of pendingOrders ?? []) {
+      const lockKey = `escrow_lock:${order.id}`;
+      const lockValue = await acquireLock(lockKey, 30000); // 30 seconds for blockchain confirmation
+      if (!lockValue) {
+        logger.info(`[escrow-reconciliation] Order ${order.order_display_id} locked by another process (API or Job), skipping.`);
+        continue;
+      }
+
       try {
         const { data: claimed, error: claimError } = await supabase
           .rpc('claim_refund_reconciliation', {
@@ -104,18 +96,16 @@ export async function reconcilePendingEscrowRefunds() {
           `[escrow-reconciliation] Refund for ${order.order_display_id} is not confirmed yet:`,
           err.message
         );
+      } finally {
+        await releaseLock(lockKey, lockValue);
       }
     }
+
+    if (globalLockAcquired && redisClient) {
+      await redisClient.del(GLOBAL_LOCK_KEY).catch(() => {});
+    }
   } finally {
-    if (leaseExtender) {
-      clearInterval(leaseExtender);
-    }
-    if (lockAcquired && redisClient) {
-      await redisClient.del(LOCK_KEY).catch(() => {});
-    }
-    if (!lockAcquired) {
-      reconciliationRunning = false;
-    }
+    reconciliationRunning = false;
   }
 }
 

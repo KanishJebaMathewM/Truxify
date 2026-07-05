@@ -229,7 +229,15 @@ class ApiClient {
   dynamic _decode(http.Response response) {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       if (response.body.isEmpty) return null;
-      return jsonDecode(response.body);
+      try {
+        return jsonDecode(response.body);
+      } catch (_) {
+        throw ApiException(
+          response.statusCode,
+          'Invalid JSON response',
+          body: response.body,
+        );
+      }
     }
 
     if (kDebugMode) {

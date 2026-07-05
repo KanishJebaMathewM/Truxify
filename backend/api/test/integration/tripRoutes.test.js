@@ -231,6 +231,29 @@ describe('Trip Routes', () => {
         expect(res.body.error).toBe('Database failed to process batch.');
     });
 
+    it('POST /events/batch returns 400 when an event omits trip_id', async () => {
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-missing-trip',
+                events: [
+                    {
+                        id: 'event-missing-trip',
+                        type: 'location_update',
+                        occurred_at: new Date().toISOString(),
+                        payload: {
+                            lat: 19.076,
+                            lng: 72.8777,
+                        },
+                    },
+                ],
+            });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('events.0.trip_id is required');
+    });
+
     it('POST /events/batch returns 422 for otpDelivery event containing otp', async () => {
         const res = await request(buildApp())
             .post('/api/v1/trips/events/batch')
@@ -329,6 +352,58 @@ describe('Trip Routes', () => {
         expect(upsertCall.payload[0].metadata).not.toHaveProperty('password');
         expect(upsertCall.payload[0].metadata.lat).toBe(19.076);
     });
+
+    it('POST /events/batch does not map coordinates from non-coordinate events', async () => {
+        const originalFrom = m.supabase.from.bind(m.supabase);
+        m.supabase.from = table => {
+            const builder = originalFrom(table);
+            if (table === 'trip_events') {
+                builder.upsert = vi.fn(async payload => {
+                    m.calls.push({
+                        table: 'trip_events',
+                        mode: 'upsert',
+                        payload,
+                    });
+                    m.store.trip_events.push(...payload);
+                    return { data: payload, error: null };
+                });
+            }
+            return builder;
+        };
+
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-non-coordinate',
+                events: [
+                    {
+                        id: 'event-note',
+                        trip_id: 'trip-1',
+                        type: 'status_note',
+                        occurred_at: new Date().toISOString(),
+                        payload: {
+                            lat: 'not-a-number',
+                            lng: 'still-not-a-number',
+                            note: 'Arrived at dock',
+                        },
+                    },
+                ],
+            });
+
+        m.supabase.from = originalFrom;
+
+        expect(res.status).toBe(202);
+        const upsertCall = m.calls.find(
+            c => c.table === 'trip_events' && c.mode === 'upsert' && c.payload[0].event_id === 'event-note'
+        );
+        expect(upsertCall).toBeTruthy();
+        expect(upsertCall.payload[0].latitude).toBeNull();
+        expect(upsertCall.payload[0].longitude).toBeNull();
+        expect(upsertCall.payload[0].metadata).not.toHaveProperty('lat');
+        expect(upsertCall.payload[0].metadata).not.toHaveProperty('lng');
+        expect(upsertCall.payload[0].metadata.note).toBe('Arrived at dock');
+    });
 });
 
 // ============================================================================
@@ -358,14 +433,16 @@ describe('GET /api/trips/:id/events', () => {
     process.env.BYPASS_AUTH = 'true';
     process.env.NODE_ENV = 'test';
     m.store.trip_events = [];
-    m.store.orders = [
-      { id: 'trip-abc', driver_id: 'driver-1', customer_id: 'customer-other' },
-      { id: 'trip-admin', driver_id: 'driver-other', customer_id: 'customer-other' },
-      { id: 'trip-filter', driver_id: 'driver-1', customer_id: 'customer-other' },
-      { id: 'trip-sort', driver_id: 'driver-1', customer_id: 'customer-other' },
-      { id: 'trip-bbox', driver_id: 'driver-1', customer_id: 'customer-other' },
+    m.store.orders = [];
+    // The route resolves the trip in orders/trips before checking access,
+    // so each fixture trip referenced below must exist in the trips table.
+    m.store.trips = [
+      { id: 'trip-abc', driver_id: 'driver-1' },
+      { id: 'trip-admin', driver_id: 'driver-1' },
+      { id: 'trip-filter', driver_id: 'driver-1' },
+      { id: 'trip-sort', driver_id: 'driver-1' },
+      { id: 'trip-bbox', driver_id: 'driver-1' },
     ];
-    m.store.trips = [];
     m.calls.length = 0;
   });
 

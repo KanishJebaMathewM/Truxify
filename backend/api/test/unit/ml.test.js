@@ -23,13 +23,16 @@ vi.mock('../../src/middleware/logger.js', () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-import { predictDemand, predictPrice } from '../../src/services/ml.js';
+import { predictDemand, predictPrice, mlBreaker } from '../../src/services/ml.js';
 
 describe('ml service — predictDemand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.ML_ENGINE_URL;
     delete process.env.ML_API_KEY;
+    if (mlBreaker) {
+      mlBreaker.disable();
+    }
   });
 
   afterEach(() => {
@@ -131,6 +134,9 @@ describe('ml service — predictPrice', () => {
     delete process.env.ML_SERVICE_URL;
     delete process.env.ML_ENGINE_URL;
     delete process.env.ML_API_KEY;
+    if (mlBreaker) {
+      mlBreaker.disable();
+    }
   });
 
   afterEach(() => {
@@ -153,7 +159,7 @@ describe('ml service — predictPrice', () => {
     });
 
     const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toContain('/predict');
+    expect(url).toContain('/predict/price');
     const body = JSON.parse(opts.body);
     expect(body.distance_km).toBe(250);
     expect(body.cargo_weight_kg).toBe(1000);

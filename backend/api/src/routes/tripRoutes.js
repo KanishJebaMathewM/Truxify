@@ -71,6 +71,22 @@ const validateBatchPayload = (schema) => (req, res, next) => {
   }
 };
 
+function validateEventTripIds(events) {
+  const missingIndex = events.findIndex(event => !event.trip_id);
+  if (missingIndex !== -1) {
+    return {
+      ok: false,
+      status: 400,
+      error: `events.${missingIndex}.trip_id is required`,
+    };
+  }
+  return { ok: true };
+}
+
+function hasCoordinatePayload(payload = {}) {
+  return payload.lat !== undefined || payload.lng !== undefined;
+}
+
 async function verifyTripIdsBelongToUser(tripIds, user) {
   const uniqueTripIds = [...new Set(tripIds.filter(Boolean))];
   if (uniqueTripIds.length === 0) return { ok: true };
@@ -163,16 +179,26 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
       }
     }
 
+    const tripIdCheck = validateEventTripIds(events);
+    if (!tripIdCheck.ok) {
+      return res.status(tripIdCheck.status).json({ error: tripIdCheck.error });
+    }
+
     const ownershipCheck = await verifyTripIdsBelongToUser(events.map(event => event.trip_id), req.user);
     if (!ownershipCheck.ok) {
       return res.status(ownershipCheck.status).json({ error: ownershipCheck.error });
     }
 
     const recordsToInsert = events.map(event => {
-      const lat = event.payload?.lat !== undefined ? Number(event.payload.lat) : null;
-      const lng = event.payload?.lng !== undefined ? Number(event.payload.lng) : null;
+      const shouldMapCoordinates = event.type === 'gpsUpdate' || event.type === 'location_update';
+      const lat = shouldMapCoordinates && event.payload?.lat !== undefined ? Number(event.payload.lat) : null;
+      const lng = shouldMapCoordinates && event.payload?.lng !== undefined ? Number(event.payload.lng) : null;
 
       const safeMetadata = { ...event.payload };
+      if (!shouldMapCoordinates && hasCoordinatePayload(safeMetadata)) {
+        delete safeMetadata.lat;
+        delete safeMetadata.lng;
+      }
       for (const field of SENSITIVE_FIELDS) {
         delete safeMetadata[field];
       }

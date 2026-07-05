@@ -85,6 +85,10 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
     logger.warn(`[reputation] Invalid driver wallet address "${driverWalletAddress}" — skipping.`);
     return;
   }
+  if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+    logger.warn(`[reputation] Invalid stars value ${stars} — must be 1-5. Skipping on-chain update.`);
+    return;
+  }
   try {
     const tx = await reputationContract.increaseReputation(driverWalletAddress, stars);
     logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);

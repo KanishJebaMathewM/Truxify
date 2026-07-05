@@ -12,6 +12,8 @@ import '../widgets/app_page_route.dart';
 import '../widgets/shipment_card.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/recent_route_card.dart';
+import '../services/order_service.dart';
+import '../services/profile_service.dart';
 import 'live_tracking_screen.dart';
 import 'notifications_screen.dart';
 
@@ -24,16 +26,22 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final CacheManager _cacheManager = CacheManager();
+  final OrderService _orderService = OrderService();
+  final ProfileService _profileService = ProfileService();
   bool _isOffline = false;
+  bool _isLoading = true;
+  String? _error;
   String _locationLabel = 'Surat, Gujarat';
+  String _customerName = '';
+  List<Map<String, dynamic>> _activeOrders = [];
 
   @override
   void initState() {
     super.initState();
-    _loadLocation();
+    _loadData();
   }
 
-  Future<void> _loadLocation() async {
+  Future<void> _loadData() async {
     final connectivity = await Connectivity().checkConnectivity();
     final hasNetwork = connectivity.isNotEmpty && !connectivity.contains(ConnectivityResult.none);
     await _cacheManager.open();
@@ -47,9 +55,30 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isOffline = !hasNetwork;
       if (cachedLocation != null) {
-        _locationLabel = 'Last truck location • ${cachedLocation['latitude']?.toStringAsFixed(3)}, ${cachedLocation['longitude']?.toStringAsFixed(3)}';
+        _locationLabel = 'Last truck location \u2022 ${cachedLocation['latitude']?.toStringAsFixed(3)}, ${cachedLocation['longitude']?.toStringAsFixed(3)}';
       }
     });
+
+    try {
+      final results = await Future.wait([
+        _profileService.fetchProfile(),
+        _orderService.fetchActiveOrders(),
+      ]);
+      if (!mounted) return;
+      final profile = results[0] as Map<String, dynamic>;
+      final orders = results[1] as List<Map<String, dynamic>>;
+      setState(() {
+        _customerName = (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '').trim();
+        _activeOrders = orders;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = 'Could not load data';
+        _isLoading = false;
+      });
+    }
   }
 
   static String _greetingFor(DateTime time) {
@@ -59,31 +88,35 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'Good evening';
   }
 
-  RouteDraft _draftForRoute(RouteCardData route) {
-    return RouteDraft(
-      pickup: route.pickup,
-      drop: route.drop,
-      dateLabel: 'Tomorrow, 6:00 AM',
-      goodsType: 'Textile',
-      weightTonnes: '3',
-      dimensions: '12 × 6 × 6',
-      stacked: true,
-      fragile: false,
-      requirements: const ['Temperature control', 'Loading help needed'],
-    );
-  }
-
   void _showComingSoon(BuildContext context, String title) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$title coming soon')));
+  }
+
+  ShipmentCardData? _buildShipmentFromOrder(Map<String, dynamic> order) {
+    final route = '${order['pickup_city'] ?? '?'} \u2192 ${order['drop_city'] ?? '?'}';
+    final driverName = order['driver_name']?.toString() ?? '';
+    final truckNum = order['truck_number']?.toString() ?? '';
+    final driver = driverName.isNotEmpty ? '$driverName | $truckNum' : (truckNum.isNotEmpty ? truckNum : 'Assigning driver');
+    final status = order['status']?.toString() ?? 'Active';
+    final eta = order['estimated_arrival']?.toString() ?? 'Pending';
+
+    return ShipmentCardData(
+      route: route,
+      driver: driver,
+      truckNumber: truckNum,
+      status: status,
+      statusColor: status == 'In Transit' ? const Color(0xFF00897B) : const Color(0xFFFFB300),
+      eta: eta,
+      isLive: status == 'In Transit',
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final controller = TruxifyScope.of(context);
     final now = DateTime.now();
-    final customerFirstName = mockCustomerName.split(' ').first;
+    final displayName = _customerName.isNotEmpty ? _customerName.split(' ').first : 'there';
     final greeting = _greetingFor(now);
-    final quickStats = mockQuickStats.take(3).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -121,76 +154,100 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('$greeting, $customerFirstName 👋', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 6),
-            Text(
-              DateFormat('EEEE, d MMMM yyyy').format(now),
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
-            ),
-            const SizedBox(height: 26),
-            SectionHeader(title: 'Active Shipments', actionLabel: 'See all', onActionTap: () => _showComingSoon(context, 'All shipments')),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 170,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: mockActiveShipments.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 14),
-                itemBuilder: (context, index) {
-                  final shipment = mockActiveShipments[index];
-                  return ShipmentCard(
-                    shipment: shipment,
-                    onTap: () {
-                      if (index < mockActiveOrders.length) {
-                        Navigator.of(context).push(
-                          AppPageRoute(builder: (_) => LiveTrackingScreen(orderId: mockActiveOrders[index].orderId)),
-                        );
-                      }
-                    },
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                for (final stat in quickStats) ...[
-                  Expanded(
-                    child: StatCard(
-                      title: stat.title,
-                      value: stat.value,
-                      icon: stat.icon,
-                    ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_error!, style: Theme.of(context).textTheme.bodyLarge),
+                      const SizedBox(height: 12),
+                      PrimaryButton(
+                        label: 'Retry',
+                        onPressed: () {
+                          setState(() { _isLoading = true; _error = null; });
+                          _loadData();
+                        },
+                      ),
+                    ],
                   ),
-                  if (stat != quickStats.last) const SizedBox(width: 10),
-                ],
-              ],
-            ),
-            const SizedBox(height: 24),
-            SectionHeader(title: 'Your usual routes'),
-            const SizedBox(height: 8),
-            ...mockRecentRoutes.map(
-              (route) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: RecentRouteCard(
-                  route: route,
-                  onRebook: () => controller.openFindTrucks(draft: _draftForRoute(route)),
+                )
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('$greeting, $displayName \u{1f44b}', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 6),
+                      Text(
+                        DateFormat('EEEE, d MMMM yyyy').format(now),
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
+                      ),
+                      const SizedBox(height: 26),
+                      SectionHeader(title: 'Active Shipments', actionLabel: 'See all', onActionTap: () => _showComingSoon(context, 'All shipments')),
+                      const SizedBox(height: 12),
+                      _activeOrders.isEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 24),
+                              child: Center(
+                                child: Text('No active shipments', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
+                              ),
+                            )
+                          : SizedBox(
+                              height: 170,
+                              child: ListView.separated(
+                                scrollDirection: Axis.horizontal,
+                                itemCount: _activeOrders.length,
+                                separatorBuilder: (_, __) => const SizedBox(width: 14),
+                                itemBuilder: (context, index) {
+                                  final shipment = _buildShipmentFromOrder(_activeOrders[index]);
+                                  if (shipment == null) return const SizedBox.shrink();
+                                  final orderId = _activeOrders[index]['display_id']?.toString() ?? _activeOrders[index]['id']?.toString() ?? '';
+                                  return ShipmentCard(
+                                    shipment: shipment,
+                                    onTap: orderId.isNotEmpty
+                                        ? () => Navigator.of(context).push(
+                                              AppPageRoute(builder: (_) => LiveTrackingScreen(orderId: orderId)),
+                                            )
+                                        : () => _showComingSoon(context, 'Live tracking'),
+                                  );
+                                },
+                              ),
+                            ),
+                      const SizedBox(height: 24),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: StatCard(title: 'Active', value: '${_activeOrders.length}', icon: Icons.local_shipping_rounded),
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: StatCard(title: 'Coming soon', value: 'More stats', icon: Icons.inventory_2_rounded),
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: StatCard(title: 'Coming soon', value: 'Savings', icon: Icons.savings_rounded),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      SectionHeader(title: 'Your usual routes'),
+                      const SizedBox(height: 8),
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 24),
+                          child: Text('Route history coming soon', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      PrimaryButton(
+                        label: 'Book a Truck \u{1f69b}',
+                        onPressed: () => controller.openFindTrucks(draft: mockDefaultRouteDraft),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            PrimaryButton(
-              label: 'Book a Truck 🚛',
-              onPressed: () => controller.openFindTrucks(draft: mockDefaultRouteDraft),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

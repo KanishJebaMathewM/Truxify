@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import '../core/config.dart';
 import 'package:latlong2/latlong.dart';
 
 /// Lightweight geocoding helper using Nominatim (OpenStreetMap).
@@ -35,7 +36,7 @@ class GeocodeService {
             'Accept': 'application/json',
             'User-Agent': 'Truxify-Driver-App',
           })
-          .timeout(const Duration(seconds: 6));
+          .timeout(AppConfig.geocodeTimeout);
       if (resp.statusCode != 200) {
         _addToCache(key, null);
         return null;
@@ -47,7 +48,12 @@ class GeocodeService {
         return null;
       }
 
-      final item = decoded.first as Map<String, dynamic>;
+      final first = decoded.first;
+      if (first is! Map<String, dynamic>) {
+        _addToCache(key, null);
+        return null;
+      }
+      final item = first;
       final lat = double.tryParse('${item['lat']}');
       final lon = double.tryParse('${item['lon']}');
       if (lat == null || lon == null) {

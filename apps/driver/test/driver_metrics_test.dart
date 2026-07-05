@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_driver/data/mock_data.dart' as mock;
 import 'package:truxify_driver/utils/driver_metrics.dart';
-import 'setup/test_setup.dart';  // ← Changed from '../setup/' to 'setup/'
+import 'setup/test_setup.dart';
 
 void main() {
   setUpAll(() async {

@@ -220,3 +220,43 @@ CREATE POLICY "Users access own user_devices"
   ON user_devices FOR ALL TO authenticated
   USING (user_id = get_profile_id())
   WITH CHECK (user_id = get_profile_id());
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- 13. DRIVER LOCATIONS  (real-time GPS coordinates)
+-- ────────────────────────────────────────────────────────────────────────────
+-- SECURITY: Each driver can only access their own location data.
+-- Admins can access all locations for dispatch operations.
+-- This prevents the vulnerability where any authenticated driver could query
+-- other drivers' real-time locations.
+
+ALTER TABLE IF EXISTS driver_locations ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Service role full access on driver_locations" ON driver_locations;
+CREATE POLICY "Service role full access on driver_locations"
+  ON driver_locations FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Drivers select own location" ON driver_locations;
+CREATE POLICY "Drivers select own location"
+  ON driver_locations FOR SELECT TO authenticated
+  USING (driver_id = get_profile_id());
+
+DROP POLICY IF EXISTS "Drivers update own location" ON driver_locations;
+CREATE POLICY "Drivers update own location"
+  ON driver_locations FOR UPDATE TO authenticated
+  USING (driver_id = get_profile_id())
+  WITH CHECK (driver_id = get_profile_id());
+
+DROP POLICY IF EXISTS "Drivers insert own location" ON driver_locations;
+CREATE POLICY "Drivers insert own location"
+  ON driver_locations FOR INSERT TO authenticated
+  WITH CHECK (driver_id = get_profile_id());
+
+DROP POLICY IF EXISTS "Admins select all driver locations" ON driver_locations;
+CREATE POLICY "Admins select all driver locations"
+  ON driver_locations FOR SELECT TO authenticated
+  USING ((SELECT role FROM profiles WHERE id = get_profile_id()) = 'admin');
+
+DROP POLICY IF EXISTS "Admins can update driver locations" ON driver_locations;
+CREATE POLICY "Admins can update driver locations"
+  ON driver_locations FOR UPDATE TO authenticated
+  USING ((SELECT role FROM profiles WHERE id = get_profile_id()) = 'admin');

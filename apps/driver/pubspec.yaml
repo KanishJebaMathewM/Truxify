@@ -31,6 +31,7 @@ dependencies:
   url_launcher: ^6.3.2
   geolocator: ^14.0.2
   shimmer: ^3.0.0
+  permission_handler: ^11.4.0
 
 dev_dependencies:
   flutter_lints: ^6.0.0

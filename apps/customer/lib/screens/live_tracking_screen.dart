@@ -7,6 +7,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core/offline/websocket/resilient_websocket.dart';
 import '../theme/app_theme.dart';
 import '../constants/supabase_config.dart';
@@ -38,6 +39,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   static const String _fallbackTruckText = 'Truck not assigned';
 
   String _driverName = _loadingDriverText;
+  String? _driverPhone;
   String _truckNumber = _loadingTruckText;
   bool _isLoadingDetails = false;
   LatLng? _previousPosition;
@@ -73,6 +75,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     if (SupabaseConfig.isConfigured) {
       _subscribeToOrderUpdates();
       _subscribeToTracking();
+    } else {
+      debugPrint('[LiveTracking] Supabase not configured — real-time updates disabled');
     }
   }
 
@@ -224,6 +228,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
           } else {
             _driverName = _loadingDriverText;
           }
+          _driverPhone = order['driver_phone']?.toString().trim();
 
           if (tn != null && tn.isNotEmpty) {
             _truckNumber = tn;
@@ -493,48 +498,25 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   Future<void> _showCallDriver() async {
     final driverName = _driverName;
     final truckNumber = _truckNumber;
+    final phone = _driverPhone;
 
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 8),
-              const Icon(Icons.call_rounded,
-                  color: TruxifyColors.accentDark, size: 42),
-              const SizedBox(height: 10),
-              Text(
-                'Calling $driverName',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleLarge
-                    ?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                truckNumber,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: TruxifyColors.adaptiveSecondaryText(context),
-                    ),
-              ),
-              const SizedBox(height: 18),
-              PrimaryButton(
-                label: 'End Call',
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+    if (phone == null || phone.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Driver contact number unavailable')),
+      );
+      return;
+    }
+
+    final uri = Uri.parse('tel:$phone');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not initiate call to $phone')),
+      );
+    }
   }
 
   Future<void> _showChangeDrop() async {
@@ -657,7 +639,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   Future<void> _showCancel() async {
     bool isLoading = false;
-    String? feeText = _order?['cancellation_fee'] != null ? 'Cancellation fee ₹${_order!['cancellation_fee']}' : null;
+    final rawFee = _order?['cancellation_fee'];
+    final feeInRupees = rawFee != null ? (rawFee as num) / 100 : null;
+    String? feeText = feeInRupees != null ? 'Cancellation fee ₹${feeInRupees.toStringAsFixed(2)}' : null;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -689,11 +673,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                           setModalState(() => isLoading = true);
                           try {
                             final resp = await _orderService.cancelOrder(orderDisplayId: widget.orderId);
-                            final fee = resp['cancellation_fee'];
+                            final rawFee = resp['cancellation_fee'];
+                            final feeInRupees = rawFee != null ? (rawFee as num) / 100 : 0;
                             await _loadOrder();
                             if (!mounted) return;
                             Navigator.of(context).pop();
-                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Order cancelled. Fee: ₹${fee ?? 0}')));
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Order cancelled. Fee: ₹${feeInRupees.toStringAsFixed(2)}')));
                           } catch (e) {
                             setModalState(() => isLoading = false);
                             if (!mounted) return;

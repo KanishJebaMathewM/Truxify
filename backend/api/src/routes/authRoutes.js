@@ -11,11 +11,22 @@
 
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
-import { invalidateCachedProfile } from '../lib/profileCache.js';
+import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
 import { firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+
+export function withTimeout(operation, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([operation, timeout]).finally(() => {
+    clearTimeout(timer);
+  });
+}
 
 /**
  * POST /api/auth/logout
@@ -28,12 +39,14 @@ router.post('/logout', authenticate, async (req, res) => {
   // ── 1. Invalidate Redis profile cache ──────────────────────────────
   // Bounded timeout prevents Redis hangs from blocking the logout response.
   try {
-    await Promise.race([
-      invalidateCachedProfile(uid),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Redis invalidation timeout')), 2000)
-      ),
-    ]);
+    await withTimeout(
+      Promise.all([
+        uid ? invalidateCachedProfile(uid) : Promise.resolve(),
+        req.user && req.user.id ? invalidateCachedSupabaseProfile(req.user.id) : Promise.resolve(),
+      ]),
+      2000,
+      'Redis invalidation timeout'
+    );
   } catch (err) {
     logger.warn(`[auth/logout] Cache invalidation skipped for uid=${uid}: ${err?.message}`);
   }
@@ -42,12 +55,11 @@ router.post('/logout', authenticate, async (req, res) => {
   // Bounded timeout prevents Firebase hangs from blocking the logout response.
   if (uid && firebaseAdmin) {
     try {
-      await Promise.race([
+      await withTimeout(
         firebaseAdmin.auth().revokeRefreshTokens(uid),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Firebase revocation timeout')), 3000)
-        ),
-      ]);
+        3000,
+        'Firebase revocation timeout'
+      );
     } catch (err) {
       logger.error(`[auth/logout] Firebase token revocation failed for uid=${uid}: ${err?.message}`);
     }

@@ -1,10 +1,31 @@
 import { Server } from "socket.io";
-import jwt from "jsonwebtoken";
+import logger from "../middleware/logger.js";
 import { GpsLog } from "../models/GpsLog.js";
+import { supabase } from "../config/db.js";
+
+let io = null;
+// Telemetry Bulk Insert Buffer
+const BATCH_FLUSH_INTERVAL_MS = 2000;
+const gpsBuffer = [];
+
+setInterval(async () => {
+  if (gpsBuffer.length === 0) return;
+  
+  // Safely extract the current batch
+  const batch = gpsBuffer.splice(0, gpsBuffer.length);
+  
+  try {
+    await GpsLog.insertMany(batch, { ordered: false });
+    logger.debug(`[WS] Bulk inserted ${batch.length} GPS points into MongoDB.`);
+  } catch (error) {
+    logger.error({ error: error.message }, '[WS] Failed to bulk insert GPS buffer to MongoDB');
+  }
+}, BATCH_FLUSH_INTERVAL_MS);
 
 /**
- * Attaches the Truxify Live Location WebSocket server to an existing
- * Node.js HTTP server.
+ * Initializes the Truxify Live Location WebSocket server on top of an existing
+ * Node.js HTTP server. Should be called once during startup after MongoDB
+ * is available.
  *
  * Architecture:
  *  /driver namespace — Driver app sends GPS updates here
@@ -21,8 +42,12 @@ import { GpsLog } from "../models/GpsLog.js";
  *
  * @param {import("http").Server} httpServer - Existing HTTP server instance
  */
-export function attachLocationServer(httpServer) {
-  const io = new Server(httpServer, {
+export function initLocationServer(httpServer) {
+  if (io) {
+    logger.warn('[initLocationServer] Already initialized — skipping duplicate call.');
+    return;
+  }
+  io = new Server(httpServer, {
     cors: {
       origin: process.env.ALLOWED_ORIGINS?.split(",") || [
         "http://localhost:3000",
@@ -44,7 +69,7 @@ export function attachLocationServer(httpServer) {
   driverNs.on("connection", (socket) => {
     const { driverId, bookingId } = socket.data;
 
-    console.log(`[WS] Driver ${driverId} connected for booking ${bookingId}`);
+    logger.info(`[WS] Driver ${driverId} connected for booking ${bookingId}`);
 
     // Join their booking room (for server-side routing)
     socket.join(`driver:${driverId}`);
@@ -79,8 +104,8 @@ export function attachLocationServer(httpServer) {
 
         const gpsTimestamp = timestamp ? new Date(timestamp) : new Date();
 
-        // 1. Persist GPS point to MongoDB time-series collection
-        await GpsLog.create({
+        // 1. Buffer GPS point to MongoDB time-series collection
+        gpsBuffer.push({
           bookingId,
           driverId,
           lat,
@@ -103,17 +128,17 @@ export function attachLocationServer(httpServer) {
           });
 
       } catch (error) {
-        console.error(`[WS] GPS persist error for driver ${driverId}:`, error);
+        logger.error({ driverId, error: error.message }, '[WS] GPS persist error for driver');
         socket.emit("error", { message: "Failed to process location update" });
       }
     });
 
     socket.on("disconnect", (reason) => {
-      console.log(`[WS] Driver ${driverId} disconnected: ${reason}`);
+      logger.info(`[WS] Driver ${driverId} disconnected: ${reason}`);
     });
 
     socket.on("error", (error) => {
-      console.error(`[WS] Driver socket error (${driverId}):`, error);
+      logger.error({ driverId, error: error.message }, `[WS] Driver socket error`);
     });
   });
 
@@ -125,7 +150,7 @@ export function attachLocationServer(httpServer) {
   customerNs.on("connection", (socket) => {
     const { customerId } = socket.data;
 
-    console.log(`[WS] Customer ${customerId} connected`);
+    logger.info(`[WS] Customer ${customerId} connected`);
 
     /**
      * Customer subscribes to a specific booking's live location.
@@ -175,7 +200,7 @@ export function attachLocationServer(httpServer) {
         socket.emit("subscribed", { bookingId });
 
       } catch (error) {
-        console.error(`[WS] Subscribe error for customer ${customerId}:`, error);
+        logger.error({ customerId, error: error.message }, '[WS] Subscribe error for customer');
         socket.emit("error", { message: "Failed to subscribe to booking" });
       }
     });
@@ -185,11 +210,11 @@ export function attachLocationServer(httpServer) {
     });
 
     socket.on("disconnect", (reason) => {
-      console.log(`[WS] Customer ${customerId} disconnected: ${reason}`);
+      logger.info(`[WS] Customer ${customerId} disconnected: ${reason}`);
     });
   });
 
-  console.log("[WS] Truxify Location Server attached (/driver + /customer)");
+  logger.info("[WS] Truxify Location Server attached (/driver + /customer)");
 
   return io;
 }
@@ -215,13 +240,30 @@ async function verifyDriverToken(socket, next) {
       return next();
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // Use the same Supabase auth verification as the REST API
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      return next(new Error("Invalid or expired authentication token"));
+    }
 
-    if (decoded.role !== "driver") {
+    // Look up profile to verify role and get driver ID
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', user.id)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      return next(new Error("Forbidden: user profile not found"));
+    }
+
+    if (profile.role !== 'driver') {
       return next(new Error("Forbidden: driver role required"));
     }
 
-    socket.data.driverId = decoded.sub;
+    socket.data.driverId = profile.id;
     socket.data.bookingId = socket.handshake.auth.bookingId;
 
     if (!socket.data.bookingId) {
@@ -250,13 +292,30 @@ async function verifyCustomerToken(socket, next) {
       return next();
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    // Use the same Supabase auth verification as the REST API
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    
+    if (authError || !user) {
+      return next(new Error("Invalid or expired authentication token"));
+    }
 
-    if (decoded.role !== "customer") {
+    // Look up profile to verify role and get customer ID
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', user.id)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (profileError || !profile) {
+      return next(new Error("Forbidden: user profile not found"));
+    }
+
+    if (profile.role !== 'customer') {
       return next(new Error("Forbidden: customer role required"));
     }
 
-    socket.data.customerId = decoded.sub;
+    socket.data.customerId = profile.id;
     next();
   } catch (error) {
     next(new Error(`Authentication failed: ${error.message}`));
@@ -269,8 +328,7 @@ async function verifyCustomerToken(socket, next) {
  */
 async function verifyBookingOwnership(customerId, bookingId) {
   try {
-    // Import Supabase client from existing db module
-    const { supabase } = await import("../config/supabase.js");
+    // Use Supabase client from existing db module
 
     const { data, error } = await supabase
       .from("bookings")
@@ -281,7 +339,37 @@ async function verifyBookingOwnership(customerId, bookingId) {
 
     if (error || !data) return false;
     return true;
-  } catch {
+  } catch (err) {
+    logger.error({ err }, '[WS] isCustomerAuthorized error');
     return false;
   }
+}
+
+/**
+ * Gracefully closes the location WebSocket server.
+ * Should be called during shutdown to release all Socket.IO resources.
+ */
+export async function closeLocationServer() {
+  if (!io) {
+    return;
+  }
+  return new Promise((resolve) => {
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        logger.warn('[closeLocationServer] Timeout — forcing close.');
+        resolve();
+      }
+    }, 5000);
+
+    io.close(() => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        logger.info('[closeLocationServer] Location WebSocket server closed.');
+        resolve();
+      }
+    });
+  });
 }

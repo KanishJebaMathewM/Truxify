@@ -1,7 +1,7 @@
 import { supabase, redisClient } from '../config/db.js';
 import { escrowRelease } from './escrow.js';
+import logger from '../middleware/logger.js';
 import os from 'os';
-
 const DEFAULT_INTERVAL_MS = 60_000;
 const LOCK_KEY = 'escrow:release:reconciliation:lock';
 const LOCK_TTL_SECONDS = 120;
@@ -18,17 +18,19 @@ export async function reconcilePendingEscrowReleases() {
     try {
       const acquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
       if (!acquired) {
-        console.log('[escrow-release-reconciliation] Lock held by another instance, skipping.');
+        logger.info('[escrow-release-reconciliation] Lock held by another instance, skipping.');
         return;
       }
       lockAcquired = true;
       leaseExtender = setInterval(async () => {
         try {
           await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-        } catch (_) {}
+        } catch (err) {
+          logger.warn('[escrow-release-reconciliation] Failed to extend lock lease:', err.message);
+        }
       }, LEASE_EXTENSION_INTERVAL_MS);
     } catch (err) {
-      console.error('[escrow-release-reconciliation] Failed to acquire Redis lock:', err.message);
+      logger.error('[escrow-release-reconciliation] Failed to acquire Redis lock:', err.message);
     }
   }
 
@@ -47,12 +49,12 @@ export async function reconcilePendingEscrowReleases() {
       .limit(50);
 
     if (error) {
-      console.error('[escrow-release-reconciliation] Failed to load failed releases:', error.message);
+      logger.error('[escrow-release-reconciliation] Failed to load failed releases:', error.message);
       return;
     }
 
     if (!failedOrders || failedOrders.length === 0) {
-      console.log('[escrow-release-reconciliation] No pending release failures found.');
+      logger.info('[escrow-release-reconciliation] No pending release failures found.');
       return;
     }
 
@@ -64,8 +66,8 @@ export async function reconcilePendingEscrowReleases() {
             p_instance_id: instanceId,
           });
 
-        if ((!claimed || claimed.length === 0) && !claimError) {
-          console.log(`[escrow-release-reconciliation] Order ${order.order_display_id} already claimed by another instance, skipping.`);
+        if ((!claimed || (Array.isArray(claimed) && claimed.length === 0)) && !claimError) {
+          logger.info(`[escrow-release-reconciliation] Order ${order.order_display_id} already claimed by another instance, skipping.`);
           continue;
         }
 
@@ -76,7 +78,7 @@ export async function reconcilePendingEscrowReleases() {
             .eq('id', order.id)
             .maybeSingle();
           if (existing && (existing.escrow_status !== 'release_failed' || existing.reconciled_by)) {
-            console.log(`[escrow-release-reconciliation] Order ${order.order_display_id} already processed, skipping.`);
+            logger.info(`[escrow-release-reconciliation] Order ${order.order_display_id} already processed, skipping.`);
             continue;
           }
         }
@@ -102,15 +104,16 @@ export async function reconcilePendingEscrowReleases() {
             updated_at: releasedAt,
           })
           .eq('id', order.id)
-          .eq('escrow_status', 'release_failed');
+          .eq('escrow_status', 'release_failed')
+          .is('reconciled_by', null);
 
         if (updateError) {
-          console.error(
+          logger.error(
             `[escrow-release-reconciliation] Failed to finalize release for ${order.order_display_id}:`,
             updateError.message
           );
         } else {
-          console.log(`[escrow-release-reconciliation] Release succeeded for ${order.order_display_id}`);
+          logger.info(`[escrow-release-reconciliation] Release succeeded for ${order.order_display_id}`);
         }
       } catch (err) {
         const releaseAttemptedAt = new Date().toISOString();
@@ -127,19 +130,19 @@ export async function reconcilePendingEscrowReleases() {
           .eq('id', order.id);
 
         if (attemptError) {
-          console.error(
+          logger.error(
             `[escrow-release-reconciliation] Failed to update attempt count for ${order.order_display_id}:`,
             attemptError.message
           );
         }
 
         if (releaseAttempts >= MAX_RETRIES) {
-          console.error(
+          logger.error(
             `[escrow-release-reconciliation] Order ${order.order_display_id} has failed ${releaseAttempts} times. Escalating to manual review.`
           );
         } else {
           const backoffMs = Math.min(1000 * Math.pow(2, releaseAttempts), 60000);
-          console.warn(
+          logger.warn(
             `[escrow-release-reconciliation] Release retry ${releaseAttempts}/${MAX_RETRIES} for ${order.order_display_id} failed. Will retry in ${backoffMs}ms.`
           );
         }
@@ -150,7 +153,11 @@ export async function reconcilePendingEscrowReleases() {
       clearInterval(leaseExtender);
     }
     if (lockAcquired && redisClient) {
-      await redisClient.del(LOCK_KEY).catch(() => {});
+      try {
+        await redisClient.del(LOCK_KEY);
+      } catch (err) {
+        logger.warn('[escrow-release-reconciliation] Failed to release Redis lock:', err.message);
+      }
     }
     if (!lockAcquired) {
       reconciliationRunning = false;

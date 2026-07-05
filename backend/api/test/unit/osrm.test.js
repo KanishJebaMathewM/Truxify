@@ -194,7 +194,8 @@ describe('osrm - getRouteEstimate', () => {
     expect(result).toBeNull();
     // After retries are exhausted, error is logged with 'after all retries' message
     expect(mockLogger.error).toHaveBeenCalledWith(
-      '[osrm] Fetch error after all %d retries: %s', 3, 'AbortError'
+      { maxRetries: 3, errMessage: 'AbortError' },
+      'Fetch error after all retries:'
     );
   });
 
@@ -252,7 +253,7 @@ describe('osrm - getRouteEstimate', () => {
       'osrm:route:v2:12.9716:77.5946:13.0827:80.2707',
       JSON.stringify(result),
       'EX',
-      3600
+      86400
     );
   });
 

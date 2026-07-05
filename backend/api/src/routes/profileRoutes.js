@@ -108,12 +108,14 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
       return res.status(500).json({ error: 'Failed to update wallet address.', details: updateErr.message });
     }
 
-    const { error: driverDetailsErr } = await supabase
-      .from('driver_details')
-      .upsert({ user_id: userId, polygon_wallet_address: normalized }, { onConflict: 'user_id' });
+    if (req.user.role === 'driver') {
+      const { error: driverDetailsErr } = await supabase
+        .from('driver_details')
+        .upsert({ user_id: userId, polygon_wallet_address: normalized }, { onConflict: 'user_id' });
 
-    if (driverDetailsErr) {
-      return res.status(500).json({ error: 'Failed to sync wallet to driver details.', details: driverDetailsErr.message });
+      if (driverDetailsErr) {
+        return res.status(500).json({ error: 'Failed to sync wallet to driver details.', details: driverDetailsErr.message });
+      }
     }
 
     if (req.user && req.user.uid) {
@@ -284,13 +286,15 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
     });
 
     if (format === 'csv') {
-      const csvRows = [
-        ['ID', 'Order Display ID', 'Pickup Address', 'Drop Address', 'Pickup Date', 'Base Freight', 'Platform Fee', 'Toll Estimate', 'Net Earnings', 'Status'],
-        ...tripsList.map(t => [t.id, t.order_display_id, t.pickup_address, t.drop_address, t.pickup_date, t.base_freight, t.platform_fee, t.toll_estimate, t.net_earnings, t.status])
-      ];
-      const csvString = csvRows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',')).join('\n');
+      // Optimize memory: construct CSV string directly using string builder/loop
+      const headers = ['ID', 'Order Display ID', 'Pickup Address', 'Drop Address', 'Pickup Date', 'Base Freight', 'Platform Fee', 'Toll Estimate', 'Net Earnings', 'Status'];
+      let csvString = headers.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',') + '\n';
+      for (const t of tripsList) {
+        const row = [t.id, t.order_display_id, t.pickup_address, t.drop_address, t.pickup_date, t.base_freight, t.platform_fee, t.toll_estimate, t.net_earnings, t.status];
+        csvString += row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',') + '\n';
+      }
       res.setHeader('Content-Type', 'text/csv');
-      return res.send(csvString);
+      return res.send(csvString.trimEnd());
     }
     if (sort_by === 'net_earnings') {
       tripsList.sort((a, b) => b.net_earnings - a.net_earnings);
@@ -309,8 +313,8 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
       trips: tripsList
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Internal Server Error', details: err.message, stack: err.stack });
+    logger.error(err);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
   }
 });
 
@@ -325,11 +329,19 @@ router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), asyn
       return res.status(400).json({ error: 'userId path parameter is required.' });
     }
 
-    let { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, firebase_uid')
-      .eq('id', targetUserId)
-      .maybeSingle();
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    let profile = null;
+    let profileError = null;
+
+    if (uuidRegex.test(targetUserId)) {
+      const result = await supabase
+        .from('profiles')
+        .select('id, firebase_uid')
+        .eq('id', targetUserId)
+        .maybeSingle();
+      profile = result.data;
+      profileError = result.error;
+    }
 
     if (!profile && !profileError) {
       const firebaseLookup = await supabase

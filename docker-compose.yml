@@ -19,7 +19,6 @@ services:
     depends_on:
       - mongo
       - redis
-      - db
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:5000/api/health/live || curl -sf http://localhost:5000/api/health/live"]
       interval: 30s

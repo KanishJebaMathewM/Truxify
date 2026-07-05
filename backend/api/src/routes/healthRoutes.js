@@ -2,7 +2,6 @@ import express from 'express';
 import { supabase, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 import { healthLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
-import { healthLimiter } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
 
@@ -65,6 +64,8 @@ function checkPolygon() {
 }
 
 const CRITICAL_UNHEALTHY = new Set(['failed', 'not_configured']);
+// Optional services treat 'not_configured' as healthy — only actual failures are critical.
+const CRITICAL_UNHEALTHY_OPTIONAL = new Set(['failed']);
 
 // GET /api/health — full dependency check; returns 503 when a critical service fails
 router.get('/', healthLimiter, async (req, res) => {
@@ -82,8 +83,12 @@ router.get('/', healthLimiter, async (req, res) => {
     polygon: checkPolygon(),
   };
 
+  // Redis is a non-critical cache: every consumer has an in-memory fallback,
+  // so a Redis failure is reported in `services` but does not degrade overall
+  // health. Supabase and MongoDB remain critical.
   const criticalFailed =
-    CRITICAL_UNHEALTHY.has(supabaseStatus) || CRITICAL_UNHEALTHY.has(mongoStatus);
+    CRITICAL_UNHEALTHY.has(supabaseStatus) ||
+    CRITICAL_UNHEALTHY_OPTIONAL.has(mongoStatus);
 
   const status = criticalFailed ? 'degraded' : 'ok';
   const httpStatus = criticalFailed ? 503 : 200;
@@ -100,4 +105,11 @@ router.get('/live', healthLimiter, (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
+// GET /api/health/ready � readiness probe for k8s
+router.get('/ready', healthLimiter, (req, res) => res.json({ status: 'ready' }));
+
+// GET /api/health/ready — readiness probe for k8s
+router.get('/ready', healthLimiter, (req, res) => res.json({ status: 'ready' }));
+
 export default router;
+

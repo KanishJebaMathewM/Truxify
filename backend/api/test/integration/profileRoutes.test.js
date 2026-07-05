@@ -110,6 +110,9 @@ describe('Profile Routes', () => {
         language: 'en',
         darkMode: false,
         isActive: true,
+        // Wallet fields introduced by the escrow payout feature
+        walletAddress: null,
+        polygonWalletAddress: null,
       });
 
       expect(res.body.extra).toEqual({
@@ -160,11 +163,15 @@ describe('Profile Routes', () => {
         fullName: 'John Driver',
         phone: '+919999999999',
         email: 'john@example.com',
-        companyName: null,
+        // companyName defaults to an empty string (display-safe) when unset
+        companyName: '',
         avatarUrl: 'https://r2.com/driver.jpg',
         language: 'hi',
         darkMode: true,
         isActive: true,
+        // Wallet fields introduced by the escrow payout feature
+        walletAddress: null,
+        polygonWalletAddress: null,
       });
 
       expect(res.body.extra).toEqual({
@@ -523,23 +530,27 @@ describe('Profile Routes', () => {
 
   describe('DELETE /api/profile/admin/cache/:userId', () => {
     it('invalidates Firebase and Supabase profile caches when passed a profile id', async () => {
+      // The route only attempts an id lookup for UUID-shaped input
+      // (non-UUID strings would fail the Postgres uuid cast), so the
+      // fixture id must be a real UUID.
+      const customerUuid = '3f2e1d4c-5b6a-4789-9abc-def012345678';
       m.store.profiles.push({
-        id: 'customer-uuid-123',
+        id: customerUuid,
         firebase_uid: 'firebase-cust-uid',
         role: 'customer',
       });
 
       const res = await request(buildApp())
-        .delete('/api/profile/admin/cache/customer-uuid-123')
+        .delete(`/api/profile/admin/cache/${customerUuid}`)
         .set(ADMIN_HEADERS);
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
         success: true,
-        message: 'Cache invalidated for user customer-uuid-123.',
+        message: `Cache invalidated for user ${customerUuid}.`,
       });
       expect(invalidateCachedProfile).toHaveBeenCalledWith('firebase-cust-uid');
-      expect(invalidateCachedSupabaseProfile).toHaveBeenCalledWith('customer-uuid-123');
+      expect(invalidateCachedSupabaseProfile).toHaveBeenCalledWith(customerUuid);
     });
 
     it('resolves Firebase uid input before invalidating both profile caches', async () => {

@@ -71,17 +71,18 @@ describe('ProfileModel.fromProfile', () => {
     const result = ProfileModel.fromProfile(profile);
 
     expect(result.id).toBe('profile-456');
-    expect(result.fullName).toBeNull();
+    // fullName defaults to an empty string (display-safe) rather than null
+    expect(result.fullName).toBe('');
     expect(result.walletAddress).toBeNull();
     expect(result.polygonWalletAddress).toBeNull();
   });
 
-  it('throws TypeError when input is undefined', () => {
-    expect(() => ProfileModel.fromProfile(undefined)).toThrow(TypeError);
+  it('returns default object when input is undefined', () => {
+    expect(ProfileModel.fromProfile(undefined).role).toBe('user');
   });
 
-  it('throws TypeError when input is null', () => {
-    expect(() => ProfileModel.fromProfile(null)).toThrow(TypeError);
+  it('returns null when input is null', () => {
+    expect(ProfileModel.fromProfile(null)).toBeNull();
   });
 });
 
@@ -106,8 +107,12 @@ describe('ProfileModel.fromCustomerStats', () => {
     expect(ProfileModel.fromCustomerStats(null)).toBeNull();
   });
 
-  it('returns null for undefined input', () => {
-    expect(ProfileModel.fromCustomerStats(undefined)).toBeNull();
+  it('returns defaults for undefined input', () => {
+    expect(ProfileModel.fromCustomerStats(undefined)).toEqual({
+      totalOrders: 0,
+      totalSaved: 0,
+      co2ReducedKg: 0,
+    });
   });
 
   it('maps partial stats fields', () => {
@@ -116,8 +121,8 @@ describe('ProfileModel.fromCustomerStats', () => {
     const result = ProfileModel.fromCustomerStats(stats);
 
     expect(result.totalOrders).toBe(5);
-    expect(result.totalSaved).toBeUndefined();
-    expect(result.co2ReducedKg).toBeUndefined();
+    expect(result.totalSaved).toBe(0);
+    expect(result.co2ReducedKg).toBe(0);
   });
 });
 
@@ -152,8 +157,17 @@ describe('ProfileModel.fromDriverDetails', () => {
     expect(ProfileModel.fromDriverDetails(null)).toBeNull();
   });
 
-  it('returns null for undefined input', () => {
-    expect(ProfileModel.fromDriverDetails(undefined)).toBeNull();
+  it('returns defaults for undefined input', () => {
+    expect(ProfileModel.fromDriverDetails(undefined)).toEqual({
+      truckId: null,
+      rating: 0,
+      totalTrips: 0,
+      completionRate: 0,
+      isOnline: false,
+      walletConfirmed: 0,
+      walletPending: 0,
+      walletTotal: 0,
+    });
   });
 
   it('maps partial driver details', () => {
@@ -163,7 +177,7 @@ describe('ProfileModel.fromDriverDetails', () => {
 
     expect(result.rating).toBe(3.5);
     expect(result.totalTrips).toBe(10);
-    expect(result.truckId).toBeUndefined();
-    expect(result.walletTotal).toBeUndefined();
+    expect(result.truckId).toBeNull();
+    expect(result.walletTotal).toBe(0);
   });
 });

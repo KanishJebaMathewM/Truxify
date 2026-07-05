@@ -26,16 +26,16 @@ import { ethers } from 'ethers';
 import logger from '../middleware/logger.js';
 
 const ESCROW_ABI = [
-  'function deposit(bytes32 bookingId, address payable customer, address payable driver) external payable',
-  'function releaseFunds(bytes32 bookingId) external',
-  'function refundFunds(bytes32 bookingId) external',
-  'function escrows(bytes32 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status)',
+  'function createBooking(uint256 bookingId, address payable driver) external payable',
+  'function releasePayment(uint256 bookingId) external',
+  'function cancelBooking(uint256 bookingId) external',
+  'function bookings(uint256 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, uint256 createdAt)',
 ];
 
 const rpcUrl            = process.env.POLYGON_RPC_URL;
 const contractAddress   = process.env.ESCROW_CONTRACT_ADDRESS;
 const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
-export const ESCROW_MATIC_PER_PAISA = parseFloat(process.env.ESCROW_MATIC_PER_PAISA ?? '0.01');
+export const ESCROW_MATIC_PER_PAISA = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0.01');
 
 /** @type {ethers.Contract | null} */
 let escrowContract = null;
@@ -93,24 +93,41 @@ export async function buildDepositTx(orderDisplayId, customerWalletAddress, driv
     return { txData: null, bookingId };
   }
 
-  const txData = await escrowContract.deposit.populateTransaction(
-    bookingId,
-    customerWalletAddress,
-    driverWalletAddress,
-    {
-      value: amountWei,
-    }
-  );
+  let txData;
+  try {
+    txData = await escrowContract.deposit.populateTransaction(
+      bookingId,
+      customerWalletAddress,
+      driverWalletAddress,
+      {
+        value: amountWei,
+      }
+    );
+  } catch (err) {
+    logger.error(`[escrow] Failed to build deposit tx for booking ${orderDisplayId}: ${err.message}`);
+    return { txData: null, bookingId, error: err.message };
+  }
   logger.info(`[escrow] Deposit tx built for booking ${orderDisplayId}`);
   return { txData, bookingId };
 }
 
-export async function recordDepositTx(bookingId, txHash) {
+export async function recordDepositTx(bookingId, txHash, expectedSenderAddress = null) {
   if (!escrowContract) {
     return { error: 'Contract not initialised' };
   }
   if (!ethers.isHexString(txHash, 32)) {
     return { error: 'Invalid transaction hash' };
+  }
+
+  // Idempotency: check if this booking already has a funded escrow on-chain
+  try {
+    const booking = await escrowContract.bookings(bookingId);
+    if (booking && booking.amount > 0n) {
+      logger.info(`[escrow] Booking ${bookingId} already has a funded escrow — idempotency skip.`);
+      return { txHash: txHash, bookingId, alreadyFunded: true };
+    }
+  } catch (err) {
+    logger.warn(`[escrow] Failed to check existing escrow status for ${bookingId}: ${err.message}, proceeding.`);
   }
 
   const provider = escrowContract.runner.provider;
@@ -135,18 +152,21 @@ export async function recordDepositTx(bookingId, txHash) {
     return { error: 'Failed to parse transaction data' };
   }
 
-  if (!decoded || decoded.name !== 'deposit') {
-    return { error: 'Transaction is not a deposit call' };
+  if (!decoded || decoded.name !== 'createBooking') {
+    return { error: 'Transaction is not a createBooking call' };
   }
 
-  const [txBookingId, txCustomer] = decoded.args;
+  const [txBookingId, txDriver] = decoded.args;
   if (txBookingId !== bookingId) {
     return { error: 'Transaction booking ID does not match' };
   }
 
-  // Verify the on-chain sender matches the customer address in the deposit call.
-  if (tx.from.toLowerCase() !== txCustomer.toLowerCase()) {
-    return { error: 'Transaction sender does not match registered customer wallet' };
+  // (No txCustomer argument in createBooking, so we skip that check).
+  // We can still verify the on-chain sender (tx.from) is expected.
+
+  // If an expected sender address was provided (from order record), verify it matches.
+  if (expectedSenderAddress && tx.from.toLowerCase() !== expectedSenderAddress.toLowerCase()) {
+    return { error: 'Transaction sender does not match the registered customer wallet for this order' };
   }
 
   logger.info(`[escrow] deposit confirmed for booking ${bookingId} in block ${receipt.blockNumber}`);
@@ -169,8 +189,8 @@ export async function escrowRelease(orderDisplayId) {
   }
 
   try {
-    const escrow = await escrowContract.escrows(bookingId);
-    if (escrow && (escrow.status === 2 || Number(escrow.status) === 2)) {
+    const booking = await escrowContract.bookings(bookingId);
+    if (booking && booking.paid === true) {
       logger.info(`[escrow] Already released for booking ${orderDisplayId}, skipping.`);
       return { txHash: null, bookingId, alreadyReleased: true };
     }
@@ -178,45 +198,22 @@ export async function escrowRelease(orderDisplayId) {
     logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with release.`);
   }
 
-  const tx = await escrowContract.releaseFunds(bookingId);
-  logger.info(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
-  const receipt = await tx.wait(1);
-  logger.info(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
-  return { txHash: receipt.hash, bookingId };
+  try {
+    const tx = await escrowContract.releaseFunds(bookingId);
+    logger.info(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+    const receipt = await tx.wait(1);
+    logger.info(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+    return { txHash: receipt.hash, bookingId };
+  } catch (err) {
+    logger.error(`[escrow] releaseFunds failed for booking ${orderDisplayId}: ${err.message}`);
+    return { txHash: null, bookingId, error: err.message };
+  }
 }
 
 /**
- * Refund escrowed funds to the customer when an order is cancelled or disputed.
- * Must be called by an authorised relayer.
- *
- * @param {string} orderDisplayId
- * @returns {Promise<{txHash: string|null, bookingId: string}>}
+ * Submit an escrow refund and return its hash before confirmation.
+ * Callers can persist the hash before waiting on the network.
  */
-export async function escrowRefund(orderDisplayId) {
-  const bookingId = getEscrowBookingId(orderDisplayId);
-
-  if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — skipping refundFunds.');
-    return { txHash: null, bookingId };
-  }
-
-  try {
-    const escrow = await escrowContract.escrows(bookingId);
-    if (escrow && (escrow.status === 3 || Number(escrow.status) === 3)) {
-      logger.info(`[escrow] Already refunded for booking ${orderDisplayId}, skipping.`);
-      return { txHash: null, bookingId, alreadyRefunded: true };
-    }
-  } catch (err) {
-    logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with refund.`);
-  }
-
-  const submitted = await submitEscrowRefund(orderDisplayId);
-  if (!submitted.txHash) return submitted;
-
-  const receipt = await submitted.waitForConfirmation();
-  return { txHash: receipt.hash, bookingId: submitted.bookingId };
-}
-
 export async function submitEscrowRefund(orderDisplayId) {
   const bookingId = getEscrowBookingId(orderDisplayId);
 
@@ -225,8 +222,14 @@ export async function submitEscrowRefund(orderDisplayId) {
     return { txHash: null, bookingId };
   }
 
-  const tx = await escrowContract.refundFunds(bookingId);
-  logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+  let tx;
+  try {
+    tx = await escrowContract.refundFunds(bookingId);
+    logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+  } catch (err) {
+    logger.error(`[escrow] refundFunds failed for booking ${orderDisplayId}: ${err.message}`);
+    return { txHash: null, bookingId, error: err.message };
+  }
   return {
     txHash: tx.hash,
     bookingId,
@@ -235,7 +238,7 @@ export async function submitEscrowRefund(orderDisplayId) {
       if (!receipt || receipt.status === 0) {
         throw new Error('Escrow refund transaction reverted or was not found.');
       }
-      logger.info(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+      logger.info(`[escrow] cancelBooking confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
       return receipt;
     },
   };
@@ -257,4 +260,12 @@ export async function confirmEscrowRefund(txHash) {
     throw new Error('Escrow refund transaction reverted or was not found.');
   }
   return receipt;
+}
+
+export function bookingIdFromUuid(orderId) {
+  return getEscrowBookingId(orderId);
+}
+
+export async function releaseEscrowFunds(orderDisplayId) {
+  return escrowRelease(orderDisplayId);
 }

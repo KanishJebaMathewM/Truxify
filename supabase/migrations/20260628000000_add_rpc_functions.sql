@@ -20,7 +20,9 @@ create or replace function accept_bid_tx(
 ) returns void
 language plpgsql
 security definer
-as $$
+-- Set search_path to avoid search_path injection attacks
+set search_path = public
+as $
 declare
   v_load_status text;
   v_order_status text;
@@ -64,6 +66,7 @@ begin
         driver_rating    = p_driver_rating,
         truck_number     = p_truck_number,
         total_amount     = p_bid_amount,
+        bid_amount       = p_bid_amount,
         escrow_booking_id = coalesce(p_escrow_booking_id, escrow_booking_id),
         updated_at       = now()
     where id = p_order_id;
@@ -84,7 +87,9 @@ create or replace function withdraw_funds_tx(
 ) returns void
 language plpgsql
 security definer
-as $$
+-- Set search_path to avoid search_path injection attacks
+set search_path = public
+as $
 declare
   v_confirmed int;
   v_pending   int;
@@ -125,10 +130,16 @@ create or replace function submit_rating_tx(
 ) returns void
 language plpgsql
 security definer
-as $$
+-- Set search_path to avoid search_path injection attacks
+set search_path = public
+as $
 declare
   v_new_avg numeric(3,2);
 begin
+  if p_stars < 1 or p_stars > 5 then
+    raise exception 'Star rating must be between 1 and 5, got %', p_stars;
+  end if;
+
   insert into ratings (order_display_id, customer_id, driver_id, stars, comment)
   values (p_order_display_id, p_customer_id, p_driver_id, p_stars, p_comment);
 

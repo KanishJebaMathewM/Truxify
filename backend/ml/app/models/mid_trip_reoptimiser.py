@@ -1,6 +1,6 @@
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,6 @@ def find_mid_trip_loads(
                 continue  # Skip loads with unparseable deadlines
 
             travel_hours_to_pickup = dist_cur_pickup / _AVG_SPEED_KMH if _AVG_SPEED_KMH > 0 else float("inf")
-            from datetime import timedelta
             estimated_pickup_time = now + timedelta(hours=travel_hours_to_pickup)
 
             if estimated_pickup_time > deadline_dt:

@@ -4,7 +4,8 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
-import { escapeLike } from '../lib/escapeLike.js';
+import { validateParams } from '../middleware/validate.js';
+import { uuidParamSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
@@ -89,9 +90,6 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
     }
     query = query.eq('status', statusFilter);
 
-    // Escape LIKE special chars in user input to prevent injection
-    const escapeLike = (s) => String(s).replace(/[%_\\]/g, '\\$&');
-
     // Filters
     if (req.query.pickup_location) {
       const pickupLocation = Array.isArray(req.query.pickup_location) ? req.query.pickup_location[0] : req.query.pickup_location;
@@ -108,6 +106,9 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
       query = query.ilike('drop_address', `%${escapeLike(destination)}%`);
     }
     if (req.query.goods_type) {
+      if (typeof req.query.goods_type !== 'string') {
+        return res.status(400).json({ error: 'goods_type must be a single string' });
+      }
       query = query.eq('goods_type', req.query.goods_type);
     }
     if (filters.min_price !== undefined) {
@@ -134,7 +135,7 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
       sortBy = 'extra_distance_km';
     }
 
-    const ascending = req.query.order === 'asc';
+    const ascending = filters.order === 'asc';
 
     query = query.order(sortBy, { ascending }).range(from, to);
 
@@ -172,7 +173,7 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
 // 2. GET SINGLE LOAD OFFER BY ID (DRIVER)
 // GET /api/loads/:id
 // ============================================================================
-router.get('/:id', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/:id', authenticate, userLimiter, requireRole(['driver']), validateParams(uuidParamSchema), async (req, res) => {
   try {
     const { data: load, error } = await supabase
       .from('load_offers')

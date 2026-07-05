@@ -4,10 +4,14 @@ import { MongoClient } from 'mongodb';
 import Redis from 'ioredis';
 import * as admin from 'firebase-admin';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import logger from '../middleware/logger.js';
 
-// Load environment variables from root directory .env
-dotenv.config({ path: path.resolve(process.cwd(), '../../.env') });
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load environment variables relative to this module instead of process.cwd()
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // ============================================================================
 // 1. SUPABASE CLIENTS — anon key for public access (RLS enforced),
@@ -42,7 +46,7 @@ if (supabaseUrl && supabaseAnonKey) {
   );
 }
 
-if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseKey) {
+if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseAnonKey) {
   try {
     supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
       auth: {

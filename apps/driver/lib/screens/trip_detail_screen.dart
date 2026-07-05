@@ -109,7 +109,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                 decoration: BoxDecoration(
                   color: Theme.of(context).brightness == Brightness.dark
                       ? TruxifyColors.darkSecondaryBackground
-                      : const Color(0xFFF5F5F5),
+                      : TruxifyColors.secondaryBackground,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Column(
@@ -287,7 +287,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
               padding: const EdgeInsets.all(20),
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [TruxifyColors.accent, Color(0xFF5E0B0B)],
+                  colors: [TruxifyColors.accent, TruxifyColors.accentDark],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -423,7 +423,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                         builder: (context, snap) {
                           if (snap.connectionState != ConnectionState.done) {
                             return Container(
-                              color: const Color(0xFFF0E8E8),
+                              color: TruxifyColors.subtleBorder,
                               child: const Center(
                                   child: CircularProgressIndicator()),
                             );
@@ -433,7 +433,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                           if (result == null ||
                               (result.start == null && result.end == null)) {
                             return Container(
-                              color: const Color(0xFFF0E8E8),
+                              color: TruxifyColors.subtleBorder,
                               child: Stack(
                                 children: [
                                   Positioned(
@@ -811,7 +811,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                       Icons.chevron_right,
                       color: Theme.of(context).brightness == Brightness.dark
                           ? TruxifyColors.darkSecondaryText
-                          : const Color(0xFFCCBBBB),
+                          : TruxifyColors.navInactive,
                       size: 22,
                     ),
                   ],
@@ -826,7 +826,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
   Future<_RouteResult?> _loadRouteForTrip(String routeLabel) async {
     try {
-      final parts = routeLabel.split('→');
+      final normalized = routeLabel.replaceAll('->', '→').replaceAll('=>', '→');
+      final parts = normalized.split('→');
       final startLabel = parts.isNotEmpty ? parts[0].trim() : '';
       final endLabel = parts.length > 1 ? parts[1].trim() : '';
 

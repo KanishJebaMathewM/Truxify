@@ -1,0 +1,19 @@
+{
+  "@@locale": "en",
+  "appTitle": "Truxify",
+  "@appTitle": {
+    "description": "The title of the application"
+  },
+  "loginTitle": "Welcome to Truxify",
+  "@loginTitle": {
+    "description": "Greeting title on the login screen"
+  },
+  "bookLoadButton": "Book a Load",
+  "@bookLoadButton": {
+    "description": "Text for the book a load button"
+  },
+  "loadingText": "Loading...",
+  "@loadingText": {
+    "description": "Generic loading indicator text"
+  }
+}

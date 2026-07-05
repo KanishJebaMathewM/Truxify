@@ -1,6 +1,6 @@
 import logging
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
@@ -117,7 +117,6 @@ def find_return_loads(
                 continue
 
             travel_hours = distance_to_pickup / avg_speed_kmh if avg_speed_kmh > 0 else float("inf")
-            from datetime import timedelta
             estimated_arrival = arrival_dt + timedelta(hours=travel_hours)
             if estimated_arrival > deadline_dt:
                 continue  # Cannot reach in time

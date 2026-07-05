@@ -71,6 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _activeTripPayout = '';
   bool _isLoadingLocation = true;
   String? _locationError;
+  final List<TripRecord> tripHistory = [];
 
   late final MarketplaceRepository _marketplaceRepo;
   StreamSubscription<LoadOffer>? _loadSubscription;
@@ -159,8 +160,8 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         });
       });
-    } catch (_) {
-      // Supabase not available (e.g. in tests)
+    } catch (e) {
+      debugPrint('_subscribeToNewLoads error: $e');
     }
   }
 
@@ -173,9 +174,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final results = await Future.wait([
-        _earningsService.fetchTodayEarningsSummary(),
-        _earningsService.fetchDriverStats(),
-        _tripService.fetchTripHistory(limit: 50),
+        _earningsService.fetchTodayEarningsSummary().catchError((_) => null),
+        _earningsService.fetchDriverStats().catchError((_) => null),
+        _tripService.fetchTripHistory(limit: 50).catchError((_) => null),
       ]);
 
       if (!mounted) return;
@@ -1359,7 +1360,7 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         color: Theme.of(context).brightness == Brightness.dark
             ? Theme.of(context).colorScheme.surfaceContainerHighest
-            : const Color(0xFFF9F7F7),
+            : TruxifyColors.background,
         border: Border.all(color: TruxifyColors.border),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -1391,7 +1392,7 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         color: Theme.of(context).brightness == Brightness.dark
             ? Theme.of(context).colorScheme.surfaceContainerHighest
-            : const Color(0xFFF9F7F7),
+            : TruxifyColors.background,
         border: Border.all(color: TruxifyColors.border),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -1497,7 +1498,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: _isTripStarted
-                      ? const Color(0xFFEAFCEE)
+                      ? TruxifyColors.successLight
                       : TruxifyColors.accentLight,
                   borderRadius: BorderRadius.circular(6),
                 ),
@@ -1549,38 +1550,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 16),
           if (_isTripStarted) ...[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Next: Dhule Plaza in 42 km',
-                  style: GoogleFonts.dmSans(
-                      fontSize: 11, color: TruxifyColors.secondaryText),
-                ),
-                Text(
-                  '25% complete',
-                  style: GoogleFonts.dmSans(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: TruxifyColors.success),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(3),
-              child: LinearProgressIndicator(
-                value: 0.25,
-                backgroundColor:
-                    Theme.of(context).brightness == Brightness.dark
-                        ? TruxifyColors.darkBorder
-                        : TruxifyColors.border,
-                valueColor:
-                    AlwaysStoppedAnimation<Color>(TruxifyColors.success),
-                minHeight: 6,
-              ),
-            ),
-            const SizedBox(height: 16),
             SlideToConfirmButton(
               label: 'Slide to Complete Trip',
               backgroundColor: TruxifyColors.success,

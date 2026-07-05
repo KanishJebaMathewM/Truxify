@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -16,6 +17,7 @@ class LocationService {
 
   WebSocketChannel? _channel;
   StreamSubscription<Position>? _positionSubscription;
+  StreamSubscription? _socketSubscription;
   Timer? _reconnectTimer;
   Timer? _heartbeatTimer;
   Timer? _maxIntervalTimer; // Fallback for max 30 seconds without ping
@@ -29,11 +31,34 @@ class LocationService {
   // Throttling configuration: send ping if moved 15m+ OR 30 seconds passed
   static const double _minDistanceMeters = 15.0;
   static const Duration _maxInterval = Duration(seconds: 30);
+  static const List<String> _activeOrderStatuses = [
+    'truck_assigned',
+    'en_route_pickup',
+    'arrived_pickup',
+    'picked_up',
+    'in_transit',
+    'arriving',
+  ];
 
   bool get isTracking => _isTracking;
 
   Future<void> startTracking() async {
     if (_isTracking) return;
+
+    // Check location permission before starting tracking (fixes #1491)
+    final permission = await Permission.location.request();
+
+    if (permission.isDenied) {
+      debugPrint('[LocationService] Location permission denied');
+      throw Exception('Location permission is required to start tracking');
+    }
+
+    if (permission.isPermanentlyDenied) {
+      debugPrint('[LocationService] Location permission permanently denied');
+      openAppSettings();
+      throw Exception('Location permissions are permanently denied. Please enable in app settings.');
+    }
+
     _isTracking = true;
     debugPrint('[LocationService] Starting driver location tracking...');
     _startPositionSubscription();
@@ -60,7 +85,7 @@ class LocationService {
       ),
     ).listen(
       (position) {
-        _handleLocationUpdate(position);
+        unawaited(_handleLocationUpdate(position));
       },
       onError: (error) {
         debugPrint('[LocationService] Position stream error: $error');
@@ -72,18 +97,20 @@ class LocationService {
     _maxIntervalTimer = Timer.periodic(_maxInterval, (_) {
       if (_lastSentPosition != null && _isTracking) {
         debugPrint('[LocationService] Max interval elapsed, sending fallback ping');
-        _sendLocationPing(_lastSentPosition!);
+        unawaited(_sendLocationPing(_lastSentPosition!));
       }
     });
   }
 
-  void _handleLocationUpdate(Position position) {
+  Future<void> _handleLocationUpdate(Position position) async {
     // Implement displacement-based throttling
     if (_lastSentPosition == null) {
       // First position, always send
-      _sendLocationPing(position);
-      _lastSentPosition = position;
-      _lastSentTime = DateTime.now();
+      final sent = await _sendLocationPing(position);
+      if (sent) {
+        _lastSentPosition = position;
+        _lastSentTime = DateTime.now();
+      }
       return;
     }
 
@@ -101,9 +128,11 @@ class LocationService {
     // Send if: moved 15m+ OR max interval (30s) has elapsed
     if (distanceMoved >= _minDistanceMeters ||
         timeSinceLastSend.compareTo(_maxInterval) >= 0) {
-      _sendLocationPing(position);
-      _lastSentPosition = position;
-      _lastSentTime = now;
+      final sent = await _sendLocationPing(position);
+      if (sent) {
+        _lastSentPosition = position;
+        _lastSentTime = now;
+      }
     } else {
       debugPrint(
         '[LocationService] Location update throttled (moved ${distanceMoved.toStringAsFixed(1)}m, '
@@ -112,10 +141,25 @@ class LocationService {
     }
   }
 
-  Future<void> _sendLocationPing(Position position) async {
+  Future<bool> _sendLocationPing(Position position) async {
     try {
       final driverId = Supabase.instance.client.auth.currentUser?.id;
-      if (driverId == null || driverId.isEmpty) return;
+      if (driverId == null || driverId.isEmpty) return false;
+
+      if (_activeOrderId != null) {
+        final cachedOrder = await Supabase.instance.client
+            .from('orders')
+            .select('id')
+            .eq('id', _activeOrderId!)
+            .eq('driver_id', driverId)
+            .inFilter('status', _activeOrderStatuses)
+            .maybeSingle();
+
+        if (cachedOrder == null) {
+          _activeOrderId = null;
+          _activeOrderDisplayId = null;
+        }
+      }
 
       // 1. Resolve active order if not cached
       if (_activeOrderId == null) {
@@ -123,24 +167,21 @@ class LocationService {
             .from('orders')
             .select('id, order_display_id')
             .eq('driver_id', driverId)
-            .inFilter('status', [
-              'truck_assigned',
-              'en_route_pickup',
-              'arrived_pickup',
-              'picked_up',
-              'in_transit',
-              'arriving'
-            ])
+            .inFilter('status', _activeOrderStatuses)
             .maybeSingle();
 
         if (activeOrder != null) {
-          _activeOrderId = activeOrder['id'] as String;
-          _activeOrderDisplayId = activeOrder['order_display_id'] as String;
+          _activeOrderId = activeOrder['id']?.toString();
+          _activeOrderDisplayId = activeOrder['order_display_id']?.toString();
         }
       }
 
       final orderId = _activeOrderId;
       final orderDisplayId = _activeOrderDisplayId;
+      if (orderId == null || orderDisplayId == null) {
+        debugPrint('[LocationService] No active order found; skipping order telemetry ping');
+        return false;
+      }
 
       // 2. Ensure WebSocket is connected
       if (_channel == null) {
@@ -167,9 +208,12 @@ class LocationService {
         };
         _channel!.sink.add(jsonEncode(payload));
         debugPrint('[LocationService] Location ping sent: lat=${position.latitude}, lng=${position.longitude}');
+        return true;
       }
+      return false;
     } catch (e) {
       debugPrint('[LocationService] Error sending location ping: $e');
+      return false;
     }
   }
 
@@ -206,7 +250,7 @@ class LocationService {
       
       _startHeartbeat();
 
-      _channel!.stream.listen(
+      _socketSubscription = _channel!.stream.listen(
         (message) {
           if (message == 'pong') return;
           debugPrint('[LocationService] Received WebSocket message: $message');
@@ -228,6 +272,11 @@ class LocationService {
 
   void _scheduleReconnect() {
     _channel = null;
+    final socketSubscription = _socketSubscription;
+    _socketSubscription = null;
+    if (socketSubscription != null) {
+      unawaited(socketSubscription.cancel());
+    }
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
 
@@ -255,6 +304,11 @@ class LocationService {
   void _closeWebSocket() {
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
+    final socketSubscription = _socketSubscription;
+    _socketSubscription = null;
+    if (socketSubscription != null) {
+      unawaited(socketSubscription.cancel());
+    }
     _channel?.sink.close();
     _channel = null;
     _activeOrderId = null;

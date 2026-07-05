@@ -12,6 +12,7 @@
   ],
   "inheritLabels": [
     "gssoc:approved",
+    "ECSoC26",
     "level:beginner",
     "level:intermediate",
     "level:advanced",

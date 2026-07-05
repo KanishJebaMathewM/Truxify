@@ -171,7 +171,9 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
 
     for (const [name, sqlContent] of [['supabase_setup.sql', setupSql], ['atomic OTP migration', migrationSql]]) {
       expect(
-        /complete_trip_tx\s*\(\s*p_order_id\s+uuid\s*,\s*p_otp_id\s+uuid\s*\)/i.test(sqlContent),
+        // Signature may carry additional optional parameters after p_otp_id
+        // (e.g. p_release_tx_hash added by the escrow payout migration).
+        /complete_trip_tx\s*\(\s*p_order_id\s+uuid\s*,\s*p_otp_id\s+uuid\s*[,)]/i.test(sqlContent),
         `OTP-aware complete_trip_tx signature not found in ${name}`
       ).toBe(true);
 

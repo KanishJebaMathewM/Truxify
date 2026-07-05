@@ -14,6 +14,15 @@ class OrderService {
 
   final ApiClient _apiClient;
 
+  String _encodePathSegment(String value) => Uri.encodeComponent(value);
+
+  List<Map<String, dynamic>> _historyFromResponse(dynamic body) {
+    if (body is Map<String, dynamic>) {
+      return List<Map<String, dynamic>>.from(body['history'] as List? ?? []);
+    }
+    return List<Map<String, dynamic>>.from(body as List);
+  }
+
   Future<String> createOrder({
     required String pickupAddress,
     required String dropAddress,
@@ -63,7 +72,7 @@ class OrderService {
   }) async {
     try {
       final body = await _apiClient.put(
-        '/api/orders/$orderDisplayId/change-drop',
+        '/api/orders/${_encodePathSegment(orderDisplayId)}/change-drop',
         body: <String, dynamic>{
           'drop_address': dropAddress,
           'drop_lat': dropLat,
@@ -84,7 +93,7 @@ class OrderService {
   }) async {
     try {
       final body = await _apiClient.post(
-        '/api/orders/$orderDisplayId/cancel',
+        '/api/orders/${_encodePathSegment(orderDisplayId)}/cancel',
         body: <String, dynamic>{
           if (reason != null) 'reason': reason,
         },
@@ -100,7 +109,7 @@ class OrderService {
   Future<Map<String, dynamic>?> fetchOrderById(String orderDisplayId) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId',
+        '/api/orders/${_encodePathSegment(orderDisplayId)}',
       ) as Map<String, dynamic>?;
       return body?['order'] as Map<String, dynamic>?;
     } on ApiException catch (e) {
@@ -116,7 +125,7 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/history',
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      return _historyFromResponse(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -129,7 +138,7 @@ class OrderService {
   ) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId/timeline',
+        '/api/orders/${_encodePathSegment(orderDisplayId)}/timeline',
       );
       return List<Map<String, dynamic>>.from(body as List);
     } on ApiException catch (e) {
@@ -144,7 +153,8 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/my/active',
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      if (body is! List) return <Map<String, dynamic>>[];
+      return List<Map<String, dynamic>>.from(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -241,7 +251,7 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/history',
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      return _historyFromResponse(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -278,7 +288,7 @@ class OrderService {
   Future<Map<String, dynamic>> fetchDriverLocation(String orderDisplayId) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId/driver-location',
+        '/api/orders/${_encodePathSegment(orderDisplayId)}/driver-location',
       );
       return body is Map<String, dynamic> ? body : <String, dynamic>{};
     } on ApiException catch (e) {
@@ -291,7 +301,7 @@ class OrderService {
   Future<Map<String, dynamic>> fetchOrderRoute(String orderDisplayId) async {
     try {
       final body = await _apiClient.get(
-        '/api/orders/$orderDisplayId/route',
+        '/api/orders/${_encodePathSegment(orderDisplayId)}/route',
       );
       return body is Map<String, dynamic> ? body : <String, dynamic>{};
     } on ApiException catch (e) {

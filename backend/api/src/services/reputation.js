@@ -85,6 +85,10 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
     logger.warn(`[reputation] Invalid driver wallet address "${driverWalletAddress}" — skipping.`);
     return;
   }
+  if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+    logger.warn(`[reputation] Invalid stars value ${stars} — must be 1-5. Skipping on-chain update.`);
+    return;
+  }
   try {
     const tx = await reputationContract.increaseReputation(driverWalletAddress, stars);
     logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
@@ -112,15 +116,18 @@ export async function getDriverReputation(walletAddress) {
     logger.warn(`[reputation] Invalid wallet address "${walletAddress}" — skipping.`);
     return null;
   }
+  let timeoutId;
   try {
     const score = await Promise.race([
       reputationContract.getReputation(walletAddress),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('RPC timeout')), 5000)
-      ),
+      new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('RPC timeout')), 5000);
+      }),
     ]);
+    clearTimeout(timeoutId);
     return Number(score);
   } catch (err) {
+    clearTimeout(timeoutId);
     logger.error(`[reputation] Failed to fetch on-chain reputation for ${walletAddress}: ${err.message}`);
     return null;
   }

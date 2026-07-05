@@ -157,7 +157,7 @@ export async function recordDepositTx(bookingId, txHash, expectedSenderAddress =
   }
 
   const [txBookingId, txDriver] = decoded.args;
-  if (txBookingId !== bookingId) {
+  if (txBookingId !== BigInt(bookingId)) {
     return { error: 'Transaction booking ID does not match' };
   }
 

@@ -4,6 +4,8 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
+import { validateParams } from '../middleware/validate.js';
+import { uuidParamSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
@@ -136,7 +138,7 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
       sortBy = 'extra_distance_km';
     }
 
-    const ascending = req.query.order === 'asc';
+    const ascending = filters.order === 'asc';
 
     query = query.order(sortBy, { ascending }).range(from, to);
 
@@ -174,7 +176,7 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
 // 2. GET SINGLE LOAD OFFER BY ID (DRIVER)
 // GET /api/loads/:id
 // ============================================================================
-router.get('/:id', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/:id', authenticate, userLimiter, requireRole(['driver']), validateParams(uuidParamSchema), async (req, res) => {
   try {
     const { data: load, error } = await supabase
       .from('load_offers')

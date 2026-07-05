@@ -48,10 +48,8 @@ describe('Trip Routes', () => {
     beforeEach(() => {
         m.store.trip_events = [];
         m.store.processed_batches = [];
-        // The batch route verifies trip ownership against orders/trips,
-        // so the fixture trip referenced by validPayload must exist.
-        m.store.trips = [{ id: 'trip-1', driver_id: 'driver-1' }];
-        m.store.orders = [];
+        m.store.orders = [{ id: 'trip-1', driver_id: 'driver-1', customer_id: 'customer-1' }];
+        m.store.trips = [];
         m.calls.length = 0;
     });
 
@@ -233,6 +231,29 @@ describe('Trip Routes', () => {
         expect(res.body.error).toBe('Database failed to process batch.');
     });
 
+    it('POST /events/batch returns 400 when an event omits trip_id', async () => {
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-missing-trip',
+                events: [
+                    {
+                        id: 'event-missing-trip',
+                        type: 'location_update',
+                        occurred_at: new Date().toISOString(),
+                        payload: {
+                            lat: 19.076,
+                            lng: 72.8777,
+                        },
+                    },
+                ],
+            });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('events.0.trip_id is required');
+    });
+
     it('POST /events/batch returns 422 for otpDelivery event containing otp', async () => {
         const res = await request(buildApp())
             .post('/api/v1/trips/events/batch')
@@ -330,6 +351,58 @@ describe('Trip Routes', () => {
         expect(upsertCall.payload[0].metadata).not.toHaveProperty('secret');
         expect(upsertCall.payload[0].metadata).not.toHaveProperty('password');
         expect(upsertCall.payload[0].metadata.lat).toBe(19.076);
+    });
+
+    it('POST /events/batch does not map coordinates from non-coordinate events', async () => {
+        const originalFrom = m.supabase.from.bind(m.supabase);
+        m.supabase.from = table => {
+            const builder = originalFrom(table);
+            if (table === 'trip_events') {
+                builder.upsert = vi.fn(async payload => {
+                    m.calls.push({
+                        table: 'trip_events',
+                        mode: 'upsert',
+                        payload,
+                    });
+                    m.store.trip_events.push(...payload);
+                    return { data: payload, error: null };
+                });
+            }
+            return builder;
+        };
+
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-non-coordinate',
+                events: [
+                    {
+                        id: 'event-note',
+                        trip_id: 'trip-1',
+                        type: 'status_note',
+                        occurred_at: new Date().toISOString(),
+                        payload: {
+                            lat: 'not-a-number',
+                            lng: 'still-not-a-number',
+                            note: 'Arrived at dock',
+                        },
+                    },
+                ],
+            });
+
+        m.supabase.from = originalFrom;
+
+        expect(res.status).toBe(202);
+        const upsertCall = m.calls.find(
+            c => c.table === 'trip_events' && c.mode === 'upsert' && c.payload[0].event_id === 'event-note'
+        );
+        expect(upsertCall).toBeTruthy();
+        expect(upsertCall.payload[0].latitude).toBeNull();
+        expect(upsertCall.payload[0].longitude).toBeNull();
+        expect(upsertCall.payload[0].metadata).not.toHaveProperty('lat');
+        expect(upsertCall.payload[0].metadata).not.toHaveProperty('lng');
+        expect(upsertCall.payload[0].metadata.note).toBe('Arrived at dock');
     });
 });
 
@@ -479,5 +552,24 @@ describe('GET /api/trips/:id/events', () => {
     expect(res.status).toBe(200);
     expect(res.body.events).toHaveLength(1);
     expect(res.body.events[0].event_id).toBe('ev-in');
+  });
+
+  it('returns 403 for unauthorized customer who does not own the order', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: 'trip-xyz', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+    );
+    m.store.orders.push({ id: 'trip-xyz', driver_id: 'driver-1', customer_id: 'customer-owner' });
+
+    const UNAUTHORIZED_CUSTOMER = {
+      'x-user-id': 'unauthorized-customer-id',
+      'x-user-role': 'customer',
+    };
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/trip-xyz/events')
+      .set(UNAUTHORIZED_CUSTOMER);
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain('Access Denied');
   });
 });

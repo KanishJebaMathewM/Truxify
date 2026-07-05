@@ -6,6 +6,7 @@ CREATE OR REPLACE FUNCTION complete_trip_tx(p_order_id UUID, p_otp_id UUID, p_re
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
   v_order RECORD;

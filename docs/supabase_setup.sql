@@ -810,6 +810,31 @@ create table if not exists user_devices (
 create index if not exists idx_user_devices_user_id on user_devices (user_id);
 create index if not exists idx_user_devices_fcm_token on user_devices (fcm_token);
 
+-- ────────────────────────────────────────────────────────────────────────────
+-- 26. DRIVER LOCATIONS  (real-time GPS coordinates — security-restricted)
+-- ────────────────────────────────────────────────────────────────────────────
+-- SECURITY CRITICAL: Each driver can only access their own location data.
+-- Admins can access all locations for dispatch operations.
+-- Prevents cross-driver location data leakage.
+create table if not exists driver_locations (
+  id                uuid primary key default gen_random_uuid(),
+  driver_id         uuid not null references profiles(id) on delete cascade,
+  latitude          numeric(10, 8) not null,                 -- Decimal degrees (-90 to 90)
+  longitude         numeric(11, 8) not null,                 -- Decimal degrees (-180 to 180)
+  accuracy          numeric(10, 2),                          -- meters (GPS accuracy radius)
+  speed             numeric(6, 2),                           -- km/h
+  heading           numeric(6, 2),                           -- degrees (0-360)
+  altitude          numeric(8, 2),                           -- meters
+  is_active         boolean not null default true,           -- driver online/active status
+  last_updated_at   timestamptz not null default now(),      -- last GPS ping timestamp
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+
+create index if not exists idx_driver_locations_driver_id on driver_locations (driver_id);
+create index if not exists idx_driver_locations_is_active on driver_locations (is_active);
+create index if not exists idx_driver_locations_updated_at on driver_locations (last_updated_at DESC);
+
 
 -- ############################################################################
 -- PART 2: ENABLE ROW LEVEL SECURITY ON ALL TABLES
@@ -841,6 +866,7 @@ alter table faqs                    enable row level security;
 alter table support_tickets         enable row level security;
 alter table earnings_daily          enable row level security;
 alter table user_devices            enable row level security;
+alter table driver_locations        enable row level security;
 
 
 -- ############################################################################

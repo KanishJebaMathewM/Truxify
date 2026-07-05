@@ -17,6 +17,17 @@ import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
+export function withTimeout(operation, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([operation, timeout]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 /**
  * POST /api/auth/logout
  * Requires: Bearer token (Firebase or Supabase)
@@ -28,17 +39,14 @@ router.post('/logout', authenticate, async (req, res) => {
   // ── 1. Invalidate Redis profile cache ──────────────────────────────
   // Bounded timeout prevents Redis hangs from blocking the logout response.
   try {
-    const redisTimer = setTimeout(() => {}, 2001);
-    await Promise.race([
+    await withTimeout(
       Promise.all([
         uid ? invalidateCachedProfile(uid) : Promise.resolve(),
         req.user && req.user.id ? invalidateCachedSupabaseProfile(req.user.id) : Promise.resolve(),
       ]),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Redis invalidation timeout')), 2000)
-      ),
-    ]);
-    clearTimeout(redisTimer);
+      2000,
+      'Redis invalidation timeout'
+    );
   } catch (err) {
     logger.warn(`[auth/logout] Cache invalidation skipped for uid=${uid}: ${err?.message}`);
   }
@@ -47,13 +55,11 @@ router.post('/logout', authenticate, async (req, res) => {
   // Bounded timeout prevents Firebase hangs from blocking the logout response.
   if (uid && firebaseAdmin) {
     try {
-      let fbTimer;
-      await Promise.race([
+      await withTimeout(
         firebaseAdmin.auth().revokeRefreshTokens(uid),
-        new Promise((_, reject) => {
-          fbTimer = setTimeout(() => reject(new Error('Firebase revocation timeout')), 3000);
-        }),
-      ]).finally(() => clearTimeout(fbTimer));
+        3000,
+        'Firebase revocation timeout'
+      );
     } catch (err) {
       logger.error(`[auth/logout] Firebase token revocation failed for uid=${uid}: ${err?.message}`);
     }

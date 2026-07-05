@@ -20,10 +20,10 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js 20
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
@@ -31,7 +31,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend/api
-        run: npm ci --no-workspaces
+        run: npm ci --workspaces=false
 
       - name: Run unit tests
         working-directory: backend/api
@@ -47,7 +47,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -77,7 +77,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -110,7 +110,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
@@ -123,3 +123,14 @@ jobs:
       - name: Run tests
         working-directory: backend/ml
         run: python -m pytest tests/ -v
+
+  client-credentials-guard:
+    name: No client-side backend credentials
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check for Redis/Upstash credentials in Flutter source
+        run: bash scripts/check-no-client-credentials.sh

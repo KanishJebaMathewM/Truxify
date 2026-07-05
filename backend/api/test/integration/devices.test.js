@@ -151,6 +151,19 @@ describe('Device Routes Integration Tests', () => {
       expect(res.body.error).toBe('Failed to register device');
     });
 
+    it('returns 500 when device token profile sync fails', async () => {
+      m.programErrorFor('profiles', 'update', 'Profile write failed');
+
+      const res = await request(buildApp())
+        .post('/api/devices/register')
+        .set(CUSTOMER_HEADERS)
+        .send({ fcmToken: 'token_profile_sync_fail', platform: 'android' });
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Failed to sync device token to profile');
+      expect(m.store.user_devices.find(d => d.fcm_token === 'token_profile_sync_fail')).toBeTruthy();
+    });
+
     it('successfully registers multiple devices for the same user', async () => {
       const resA = await request(buildApp())
         .post('/api/devices/register')

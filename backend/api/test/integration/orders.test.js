@@ -208,17 +208,20 @@ describe('POST /api/orders — server-side pricing contract', () => {
     expect(m.calls.find(c => c.table === 'orders' && c.mode === 'insert')).toBeFalsy();
   });
 
-  it('load_offers mirrors orders: freight_value === orders.base_freight, etc.', async () => {
+  it('load_offers exposes the total price while retaining component costs', async () => {
     const app = buildApp();
     await request(app).post('/api/orders').set(CUSTOMER_HEADERS).send(validOrderBody);
 
     const orderInsert   = m.calls.find(c => c.table === 'orders' && c.mode === 'insert').payload;
     const offerInsert   = m.calls.find(c => c.table === 'load_offers' && c.mode === 'insert').payload;
-    expect(offerInsert.freight_value).toBe(orderInsert.base_freight);
+    expect(offerInsert.freight_value).toBe(orderInsert.total_amount);
     expect(offerInsert.toll_cost).toBe(orderInsert.toll_estimate);
-    // fuelCost + toll_cost + net_profit = baseFreight (the driver-side ledger invariant)
+    expect(offerInsert.freight_value).toBe(
+      orderInsert.base_freight + orderInsert.toll_estimate + orderInsert.platform_fee
+    );
+    // Component fields continue to preserve the driver-side ledger invariant.
     expect(offerInsert.fuel_cost + offerInsert.toll_cost + offerInsert.net_profit)
-      .toBe(offerInsert.freight_value);
+      .toBe(orderInsert.base_freight);
   });
 
   it('uses OSRM road distance for persisted pricing when routing succeeds', async () => {

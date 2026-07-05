@@ -14,7 +14,7 @@ export async function flushSentry(timeoutMs = 2000) {
   try {
     await Sentry.flush(timeoutMs);
   } catch (err) {
-    logger.warn('[sentry] Sentry.flush failed during teardown: %s', err.message);
+    logger.warn({ err }, 'Sentry.flush failed during teardown');
   }
 }
 

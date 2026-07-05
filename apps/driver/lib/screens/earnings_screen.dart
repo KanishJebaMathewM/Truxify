@@ -47,7 +47,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
-    final startTime = DateTime.now();
 
     await Future.wait([
       _loadMonthlyEarnings(),
@@ -55,13 +54,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
       _loadTransactions(),
       _loadWalletSummary(),
     ]);
-
-    final elapsed = DateTime.now().difference(startTime);
-    final remainingDelay = const Duration(milliseconds: 1500) - elapsed;
-    final isTesting = WidgetsBinding.instance.runtimeType.toString().contains('Test');
-    if (remainingDelay > Duration.zero && !isTesting) {
-      await Future.delayed(remainingDelay);
-    }
 
     if (mounted) {
       setState(() => _isLoading = false);

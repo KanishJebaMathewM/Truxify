@@ -153,7 +153,8 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/my/active',
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      if (body is! List) return <Map<String, dynamic>>[];
+      return List<Map<String, dynamic>>.from(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {

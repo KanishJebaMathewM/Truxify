@@ -7,10 +7,12 @@ import request from 'supertest';
 import express from 'express';
 
 const invalidateCachedProfileMock = vi.fn().mockResolvedValue(undefined);
+const invalidateCachedSupabaseProfileMock = vi.fn().mockResolvedValue(undefined);
 const revokeRefreshTokensMock = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('../../src/lib/profileCache.js', () => ({
   invalidateCachedProfile: invalidateCachedProfileMock,
+  invalidateCachedSupabaseProfile: invalidateCachedSupabaseProfileMock,
   getCachedProfile: vi.fn().mockResolvedValue(null),
   setCachedProfile: vi.fn().mockResolvedValue(undefined),
   isValidCachedProfile: vi.fn().mockReturnValue(true),
@@ -46,7 +48,7 @@ vi.mock('../../src/middleware/auth.js', () => ({
   requireRole: () => (_req, _res, next) => next(),
 }));
 
-const { default: authRouter } = await import('../../src/routes/authRoutes.js');
+const { default: authRouter, withTimeout } = await import('../../src/routes/authRoutes.js');
 
 function buildApp() {
   const app = express();
@@ -135,5 +137,32 @@ describe('POST /api/auth/logout', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+  });
+
+  it('clears timeout timers when the operation settles first', async () => {
+    vi.useFakeTimers();
+
+    try {
+      await withTimeout(Promise.resolve('ok'), 2000, 'too slow');
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears timeout timers when the operation times out', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const result = withTimeout(new Promise(() => {}), 2000, 'too slow');
+      const assertion = expect(result).rejects.toThrow('too slow');
+      await vi.advanceTimersByTimeAsync(2000);
+
+      await assertion;
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

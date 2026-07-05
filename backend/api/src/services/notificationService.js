@@ -211,7 +211,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       customerId,
     { title: 'Delivery Verification OTP', body },
     { orderDisplayId, notifType: 'delivery_otp' }
-  ); } catch (err) { logger.warn('[NotificationService] Unexpected sendFcmNotification error: %s', err?.message ?? err); }
+  ); } catch (err) { logger.warn({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error'); }
 
   if (process.env.TWILIO_AUTH_TOKEN) {
     logger.info(`[NotificationService] [SMS] SMS stub: Sending OTP for order ${orderDisplayId} (masked)`);

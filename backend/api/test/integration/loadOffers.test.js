@@ -338,6 +338,21 @@ describe('Load Offers Routes Integration Tests', () => {
       expect(call.order).toEqual({ col: 'extra_distance_km', ascending: false });
     });
 
+    it('rejects unsupported order values', async () => {
+      const res = await request(buildApp())
+        .get('/api/loads?order=ascending')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation failed');
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'order' }),
+        ])
+      );
+      expect(m.calls.find(call => call.table === 'load_offers')).toBeUndefined();
+    });
+
     it('returns 500 without leaking database details on db error', async () => {
       m.programError('Internal DB deadlock');
 

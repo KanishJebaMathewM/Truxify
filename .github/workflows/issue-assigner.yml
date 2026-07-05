@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Assign issue
-        uses: actions/github-script@v9
+        uses: actions/github-script@v7
         with:
           script: |
             const opener = context.payload.issue.user.login;

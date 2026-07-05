@@ -13,9 +13,10 @@ function loadRules(rulesPath = DEFAULT_RULES_PATH) {
   return JSON.parse(fs.readFileSync(rulesPath, 'utf8'));
 }
 
-function hasProgramSignal({ title = '', body = '', rules }) {
-  const source = normalize(`${title}\n${body}`);
-  return (rules.programSignals || []).some((signal) => source.includes(normalize(signal)));
+function hasProgramSignal({ title = '', body = '', rules = loadRules() }) {
+  const text = `${title}\n${body}`.toLowerCase();
+  const signals = rules.programSignals || [];
+  return signals.some((signal) => text.includes(normalize(signal)));
 }
 
 function findLinkedIssueNumbers(text = '') {
@@ -217,6 +218,18 @@ async function run({ github, context, core, rulesPath = DEFAULT_RULES_PATH, dryR
 
   // Fetch available labels in the repo
   let availableLabels = await fetchPaginatedLabels(github, owner, repo);
+
+  // Collect rule target labels so valid rules labels aren't dropped if not pre-created in repo settings
+  const ruleLabels = new Set();
+  (rules.programLabels || []).forEach((l) => ruleLabels.add(l));
+  (rules.titleRules || []).forEach((r) => (r.labels || []).forEach((l) => ruleLabels.add(l)));
+  (rules.pathRules || []).forEach((r) => (r.labels || []).forEach((l) => ruleLabels.add(l)));
+
+  for (const ruleLabel of ruleLabels) {
+    if (!availableLabels.map(normalize).includes(normalize(ruleLabel))) {
+      availableLabels.push(ruleLabel);
+    }
+  }
 
   // Ensure labels exist if they were detected
   if (hasGssoc && !availableLabels.map(normalize).includes('gssoc:approved')) {

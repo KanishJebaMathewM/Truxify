@@ -105,4 +105,11 @@ router.get('/live', healthLimiter, (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
+// GET /api/health/ready � readiness probe for k8s
+router.get('/ready', healthLimiter, (req, res) => res.json({ status: 'ready' }));
+
+// GET /api/health/ready — readiness probe for k8s
+router.get('/ready', healthLimiter, (req, res) => res.json({ status: 'ready' }));
+
 export default router;
+

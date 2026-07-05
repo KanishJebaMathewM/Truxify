@@ -13,12 +13,18 @@ class NotificationRepository {
         .select()
         .eq('user_id', userId)
         .order('created_at', ascending: false);
-    final List<Map<String, dynamic>> rows = List<Map<String, dynamic>>.from(response as List);
+    final List<Map<String, dynamic>> rows = response is List
+        ? List<Map<String, dynamic>>.from(response)
+        : <Map<String, dynamic>>[];
     return rows.map(NotificationItem.fromMap).toList();
   }
 
-  Future<void> markNotificationRead(String id) async {
-    await _client.from('notifications').update({'is_read': true}).eq('id', id);
+  Future<void> markNotificationRead(String id, String userId) async {
+    await _client
+        .from('notifications')
+        .update({'is_read': true})
+        .eq('id', id)
+        .eq('user_id', userId);
   }
 }
 

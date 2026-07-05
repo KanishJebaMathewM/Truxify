@@ -71,6 +71,22 @@ const validateBatchPayload = (schema) => (req, res, next) => {
   }
 };
 
+function validateEventTripIds(events) {
+  const missingIndex = events.findIndex(event => !event.trip_id);
+  if (missingIndex !== -1) {
+    return {
+      ok: false,
+      status: 400,
+      error: `events.${missingIndex}.trip_id is required`,
+    };
+  }
+  return { ok: true };
+}
+
+function hasCoordinatePayload(payload = {}) {
+  return payload.lat !== undefined || payload.lng !== undefined;
+}
+
 async function verifyTripIdsBelongToUser(tripIds, user) {
   const uniqueTripIds = [...new Set(tripIds.filter(Boolean))];
   if (uniqueTripIds.length === 0) return { ok: true };
@@ -163,16 +179,26 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
       }
     }
 
+    const tripIdCheck = validateEventTripIds(events);
+    if (!tripIdCheck.ok) {
+      return res.status(tripIdCheck.status).json({ error: tripIdCheck.error });
+    }
+
     const ownershipCheck = await verifyTripIdsBelongToUser(events.map(event => event.trip_id), req.user);
     if (!ownershipCheck.ok) {
       return res.status(ownershipCheck.status).json({ error: ownershipCheck.error });
     }
 
     const recordsToInsert = events.map(event => {
-      const lat = event.payload?.lat !== undefined ? Number(event.payload.lat) : null;
-      const lng = event.payload?.lng !== undefined ? Number(event.payload.lng) : null;
+      const shouldMapCoordinates = event.type === 'gpsUpdate' || event.type === 'location_update';
+      const lat = shouldMapCoordinates && event.payload?.lat !== undefined ? Number(event.payload.lat) : null;
+      const lng = shouldMapCoordinates && event.payload?.lng !== undefined ? Number(event.payload.lng) : null;
 
       const safeMetadata = { ...event.payload };
+      if (!shouldMapCoordinates && hasCoordinatePayload(safeMetadata)) {
+        delete safeMetadata.lat;
+        delete safeMetadata.lng;
+      }
       for (const field of SENSITIVE_FIELDS) {
         delete safeMetadata[field];
       }
@@ -240,17 +266,21 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
 // GET TRIP EVENTS (DRIVER, CUSTOMER, OR ADMIN)
 // ============================================================================
 /**
- * GET /api/trips/:id/events
- *
- * Returns all telemetry/milestone events for a given trip, ordered
- * chronologically.
- *
- * Access control:
- *   - The trip's driver (trip_events.user_id === req.user.id)
- *   - The order's customer (orders.customer_id === req.user.id)
- *   - Any admin
- *
- * Optional query param: ?type=gpsUpdate  (filters by event_type)
+ * @route GET /api/trips/:id/events
+ * @desc Returns all telemetry and milestone events for a given trip, ordered chronologically.
+ * @access Authenticated (Driver, Customer owner, or Admin)
+ * @param {string} req.params.id - The UUID of the trip
+ * @param {string} [req.query.type] - Filter by specific event type (e.g. gpsUpdate)
+ * @param {string} [req.query.sort] - Chronological sort order ('asc' or 'desc', defaults to 'asc')
+ * @param {number} [req.query.min_lat] - Minimum latitude for geographical bounding box filtering
+ * @param {number} [req.query.max_lat] - Maximum latitude for geographical bounding box filtering
+ * @param {number} [req.query.min_lng] - Minimum longitude for geographical bounding box filtering
+ * @param {number} [req.query.max_lng] - Maximum longitude for geographical bounding box filtering
+ * @returns {object} 200 - Trip ID and array of events
+ * @returns {object} 400 - Validation errors for coordinates or sorting parameters
+ * @returns {object} 403 - Forbidden if user is not driver, customer owner, or admin
+ * @returns {object} 404 - Trip or order not found
+ * @returns {object} 500 - Internal server error
  */
 router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
   const tripId = req.params.id;
@@ -396,6 +426,10 @@ router.put('/:tripDisplayId/stops/:stopId/complete', authenticate, userLimiter, 
       is_current: false,
     }).eq('id', stopId).eq('trip_display_id', tripDisplayId).select().maybeSingle();
 
+    if (updatedStop.error) {
+      logger.error('[tripRoutes] Failed to update stop:', updatedStop.error.message);
+      return res.status(500).json({ error: 'Database error while updating stop.' });
+    }
     if (!updatedStop.data) return res.status(404).json({ error: 'Stop not found or does not belong to this trip.' });
 
     const nextStops = await supabase.from('trip_stops').select()

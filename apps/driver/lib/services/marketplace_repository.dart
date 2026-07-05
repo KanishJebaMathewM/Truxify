@@ -48,8 +48,9 @@ class MarketplaceRepository {
       throw StateError('Failed to fetch load offers');
     }
 
-    final body = jsonDecode(response.body) as List;
-    return body.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) throw StateError('Unexpected response type');
+    return decoded.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
   }
 
   Future<List<LoadOffer>> fetchEnRouteLoads() async {
@@ -60,8 +61,9 @@ class MarketplaceRepository {
       throw StateError('Failed to fetch en-route loads');
     }
 
-    final body = jsonDecode(response.body) as List;
-    return body.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) throw StateError('Unexpected response type');
+    return decoded.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
   }
 
   Future<DriverBid> submitBid({

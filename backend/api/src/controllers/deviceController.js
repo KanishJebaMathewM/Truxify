@@ -84,6 +84,9 @@ export async function registerDeviceToken(req, res) {
         '[DeviceController] Device token saved but failed to sync profiles.fcm_token:',
         profileSyncError.message
       );
+      return res.status(500).json({
+        error: 'Failed to sync device token to profile'
+      });
     }
 
     return res.json({

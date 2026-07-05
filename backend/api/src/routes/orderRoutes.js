@@ -2,7 +2,7 @@ import express from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
-import { bidLimiter, userLimiter } from '../middleware/rateLimiter.js';
+import { bidLimiter, userLimiter, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
 import { supabase, redisClient, mongoDb } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
@@ -158,7 +158,7 @@ const telemetryLimiter = rateLimit({
   max: process.env.NODE_ENV === 'test' ? 1000 : 30, // 30 requests per minute should be enough for telemetry
   keyGenerator: (req) => {
     if (!req.user || !req.user.id) {
-      return req.ip ? ipKeyGenerator(req.ip) : 'unknown-ip';
+      return req.ip ? safeIpKeyGenerator(req) : 'unknown-ip';
     }
     return req.user.id;
   },
@@ -190,7 +190,7 @@ function generateOrderDisplayId() {
   const prefix = '#FF';
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
-  const random = Math.floor(100000 + Math.random() * 900000); // 6 random digits
+  const random = crypto.randomInt(100000, 999999).toString(); // 6 random digits using CSPRNG
   return `${prefix}${dateStr}${random}`;
 }
 
@@ -325,7 +325,7 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), validateB
         drop_address, drop_lat, drop_lng,
         goods_type,
         weight: `${weight_tonnes} tonnes`,
-        freight_value: pricing.baseFreight,
+        freight_value: pricing.totalAmount,
         fuel_cost: pricing.fuelCost,
         toll_cost: pricing.tollEstimate,
         net_profit: pricing.netProfit,
@@ -1269,7 +1269,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
         drop_lat: Number(drop_lat),
         drop_lng: Number(drop_lng),
         route_label: `${(order.pickup_address || '').split(',')[0]} → ${drop_address.split(',')[0]}`,
-        freight_value: pricing.baseFreight,
+        freight_value: pricing.totalAmount,
         fuel_cost: pricing.fuelCost,
         toll_cost: pricing.tollEstimate,
         net_profit: pricing.netProfit,

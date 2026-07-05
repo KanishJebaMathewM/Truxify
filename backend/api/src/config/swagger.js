@@ -1,6 +1,9 @@
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 
+// Use environment variable for Swagger server URL
+const apiUrl = process.env.API_PUBLIC_URL || 'http://localhost:5000/api';
+
 const options = {
   definition: {
     openapi: '3.0.0',
@@ -11,6 +14,10 @@ const options = {
     },
     servers: [
       {
+        url: apiUrl,
+        description: process.env.API_PUBLIC_URL
+          ? 'Configured server'
+          : 'Development server',
         url: process.env.API_PUBLIC_URL || 'http://localhost:5000/api',
         description: process.env.API_PUBLIC_URL ? 'Server' : 'Development server',
       },

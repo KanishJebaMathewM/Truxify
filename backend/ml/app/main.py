@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     ml_api_key = os.environ.get("ML_API_KEY")
     if not ml_api_key:
-        return
+        logger.warning("ML_API_KEY not set - ML engine running without authentication")
+        raise HTTPException(status_code=503, detail="ML engine not configured: missing ML_API_KEY")
     if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -406,7 +407,7 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
 # Price Prediction
 # ---------------------------------------------------------------------------
 
-@app.post("/predict", response_model=PricePredictOutput)
+@app.post("/predict/price", response_model=PricePredictOutput)
 async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_api_key)):
     try:
         result = predict_price(

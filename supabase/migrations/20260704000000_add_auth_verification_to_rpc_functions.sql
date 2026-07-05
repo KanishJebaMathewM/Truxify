@@ -154,6 +154,11 @@ BEGIN
     RAISE EXCEPTION 'Unauthorized: you can only submit ratings for yourself';
   END IF;
 
+  -- Validate star rating is between 1 and 5
+  IF p_stars < 1 OR p_stars > 5 THEN
+    RAISE EXCEPTION 'Star rating must be between 1 and 5, got %', p_stars;
+  END IF;
+
   INSERT INTO ratings (order_display_id, customer_id, driver_id, stars, comment)
   VALUES (p_order_display_id, p_customer_id, p_driver_id, p_stars, p_comment);
 

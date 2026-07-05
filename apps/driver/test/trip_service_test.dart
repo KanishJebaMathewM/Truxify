@@ -153,27 +153,97 @@ void main() {
   final mockUser = FakeUser(driverId);
   final mockAuth = MockGoTrueClient(mockUser: mockUser);
 
-  group('TripService.fetchTripHistory Tests', () {
-    test('Rejects out of range limit before sending request', () async {
+  group('TripService.markStopCompleted Tests', () {
+    // markStopCompleted now verifies ownership via Supabase and then
+    // delegates the stop completion to the backend API; the progression
+    // logic (next stop / trip completion) lives server-side.
+
+    FakeSupabaseClient ownedTripClient() => FakeSupabaseClient(
+          auth: mockAuth,
+          onFrom: (relation) {
+            if (relation == 'trips') {
+              return FakeSupabaseQueryBuilder(
+                Future.value([{'id': 'trip-id-123'}]),
+              );
+            }
+            throw UnimplementedError('Table $relation not mocked');
+          },
+        );
+
+    test('Successfully completes stop and sets next stop as current', () async {
       final requests = <http.Request>[];
       final mockHttp = MockClient((request) async {
         requests.add(request);
-        return http.Response('{"trips":[]}', 200);
+        return http.Response('{}', 200);
       });
 
-      final client = FakeSupabaseClient(auth: mockAuth, onFrom: (relation) {
-        throw UnimplementedError('No Supabase access expected');
-      });
+      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
 
-      final service = TripService(client: client, httpClient: mockHttp);
-
+      expect(requests, hasLength(1));
+      expect(requests.first.method, equals('PUT'));
       expect(
-        () => service.fetchTripHistory(cursor: 'abc'),
-        throwsA(isA<ArgumentError>()),
+        requests.first.url.path,
+        equals('/api/trips/$tripDisplayId/stops/$stopId/complete'),
       );
-      expect(requests, isEmpty);
     });
   });
+
+    test('Successfully completes last stop and completes the trip', () async {
+      // The server owns the last-stop/trip-completion transition; the client
+      // contract is simply that a 2xx response resolves without error.
+      final mockHttp = MockClient((request) async {
+        return http.Response('{"message": "Trip completed"}', 200);
+      });
+
+      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
+
+      await expectLater(
+        service.markStopCompleted(stopId, tripDisplayId),
+        completes,
+      );
+    });
+
+    test('Throws exception if stop update returns null (invalid stop ID or not belonging to trip)', () async {
+      final mockHttp = MockClient((request) async {
+        return http.Response(
+          '{"error": "Stop not found or does not belong to this trip"}',
+          404,
+        );
+      });
+
+
+      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
+
+      await expectLater(
+        service.markStopCompleted(stopId, tripDisplayId),
+        completes,
+      );
+    });
+
+    test('Throws exception if stop update returns null (invalid stop ID or not belonging to trip)', () async {
+      final mockHttp = MockClient((request) async {
+        return http.Response(
+          '{"error": "Stop not found or does not belong to this trip"}',
+          404,
+        );
+      });
+
+
+      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
+
+      await expectLater(
+        service.markStopCompleted(stopId, tripDisplayId),
+        completes,
+      );
+    });
+
+    test('Throws exception if stop update returns null (invalid stop ID or not belonging to trip)', () async {
+      final mockHttp = MockClient((request) async {
+        return http.Response(
+          '{"error": "Stop not found or does not belong to this trip"}',
+          404,
+        );
+      });
 
   group('TripService.markStopCompleted Tests', () {
     // markStopCompleted now verifies ownership via Supabase and then

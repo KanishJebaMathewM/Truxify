@@ -23,13 +23,19 @@ contract Escrow {
     mapping(address => bool) public authorizedRelayers;
     mapping(bytes32 => BookingEscrow) public escrows;
     mapping(address => uint256) public pendingWithdrawals;
+    mapping(address => uint256) public releaseTimestamps;
     bool private locked;
+    bool public paused;
+    uint256 public constant WITHDRAWAL_TIMEOUT = 30 days;
 
     event RelayerUpdated(address indexed relayer, bool authorized);
     event Deposited(bytes32 indexed bookingId, address indexed customer, address indexed driver, uint256 amount);
     event Released(bytes32 indexed bookingId, address indexed driver, uint256 amount);
     event Refunded(bytes32 indexed bookingId, address indexed customer, uint256 amount);
     event Withdrawn(address indexed recipient, uint256 amount);
+    event Paused(address indexed account);
+    event Unpaused(address indexed account);
+    event EmergencyRecovered(address indexed recipient, uint256 amount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner");
@@ -46,6 +52,11 @@ contract Escrow {
         locked = true;
         _;
         locked = false;
+    }
+
+    modifier whenNotPaused() {
+        require(!paused, "Contract is paused");
+        _;
     }
 
     /// @notice Initializes the contract and sets the initial relayer.
@@ -67,11 +78,23 @@ contract Escrow {
         emit RelayerUpdated(relayer, authorized);
     }
 
+    /// @notice Pauses the contract, preventing all deposits, releases, and refunds.
+    function pause() external onlyOwner {
+        paused = true;
+        emit Paused(msg.sender);
+    }
+
+    /// @notice Unpauses the contract.
+    function unpause() external onlyOwner {
+        paused = false;
+        emit Unpaused(msg.sender);
+    }
+
     /// @notice Deposits funds into escrow for a specific booking.
     /// @param bookingId The unique identifier of the booking.
     /// @param customer The address of the customer making the deposit.
     /// @param driver The address of the driver assigned to the booking.
-    function deposit(bytes32 bookingId, address payable customer, address payable driver) external payable {
+    function deposit(bytes32 bookingId, address payable customer, address payable driver) external payable whenNotPaused {
         require(bookingId != bytes32(0), "Invalid booking");
         require(customer != address(0), "Invalid customer");
         require(driver != address(0), "Invalid driver");
@@ -91,7 +114,7 @@ contract Escrow {
 
     /// @notice Releases funds to the driver after a successful booking.
     /// @param bookingId The unique identifier of the booking.
-    function releaseFunds(bytes32 bookingId) external onlyRelayer nonReentrant {
+    function releaseFunds(bytes32 bookingId) external onlyRelayer nonReentrant whenNotPaused {
         BookingEscrow storage booking = escrows[bookingId];
         require(booking.status == EscrowStatus.Funded, "Escrow not funded");
 
@@ -100,13 +123,14 @@ contract Escrow {
         booking.amount = 0;
 
         pendingWithdrawals[booking.driver] += amount;
+        releaseTimestamps[booking.driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         emit Released(bookingId, booking.driver, amount);
     }
 
     /// @notice Refunds funds back to the customer if the booking is cancelled.
     /// @param bookingId The unique identifier of the booking.
-    function refundFunds(bytes32 bookingId) external onlyRelayer nonReentrant {
+    function refundFunds(bytes32 bookingId) external onlyRelayer nonReentrant whenNotPaused {
         BookingEscrow storage booking = escrows[bookingId];
         require(booking.status == EscrowStatus.Funded, "Escrow not funded");
 
@@ -115,20 +139,40 @@ contract Escrow {
         booking.amount = 0;
 
         pendingWithdrawals[booking.customer] += amount;
+        releaseTimestamps[booking.customer] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         emit Refunded(bookingId, booking.customer, amount);
     }
 
     /// @notice Allows a user (driver or customer) to withdraw their pending funds.
-    function withdraw() external nonReentrant {
+    function withdraw() external nonReentrant whenNotPaused {
         uint256 amount = pendingWithdrawals[msg.sender];
         require(amount > 0, "Nothing to withdraw");
 
         pendingWithdrawals[msg.sender] = 0;
+        releaseTimestamps[msg.sender] = 0;
 
         (bool sent, ) = msg.sender.call{value: amount}("");
         require(sent, "Withdrawal failed");
 
         emit Withdrawn(msg.sender, amount);
+    }
+
+    /// @notice Emergency recovery function for owner to recover funds after timeout.
+    /// @dev Can only be called after the withdrawal timeout period has passed.
+    /// @param recipient The address to receive the recovered funds
+    /// @param amount The amount to recover
+    function emergencyRecover(address recipient, uint256 amount) external onlyOwner nonReentrant {
+        require(recipient != address(0), "Invalid recipient");
+        require(block.timestamp > releaseTimestamps[recipient], "Withdrawal period active");
+        require(pendingWithdrawals[recipient] >= amount, "Insufficient pending");
+
+        pendingWithdrawals[recipient] -= amount;
+        releaseTimestamps[recipient] = 0;
+
+        (bool sent, ) = recipient.call{value: amount}("");
+        require(sent, "Emergency transfer failed");
+
+        emit EmergencyRecovered(recipient, amount);
     }
 }

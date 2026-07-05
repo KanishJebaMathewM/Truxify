@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/api_client.dart';
+import 'fcm_service.dart';
 import 'supabase_service.dart';
 
 /// Secure profile cache using [FlutterSecureStorage] instead of
@@ -79,7 +80,10 @@ class ProfileService {
     // Clear cached PII before signing out
     await clearProfileCache();
 
-    // Sign out from local clients
+    // Unregister this device's FCM token first so a signed-out device stops
+    // receiving push notifications intended for the next user of a shared
+    // device, then sign out from local clients.
+    await FcmService.unregisterToken();
     await Future.wait([
       FirebaseAuth.instance.signOut(),
       SupabaseService.client.auth.signOut(),

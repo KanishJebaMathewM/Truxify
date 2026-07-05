@@ -42,10 +42,12 @@ class LocationService {
       throw Exception('Search failed: ${response.statusCode} (${uri.path})');
     }
 
-    final decoded = jsonDecode(response.body) as List<dynamic>;
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) return const <LocationSuggestion>[];
     return decoded
         .map((item) {
-          final json = item as Map<String, dynamic>;
+          if (item is! Map<String, dynamic>) return null;
+          final json = item;
           final lat = double.tryParse('${json['lat']}');
           final lon = double.tryParse('${json['lon']}');
           final displayName = (json['display_name'] as String?)?.trim() ?? '';
@@ -84,7 +86,8 @@ class LocationService {
       throw Exception('Reverse lookup failed: ${response.statusCode} (${uri.path})');
     }
 
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) throw Exception('Reverse lookup failed: unexpected response type');
     final displayName = (decoded['display_name'] as String?)?.trim();
     if (displayName != null && displayName.isNotEmpty) {
       return displayName;

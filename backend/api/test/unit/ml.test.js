@@ -159,7 +159,7 @@ describe('ml service — predictPrice', () => {
     });
 
     const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toContain('/predict');
+    expect(url).toContain('/predict/price');
     const body = JSON.parse(opts.body);
     expect(body.distance_km).toBe(250);
     expect(body.cargo_weight_kg).toBe(1000);

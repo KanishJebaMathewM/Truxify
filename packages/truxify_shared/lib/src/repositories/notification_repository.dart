@@ -13,7 +13,9 @@ class NotificationRepository {
         .select()
         .eq('user_id', userId)
         .order('created_at', ascending: false);
-    final List<Map<String, dynamic>> rows = List<Map<String, dynamic>>.from(response as List);
+    final List<Map<String, dynamic>> rows = response is List
+        ? List<Map<String, dynamic>>.from(response)
+        : <Map<String, dynamic>>[];
     return rows.map(NotificationItem.fromMap).toList();
   }
 

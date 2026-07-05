@@ -77,14 +77,15 @@ function buildStore(prefix) {
 }
 
 /**
- * Generates a rate-limit key from the actual TCP connection address instead of
- * req.ip (which trusts the client-controlled X-Forwarded-For header). This
- * prevents attackers from bypassing rate limits by rotating the header value.
+ * Generates a rate-limit key from the proxy-resolved IP address.
+ *
+ * Express's trust-proxy setting (1 hop) resolves X-Forwarded-For to req.ip.
+ * Using req.socket.remoteAddress directly would see the load balancer / proxy
+ * IP instead of the real client, collapsing all users behind the same proxy
+ * into one rate-limit bucket.
  */
 export function safeIpKeyGenerator(req) {
-  return req.socket?.remoteAddress
-    || req.connection?.remoteAddress
-    || 'unknown';
+  return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
 /**

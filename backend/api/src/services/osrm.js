@@ -91,9 +91,18 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
         return null;
       }
 
+      // Apply a time-based traffic multiplier to the duration to provide a more accurate ETA
+      const now = new Date();
+      const hour = now.getHours();
+      let trafficMultiplier = 1.0;
+      // Rush hour: 8 AM - 10 AM and 5 PM - 7 PM
+      if ((hour >= 8 && hour <= 10) || (hour >= 17 && hour <= 19)) {
+        trafficMultiplier = 1.35;
+      }
+      
       const result = {
         distanceKm: route.distance / 1000,
-        durationSeconds: Number.isFinite(route.duration) ? route.duration : null,
+        durationSeconds: Number.isFinite(route.duration) ? Math.round(route.duration * trafficMultiplier) : null,
       };
 
       if (redisClient) {

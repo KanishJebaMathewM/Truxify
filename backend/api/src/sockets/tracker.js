@@ -5,12 +5,27 @@ import logger from '../middleware/logger.js';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 
 let mongoDbOverride = null;
 const getMongoDb = () => mongoDbOverride || mongoDb;
 
 let telemetryDropCounter = 0;
-const RECOVERY_FILE_PATH = path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
+const RECOVERY_FILE_PATH = process.env.RECOVERY_FILE_PATH || path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
+
+function scrubPII(record) {
+  const scrubbed = { ...record };
+  if (scrubbed.driver_id) {
+    scrubbed.driver_id = 'scrubbed:' + crypto.createHash('sha256').update(scrubbed.driver_id).digest('hex').slice(0, 12);
+  }
+  if (typeof scrubbed.lat === 'number') {
+    scrubbed.lat = Math.round(scrubbed.lat * 100) / 100;
+  }
+  if (typeof scrubbed.lng === 'number') {
+    scrubbed.lng = Math.round(scrubbed.lng * 100) / 100;
+  }
+  return scrubbed;
+}
 
 // In-memory mapping of active client subscriptions
 const trackingSubscriptions = new Map();
@@ -757,8 +772,8 @@ export async function closeWebSocketServer() {
       const dataLoss = telemetryWriteBuffer.length;
       if (dataLoss > 0) {
         try {
-          const lines = telemetryWriteBuffer.map(r => JSON.stringify(r)).join('\n');
-          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', 'utf-8');
+          const lines = telemetryWriteBuffer.map(r => JSON.stringify(scrubPII(r))).join('\n');
+          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', { encoding: 'utf-8', mode: 0o600 });
           logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available. Wrote ${dataLoss} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`);
         } catch (fileErr) {
           logger.error(`[TRUXIFY SHUTDOWN] Failed to write recovery file: ${fileErr.message}. ${dataLoss} records lost.`);

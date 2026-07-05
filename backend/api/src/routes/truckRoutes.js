@@ -136,21 +136,14 @@ function parseBoolean(value) {
   return ['true', '1', 'yes'].includes(String(value).trim().toLowerCase());
 }
 
-/**
- * @route GET /api/trucks/search
- * @desc Search for online drivers with active trucks and calculate price estimates
- * @access Authenticated
- * @param {number} req.query.pickup_lat - Pickup latitude
- * @param {number} req.query.pickup_lng - Pickup longitude
- * @param {number} req.query.drop_lat - Drop-off latitude
- * @param {number} req.query.drop_lng - Drop-off longitude
- * @param {number} req.query.weight_tonnes - Cargo weight in tonnes
- * @param {boolean} [req.query.is_fragile] - Fragile cargo indicator
- * @param {boolean} [req.query.is_stackable] - Stackable cargo indicator
- * @returns {array} 200 - List of matching drivers and their price/ETA estimates
- * @returns {object} 400 - Validation errors or missing/invalid query parameters
- * @returns {object} 500 - Internal server error
- */
+function isLatitude(value) {
+  return Number.isFinite(value) && value >= -90 && value <= 90;
+}
+
+function isLongitude(value) {
+  return Number.isFinite(value) && value >= -180 && value <= 180;
+}
+
 router.get('/search', authenticate, userLimiter, async (req, res) => {
   const {
     pickup_lat, pickup_lng,
@@ -173,6 +166,8 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Invalid numeric parameters' });
   }
 
+  if (!isLatitude(numPickupLat) || !isLatitude(numDropLat) || !isLongitude(numPickupLng) || !isLongitude(numDropLng)) {
+    return res.status(400).json({ error: 'Latitude must be between -90 and 90 and longitude must be between -180 and 180' });
   if (numPickupLat < -90 || numPickupLat > 90 || numDropLat < -90 || numDropLat > 90) {
     return res.status(400).json({ error: 'Latitude must be between -90 and 90' });
   }

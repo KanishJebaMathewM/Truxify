@@ -95,9 +95,8 @@ export async function buildDepositTx(orderDisplayId, customerWalletAddress, driv
 
   let txData;
   try {
-    txData = await escrowContract.deposit.populateTransaction(
+    txData = await escrowContract.createBooking.populateTransaction(
       bookingId,
-      customerWalletAddress,
       driverWalletAddress,
       {
         value: amountWei,
@@ -199,7 +198,7 @@ export async function escrowRelease(orderDisplayId) {
   }
 
   try {
-    const tx = await escrowContract.releaseFunds(bookingId);
+    const tx = await escrowContract.releasePayment(bookingId);
     logger.info(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
     const receipt = await tx.wait(1);
     logger.info(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
@@ -224,7 +223,7 @@ export async function submitEscrowRefund(orderDisplayId) {
 
   let tx;
   try {
-    tx = await escrowContract.refundFunds(bookingId);
+    tx = await escrowContract.cancelBooking(bookingId);
     logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   } catch (err) {
     logger.error(`[escrow] refundFunds failed for booking ${orderDisplayId}: ${err.message}`);

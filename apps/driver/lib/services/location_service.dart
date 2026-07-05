@@ -17,6 +17,7 @@ class LocationService {
 
   WebSocketChannel? _channel;
   StreamSubscription<Position>? _positionSubscription;
+  StreamSubscription? _socketSubscription;
   Timer? _reconnectTimer;
   Timer? _heartbeatTimer;
   Timer? _maxIntervalTimer; // Fallback for max 30 seconds without ping
@@ -242,7 +243,7 @@ class LocationService {
       
       _startHeartbeat();
 
-      _channel!.stream.listen(
+      _socketSubscription = _channel!.stream.listen(
         (message) {
           if (message == 'pong') return;
           debugPrint('[LocationService] Received WebSocket message: $message');
@@ -264,6 +265,11 @@ class LocationService {
 
   void _scheduleReconnect() {
     _channel = null;
+    final socketSubscription = _socketSubscription;
+    _socketSubscription = null;
+    if (socketSubscription != null) {
+      unawaited(socketSubscription.cancel());
+    }
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
 
@@ -291,6 +297,11 @@ class LocationService {
   void _closeWebSocket() {
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
+    final socketSubscription = _socketSubscription;
+    _socketSubscription = null;
+    if (socketSubscription != null) {
+      unawaited(socketSubscription.cancel());
+    }
     _channel?.sink.close();
     _channel = null;
     _activeOrderId = null;

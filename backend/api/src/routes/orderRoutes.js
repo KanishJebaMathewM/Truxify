@@ -479,8 +479,7 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
       const result = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
       order = result.data;
       orderErr = result.error;
-    }
-    if (!order) {
+    } else {
       const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
       order = result.data;
       orderErr = result.error;
@@ -1305,7 +1304,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
     });
   } catch (err) {
     logger.error('Change drop exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
   }
 });
 
@@ -1489,7 +1488,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
 
     const updatePayload = {
       status: 'cancelled',
-      cancellation_reason: reason,
+      cancellation_reason: reason ?? order.cancellation_reason,
       updated_at: new Date().toISOString(),
     };
 
@@ -1517,7 +1516,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
   } catch (err) {
     logger.error('Cancel order exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
   }
 });
 
@@ -1690,7 +1689,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
 
   } catch (err) {
     logger.error({ err }, 'Fetch driver location exception');
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
   }
 });
 
@@ -1798,7 +1797,7 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRol
 
   } catch (err) {
     logger.error({ err }, 'Fetch order route exception');
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
   }
 });
 

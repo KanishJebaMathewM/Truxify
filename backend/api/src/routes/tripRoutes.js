@@ -466,9 +466,16 @@ router.put('/:tripDisplayId/start', authenticate, userLimiter, requireRole(['dri
     if (!trip) return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
 
     // ENFORCEMENT CHECK: Ensure order is funded before trip can start
-    const { data: order, error: orderErr } = await supabase.from('orders').select('escrow_status').eq('id', trip.id).maybeSingle();
+    // A driver has at most one active order associated with their active trip.
+    const { data: order, error: orderErr } = await supabase.from('orders')
+      .select('escrow_status')
+      .eq('driver_id', req.user.id)
+      .in('status', ['truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up'])
+      .maybeSingle();
+
     if (orderErr) return res.status(500).json({ error: 'Failed to verify order funding status.' });
-    if (order && order.escrow_status !== 'funded') {
+    if (!order) return res.status(404).json({ error: 'Active order not found for this driver.' });
+    if (order.escrow_status !== 'funded') {
       return res.status(403).json({ error: `Cannot start trip: Escrow is not funded (current status: ${order.escrow_status}).` });
     }
 

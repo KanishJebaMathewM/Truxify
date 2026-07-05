@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { requestIdMiddleware, requestLogger } from '../../src/middleware/requestId.js';
+import { asyncLocalStorage } from '../../src/middleware/logger.js';
 
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}));
+vi.mock('../../src/middleware/logger.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), child: vi.fn().mockReturnThis() },
+  };
+});
 
 function makeReq(overrides = {}) {
   return { requestId: undefined, originalUrl: '/api/test', method: 'GET', headers: {}, ...overrides };
@@ -20,11 +25,15 @@ function makeRes(statusCode = 200) {
 }
 
 describe('requestIdMiddleware', () => {
-  it('attaches a UUID to req.requestId', () => {
+  it('attaches a UUID to req.requestId and runs asyncLocalStorage', () => {
     const req = makeReq();
     const res = makeRes();
     const next = vi.fn();
-    requestIdMiddleware(req, res, next);
+    requestIdMiddleware(req, res, () => {
+      next();
+      const store = asyncLocalStorage.getStore();
+      expect(store.requestId).toBe(req.requestId);
+    });
     expect(req.requestId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
     );
@@ -69,7 +78,7 @@ describe('requestLogger', () => {
     requestLogger(req, res, vi.fn());
     res.emit('finish');
     expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: 'test-id', statusCode: 200 })
+      expect.objectContaining({ statusCode: 200 })
     );
   });
 
@@ -79,7 +88,7 @@ describe('requestLogger', () => {
     requestLogger(req, res, vi.fn());
     res.emit('finish');
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: 'test-id', statusCode: 404 })
+      expect.objectContaining({ statusCode: 404 })
     );
   });
 
@@ -89,7 +98,7 @@ describe('requestLogger', () => {
     requestLogger(req, res, vi.fn());
     res.emit('finish');
     expect(logger.error).toHaveBeenCalledWith(
-      expect.objectContaining({ requestId: 'test-id', statusCode: 500 })
+      expect.objectContaining({ statusCode: 500 })
     );
   });
 

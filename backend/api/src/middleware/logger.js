@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { AsyncLocalStorage } from 'async_hooks';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -13,6 +14,8 @@ function sanitizeLogLevel(level) {
   return LOG_LEVELS.includes(level) ? level : 'info';
 }
 
+export const asyncLocalStorage = new AsyncLocalStorage();
+
 const logger = pino({
   level: resolveLogLevel(),
   ...(isDev && {
@@ -21,6 +24,13 @@ const logger = pino({
       options: { colorize: true, translateTime: 'SYS:standard', ignore: 'pid,hostname' },
     },
   }),
+  mixin() {
+    const store = asyncLocalStorage.getStore();
+    if (store && store.requestId) {
+      return { requestId: store.requestId };
+    }
+    return {};
+  }
 });
 
 export { LOG_LEVELS, sanitizeLogLevel };

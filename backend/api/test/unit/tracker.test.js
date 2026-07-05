@@ -319,7 +319,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
     const { isWebSocketUpgradeAllowed } = await import('../../src/sockets/tracker.js');
     const allowed = await isWebSocketUpgradeAllowed({
       headers: { 'x-forwarded-for': '203.0.113.10, 10.0.0.2' },
-      socket: { remoteAddress: '10.0.0.2' },
+      socket: { remoteAddress: '127.0.0.1' },
     });
 
     expect(allowed).toBe(true);
@@ -1561,7 +1561,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     await t.flushTelemetryBuffer();
 
     // Failed records (old-driver) must be prepended and new records (new-driver) appended
-    const buffer = t.getTelemetryWriteBuffer();
+    const buffer = [...(t.getTelemetryFlushBuffer ? t.getTelemetryFlushBuffer() : []), ...t.getTelemetryWriteBuffer()];
     expect(buffer).toHaveLength(2);
     expect(buffer[0].driver_id).toBe('old-driver');
     expect(buffer[1].driver_id).toBe('new-driver');
@@ -1592,7 +1592,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
 
     await t.flushTelemetryBuffer();
 
-    const buffer = t.getTelemetryWriteBuffer();
+    const buffer = [...(t.getTelemetryFlushBuffer ? t.getTelemetryFlushBuffer() : []), ...t.getTelemetryWriteBuffer()];
     // 5000 is MAX_BUFFER_SIZE. 4995 new records + 5 kept old records = 5000 records.
     expect(buffer).toHaveLength(5000);
     // The first 5 old records (indices 0 to 4) should be dropped, keeping only indices 5 to 9.

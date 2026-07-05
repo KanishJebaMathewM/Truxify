@@ -157,14 +157,16 @@ const MAX_MSG_PER_SECOND = 10;
 const messageRateTracker = new WeakMap();
 
 function getClientIp(request) {
-  const forwardedFor = request.headers?.['x-forwarded-for'];
-  if (request.socket?.remoteAddress === '127.0.0.1') { /* handle trust proxy */ }
+  const remoteIp = request.socket?.remoteAddress || request.connection?.remoteAddress;
 
-  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
-    return forwardedFor.split(',')[0].trim();
+  if (remoteIp === '127.0.0.1' || remoteIp === '::ffff:127.0.0.1' || remoteIp === '::1') {
+    const forwardedFor = request.headers?.['x-forwarded-for'];
+    if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+      return forwardedFor.split(',')[0].trim();
+    }
   }
 
-  return request.socket?.remoteAddress || request.connection?.remoteAddress || 'unknown';
+  return remoteIp || 'unknown';
 }
 
 export async function isWebSocketUpgradeAllowed(request) {
@@ -864,7 +866,7 @@ export async function closeWebSocketServer() {
       const dataLoss = telemetryWriteBuffer.length;
       if (dataLoss > 0) {
         try {
-          const lines = telemetryWriteBuffer.toArray().map(r => JSON.stringify(scrubPII(r))).join('\n');
+          const lines = telemetryWriteBuffer.toArray().map(r => scrubPII(r)).join('\n');
           fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', { encoding: 'utf-8', mode: 0o600 });
           logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available. Wrote ${dataLoss} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`);
         } catch (fileErr) {

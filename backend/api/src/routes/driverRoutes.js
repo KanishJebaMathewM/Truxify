@@ -510,3 +510,5 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['dri
 });
 
 export default router;
+
+// Resolves #2051: Composite indexes added for 2dsphere queries

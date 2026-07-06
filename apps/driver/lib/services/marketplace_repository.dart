@@ -31,6 +31,8 @@ class MarketplaceRepository {
   final http.Client _httpClient;
   final String _apiBaseUrl;
 
+  String _encodePathSegment(String value) => Uri.encodeComponent(value);
+
   Future<Map<String, String>> _authHeaders() async {
     final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
     final userId = _client.auth.currentUser?.id ?? '';
@@ -70,7 +72,9 @@ class MarketplaceRepository {
     required String loadId,
     required num amount,
   }) async {
-    final uri = Uri.parse('$_apiBaseUrl/api/orders/$loadId/bids');
+    final uri = Uri.parse(
+      '$_apiBaseUrl/api/orders/${_encodePathSegment(loadId)}/bids',
+    );
     final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
     final response = await _httpClient.post(
       uri,
@@ -83,15 +87,15 @@ class MarketplaceRepository {
       }),
     );
 
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(decoded['error']?.toString() ?? 'Failed to submit bid.');
+      throw StateError(_errorMessage(response, 'Failed to submit bid.'));
     }
 
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     return DriverBid.fromJson(Map<String, dynamic>.from(decoded['bid'] as Map));
   }
 
-  Future<List<DriverBid>> fetchDriverBids({required String driverId}) async {
+  Future<List<DriverBid>> fetchDriverBids() async {
     final uri = Uri.parse('$_apiBaseUrl/api/driver/bids');
     final response = await _httpClient.get(uri, headers: await _authHeaders());
 
@@ -210,6 +214,19 @@ class MarketplaceRepository {
     };
 
     return controller.stream;
+  }
+
+  String _errorMessage(http.Response response, String fallback) {
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        final message = decoded['error'] ?? decoded['message'];
+        if (message != null) return message.toString();
+      }
+    } catch (_) {
+      // Fall through to the status-aware fallback below.
+    }
+    return '$fallback (${response.statusCode})';
   }
 
   String _formatCurrency(num value) {

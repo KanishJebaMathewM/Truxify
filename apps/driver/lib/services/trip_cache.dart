@@ -62,6 +62,10 @@ class TripCache {
       final savedAtRaw = prefs.getString(_savedAtKey);
       final savedAt = savedAtRaw != null ? DateTime.tryParse(savedAtRaw) : null;
 
+      if (savedAt != null && DateTime.now().difference(savedAt) > _ttl) {
+        return null;
+      }
+
       return TripCacheSnapshot(
         trips: trips,
         stopsByTripId: stopsByTripId,

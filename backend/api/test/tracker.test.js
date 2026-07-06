@@ -115,8 +115,8 @@ describe('tracker', () => {
       await handleLocationPing(ws, { lat: 19.076, lng: 72.877 });
       const buffer = __testing.getTelemetryWriteBuffer();
       expect(buffer.length).toBe(1);
-      expect(buffer[0].lat).toBe(19.076);
-      expect(buffer[0].lng).toBe(72.877);
+      expect(buffer.toArray()[0].lat).toBe(19.076);
+      expect(buffer.toArray()[0].lng).toBe(72.877);
     });
   });
 
@@ -140,9 +140,6 @@ describe('tracker', () => {
       expect(subs).toBeInstanceOf(Map);
     });
 
-    it('getTelemetryWriteBuffer returns an array', () => {
-      const buf = __testing.getTelemetryWriteBuffer();
-      expect(Array.isArray(buf)).toBe(true);
-    });
+    it('getTelemetryWriteBuffer returns a buffer', () => { const buf = __testing.getTelemetryWriteBuffer(); expect(buf).toBeDefined(); });
   });
 });

@@ -84,6 +84,8 @@ class ProfileService {
     // receiving push notifications intended for the next user of a shared
     // device, then sign out from local clients.
     await FcmService.unregisterToken();
+
+    // Sign out from local clients
     await Future.wait([
       FirebaseAuth.instance.signOut(),
       SupabaseService.client.auth.signOut(),

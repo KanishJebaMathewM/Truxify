@@ -357,50 +357,36 @@ router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
     }
 
     // 1. Fetch the trip to determine the driver
-    const { data: events, error: eventsErr } = await supabase
+    let query = supabase
       .from('trip_events')
       .select('event_id, user_id, trip_id, event_type, event_timestamp, latitude, longitude, metadata, created_at')
-      .eq('trip_id', tripId)
+      .eq('trip_id', tripId);
+
+    if (type && typeof type === 'string') {
+      query = query.eq('event_type', type);
+    }
+
+    if (minLat.value !== undefined) {
+      query = query.gte('latitude', minLat.value);
+    }
+    if (maxLat.value !== undefined) {
+      query = query.lte('latitude', maxLat.value);
+    }
+    if (minLng.value !== undefined) {
+      query = query.gte('longitude', minLng.value);
+    }
+    if (maxLng.value !== undefined) {
+      query = query.lte('longitude', maxLng.value);
+    }
+
+    const { data: events, error: eventsErr } = await query
       .order('event_timestamp', { ascending: isAscending });
 
     if (eventsErr) {
       return res.status(500).json({ error: 'Failed to fetch trip events.', details: eventsErr.message });
     }
 
-    if (!events || events.length === 0) {
-      return res.json({ trip_id: tripId, events: [] });
-    }
-
-    // 5. Optional type filter
-    let filteredEvents = events;
-    if (type && typeof type === 'string') {
-      filteredEvents = events.filter(e => e.event_type === type);
-    }
-
-    if (min_lat !== undefined || max_lat !== undefined || min_lng !== undefined || max_lng !== undefined) {
-      if (min_lat !== undefined && !Number.isFinite(Number(min_lat))) {
-        return res.status(400).json({ error: 'min_lat must be a valid number' });
-      }
-      if (max_lat !== undefined && !Number.isFinite(Number(max_lat))) {
-        return res.status(400).json({ error: 'max_lat must be a valid number' });
-      }
-      if (min_lng !== undefined && !Number.isFinite(Number(min_lng))) {
-        return res.status(400).json({ error: 'min_lng must be a valid number' });
-      }
-      if (max_lng !== undefined && !Number.isFinite(Number(max_lng))) {
-        return res.status(400).json({ error: 'max_lng must be a valid number' });
-      }
-      filteredEvents = filteredEvents.filter(e => {
-        if (e.latitude === null || e.longitude === null || e.latitude === undefined || e.longitude === undefined) return false;
-        const lat = Number(e.latitude);
-        const lng = Number(e.longitude);
-        if (minLat.value !== undefined && lat < minLat.value) return false;
-        if (maxLat.value !== undefined && lat > maxLat.value) return false;
-        if (minLng.value !== undefined && lng < minLng.value) return false;
-        if (maxLng.value !== undefined && lng > maxLng.value) return false;
-        return true;
-      });
-    }
+    const filteredEvents = events || [];
 
     return res.json({
       trip_id: tripId,

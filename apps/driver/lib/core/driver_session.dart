@@ -12,7 +12,10 @@ class DriverSession {
   /// live auth session.
   static String get driverId {
     final user = Supabase.instance.client.auth.currentUser;
-    return user?.id ?? '';
+    if (user == null) {
+      throw StateError('No authenticated driver session.');
+    }
+    return user.id;
   }
 
   /// True only when there is a valid Supabase auth session.

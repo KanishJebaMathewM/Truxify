@@ -113,9 +113,8 @@ void main() {
     );
   });
 
-  test('fetchProfile clears corrupted cached data on ApiException', () async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('truxify_profile_cache', 'not-json');
+    test('fetchProfile clears corrupted cached data on ApiException', () async {
+    mockStorage['truxify_profile_cache'] = 'not-json';
 
     when(() => apiClient.get('/api/profile'))
         .thenThrow(const ApiException(503, 'Service Unavailable'));
@@ -128,6 +127,7 @@ void main() {
         'Service Unavailable',
       )),
     );
-    expect(prefs.getString('truxify_profile_cache'), isNull);
+
+    expect(mockStorage['truxify_profile_cache'], isNull);
   });
 }

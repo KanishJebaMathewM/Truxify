@@ -1572,7 +1572,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
       // Simulate new pings arriving to almost fill the buffer while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
       const mockNewRecords = Array.from({ length: 4995 }, (_, i) => ({ driver_id: `new-driver-${i}` }));
-      t.getTelemetryWriteBuffer().push(...mockNewRecords);
+      mockNewRecords.forEach(r => t.getTelemetryWriteBuffer().push(r));
       throw new Error('transient write failure');
     });
     const collection = vi.fn().mockReturnValue({ insertMany });

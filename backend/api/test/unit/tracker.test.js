@@ -1726,7 +1726,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       expect(buffer.toArray()[0].driver_id).toBe('driver-old-1');
       expect(buffer.toArray()[4999].driver_id).toBe('driver-new');
       expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('[TRUXIFY BUFFER WARN] Telemetry buffer full')
+        expect.stringContaining('[TRUXIFY BUFFER CRITICAL] Buffer at 100% capacity')
       );
     });
   });

@@ -570,3 +570,39 @@ By participating in this project, you agree to follow our Code of Conduct.
 ---
 
 Thank you for contributing to Truxify and helping make logistics management more efficient and accessible for everyone!
+
+
+## ⚠️ Environment Setup (Required Before Running)
+
+Truxify uses `--dart-define` flags to separate dev/staging/prod environments.
+**Never run `flutter run` without these flags — it will connect to production services.**
+
+### Step 1: Copy the dev template
+```bash
+cp dart_defines/dev.env.example dart_defines/dev.env
+```
+
+### Step 2: Fill in your local values in `dart_defines/dev.env`
+
+For local Supabase, use:
+- `SUPABASE_URL=http://localhost:54321` (default Supabase local dev port)
+- Get your local anon key from `supabase start` output
+
+### Step 3: Run with dart-defines
+
+**Mac/Linux:**
+```bash
+flutter run --dart-define=ENV=dev \
+            --dart-define=SUPABASE_URL=http://localhost:54321 \
+            --dart-define=SUPABASE_ANON_KEY=your-local-key \
+            --dart-define=API_BASE_URL=http://localhost:3000
+```
+
+**Windows PowerShell:**
+```powershell
+flutter run `
+  --dart-define=ENV=dev `
+  --dart-define=SUPABASE_URL=http://localhost:54321 `
+  --dart-define=SUPABASE_ANON_KEY=your-local-key `
+  --dart-define=API_BASE_URL=http://localhost:3000
+```

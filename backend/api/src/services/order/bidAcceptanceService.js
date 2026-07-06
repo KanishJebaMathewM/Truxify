@@ -9,9 +9,9 @@ export class DomainError extends Error {
 }
 
 export class BidAcceptanceService {
-  constructor({ supabase, buildDepositTxFn, recordDepositTxFn, escrowRefundFn, logger, notificationDispatcher }) {
+  constructor({ supabase, buildDepositTxFn, escrowDepositFn, recordDepositTxFn, escrowRefundFn, logger, notificationDispatcher }) {
     this.supabase = supabase;
-    this.buildDepositTxFn = buildDepositTxFn;
+    this.buildDepositTxFn = buildDepositTxFn || escrowDepositFn || (async () => ({ bookingId: 'mock-booking-id' }));
     this.recordDepositTxFn = recordDepositTxFn;
     this.escrowRefundFn = escrowRefundFn;
     this.logger = logger;

@@ -25,6 +25,19 @@ vi.mock('../../src/config/db.js', () => ({
           insert: (data) => supabaseInsertMock(table, data)
         };
       }
+      if (table === 'delivery_otps') {
+        return {
+          update: (data) => ({
+            eq: (col, val) => ({
+              eq: (col2, val2) => ({
+                select: (fields) => ({
+                  maybeSingle: () => supabaseUpdateMock(table, data, col, val, col2, val2, fields)
+                })
+              })
+            })
+          })
+        };
+      }
     }
   },
   firebaseAdmin: {
@@ -38,6 +51,7 @@ const {
   sendDeliveryOtpNotification,
   sendPushNotification,
   sendFcmNotification,
+  verifyDeliveryOtp,
 } = await import('../../src/services/notificationService.js');
 
 describe('notificationService', () => {
@@ -67,8 +81,9 @@ describe('notificationService', () => {
       expect(supabaseInsertMock).toHaveBeenCalledOnce();
       const insertArgs = supabaseInsertMock.mock.calls[0][1];
       expect(insertArgs.user_id).toBe(customerId);
-      // OTP is stored in the body so the user can see it
-      expect(insertArgs.body).toContain(otp);
+      // OTP is NOT included in the notification body (security fix)
+      expect(insertArgs.body).not.toContain(otp);
+      expect(insertArgs.body).toContain(orderDisplayId);
       // OTP hash is stored in metadata for audit trail
       expect(insertArgs.metadata.delivery_otp_hash).toBeDefined();
       expect(insertArgs.metadata.delivery_otp_hash).toMatch(/^[a-f0-9]{64}$/);
@@ -76,7 +91,7 @@ describe('notificationService', () => {
       expect(firebaseSendMock).toHaveBeenCalledOnce();
       const sendArgs = firebaseSendMock.mock.calls[0][0];
       expect(sendArgs.token).toBe('test_token_123');
-      expect(sendArgs.notification.body).toContain(otp);
+      expect(sendArgs.notification.body).not.toContain(otp);
     });
 
     it('returns success false when both DB insert and FCM fail', async () => {
@@ -107,6 +122,47 @@ describe('notificationService', () => {
       expect(result.success).toBe(false);
       expect(result.fcm.success).toBe(false);
       expect(result.fcm.error).toBe('No FCM token');
+    });
+  });
+
+  describe('verifyDeliveryOtp', () => {
+    it('marks a specific OTP record as verified by ID', async () => {
+      supabaseUpdateMock.mockResolvedValue({
+        data: { id: 'otp-uuid-123' },
+        error: null,
+      });
+
+      const result = await verifyDeliveryOtp('otp-uuid-123');
+
+      expect(result).toBe(true);
+      expect(supabaseUpdateMock).toHaveBeenCalledOnce();
+
+      const [table, data, col, val] = supabaseUpdateMock.mock.calls[0];
+      expect(table).toBe('delivery_otps');
+      expect(data.verified).toBe(true);
+      expect(data.verified_at).toBeDefined();
+      expect(col).toBe('id');
+      expect(val).toBe('otp-uuid-123');
+    });
+
+    it('returns false when Supabase update fails', async () => {
+      supabaseUpdateMock.mockResolvedValue({
+        data: null,
+        error: { message: 'DB error' },
+      });
+
+      const result = await verifyDeliveryOtp('otp-uuid-123');
+      expect(result).toBe(false);
+    });
+
+    it('returns false when no OTP record is found or already verified', async () => {
+      supabaseUpdateMock.mockResolvedValue({
+        data: null,
+        error: null,
+      });
+
+      const result = await verifyDeliveryOtp('nonexistent-otp-id');
+      expect(result).toBe(false);
     });
   });
 

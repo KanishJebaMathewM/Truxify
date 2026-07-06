@@ -101,6 +101,7 @@ export async function predictPrice({
     routeOrigin = '',
     routeDestination = '',
 } = {}) {
+  guardMlApiKey();
     const url = `${getBaseUrl()}/predict/price`;
 
     const payload = {

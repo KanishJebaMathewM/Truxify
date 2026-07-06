@@ -20,8 +20,6 @@ class AddressRepository {
   /// Insert a new address. If it's marked default, demote all others first.
   Future<SavedAddress> add(SavedAddress address) async {
     final userId = SupabaseService.requireUserId();
-    if (address.isDefault) await _clearDefaults(userId);
-
     final payload = address.toMap()..['user_id'] = userId;
 
     final row = await SupabaseService.client
@@ -29,7 +27,11 @@ class AddressRepository {
         .insert(payload)
         .select()
         .single();
-    return SavedAddress.fromMap(row);
+    final savedAddress = SavedAddress.fromMap(row);
+    if (address.isDefault) {
+      await _clearDefaults(userId, exceptId: savedAddress.id);
+    }
+    return savedAddress;
   }
 
   /// Set an address as the default, clearing all others.
@@ -53,9 +55,14 @@ class AddressRepository {
         .eq('user_id', userId);
   }
 
-  Future<void> _clearDefaults(String userId) async {
-    await SupabaseService.client
+  Future<void> _clearDefaults(String userId, {String? exceptId}) async {
+    var query = SupabaseService.client
         .from(_table)
-        .update({'is_default': false}).eq('user_id', userId);
+        .update({'is_default': false})
+        .eq('user_id', userId);
+    if (exceptId != null) {
+      query = query.neq('id', exceptId);
+    }
+    await query;
   }
 }

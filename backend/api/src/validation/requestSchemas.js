@@ -155,6 +155,7 @@ export const registerDeviceSchema = z.object({
   platform: z.enum(['android', 'ios', 'web'], {
     invalid_type_error: 'platform must be one of: android, ios, web',
   }).default('android'),
+  // Custom metadata object containing device details
   metadata: z.record(z.any()).optional(),
 }).strict();
 

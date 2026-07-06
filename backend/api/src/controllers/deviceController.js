@@ -7,6 +7,7 @@ import logger from '../middleware/logger.js';
 export async function registerDeviceToken(req, res) {
   try {
     const userId = req.user?.id;
+    // Support custom metadata object in device registration
     const { fcmToken, platform, metadata } = req.body;
 
     if (!userId) {

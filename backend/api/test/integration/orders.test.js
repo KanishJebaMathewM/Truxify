@@ -717,7 +717,7 @@ describe('GET /api/orders/:id — order details', () => {
       .set(CUSTOMER_HEADERS);
 
     console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
-    expect(res.body.order.id).toBe('order-1');
+    expect(res.body.order.id).toBe('aaaa0001-0000-4000-a000-000000000001');
     expect(Array.isArray(res.body.timeline)).toBe(true);
   });
 

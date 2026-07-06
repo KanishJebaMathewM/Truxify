@@ -63,6 +63,13 @@ class ApiClient {
         'Set --dart-define=TRUXIFY_API_BASE_URL=<url> for production builds.',
       );
     }
+    return _defaultBaseUrl;
+  }
+
+  static String get _defaultBaseUrl {
+    const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
+    if (envUrl.isNotEmpty) return envUrl;
+    if (kReleaseMode) throw StateError('TRUXIFY_API_BASE_URL must be set in release mode');
     return 'http://localhost:5000';
   }
 

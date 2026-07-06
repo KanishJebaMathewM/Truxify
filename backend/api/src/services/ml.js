@@ -16,9 +16,7 @@ export const mlBreaker = new CircuitBreaker(async (url, options) => {
     resetTimeout: 30000
 });
 
-mlBreaker.fallback(() => {
-    throw new Error('[ML] Service temporarily unavailable due to high failure rate. Circuit open.');
-});
+
 
 // Startup validation
 if (!process.env.ML_API_KEY) {

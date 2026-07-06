@@ -858,11 +858,16 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
     // Phase 3: Only after bid is accepted, write escrow pre-update to DB
     if (depositTxData) {
       const bookingId = bookingIdFromUuid(order.order_display_id);
-      await supabase.from('orders').update({
+      const { error: updateErr } = await supabase.from('orders').update({
         escrow_booking_id: bookingId,
         escrow_status: 'funding',
         version: order.version + 2
       }).eq('id', orderId).eq('version', order.version + 1);
+
+      if (updateErr) {
+        logger.error('[escrow] Failed to update escrow status in Phase 3:', updateErr.message);
+        return res.status(500).json({ error: 'Failed to initialize escrow securely. Please try again.' });
+      }
     }
 
     res.json({

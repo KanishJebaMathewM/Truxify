@@ -1,7 +1,7 @@
 import { WebSocketServer } from 'ws';
-import { mongoDb, redisClient, firebaseAdmin, supabase } from '../config/db.js';
+import { mongoDb, redisClient, firebaseAdmin, supabase } from '../src/config/db.js';
 import jwt from 'jsonwebtoken';
-import logger from '../middleware/logger.js';
+import logger from '../src/middleware/logger.js';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
@@ -1029,3 +1029,8 @@ export const __testing = {
     return MAX_CONSECUTIVE_DROPS;
   },
 };
+
+import { describe, it } from 'vitest';
+describe('tracker helper dummy test', () => {
+  it('dummy', () => {});
+});

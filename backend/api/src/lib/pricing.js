@@ -120,6 +120,7 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   }
 
   const baseFreight = Math.round(rate * weightTonnes * distanceKm) + rateCard.handlingFee;
+  // Apply the dynamic toll rate factor to scale the toll estimates
   const tollEstimate = Math.round(rateCard.tollPerKm * distanceKm * tollFactor);
   const platformFee = Math.round((baseFreight * rateCard.platformFeePct) / 100);
   const totalAmount = baseFreight + tollEstimate + platformFee;

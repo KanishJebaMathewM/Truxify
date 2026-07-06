@@ -28,10 +28,8 @@ class ProfileService {
 
   static const String _profileCacheKey = 'truxify_profile_cache';
 
-  Future<Map<String, dynamic>?> _readCachedProfile(
-    SharedPreferences prefs,
-  ) async {
-    final cached = prefs.getString(_profileCacheKey);
+  Future<Map<String, dynamic>?> _readCachedProfile() async {
+    final cached = await _secureStorage.read(key: _profileCacheKey);
     if (cached == null) return null;
     try {
       final decoded = jsonDecode(cached);
@@ -39,7 +37,7 @@ class ProfileService {
     } catch (_) {
       // Invalid cache entries are cleared so future fallbacks do not crash.
     }
-    await prefs.remove(_profileCacheKey);
+    await _secureStorage.delete(key: _profileCacheKey);
     return null;
   }
 
@@ -56,7 +54,7 @@ class ProfileService {
       }
       return <String, dynamic>{};
     } on ApiException catch (e) {
-      final cached = await _readCachedProfile(prefs);
+      final cached = await _readCachedProfile();
       if (cached != null) {
         developer.log('API failed, returning cached profile.');
         return cached;
@@ -65,7 +63,7 @@ class ProfileService {
     } on FormatException {
       throw const FormatException('Invalid JSON response from server.');
     } catch (e) {
-      final cached = await _readCachedProfile(prefs);
+      final cached = await _readCachedProfile();
       if (cached != null) {
         developer.log('Network error, returning cached profile.');
         return cached;

@@ -87,15 +87,15 @@ vi.mock('../../src/services/reputation.js', () => ({
 
 const escrowReleaseMock = vi.fn();
 const submitEscrowRefundMock = vi.fn();
-const submitEscrowRefundMock = vi.fn();
 const confirmEscrowRefundMock = vi.fn();
+const submitEscrowCancelWithPenaltyMock = vi.fn();
 vi.mock('../../src/services/escrow.js', async () => {
   const actual = await vi.importActual('../../src/services/escrow.js');
   return {
     ...actual,
     escrowRelease: escrowReleaseMock,
     submitEscrowRefund: submitEscrowRefundMock,
-    submitEscrowCancelWithPenalty: submitEscrowRefundMock,
+    submitEscrowCancelWithPenalty: submitEscrowCancelWithPenaltyMock,
     confirmEscrowRefund: confirmEscrowRefundMock,
   };
 });

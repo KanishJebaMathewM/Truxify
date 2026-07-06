@@ -9,6 +9,7 @@ class TripCache {
   static const String _stopsKey = 'truxify_driver_cached_trip_stops';
   static const String _routePointsKey = 'truxify_driver_cached_route_points';
   static const String _savedAtKey = 'truxify_driver_cached_trips_saved_at';
+  static const Duration _ttl = Duration(hours: 24);
 
   static Future<void> save({
     required List<Map<String, dynamic>> trips,
@@ -60,6 +61,10 @@ class TripCache {
 
       final savedAtRaw = prefs.getString(_savedAtKey);
       final savedAt = savedAtRaw != null ? DateTime.tryParse(savedAtRaw) : null;
+
+      if (savedAt != null && DateTime.now().difference(savedAt) > _ttl) {
+        return null;
+      }
 
       return TripCacheSnapshot(
         trips: trips,

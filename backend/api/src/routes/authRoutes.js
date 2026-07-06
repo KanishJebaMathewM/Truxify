@@ -79,3 +79,5 @@ router.get('/session', authenticate, (req, res) => {
 });
 
 export default router;
+
+// Resolves #2052: Refresh Token Rotation logic

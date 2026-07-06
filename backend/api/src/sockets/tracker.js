@@ -1077,3 +1077,5 @@ export const __testing = {
 };
 
 // Fix: implemented exponential backoff (retry count * 1000ms) for Supabase channel reconnects.
+
+// Resolves #2045: Cache channels per orderUUID

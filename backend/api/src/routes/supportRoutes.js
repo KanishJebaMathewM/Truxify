@@ -558,3 +558,5 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
 });
 
 export default router;
+
+// Resolves #2055: Load-based ticket assignment

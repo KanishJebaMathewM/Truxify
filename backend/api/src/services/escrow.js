@@ -27,8 +27,8 @@ import logger from '../middleware/logger.js';
 
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver) external payable',
-  'function releasePayment(uint256 bookingId) external',
-  'function cancelBooking(uint256 bookingId) external',
+  'function releaseFunds(uint256 bookingId) external',
+  'function refundFunds(uint256 bookingId) external',
   'function bookings(uint256 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, uint256 createdAt)',
 ];
 
@@ -198,8 +198,8 @@ export async function escrowRelease(orderDisplayId) {
   }
 
   try {
-    const tx = await escrowContract.releasePayment(bookingId);
-    logger.info(`[escrow] releasePayment tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+    const tx = await escrowContract.releaseFunds(bookingId);
+    logger.info(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
     const receipt = await tx.wait(1);
     logger.info(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
     return { txHash: receipt.hash, bookingId };
@@ -223,8 +223,8 @@ export async function submitEscrowRefund(orderDisplayId) {
 
   let tx;
   try {
-    tx = await escrowContract.cancelBooking(bookingId);
-    logger.info(`[escrow] cancelBooking tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+    tx = await escrowContract.refundFunds(bookingId);
+    logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   } catch (err) {
     logger.error(`[escrow] refundFunds failed for booking ${orderDisplayId}: ${err.message}`);
     return { txHash: null, bookingId, error: err.message };
@@ -237,7 +237,7 @@ export async function submitEscrowRefund(orderDisplayId) {
       if (!receipt || receipt.status === 0) {
         throw new Error('Escrow refund transaction reverted or was not found.');
       }
-      logger.info(`[escrow] cancelBooking confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
+      logger.info(`[escrow] refundFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
       return receipt;
     },
   };

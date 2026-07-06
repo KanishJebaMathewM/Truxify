@@ -1,7 +1,6 @@
 import express from 'express';
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit from 'express-rate-limit';
 import crypto from 'crypto';
-import { ethers } from 'ethers';
 import { bidLimiter, userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { supabase, redisClient, mongoDb } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';

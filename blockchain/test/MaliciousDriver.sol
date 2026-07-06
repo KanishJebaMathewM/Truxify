@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 interface ITruxifyEscrow {
     function releasePayment(uint256 bookingId) external;
+    function withdraw() external;
 }
 
 /**
@@ -22,12 +23,16 @@ contract MaliciousDriver {
     receive() external payable {
         attackCount++;
         if (attackCount < 5) {
-            // Try to call releasePayment again before state is committed
-            escrow.releasePayment(attackBookingId);
+            // Try to call withdraw again before state is committed
+            escrow.withdraw();
         }
     }
 
     function setAttackBookingId(uint256 bookingId) external {
         attackBookingId = bookingId;
+    }
+
+    function attackWithdraw() external {
+        escrow.withdraw();
     }
 }

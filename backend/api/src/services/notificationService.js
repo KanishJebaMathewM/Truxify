@@ -181,7 +181,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
   logger.info(`[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`);
 
   const title = 'Delivery Verification OTP';
-  const body = `Your delivery OTP for order ${orderDisplayId} has been sent. Share this with the driver only after verifying your cargo has arrived safely.`;
+  const body = `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`;
   const otpHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
 
   let dbSuccess = false;

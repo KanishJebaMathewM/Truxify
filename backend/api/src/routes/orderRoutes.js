@@ -480,6 +480,7 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
       order = result.data;
       orderErr = result.error;
     }
+    if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
     if (!order) {
       const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
       order = result.data;
@@ -1512,7 +1513,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
 
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
   } catch (err) {
-    logger.error('Cancel order exception:', err.message);
+    logger.error({ err }, 'Cancel order exception');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });

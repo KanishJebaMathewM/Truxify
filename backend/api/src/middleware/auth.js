@@ -32,6 +32,27 @@ export async function authenticate(req, res, next) {
       });
     }
 
+    if (process.env.NODE_ENV === 'test' && !process.env.DEV_ACCESS_TOKEN) {
+      const testUserId = req.headers['x-user-id'];
+      const testUserRole = req.headers['x-user-role'] || 'customer';
+      const testFullName = req.headers['x-user-name'] || 'Test User';
+
+      if (testUserId) {
+        req.user = {
+          id: testUserId,
+          uid: 'test_firebase_uid_123',
+          role: testUserRole,
+          fullName: testFullName,
+          phone: '+919999999999'
+        };
+        return next();
+      } else {
+        return res.status(401).json({
+          error: 'Authentication bypassed but x-user-id header is missing.'
+        });
+      }
+    }
+
     const devToken = req.headers['x-dev-access-token'];
     if (devToken && process.env.DEV_ACCESS_TOKEN && devToken === process.env.DEV_ACCESS_TOKEN) {
       const testUserId = req.headers['x-user-id'];

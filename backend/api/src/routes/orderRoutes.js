@@ -1057,8 +1057,8 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
 
     // Phase 1: Execute blockchain escrow release BEFORE crediting the driver's wallet.
     // If the blockchain call fails, the database state is NOT modified and the driver can retry.
-    if (order.escrow_status === 'funding') {
-      return res.status(400).json({ error: 'Cannot release payment: Escrow deposit was never completed by the customer.' });
+    if (order.escrow_booking_id && order.escrow_status !== 'funded' && order.escrow_status !== 'release_failed') {
+      return res.status(400).json({ error: `Cannot release payment: Escrow deposit was never completed or is in an invalid state (${order.escrow_status}).` });
     }
 
     let releaseTxHash = null;
@@ -1081,7 +1081,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
         });
       }
     } else {
-      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
+      logger.info(`[escrow] Order ${orderId} has no escrow_booking_id — skipping on-chain release.`);
     }
 
     // Phase 2: Only on blockchain success (or skip), call complete_trip_tx to credit the driver's wallet.
@@ -1305,7 +1305,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
     });
   } catch (err) {
     logger.error('Change drop exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 
@@ -1536,7 +1536,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
   } catch (err) {
     logger.error('Cancel order exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 
@@ -1709,7 +1709,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
 
   } catch (err) {
     logger.error({ err }, 'Fetch driver location exception');
-    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 
@@ -1817,7 +1817,7 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRol
 
   } catch (err) {
     logger.error({ err }, 'Fetch order route exception');
-    return res.status(500).json({ error: 'Internal Server Error', message: err.message, stack: err.stack });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 

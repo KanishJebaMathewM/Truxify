@@ -1,0 +1,506 @@
+﻿2026-07-06T07:49:11.3774507Z Current runner version: '2.335.1'
+2026-07-06T07:49:11.3801000Z ##[group]Runner Image Provisioner
+2026-07-06T07:49:11.3801821Z Hosted Compute Agent
+2026-07-06T07:49:11.3802500Z Version: 20260624.560
+2026-07-06T07:49:11.3803159Z Commit: 925d229a51159bc391ae97e54a2dd1fe20af789d
+2026-07-06T07:49:11.3803924Z Build Date: 2026-06-24T18:26:47Z
+2026-07-06T07:49:11.3804623Z Worker ID: {bf8a676b-d0f7-45c0-9523-8077115d09ea}
+2026-07-06T07:49:11.3805335Z Azure Region: eastus
+2026-07-06T07:49:11.3805937Z ##[endgroup]
+2026-07-06T07:49:11.3807467Z ##[group]Operating System
+2026-07-06T07:49:11.3808333Z Ubuntu
+2026-07-06T07:49:11.3808976Z 24.04.4
+2026-07-06T07:49:11.3809480Z LTS
+2026-07-06T07:49:11.3810023Z ##[endgroup]
+2026-07-06T07:49:11.3810620Z ##[group]Runner Image
+2026-07-06T07:49:11.3811201Z Image: ubuntu-24.04
+2026-07-06T07:49:11.3811841Z Version: 20260628.225.1
+2026-07-06T07:49:11.3813120Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260628.225/images/ubuntu/Ubuntu2404-Readme.md
+2026-07-06T07:49:11.3814789Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260628.225
+2026-07-06T07:49:11.3815791Z ##[endgroup]
+2026-07-06T07:49:11.3817001Z ##[group]GITHUB_TOKEN Permissions
+2026-07-06T07:49:11.3819854Z Contents: read
+2026-07-06T07:49:11.3820537Z Metadata: read
+2026-07-06T07:49:11.3821129Z ##[endgroup]
+2026-07-06T07:49:11.3823238Z Secret source: None
+2026-07-06T07:49:11.3824333Z Prepare workflow directory
+2026-07-06T07:49:11.4158650Z Prepare all required actions
+2026-07-06T07:49:11.4197500Z Getting action download info
+2026-07-06T07:49:11.6506733Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-07-06T07:49:11.7383580Z Download action repository 'subosito/flutter-action@v2' (SHA:1a449444c387b1966244ae4d4f8c696479add0b2)
+2026-07-06T07:49:11.9610175Z Getting action download info
+2026-07-06T07:49:12.0345972Z Download action repository 'actions/cache@v5' (SHA:caa296126883cff596d87d8935842f9db880ef25)
+2026-07-06T07:49:12.3153033Z Complete job name: Driver Flutter checks
+2026-07-06T07:49:12.4092758Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-07-06T07:49:12.4104012Z ##[group]Run actions/checkout@v4
+2026-07-06T07:49:12.4105325Z with:
+2026-07-06T07:49:12.4106246Z   repository: KanishJebaMathewM/Truxify
+2026-07-06T07:49:12.4115099Z   token: ***
+2026-07-06T07:49:12.4115993Z   ssh-strict: true
+2026-07-06T07:49:12.4116880Z   ssh-user: git
+2026-07-06T07:49:12.4117777Z   persist-credentials: true
+2026-07-06T07:49:12.4118942Z   clean: true
+2026-07-06T07:49:12.4119858Z   sparse-checkout-cone-mode: true
+2026-07-06T07:49:12.4120943Z   fetch-depth: 1
+2026-07-06T07:49:12.4121833Z   fetch-tags: false
+2026-07-06T07:49:12.4122812Z   show-progress: true
+2026-07-06T07:49:12.4123771Z   lfs: false
+2026-07-06T07:49:12.4124672Z   submodules: false
+2026-07-06T07:49:12.4125603Z   set-safe-directory: true
+2026-07-06T07:49:12.4126938Z ##[endgroup]
+2026-07-06T07:49:12.5195540Z Syncing repository: KanishJebaMathewM/Truxify
+2026-07-06T07:49:12.5200645Z ##[group]Getting Git version info
+2026-07-06T07:49:12.5203143Z Working directory is '/home/runner/work/Truxify/Truxify'
+2026-07-06T07:49:12.5206634Z [command]/usr/bin/git version
+2026-07-06T07:49:12.5261727Z git version 2.54.0
+2026-07-06T07:49:12.5287015Z ##[endgroup]
+2026-07-06T07:49:12.5306296Z Temporarily overriding HOME='/home/runner/work/_temp/fc9d6ee5-a1c7-47ac-9bf5-760bcc138454' before making global git config changes
+2026-07-06T07:49:12.5312166Z Adding repository directory to the temporary git global config as a safe directory
+2026-07-06T07:49:12.5316671Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Truxify/Truxify
+2026-07-06T07:49:12.5380227Z Deleting the contents of '/home/runner/work/Truxify/Truxify'
+2026-07-06T07:49:12.5384713Z ##[group]Initializing the repository
+2026-07-06T07:49:12.5389540Z [command]/usr/bin/git init /home/runner/work/Truxify/Truxify
+2026-07-06T07:49:12.5542889Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-07-06T07:49:12.5546588Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-07-06T07:49:12.5550234Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-07-06T07:49:12.5552893Z hint: call:
+2026-07-06T07:49:12.5554534Z hint:
+2026-07-06T07:49:12.5556172Z hint: 	git config --global init.defaultBranch <name>
+2026-07-06T07:49:12.5558508Z hint:
+2026-07-06T07:49:12.5560462Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-07-06T07:49:12.5563477Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-07-06T07:49:12.5565038Z hint:
+2026-07-06T07:49:12.5566452Z hint: 	git branch -m <name>
+2026-07-06T07:49:12.5568260Z hint:
+2026-07-06T07:49:12.5571370Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-07-06T07:49:12.5575064Z Initialized empty Git repository in /home/runner/work/Truxify/Truxify/.git/
+2026-07-06T07:49:12.5580946Z [command]/usr/bin/git remote add origin https://github.com/KanishJebaMathewM/Truxify
+2026-07-06T07:49:12.5618256Z ##[endgroup]
+2026-07-06T07:49:12.5620811Z ##[group]Disabling automatic garbage collection
+2026-07-06T07:49:12.5623277Z [command]/usr/bin/git config --local gc.auto 0
+2026-07-06T07:49:12.5656198Z ##[endgroup]
+2026-07-06T07:49:12.5659392Z ##[group]Setting up auth
+2026-07-06T07:49:12.5663293Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-07-06T07:49:12.5712453Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-07-06T07:49:12.6126393Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-07-06T07:49:12.6164485Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-07-06T07:49:12.6399552Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-07-06T07:49:12.6443130Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-07-06T07:49:12.6675808Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-07-06T07:49:12.6715970Z ##[endgroup]
+2026-07-06T07:49:12.6718275Z ##[group]Fetching the repository
+2026-07-06T07:49:12.6726647Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +38776b459e63c6a24eb5a3da6b7b3065db2abf6c:refs/remotes/pull/2247/merge
+2026-07-06T07:49:13.3150276Z From https://github.com/KanishJebaMathewM/Truxify
+2026-07-06T07:49:13.3151874Z  * [new ref]         38776b459e63c6a24eb5a3da6b7b3065db2abf6c -> pull/2247/merge
+2026-07-06T07:49:13.3195589Z ##[endgroup]
+2026-07-06T07:49:13.3196472Z ##[group]Determining the checkout info
+2026-07-06T07:49:13.3197968Z ##[endgroup]
+2026-07-06T07:49:13.3204574Z [command]/usr/bin/git sparse-checkout disable
+2026-07-06T07:49:13.3257076Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-07-06T07:49:13.3289601Z ##[group]Checking out the ref
+2026-07-06T07:49:13.3296011Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/2247/merge
+2026-07-06T07:49:13.5119190Z Note: switching to 'refs/remotes/pull/2247/merge'.
+2026-07-06T07:49:13.5120139Z 
+2026-07-06T07:49:13.5120829Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-07-06T07:49:13.5122209Z changes and commit them, and you can discard any commits you make in this
+2026-07-06T07:49:13.5123636Z state without impacting any branches by switching back to a branch.
+2026-07-06T07:49:13.5125057Z 
+2026-07-06T07:49:13.5125638Z If you want to create a new branch to retain commits you create, you may
+2026-07-06T07:49:13.5126729Z do so (now or later) by using -c with the switch command. Example:
+2026-07-06T07:49:13.5127464Z 
+2026-07-06T07:49:13.5127838Z   git switch -c <new-branch-name>
+2026-07-06T07:49:13.5128655Z 
+2026-07-06T07:49:13.5129040Z Or undo this operation with:
+2026-07-06T07:49:13.5129598Z 
+2026-07-06T07:49:13.5130401Z   git switch -
+2026-07-06T07:49:13.5131550Z 
+2026-07-06T07:49:13.5132263Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-07-06T07:49:13.5133156Z 
+2026-07-06T07:49:13.5134035Z HEAD is now at 38776b4 Merge 6a03dce001097b2e95edb025f8dd3da9a1f62e06 into a26c82c8a110f05f4ce13eb46199d8dd01dd5ea5
+2026-07-06T07:49:13.5151572Z ##[endgroup]
+2026-07-06T07:49:13.5196044Z [command]/usr/bin/git log -1 --format=%H
+2026-07-06T07:49:13.5225989Z 38776b459e63c6a24eb5a3da6b7b3065db2abf6c
+2026-07-06T07:49:13.5654985Z ##[group]Run subosito/flutter-action@v2
+2026-07-06T07:49:13.5655599Z with:
+2026-07-06T07:49:13.5655996Z   channel: stable
+2026-07-06T07:49:13.5656383Z   cache: true
+2026-07-06T07:49:13.5656635Z   architecture: X64
+2026-07-06T07:49:13.5656909Z   pub-cache-path: default
+2026-07-06T07:49:13.5657191Z   dry-run: false
+2026-07-06T07:49:13.5657524Z   git-source: https://github.com/flutter/flutter.git
+2026-07-06T07:49:13.5657895Z ##[endgroup]
+2026-07-06T07:49:13.5793673Z ##[group]Run chmod +x "$GITHUB_ACTION_PATH/setup.sh"
+2026-07-06T07:49:13.5794226Z [36;1mchmod +x "$GITHUB_ACTION_PATH/setup.sh"[0m
+2026-07-06T07:49:13.7197217Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-07-06T07:49:13.7197777Z ##[endgroup]
+2026-07-06T07:49:13.7369379Z ##[group]Run $GITHUB_ACTION_PATH/setup.sh -p \
+2026-07-06T07:49:13.7369879Z [36;1m$GITHUB_ACTION_PATH/setup.sh -p \[0m
+2026-07-06T07:49:13.7370227Z [36;1m  -n '' \[0m
+2026-07-06T07:49:13.7370480Z [36;1m  -f '' \[0m
+2026-07-06T07:49:13.7370799Z [36;1m  -a 'X64' \[0m
+2026-07-06T07:49:13.7371057Z [36;1m  -k '' \[0m
+2026-07-06T07:49:13.7371355Z [36;1m  -c '' \[0m
+2026-07-06T07:49:13.7371601Z [36;1m  -l '' \[0m
+2026-07-06T07:49:13.7371852Z [36;1m  -d 'default' \[0m
+2026-07-06T07:49:13.7372229Z [36;1m  -g 'https://github.com/flutter/flutter.git' \[0m
+2026-07-06T07:49:13.7372617Z [36;1m  stable[0m
+2026-07-06T07:49:13.7405633Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-07-06T07:49:13.7406059Z ##[endgroup]
+2026-07-06T07:49:14.1843121Z ##[group]Run actions/cache@v5
+2026-07-06T07:49:14.1843405Z with:
+2026-07-06T07:49:14.1843672Z   path: /opt/hostedtoolcache/flutter/stable-3.44.4-x64
+2026-07-06T07:49:14.1844163Z   key: flutter-linux-stable-3.44.4-x64-ad70ec4617166f1c38e5d2bfd388af71fda14f06
+2026-07-06T07:49:14.1844610Z   enableCrossOsArchive: false
+2026-07-06T07:49:14.1844861Z   fail-on-cache-miss: false
+2026-07-06T07:49:14.1845092Z   lookup-only: false
+2026-07-06T07:49:14.1845300Z   save-always: false
+2026-07-06T07:49:14.1845537Z ##[endgroup]
+2026-07-06T07:49:14.3773195Z Cache hit for: flutter-linux-stable-3.44.4-x64-ad70ec4617166f1c38e5d2bfd388af71fda14f06
+2026-07-06T07:49:15.4238432Z Received 218103808 of 1689714614 (12.9%), 207.6 MBs/sec
+2026-07-06T07:49:16.4269168Z Received 494927872 of 1689714614 (29.3%), 235.4 MBs/sec
+2026-07-06T07:49:17.4361283Z Received 775946240 of 1689714614 (45.9%), 245.5 MBs/sec
+2026-07-06T07:49:18.4449399Z Received 1044381696 of 1689714614 (61.8%), 247.8 MBs/sec
+2026-07-06T07:49:19.4461278Z Received 1321205760 of 1689714614 (78.2%), 250.8 MBs/sec
+2026-07-06T07:49:20.4460638Z Received 1606418432 of 1689714614 (95.1%), 254.3 MBs/sec
+2026-07-06T07:49:20.8489738Z Received 1689714614 of 1689714614 (100.0%), 250.7 MBs/sec
+2026-07-06T07:49:20.8558798Z Cache Size: ~1611 MB (1689714614 B)
+2026-07-06T07:49:20.8641931Z [command]/usr/bin/tar -xf /home/runner/work/_temp/9fad0998-1114-4743-b852-dbdb39925d1b/cache.tzst -P -C /home/runner/work/Truxify/Truxify --use-compress-program unzstd
+2026-07-06T07:49:25.7320490Z Cache restored successfully
+2026-07-06T07:49:25.8128926Z Cache restored from key: flutter-linux-stable-3.44.4-x64-ad70ec4617166f1c38e5d2bfd388af71fda14f06
+2026-07-06T07:49:25.9569650Z ##[group]Run actions/cache@v5
+2026-07-06T07:49:25.9569929Z with:
+2026-07-06T07:49:25.9570144Z   path: /home/runner/.pub-cache
+2026-07-06T07:49:25.9570585Z   key: flutter-pub-linux-stable-3.44.4-x64-ad70ec4617166f1c38e5d2bfd388af71fda14f06-
+2026-07-06T07:49:25.9571078Z   enableCrossOsArchive: false
+2026-07-06T07:49:25.9571340Z   fail-on-cache-miss: false
+2026-07-06T07:49:25.9571580Z   lookup-only: false
+2026-07-06T07:49:25.9571805Z   save-always: false
+2026-07-06T07:49:25.9572051Z ##[endgroup]
+2026-07-06T07:49:26.2372083Z Cache hit for: flutter-pub-linux-stable-3.44.4-x64-ad70ec4617166f1c38e5d2bfd388af71fda14f06-
+2026-07-06T07:49:26.7896592Z Received 76914658 of 76914658 (100.0%), 150.6 MBs/sec
+2026-07-06T07:49:26.7897246Z Cache Size: ~73 MB (76914658 B)
+2026-07-06T07:49:26.7925750Z [command]/usr/bin/tar -xf /home/runner/work/_temp/4df6104e-2fae-4595-af4a-6960ce166535/cache.tzst -P -C /home/runner/work/Truxify/Truxify --use-compress-program unzstd
+2026-07-06T07:49:28.2428625Z Cache restored successfully
+2026-07-06T07:49:28.2539195Z Cache restored from key: flutter-pub-linux-stable-3.44.4-x64-ad70ec4617166f1c38e5d2bfd388af71fda14f06-
+2026-07-06T07:49:28.2703711Z ##[group]Run $GITHUB_ACTION_PATH/setup.sh \
+2026-07-06T07:49:28.2704076Z [36;1m$GITHUB_ACTION_PATH/setup.sh \[0m
+2026-07-06T07:49:28.2704370Z [36;1m  -n '3.44.4' \[0m
+2026-07-06T07:49:28.2704603Z [36;1m  -a 'x64' \[0m
+2026-07-06T07:49:28.2704923Z [36;1m  -c '/opt/hostedtoolcache/flutter/stable-3.44.4-x64' \[0m
+2026-07-06T07:49:28.2705297Z [36;1m  -d '/home/runner/.pub-cache' \[0m
+2026-07-06T07:49:28.2705575Z [36;1m  stable[0m
+2026-07-06T07:49:28.2737286Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-07-06T07:49:28.2737642Z ##[endgroup]
+2026-07-06T07:49:28.4800346Z ##[group]Run flutter pub get
+2026-07-06T07:49:28.4800675Z [36;1mflutter pub get[0m
+2026-07-06T07:49:28.4835423Z shell: /usr/bin/bash -e {0}
+2026-07-06T07:49:28.4835690Z env:
+2026-07-06T07:49:28.4836010Z   FLUTTER_ROOT: /opt/hostedtoolcache/flutter/stable-3.44.4-x64/flutter
+2026-07-06T07:49:28.4836430Z   PUB_CACHE: /home/runner/.pub-cache
+2026-07-06T07:49:28.4836710Z ##[endgroup]
+2026-07-06T07:49:28.7891254Z Resolving dependencies...
+2026-07-06T07:49:29.1709260Z Downloading packages...
+2026-07-06T07:49:29.2911348Z + app_links 7.2.0
+2026-07-06T07:49:29.2911825Z + app_links_linux 1.0.3
+2026-07-06T07:49:29.2912318Z + app_links_platform_interface 2.0.3
+2026-07-06T07:49:29.2912854Z + app_links_web 1.0.4
+2026-07-06T07:49:29.2913335Z + args 2.7.0
+2026-07-06T07:49:29.2913691Z + async 2.13.1
+2026-07-06T07:49:29.2913939Z + characters 1.4.1
+2026-07-06T07:49:29.2914173Z + clock 1.1.2
+2026-07-06T07:49:29.2914399Z + code_assets 1.2.1
+2026-07-06T07:49:29.2914640Z + collection 1.19.1
+2026-07-06T07:49:29.2914947Z + convert 3.1.2
+2026-07-06T07:49:29.2915197Z + crypto 3.0.7
+2026-07-06T07:49:29.2915446Z + dart_jsonwebtoken 3.4.1
+2026-07-06T07:49:29.2915715Z + ffi 2.2.0
+2026-07-06T07:49:29.2915924Z + file 7.0.1
+2026-07-06T07:49:29.2916153Z + flutter 0.0.0 from sdk flutter
+2026-07-06T07:49:29.2916468Z + flutter_web_plugins 0.0.0 from sdk flutter
+2026-07-06T07:49:29.2916803Z + functions_client 2.6.4
+2026-07-06T07:49:29.2917061Z + google_fonts 8.1.0
+2026-07-06T07:49:29.2917300Z + gotrue 2.25.0
+2026-07-06T07:49:29.2917517Z + gtk 2.2.0
+2026-07-06T07:49:29.2917730Z + hooks 2.0.2
+2026-07-06T07:49:29.2917953Z + http 1.6.0
+2026-07-06T07:49:29.2918648Z + http_parser 4.1.2
+2026-07-06T07:49:29.2919029Z + intl 0.20.3
+2026-07-06T07:49:29.2919364Z + jni 1.0.0
+2026-07-06T07:49:29.2919690Z + jni_flutter 1.0.1
+2026-07-06T07:49:29.2919992Z + json_annotation 4.12.0
+2026-07-06T07:49:29.2920255Z + jwt_decode 0.3.1
+2026-07-06T07:49:29.2920493Z + logging 1.3.0
+2026-07-06T07:49:29.2920738Z + material_color_utilities 0.13.0
+2026-07-06T07:49:29.2921047Z + meta 1.18.0 (1.18.3 available)
+2026-07-06T07:49:29.2921575Z + mime 2.0.0
+2026-07-06T07:49:29.2921802Z + objective_c 9.4.1
+2026-07-06T07:49:29.2922057Z + package_config 2.2.0 (3.0.0 available)
+2026-07-06T07:49:29.2922396Z + passkeys_platform_interface 2.8.0
+2026-07-06T07:49:29.2922704Z + path 1.9.1
+2026-07-06T07:49:29.2922916Z + path_provider 2.1.6
+2026-07-06T07:49:29.2923156Z + path_provider_android 2.3.1
+2026-07-06T07:49:29.2923417Z + path_provider_foundation 2.6.0
+2026-07-06T07:49:29.2923675Z + path_provider_linux 2.2.2
+2026-07-06T07:49:29.2923933Z + path_provider_platform_interface 2.1.3
+2026-07-06T07:49:29.2924232Z + path_provider_windows 2.3.0
+2026-07-06T07:49:29.2924474Z + platform 3.1.6
+2026-07-06T07:49:29.2924706Z + plugin_platform_interface 2.1.8
+2026-07-06T07:49:29.2924966Z + pointycastle 4.0.0
+2026-07-06T07:49:29.2925180Z + postgrest 2.8.0
+2026-07-06T07:49:29.2925384Z + pub_semver 2.2.0
+2026-07-06T07:49:29.2925601Z + realtime_client 2.10.0
+2026-07-06T07:49:29.2925833Z + record_use 0.6.0
+2026-07-06T07:49:29.2926034Z + retry 3.1.2
+2026-07-06T07:49:29.2926235Z + rxdart 0.28.0
+2026-07-06T07:49:29.2926457Z + shared_preferences 2.5.5
+2026-07-06T07:49:29.2926722Z + shared_preferences_android 2.4.26
+2026-07-06T07:49:29.2926999Z + shared_preferences_foundation 2.5.6
+2026-07-06T07:49:29.2927278Z + shared_preferences_linux 2.4.1
+2026-07-06T07:49:29.2927571Z + shared_preferences_platform_interface 2.4.2
+2026-07-06T07:49:29.2927874Z + shared_preferences_web 2.4.3
+2026-07-06T07:49:29.2928311Z + shared_preferences_windows 2.4.1
+2026-07-06T07:49:29.2928711Z + shimmer 3.0.0
+2026-07-06T07:49:29.2929077Z + sky_engine 0.0.0 from sdk flutter
+2026-07-06T07:49:29.2929515Z + source_span 1.10.2
+2026-07-06T07:49:29.2929860Z + storage_client 2.6.0
+2026-07-06T07:49:29.2930089Z + stream_channel 2.1.4
+2026-07-06T07:49:29.2930366Z + string_scanner 1.4.1
+2026-07-06T07:49:29.2930618Z + supabase 2.13.4
+2026-07-06T07:49:29.2930838Z + supabase_flutter 2.15.4
+2026-07-06T07:49:29.2931066Z + term_glyph 1.2.2
+2026-07-06T07:49:29.2931492Z + typed_data 1.4.0
+2026-07-06T07:49:29.2931711Z + url_launcher 6.3.2
+2026-07-06T07:49:29.2931945Z + url_launcher_android 6.3.32
+2026-07-06T07:49:29.2932185Z + url_launcher_ios 6.4.1
+2026-07-06T07:49:29.2932418Z + url_launcher_linux 3.2.2
+2026-07-06T07:49:29.2932650Z + url_launcher_macos 3.2.5
+2026-07-06T07:49:29.2932902Z + url_launcher_platform_interface 2.3.2
+2026-07-06T07:49:29.2933177Z + url_launcher_web 2.4.3
+2026-07-06T07:49:29.2933410Z + url_launcher_windows 3.1.5
+2026-07-06T07:49:29.2933679Z + vector_math 2.2.0 (2.4.0 available)
+2026-07-06T07:49:29.2933964Z + web 1.1.1
+2026-07-06T07:49:29.2934178Z + web_socket 1.0.1
+2026-07-06T07:49:29.2934395Z + web_socket_channel 3.0.3
+2026-07-06T07:49:29.2934644Z + xdg_directories 1.1.0
+2026-07-06T07:49:29.2934871Z + yaml 3.1.3
+2026-07-06T07:49:29.2935083Z + yet_another_json_isolate 2.1.1
+2026-07-06T07:49:29.2935351Z Changed 84 dependencies!
+2026-07-06T07:49:29.2935717Z 3 packages have newer versions incompatible with dependency constraints.
+2026-07-06T07:49:29.2936173Z Try `flutter pub outdated` for more information.
+2026-07-06T07:49:29.6595694Z ##[group]Run flutter pub get
+2026-07-06T07:49:29.6596016Z [36;1mflutter pub get[0m
+2026-07-06T07:49:29.6628452Z shell: /usr/bin/bash -e {0}
+2026-07-06T07:49:29.6628713Z env:
+2026-07-06T07:49:29.6629026Z   FLUTTER_ROOT: /opt/hostedtoolcache/flutter/stable-3.44.4-x64/flutter
+2026-07-06T07:49:29.6629442Z   PUB_CACHE: /home/runner/.pub-cache
+2026-07-06T07:49:29.6629710Z ##[endgroup]
+2026-07-06T07:49:29.8234544Z Resolving dependencies...
+2026-07-06T07:49:30.7131158Z Downloading packages...
+2026-07-06T07:49:32.0613163Z + _fe_analyzer_shared 100.0.0 (104.0.0 available)
+2026-07-06T07:49:32.0614004Z + _flutterfire_internals 1.3.73
+2026-07-06T07:49:32.0614604Z + analyzer 13.0.0 (14.0.0 available)
+2026-07-06T07:49:32.0615208Z + app_links 7.2.0
+2026-07-06T07:49:32.0615720Z + app_links_linux 1.0.3
+2026-07-06T07:49:32.0616288Z + app_links_platform_interface 2.0.3
+2026-07-06T07:49:32.0616931Z + app_links_web 1.0.4
+2026-07-06T07:49:32.0617442Z + archive 4.0.9
+2026-07-06T07:49:32.0618366Z + args 2.7.0
+2026-07-06T07:49:32.0619201Z + async 2.13.1
+2026-07-06T07:49:32.0619712Z + boolean_selector 2.1.2
+2026-07-06T07:49:32.0620261Z + build 4.0.6
+2026-07-06T07:49:32.0620721Z + build_config 1.3.0
+2026-07-06T07:49:32.0621209Z + build_daemon 4.1.1
+2026-07-06T07:49:32.0621718Z + build_runner 2.15.0
+2026-07-06T07:49:32.0622274Z + built_collection 5.1.1
+2026-07-06T07:49:32.0622833Z + built_value 8.12.6
+2026-07-06T07:49:32.0623327Z + characters 1.4.1
+2026-07-06T07:49:32.0623802Z + checked_yaml 2.0.4
+2026-07-06T07:49:32.0624283Z + clock 1.1.2
+2026-07-06T07:49:32.0624720Z + code_assets 1.2.1
+2026-07-06T07:49:32.0625108Z + code_builder 4.11.1
+2026-07-06T07:49:32.0625503Z + collection 1.19.1
+2026-07-06T07:49:32.0625888Z + convert 3.1.2
+2026-07-06T07:49:32.0626259Z + crypto 3.0.7
+2026-07-06T07:49:32.0626627Z + dart_earcut 1.2.0
+2026-07-06T07:49:32.0627026Z + dart_jsonwebtoken 3.4.1
+2026-07-06T07:49:32.0627486Z + dart_polylabel2 1.0.0
+2026-07-06T07:49:32.0627905Z + dart_style 3.1.9
+2026-07-06T07:49:32.0628582Z + dbus 0.7.14
+2026-07-06T07:49:32.0628962Z + fake_async 1.3.3
+2026-07-06T07:49:32.0629341Z + ffi 2.2.0
+2026-07-06T07:49:32.0629698Z + ffi_leak_tracker 0.1.2
+2026-07-06T07:49:32.0630108Z + file 7.0.1
+2026-07-06T07:49:32.0630464Z + firebase_auth 6.5.4
+2026-07-06T07:49:32.0630920Z + firebase_auth_platform_interface 9.0.3
+2026-07-06T07:49:32.0631455Z + firebase_auth_web 6.2.3
+2026-07-06T07:49:32.0631906Z + firebase_core 4.11.0
+2026-07-06T07:49:32.0632371Z + firebase_core_platform_interface 7.1.0
+2026-07-06T07:49:32.0632906Z + firebase_core_web 3.9.0
+2026-07-06T07:49:32.0633355Z + firebase_messaging 16.4.1
+2026-07-06T07:49:32.0633862Z + firebase_messaging_platform_interface 4.9.0
+2026-07-06T07:49:32.0634415Z + firebase_messaging_web 4.2.1
+2026-07-06T07:49:32.0634751Z + fixnum 1.1.1
+2026-07-06T07:49:32.0635029Z + flutter 0.0.0 from sdk flutter
+2026-07-06T07:49:32.0635348Z + flutter_lints 6.0.0
+2026-07-06T07:49:32.0635642Z + flutter_map 8.3.1
+2026-07-06T07:49:32.0635928Z + flutter_test 0.0.0 from sdk flutter
+2026-07-06T07:49:32.0636330Z + flutter_web_plugins 0.0.0 from sdk flutter
+2026-07-06T07:49:32.0636705Z + functions_client 2.6.4
+2026-07-06T07:49:32.0637000Z + geoclue 0.1.1
+2026-07-06T07:49:32.0637254Z + geolocator 14.0.3
+2026-07-06T07:49:32.0637539Z + geolocator_android 5.0.3
+2026-07-06T07:49:32.0637851Z + geolocator_apple 2.3.14
+2026-07-06T07:49:32.0638494Z + geolocator_linux 0.2.6
+2026-07-06T07:49:32.0638827Z + geolocator_platform_interface 4.2.8
+2026-07-06T07:49:32.0639182Z + geolocator_web 4.1.4
+2026-07-06T07:49:32.0639471Z + geolocator_windows 0.2.5
+2026-07-06T07:49:32.0639759Z + glob 2.1.3
+2026-07-06T07:49:32.0640001Z + google_fonts 8.1.0
+2026-07-06T07:49:32.0640262Z + gotrue 2.25.0
+2026-07-06T07:49:32.0640512Z + graphs 2.3.2
+2026-07-06T07:49:32.0640760Z + gsettings 0.2.8
+2026-07-06T07:49:32.0641011Z + gtk 2.2.0
+2026-07-06T07:49:32.0641238Z + hooks 2.0.2
+2026-07-06T07:49:32.0641479Z + http 1.6.0
+2026-07-06T07:49:32.0641737Z + http_multi_server 3.2.2
+2026-07-06T07:49:32.0642027Z + http_parser 4.1.2
+2026-07-06T07:49:32.0642545Z + intl 0.20.3
+2026-07-06T07:49:32.0642824Z + io 1.0.5
+2026-07-06T07:49:32.0643047Z + jni 1.0.0
+2026-07-06T07:49:32.0643277Z + jni_flutter 1.0.1
+2026-07-06T07:49:32.0643561Z + json_annotation 4.12.0
+2026-07-06T07:49:32.0643850Z + jwt_decode 0.3.1
+2026-07-06T07:49:32.0644125Z + latlong2 0.9.1 (0.10.1 available)
+2026-07-06T07:49:32.0644443Z + leak_tracker 11.0.2
+2026-07-06T07:49:32.0644754Z + leak_tracker_flutter_testing 3.0.10
+2026-07-06T07:49:32.0645119Z + leak_tracker_testing 3.0.2
+2026-07-06T07:49:32.0645416Z + lints 6.1.0
+2026-07-06T07:49:32.0645652Z + logging 1.3.0
+2026-07-06T07:49:32.0645921Z + matcher 0.12.19 (0.12.20 available)
+2026-07-06T07:49:32.0646302Z + material_color_utilities 0.13.0
+2026-07-06T07:49:32.0646634Z + meta 1.18.0 (1.18.3 available)
+2026-07-06T07:49:32.0646927Z + mgrs_dart 3.0.0
+2026-07-06T07:49:32.0647177Z + mime 2.0.0
+2026-07-06T07:49:32.0647408Z + mockito 5.7.0
+2026-07-06T07:49:32.0647671Z + network_image_mock 2.1.1
+2026-07-06T07:49:32.0647964Z + objective_c 9.4.1
+2026-07-06T07:49:32.0648729Z + package_config 2.2.0 (3.0.0 available)
+2026-07-06T07:49:32.0649085Z + package_info_plus 10.2.0
+2026-07-06T07:49:32.0649453Z + package_info_plus_platform_interface 4.1.0
+2026-07-06T07:49:32.0649872Z + passkeys_platform_interface 2.8.0
+2026-07-06T07:49:32.0650206Z + path 1.9.1
+2026-07-06T07:49:32.0650461Z + path_provider 2.1.6
+2026-07-06T07:49:32.0650764Z + path_provider_android 2.3.1
+2026-07-06T07:49:32.0651115Z + path_provider_foundation 2.6.0
+2026-07-06T07:49:32.0651456Z + path_provider_linux 2.2.2
+2026-07-06T07:49:32.0651808Z + path_provider_platform_interface 2.1.3
+2026-07-06T07:49:32.0652186Z + path_provider_windows 2.3.0
+2026-07-06T07:49:32.0652544Z + permission_handler 11.4.0 (12.0.3 available)
+2026-07-06T07:49:32.0652972Z + permission_handler_android 12.1.0 (13.0.1 available)
+2026-07-06T07:49:32.0653389Z + permission_handler_apple 9.4.10
+2026-07-06T07:49:32.0653738Z + permission_handler_html 0.1.3+5
+2026-07-06T07:49:32.0654131Z + permission_handler_platform_interface 4.3.0
+2026-07-06T07:49:32.0654565Z + permission_handler_windows 0.2.1
+2026-07-06T07:49:32.0654901Z + petitparser 7.0.2
+2026-07-06T07:49:32.0655170Z + platform 3.1.6
+2026-07-06T07:49:32.0655464Z + plugin_platform_interface 2.1.8
+2026-07-06T07:49:32.0655795Z + pointycastle 4.0.0
+2026-07-06T07:49:32.0656058Z + pool 1.5.2
+2026-07-06T07:49:32.0656295Z + posix 6.5.0
+2026-07-06T07:49:32.0656547Z + postgrest 2.8.0
+2026-07-06T07:49:32.0656805Z + proj4dart 3.0.0
+2026-07-06T07:49:32.0657062Z + pub_semver 2.2.0
+2026-07-06T07:49:32.0657333Z + pubspec_parse 1.5.0
+2026-07-06T07:49:32.0657618Z + realtime_client 2.10.0
+2026-07-06T07:49:32.0657906Z + record_use 0.6.0
+2026-07-06T07:49:32.0658461Z + retry 3.1.2
+2026-07-06T07:49:32.0658709Z + rxdart 0.28.0
+2026-07-06T07:49:32.0658976Z + shared_preferences 2.5.5
+2026-07-06T07:49:32.0659306Z + shared_preferences_android 2.4.26
+2026-07-06T07:49:32.0659676Z + shared_preferences_foundation 2.5.6
+2026-07-06T07:49:32.0660052Z + shared_preferences_linux 2.4.1
+2026-07-06T07:49:32.0660437Z + shared_preferences_platform_interface 2.4.2
+2026-07-06T07:49:32.0660842Z + shared_preferences_web 2.4.3
+2026-07-06T07:49:32.0661187Z + shared_preferences_windows 2.4.1
+2026-07-06T07:49:32.0661509Z + shelf 1.4.2
+2026-07-06T07:49:32.0661759Z + shelf_web_socket 3.0.0
+2026-07-06T07:49:32.0662060Z + shimmer 3.0.0
+2026-07-06T07:49:32.0662357Z + simple_sparse_list 0.1.4
+2026-07-06T07:49:32.0662684Z + sky_engine 0.0.0 from sdk flutter
+2026-07-06T07:49:32.0663008Z + source_gen 4.2.3
+2026-07-06T07:49:32.0663272Z + source_span 1.10.2
+2026-07-06T07:49:32.0663542Z + stack_trace 1.12.1
+2026-07-06T07:49:32.0663822Z + storage_client 2.6.0
+2026-07-06T07:49:32.0664113Z + stream_channel 2.1.4
+2026-07-06T07:49:32.0664401Z + stream_transform 2.1.1
+2026-07-06T07:49:32.0664695Z + string_scanner 1.4.1
+2026-07-06T07:49:32.0664971Z + supabase 2.13.4
+2026-07-06T07:49:32.0665244Z + supabase_flutter 2.15.4
+2026-07-06T07:49:32.0665539Z + term_glyph 1.2.2
+2026-07-06T07:49:32.0665810Z + test_api 0.7.11 (0.7.13 available)
+2026-07-06T07:49:32.0666706Z + truxify_shared 1.0.0 from path ../../packages/truxify_shared
+2026-07-06T07:49:32.0667168Z + typed_data 1.4.0
+2026-07-06T07:49:32.0667419Z + unicode 1.1.9
+2026-07-06T07:49:32.0667674Z + url_launcher 6.3.2
+2026-07-06T07:49:32.0667974Z + url_launcher_android 6.3.32
+2026-07-06T07:49:32.0668598Z + url_launcher_ios 6.4.1
+2026-07-06T07:49:32.0668903Z + url_launcher_linux 3.2.2
+2026-07-06T07:49:32.0669210Z + url_launcher_macos 3.2.5
+2026-07-06T07:49:32.0669551Z + url_launcher_platform_interface 2.3.2
+2026-07-06T07:49:32.0669910Z + url_launcher_web 2.4.3
+2026-07-06T07:49:32.0670215Z + url_launcher_windows 3.1.5
+2026-07-06T07:49:32.0670509Z + uuid 4.5.3
+2026-07-06T07:49:32.0670776Z + vector_math 2.2.0 (2.4.0 available)
+2026-07-06T07:49:32.0671093Z + vm_service 15.2.0
+2026-07-06T07:49:32.0671351Z + watcher 1.2.1
+2026-07-06T07:49:32.0671589Z + web 1.1.1
+2026-07-06T07:49:32.0671830Z + web_socket 1.0.1
+2026-07-06T07:49:32.0672110Z + web_socket_channel 3.0.3
+2026-07-06T07:49:32.0672391Z + win32 6.3.0
+2026-07-06T07:49:32.0672813Z + wkt_parser 2.0.0
+2026-07-06T07:49:32.0673092Z + xdg_directories 1.1.0
+2026-07-06T07:49:32.0673378Z + xml 6.6.1 (7.0.1 available)
+2026-07-06T07:49:32.0673656Z + yaml 3.1.3
+2026-07-06T07:49:32.0673924Z + yet_another_json_isolate 2.1.1
+2026-07-06T07:49:32.0674258Z Changed 166 dependencies!
+2026-07-06T07:49:32.0674726Z 11 packages have newer versions incompatible with dependency constraints.
+2026-07-06T07:49:32.0675298Z Try `flutter pub outdated` for more information.
+2026-07-06T07:49:32.5884194Z ##[group]Run flutter analyze
+2026-07-06T07:49:32.5884750Z [36;1mflutter analyze[0m
+2026-07-06T07:49:32.5918746Z shell: /usr/bin/bash -e {0}
+2026-07-06T07:49:32.5919017Z env:
+2026-07-06T07:49:32.5919337Z   FLUTTER_ROOT: /opt/hostedtoolcache/flutter/stable-3.44.4-x64/flutter
+2026-07-06T07:49:32.5919749Z   PUB_CACHE: /home/runner/.pub-cache
+2026-07-06T07:49:32.5920020Z ##[endgroup]
+2026-07-06T07:49:45.2118294Z Analyzing driver...                                             
+2026-07-06T07:49:45.2124129Z 
+2026-07-06T07:49:45.2162516Z warning • A value of type 'Null' can't be returned by the 'onError' handler because it must be assignable to 'FutureOr<Map<String, dynamic>>' • lib/screens/home_screen.dart:178:63 • invalid_return_type_for_catch_error
+2026-07-06T07:49:45.2165582Z warning • A value of type 'Null' can't be returned by the 'onError' handler because it must be assignable to 'FutureOr<Map<String, dynamic>>' • lib/screens/home_screen.dart:179:68 • invalid_return_type_for_catch_error
+2026-07-06T07:49:45.2168879Z   error • The named parameter 'driverId' isn't defined. Try correcting the name to an existing named parameter's name, or defining a named parameter with the name 'driverId' • lib/screens/trips_screen.dart:650:27 • undefined_named_parameter
+2026-07-06T07:49:45.2172473Z   error • The function 'ownedTripClient' isn't defined. Try importing the library that defines 'ownedTripClient', correcting the name to the name of an existing function, or defining a function named 'ownedTripClient' • test/trip_service_test.dart:198:43 • undefined_function
+2026-07-06T07:49:45.2176263Z   error • The function 'ownedTripClient' isn't defined. Try importing the library that defines 'ownedTripClient', correcting the name to the name of an existing function, or defining a function named 'ownedTripClient' • test/trip_service_test.dart:215:43 • undefined_function
+2026-07-06T07:49:45.2180327Z   error • The function 'ownedTripClient' isn't defined. Try importing the library that defines 'ownedTripClient', correcting the name to the name of an existing function, or defining a function named 'ownedTripClient' • test/trip_service_test.dart:232:43 • undefined_function
+2026-07-06T07:49:45.2182868Z   error • Expected to find ';' • test/trip_service_test.dart:439:1 • expected_token
+2026-07-06T07:49:45.2183924Z   error • Expected to find ')' • test/trip_service_test.dart:440:1 • expected_token
+2026-07-06T07:49:45.2184953Z   error • Expected to find '}' • test/trip_service_test.dart:440:1 • expected_token
+2026-07-06T07:49:45.2185951Z 
+2026-07-06T07:49:45.2301540Z 9 issues found. (ran in 11.7s)
+2026-07-06T07:49:45.2388287Z ##[error]Process completed with exit code 1.
+2026-07-06T07:49:45.2603508Z Post job cleanup.
+2026-07-06T07:49:45.2677091Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-07-06T07:49:45.2678686Z Post job cleanup.
+2026-07-06T07:49:45.3604591Z [command]/usr/bin/git version
+2026-07-06T07:49:45.3648278Z git version 2.54.0
+2026-07-06T07:49:45.3691637Z Temporarily overriding HOME='/home/runner/work/_temp/bcbf075f-3b97-4d7f-b5e2-8d846c853156' before making global git config changes
+2026-07-06T07:49:45.3693088Z Adding repository directory to the temporary git global config as a safe directory
+2026-07-06T07:49:45.3697780Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Truxify/Truxify
+2026-07-06T07:49:45.3740792Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-07-06T07:49:45.3779420Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-07-06T07:49:45.4037006Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-07-06T07:49:45.4073955Z http.https://github.com/.extraheader
+2026-07-06T07:49:45.4089988Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+2026-07-06T07:49:45.4127342Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-07-06T07:49:45.4408806Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-07-06T07:49:45.4461566Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-07-06T07:49:45.4882208Z Cleaning up orphan processes
+2026-07-06T07:49:45.5211267Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

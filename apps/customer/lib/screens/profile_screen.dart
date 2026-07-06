@@ -1,3 +1,4 @@
+import '../core/api_client.dart';
 import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -242,7 +243,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     try {
                       final client = Supabase.instance.client;
                       final token = client.auth.currentSession?.accessToken;
-                      final userId = client.auth.currentUser?.id ?? '';
+
                       final response = await http.put(
                         Uri.parse('${ApiClient.defaultBaseUrl}/api/profile/wallet'),
                         headers: <String, String>{

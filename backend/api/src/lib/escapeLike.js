@@ -1,5 +1,5 @@
 export function escapeLike(value) {
-  if (typeof value !== 'string') return '';
+  if (typeof value !== 'string') return value;
   return value
     .replace(/\\/g, '\\\\')
     .replace(/%/g, '\\%')

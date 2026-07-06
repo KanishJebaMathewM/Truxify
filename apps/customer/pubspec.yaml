@@ -30,6 +30,7 @@ dependencies:
   geocoding: ^4.0.0
   geolocator: ^14.0.2
   shared_preferences: ^2.5.5
+  flutter_secure_storage: ^9.2.4
   uuid: ^4.5.3
   web_socket_channel: ^3.0.0
   shimmer: ^3.0.0

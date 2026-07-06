@@ -4,26 +4,33 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/core/api_client.dart';
 import 'package:truxify/services/profile_service.dart';
 import 'package:truxify/services/supabase_service.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'dart:convert';
 
 class MockApiClient extends Mock implements ApiClient {}
 class MockSupabaseClient extends Mock implements SupabaseClient {}
 class MockGoTrueClient extends Mock implements GoTrueClient {}
 class MockUser extends Mock implements User {}
+class MockFlutterSecureStorage extends Mock implements FlutterSecureStorage {}
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late MockApiClient apiClient;
   late MockSupabaseClient supabaseClient;
   late MockGoTrueClient authClient;
   late MockUser user;
+  late MockFlutterSecureStorage secureStorage;
   late ProfileService profileService;
+  late Map<String, String> mockStorage;
 
   setUp(() {
     apiClient = MockApiClient();
     supabaseClient = MockSupabaseClient();
     authClient = MockGoTrueClient();
     user = MockUser();
+    secureStorage = MockFlutterSecureStorage();
+    mockStorage = <String, String>{};
 
     SupabaseService.mockClient = supabaseClient;
 
@@ -32,8 +39,39 @@ void main() {
     when(() => user.id).thenReturn('user_123');
     when(() => user.userMetadata).thenReturn({'full_name': 'John Doe'});
 
-    SharedPreferences.setMockInitialValues({});
-    profileService = ProfileService(apiClient: apiClient);
+    // Mock write
+    when(() => secureStorage.write(
+          key: any(named: 'key'),
+          value: any(named: 'value'),
+          aOptions: any(named: 'aOptions'),
+          iOptions: any(named: 'iOptions'),
+        )).thenAnswer((invocation) async {
+      final key = invocation.namedArguments[#key] as String;
+      final value = invocation.namedArguments[#value] as String;
+      mockStorage[key] = value;
+    });
+
+    // Mock read
+    when(() => secureStorage.read(
+          key: any(named: 'key'),
+          aOptions: any(named: 'aOptions'),
+          iOptions: any(named: 'iOptions'),
+        )).thenAnswer((invocation) async {
+      final key = invocation.namedArguments[#key] as String;
+      return mockStorage[key];
+    });
+
+    // Mock delete
+    when(() => secureStorage.delete(
+          key: any(named: 'key'),
+          aOptions: any(named: 'aOptions'),
+          iOptions: any(named: 'iOptions'),
+        )).thenAnswer((invocation) async {
+      final key = invocation.namedArguments[#key] as String;
+      mockStorage.remove(key);
+    });
+
+    profileService = ProfileService(apiClient: apiClient, secureStorage: secureStorage);
   });
 
   tearDown(() {
@@ -51,15 +89,12 @@ void main() {
 
     verify(() => apiClient.get('/api/profile')).called(1);
 
-    final prefs = await SharedPreferences.getInstance();
-    final cached = prefs.getString('truxify_profile_cache');
-    expect(cached, isNotNull);
-    expect(jsonDecode(cached!)['email'], equals('john@example.com'));
+    expect(mockStorage['truxify_profile_cache'], isNotNull);
+    expect(jsonDecode(mockStorage['truxify_profile_cache']!)['email'], equals('john@example.com'));
   });
 
   test('fetchProfile returns cached data on ApiException if available', () async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('truxify_profile_cache', jsonEncode({'id': 'user_123', 'email': 'cached@example.com'}));
+    mockStorage['truxify_profile_cache'] = jsonEncode({'id': 'user_123', 'email': 'cached@example.com'});
 
     when(() => apiClient.get('/api/profile'))
         .thenThrow(const ApiException(400, 'Bad Request'));
@@ -78,21 +113,19 @@ void main() {
     );
   });
 
-  test('fetchProfile clears corrupted cached data on ApiException', () async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('truxify_profile_cache', 'not-json');
+    test('fetchProfile clears corrupted cached data on ApiException', () async {
+    mockStorage['truxify_profile_cache'] = 'not-json';
 
     when(() => apiClient.get('/api/profile'))
         .thenThrow(const ApiException(503, 'Service Unavailable'));
 
-    expect(
-      () => profileService.fetchProfile(),
-      throwsA(isA<StateError>().having(
-        (e) => e.message,
-        'message',
-        'Service Unavailable',
-      )),
-    );
-    expect(prefs.getString('truxify_profile_cache'), isNull);
+    try {
+      await profileService.fetchProfile();
+      fail('Expected StateError to be thrown');
+    } catch (e) {
+      expect(e, isA<StateError>().having((e) => e.message, 'message', 'Service Unavailable'));
+    }
+
+    expect(mockStorage['truxify_profile_cache'], isNull);
   });
 }

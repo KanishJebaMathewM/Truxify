@@ -458,13 +458,13 @@ export async function handleLocationPing(ws, data, req) {
     }
   }
 
-  // Resolve order details from Supabase
+  // Resolve order details from Supabase and verify driver ownership
   let orderUUID = data.orderId || data.order_id || null;
   let orderDisplayId = data.order_display_id || null;
 
   if (supabase && (orderUUID || orderDisplayId)) {
     try {
-      let query = supabase.from('orders').select('id, order_display_id');
+      let query = supabase.from('orders').select('id, order_display_id, driver_id');
       if (orderUUID && orderUUID.includes('-')) {
         query = query.eq('id', orderUUID);
       } else if (orderDisplayId) {
@@ -474,6 +474,20 @@ export async function handleLocationPing(ws, data, req) {
       }
       const { data: order } = await query.maybeSingle();
       if (order) {
+        // Verify the authenticated driver is assigned to this order
+        if (order.driver_id !== driver_id) {
+          logger.warn({
+            event: 'UNAUTHORIZED_ORDER_TRACKING',
+            driverId: driver_id,
+            orderId: order.id,
+            orderDisplayId: order.order_display_id,
+            assignedDriverId: order.driver_id,
+          }, 'Driver attempted to submit location for order they are not assigned to');
+          return ws.send(JSON.stringify({
+            error: 'Not authorized to track this order',
+            orderId: orderDisplayId || orderUUID,
+          }));
+        }
         orderUUID = order.id;
         orderDisplayId = order.order_display_id;
       }

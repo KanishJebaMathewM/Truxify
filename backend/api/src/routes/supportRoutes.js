@@ -545,17 +545,13 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
       return res.status(403).json({ error: 'Access Denied: You do not own this ticket.' });
     }
 
-    const parsedLimit = parseIntegerQuery(req.query.limit, 100, 'limit', { min: 1 });
+    const parsedLimit = parsePositiveInteger(req.query.limit, 100, 'limit');
     if (parsedLimit.error) {
       return res.status(400).json({ error: parsedLimit.error });
     }
-    const parsedOffset = parseIntegerQuery(req.query.offset, 0, 'offset', { min: 0 });
-    if (parsedOffset.error) {
-      return res.status(400).json({ error: parsedOffset.error });
-    }
 
     const limit = Math.min(100, parsedLimit.value);
-    const offset = parsedOffset.value;
+    const offset = typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : 0;
 
     const { data: comments, error: commentsError } = await supabase
       .from('support_ticket_comments')

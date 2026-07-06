@@ -5,7 +5,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export function requestIdMiddleware(req, res, next) {
   const header = req.headers['x-request-id'];
-  req.requestId = (typeof header === 'string' && UUID_RE.test(header)) ? header : randomUUID();
+  req.requestId = (typeof header === 'string' && header.trim()) ? header.trim() : randomUUID();
   res.setHeader('X-Request-Id', req.requestId);
   next();
 }

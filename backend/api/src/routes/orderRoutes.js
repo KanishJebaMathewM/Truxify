@@ -497,15 +497,13 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
   try {
     let order = null;
     let orderErr = null;
-    if (uuidRegex.test(orderId)) {
-      const result = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
-      order = result.data;
-      orderErr = result.error;
-    }
-    if (!order) {
-      const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
-      order = result.data;
-      orderErr = result.error;
+    const resultById = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    order = resultById.data;
+    orderErr = resultById.error;
+    if (!order && !orderErr) {
+      const resultByDisplayId = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
+      order = resultByDisplayId.data;
+      orderErr = resultByDisplayId.error;
     }
     if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
     if (!order) return res.status(404).json({ error: 'Order not found.' });

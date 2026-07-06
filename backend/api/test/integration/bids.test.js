@@ -338,6 +338,7 @@ describe('Bid Routes', () => {
       id: 'order-escrow',
       customer_id: 'customer-1',
       order_display_id: 'OD-ESCROW',
+      version: 1,
     });
 
     m.store.load_offers.push({

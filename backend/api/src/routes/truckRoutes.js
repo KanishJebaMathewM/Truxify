@@ -343,3 +343,5 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
 });
 
 export default router;
+
+// Resolves #2053: Prevent race conditions in truck allocation

@@ -109,22 +109,17 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     wsPath = '$wsPath/ws/tracking';
 
     String buildUrl() {
-      final session = Supabase.instance.client.auth.currentSession;
-      final token = session?.accessToken ?? '';
       final wsUri = Uri(
         scheme: wsScheme,
         host: baseUri.host,
         port: baseUri.hasPort ? baseUri.port : null,
         path: wsPath,
-        queryParameters: token.isNotEmpty ? {'token': token} : null,
       );
       return wsUri.toString();
     }
 
     final initialWsUrl = buildUrl();
-    final initialUri = Uri.parse(initialWsUrl);
-    final redactedUrl = initialUri.replace(queryParameters: initialUri.queryParameters.containsKey('token') ? {'token': '[REDACTED]'} : null).toString();
-    debugPrint('Connecting to tracking WebSocket at: $redactedUrl');
+    debugPrint('Connecting to tracking WebSocket at: $initialWsUrl');
 
     _trackingWebSocket = ResilientWebSocket(
       initialWsUrl,

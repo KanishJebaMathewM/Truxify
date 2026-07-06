@@ -106,11 +106,29 @@ router.get('/live', healthLimiter, (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// GET /api/health/ready � readiness probe for k8s
-router.get('/ready', healthLimiter, (req, res) => res.json({ status: 'ready' }));
-
 // GET /api/health/ready — readiness probe for k8s
-router.get('/ready', healthLimiter, (req, res) => res.json({ status: 'ready' }));
+router.get('/ready', healthLimiter, async (req, res) => {
+  const [supabaseStatus, mongoStatus, redisStatus] = await Promise.all([
+    checkSupabase(),
+    checkMongo(),
+    checkRedis(),
+  ]);
+
+  const services = {
+    supabase: supabaseStatus,
+    mongodb: mongoStatus,
+    redis: redisStatus,
+  };
+
+  const criticalFailed =
+    CRITICAL_UNHEALTHY.has(supabaseStatus) ||
+    CRITICAL_UNHEALTHY_OPTIONAL.has(mongoStatus);
+
+  if (criticalFailed) {
+    return res.status(503).json({ status: 'not_ready', services });
+  }
+
+  return res.status(200).json({ status: 'ready', services });
+});
 
 export default router;
-

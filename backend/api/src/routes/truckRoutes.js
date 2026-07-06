@@ -11,6 +11,17 @@ import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
+/**
+ * @openapi
+ * /api/trucks/types:
+ *   get:
+ *     summary: Retrieve list of supported truck types
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of truck types
+ */
 // GET /api/trucks/types
 router.get('/types', authenticate, userLimiter, (req, res) => {
   return res.json({

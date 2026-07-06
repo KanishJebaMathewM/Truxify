@@ -77,7 +77,7 @@ export async function authenticate(req, res, next) {
       // ignore decoding errors and let verification handle it
     }
 
-    const isSupabaseToken = decoded && decoded.iss && (decoded.iss.includes('supabase') || decoded.iss.includes('supabase.co'));
+    const isSupabaseToken = decoded && typeof decoded.iss === 'string' && (decoded.iss.includes('supabase') || decoded.iss.includes('supabase.co'));
 
     if (isSupabaseToken) {
       if (!supabase) {

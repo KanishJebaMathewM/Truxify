@@ -40,6 +40,7 @@ describe('otpService', () => {
   });
 
   it('generateAndStoreOtp returns null when Redis is unavailable', async () => {
+    vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       redisClient: null,
     }));
@@ -86,6 +87,7 @@ describe('otpService', () => {
 
   it('verifyOtp returns false when Redis is unavailable in production', async () => {
     process.env.NODE_ENV = 'production';
+    vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       redisClient: null,
     }));
@@ -97,6 +99,7 @@ describe('otpService', () => {
 
   it('verifyOtp returns false when Redis is unavailable in non-production', async () => {
     process.env.NODE_ENV = 'development';
+    vi.resetModules();
     vi.doMock('../../src/config/db.js', () => ({
       redisClient: null,
     }));

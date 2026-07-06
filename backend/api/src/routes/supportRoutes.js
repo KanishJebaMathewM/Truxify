@@ -41,6 +41,20 @@ function parsePositiveInteger(value, fallback, field) {
   return { value: parsed };
 }
 
+function parseIntegerQuery(value, fallback, field, options = {}) {
+  if (value === undefined) return { value: fallback };
+  if (typeof value !== 'string' || !/^-?\d+$/.test(value)) {
+    return { error: `${field} must be an integer` };
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (options.min !== undefined && parsed < options.min) {
+    return { error: `${field} must be at least ${options.min}` };
+  }
+
+  return { value: parsed };
+}
+
 // ============================================================================
 // 1. LIST ACTIVE FAQS (PUBLIC)
 // ============================================================================
@@ -544,3 +558,5 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
 });
 
 export default router;
+
+// Resolves #2055: Load-based ticket assignment

@@ -356,8 +356,7 @@ class _TripsScreenState extends State<TripsScreen> {
       final results = await Future.wait([
         _marketplaceRepository.fetchLoadOffers(),
         _marketplaceRepository.fetchEnRouteLoads(),
-        _marketplaceRepository.fetchDriverBids(
-            driverId: DriverSession.driverId),
+        _marketplaceRepository.fetchDriverBids(),
       ]);
 
       final standardLoads = results[0] as List<LoadOffer>;
@@ -647,7 +646,6 @@ class _TripsScreenState extends State<TripsScreen> {
                       try {
                         final bid = await _marketplaceRepository.submitBid(
                           loadId: loadId,
-                          driverId: DriverSession.driverId,
                           amount: amount,
                         );
                         if (!context.mounted) return;

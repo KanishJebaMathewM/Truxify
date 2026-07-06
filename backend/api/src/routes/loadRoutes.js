@@ -6,6 +6,7 @@ import logger from '../middleware/logger.js';
 import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
 import { validateParams } from '../middleware/validate.js';
 import { uuidParamSchema } from '../validation/requestSchemas.js';
+import { escapeLike } from '../lib/escapeLike.js';
 
 const router = express.Router();
 
@@ -208,3 +209,4 @@ router.get('/:id', authenticate, userLimiter, requireRole(['driver']), validateP
 });
 
 export default router;
+

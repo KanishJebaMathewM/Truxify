@@ -128,7 +128,13 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
   const description = normalizeRequiredText(req.body.description) || subject;
 
   const normalizedCategory = category.toLowerCase();
-  const dbCategory = CATEGORY_MAP[normalizedCategory] || 'general';
+  const dbCategory = CATEGORY_MAP[normalizedCategory];
+
+  if (!dbCategory) {
+    return res.status(400).json({
+      error: `Invalid support ticket category. Must be one of: ${Object.keys(CATEGORY_MAP).join(', ')}`,
+    });
+  }
 
   try {
     const { data: ticket, error } = await supabase

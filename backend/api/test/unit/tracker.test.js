@@ -1721,10 +1721,10 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         longitude: 77.5946,
       });
 
-      const buffer = __testing.getTelemetryWriteBuffer();
-      expect(buffer.length).toBe(9501);
-      expect(buffer[0].driver_id).toBe('driver-old-500');
-      expect(buffer[9500].driver_id).toBe('driver-new');
+            const buffer = __testing.getTelemetryWriteBuffer();
+      expect(buffer.length).toBe(5000);
+      expect(buffer[0].driver_id).toBe('driver-old-1');
+      expect(buffer[4999].driver_id).toBe('driver-new');
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('[TRUXIFY BUFFER WARN] Telemetry buffer full')
       );

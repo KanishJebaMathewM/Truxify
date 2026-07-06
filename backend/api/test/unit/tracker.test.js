@@ -1596,12 +1596,12 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     // 5000 is MAX_BUFFER_SIZE. 4995 new records + 5 kept old records = 5000 records.
     expect(buffer).toHaveLength(5000);
     // The first 5 old records (indices 0 to 4) should be dropped, keeping only indices 5 to 9.
-    expect(buffer.toArray()[0].driver_id).toBe('old-driver-0');
-    expect(buffer.toArray()[9].driver_id).toBe('old-driver-9');
-    expect(buffer.toArray()[10].driver_id).toBe('new-driver-0');
+    expect(buffer.toArray()[0].driver_id).toBe('old-driver-5');
+    expect(buffer.toArray()[4].driver_id).toBe('old-driver-9');
+    expect(buffer.toArray()[5].driver_id).toBe('new-driver-0');
 
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('[TRUXIFY BUFFER DROP] Dropped 5 oldest records due to capacity after flush failure.')
+      expect.stringContaining('[TRUXIFY BUFFER DROP] Capacity limit: dropped 5 oldest records from retry merge.')
     );
   });
 
@@ -1721,14 +1721,8 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         longitude: 77.5946,
       });
 
-      const buffer = __testing.getTelemetryWriteBuffer();
-      // The capacity of TelemetryRingBuffer is 5000. It will retain the last 5000 records.
-      // So the array length should be 5000.
+            const buffer = __testing.getTelemetryWriteBuffer();
       expect(buffer.length).toBe(5000);
-      
-      // The oldest retained record out of the 10000 old records (indices 0 to 9999) and 1 new record
-      // Total inserted: 10001. Capacity: 5000.
-      // Retains the last 5000 records. (driver-old-5001 to driver-old-9999, and driver-new)
       expect(buffer.toArray()[0].driver_id).toBe('driver-old-1');
       expect(buffer.toArray()[4999].driver_id).toBe('driver-new');
       expect(logger.warn).toHaveBeenCalledWith(

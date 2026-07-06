@@ -139,6 +139,11 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   };
 }
 
+/**
+ * Converts a distance in kilometers to miles
+ * @param {number} km Distance in kilometers
+ * @returns {number} Distance in miles
+ */
 export function convertKmToMiles(km) {
   if (typeof km !== 'number' || Number.isNaN(km)) {
     throw new TypeError('km must be a number');

@@ -13,7 +13,7 @@
  *
  * Run with:  npm test -- test/integration/orders.test.js
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import crypto from 'crypto';
 
@@ -679,7 +679,7 @@ describe('GET /api/orders/:id — order details', () => {
 
   it('returns 403 when user does not own the order', async () => {
     m.store.orders.push({
-      id: 'order-1',
+      id: 'aaaa0001-0000-4000-a000-000000000001',
       customer_id: 'someone-else',
       driver_id: null,
       order_display_id: 'OD1',
@@ -688,7 +688,7 @@ describe('GET /api/orders/:id — order details', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .get('/api/orders/order-1')
+      .get('/api/orders/aaaa0001-0000-4000-a000-000000000001')
       .set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(403);
@@ -696,7 +696,7 @@ describe('GET /api/orders/:id — order details', () => {
 
   it('returns order details with timeline for owner', async () => {
     m.store.orders.push({
-      id: 'order-1',
+      id: 'aaaa0001-0000-4000-a000-000000000001',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       driver_id: null,
       order_display_id: 'OD1',
@@ -712,17 +712,17 @@ describe('GET /api/orders/:id — order details', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .get('/api/orders/order-1')
+      .get('/api/orders/aaaa0001-0000-4000-a000-000000000001')
       .set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(200);
-    expect(res.body.order.id).toBe('order-1');
+    expect(res.body.order.id).toBe('aaaa0001-0000-4000-a000-000000000001');
     expect(Array.isArray(res.body.timeline)).toBe(true);
   });
 
   it('returns order details with driver profile when driver assigned', async () => {
     m.store.orders.push({
-      id: 'order-2',
+      id: 'aaaa0001-0000-4000-a000-000000000002',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       driver_id: 'driver-1',
       order_display_id: 'OD2',
@@ -744,7 +744,7 @@ describe('GET /api/orders/:id — order details', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .get('/api/orders/order-2')
+      .get('/api/orders/aaaa0001-0000-4000-a000-000000000002')
       .set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(200);
@@ -753,7 +753,7 @@ describe('GET /api/orders/:id — order details', () => {
 
   it('does not expose delivery_otp on order for any role (isolated table)', async () => {
     m.store.orders.push({
-      id: 'order-3',
+      id: 'aaaa0001-0000-4000-a000-000000000003',
       customer_id: 'customer-123',
       driver_id: 'driver-123',
       order_display_id: 'OD3',
@@ -763,7 +763,7 @@ describe('GET /api/orders/:id — order details', () => {
 
     // 1. Customer request — no delivery_otp on order object
     const customerRes = await request(app)
-      .get('/api/orders/order-3')
+      .get('/api/orders/aaaa0001-0000-4000-a000-000000000003')
       .set({
         'x-user-id': 'customer-123',
         'x-user-role': 'customer'
@@ -773,7 +773,7 @@ describe('GET /api/orders/:id — order details', () => {
 
     // 2. Driver request — also no delivery_otp
     const driverRes = await request(app)
-      .get('/api/orders/order-3')
+      .get('/api/orders/aaaa0001-0000-4000-a000-000000000003')
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -788,7 +788,7 @@ describe('GET /api/orders/:id — order details', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .get('/api/orders/order-1')
+      .get('/api/orders/aaaa0001-0000-4000-a000-000000000001')
       .set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(500);
@@ -1670,6 +1670,10 @@ describe('Delivery OTP Verification and Milestones', () => {
       };
 
       mockRedis = null; // defaults to null
+    });
+
+    afterAll(() => {
+      mockRedis = null;
     });
 
     it('uses active Redis client to store verification failures and locks out after max attempts', async () => {

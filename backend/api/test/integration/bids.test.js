@@ -339,6 +339,7 @@ describe('Bid Routes', () => {
       id: 'order-escrow',
       customer_id: 'customer-1',
       order_display_id: 'OD-ESCROW',
+      version: 1,
     });
 
     m.store.load_offers.push({
@@ -369,24 +370,40 @@ describe('Bid Routes', () => {
       polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
     });
 
-    const app = buildApp();
+    const originalRpc = m.supabase.rpc;
+    m.supabase.rpc = vi.fn().mockImplementation(async (fnName, args) => {
+      if (fnName === 'accept_bid_tx') {
+        const order = m.store.orders.find(o => o.id === args.p_order_id);
+        if (order) {
+          order.version = (order.version || 0) + 1;
+        }
+        return { data: null, error: null };
+      }
+      return originalRpc(fnName, args);
+    });
 
-    const res = await request(app)
-      .post('/api/orders/order-escrow/bids/bid-escrow/accept')
-      .set(CUSTOMER);
+    try {
+      const app = buildApp();
 
-    expect(res.status).toBe(200);
-    expect(mockBuildDepositTx).toHaveBeenCalledWith(
-      'OD-ESCROW',
-      '0x1234567890abcdef1234567890abcdef12345678',
-      '0xAbcdef1234567890Abcdef1234567890Abcdef12',
-      500000000000000000000n,
-    );
-    expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
+      const res = await request(app)
+        .post('/api/orders/order-escrow/bids/bid-escrow/accept')
+        .set(CUSTOMER);
 
-    let order = m.store.orders.find(o => o.id === 'order-escrow');
-    expect(order.escrow_status).toBe('funding');
-    expect(order.escrow_booking_id).toBe('escrow:OD-ESCROW');
+      expect(res.status).toBe(200);
+      expect(mockBuildDepositTx).toHaveBeenCalledWith(
+        'OD-ESCROW',
+        '0x1234567890abcdef1234567890abcdef12345678',
+        '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+        500000000000000000000n,
+      );
+      expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
+
+      let order = m.store.orders.find(o => o.id === 'order-escrow');
+      expect(order.escrow_status).toBe('funding');
+      expect(order.escrow_booking_id).toBe('escrow:OD-ESCROW');
+    } finally {
+      m.supabase.rpc = originalRpc;
+    }
   });
 
   it('POST /:id/bids/:bidId/accept returns error when escrow deposit fails before accepting bid', async () => {

@@ -280,9 +280,9 @@ class SupabaseQueryBuilder {
         rows = rows.slice(from, to + 1);
       }
       if (this._limit != null) rows = rows.slice(0, this._limit);
-      if (this._single)     return { data: rows[0] ?? null, error: rows[0] ? null : { code: 'PGRST116', message: 'no rows' }, count: rows[0] ? 1 : 0 };
-      if (this._maybeSingle) return { data: rows[0] ?? null, error: null, count: rows[0] ? 1 : 0 };
-      return { data: rows, error: null, count: totalCount };
+      if (this._single)     return { data: rows[0] ? { ...rows[0] } : null, error: rows[0] ? null : { code: 'PGRST116', message: 'no rows' }, count: rows[0] ? 1 : 0 };
+      if (this._maybeSingle) return { data: rows[0] ? { ...rows[0] } : null, error: null, count: rows[0] ? 1 : 0 };
+      return { data: rows.map(r => ({ ...r })), error: null, count: totalCount };
     }
 
     return { data: null, error: { message: `mock: unhandled mode ${this._mode}` } };
@@ -353,6 +353,7 @@ export function createSupabaseMock(initialStore = {}) {
       programmed.matchingErrors.push({ table, mode, error: { message: msg } });
     },
     programRpcError(msg = 'mock error') { programmed.nextRpcError = { message: msg }; },
+    programStorageError(msg = 'mock error') { programmed.nextStorageError = { message: msg }; },
     programData(data)                   { programmed.nextData = data; },
   };
 }

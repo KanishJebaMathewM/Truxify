@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: backend/api/package-lock.json
+          cache-dependency-path: package-lock.json
       - name: Install dependencies
         working-directory: backend/api
         run: npm install --no-audit --no-fund --legacy-peer-deps

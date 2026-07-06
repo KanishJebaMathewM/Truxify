@@ -39,11 +39,12 @@ describe('requestIdMiddleware', () => {
   });
 
   it('propagates an inbound X-Request-Id header instead of generating a new one', () => {
-    const req = makeReq({ headers: { 'x-request-id': 'upstream-trace-id-abc' } });
+    const validUuid = '123e4567-e89b-12d3-a456-426614174000';
+    const req = makeReq({ headers: { 'x-request-id': validUuid } });
     const res = makeRes();
     requestIdMiddleware(req, res, vi.fn());
-    expect(req.requestId).toBe('upstream-trace-id-abc');
-    expect(res.setHeader).toHaveBeenCalledWith('X-Request-Id', 'upstream-trace-id-abc');
+    expect(req.requestId).toBe(validUuid);
+    expect(res.setHeader).toHaveBeenCalledWith('X-Request-Id', validUuid);
   });
 
   it('generates a unique ID per request', () => {

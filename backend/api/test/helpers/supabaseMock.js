@@ -323,6 +323,23 @@ export function createSupabaseMock(initialStore = {}) {
         const data = programmed.nextData; programmed.nextData = null;
         return Promise.resolve({ data, error: null });
       }
+      // Simulate PL/pgSQL RPC side-effects that bump row versions
+      if (fnName === 'accept_bid_tx' && args?.p_order_id) {
+        const idx = store.orders?.findIndex(o => o.id === args.p_order_id);
+        if (idx !== -1 && typeof store.orders[idx].version === 'number') {
+          // Replace with a new object so the caller's reference retains the old version
+          store.orders[idx] = { ...store.orders[idx], version: store.orders[idx].version + 1 };
+        }
+        if (args.p_load_id) {
+          const offerIdx = store.load_offers?.findIndex(o => o.id === args.p_load_id);
+          if (offerIdx !== -1) {
+            store.load_offers[offerIdx] = { ...store.load_offers[offerIdx], status: 'claimed' };
+          }
+        }
+        if (idx !== -1) {
+          store.orders[idx] = { ...store.orders[idx], driver_id: args.p_driver_id, status: 'active' };
+        }
+      }
       return Promise.resolve({ data: null, error: null });
     },
     storage: {

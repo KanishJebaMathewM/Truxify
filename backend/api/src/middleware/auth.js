@@ -32,7 +32,8 @@ export async function authenticate(req, res, next) {
       });
     }
 
-    if (process.env.NODE_ENV === 'test' && !process.env.DEV_ACCESS_TOKEN) {
+    // In test mode, allow x-user-id header directly without DEV_ACCESS_TOKEN
+    if (process.env.NODE_ENV === 'test') {
       const testUserId = req.headers['x-user-id'];
       const testUserRole = req.headers['x-user-role'] || 'customer';
       const testFullName = req.headers['x-user-name'] || 'Test User';
@@ -46,11 +47,11 @@ export async function authenticate(req, res, next) {
           phone: '+919999999999'
         };
         return next();
-      } else {
-        return res.status(401).json({
-          error: 'Authentication bypassed but x-user-id header is missing.'
-        });
       }
+      return res.status(401).json({
+        error: 'Authentication bypassed but x-user-id header is missing.',
+        hint: 'Provide an x-user-id header with a valid user UUID.'
+      });
     }
 
     const devToken = req.headers['x-dev-access-token'];

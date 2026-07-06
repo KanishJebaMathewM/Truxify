@@ -2,28 +2,29 @@ import asyncio
 import hmac
 import logging
 import os
+import time
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from .models.eta_prediction import eta_predictor
+from .app.models.eta_prediction import eta_predictor
 
-from .models.demand_forecast import (
+from .app.models.demand_forecast import (
     predict_demand,
     train_demand_forecast_model,
     FEATURE_NAMES,
 )
-from .models.price_prediction import predict_price, train_price_model
-from .models.bilateral_matcher import match_bilateral
-from .models.driver_profit import driver_profit_predictor
-from .models.bin_packing import optimise_packing
-from .models.collaborative_filter import collaborative_filter
-from .models.trust_scorer import trust_scorer
-from .models.deadhead_eliminator import find_return_loads
-from .models.mid_trip_reoptimiser import find_mid_trip_loads
-from .models.base import model_exists
-from .models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
-from .models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
+from .app.models.price_prediction import predict_price, train_price_model
+from .app.models.bilateral_matcher import match_bilateral
+from .app.models.driver_profit import driver_profit_predictor
+from .app.models.bin_packing import optimise_packing
+from .app.models.collaborative_filter import collaborative_filter
+from .app.models.trust_scorer import trust_scorer
+from .app.models.deadhead_eliminator import find_return_loads
+from .app.models.mid_trip_reoptimiser import find_mid_trip_loads
+from .app.models.base import model_exists
+from .app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
+from .app.models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,11 +40,52 @@ async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+# ── Health Check ─────────────────────────────────────────────────────────────
+# Added for Issue #<number>: Node.js backend calls this before routing
+# any prediction request to verify the ML service is up.
+
+import time
+
+# Track when the service started (for uptime reporting)
+_SERVICE_START_TIME = time.time()
+
 app = FastAPI(
     title="Truxify ML Engine",
-    description="Machine Learning microservice for Truxify",
+    description="ML prediction service for load matching, pricing, ETA, and route optimization",
     version="1.0.0",
+    docs_url="/docs",      # Swagger UI at /docs
+    redoc_url="/redoc", 
 )
+
+@app.get(
+    "/health",
+    tags=["Health"],
+    summary="ML service health check",
+    response_description="Service status and loaded model count",
+)
+async def health_check():
+    """
+    Returns the current health status of the ML engine.
+
+    The Node.js API gateway calls this endpoint before routing
+    prediction requests. If this returns non-200, the gateway
+    returns a 503 to the Flutter app instead of a failed prediction.
+
+    Returns:
+        status: "ok" if service is healthy
+        uptime_seconds: time since service started
+        models_loaded: number of ML models currently in memory
+    """
+    return {
+        "status": "ok",
+        "uptime_seconds": round(time.time() - _SERVICE_START_TIME, 2),
+        # Replace `loaded_models` with your actual variable that holds loaded models
+        # If you don't have one, use a hardcoded count for now
+        "models_loaded": len(loaded_models) if "loaded_models" in dir() else "unknown",
+        "version": "1.0.0",
+    }
+# ─────────────────────────────────────────────────────────────────────────────
+
 
 # CORS: restrict to known origins — no wildcard "*" to prevent unauthorized cross-origin access
 app.add_middleware(

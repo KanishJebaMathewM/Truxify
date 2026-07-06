@@ -36,7 +36,7 @@ describe('otpService', () => {
     const otp = await generateAndStoreOtp('+919876543210');
 
     expect(otp).toMatch(/^\d{6}$/);
-    expect(activeRedisClient.set).toHaveBeenCalledWith(
+    expect(mockRedis.set).toHaveBeenCalledWith(
       'otp:+919876543210',
       otp,
       'EX',

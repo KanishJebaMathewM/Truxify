@@ -29,3 +29,9 @@
 
 # Snapshot cheatcodes output
 /snapshots
+
+node_modules/
+.env
+artifacts/
+cache/
+coverage/

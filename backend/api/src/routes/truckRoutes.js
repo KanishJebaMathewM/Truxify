@@ -2,8 +2,10 @@ import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
-import { validateParams, validateBody } from '../middleware/validate.js';
-import { paramIdSchema, uuidParamSchema, registerTruckSchema } from '../validation/requestSchemas.js';
+import { validateParams } from '../middleware/validate.js';
+import { paramIdSchema } from '../validation/requestSchemas.js';
+import { validateBody } from '../middleware/validate.js';
+import { registerTruckSchema } from '../validation/requestSchemas.js';
 import { getRouteEstimate } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { predictPrice } from '../services/ml.js';
@@ -11,41 +13,14 @@ import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
-// GET /api/trucks/types
-router.get('/types', authenticate, userLimiter, (req, res) => {
-  return res.json({
-    types: ['mini-truck', 'flatbed', 'box-truck', 'refrigerated', 'container']
-  });
-});
-function parseCapacityFilter(value, field) {
-  if (value === undefined) return { value: undefined };
-  if (typeof value !== 'string' || value.trim() === '') {
-    return { error: `${field} must be a positive number` };
-  }
-
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return { error: `${field} must be a positive number` };
-  }
-
-  return { value: parsed };
-}
-
 // ============================================================================
 // REGISTER A TRUCK (DRIVER ONLY)
 // ============================================================================
 /**
- * @route POST /api/trucks
- * @desc Allows authenticated drivers to register a truck they own.
- * @access Driver
- * @param {string} req.body.name - Name of the truck
- * @param {string} req.body.number_plate - Number plate of the truck (normalised to uppercase)
- * @param {number} req.body.max_capacity_tons - Maximum capacity of the truck in tons
- * @returns {object} 201 - Successfully registered truck details
- * @returns {object} 400 - Validation errors
- * @returns {object} 403 - Forbidden for non-drivers
- * @returns {object} 409 - Truck with number plate already registered
- * @returns {object} 500 - Internal server error
+ * POST /api/trucks
+ * Allows authenticated drivers to register a truck they own.
+ * - Validates payload with registerTruckSchema (name, number_plate, max_capacity_tons)
+ * - Returns 409 if the number plate is already registered
  */
 router.post('/', authenticate, requireRole(['driver']), userLimiter, validateBody(registerTruckSchema), async (req, res) => {
   const { name, number_plate, max_capacity_tons } = req.body;
@@ -89,64 +64,27 @@ router.post('/', authenticate, requireRole(['driver']), userLimiter, validateBod
 // LIST DRIVER'S TRUCKS
 // ============================================================================
 /**
- * @route GET /api/trucks
- * @desc Returns all trucks owned by the authenticated driver.
- * @access Driver
- * @param {string} [req.query.name] - Filter trucks by name (case-insensitive substring)
- * @param {number} [req.query.min_capacity] - Minimum capacity filter in tons
- * @param {number} [req.query.max_capacity] - Maximum capacity filter in tons
- * @returns {object} 200 - Array of trucks
- * @returns {object} 403 - Forbidden for non-drivers
- * @returns {object} 500 - Internal server error
+ * GET /api/trucks
+ * Returns all trucks owned by the authenticated driver.
  */
 router.get('/', authenticate, requireRole(['driver']), userLimiter, async (req, res) => {
-  const { name, min_capacity, max_capacity } = req.query;
+  const { name } = req.query;
+  const { min_capacity, max_capacity } = req.query;
 
   try {
-    const minCapacity = parseCapacityFilter(min_capacity, 'min_capacity');
-    if (minCapacity.error) {
-      return res.status(400).json({ error: minCapacity.error });
-    }
-
-    const maxCapacity = parseCapacityFilter(max_capacity, 'max_capacity');
-    if (maxCapacity.error) {
-      return res.status(400).json({ error: maxCapacity.error });
-    }
-
-    if (
-      minCapacity.value !== undefined &&
-      maxCapacity.value !== undefined &&
-      minCapacity.value > maxCapacity.value
-    ) {
-      return res.status(400).json({ error: 'min_capacity must be less than or equal to max_capacity' });
-    }
-
     let query = supabase
       .from('trucks')
       .select('id, name, number_plate, max_capacity_tons, created_at')
       .eq('owner_id', req.user.id);
 
-    if (name && typeof name === 'string') {
-      const cleanName = name.trim();
-      if (cleanName) {
-        query = query.ilike('name', `%${cleanName}%`);
-      }
+    if (name) {
+      query = query.ilike('name', `%${name}%`);
     }
-
-    if (min_capacity !== undefined) {
-      const minCapNum = Number(min_capacity);
-      if (!Number.isFinite(minCapNum) || minCapNum < 0) {
-        return res.status(400).json({ error: 'min_capacity must be a non-negative number' });
-      }
-      query = query.gte('max_capacity_tons', minCapNum);
+    if (min_capacity) {
+      query = query.gte('max_capacity_tons', Number(min_capacity));
     }
-
-    if (max_capacity !== undefined) {
-      const maxCapNum = Number(max_capacity);
-      if (!Number.isFinite(maxCapNum) || maxCapNum < 0) {
-        return res.status(400).json({ error: 'max_capacity must be a non-negative number' });
-      }
-      query = query.lte('max_capacity_tons', maxCapNum);
+    if (max_capacity) {
+      query = query.lte('max_capacity_tons', Number(max_capacity));
     }
 
     const { data: trucks, error } = await query.order('created_at', { ascending: false });
@@ -165,14 +103,6 @@ router.get('/', authenticate, requireRole(['driver']), userLimiter, async (req, 
 function parseBoolean(value) {
   if (typeof value === 'boolean') return value;
   return ['true', '1', 'yes'].includes(String(value).trim().toLowerCase());
-}
-
-function isLatitude(value) {
-  return Number.isFinite(value) && value >= -90 && value <= 90;
-}
-
-function isLongitude(value) {
-  return Number.isFinite(value) && value >= -180 && value <= 180;
 }
 
 router.get('/search', authenticate, userLimiter, async (req, res) => {
@@ -195,15 +125,6 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
 
   if ([numPickupLat, numPickupLng, numDropLat, numDropLng, numWeightTonnes].some(isNaN)) {
     return res.status(400).json({ error: 'Invalid numeric parameters' });
-  }
-
-  if (!isLatitude(numPickupLat) || !isLatitude(numDropLat) || !isLongitude(numPickupLng) || !isLongitude(numDropLng)) {
-    return res.status(400).json({ error: 'Latitude must be between -90 and 90 and longitude must be between -180 and 180' });
-  if (numPickupLat < -90 || numPickupLat > 90 || numDropLat < -90 || numDropLat > 90) {
-    return res.status(400).json({ error: 'Latitude must be between -90 and 90' });
-  }
-  if (numPickupLng < -180 || numPickupLng > 180 || numDropLng < -180 || numDropLng > 180) {
-    return res.status(400).json({ error: 'Longitude must be between -180 and 180' });
   }
 
   if (numWeightTonnes <= 0 || numWeightTonnes > 50) {
@@ -314,17 +235,8 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
   }
 });
 
-/**
- * @route GET /api/trucks/:id/number
- * @desc Retrieve the number plate of a truck by its UUID
- * @access Authenticated
- * @param {string} req.params.id - The UUID of the truck
- * @returns {object} 200 - Truck number plate
- * @returns {object} 400 - Invalid UUID format
- * @returns {object} 404 - Truck not found
- * @returns {object} 500 - Internal server error
- */
-router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
+// GET TRUCK NUMBER PLATE BY ID
+router.get('/:id/number', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   try {
     const { data: truck, error } = await supabase
       .from('trucks')

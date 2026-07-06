@@ -1,6 +1,6 @@
 {
   "model_name": "trust_scorer",
-  "saved_at": "2026-06-27T20:53:48.446654",
+  "saved_at": "2026-07-05T19:16:05.403714",
   "metrics": {
     "accuracy": 0.9933333333333333,
     "classification_report": {
@@ -8,32 +8,32 @@
         "precision": 1.0,
         "recall": 1.0,
         "f1-score": 1.0,
-        "support": 36.0
+        "support": 36
       },
       "1": {
         "precision": 0.9920634920634921,
         "recall": 1.0,
         "f1-score": 0.9960159362549801,
-        "support": 250.0
+        "support": 250
       },
       "2": {
         "precision": 1.0,
         "recall": 0.8571428571428571,
-        "f1-score": 0.9230769230769231,
-        "support": 14.0
+        "f1-score": 0.923076923076923,
+        "support": 14
       },
       "accuracy": 0.9933333333333333,
       "macro avg": {
         "precision": 0.9973544973544973,
         "recall": 0.9523809523809524,
-        "f1-score": 0.9730309531106345,
-        "support": 300.0
+        "f1-score": 0.9730309531106344,
+        "support": 300
       },
       "weighted avg": {
         "precision": 0.9933862433862434,
         "recall": 0.9933333333333333,
         "f1-score": 0.9930902032894063,
-        "support": 300.0
+        "support": 300
       }
     },
     "n_samples": 1500,

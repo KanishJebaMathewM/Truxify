@@ -287,4 +287,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     function unpause() external onlyOwner {
         _unpause();
     }
+
+    receive() external payable {}
 }

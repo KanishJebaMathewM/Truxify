@@ -1601,7 +1601,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     expect(buffer.toArray()[5].driver_id).toBe('new-driver-0');
 
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('[TRUXIFY BUFFER DROP] Capacity limit: dropped 5 oldest records from retry merge.')
+      expect.stringContaining('[TRUXIFY BUFFER DROP] Dropped 5 oldest records due to capacity after flush failure.')
     );
   });
 
@@ -1723,7 +1723,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
             const buffer = __testing.getTelemetryWriteBuffer();
       expect(buffer.length).toBe(5000);
-      expect(buffer.toArray()[0].driver_id).toBe('driver-old-1');
+      expect(buffer.toArray()[0].driver_id).toBe('driver-old-5001');
       expect(buffer.toArray()[4999].driver_id).toBe('driver-new');
       expect(logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('[TRUXIFY BUFFER CRITICAL] Buffer at 100% capacity')

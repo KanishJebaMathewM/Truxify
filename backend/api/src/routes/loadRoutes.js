@@ -6,7 +6,6 @@ import logger from '../middleware/logger.js';
 import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
 import { validateParams } from '../middleware/validate.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
-import { uuidParamSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 
 const router = express.Router();

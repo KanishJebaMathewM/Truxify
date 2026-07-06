@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
-import hre from "hardhat";
-const { ethers } = hre;
+import { describe, it, before } from "node:test";
+import { network } from "hardhat";
+
+let ethers;
 
 async function assertRejectsWith(promise, message) {
   await assert.rejects(promise, error => error.message.includes(message));
 }
 
 describe("Reputation", function () {
+  before(async () => {
+    ({ ethers } = await network.create());
+  });
   async function deployReputation() {
     const [owner, relayer, driver, outsider] = await ethers.getSigners();
     const Reputation = await ethers.getContractFactory("Reputation");

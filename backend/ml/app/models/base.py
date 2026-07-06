@@ -48,18 +48,24 @@ def load_model(model_name: str) -> Optional[Any]:
     if not os.path.exists(path):
         logger.warning("Model '%s' not found at %s", model_name, path)
         return None
-    with open(path, "rb") as f:
-        return pickle.load(f)
+    try:
+        with open(path, "rb") as f:
+            return pickle.load(f)
+    except Exception as e:
+        logger.error("Failed to load model '%s' from %s: %s", model_name, path, e)
+        return None
 
 def model_exists(model_name: str) -> bool:
     return os.path.exists(get_model_path(model_name))
 
 async def ensure_model_loaded(model_name: str, train_fn, *args, **kwargs) -> Optional[Any]:
     async with _get_lock(model_name):
-        if not model_exists(model_name):
-            logger.info("Model '%s' not found, training...", model_name)
+        model = load_model(model_name)
+        if model is None:
+            logger.info("Model '%s' not loaded or not found, training...", model_name)
             await train_fn(*args, **kwargs)
-        return load_model(model_name)
+            model = load_model(model_name)
+        return model
 
 async def preload_all_models():
     from .demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME

@@ -16,13 +16,10 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
  *  - Checks-Effects-Interactions (CEI) pattern enforced
  *  - State updated BEFORE external .call{} to prevent re-entrancy
  *  - Pausable for emergency situations
- *  - Pull-based withdrawal pattern: funds credited to pendingWithdrawals
- *    mapping; recipients call withdraw() themselves — eliminates push-to-
- *    unknown-receiver risk and permanent fund-locking when receiver
- *    cannot accept ETH (e.g. contract with no receive/fallback).
+ *  - Pull-based withdrawal with timeout for fund recovery
  *  - Emergency recovery: owner can recover locked funds for a booking
- *    that is stuck in Disputed state after a configurable grace period, or
- *    recover pending withdrawals after timeout.
+ *    that is stuck in Disputed state after a configurable grace period,
+ *    preventing permanent loss of user funds.
  */
 contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
@@ -50,7 +47,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     mapping(uint256 => Booking) public bookings;
     uint256 public bookingCount;
-        mapping(address => uint256) public pendingWithdrawals;
+    mapping(address => uint256) public pendingWithdrawals;
     mapping(address => uint256) public releaseTimestamps;
     uint256 public constant WITHDRAWAL_TIMEOUT = 30 days;
 
@@ -96,23 +93,20 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         uint256 amount
     );
 
-        event Withdrawn(address indexed recipient, uint256 amount);
-
-    event Withdrawal(address indexed recipient, uint256 amount);
-
-    event PaymentReleased(
-        uint256 indexed bookingId,
-        address indexed driver,
+    event Withdrawal(
+        address indexed recipient,
         uint256 amount
     );
-
-    event EmergencyRecovered(address indexed recipient, uint256 amount);
 
     event EmergencyRecovery(
         uint256 indexed bookingId,
-        address indexed customer,
+        address indexed recipient,
         uint256 amount
     );
+
+    event Withdrawn(address indexed recipient, uint256 amount);
+
+    event EmergencyRecovered(address indexed recipient, uint256 amount);
 
     event EmergencyGracePeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
 
@@ -196,13 +190,12 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         booking.amount  = 0;
         booking.status  = BookingStatus.Delivered;
 
-        // Credit to pull-based mapping — no external call here
+        // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[driver] += paymentAmount;
         releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         emit PaymentCredited(bookingId, driver, paymentAmount);
         emit WithdrawalReady(bookingId, driver, paymentAmount);
-        emit PaymentReleased(bookingId, driver, paymentAmount);
     }
 
     /**
@@ -339,6 +332,8 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         return bookings[bookingId];
     }
 
+    /**
+    }
 
     /**
      * @dev Emergency recovery function for owner to recover funds after timeout.

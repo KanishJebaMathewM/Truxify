@@ -20,6 +20,7 @@ import {
 import { changeDropSchema, cancelOrderSchema } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
 import { escrowDeposit, escrowRelease, escrowRefund } from '../services/escrow.js';
+import { BidAcceptanceService, DomainError } from '../services/order/bidAcceptanceService.js';
 import { sendDeliveryOtpNotification } from '../services/notificationService.js';
 import { predictDemand, predictPrice } from '../services/ml.js';
 import rateLimit from 'express-rate-limit';
@@ -125,6 +126,13 @@ const predictDemandLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many demand prediction requests. Please try again later.' },
+});
+
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  escrowDepositFn: escrowDeposit,
+  escrowRefundFn: escrowRefund,
+  logger,
 });
 
 /**
@@ -629,113 +637,18 @@ router.post('/:id/bids/:bidId/accept', authenticate, requireRole(['customer']), 
   const bidId = req.params.bidId;
 
   try {
-    const { data: order } = await supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
-    if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-
-    const { data: bid } = await supabase.from('load_bids').select('*').eq('id', bidId).maybeSingle();
-    if (!bid || bid.status !== 'pending') return res.status(404).json({ error: 'Bid is not active or not found.' });
-
-    const { data: loadOffer, error: loadOfferErr } = await supabase.from('load_offers').select('id').eq('order_display_id', order.order_display_id).maybeSingle();
-    if (loadOfferErr) return res.status(500).json({ error: 'Failed to verify bid ownership.', details: loadOfferErr.message });
-    if (!loadOffer) return res.status(404).json({ error: 'Load offer for this order was not found.' });
-    if (bid.load_id !== loadOffer.id) return res.status(403).json({ error: 'Access Denied: Bid does not belong to this order.' });
-
-    // Fetch wallet addresses BEFORE any state change to validate escrow readiness
-    const [driverDetailsResult, customerProfileResult] = await Promise.all([
-      supabase.from('driver_details').select('polygon_wallet_address').eq('user_id', bid.driver_id).maybeSingle(),
-      supabase.from('profiles').select('polygon_wallet_address').eq('id', req.user.id).maybeSingle(),
-    ]);
-
-    const driverWallet = driverDetailsResult.data?.polygon_wallet_address ?? null;
-    const customerWallet = customerProfileResult.data?.polygon_wallet_address ?? null;
-
-    if (!driverWallet || !customerWallet) {
-      logger.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — rejecting bid acceptance.`);
-      return res.status(422).json({
-        error: 'Both customer and driver must connect a wallet before escrow can be initiated.'
-      });
-    }
-
-    const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', bid.driver_id).maybeSingle();
-    const { data: details } = await supabase.from('driver_details').select('rating, truck_id').eq('user_id', bid.driver_id).maybeSingle();
-
-    let truckInfo = null;
-    if (details && details.truck_id) {
-      const { data, error: truckErr } = await supabase.from('trucks').select('id, name, number_plate').eq('id', details.truck_id).maybeSingle();
-      if (truckErr) logger.error('Truck lookup error during bid accept:', truckErr.message);
-      truckInfo = data;
-    }
-
-    // Phase 1: Escrow deposit BEFORE accepting the bid
-    let escrowTxHash = null;
-    if (driverWallet && customerWallet) {
-      const amountWei = ethers.parseEther((bid.bid_amount / 100).toFixed(2).toString());
-      try {
-        const { txHash } = await escrowDeposit(order.order_display_id, customerWallet, driverWallet, amountWei);
-        if (txHash) {
-          escrowTxHash = txHash;
-        } else {
-          return res.status(500).json({
-            error: 'Escrow deposit failed. Bid was not accepted.',
-            recovery: 'Please try again or contact support if the issue persists.'
-          });
-        }
-      } catch (depositErr) {
-        return res.status(500).json({
-          error: 'Escrow deposit failed. Bid was not accepted.',
-          details: depositErr.message,
-          recovery: 'Check that the customer wallet has sufficient MATIC balance for the deposit and that the Polygon RPC endpoint is reachable.'
-        });
-      }
-    }
-
-    // Phase 2: Atomically accept the bid
-    const { error: rpcErr } = await supabase.rpc('accept_bid_tx', {
-      p_bid_id: bidId, p_order_id: orderId, p_load_id: bid.load_id, p_driver_id: bid.driver_id,
-      p_truck_id: truckInfo?.id || null, p_driver_name: profile?.full_name || 'Assigned Driver',
-      p_driver_rating: details?.rating || 0.00, p_truck_number: truckInfo?.number_plate || 'N/A',
-      p_bid_amount: bid.bid_amount, p_order_display_id: order.order_display_id
+    const result = await bidAcceptanceService.acceptBid({
+      orderId,
+      bidId,
+      customerId: req.user.id,
     });
-
-    if (rpcErr) {
-      // Compensating transaction: escrow deposit succeeded but DB update failed
-      if (escrowTxHash) {
-        try {
-          await escrowRefund(order.order_display_id);
-          logger.warn(`[escrow] Compensating refund issued for order ${order.order_display_id} after RPC failure.`);
-        } catch (refundErr) {
-          logger.error(`[escrow] CRITICAL: Escrow refund also failed for order ${order.order_display_id}:`, refundErr.message);
-        }
-      }
-      return res.status(500).json({
-        error: 'Failed to accept bid atomically.',
-        details: rpcErr.message,
-        recovery: 'The escrow deposit has been refunded. Please try again.'
-      });
-    }
-
-    // Record escrow booking reference and deposit info
-    const escrowUpdate = {
-      escrow_booking_id: `escrow:${order.order_display_id}`,
-      escrow_status: escrowTxHash ? 'funded' : 'pending',
-    };
-    if (escrowTxHash) {
-      escrowUpdate.deposit_tx_hash = escrowTxHash;
-      escrowUpdate.escrow_deposited_at = new Date().toISOString();
-    }
-
-    const { error: escrowUpdateErr } = await supabase
-      .from('orders')
-      .update(escrowUpdate)
-      .eq('id', orderId);
-
-    if (escrowUpdateErr) {
-      logger.warn('[escrow] Failed to update escrow booking reference:', escrowUpdateErr.message);
-    }
-
-    res.json({ message: 'Bid accepted. Driver and truck assigned.' });
+    return res.status(result.status).json(result.body);
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Bid acceptance exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

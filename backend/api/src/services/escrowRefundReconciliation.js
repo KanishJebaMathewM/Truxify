@@ -11,19 +11,27 @@ let reconciliationTimer = null;
 let reconciliationRunning = false;
 
 export async function reconcilePendingEscrowRefunds() {
+  let globalLockAcquired = false;
+  if (redisClient) {
+    try {
+      globalLockAcquired = await redisClient.set(GLOBAL_LOCK_KEY, process.pid.toString(), 'NX', 'EX', GLOBAL_LOCK_TTL_SECONDS);
+    } catch (err) {
+      logger.warn('[escrow-reconciliation] Redis unavailable, cannot acquire global lock — skipping batch pull.');
+      return;
+    }
+    if (!globalLockAcquired) {
+      logger.info('[escrow-reconciliation] Global lock held by another instance, skipping batch pull.');
+      return;
+    }
+  } else {
+    logger.warn('[escrow-reconciliation] Redis not configured, cannot acquire distributed lock — skipping.');
+    return;
+  }
+
   if (reconciliationRunning) return;
   reconciliationRunning = true;
 
   try {
-    // Acquire a global lock just to prevent multiple instances from pulling the exact same batch unnecessarily
-    let globalLockAcquired = false;
-    if (redisClient) {
-      globalLockAcquired = await redisClient.set(GLOBAL_LOCK_KEY, process.pid.toString(), 'NX', 'EX', GLOBAL_LOCK_TTL_SECONDS);
-      if (!globalLockAcquired) {
-        logger.info('[escrow-reconciliation] Global lock held by another instance, skipping batch pull.');
-        return;
-      }
-    }
 
     const instanceId = process.env.HOSTNAME || os.hostname();
     const { data: pendingOrders, error } = await supabase

@@ -288,6 +288,7 @@ router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
   if (sort !== undefined && sort !== 'asc' && sort !== 'desc') {
     return res.status(400).json({ error: 'sort must be asc or desc' });
   }
+  // Database-optimized chronological sorting is enforced on order query
   const isAscending = sort !== 'desc';
   const parseCoordinate = (value, name, min, max) => {
     if (value === undefined) return { value: undefined };

@@ -64,8 +64,13 @@ if (!process.env.DRIVER_LOGIN_OTP) {
 const app = express();
 const server = http.createServer(app);
 
-// Trust proxy required for rate-limiting behind load balancers/Docker
-app.set('trust proxy', 1);
+// Trust proxy required for rate-limiting behind load balancers/Docker.
+// TRUST_PROXY env var allows each deployment to set the correct proxy count:
+//   - Production (behind Nginx/ALB/Cloudflare) → 1 (default)
+//   - Docker Compose (no proxy)                 → 0
+//   - Multiple proxy hops (e.g. Cloudflare→Nginx) → 2
+const trustProxy = process.env.TRUST_PROXY !== undefined ? Number(process.env.TRUST_PROXY) : 1;
+app.set('trust proxy', trustProxy);
 
 // ============================================================================
 // 🔒 ADVANCED SECURITY HEADERS (HELMET CONFIGURATION)

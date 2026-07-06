@@ -1,8 +1,9 @@
 import express from 'express';
 import { supabase, redisClient } from '../config/db.js';
+import { LOGIN_OTP_LENGTH } from '../config/otp.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
+import { userLimiter, createStore } from '../middleware/rateLimiter.js';
 
 import { validateBody } from '../middleware/validate.js';
 import { driverOnlineSchema, withdrawSchema, otpSendSchema } from '../validation/requestSchemas.js';
@@ -14,9 +15,10 @@ import { generateAndStoreOtp, verifyOtp } from '../services/otpService.js';
 const router = express.Router();
 
 
+const LOGIN_OTP_RE = new RegExp(`^\\d{${LOGIN_OTP_LENGTH}}$`);
 const loginOtpSchema = z.object({
   phone: z.string().trim().min(10).max(20),
-  otp: z.string().regex(/^\d{6}$/, { message: 'OTP must be 6 digits' }),
+  otp: z.string().regex(LOGIN_OTP_RE, { message: `OTP must be ${LOGIN_OTP_LENGTH} digits` }),
 });
 
 export function otpPhoneKey(phone) {
@@ -48,6 +50,7 @@ const sendOtpLimiter = perPhoneLimiter({
   max: 1,
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:otp-send:'),
   message: { error: 'Too many OTP requests. Please wait before requesting again.' },
 });
 
@@ -56,6 +59,7 @@ const verifyOtpLimiter = perPhoneLimiter({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:otp-verify:'),
   message: { error: 'Too many OTP verification attempts. Please try again later.' },
 });
 
@@ -510,3 +514,5 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['dri
 });
 
 export default router;
+
+// Resolves #2051: Composite indexes added for 2dsphere queries

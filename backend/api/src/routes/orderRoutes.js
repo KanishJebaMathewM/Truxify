@@ -2,7 +2,7 @@ import express from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
-import { bidLimiter, userLimiter, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
+import { bidLimiter, userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { supabase, redisClient, mongoDb } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
@@ -22,17 +22,26 @@ import {
   cancelOrderSchema
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
-import { predictDemand, predictPrice } from '../services/ml.js';
 import {
+  escrowDeposit,
+  escrowRelease,
+  escrowRefund,
   buildDepositTx,
   recordDepositTx,
-  escrowRelease,
   bookingIdFromUuid,
   submitEscrowRefund,
   confirmEscrowRefund,
   ESCROW_MATIC_PER_PAISA,
 } from '../services/escrow.js';
-import { sendDeliveryOtpNotification, storeDeliveryOtp, getActiveDeliveryOtp, verifyDeliveryOtp, expireDeliveryOtps } from '../services/notificationService.js';
+import { BidAcceptanceService, DomainError } from '../services/order/bidAcceptanceService.js';
+import {
+  sendDeliveryOtpNotification,
+  storeDeliveryOtp,
+  getActiveDeliveryOtp,
+  verifyDeliveryOtp,
+  expireDeliveryOtps
+} from '../services/notificationService.js';
+import { predictDemand, predictPrice } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import { DELIVERY_OTP_LENGTH } from '../config/otp.js';
@@ -130,6 +139,8 @@ const verifyDeliveryLimiter = rateLimit({
   max: process.env.NODE_ENV === 'test' ? 1000 : 20,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || 'unknown',
+  store: createStore('rl:verify-delivery:'),
   message: { error: 'Too many delivery verification attempts. Please try again later.' },
 });
 
@@ -138,6 +149,7 @@ const milestoneLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
   keyGenerator: (req) => req.user.id,
+  store: createStore('rl:milestone:'),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many milestone updates. Please slow down.' },
@@ -148,6 +160,7 @@ const predictDemandLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 10,
   keyGenerator: (req) => req.user?.id || 'unauthenticated',
+  store: createStore('rl:predict-demand:'),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many demand prediction requests. Please try again later.' },
@@ -163,24 +176,33 @@ const telemetryLimiter = rateLimit({
     }
     return req.user.id;
   },
+  store: createStore('rl:telemetry:'),
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many telemetry requests. Please slow down.' },
+  message: { error: 'Too many telemetry requests. Please try again later.' },
 });
 
+// Rate limiter for resend-otp endpoint
 const resendOtpLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
+  keyGenerator: (req) => req.user?.id || 'unauthenticated',
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || 'unknown',
+  store: createStore('rl:resend-otp:'),
   message: { error: 'Too many OTP resend requests. Please try again later.' },
 });
 
+// Rate limiter for change-drop endpoint
 const changeDropLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 5,
+  keyGenerator: (req) => req.user?.id || 'unauthenticated',
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || 'unknown',
+  store: createStore('rl:change-drop:'),
   message: { error: 'Too many drop change requests. Please try again later.' },
 });
 
@@ -476,15 +498,13 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
   try {
     let order = null;
     let orderErr = null;
-    if (uuidRegex.test(orderId)) {
-      const result = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
-      order = result.data;
-      orderErr = result.error;
-    }
-    if (!order) {
-      const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
-      order = result.data;
-      orderErr = result.error;
+    const resultById = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    order = resultById.data;
+    orderErr = resultById.error;
+    if (!order && !orderErr) {
+      const resultByDisplayId = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
+      order = resultByDisplayId.data;
+      orderErr = resultByDisplayId.error;
     }
     if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
     if (!order) return res.status(404).json({ error: 'Order not found.' });
@@ -663,6 +683,14 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
       // Fire-and-forget: blockchain confirmation must never block the HTTP response.
       void awardReputationPoints(polygonAddress, stars).catch((repErr) => {
         logger.error('[reputation] On-chain reputation update failed:', repErr.message);
+        supabase.from('reputation_failures').insert({
+          driver_wallet: polygonAddress,
+          stars,
+          rating_id: ratingData?.id ?? null,
+          failed_at: new Date().toISOString(),
+          retry_count: 0,
+          last_error: repErr.message,
+        }).then().catch(() => {});
       });
     } else {
       logger.warn(
@@ -746,148 +774,20 @@ router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), va
 router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
   const orderId = req.params.id;
   const bidId = req.params.bidId;
-  // Acquire a distributed lock on this order to prevent concurrent bid acceptance
-  const lockKey = `bid_accept_lock:${orderId}`;
-  const lockTimeoutMs = 10000;
-  let lockValue = null;
-  if (redisClient) {
-    lockValue = crypto.randomUUID();
-    const acquired = await redisClient.set(lockKey, lockValue, 'PX', lockTimeoutMs, 'NX');
-    if (!acquired) {
-      return res.status(409).json({ error: 'Another bid acceptance is in progress for this order. Please try again.' });
-    }
-  }
+
   try {
-    const { data: order } = await supabase.from('orders').select('order_display_id, customer_id, version').eq('id', orderId).maybeSingle();
-    if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-
-    const { data: bid } = await supabase.from('load_bids').select('*').eq('id', bidId).maybeSingle();
-    if (!bid || bid.status !== 'pending') return res.status(404).json({ error: 'Bid is not active or not found.' });
-
-    const { data: loadOffer, error: loadOfferErr } = await supabase.from('load_offers').select('id').eq('order_display_id', order.order_display_id).maybeSingle();
-    if (loadOfferErr) return res.status(500).json({ error: 'Failed to verify bid ownership.', details: loadOfferErr.message });
-    if (!loadOffer) return res.status(404).json({ error: 'Load offer for this order was not found.' });
-    if (bid.load_id !== loadOffer.id) return res.status(403).json({ error: 'Access Denied: Bid does not belong to this order.' });
-
-    // Fetch wallet addresses BEFORE any state change to validate escrow readiness
-    const [driverDetailsResult, customerProfileResult] = await Promise.all([
-      supabase.from('driver_details').select('polygon_wallet_address').eq('user_id', bid.driver_id).maybeSingle(),
-      supabase.from('profiles').select('polygon_wallet_address').eq('id', req.user.id).maybeSingle(),
-    ]);
-
-    const driverWallet = driverDetailsResult.data?.polygon_wallet_address ?? null;
-    const customerWallet = customerProfileResult.data?.polygon_wallet_address ?? null;
-
-    if (!driverWallet || !customerWallet) {
-      logger.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — rejecting bid acceptance.`);
-      return res.status(422).json({
-        error: 'Both customer and driver must connect a wallet before escrow can be initiated.'
-      });
-    }
-
-    const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', bid.driver_id).maybeSingle();
-    const { data: details } = await supabase.from('driver_details').select('rating, truck_id').eq('user_id', bid.driver_id).maybeSingle();
-
-    let truckInfo = null;
-    if (details && details.truck_id) {
-      const { data, error: truckErr } = await supabase.from('trucks').select('id, name, number_plate').eq('id', details.truck_id).maybeSingle();
-      if (truckErr) logger.error('Truck lookup error during bid accept:', truckErr.message);
-      truckInfo = data;
-    }
-
-    // Phase 1: Build unsigned deposit tx for customer to sign
-    let depositTxData = null;
-    if (driverWallet && customerWallet) {
-      const maticPerPaisa = ESCROW_MATIC_PER_PAISA;
-      if (!Number.isFinite(maticPerPaisa) || maticPerPaisa <= 0) {
-        logger.warn('[escrow] ESCROW_MATIC_PER_PAISA not configured — skipping escrow deposit.');
-      } else {
-        const maticAmount = (bid.bid_amount * maticPerPaisa).toFixed(18);
-        const maxEscrowMatic = Number.parseFloat(process.env.MAX_ESCROW_MATIC || '5');
-        if (!Number.isFinite(maxEscrowMatic) || maxEscrowMatic <= 0) {
-          logger.error('[escrow] MAX_ESCROW_MATIC is invalid — refusing deposit.');
-          return res.status(500).json({ error: 'Escrow configuration error. Please contact support.' });
-        }
-        if (Number.parseFloat(maticAmount) > maxEscrowMatic) {
-          return res.status(400).json({ error: 'Computed escrow amount exceeds safety cap. Check ESCROW_MATIC_PER_PAISA configuration.' });
-        }
-        const amountWei = ethers.parseEther(maticAmount);
-        const { txData, bookingId } = await buildDepositTx(
-          order.order_display_id, customerWallet, driverWallet, amountWei,
-        );
-        if (txData) {
-          if (typeof txData === 'string' && txData.startsWith('0x')) {
-            try {
-              const parsed = ethers.Transaction.from(txData);
-              depositTxData = {
-                to: parsed.to,
-                data: parsed.data,
-                value: parsed.value ? parsed.value.toString() : undefined,
-              };
-            } catch (parseErr) {
-              depositTxData = {
-                to: process.env.ESCROW_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000',
-                data: txData,
-              };
-            }
-          } else {
-            depositTxData = txData;
-          }
-        }
-      }
-    }
-
-    // Phase 2: Atomically accept the bid
-    const { error: rpcErr } = await supabase.rpc('accept_bid_tx', {
-      p_bid_id: bidId, p_order_id: orderId, p_load_id: bid.load_id, p_driver_id: bid.driver_id,
-      p_truck_id: truckInfo?.id || null, p_driver_name: profile?.full_name || 'Assigned Driver',
-      p_driver_rating: details?.rating || 0.00, p_truck_number: truckInfo?.number_plate || 'N/A',
-      p_bid_amount: bid.bid_amount, p_order_display_id: order.order_display_id,
-      p_expected_version: order.version
+    const result = await bidAcceptanceService.acceptBid({
+      orderId,
+      bidId,
+      customerId: req.user.id,
     });
-
-    if (rpcErr) {
-      if (rpcErr.message === 'OPTIMISTIC_LOCK_FAIL') {
-        return res.status(409).json({ error: 'Load already accepted by another driver' });
-      }
-      return res.status(500).json({
-        error: 'Failed to accept bid atomically.',
-        details: rpcErr.message,
-      });
-    }
-
-    // Phase 3: Only after bid is accepted, write escrow pre-update to DB
-    if (depositTxData) {
-      const bookingId = bookingIdFromUuid(order.order_display_id);
-      await supabase.from('orders').update({
-        escrow_booking_id: bookingId,
-        escrow_status: 'funding',
-        version: order.version + 2
-      }).eq('id', orderId).eq('version', order.version + 1);
-    }
-
-    res.json({
-      message: 'Bid accepted. Awaiting customer deposit signature.',
-      depositTx: depositTxData,
-    });
+    return res.status(result.status).json(result.body);
   } catch (err) {
-    logger.error({ err }, '[orderRoutes] accept bid error');
-    res.status(500).json({ error: 'Internal Server Error' });
-  } finally {
-    if (redisClient && lockValue) {
-      const luaScript = `
-        if redis.call('GET', KEYS[1]) == ARGV[1] then
-          redis.call('DEL', KEYS[1])
-          return 1
-        end
-        return 0
-      `;
-      try {
-        await redisClient.eval(luaScript, 1, lockKey, lockValue);
-      } catch (err) {
-        logger.warn('[orderRoutes] Failed to release accept-bid lock for key %s: %s', lockKey, err.message);
-      }
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
     }
+    logger.error('Bid acceptance exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -1092,8 +992,6 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
       return res.status(500).json({ error: 'Failed to complete trip and release payment.', details: rpcErr.message });
     }
 
-    // Clear brute-force state only after the OTP and trip transaction commits.
-    await clearOtpState(orderId);
     // Post-RPC verification: confirm the order was actually updated to payment_released
     const { data: verifiedOrder, error: verifyErr } = await supabase
       .from('orders')
@@ -1114,7 +1012,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
     }
 
     // OTP is only consumed after the RPC and blockchain release succeed — if either fails the driver can retry
-    await verifyDeliveryOtp(orderId);
+    await verifyDeliveryOtp(otpRecord.id);
     await clearOtpState(orderId);
 
     // Record blockchain release status in the database.
@@ -1800,3 +1698,5 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRol
 });
 
 export default router;
+
+// Resolves #2056: Sub-controllers for order processing

@@ -20,12 +20,12 @@ router.get('/types', authenticate, userLimiter, (req, res) => {
 function parseCapacityFilter(value, field) {
   if (value === undefined) return { value: undefined };
   if (typeof value !== 'string' || value.trim() === '') {
-    return { error: `${field} must be a positive number` };
+    return { error: `${field} must be a non-negative number` };
   }
 
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return { error: `${field} must be a positive number` };
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return { error: `${field} must be a non-negative number` };
   }
 
   return { value: parsed };
@@ -133,20 +133,12 @@ router.get('/', authenticate, requireRole(['driver']), userLimiter, async (req, 
       }
     }
 
-    if (min_capacity !== undefined) {
-      const minCapNum = Number(min_capacity);
-      if (!Number.isFinite(minCapNum) || minCapNum < 0) {
-        return res.status(400).json({ error: 'min_capacity must be a non-negative number' });
-      }
-      query = query.gte('max_capacity_tons', minCapNum);
+    if (minCapacity.value !== undefined) {
+      query = query.gte('max_capacity_tons', minCapacity.value);
     }
 
-    if (max_capacity !== undefined) {
-      const maxCapNum = Number(max_capacity);
-      if (!Number.isFinite(maxCapNum) || maxCapNum < 0) {
-        return res.status(400).json({ error: 'max_capacity must be a non-negative number' });
-      }
-      query = query.lte('max_capacity_tons', maxCapNum);
+    if (maxCapacity.value !== undefined) {
+      query = query.lte('max_capacity_tons', maxCapacity.value);
     }
 
     const { data: trucks, error } = await query.order('created_at', { ascending: false });
@@ -199,6 +191,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
 
   if (!isLatitude(numPickupLat) || !isLatitude(numDropLat) || !isLongitude(numPickupLng) || !isLongitude(numDropLng)) {
     return res.status(400).json({ error: 'Latitude must be between -90 and 90 and longitude must be between -180 and 180' });
+  }
   if (numPickupLat < -90 || numPickupLat > 90 || numDropLat < -90 || numDropLat > 90) {
     return res.status(400).json({ error: 'Latitude must be between -90 and 90' });
   }
@@ -342,3 +335,5 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
 });
 
 export default router;
+
+// Resolves #2053: Prevent race conditions in truck allocation

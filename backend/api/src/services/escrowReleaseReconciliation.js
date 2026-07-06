@@ -6,13 +6,11 @@ const DEFAULT_INTERVAL_MS = 60_000;
 const LOCK_KEY = 'escrow:release:reconciliation:lock';
 const LOCK_TTL_SECONDS = 120;
 const MAX_RETRIES = 10;
-const LEASE_EXTENSION_INTERVAL_MS = (LOCK_TTL_SECONDS * 1000) / 2;
 let reconciliationTimer = null;
 let reconciliationRunning = false;
 
 export async function reconcilePendingEscrowReleases() {
   let lockAcquired = false;
-  let leaseExtender = null;
 
   if (redisClient) {
     try {
@@ -22,13 +20,6 @@ export async function reconcilePendingEscrowReleases() {
         return;
       }
       lockAcquired = true;
-      leaseExtender = setInterval(async () => {
-        try {
-          await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-        } catch (err) {
-          logger.warn('[escrow-release-reconciliation] Failed to extend lock lease:', err.message);
-        }
-      }, LEASE_EXTENSION_INTERVAL_MS);
     } catch (err) {
       logger.error('[escrow-release-reconciliation] Failed to acquire Redis lock:', err.message);
     }
@@ -59,6 +50,13 @@ export async function reconcilePendingEscrowReleases() {
     }
 
     for (const order of failedOrders ?? []) {
+      if (lockAcquired && redisClient) {
+        try {
+          await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
+        } catch (err) {
+          logger.warn('[escrow-release-reconciliation] Failed to refresh lock:', err.message);
+        }
+      }
       try {
         const { data: claimed, error: claimError } = await supabase
           .rpc('claim_release_reconciliation', {
@@ -149,9 +147,6 @@ export async function reconcilePendingEscrowReleases() {
       }
     }
   } finally {
-    if (leaseExtender) {
-      clearInterval(leaseExtender);
-    }
     if (lockAcquired && redisClient) {
       try {
         await redisClient.del(LOCK_KEY);

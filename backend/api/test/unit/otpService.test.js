@@ -5,33 +5,38 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+let mockRedis = null;
+
+vi.mock('../../src/config/db.js', () => ({
+  get redisClient() { return mockRedis; },
+}));
+
+import { generateAndStoreOtp, verifyOtp } from '../../src/services/otpService.js';
+
 describe('otpService', () => {
-  let mockRedisClient;
+  let activeRedisClient;
   let originalNodeEnv;
 
   beforeEach(() => {
-    mockRedisClient = {
+    activeRedisClient = {
       set: vi.fn().mockResolvedValue('OK'),
       get: vi.fn(),
       del: vi.fn().mockResolvedValue(1),
     };
-    vi.doMock('../../src/config/db.js', () => ({
-      redisClient: mockRedisClient,
-    }));
+    mockRedis = activeRedisClient;
     originalNodeEnv = process.env.NODE_ENV;
   });
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
-    vi.resetModules();
+    mockRedis = null;
   });
 
   it('generateAndStoreOtp generates a 4-digit OTP and stores it in Redis', async () => {
-    const { generateAndStoreOtp } = await import('../../src/services/otpService.js');
     const otp = await generateAndStoreOtp('+919876543210');
 
     expect(otp).toMatch(/^\d{6}$/);
-    expect(mockRedisClient.set).toHaveBeenCalledWith(
+    expect(mockRedis.set).toHaveBeenCalledWith(
       'otp:+919876543210',
       otp,
       'EX',
@@ -51,38 +56,34 @@ describe('otpService', () => {
   });
 
   it('verifyOtp returns true when the correct OTP is provided', async () => {
-    mockRedisClient.get.mockResolvedValue('1234');
-    const { verifyOtp } = await import('../../src/services/otpService.js');
+    activeRedisClient.get.mockResolvedValue('1234');
     const result = await verifyOtp('+919876543210', '1234');
 
     expect(result).toBe(true);
-    expect(mockRedisClient.del).toHaveBeenCalledWith('otp:+919876543210');
+    expect(activeRedisClient.del).toHaveBeenCalledWith('otp:+919876543210');
   });
 
   it('verifyOtp returns false when the wrong OTP is provided', async () => {
-    mockRedisClient.get.mockResolvedValue('1234');
-    const { verifyOtp } = await import('../../src/services/otpService.js');
+    activeRedisClient.get.mockResolvedValue('1234');
     const result = await verifyOtp('+919876543210', '5678');
 
     expect(result).toBe(false);
-    expect(mockRedisClient.del).not.toHaveBeenCalled();
+    expect(activeRedisClient.del).not.toHaveBeenCalled();
   });
 
   it('verifyOtp returns false when no OTP is stored', async () => {
-    mockRedisClient.get.mockResolvedValue(null);
-    const { verifyOtp } = await import('../../src/services/otpService.js');
+    activeRedisClient.get.mockResolvedValue(null);
     const result = await verifyOtp('+919876543210', '1234');
 
     expect(result).toBe(false);
-    expect(mockRedisClient.del).not.toHaveBeenCalled();
+    expect(activeRedisClient.del).not.toHaveBeenCalled();
   });
 
   it('verifyOtp deletes the OTP after successful verification', async () => {
-    mockRedisClient.get.mockResolvedValue('4321');
-    const { verifyOtp } = await import('../../src/services/otpService.js');
+    activeRedisClient.get.mockResolvedValue('4321');
     await verifyOtp('+919876543210', '4321');
 
-    expect(mockRedisClient.del).toHaveBeenCalledWith('otp:+919876543210');
+    expect(activeRedisClient.del).toHaveBeenCalledWith('otp:+919876543210');
   });
 
   it('verifyOtp returns false when Redis is unavailable in production', async () => {

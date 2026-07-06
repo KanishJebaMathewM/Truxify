@@ -42,14 +42,5 @@ export async function getDriverDetails(userId) {
     .maybeSingle();
 
   if (error) throw error;
-  
-  if (!data) {
-    return {
-      is_online: false,
-      current_location: null,
-      verification_status: 'pending'
-    };
-  }
-  
   return data;
 }

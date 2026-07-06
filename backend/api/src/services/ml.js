@@ -77,7 +77,6 @@ function getBaseUrl() {
  * @returns {Promise<object>}
  */
 export async function predictDemand(features = {}) {
-  guardMlApiKey();
     const url = `${getBaseUrl()}/predict/demand`;
 
     const response = await mlBreaker.fire(url, {

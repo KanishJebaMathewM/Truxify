@@ -2127,6 +2127,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     routeEstimateMock.mockResolvedValue({ distanceKm: 100 });
     submitEscrowRefundMock.mockReset();
     confirmEscrowRefundMock.mockReset();
+    mockRedis = null;
   });
 
   it('allows customer to change drop and returns recalculated pricing', async () => {

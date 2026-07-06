@@ -1,3 +1,4 @@
+import '../core/api_client.dart';
 import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';

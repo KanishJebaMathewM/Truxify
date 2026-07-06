@@ -8,6 +8,7 @@ export async function registerDeviceToken(req, res) {
   try {
     const userId = req.user?.id;
     const { fcmToken, platform, metadata } = req.body;
+    const trimmedToken = fcmToken?.trim();
 
     if (!userId) {
       return res.status(401).json({
@@ -15,7 +16,7 @@ export async function registerDeviceToken(req, res) {
       });
     }
 
-    if (!fcmToken) {
+    if (!trimmedToken) {
       return res.status(400).json({
         error: 'fcmToken is required'
       });
@@ -25,7 +26,7 @@ export async function registerDeviceToken(req, res) {
     const { data: existingDevice, error: lookupError } = await supabase
       .from('user_devices')
       .select('user_id')
-      .eq('fcm_token', fcmToken)
+      .eq('fcm_token', trimmedToken)
       .maybeSingle();
 
     if (lookupError) {
@@ -112,6 +113,7 @@ export async function unregisterDeviceToken(req, res) {
   try {
     const userId = req.user?.id;
     const { fcmToken } = req.body;
+    const trimmedToken = fcmToken?.trim();
 
     if (!userId) {
       return res.status(401).json({
@@ -119,7 +121,7 @@ export async function unregisterDeviceToken(req, res) {
       });
     }
 
-    if (!fcmToken) {
+    if (!trimmedToken) {
       return res.status(400).json({
         error: 'fcmToken is required'
       });
@@ -129,7 +131,7 @@ export async function unregisterDeviceToken(req, res) {
       .from('user_devices')
       .delete()
       .eq('user_id', userId)
-      .eq('fcm_token', fcmToken);
+      .eq('fcm_token', trimmedToken);
 
     if (deleteError) {
       logger.error('[DeviceController] Failed to remove device token from database:', deleteError.message);

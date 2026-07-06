@@ -35,8 +35,8 @@ describe('otpService', () => {
   it('generateAndStoreOtp generates a 4-digit OTP and stores it in Redis', async () => {
     const otp = await generateAndStoreOtp('+919876543210');
 
-    expect(otp).toMatch(/^\d{4}$/);
-    expect(activeRedisClient.set).toHaveBeenCalledWith(
+    expect(otp).toMatch(/^\d{6}$/);
+    expect(mockRedisClient.set).toHaveBeenCalledWith(
       'otp:+919876543210',
       otp,
       'EX',

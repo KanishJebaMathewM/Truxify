@@ -2,7 +2,7 @@ import express from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
-import { bidLimiter, userLimiter, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
+import { bidLimiter, userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { supabase, redisClient, mongoDb } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
@@ -138,6 +138,8 @@ const verifyDeliveryLimiter = rateLimit({
   max: process.env.NODE_ENV === 'test' ? 1000 : 20,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || 'unknown',
+  store: createStore('rl:verify-delivery:'),
   message: { error: 'Too many delivery verification attempts. Please try again later.' },
 });
 
@@ -146,6 +148,7 @@ const milestoneLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
   keyGenerator: (req) => req.user.id,
+  store: createStore('rl:milestone:'),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many milestone updates. Please slow down.' },
@@ -156,6 +159,7 @@ const predictDemandLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 10,
   keyGenerator: (req) => req.user?.id || 'unauthenticated',
+  store: createStore('rl:predict-demand:'),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many demand prediction requests. Please try again later.' },
@@ -171,6 +175,7 @@ const telemetryLimiter = rateLimit({
     }
     return req.user.id;
   },
+  store: createStore('rl:telemetry:'),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many telemetry requests. Please try again later.' },
@@ -183,6 +188,8 @@ const resendOtpLimiter = rateLimit({
   keyGenerator: (req) => req.user?.id || 'unauthenticated',
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || 'unknown',
+  store: createStore('rl:resend-otp:'),
   message: { error: 'Too many OTP resend requests. Please try again later.' },
 });
 
@@ -193,15 +200,9 @@ const changeDropLimiter = rateLimit({
   keyGenerator: (req) => req.user?.id || 'unauthenticated',
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many drop location changes. Please try again later.' },
-});
-
-const bidAcceptanceService = new BidAcceptanceService({
-  supabase,
-  buildDepositTxFn: buildDepositTx,
-  recordDepositTxFn: recordDepositTx,
-  escrowRefundFn: escrowRefund,
-  logger,
+  keyGenerator: (req) => req.user?.id || 'unknown',
+  store: createStore('rl:change-drop:'),
+  message: { error: 'Too many drop change requests. Please try again later.' },
 });
 
 /**
@@ -496,16 +497,13 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
   try {
     let order = null;
     let orderErr = null;
-    if (uuidRegex.test(orderId)) {
-      const result = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
-      order = result.data;
-      orderErr = result.error;
-    }
-    if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
-    if (!order) {
-      const result = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
-      order = result.data;
-      orderErr = result.error;
+    const resultById = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    order = resultById.data;
+    orderErr = resultById.error;
+    if (!order && !orderErr) {
+      const resultByDisplayId = await supabase.from('orders').select('*').eq('order_display_id', orderId).maybeSingle();
+      order = resultByDisplayId.data;
+      orderErr = resultByDisplayId.error;
     }
     if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
     if (!order) return res.status(404).json({ error: 'Order not found.' });
@@ -1013,7 +1011,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
     }
 
     // OTP is only consumed after the RPC and blockchain release succeed — if either fails the driver can retry
-    await verifyDeliveryOtp(orderId);
+    await verifyDeliveryOtp(otpRecord.id);
     await clearOtpState(orderId);
 
     // Record blockchain release status in the database.

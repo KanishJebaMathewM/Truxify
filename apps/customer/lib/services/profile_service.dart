@@ -28,9 +28,7 @@ class ProfileService {
 
   static const String _profileCacheKey = 'truxify_profile_cache';
 
-  Future<Map<String, dynamic>?> _readCachedProfile(
-    SharedPreferences prefs,
-  ) async {
+  Future<Map<String, dynamic>?> _readCachedProfile() async {
     final cached = await _secureStorage.read(key: _profileCacheKey);
     if (cached == null) return null;
     try {

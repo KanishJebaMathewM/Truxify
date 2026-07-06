@@ -76,32 +76,36 @@ export async function waitForMongoDb() {
 }
 
 if (mongoUri) {
-  try {
-    mongoClient = new MongoClient(mongoUri);
-    mongoClient.connect()
-      .then(() => {
-        mongoDb = mongoClient.db(mongoDbName);
-        logger.info({ db: mongoDbName }, 'Connected to MongoDB');
-        
-        // Create indexes on telemetry collection
-        mongoDb.collection('telemetry').createIndex(
+  (async () => {
+    try {
+      mongoClient = new MongoClient(mongoUri);
+      await mongoClient.connect();
+      mongoDb = mongoClient.db(mongoDbName);
+      logger.info({ db: mongoDbName }, 'Connected to MongoDB');
+      
+      // Create indexes on telemetry collection
+      try {
+        await mongoDb.collection('telemetry').createIndex(
           { timestamp: 1 },
           { expireAfterSeconds: 604800 }
-        ).catch(err => logger.error({ err }, 'Failed to create TTL index on telemetry'));
-        
-        mongoDb.collection('telemetry').createIndex(
+        );
+      } catch (err) {
+        logger.error({ err }, 'Failed to create TTL index on telemetry');
+      }
+      
+      try {
+        await mongoDb.collection('telemetry').createIndex(
           { location: '2dsphere' }
-        ).catch(err => logger.error({ err }, 'Failed to create 2dsphere index on telemetry'));
-        if (_mongoDbResolve) _mongoDbResolve();
-      })
-      .catch(err => {
-        logger.error({ err }, 'Failed to connect to MongoDB server');
-        if (_mongoDbResolve) _mongoDbResolve();
-      });
-  } catch (error) {
-    logger.error({ err: error }, 'MongoDB client initialization error');
-    if (_mongoDbResolve) _mongoDbResolve();
-  }
+        );
+      } catch (err) {
+        logger.error({ err }, 'Failed to create 2dsphere index on telemetry');
+      }
+      if (_mongoDbResolve) _mongoDbResolve();
+    } catch (error) {
+      logger.error({ err: error }, 'MongoDB client initialization error');
+      if (_mongoDbResolve) _mongoDbResolve();
+    }
+  })();
 } else {
   if (_mongoDbResolve) _mongoDbResolve();
   logger.warn('MONGODB_URI not found in .env. MongoDB telemetry database disabled.');

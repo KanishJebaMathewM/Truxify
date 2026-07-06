@@ -72,18 +72,17 @@ class TelemetryRingBuffer {
     return result;
   }
 
-  prepend(items) {
+    prepend(items) {
     if (!items || items.length === 0) return 0;
     let dropped = 0;
     for (let i = items.length - 1; i >= 0; i--) {
+      if (this.size >= this.capacity) {
+        dropped++;
+        continue;
+      }
       this.head = (this.head - 1 + this.capacity) % this.capacity;
       this.buffer[this.head] = items[i];
-      if (this.size < this.capacity) {
-        this.size++;
-      } else {
-        dropped++;
-        this.tail = this.head;
-      }
+      this.size++;
     }
     return dropped;
   }
@@ -733,7 +732,6 @@ async function flushTelemetryBuffer() {
           logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
         }
       }
-      }
     } finally {
       currentFlushPromise = null;
       flushMutex = false;
@@ -769,7 +767,7 @@ function scheduleNextFlush() {
   telemetryFlushTimeout = setTimeout(async () => {
     try {
       await flushTelemetryBuffer();
-    } finally {
+    } catch(e) {} finally {
       scheduleNextFlush();
     }
   }, Math.max(BUFFER_FLUSH_INTERVAL_MS, flushBackoffMs));

@@ -29,7 +29,7 @@ describe('ml service — predictDemand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.ML_ENGINE_URL;
-    delete process.env.ML_API_KEY;
+    process.env.ML_API_KEY = 'test_key';
     if (mlBreaker) {
       mlBreaker.disable();
     }
@@ -116,7 +116,7 @@ describe('ml service — predictDemand', () => {
     const [, opts] = mockFetch.mock.calls[0];
     expect(opts.headers['X-API-Key']).toBe('secret-key-123');
     expect(opts.headers['Content-Type']).toBe('application/json');
-    delete process.env.ML_API_KEY;
+    process.env.ML_API_KEY = 'test_key';
   });
 
   it('rejects when fetch throws (network error)', async () => {
@@ -133,7 +133,7 @@ describe('ml service — predictPrice', () => {
     vi.clearAllMocks();
     delete process.env.ML_SERVICE_URL;
     delete process.env.ML_ENGINE_URL;
-    delete process.env.ML_API_KEY;
+    process.env.ML_API_KEY = 'test_key';
     if (mlBreaker) {
       mlBreaker.disable();
     }

@@ -16,7 +16,7 @@ const router = express.Router();
 
 const loginOtpSchema = z.object({
   phone: z.string().trim().min(10).max(20),
-  otp: z.string().regex(/^\d{4}$/, { message: 'OTP must be 4 digits' }),
+  otp: z.string().regex(/^\d{6}$/, { message: 'OTP must be 6 digits' }),
 });
 
 export function otpPhoneKey(phone) {

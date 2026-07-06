@@ -35,6 +35,7 @@ import {
 import { sendDeliveryOtpNotification, storeDeliveryOtp, getActiveDeliveryOtp, verifyDeliveryOtp, expireDeliveryOtps } from '../services/notificationService.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
+import { DELIVERY_OTP_LENGTH } from '../config/otp.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
@@ -945,7 +946,7 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
     if (milestone === 'In Transit') {
       const activeOtp = await getActiveDeliveryOtp(orderId);
       if (!activeOtp) {
-        generatedOtp = crypto.randomInt(100000, 1000000).toString();
+        generatedOtp = crypto.randomInt(10 ** (DELIVERY_OTP_LENGTH - 1), 10 ** DELIVERY_OTP_LENGTH).toString();
         const stored = await storeDeliveryOtp(orderId, generatedOtp, OTP_TTL_MINUTES);
         if (stored) {
           await clearOtpState(orderId);
@@ -1176,7 +1177,7 @@ router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requ
       return res.status(409).json({ error: 'Delivery OTP can only be sent after the shipment reaches the delivery location.' });
     }
 
-    const otp = crypto.randomInt(100000, 1000000).toString();
+    const otp = crypto.randomInt(10 ** (DELIVERY_OTP_LENGTH - 1), 10 ** DELIVERY_OTP_LENGTH).toString();
     const stored = await storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
     if (!stored) {
       return res.status(500).json({ error: 'Failed to generate delivery OTP.' });

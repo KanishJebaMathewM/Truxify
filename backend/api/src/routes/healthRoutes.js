@@ -97,6 +97,7 @@ router.get('/', healthLimiter, async (req, res) => {
     status,
     services,
     uptime: process.uptime(),
+    // Include process memory usage in health check response
     memory: process.memoryUsage(),
   });
 });

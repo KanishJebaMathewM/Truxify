@@ -113,20 +113,18 @@ void main() {
     );
   });
 
-    test('fetchProfile clears corrupted cached data on ApiException', () async {
+      test('fetchProfile clears corrupted cached data on ApiException', () async {
     mockStorage['truxify_profile_cache'] = 'not-json';
 
     when(() => apiClient.get('/api/profile'))
         .thenThrow(const ApiException(503, 'Service Unavailable'));
 
-    expect(
-      () => profileService.fetchProfile(),
-      throwsA(isA<StateError>().having(
-        (e) => e.message,
-        'message',
-        'Service Unavailable',
-      )),
-    );
+    try {
+      await profileService.fetchProfile();
+      fail('Expected StateError to be thrown');
+    } catch (e) {
+      expect(e, isA<StateError>().having((e) => e.message, 'message', 'Service Unavailable'));
+    }
 
     expect(mockStorage['truxify_profile_cache'], isNull);
   });

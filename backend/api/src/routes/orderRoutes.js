@@ -46,6 +46,13 @@ import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  buildDepositTxFn: buildDepositTx,
+  recordDepositTxFn: recordDepositTx,
+  logger
+});
+
 const router = express.Router();
 
 // ── OTP brute-force protection (Redis + In-Memory Fallback) ────────────────────
@@ -685,7 +692,7 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
         supabase.from('reputation_failures').insert({
           driver_wallet: polygonAddress,
           stars,
-          rating_id: ratingData?.id ?? null,
+          rating_id: null,
           failed_at: new Date().toISOString(),
           retry_count: 0,
           last_error: repErr.message,
@@ -1410,7 +1417,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
 
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
   } catch (err) {
-    logger.error('Cancel order exception:', err.message);
+    logger.error({ err }, 'Cancel order exception');
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });

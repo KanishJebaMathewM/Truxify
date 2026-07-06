@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import hre from "hardhat";
-const { ethers } = hre;
+import { describe, it, before } from "node:test";
+import { network } from "hardhat";
+
+let ethers;
 
 async function assertRejectsWith(promise, message) {
   await assert.rejects(promise, error => error.message.includes(message));
@@ -11,6 +13,9 @@ function bookingId(label) {
 }
 
 describe("Escrow", function () {
+  before(async () => {
+    ({ ethers } = await network.create());
+  });
   async function deployEscrow() {
     const [owner, relayer, customer, driver, outsider] = await ethers.getSigners();
     const Escrow = await ethers.getContractFactory("Escrow");
@@ -40,12 +45,12 @@ describe("Escrow", function () {
     const amount = ethers.parseEther("0.25");
     await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount });
 
-    const driverBefore = await ethers.provider.getBalance(driver.address);
+    const pendingBefore = await escrow.pendingWithdrawals(driver.address);
     await escrow.connect(relayer).releaseFunds(id);
-    const driverAfter = await ethers.provider.getBalance(driver.address);
+    const pendingAfter = await escrow.pendingWithdrawals(driver.address);
     const saved = await escrow.escrows(id);
 
-    assert.equal(driverAfter - driverBefore, amount);
+    assert.equal(pendingAfter - pendingBefore, amount);
     assert.equal(saved.status, 2n);
     assert.equal(saved.amount, 0n);
   });
@@ -56,12 +61,15 @@ describe("Escrow", function () {
     const amount = ethers.parseEther("0.25");
     await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount });
 
+    const pendingBefore = await escrow.pendingWithdrawals(customer.address);
     await escrow.connect(relayer).refundFunds(id);
+    const pendingAfter = await escrow.pendingWithdrawals(customer.address);
     const saved = await escrow.escrows(id);
 
+    assert.equal(pendingAfter - pendingBefore, amount);
     assert.equal(saved.status, 3n);
     assert.equal(saved.amount, 0n);
-    assert.equal(await ethers.provider.getBalance(await escrow.getAddress()), 0n);
+    assert.equal(await ethers.provider.getBalance(await escrow.getAddress()), amount);
   });
 
   it("blocks double release and double refund attempts", async function () {
@@ -126,6 +134,6 @@ describe("Escrow", function () {
     await escrow.connect(owner).setRelayer(await attacker.getAddress(), true);
     await escrow.connect(customer).deposit(id, customer.address, await attacker.getAddress(), { value: 1000n });
 
-    await assertRejectsWith(attacker.attackRelease(id), "Driver payout failed");
+    await assertRejectsWith(attacker.attackRelease(id), "Withdrawal failed");
   });
 });

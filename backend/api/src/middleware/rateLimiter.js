@@ -1,5 +1,4 @@
 import rateLimit, { MemoryStore } from 'express-rate-limit';
-import { RedisStore } from 'rate-limit-redis';
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
 

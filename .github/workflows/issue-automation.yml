@@ -1,0 +1,38 @@
+name: Issue Automation
+
+on:
+  issues:
+    types: [opened, assigned]
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  run-rules:
+    name: Run Issue Rules
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run automation script
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { handleIssueOpened, handleIssueAssigned, handleIssueCommentCreated } = require('./.github/scripts/issue-rules.js');
+            
+            if (context.eventName === 'issues') {
+              if (context.payload.action === 'opened') {
+                await handleIssueOpened({ github, context });
+              } else if (context.payload.action === 'assigned') {
+                await handleIssueAssigned({ github, context });
+              }
+            } else if (context.eventName === 'issue_comment') {
+              if (context.payload.action === 'created') {
+                await handleIssueCommentCreated({ github, context });
+              }
+            }

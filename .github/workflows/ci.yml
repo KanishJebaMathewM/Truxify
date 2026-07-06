@@ -25,7 +25,7 @@ jobs:
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: backend/api/package-lock.json
 
@@ -107,7 +107,7 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -130,7 +130,7 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Check for Redis/Upstash credentials in Flutter source
         run: bash scripts/check-no-client-credentials.sh

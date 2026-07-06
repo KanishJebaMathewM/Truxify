@@ -31,6 +31,8 @@ class MarketplaceRepository {
   final http.Client _httpClient;
   final String _apiBaseUrl;
 
+  String _encodePathSegment(String value) => Uri.encodeComponent(value);
+
   Future<Map<String, String>> _authHeaders() async {
     final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
     final userId = _client.auth.currentUser?.id ?? '';
@@ -70,7 +72,9 @@ class MarketplaceRepository {
     required String loadId,
     required num amount,
   }) async {
-    final uri = Uri.parse('$_apiBaseUrl/api/orders/$loadId/bids');
+    final uri = Uri.parse(
+      '$_apiBaseUrl/api/orders/${_encodePathSegment(loadId)}/bids',
+    );
     final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
     final response = await _httpClient.post(
       uri,

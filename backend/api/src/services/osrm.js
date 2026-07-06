@@ -63,7 +63,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
       if (!response.ok) {
         clearTimeout(timeout);
         if (response.status >= 500 && attempt < maxRetries - 1) {
-          logger.warn('[osrm] Server error %d (attempt %d/%d). Retrying...', response.status, attempt + 1, maxRetries);
+          logger.warn({ status: response.status, attempt: attempt + 1, maxRetries }, 'Server error. Retrying...');
           await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
           continue;
         }
@@ -97,10 +97,10 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
       clearTimeout(timeout);
       if (attempt < maxRetries - 1) {
         const delayMs = baseDelayMs * Math.pow(2, attempt);
-        logger.warn('[osrm] Fetch error (attempt %d/%d): %s. Retrying in %d ms...', attempt + 1, maxRetries, err.message, delayMs);
+        logger.warn({ attempt: attempt + 1, maxRetries, errMessage: err.message, delayMs }, 'Fetch error. Retrying...');
         await new Promise(r => setTimeout(r, delayMs));
       } else {
-        logger.error('[osrm] Fetch error after all %d retries: %s', maxRetries, err.message);
+        logger.error({ maxRetries, errMessage: err.message }, 'Fetch error after all retries:');
         return null;
       }
     }

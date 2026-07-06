@@ -7,7 +7,7 @@ import logger from '../middleware/logger.js';
 export async function registerDeviceToken(req, res) {
   try {
     const userId = req.user?.id;
-    const { fcmToken, platform } = req.body;
+    const { fcmToken, platform, metadata } = req.body;
 
     if (!userId) {
       return res.status(401).json({
@@ -41,7 +41,8 @@ export async function registerDeviceToken(req, res) {
       {
         user_id: userId,
         fcm_token: fcmToken,
-        platform: platform || 'android'
+        platform: platform || 'android',
+        metadata: metadata || {}
       },
       { onConflict: 'fcm_token' }
     );
@@ -84,6 +85,9 @@ export async function registerDeviceToken(req, res) {
         '[DeviceController] Device token saved but failed to sync profiles.fcm_token:',
         profileSyncError.message
       );
+      return res.status(500).json({
+        error: 'Failed to sync device token to profile'
+      });
     }
 
     return res.json({
@@ -92,6 +96,70 @@ export async function registerDeviceToken(req, res) {
     });
   } catch (err) {
     logger.error('[DeviceController] Unexpected error in registerDeviceToken:', err.message);
+    return res.status(500).json({
+      error: 'An unexpected error occurred'
+    });
+  }
+}
+
+/**
+ * Unregister an FCM token for a user device, e.g. on logout.
+ * Removes the token from user_devices so the signed-out device stops
+ * receiving push notifications, and clears profiles.fcm_token when it
+ * still points at the same token.
+ */
+export async function unregisterDeviceToken(req, res) {
+  try {
+    const userId = req.user?.id;
+    const { fcmToken } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({
+        error: 'User not authenticated'
+      });
+    }
+
+    if (!fcmToken) {
+      return res.status(400).json({
+        error: 'fcmToken is required'
+      });
+    }
+
+    const { error: deleteError } = await supabase
+      .from('user_devices')
+      .delete()
+      .eq('user_id', userId)
+      .eq('fcm_token', fcmToken);
+
+    if (deleteError) {
+      logger.error('[DeviceController] Failed to remove device token from database:', deleteError.message);
+      return res.status(500).json({
+        error: 'Failed to unregister device'
+      });
+    }
+
+    const { error: profileClearError } = await supabase
+      .from('profiles')
+      .update({
+        fcm_token: null,
+        fcm_token_updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId)
+      .eq('fcm_token', fcmToken);
+
+    if (profileClearError) {
+      logger.error(
+        '[DeviceController] Device token removed but failed to clear profiles.fcm_token:',
+        profileClearError.message
+      );
+    }
+
+    return res.json({
+      success: true,
+      message: 'Device token unregistered'
+    });
+  } catch (err) {
+    logger.error('[DeviceController] Unexpected error in unregisterDeviceToken:', err.message);
     return res.status(500).json({
       error: 'An unexpected error occurred'
     });

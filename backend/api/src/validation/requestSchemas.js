@@ -155,6 +155,13 @@ export const registerDeviceSchema = z.object({
   platform: z.enum(['android', 'ios', 'web'], {
     invalid_type_error: 'platform must be one of: android, ios, web',
   }).default('android'),
+  metadata: z.record(z.any()).optional(),
+}).strict();
+
+export const unregisterDeviceSchema = z.object({
+  fcmToken: z.string()
+    .min(10, { message: 'fcmToken must be at least 10 characters' })
+    .max(4096, { message: 'fcmToken is too long' }),
 }).strict();
 
 export const updateFcmTokenSchema = z.object({
@@ -227,4 +234,5 @@ export const updateProfileSchema = z.object({
   language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').optional(),
   dark_mode: z.boolean().optional(),
   is_online: z.boolean().optional(),
+  verification_status: z.enum(['pending', 'verified', 'rejected']).optional(),
 }).strict();

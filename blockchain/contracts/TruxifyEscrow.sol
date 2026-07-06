@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title TruxifyEscrow
@@ -14,15 +15,13 @@ import "@openzeppelin/contracts/access/Ownable.sol";
  *  - ReentrancyGuard on all ETH-transferring functions
  *  - Checks-Effects-Interactions (CEI) pattern enforced
  *  - State updated BEFORE external .call{} to prevent re-entrancy
- *  - Pull-based withdrawal pattern: funds credited to pendingWithdrawals
- *    mapping; recipients call withdraw() themselves — eliminates push-to-
- *    unknown-receiver risk and permanent fund-locking when receiver
- *    cannot accept ETH (e.g. contract with no receive/fallback).
+ *  - Pausable for emergency situations
+ *  - Pull-based withdrawal with timeout for fund recovery
  *  - Emergency recovery: owner can recover locked funds for a booking
  *    that is stuck in Disputed state after a configurable grace period,
  *    preventing permanent loss of user funds.
  */
-contract TruxifyEscrow is ReentrancyGuard, Ownable {
+contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     // ─── Enums ───────────────────────────────────────────────────────────────
 
@@ -48,11 +47,9 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
 
     mapping(uint256 => Booking) public bookings;
     uint256 public bookingCount;
-
-    /// @dev Pull-based withdrawal balances. Replaces push-to-address pattern.
-    ///      Accumulated when releasePayment() or cancelBooking() is called.
-    ///      Recipients call withdraw() to pull their own funds out.
     mapping(address => uint256) public pendingWithdrawals;
+    mapping(address => uint256) public releaseTimestamps;
+    uint256 public constant WITHDRAWAL_TIMEOUT = 30 days;
 
     /// @notice Grace period in seconds after which the owner can trigger
     ///         emergency recovery on a Disputed booking (default: 30 days).
@@ -90,6 +87,12 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
         address indexed raisedBy
     );
 
+    event WithdrawalReady(
+        uint256 indexed bookingId,
+        address indexed recipient,
+        uint256 amount
+    );
+
     event Withdrawal(
         address indexed recipient,
         uint256 amount
@@ -100,6 +103,10 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
         address indexed recipient,
         uint256 amount
     );
+
+    event Withdrawn(address indexed recipient, uint256 amount);
+
+    event EmergencyRecovered(address indexed recipient, uint256 amount);
 
     event EmergencyGracePeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
 
@@ -167,6 +174,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
         external
         onlyOwner
         nonReentrant
+        whenNotPaused
     {
         Booking storage booking = bookings[bookingId];
 
@@ -182,10 +190,12 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
         booking.amount  = 0;
         booking.status  = BookingStatus.Delivered;
 
-        // Credit to pull-based mapping — no external call here
+        // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[driver] += paymentAmount;
+        releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         emit PaymentCredited(bookingId, driver, paymentAmount);
+        emit WithdrawalReady(bookingId, driver, paymentAmount);
     }
 
     /**
@@ -197,6 +207,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
     function cancelBooking(uint256 bookingId)
         external
         nonReentrant
+        whenNotPaused
     {
         Booking storage booking = bookings[bookingId];
 
@@ -216,8 +227,10 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
 
         // Credit to pull-based mapping — no external call here
         pendingWithdrawals[customer] += refundAmount;
+        releaseTimestamps[customer] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         emit RefundCredited(bookingId, customer, refundAmount);
+        emit WithdrawalReady(bookingId, customer, refundAmount);
         emit BookingCancelled(bookingId, customer, refundAmount);
     }
 
@@ -227,12 +240,13 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
      *
      * Security: nonReentrant + CEI — balance zeroed before .call{}.
      */
-    function withdraw() external nonReentrant {
+    function withdraw() external nonReentrant whenNotPaused {
         uint256 amount = pendingWithdrawals[msg.sender];
         if (amount == 0) revert NothingToWithdraw();
 
         // ── EFFECTS ───────────────────────────────────────────────────────
         pendingWithdrawals[msg.sender] = 0;
+        releaseTimestamps[msg.sender] = 0;
 
         // ── INTERACTIONS ──────────────────────────────────────────────────
         (bool success, ) = payable(msg.sender).call{value: amount}("");
@@ -243,6 +257,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
         }
 
         emit Withdrawal(msg.sender, amount);
+        emit Withdrawn(msg.sender, amount);
     }
 
     /**
@@ -316,4 +331,43 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable {
     {
         return bookings[bookingId];
     }
+
+    /**
+    }
+
+    /**
+     * @dev Emergency recovery function for owner to recover funds after timeout.
+     *      Can only be called after the withdrawal timeout period has passed.
+     * @param recipient The address to receive the recovered funds
+     * @param amount The amount to recover
+     */
+    function emergencyRecover(address recipient, uint256 amount) external onlyOwner nonReentrant {
+        require(recipient != address(0), "Invalid recipient");
+        require(block.timestamp > releaseTimestamps[recipient], "Withdrawal period active");
+        require(pendingWithdrawals[recipient] >= amount, "Insufficient pending");
+
+        pendingWithdrawals[recipient] -= amount;
+        releaseTimestamps[recipient] = 0;
+
+        (bool success, ) = recipient.call{value: amount}("");
+        require(success, "Emergency transfer failed");
+
+        emit EmergencyRecovered(recipient, amount);
+    }
+
+    /**
+     * @dev Pause the contract to prevent all operations in emergency situations.
+     */
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /**
+     * @dev Unpause the contract after emergency situation is resolved.
+     */
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    receive() external payable {}
 }

@@ -197,13 +197,13 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       });
 
     if (error) {
-      logger.error('[NotificationService] Database insert failed:', error);
+      logger.error({ err: error }, '[NotificationService] Database insert failed');
     } else {
       logger.info('[NotificationService] Notification inserted successfully');
       dbSuccess = true;
     }
   } catch (dbErr) {
-    logger.error('[NotificationService] Database connection error during notification insert:', dbErr.message);
+    logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');
   }
 
   let fcmResult;

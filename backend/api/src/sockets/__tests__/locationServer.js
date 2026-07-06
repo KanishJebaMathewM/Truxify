@@ -1,6 +1,6 @@
 import { createServer } from "http";
 import { io as Client } from "socket.io-client";
-import { attachLocationServer } from "../locationServer.js";
+import { initLocationServer } from "../locationServer.js";
 import express from "express";
 
 // Set bypass auth for tests
@@ -14,7 +14,7 @@ describe("WebSocket Location Server", () => {
   beforeAll((done) => {
     const app = express();
     httpServer = createServer(app);
-    attachLocationServer(httpServer);
+    initLocationServer(httpServer);
     httpServer.listen(0, () => {
       serverAddress = `http://localhost:${httpServer.address().port}`;
       done();

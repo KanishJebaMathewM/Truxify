@@ -338,6 +338,21 @@ describe('Load Offers Routes Integration Tests', () => {
       expect(call.order).toEqual({ col: 'extra_distance_km', ascending: false });
     });
 
+    it('rejects unsupported order values', async () => {
+      const res = await request(buildApp())
+        .get('/api/loads?order=ascending')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation failed');
+      expect(res.body.details).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ field: 'order' }),
+        ])
+      );
+      expect(m.calls.find(call => call.table === 'load_offers')).toBeUndefined();
+    });
+
     it('returns 500 without leaking database details on db error', async () => {
       m.programError('Internal DB deadlock');
 
@@ -354,7 +369,7 @@ describe('Load Offers Routes Integration Tests', () => {
   describe('GET /api/loads/:id (Get Single Load)', () => {
     it('successfully gets a single available load', async () => {
       m.store.load_offers.push({
-        id: 'load-123',
+        id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
         pickup_address: 'Pune',
         drop_address: 'Mumbai',
         freight_value: 500000,
@@ -362,11 +377,11 @@ describe('Load Offers Routes Integration Tests', () => {
       });
 
       const res = await request(buildApp())
-        .get('/api/loads/load-123')
+        .get('/api/loads/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11')
         .set(DRIVER_HEADERS);
 
       expect(res.status).toBe(200);
-      expect(res.body.load.id).toBe('load-123');
+      expect(res.body.load.id).toBe('a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11');
       expect(res.body.load.pickup).toBe('Pune');
       expect(res.body.load.destination).toBe('Mumbai');
       expect(res.body.load.estimated_price).toBe(5000);
@@ -374,12 +389,12 @@ describe('Load Offers Routes Integration Tests', () => {
 
     it('returns 404 if load not found or status is not available', async () => {
       m.store.load_offers.push({
-        id: 'load-claimed',
+        id: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12',
         status: 'claimed',
       });
 
       const res = await request(buildApp())
-        .get('/api/loads/load-claimed')
+        .get('/api/loads/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a12')
         .set(DRIVER_HEADERS);
 
       expect(res.status).toBe(404);
@@ -390,7 +405,7 @@ describe('Load Offers Routes Integration Tests', () => {
       m.programError('Fatal PostgreSQL failure');
 
       const res = await request(buildApp())
-        .get('/api/loads/some-id')
+        .get('/api/loads/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a13')
         .set(DRIVER_HEADERS);
 
       expect(res.status).toBe(500);

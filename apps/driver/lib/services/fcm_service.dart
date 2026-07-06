@@ -42,6 +42,49 @@ class FcmService {
     }
   }
 
+  /// Unregisters the current device's FCM token from the backend.
+  /// Must be called before signing out so a logged-out device stops
+  /// receiving push notifications intended for the next user of a
+  /// shared device.
+  static Future<void> unregisterToken() async {
+    try {
+      final messaging = FirebaseMessaging.instance;
+      final token = await messaging.getToken();
+      if (token == null) {
+        return;
+      }
+      await _unregisterTokenFromBackend(token);
+    } catch (e) {
+      debugPrint('[FCM] Unregistering token failed: $e');
+    }
+  }
+
+  static Future<void> _unregisterTokenFromBackend(String token) async {
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    if (firebaseUser == null) {
+      debugPrint('[FCM] No authenticated user, skipping token unregister.');
+      return;
+    }
+    final accessToken = await firebaseUser.getIdToken();
+
+    final response = await http.delete(
+      Uri.parse('$_apiBaseUrl/api/devices/unregister'),
+      headers: <String, String>{
+        'Content-Type': 'application/json',
+        if (accessToken != null && accessToken.isNotEmpty) 'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(<String, dynamic>{
+        'fcmToken': token,
+      }),
+    );
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      debugPrint('[FCM] Device token unregistered successfully.');
+    } else {
+      debugPrint('[FCM] Failed to unregister device token: ${response.body}');
+    }
+  }
+
   static Future<void> clearToken() async {
     try {
       await _sendTokenToBackend(null);

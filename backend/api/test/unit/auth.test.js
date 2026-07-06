@@ -392,12 +392,14 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
   beforeEach(() => {
     process.env.BYPASS_AUTH = 'true';
     process.env.NODE_ENV = 'test';
+    process.env.DEV_ACCESS_TOKEN = 'dev-token-123';
     vi.resetModules();
   });
 
   afterEach(() => {
     delete process.env.BYPASS_AUTH;
     delete process.env.NODE_ENV;
+    delete process.env.DEV_ACCESS_TOKEN;
   });
 
   it('returns 503 when BYPASS_AUTH is enabled in production', async () => {
@@ -485,6 +487,7 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
 
     const req = {
       headers: {
+        'x-dev-access-token': 'dev-token-123',
         'x-user-id': 'test-uuid-123',
         'x-user-role': 'driver',
         'x-user-name': 'Test Driver',
@@ -516,7 +519,10 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
     const { authenticate } = await import('../../src/middleware/auth.js');
 
     const req = {
-      headers: { 'x-user-id': 'test-uuid-456' },
+      headers: {
+        'x-dev-access-token': 'dev-token-123',
+        'x-user-id': 'test-uuid-456',
+      },
     };
     const res = {
       status: vi.fn().mockReturnThis(),

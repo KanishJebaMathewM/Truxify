@@ -433,14 +433,16 @@ describe('GET /api/trips/:id/events', () => {
     process.env.BYPASS_AUTH = 'true';
     process.env.NODE_ENV = 'test';
     m.store.trip_events = [];
-    m.store.orders = [
-      { id: 'trip-abc', driver_id: 'driver-1', customer_id: 'customer-other' },
-      { id: 'trip-admin', driver_id: 'driver-other', customer_id: 'customer-other' },
-      { id: 'trip-filter', driver_id: 'driver-1', customer_id: 'customer-other' },
-      { id: 'trip-sort', driver_id: 'driver-1', customer_id: 'customer-other' },
-      { id: 'trip-bbox', driver_id: 'driver-1', customer_id: 'customer-other' },
+    m.store.orders = [];
+    // The route resolves the trip in orders/trips before checking access,
+    // so each fixture trip referenced below must exist in the trips table.
+    m.store.trips = [
+      { id: 'trip-abc', driver_id: 'driver-1' },
+      { id: 'trip-admin', driver_id: 'driver-1' },
+      { id: 'trip-filter', driver_id: 'driver-1' },
+      { id: 'trip-sort', driver_id: 'driver-1' },
+      { id: 'trip-bbox', driver_id: 'driver-1' },
     ];
-    m.store.trips = [];
     m.calls.length = 0;
   });
 

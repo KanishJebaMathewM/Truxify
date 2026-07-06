@@ -37,6 +37,12 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * c
 
 
+# Maximum detour threshold as a fraction of the total trip distance.
+# Loads whose detour exceeds this fraction of (distance_to_pickup + load_distance)
+# are filtered out to prevent profit-negative recommendations.
+MAX_DETOUR_FRACTION = 0.5
+
+
 def find_return_loads(
     driver_destination: Dict,
     truck_specs: Dict,
@@ -50,6 +56,7 @@ def find_return_loads(
       - Truck capacity and dimension compatibility
       - Time feasibility against the load's pickup deadline
       - Earnings per kilometre of detour
+      - Detour threshold (MAX_DETOUR_FRACTION of total trip km)
 
     Args:
         driver_destination: Dict with 'lat' and 'lng' of the driver's drop-off point.
@@ -121,6 +128,11 @@ def find_return_loads(
             if estimated_arrival > deadline_dt:
                 continue  # Cannot reach in time
 
+            # --- Detour threshold ---
+            total_trip_km = distance_to_pickup + load_distance
+            if total_trip_km > 0 and detour_km / total_trip_km > MAX_DETOUR_FRACTION:
+                continue
+
             # --- Scoring ---
             payment = load.get("payment_inr", 0.0)
 
@@ -129,7 +141,6 @@ def find_return_loads(
             proximity_score = max(0.0, 1.0 - distance_to_pickup / max_proximity_km) * 40.0
 
             # Earnings per km (max 35 pts)
-            total_trip_km = distance_to_pickup + load_distance
             earnings_per_km = payment / total_trip_km if total_trip_km > 0 else 0.0
             earnings_score = min(earnings_per_km / 30.0, 1.0) * 35.0  # 30 INR/km = full score
 

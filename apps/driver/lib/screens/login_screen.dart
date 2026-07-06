@@ -167,7 +167,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 decoration: InputDecoration(
                   prefixIcon: Container(
                     alignment: Alignment.center,
-                    width: 90,
+                    width: 115,
                     margin: const EdgeInsets.only(right: 8),
                     decoration: BoxDecoration(
                       border: Border(

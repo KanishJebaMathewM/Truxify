@@ -125,7 +125,7 @@ def test_predict_price_valid():
         "route_origin": "Mumbai",
         "route_destination": "Delhi",
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert "estimated_price" in data
@@ -139,7 +139,7 @@ def test_predict_price_minimal():
         "distance_km": 100.0,
         "cargo_weight_kg": 1000.0,
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert data["estimated_price"] > 0
@@ -150,7 +150,7 @@ def test_predict_price_invalid_distance():
         "distance_km": 0,
         "cargo_weight_kg": 1000.0,
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 422
 
 

@@ -29,7 +29,7 @@ def test_predict_price_valid():
         "fuel_price": 110.0,
         "cargo_type": "general",
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert "estimated_price" in data
@@ -46,7 +46,7 @@ def test_predict_price_minimal():
         "distance_km": 100.0,
         "cargo_weight_kg": 1000.0,
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert data["estimated_price"] > 0
@@ -63,7 +63,7 @@ def test_predict_price_invalid_distance():
         "distance_km": 0,
         "cargo_weight_kg": 1000.0,
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 422
 
 
@@ -73,7 +73,7 @@ def test_predict_price_invalid_weight():
         "distance_km": 100.0,
         "cargo_weight_kg": 0,
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 422
 
 
@@ -89,7 +89,7 @@ def test_predict_price_confidence_range():
         "truck_type": "medium_truck",
         "fuel_price": 105.0,
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert data["min_price"] <= data["estimated_price"] <= data["max_price"]
@@ -106,7 +106,7 @@ def test_predict_price_auth_missing(monkeypatch):
         "distance_km": 500.0,
         "cargo_weight_kg": 10000.0,
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 401
     assert response.json() == {"detail": "Unauthorized"}
 
@@ -119,7 +119,7 @@ def test_predict_price_auth_valid(monkeypatch):
         "cargo_weight_kg": 10000.0,
     }
     response = client.post(
-        "/predict",
+        "/predict/price",
         json=payload,
         headers={"X-API-Key": "test-secret-key"},
     )

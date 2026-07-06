@@ -17,14 +17,15 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Node.js 20
+      - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
-          cache-dependency-path: package-lock.json
+          cache-dependency-path: backend/api/package-lock.json
       - name: Install dependencies
-        run: npm ci --prefer-offline=false --workspace=backend/api
+        working-directory: backend/api
+        run: npm ci --workspaces=false
       - name: Run ESLint
         working-directory: backend/api
         run: npm run lint

@@ -68,7 +68,6 @@ class MarketplaceRepository {
 
   Future<DriverBid> submitBid({
     required String loadId,
-    required String driverId,
     required num amount,
   }) async {
     final uri = Uri.parse('$_apiBaseUrl/api/orders/$loadId/bids');

@@ -647,7 +647,6 @@ class _TripsScreenState extends State<TripsScreen> {
                       try {
                         final bid = await _marketplaceRepository.submitBid(
                           loadId: loadId,
-                          driverId: DriverSession.driverId,
                           amount: amount,
                         );
                         if (!context.mounted) return;

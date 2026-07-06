@@ -55,7 +55,7 @@ describe("TruxifyEscrow", function () {
 
       await assertRejectsWith(
         escrow.connect(customer).createBooking(1, driver.address, { value: 0 }),
-        "Payment required"
+        "PaymentRequired"
       );
     });
   });
@@ -111,7 +111,7 @@ describe("TruxifyEscrow", function () {
       // Second call must revert
       await assertRejectsWith(
         escrow.connect(owner).releasePayment(1),
-        "Booking not active"
+        "BookingNotActive"
       );
     });
   });

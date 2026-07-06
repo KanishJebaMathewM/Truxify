@@ -3,7 +3,7 @@ import logger from '../middleware/logger.js';
 import crypto from 'crypto';
 
 const OTP_TTL_SECONDS = 300;
-const OTP_LENGTH = 4;
+const OTP_LENGTH = 6;
 
 export async function generateAndStoreOtp(phone) {
   if (!redisClient) {

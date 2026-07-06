@@ -95,9 +95,8 @@ export async function buildDepositTx(orderDisplayId, customerWalletAddress, driv
 
   let txData;
   try {
-    txData = await escrowContract.deposit.populateTransaction(
+    txData = await escrowContract.createBooking.populateTransaction(
       bookingId,
-      customerWalletAddress,
       driverWalletAddress,
       {
         value: amountWei,
@@ -157,7 +156,7 @@ export async function recordDepositTx(bookingId, txHash, expectedSenderAddress =
   }
 
   const [txBookingId, txDriver] = decoded.args;
-  if (txBookingId !== bookingId) {
+  if (BigInt(txBookingId) !== BigInt(bookingId)) {
     return { error: 'Transaction booking ID does not match' };
   }
 
@@ -199,8 +198,8 @@ export async function escrowRelease(orderDisplayId) {
   }
 
   try {
-    const tx = await escrowContract.releaseFunds(bookingId);
-    logger.info(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+    const tx = await escrowContract.releasePayment(bookingId);
+    logger.info(`[escrow] releasePayment tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
     const receipt = await tx.wait(1);
     logger.info(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
     return { txHash: receipt.hash, bookingId };
@@ -224,8 +223,8 @@ export async function submitEscrowRefund(orderDisplayId) {
 
   let tx;
   try {
-    tx = await escrowContract.refundFunds(bookingId);
-    logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
+    tx = await escrowContract.cancelBooking(bookingId);
+    logger.info(`[escrow] cancelBooking tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   } catch (err) {
     logger.error(`[escrow] refundFunds failed for booking ${orderDisplayId}: ${err.message}`);
     return { txHash: null, bookingId, error: err.message };

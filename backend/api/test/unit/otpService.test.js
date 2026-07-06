@@ -45,7 +45,11 @@ describe('otpService', () => {
   });
 
   it('generateAndStoreOtp returns null when Redis is unavailable', async () => {
-    mockRedis = null;
+    vi.resetModules();
+    vi.doMock('../../src/config/db.js', () => ({
+      redisClient: null,
+    }));
+    const { generateAndStoreOtp } = await import('../../src/services/otpService.js');
     const result = await generateAndStoreOtp('+919876543210');
 
     expect(result).toBeNull();
@@ -84,7 +88,11 @@ describe('otpService', () => {
 
   it('verifyOtp returns false when Redis is unavailable in production', async () => {
     process.env.NODE_ENV = 'production';
-    mockRedis = null;
+    vi.resetModules();
+    vi.doMock('../../src/config/db.js', () => ({
+      redisClient: null,
+    }));
+    const { verifyOtp } = await import('../../src/services/otpService.js');
     const result = await verifyOtp('+919876543210', '1234');
 
     expect(result).toBe(false);
@@ -92,7 +100,11 @@ describe('otpService', () => {
 
   it('verifyOtp returns false when Redis is unavailable in non-production', async () => {
     process.env.NODE_ENV = 'development';
-    mockRedis = null;
+    vi.resetModules();
+    vi.doMock('../../src/config/db.js', () => ({
+      redisClient: null,
+    }));
+    const { verifyOtp } = await import('../../src/services/otpService.js');
     const result = await verifyOtp('+919876543210', '1234');
 
     expect(result).toBe(false);

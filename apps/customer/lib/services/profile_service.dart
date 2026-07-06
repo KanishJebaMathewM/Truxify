@@ -28,6 +28,21 @@ class ProfileService {
 
   static const String _profileCacheKey = 'truxify_profile_cache';
 
+  Future<Map<String, dynamic>?> _readCachedProfile(
+    SharedPreferences prefs,
+  ) async {
+    final cached = prefs.getString(_profileCacheKey);
+    if (cached == null) return null;
+    try {
+      final decoded = jsonDecode(cached);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {
+      // Invalid cache entries are cleared so future fallbacks do not crash.
+    }
+    await prefs.remove(_profileCacheKey);
+    return null;
+  }
+
   Future<Map<String, dynamic>> fetchProfile() async {
     try {
       final result = await _apiClient.get('/api/profile');
@@ -41,19 +56,19 @@ class ProfileService {
       }
       return <String, dynamic>{};
     } on ApiException catch (e) {
-      final cached = await _secureStorage.read(key: _profileCacheKey);
+      final cached = await _readCachedProfile(prefs);
       if (cached != null) {
-        developer.log('API failed, returning cached profile from secure storage.');
-        return jsonDecode(cached) as Map<String, dynamic>;
+        developer.log('API failed, returning cached profile.');
+        return cached;
       }
       throw StateError(e.message);
     } on FormatException {
       throw const FormatException('Invalid JSON response from server.');
     } catch (e) {
-      final cached = await _secureStorage.read(key: _profileCacheKey);
+      final cached = await _readCachedProfile(prefs);
       if (cached != null) {
-        developer.log('Network error, returning cached profile from secure storage.');
-        return jsonDecode(cached) as Map<String, dynamic>;
+        developer.log('Network error, returning cached profile.');
+        return cached;
       }
       throw StateError('Failed to fetch profile via backend API: $e');
     }

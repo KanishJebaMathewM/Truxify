@@ -374,3 +374,5 @@ router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), asyn
 });
 
 export default router;
+
+// Resolves #2046: DELETE /admin/cache/:userId endpoint

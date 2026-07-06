@@ -83,11 +83,11 @@ class MarketplaceRepository {
       }),
     );
 
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(decoded['error']?.toString() ?? 'Failed to submit bid.');
+      throw StateError(_errorMessage(response, 'Failed to submit bid.'));
     }
 
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     return DriverBid.fromJson(Map<String, dynamic>.from(decoded['bid'] as Map));
   }
 
@@ -210,6 +210,19 @@ class MarketplaceRepository {
     };
 
     return controller.stream;
+  }
+
+  String _errorMessage(http.Response response, String fallback) {
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        final message = decoded['error'] ?? decoded['message'];
+        if (message != null) return message.toString();
+      }
+    } catch (_) {
+      // Fall through to the status-aware fallback below.
+    }
+    return '$fallback (${response.statusCode})';
   }
 
   String _formatCurrency(num value) {

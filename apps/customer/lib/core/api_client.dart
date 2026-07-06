@@ -66,6 +66,8 @@ class ApiClient {
     return _defaultBaseUrl;
   }
 
+  static String get defaultBaseUrl => _defaultBaseUrl;
+
   static String get _defaultBaseUrl {
     const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
     if (envUrl.isNotEmpty) return envUrl;

@@ -116,6 +116,16 @@ export async function reconcilePendingEscrowRefunds() {
           `[escrow-reconciliation] Refund for ${order.order_display_id} is not confirmed yet (retry ${newRetryCount}/${MAX_RETRIES}):`,
           err.message
         );
+        const refundAttempts = (order.escrow_refund_attempts || 0) + 1;
+        await supabase
+          .from('orders')
+          .update({
+            escrow_status: 'refund_failed',
+            escrow_refund_attempts: refundAttempts,
+            escrow_refund_error: err.message,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', order.id);
       } finally {
         await releaseLock(lockKey, lockValue);
       }

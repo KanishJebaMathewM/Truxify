@@ -1,9 +1,25 @@
-import hre from "hardhat";
-const { ethers } = hre;
+import { describe, it, before } from "node:test";
+import assert from "node:assert/strict";
+import { network } from "hardhat";
 import { expect } from "chai";
-import { loadFixture } from "@nomicfoundation/hardhat-network-helpers";
+
+let ethers;
+let loadFixture;
+
+async function assertRejects(promise) {
+  await assert.rejects(promise);
+}
+
+async function assertRejectsWith(promise, message) {
+  await assert.rejects(promise, error => error.message.includes(message));
+}
 
 describe("TruxifyEscrow", function () {
+  before(async () => {
+    let networkHelpers;
+    ({ ethers, networkHelpers } = await network.create());
+    ({ loadFixture } = networkHelpers);
+  });
 
   // ─── Fixture ──────────────────────────────────────────────────────────────
   async function deployEscrowFixture() {
@@ -37,9 +53,10 @@ describe("TruxifyEscrow", function () {
     it("reverts if payment is zero", async function () {
       const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
 
-      await expect(
-        escrow.connect(customer).createBooking(1, driver.address, { value: 0 })
-      ).to.be.revertedWith("TruxifyEscrow: Payment required");
+      await assertRejectsWith(
+        escrow.connect(customer).createBooking(1, driver.address, { value: 0 }),
+        "PaymentRequired"
+      );
     });
   });
 
@@ -61,8 +78,10 @@ describe("TruxifyEscrow", function () {
 
       const booking = await escrow.getBooking(bookingId);
       expect(booking.paid).to.be.true;
-      expect(booking.amount).to.equal(0);
-      expect(booking.status).to.equal(1); // Delivered
+      expect(booking.amount).to.equal(0n);
+      expect(booking.status).to.equal(1n); // Delivered
+
+      await escrow.connect(driver).withdraw();
 
       const driverBalanceAfter = await ethers.provider.getBalance(driver.address);
       expect(driverBalanceAfter).to.be.gt(driverBalanceBefore);
@@ -75,9 +94,9 @@ describe("TruxifyEscrow", function () {
         value: ethers.parseEther("1.0"),
       });
 
-      await expect(
+      await assertRejects(
         escrow.connect(attacker).releasePayment(1)
-      ).to.be.reverted; // OwnableUnauthorizedAccount
+      ); // OwnableUnauthorizedAccount
     });
 
     it("reverts on double payment attempt", async function () {
@@ -90,9 +109,10 @@ describe("TruxifyEscrow", function () {
       await escrow.connect(owner).releasePayment(1);
 
       // Second call must revert
-      await expect(
-        escrow.connect(owner).releasePayment(1)
-      ).to.be.revertedWith("TruxifyEscrow: Booking not active");
+      await assertRejectsWith(
+        escrow.connect(owner).releasePayment(1),
+        "BookingNotActive"
+      );
     });
   });
 
@@ -119,10 +139,13 @@ describe("TruxifyEscrow", function () {
         value: ethers.parseEther("10.0"),
       });
 
-      // Attempt re-entrant drain — must revert or pay only once
-      await expect(
-        escrow.connect(owner).releasePayment(bookingId)
-      ).to.be.reverted; // ReentrancyGuardReentrantCall
+      await escrow.connect(owner).releasePayment(bookingId);
+      await malicious.setAttackBookingId(bookingId);
+
+      // Attempt re-entrant drain — must revert
+      await assertRejects(
+        malicious.attackWithdraw()
+      );
 
       // Escrow should still hold funds (not drained)
       const escrowBalance = await ethers.provider.getBalance(await escrow.getAddress());
@@ -140,13 +163,14 @@ describe("TruxifyEscrow", function () {
 
       const balanceBefore = await ethers.provider.getBalance(customer.address);
       await escrow.connect(customer).cancelBooking(1);
+      await escrow.connect(customer).withdraw();
       const balanceAfter = await ethers.provider.getBalance(customer.address);
 
       expect(balanceAfter).to.be.gt(balanceBefore);
 
       const booking = await escrow.getBooking(1);
-      expect(booking.status).to.equal(2); // Cancelled
-      expect(booking.amount).to.equal(0);
+      expect(booking.status).to.equal(2n); // Cancelled
+      expect(booking.amount).to.equal(0n);
     });
   });
 });

@@ -94,14 +94,20 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
 
     // Filters
     if (req.query.pickup_location) {
-      const pickupLocation = Array.isArray(req.query.pickup_location) ? req.query.pickup_location[0] : req.query.pickup_location;
+      const pickupLocation = (Array.isArray(req.query.pickup_location) ? req.query.pickup_location[0] : req.query.pickup_location).trim();
+      if (!pickupLocation) {
+        return res.status(400).json({ error: 'pickup_location must not be empty' });
+      }
       if (pickupLocation.length > 200) {
         return res.status(400).json({ error: 'pickup_location too long (max 200 chars)' });
       }
       query = query.ilike('pickup_address', `%${escapeLike(pickupLocation)}%`);
     }
     if (req.query.destination) {
-      const destination = Array.isArray(req.query.destination) ? req.query.destination[0] : req.query.destination;
+      const destination = (Array.isArray(req.query.destination) ? req.query.destination[0] : req.query.destination).trim();
+      if (!destination) {
+        return res.status(400).json({ error: 'destination must not be empty' });
+      }
       if (destination.length > 200) {
         return res.status(400).json({ error: 'destination too long (max 200 chars)' });
       }

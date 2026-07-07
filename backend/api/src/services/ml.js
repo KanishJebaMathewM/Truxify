@@ -2,6 +2,27 @@
 // overrides for Docker Compose container-to-container communication.
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 
+// Input validation helper for ML service parameters
+function validateNumber(value, name, min, max) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) {
+    throw new Error(name + ' must be a finite number, got ' + typeof value);
+  }
+  if (min !== undefined && num < min) throw new Error(name + ' must be >= ' + min);
+  if (max !== undefined && num > max) throw new Error(name + ' must be <= ' + max);
+  return num;
+}
+
+function validateString(value, name, maxLen) {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(name + ' must be a non-empty string');
+  }
+  if (maxLen !== undefined && value.length > maxLen) {
+    throw new Error(name + ' must not exceed ' + maxLen + ' characters');
+  }
+  return value;
+}
+
 // Startup validation: warn if ML_API_KEY is not set
 if (!process.env.ML_API_KEY) {
   // Use console.warn here since logger may not be initialized at module load time

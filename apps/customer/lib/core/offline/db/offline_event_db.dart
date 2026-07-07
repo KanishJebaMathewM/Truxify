@@ -20,7 +20,7 @@ class OfflineEventDb {
 
     _database = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE $_tableName (
@@ -31,9 +31,15 @@ class OfflineEventDb {
             occurred_at TEXT NOT NULL,
             sync_status TEXT NOT NULL,
             retry_count INTEGER NOT NULL,
-            last_retry_at TEXT
+            last_retry_at TEXT,
+            sync_error TEXT
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('ALTER TABLE $_tableName ADD COLUMN sync_error TEXT');
+        }
       },
     );
 
@@ -76,7 +82,7 @@ class OfflineEventDb {
     final db = await open();
     await db.update(
       _tableName,
-      {'sync_status': 'synced', 'last_retry_at': null},
+      {'sync_status': 'synced', 'last_retry_at': null, 'sync_error': null},
       where: 'id = ?',
       whereArgs: [id],
     );
@@ -89,6 +95,21 @@ class OfflineEventDb {
       {
         'sync_status': 'failed',
         'retry_count': retryCount,
+        'last_retry_at': DateTime.now().toUtc().toIso8601String(),
+        'sync_error': null,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> markRejected(String id, {required String reason}) async {
+    final db = await open();
+    await db.update(
+      _tableName,
+      {
+        'sync_status': 'rejected',
+        'sync_error': reason,
         'last_retry_at': DateTime.now().toUtc().toIso8601String(),
       },
       where: 'id = ?',

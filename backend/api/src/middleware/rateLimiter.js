@@ -1,4 +1,4 @@
-import rateLimit, { MemoryStore } from 'express-rate-limit';
+import rateLimit, { MemoryStore, ipKeyGenerator } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
@@ -73,15 +73,24 @@ class DeferredRedisStore {
 }
 
 function buildStore(prefix) {
-  return new DeferredRedisStore(prefix);
+  return createStore(prefix);
 }
 
 /**
- * Generates a rate-limit key from the actual TCP connection address instead of
- * req.ip (which trusts the client-controlled X-Forwarded-For header). This
- * prevents attackers from bypassing rate limits by rotating the header value.
+ * Generates a rate-limit key from the proxy-resolved IP address.
+ *
+ * Express's trust-proxy setting (1 hop) resolves X-Forwarded-For to req.ip.
+ * Using req.socket.remoteAddress directly would see the load balancer / proxy
+ * IP instead of the real client, collapsing all users behind the same proxy
+ * into one rate-limit bucket.
  */
 export function safeIpKeyGenerator(req) {
+  // Uses req.ip (which respects Express trust proxy setting) to resolve the
+  // real client IP behind a reverse proxy (Nginx, Cloudflare, ALB). Falls
+  // back to the raw TCP socket address for direct-connection deployments.
+  // The ipKeyGenerator helper from express-rate-limit normalizes IPv6
+  // addresses to prevent IP rotation bypasses (ERR_ERL_KEY_GEN_IPV6).
+  if (req.ip) return ipKeyGenerator(req.ip);
   return req.socket?.remoteAddress
     || req.connection?.remoteAddress
     || 'unknown';
@@ -170,5 +179,14 @@ export const deviceLimiter = rateLimit({
   store: buildStore('rl:device:'),
   message: { error: 'Rate limit exceeded', retryAfter: 600 },
 });
+
+/**
+ * Factory that creates a DeferredRedisStore — used by both the built-in
+ * limiters in this module and by route-level limiters (orderRoutes,
+ * driverRoutes) that need Redis-backed shared state across instances.
+ */
+export function createStore(prefix) {
+  return new DeferredRedisStore(prefix);
+}
 
 export const __testing = { DeferredRedisStore, isRedisReady };

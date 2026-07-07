@@ -1147,7 +1147,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     }
                   }
 
-                  // Clear FCM token on logout
+                  // Unregister and clear FCM token on logout so this device stops
+                  // receiving push notifications for the signed-out account.
+                  await FcmService.unregisterToken();
                   await FcmService.clearToken();
 
                   await client.auth.signOut();

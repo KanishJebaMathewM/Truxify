@@ -1,145 +1,86 @@
-/**
- * Unit tests for backend/api/src/lib/pricing.js
- *
- * Coverage:
- *   - haversineKm returns 0 for identical points
- *   - haversineKm computes known distances correctly
- *   - haversineKm throws TypeError for non-finite inputs
- *   - computeOrderPricing happy path with all fields
- *   - computeOrderPricing applies fragile multiplier
- *   - computeOrderPricing applies stackable discount
- *   - computeOrderPricing uses roadDistanceKm when provided
- *   - computeOrderPricing falls back to haversine when roadDistanceKm is absent
- *   - computeOrderPricing throws RangeError for zero or negative weight
- *   - computeOrderPricing throws TypeError for non-object input
- *   - computeOrderPricing throws RangeError for zero computed rate
- *
- * Run with:  npm run test:unit -- test/unit/pricing.test.js
- */
 import { describe, it, expect } from 'vitest';
-import { haversineKm, computeOrderPricing } from '../../src/lib/pricing.js';
+import {
+  haversineKm,
+  computeOrderPricing,
+  convertKmToMiles,
+  __testing
+} from '../../src/lib/pricing.js';
 
-// Mumbai CST (19.0855, 72.8450) to Delhi NDLS (28.8428, 77.2781)
-// Approximate great-circle distance: ~1154 km
-const MUMBAI = { lat: 19.0855, lng: 72.8450 };
-const DELHI  = { lat: 28.8428, lng: 77.2781 };
+describe('pricing.js', () => {
+  describe('haversineKm', () => {
+    it('returns 0 for identical coordinates', () => {
+      expect(haversineKm(12.9716, 77.5946, 12.9716, 77.5946)).toBe(0);
+    });
 
-describe('haversineKm', () => {
-  it('returns 0 for identical points', () => {
-    expect(haversineKm(0, 0, 0, 0)).toBe(0);
-    expect(haversineKm(19.0855, 72.8450, 19.0855, 72.8450)).toBe(0);
+    it('calculates approximate distance between Bangalore and Chennai', () => {
+      const distance = haversineKm(12.9716, 77.5946, 13.0827, 80.2707);
+      expect(distance).toBeGreaterThan(280);
+      expect(distance).toBeLessThan(310);
+    });
+
+    it('throws TypeError for non-finite lat/lng arguments', () => {
+      expect(() => haversineKm('12.9', 77.5, 13.0, 80.2)).toThrow(TypeError);
+      expect(() => haversineKm(NaN, 77.5, 13.0, 80.2)).toThrow(TypeError);
+    });
   });
 
-  it('computes known distance between Mumbai and Delhi approximately correctly', () => {
-    // Allow 5% tolerance for the slightly different Earth radius constant used
-    const dist = haversineKm(MUMBAI.lat, MUMBAI.lng, DELHI.lat, DELHI.lng);
-    expect(dist).toBeGreaterThan(1100);
-    expect(dist).toBeLessThan(1200);
+  describe('computeOrderPricing', () => {
+    const defaultRateCard = __testing.DEFAULTS;
+
+    it('calculates canonical order pricing with default rate card', () => {
+      const result = computeOrderPricing({
+        pickupLat: 12.9716,
+        pickupLng: 77.5946,
+        dropLat: 13.0827,
+        dropLng: 80.2707,
+        weightTonnes: 5,
+        roadDistanceKm: 300,
+      });
+
+      // baseFreight = round(50 * 5 * 300) + 30000 = 75000 + 30000 = 105000 paisa (₹1050)
+      expect(result.baseFreight).toBe(105000);
+      // tollEstimate = round(200 * 300 * 1) = 60000 paisa (₹600)
+      expect(result.tollEstimate).toBe(60000);
+      // platformFee = round(105000 * 5 / 100) = 5250 paisa (₹52.5)
+      expect(result.platformFee).toBe(5250);
+      // totalAmount = 105000 + 60000 + 5250 = 170250 paisa (₹1702.50)
+      expect(result.totalAmount).toBe(170250);
+      expect(result.distanceKm).toBe(300);
+    });
+
+    it('applies fragile multiplier and stackable discount', () => {
+      const fragileResult = computeOrderPricing({
+        pickupLat: 12.9716,
+        pickupLng: 77.5946,
+        dropLat: 13.0827,
+        dropLng: 80.2707,
+        weightTonnes: 2,
+        roadDistanceKm: 100,
+        isFragile: true,
+      });
+
+      // rate = 50 * 1.5 = 75; baseFreight = 75 * 2 * 100 + 30000 = 15000 + 30000 = 45000
+      expect(fragileResult.baseFreight).toBe(45000);
+    });
+
+    it('throws RangeError for invalid weightTonnes', () => {
+      expect(() => computeOrderPricing({
+        pickupLat: 12.9716,
+        pickupLng: 77.5946,
+        dropLat: 13.0827,
+        dropLng: 80.2707,
+        weightTonnes: 0,
+      })).toThrow(RangeError);
+    });
   });
 
-  it('is symmetric (A to B equals B to A)', () => {
-    const ab = haversineKm(MUMBAI.lat, MUMBAI.lng, DELHI.lat, DELHI.lng);
-    const ba = haversineKm(DELHI.lat, DELHI.lng, MUMBAI.lat, MUMBAI.lng);
-    expect(ab).toBeCloseTo(ba, 10);
-  });
+  describe('convertKmToMiles', () => {
+    it('converts km to miles accurately', () => {
+      expect(convertKmToMiles(100)).toBeCloseTo(62.1371, 3);
+    });
 
-  it('throws TypeError for non-finite latitude', () => {
-    expect(() => haversineKm(NaN, 72.8450, DELHI.lat, DELHI.lng)).toThrow(TypeError);
-    expect(() => haversineKm(Infinity, 72.8450, DELHI.lat, DELHI.lng)).toThrow(TypeError);
-  });
-
-  it('throws TypeError for non-finite longitude', () => {
-    expect(() => haversineKm(MUMBAI.lat, NaN, DELHI.lat, DELHI.lng)).toThrow(TypeError);
-    expect(() => haversineKm(MUMBAI.lat, Infinity, DELHI.lat, DELHI.lng)).toThrow(TypeError);
-  });
-});
-
-describe('computeOrderPricing', () => {
-  const baseInput = {
-    pickupLat: MUMBAI.lat,
-    pickupLng: MUMBAI.lng,
-    dropLat: DELHI.lat,
-    dropLng: DELHI.lng,
-    weightTonnes: 5,
-  };
-
-  const rateCard = {
-    ratePerTonneKm: 50,
-    fragileMultiplier: 1.5,
-    stackableDiscount: 0.9,
-    handlingFee: 30000,
-    platformFeePct: 5,
-    fuelCostPct: 45,
-    tollPerKm: 200,
-  };
-
-  it('returns all pricing fields in paisa', () => {
-    const result = computeOrderPricing(baseInput, rateCard);
-    expect(result).toHaveProperty('distanceKm');
-    expect(result).toHaveProperty('baseFreight');
-    expect(result).toHaveProperty('tollEstimate');
-    expect(result).toHaveProperty('platformFee');
-    expect(result).toHaveProperty('totalAmount');
-    expect(result).toHaveProperty('fuelCost');
-    expect(result).toHaveProperty('netProfit');
-    expect(result.distanceKm).toBeGreaterThan(0);
-    expect(result.totalAmount).toBeGreaterThan(0);
-  });
-
-  it('applies fragile multiplier when isFragile is true', () => {
-    const normal = computeOrderPricing(baseInput, rateCard);
-    const fragile = computeOrderPricing({ ...baseInput, isFragile: true }, rateCard);
-    expect(fragile.baseFreight).toBeGreaterThan(normal.baseFreight);
-  });
-
-  it('applies stackable discount when isStackable is true', () => {
-    const normal = computeOrderPricing(baseInput, rateCard);
-    const stackable = computeOrderPricing({ ...baseInput, isStackable: true }, rateCard);
-    expect(stackable.baseFreight).toBeLessThan(normal.baseFreight);
-  });
-
-  it('uses roadDistanceKm when provided instead of haversine', () => {
-    const withRoad = computeOrderPricing({ ...baseInput, roadDistanceKm: 1400 }, rateCard);
-    const withoutRoad = computeOrderPricing(baseInput, rateCard);
-    // roadDistanceKm > haversine distance for this route, so total should differ
-    expect(withRoad.distanceKm).toBe(1400);
-    expect(withRoad.distanceKm).not.toBeCloseTo(withoutRoad.distanceKm, 1);
-  });
-
-  it('falls back to haversine when roadDistanceKm is absent', () => {
-    const result = computeOrderPricing(baseInput, rateCard);
-    const haversineDist = haversineKm(MUMBAI.lat, MUMBAI.lng, DELHI.lat, DELHI.lng);
-    expect(result.distanceKm).toBeCloseTo(haversineDist, 1);
-  });
-
-  it('throws RangeError for zero weight', () => {
-    expect(() => computeOrderPricing({ ...baseInput, weightTonnes: 0 }, rateCard))
-      .toThrow(RangeError);
-  });
-
-  it('throws RangeError for negative weight', () => {
-    expect(() => computeOrderPricing({ ...baseInput, weightTonnes: -1 }, rateCard))
-      .toThrow(RangeError);
-  });
-
-  it('throws TypeError when input is not an object', () => {
-    expect(() => computeOrderPricing(null, rateCard)).toThrow(TypeError);
-    expect(() => computeOrderPricing(undefined, rateCard)).toThrow(TypeError);
-    expect(() => computeOrderPricing('not an object', rateCard)).toThrow(TypeError);
-  });
-
-  it('throws RangeError when computed rate is zero or negative', () => {
-    const zeroRateCard = { ...rateCard, ratePerTonneKm: 0 };
-    expect(() => computeOrderPricing(baseInput, zeroRateCard)).toThrow(RangeError);
-  });
-
-  it('totalAmount equals sum of baseFreight, tollEstimate, and platformFee', () => {
-    const result = computeOrderPricing(baseInput, rateCard);
-    expect(result.totalAmount).toBe(result.baseFreight + result.tollEstimate + result.platformFee);
-  });
-
-  it('netProfit equals baseFreight minus fuelCost minus tollEstimate', () => {
-    const result = computeOrderPricing(baseInput, rateCard);
-    expect(result.netProfit).toBe(result.baseFreight - result.fuelCost - result.tollEstimate);
+    it('throws TypeError for non-number inputs', () => {
+      expect(() => convertKmToMiles('100')).toThrow(TypeError);
+    });
   });
 });

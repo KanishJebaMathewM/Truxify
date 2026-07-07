@@ -4,11 +4,16 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/firebase_config.dart';
-import 'core/supabase_config.dart';
+// Remove the import of 'core/supabase_config.dart' – we now use Env
+import 'package:truxify/config/env.dart';  // Adjust package name to match your pubspec
 
 Future<void> main() async {
   // Ensure Flutter engine is initialized.
   WidgetsFlutterBinding.ensureInitialized();
+
+  // ── Validate all required environment variables before app starts ────────
+  Env.validate();  // Throws an error if SUPABASE_URL or SUPABASE_ANON_KEY are missing
+  // ─────────────────────────────────────────────────────────────────────────────
 
   // Initialize Firebase.
   try {
@@ -30,7 +35,6 @@ Future<void> main() async {
           ),
         );
       }
-
     } else {
       await Firebase.initializeApp();
     }
@@ -38,18 +42,15 @@ Future<void> main() async {
     debugPrint('Firebase initialization failed: $e');
   }
 
-  // Initialize Supabase if keys are provided.
-  if (SupabaseConfig.isConfigured) {
-    try {
-      await Supabase.initialize(
-        url: SupabaseConfig.url,
-        anonKey: SupabaseConfig.anonKey,
-      );
-    } catch (e) {
-      debugPrint('Supabase initialization failed: $e');
-    }
-  } else {
-    debugPrint('Supabase URL/AnonKey not provided. Skipping initialization.');
+  // Initialize Supabase using environment variables.
+  try {
+    await Supabase.initialize(
+      url: Env.supabaseUrl,
+      anonKey: Env.supabaseAnonKey,
+    );
+  } catch (e) {
+    debugPrint('Supabase initialization failed: $e');
+    // You may rethrow or handle gracefully; Env.validate already ensures they exist.
   }
 
   runApp(const TruxifyApp());

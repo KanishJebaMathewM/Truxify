@@ -20,7 +20,9 @@ create or replace function accept_bid_tx(
 ) returns void
 language plpgsql
 security definer
-as $$
+-- Set search_path to avoid search_path injection attacks
+set search_path = public
+as $
 declare
   v_load_status text;
   v_order_status text;
@@ -85,7 +87,9 @@ create or replace function withdraw_funds_tx(
 ) returns void
 language plpgsql
 security definer
-as $$
+-- Set search_path to avoid search_path injection attacks
+set search_path = public
+as $
 declare
   v_confirmed int;
   v_pending   int;
@@ -126,7 +130,9 @@ create or replace function submit_rating_tx(
 ) returns void
 language plpgsql
 security definer
-as $$
+-- Set search_path to avoid search_path injection attacks
+set search_path = public
+as $
 declare
   v_new_avg numeric(3,2);
 begin

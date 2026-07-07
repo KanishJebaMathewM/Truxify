@@ -99,6 +99,7 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   const {
     pickupLat, pickupLng, dropLat, dropLng,
     weightTonnes, roadDistanceKm, isFragile = false, isStackable = false,
+    tollFactor = 1,
   } = input;
 
   if (!Number.isFinite(weightTonnes) || weightTonnes <= 0) {
@@ -119,7 +120,7 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   }
 
   const baseFreight = Math.round(rate * weightTonnes * distanceKm) + rateCard.handlingFee;
-  const tollEstimate = Math.round(rateCard.tollPerKm * distanceKm);
+  const tollEstimate = Math.round(rateCard.tollPerKm * distanceKm * tollFactor);
   const platformFee = Math.round((baseFreight * rateCard.platformFeePct) / 100);
   const totalAmount = baseFreight + tollEstimate + platformFee;
 
@@ -136,6 +137,13 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
     fuelCost,
     netProfit,
   };
+}
+
+export function convertKmToMiles(km) {
+  if (typeof km !== 'number' || Number.isNaN(km)) {
+    throw new TypeError('km must be a number');
+  }
+  return km * 0.621371;
 }
 
 export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM };

@@ -1,18 +1,31 @@
 import { randomUUID } from 'crypto';
 import logger from './logger.js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function requestIdMiddleware(req, res, next) {
-  req.requestId = req.headers['x-request-id'] || randomUUID();
+  const header = req.headers['x-request-id'];
+  req.requestId = (typeof header === 'string' && header.trim()) ? header.trim() : randomUUID();
   res.setHeader('X-Request-Id', req.requestId);
   next();
 }
 
 export function requestLogger(req, res, next) {
   const start = Date.now();
+  const requestedLogLevel = req.headers?.['x-log-level'];
+  let reqLogger = logger;
+  
+  if (requestedLogLevel && ['info', 'warn', 'error', 'debug', 'trace'].includes(requestedLogLevel.toLowerCase())) {
+    reqLogger = logger.child({});
+    reqLogger.level = requestedLogLevel.toLowerCase();
+  }
+  
+  req.log = reqLogger;
+
   res.on('finish', () => {
     const durationMs = Date.now() - start;
     const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
-    logger[level]({
+    reqLogger[level]({
       requestId: req.requestId,
       method: req.method,
       path: req.originalUrl,

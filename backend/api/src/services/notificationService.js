@@ -147,18 +147,29 @@ export async function getActiveDeliveryOtp(orderId) {
   return data;
 }
 
-export async function verifyDeliveryOtp(orderId) {
-  const { error } = await supabase
+export async function verifyDeliveryOtp(otpId) {
+  // Target a specific OTP record by ID instead of bulk-updating all
+  // unverified OTPs for an order. This ensures only the matched OTP
+  // (which was validated by the caller via timing-safe hash comparison)
+  // is consumed, preventing any future caller from bypassing verification.
+  const { data, error } = await supabase
     .from('delivery_otps')
     .update({
       verified: true,
       verified_at: new Date().toISOString(),
     })
-    .eq('order_id', orderId)
-    .eq('verified', false);
+    .eq('id', otpId)
+    .eq('verified', false)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     logger.error('[NotificationService] Failed to verify OTP:', error.message);
+    return false;
+  }
+
+  if (!data) {
+    logger.warn('[NotificationService] OTP not found or already verified:', otpId);
     return false;
   }
 
@@ -197,13 +208,13 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       });
 
     if (error) {
-      logger.error('[NotificationService] Database insert failed:', error);
+      logger.error({ err: error }, '[NotificationService] Database insert failed');
     } else {
       logger.info('[NotificationService] Notification inserted successfully');
       dbSuccess = true;
     }
   } catch (dbErr) {
-    logger.error('[NotificationService] Database connection error during notification insert:', dbErr.message);
+    logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');
   }
 
   let fcmResult;

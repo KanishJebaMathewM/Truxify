@@ -4,6 +4,13 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 class CacheManager {
+  dynamic _safeDecode(String json) {
+    try {
+      return jsonDecode(json);
+    } catch (_) {
+      return null;
+    }
+  }
   static const _dbName = 'truxify_cache.db';
 
   Database? _database;
@@ -162,7 +169,9 @@ class CacheManager {
       return null;
     }
 
-    final payload = jsonDecode(rows.first['value'] as String) as Map<String, dynamic>;
+    final decoded = _safeDecode(rows.first['value'] as String);
+      if (decoded == null) return null;
+      final payload = decoded as Map<String, dynamic>;
     return <String, dynamic>{
       ...payload,
       '_cached_at': rows.first['updated_at'],
@@ -233,7 +242,7 @@ class CacheManager {
     final result = <String, dynamic>{};
 
     for (final row in rows) {
-      result[row['key'] as String] = jsonDecode(row['value'] as String);
+      result[row['key'] as String] = _safeDecode(row['value'] as String);
     }
 
     return result;

@@ -29,6 +29,6 @@ export const corsMiddleware = cors({
 
     return callback(null, false);
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: corsAllowedHeaders,
 });

@@ -29,6 +29,8 @@ const {
   bidLimiter,
   deviceLimiter,
   userKeyGenerator,
+  safeIpKeyGenerator,
+  createStore,
   __testing,
 } = await import('../../src/middleware/rateLimiter.js');
 
@@ -60,6 +62,52 @@ function makeRes() {
 function makeNext() {
   return vi.fn();
 }
+
+describe('safeIpKeyGenerator', () => {
+  it('uses req.ip when available (trust proxy scenario)', () => {
+    const req = {
+      ip: '203.0.113.7',
+      socket: { remoteAddress: '::1' },
+    };
+    expect(safeIpKeyGenerator(req)).toBe('203.0.113.7');
+  });
+
+  it('falls back to socket.remoteAddress when req.ip is absent', () => {
+    const req = {
+      ip: undefined,
+      socket: { remoteAddress: '10.0.0.5' },
+    };
+    expect(safeIpKeyGenerator(req)).toBe('10.0.0.5');
+  });
+
+  it('falls back to connection.remoteAddress when socket is absent', () => {
+    const req = {
+      ip: undefined,
+      socket: undefined,
+      connection: { remoteAddress: '10.0.0.9' },
+    };
+    expect(safeIpKeyGenerator(req)).toBe('10.0.0.9');
+  });
+
+  it('returns unknown when nothing is available', () => {
+    const req = {};
+    expect(safeIpKeyGenerator(req)).toBe('unknown');
+  });
+
+  it('gives different keys for different client IPs behind a proxy', () => {
+    const reqA = { ip: '203.0.113.7', socket: { remoteAddress: '10.0.0.1' } };
+    const reqB = { ip: '198.51.100.3', socket: { remoteAddress: '10.0.0.1' } };
+    expect(safeIpKeyGenerator(reqA)).not.toBe(safeIpKeyGenerator(reqB));
+  });
+});
+
+describe('createStore', () => {
+  it('returns a DeferredRedisStore instance with the given prefix', () => {
+    const store = createStore('rl:custom:');
+    expect(store).toBeInstanceOf(DeferredRedisStore);
+    expect(store.prefix).toBe('rl:custom:');
+  });
+});
 
 describe('userKeyGenerator', () => {
   it('keys by the authenticated user id', () => {

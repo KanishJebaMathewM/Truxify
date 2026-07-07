@@ -1107,3 +1107,15 @@ export const __testing = {
     return MAX_CONSECUTIVE_DROPS;
   },
 };
+
+// WebSocket reconnection configuration and backoff calculation
+const RECONNECT_CONFIG = {
+  maxAttempts: 5,
+  baseDelay: 1000,
+  maxDelay: 30000,
+};
+
+function calculateBackoff(attempt) {
+  const delay = Math.min(RECONNECT_CONFIG.baseDelay * Math.pow(2, attempt), RECONNECT_CONFIG.maxDelay);
+  return delay + Math.random() * 1000;
+}

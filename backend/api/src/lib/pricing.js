@@ -15,6 +15,8 @@
  * `load_bids.bid_amount` is documented as paisa in orderRoutes.js:215).
  */
 
+import logger from '../middleware/logger.js';
+
 const EARTH_RADIUS_KM = 6371.0088;
 
 const DEFAULTS = Object.freeze({
@@ -27,27 +29,37 @@ const DEFAULTS = Object.freeze({
   TOLL_PER_KM: 200,         // paisa per km, proxy for highway toll
 });
 
-function parsePositiveInt(raw, fallback) {
-  if (raw === null || raw === undefined || raw === '') return fallback;
+function parsePositiveInt(raw, fallback, label) {
+  if (raw === null || raw === undefined || raw === '') {
+    if (label) logger.warn(`[pricing] ${label} is not set — using default ${fallback}`);
+    return fallback;
+  }
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
+  if (Number.isFinite(n) && n >= 0) return n;
+  if (label) logger.warn(`[pricing] ${label}=${raw} is invalid — using default ${fallback}`);
+  return fallback;
 }
 
-function parsePositiveFloat(raw, fallback) {
-  if (raw === null || raw === undefined || raw === '') return fallback;
+function parsePositiveFloat(raw, fallback, label) {
+  if (raw === null || raw === undefined || raw === '') {
+    if (label) logger.warn(`[pricing] ${label} is not set — using default ${fallback}`);
+    return fallback;
+  }
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : fallback;
+  if (Number.isFinite(n) && n > 0) return n;
+  if (label) logger.warn(`[pricing] ${label}=${raw} is invalid — using default ${fallback}`);
+  return fallback;
 }
 
 function readRateCard() {
   return {
-    ratePerTonneKm: parsePositiveInt(process.env.TRUXIFY_RATE_PER_TONNE_KM, DEFAULTS.RATE_PER_TONNE_KM),
-    fragileMultiplier: parsePositiveFloat(process.env.TRUXIFY_FRAGILE_MULTIPLIER, DEFAULTS.FRAGILE_MULTIPLIER),
-    stackableDiscount: parsePositiveFloat(process.env.TRUXIFY_STACKABLE_DISCOUNT, DEFAULTS.STACKABLE_DISCOUNT),
-    handlingFee: parsePositiveInt(process.env.TRUXIFY_HANDLING_FEE, DEFAULTS.HANDLING_FEE),
-    platformFeePct: parsePositiveInt(process.env.TRUXIFY_PLATFORM_FEE_PCT, DEFAULTS.PLATFORM_FEE_PCT),
-    fuelCostPct: parsePositiveInt(process.env.TRUXIFY_FUEL_COST_PCT, DEFAULTS.FUEL_COST_PCT),
-    tollPerKm: parsePositiveInt(process.env.TRUXIFY_TOLL_PER_KM, DEFAULTS.TOLL_PER_KM),
+    ratePerTonneKm: parsePositiveInt(process.env.TRUXIFY_RATE_PER_TONNE_KM, DEFAULTS.RATE_PER_TONNE_KM, 'TRUXIFY_RATE_PER_TONNE_KM'),
+    fragileMultiplier: parsePositiveFloat(process.env.TRUXIFY_FRAGILE_MULTIPLIER, DEFAULTS.FRAGILE_MULTIPLIER, 'TRUXIFY_FRAGILE_MULTIPLIER'),
+    stackableDiscount: parsePositiveFloat(process.env.TRUXIFY_STACKABLE_DISCOUNT, DEFAULTS.STACKABLE_DISCOUNT, 'TRUXIFY_STACKABLE_DISCOUNT'),
+    handlingFee: parsePositiveInt(process.env.TRUXIFY_HANDLING_FEE, DEFAULTS.HANDLING_FEE, 'TRUXIFY_HANDLING_FEE'),
+    platformFeePct: parsePositiveInt(process.env.TRUXIFY_PLATFORM_FEE_PCT, DEFAULTS.PLATFORM_FEE_PCT, 'TRUXIFY_PLATFORM_FEE_PCT'),
+    fuelCostPct: parsePositiveInt(process.env.TRUXIFY_FUEL_COST_PCT, DEFAULTS.FUEL_COST_PCT, 'TRUXIFY_FUEL_COST_PCT'),
+    tollPerKm: parsePositiveInt(process.env.TRUXIFY_TOLL_PER_KM, DEFAULTS.TOLL_PER_KM, 'TRUXIFY_TOLL_PER_KM'),
   };
 }
 
@@ -96,6 +108,15 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   if (!input || typeof input !== 'object') {
     throw new TypeError('computeOrderPricing requires an input object');
   }
+
+  // Validate rate card at call time
+  if (!rateCard.ratePerTonneKm || rateCard.ratePerTonneKm <= 0) {
+    throw new RangeError(`ratePerTonneKm must be > 0, got ${rateCard.ratePerTonneKm}`);
+  }
+  if (!rateCard.handlingFee || rateCard.handlingFee < 0) {
+    throw new RangeError(`handlingFee must be >= 0, got ${rateCard.handlingFee}`);
+  }
+
   const {
     pickupLat, pickupLng, dropLat, dropLng,
     weightTonnes, roadDistanceKm, isFragile = false, isStackable = false,

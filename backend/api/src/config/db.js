@@ -231,6 +231,26 @@ export function validateConfig() {
     logger.warn(`Missing optional env vars (features disabled): ${missingRecommended.join(', ')}`);
   }
 
+  // Pricing rate-card validation
+  const pricingVars = [
+    'TRUXIFY_RATE_PER_TONNE_KM',
+    'TRUXIFY_FRAGILE_MULTIPLIER',
+    'TRUXIFY_STACKABLE_DISCOUNT',
+    'TRUXIFY_HANDLING_FEE',
+    'TRUXIFY_PLATFORM_FEE_PCT',
+    'TRUXIFY_FUEL_COST_PCT',
+    'TRUXIFY_TOLL_PER_KM',
+  ];
+  for (const key of pricingVars) {
+    const raw = process.env[key];
+    if (raw !== undefined && raw !== null && raw !== '') {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) {
+        logger.warn(`[pricing] ${key}=${raw} is invalid — will use default at runtime`);
+      }
+    }
+  }
+
   logger.info('Config validation passed');
 }
 

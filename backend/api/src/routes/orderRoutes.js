@@ -955,11 +955,24 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
       return res.status(500).json({ error: 'Failed to verify OTP.', details: updateErr.message });
     }
 
-    // Phase 1: Execute blockchain escrow release BEFORE crediting the driver's wallet.
-    // If the blockchain call fails, the database state is NOT modified and the driver can retry.
+    // Phase 1: Outbox Pattern — update DB state to release_pending BEFORE blockchain action.
+    if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
+      const { error: pendingErr } = await supabase.from('orders').update({
+        escrow_status: 'release_pending',
+        escrow_release_error: null,
+        escrow_release_attempts: (order.escrow_release_attempts || 0) + 1,
+        escrow_release_last_attempt_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }).eq('id', orderId);
+      
+      if (pendingErr) {
+        return res.status(500).json({ error: 'Failed to update order status to release_pending.', details: pendingErr.message });
+      }
+    }
+
     let releaseTxHash = null;
     let escrowAlreadyReleased = false;
-    if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
+    if (order.escrow_status === 'funded' || order.escrow_status === 'release_pending' || order.escrow_status === 'release_failed') {
       try {
         const releaseResult = await escrowRelease(order.order_display_id);
         if (releaseResult.txHash) {
@@ -971,8 +984,14 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
         }
       } catch (releaseErr) {
         logger.error('[escrow] Blockchain release failed for order', orderId, ':', releaseErr.message);
-        return res.status(503).json({
-          error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
+        
+        await supabase.from('orders').update({
+          escrow_status: 'release_failed',
+          escrow_release_error: releaseErr.message
+        }).eq('id', orderId);
+
+        return res.status(202).json({
+          message: 'Delivery OTP verified, but blockchain release is pending reconciliation.',
           retryable: true,
         });
       }
@@ -1459,15 +1478,30 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
     const customerWallet = customerProfile?.polygon_wallet_address ?? null;
 
     const bookingId = order.escrow_booking_id || `escrow:${order.order_display_id}`;
+
+    // Outbox Pattern: Update DB to 'deposit_pending' BEFORE checking blockchain.
+    const { error: pendingErr } = await supabase.from('orders').update({
+      escrow_status: 'deposit_pending',
+      deposit_tx_hash: txHash,
+      updated_at: new Date().toISOString(),
+    }).eq('id', orderId).eq('escrow_status', 'funding');
+
+    if (pendingErr) {
+      return res.status(500).json({ error: 'Failed to record deposit intent in DB.' });
+    }
+
     const result = await recordDepositTx(bookingId, txHash, customerWallet);
 
-    if (result.error) return res.status(422).json({ error: result.error });
+    if (result.error) {
+      await supabase.from('orders').update({ escrow_status: 'funding', deposit_tx_hash: null }).eq('id', orderId);
+      return res.status(422).json({ error: result.error });
+    }
 
     const { error: updateErr } = await supabase.from('orders').update({
       escrow_status: 'funded',
       deposit_tx_hash: result.txHash,
       escrow_deposited_at: new Date().toISOString(),
-    }).eq('id', orderId).eq('escrow_status', 'funding');
+    }).eq('id', orderId).in('escrow_status', ['funding', 'deposit_pending']);
 
     if (updateErr) {
       logger.error('[confirm-deposit] DB update failed:', updateErr.message);

@@ -53,3 +53,5 @@ dependencies {
     // https://firebase.google.com/docs/android/setup#available-libraries
 }
 
+
+// Resolves #2403: feat(analytics): integrate Firebase Crashlytics and Analytics

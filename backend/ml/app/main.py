@@ -53,6 +53,26 @@ app.add_middleware(
 )
 
 
+# Input validation utilities
+import re
+
+VALID_TRUCK_TYPES = {"light_truck", "medium_truck", "heavy_truck", "trailer"}
+VALID_CARGO_TYPES = {"general", "perishable", "fragile", "hazardous", "bulk"}
+
+def validate_truck_type(truck_type: str) -> str:
+    if truck_type not in VALID_TRUCK_TYPES:
+        return "medium_truck"
+    return truck_type
+
+def validate_cargo_type(cargo_type: str) -> str:
+    if cargo_type not in VALID_CARGO_TYPES:
+        return "general"
+    return cargo_type
+
+def sanitize_location_name(name: str) -> str:
+    cleaned = re.sub(r'[<>"\'%;()&+]', '', name)
+    return cleaned.strip()[:200]
+
 # ---------------------------------------------------------------------------
 # Schemas — Demand Forecast
 # ---------------------------------------------------------------------------

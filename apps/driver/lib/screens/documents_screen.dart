@@ -815,7 +815,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                          color: TruxifyColors.accent.withOpacity(0.3),
+                          color: TruxifyColors.accent.withValues(alpha: 0.3),
                           style: BorderStyle.solid),
                     ),
                     child: Padding(

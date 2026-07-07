@@ -666,7 +666,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
-                          color: TruxifyColors.accent.withOpacity(0.25),
+                          color: TruxifyColors.accent.withValues(alpha: 0.25),
                           blurRadius: 12,
                           offset: const Offset(0, 4),
                         ),
@@ -708,7 +708,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.dmSans(
                                   fontSize: 10,
-                                  color: Colors.white.withOpacity(0.85),
+                                  color: Colors.white.withValues(alpha: 0.85),
                                 ),
                               ),
                             ],
@@ -749,7 +749,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           child: Icon(
                             Icons.close_rounded,
-                            color: Colors.white.withOpacity(0.7),
+                            color: Colors.white.withValues(alpha: 0.7),
                             size: 20,
                           ),
                         ),
@@ -817,7 +817,7 @@ class _HomeScreenState extends State<HomeScreen> {
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 18,
             offset: const Offset(0, 4),
           ),
@@ -1017,7 +1017,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   strokeWidth: 5.0,
                   color: TruxifyColors.accent,
                   borderStrokeWidth: 2.0,
-                  borderColor: Colors.white.withOpacity(0.8),
+                  borderColor: Colors.white.withValues(alpha: 0.8),
                 ),
               ],
             ),
@@ -1110,7 +1110,7 @@ class _HomeScreenState extends State<HomeScreen> {
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 18,
             offset: const Offset(0, 6),
           ),
@@ -1239,7 +1239,7 @@ class _HomeScreenState extends State<HomeScreen> {
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -1263,7 +1263,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: (_isOnline ? TruxifyColors.success : TruxifyColors.secondaryText).withOpacity(0.4),
+                          color: (_isOnline ? TruxifyColors.success : TruxifyColors.secondaryText).withValues(alpha: 0.4),
                           blurRadius: 6,
                           spreadRadius: 2,
                         ),
@@ -1479,7 +1479,7 @@ class _HomeScreenState extends State<HomeScreen> {
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 20,
             offset: const Offset(0, 4),
           ),

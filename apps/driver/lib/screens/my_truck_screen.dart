@@ -270,8 +270,8 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: isCompliant
-                          ? TruxifyColors.success.withOpacity(0.1)
-                          : TruxifyColors.error.withOpacity(0.1),
+                          ? TruxifyColors.success.withValues(alpha: 0.1)
+                          : TruxifyColors.error.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
@@ -489,7 +489,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: TruxifyColors.accent.withOpacity(0.12),
+                      color: TruxifyColors.accent.withValues(alpha: 0.12),
                       blurRadius: 8,
                       offset: const Offset(0, 2),
                     )
@@ -524,7 +524,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                       textAlign: TextAlign.center,
                       style: GoogleFonts.dmSans(
                         fontSize: 12,
-                        color: Colors.white.withOpacity(0.7),
+                        color: Colors.white.withValues(alpha: 0.7),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -556,8 +556,8 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
                             color: ticket.status.toLowerCase() == 'open'
-                                ? TruxifyColors.warning.withOpacity(0.1)
-                                : TruxifyColors.success.withOpacity(0.1),
+                                ? TruxifyColors.warning.withValues(alpha: 0.1)
+                                : TruxifyColors.success.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(

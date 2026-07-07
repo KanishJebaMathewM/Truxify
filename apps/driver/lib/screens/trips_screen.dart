@@ -974,7 +974,7 @@ class _TripsScreenState extends State<TripsScreen> {
           ),
           boxShadow: [
             BoxShadow(
-              color: TruxifyColors.accent.withOpacity(0.06),
+              color: TruxifyColors.accent.withValues(alpha: 0.06),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -1284,7 +1284,7 @@ class _MarketplaceBody extends StatelessWidget {
                 const SizedBox(height: 14),
                 Text('Could not load marketplace. Pull down to retry.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                     )),
               ],
             ),

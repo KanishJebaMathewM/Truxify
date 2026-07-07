@@ -13,9 +13,24 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { invalidateCachedProfile } from '../lib/profileCache.js';
 import { firebaseAdmin } from '../config/db.js';
+import { authLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+
+const AUTH_RATE_LIMITS = {
+  maxAttempts: 5,
+  windowMinutes: 15,
+};
+
+function getAuthRateLimitInfo(req) {
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  return {
+    ip: ip.replace(/^::ffff:/, ''),
+    window: AUTH_RATE_LIMITS.windowMinutes * 60,
+    maxHits: AUTH_RATE_LIMITS.maxAttempts,
+  };
+}
 
 /**
  * POST /api/auth/logout

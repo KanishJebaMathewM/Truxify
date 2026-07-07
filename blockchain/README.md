@@ -90,3 +90,59 @@ npx hardhat test
 pip install slither-analyzer
 slither contracts/TruxifyEscrow.sol
 ```
+
+## Contribution Guide
+
+Welcome! If you're looking to contribute to the Truxify smart contracts, here's how to set up your local development environment.
+
+### 1. Install Dependencies
+
+Ensure you have Node.js installed, then install the dependencies in the `blockchain` directory:
+
+```bash
+cd blockchain
+npm install
+```
+
+### 2. Run a Local Hardhat Node
+
+To simulate the blockchain locally for testing and development, start the Hardhat network node. This will spin up a local Ethereum network and provide you with 20 funded test accounts.
+
+```bash
+npx hardhat node
+```
+
+Leave this terminal window open.
+
+### 3. Deploy Contracts Locally
+
+Open a **new terminal window** and deploy the smart contracts to your local node. By default, Hardhat scripts will connect to the local node if you specify the `--network localhost` flag.
+
+```bash
+cd blockchain
+npx hardhat ignition deploy ignition/modules/Counter.ts --network localhost
+```
+*(Note: Replace `Counter.ts` with the appropriate escrow module if deploying the Truxify Escrow contract).*
+
+### 4. Running Tests
+
+Before submitting a Pull Request, ensure all tests pass:
+
+```bash
+npx hardhat test
+```
+
+### 5. Code Style & Formatting
+
+We use Prettier for formatting. Ensure your Solidity code is formatted before committing:
+
+```bash
+npm run format
+```
+
+### 6. Submitting a Pull Request
+
+- Fork the repository and create a new branch from `main`.
+- Write tests for any new contract functionality.
+- Ensure all tests and static analysis checks (`slither`) pass.
+- Open a Pull Request detailing your changes.

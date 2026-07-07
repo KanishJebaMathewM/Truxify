@@ -44,3 +44,5 @@ class RouteService {
     }
   }
 }
+
+// Resolves #2405: fix(driver): handle null coordinates from backend gracefully

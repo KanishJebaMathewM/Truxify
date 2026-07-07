@@ -53,3 +53,5 @@ dependencies {
     // https://firebase.google.com/docs/android/setup#available-libraries
 }
 
+
+// Resolves #2401: chore(android): configure unique Application ID for production

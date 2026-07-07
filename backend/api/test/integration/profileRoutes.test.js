@@ -105,7 +105,7 @@ describe('Profile Routes', () => {
         darkMode: false,
         isActive: true,
         polygonWalletAddress: null,
-        walletAddress: null,
+        walletAddress: null
       });
 
       expect(res.body.extra).toEqual({
@@ -162,7 +162,7 @@ describe('Profile Routes', () => {
         darkMode: true,
         isActive: true,
         polygonWalletAddress: null,
-        walletAddress: null,
+        walletAddress: null
       });
 
       expect(res.body.extra).toEqual({

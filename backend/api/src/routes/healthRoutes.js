@@ -66,11 +66,18 @@ const CRITICAL_UNHEALTHY = new Set(['failed', 'not_configured']);
 
 // GET /api/health — full dependency check; returns 503 when a critical service fails
 router.get('/', async (req, res) => {
+  const startTime = Date.now();
+  logger.info('[health] Health check invoked from ' + req.ip);
+
   const [supabaseStatus, mongoStatus, redisStatus] = await Promise.all([
     checkSupabase(),
     checkMongo(),
     checkRedis(),
   ]);
+
+  res.on('finish', () => {
+    logger.info('[health] Health check completed in ' + (Date.now() - startTime) + 'ms');
+  });
 
   const services = {
     supabase: supabaseStatus,

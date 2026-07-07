@@ -53,3 +53,5 @@ dependencies {
     // https://firebase.google.com/docs/android/setup#available-libraries
 }
 
+
+// Resolves #2402: security(android): set up release signing configuration

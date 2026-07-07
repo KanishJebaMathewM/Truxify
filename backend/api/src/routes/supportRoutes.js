@@ -463,4 +463,19 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, async (req, res) 
   }
 });
 
+// Validation helpers for support ticket inputs
+function validateTicketStatus(status) {
+  const valid = ['open', 'in_progress', 'resolved', 'closed'];
+  return valid.includes(status) ? status : null;
+}
+
+function validateCategory(category) {
+  return CATEGORY_MAP[category?.toLowerCase()] || null;
+}
+
+function sanitizeMessage(message) {
+  if (!message || typeof message !== 'string') return '';
+  return message.trim().slice(0, 1000);
+}
+
 export default router;

@@ -171,4 +171,14 @@ export const deviceLimiter = rateLimit({
   message: { error: 'Rate limit exceeded', retryAfter: 600 },
 });
 
+/**
+ * Sets custom rate limit headers on the response for client awareness.
+ * Provides remaining requests, limit, and reset timestamp.
+ */
+export function setRateLimitHeaders(res, limit, remaining, reset) {
+  res.setHeader('X-RateLimit-Limit', String(limit));
+  res.setHeader('X-RateLimit-Remaining', String(remaining));
+  res.setHeader('X-RateLimit-Reset', String(Math.ceil(reset)));
+}
+
 export const __testing = { DeferredRedisStore, isRedisReady };

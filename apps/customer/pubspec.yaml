@@ -32,6 +32,7 @@ dependencies:
   shared_preferences: ^2.5.5
   uuid: ^4.5.3
   web_socket_channel: ^3.0.0
+  local_auth: ^2.2.0
   shimmer: ^3.0.0
   url_launcher: ^6.3.1
 

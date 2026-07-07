@@ -793,7 +793,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
 // ============================================================================
 // 12. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 // ============================================================================
-router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver']), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
+router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver']), milestoneLimiter, requireIdempotency(3600), validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   const orderId = req.params.id;
   const { milestone } = req.body;
 
@@ -807,6 +807,12 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
   };
 
   if (milestone === 'Delivered') return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
+
+  const lockKey = `milestone_lock:${orderId}`;
+  const lockValue = await acquireLock(lockKey, 10000);
+  if (!lockValue) {
+    return res.status(409).json({ error: 'Another milestone update is in progress for this order. Please try again.' });
+  }
 
   try {
     const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
@@ -885,6 +891,8 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
     res.json(response);
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    await releaseLock(lockKey, lockValue);
   }
 });
 

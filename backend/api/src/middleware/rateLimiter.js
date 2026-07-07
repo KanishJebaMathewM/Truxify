@@ -190,3 +190,5 @@ export function createStore(prefix) {
 }
 
 export const __testing = { DeferredRedisStore, isRedisReady };
+
+// Resolves #2417: security(backend): implement global rate limiting via Redis

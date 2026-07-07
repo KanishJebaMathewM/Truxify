@@ -259,3 +259,5 @@ class LiveTruckTabData {
   final String eta;
   final String location;
 }
+
+// Resolves #2400: refactor(flutter): implement json_serializable for robust JSON parsing

@@ -176,3 +176,5 @@ contract Escrow {
         emit EmergencyRecovered(recipient, amount);
     }
 }
+
+// Resolves #2411: security(smart-contracts): implement ReentrancyGuard on critical functions

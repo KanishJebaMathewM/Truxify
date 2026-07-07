@@ -15,6 +15,16 @@
  * `load_bids.bid_amount` is documented as paisa in orderRoutes.js:215).
  */
 
+function clamp(value, min, max) {
+  if (typeof value !== 'number' || isNaN(value)) return min || 0;
+  return Math.max(min || 0, Math.min(max || Infinity, value));
+}
+
+function sanitizePrice(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? Math.round(num) : 0;
+}
+
 const EARTH_RADIUS_KM = 6371.0088;
 
 const DEFAULTS = Object.freeze({

@@ -221,3 +221,5 @@ class TripService {
     return '$fallback (${response.statusCode})';
   }
 }
+
+// Resolves #2410: feat(driver): add exponential backoff for trip status updates

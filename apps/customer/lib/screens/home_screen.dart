@@ -26,6 +26,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final CacheManager _cacheManager = CacheManager();
   bool _isOffline = false;
   String _locationLabel = 'Surat, Gujarat';
+  String? _errorMessage;
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -33,21 +35,41 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadLocation();
   }
 
-  Future<void> _loadLocation() async {
-    final connectivity = await Connectivity().checkConnectivity();
-    final hasNetwork = connectivity.isNotEmpty && !connectivity.contains(ConnectivityResult.none);
-    await _cacheManager.open();
-    final existingLocation = await _cacheManager.getLastLocation();
-    if (existingLocation == null) {
-      await _cacheManager.cacheLastLocation(21.1702, 72.8311);
-    }
-    final cachedLocation = await _cacheManager.getLastLocation();
-    if (!mounted) return;
+  String _sanitizeLocation(dynamic value) {
+    if (value == null) return '0.000';
+    if (value is double) return value.toStringAsFixed(3);
+    if (value is int) return value.toStringAsFixed(3);
+    return (double.tryParse(value.toString()) ?? 0.0).toStringAsFixed(3);
+  }
 
-    setState(() {
-      _isOffline = !hasNetwork;
-      if (cachedLocation != null) {
-        _locationLabel = 'Last truck location • ${cachedLocation['latitude']?.toStringAsFixed(3)}, ${cachedLocation['longitude']?.toStringAsFixed(3)}';
+  Future<void> _loadLocation() async {
+    try {
+      final connectivity = await Connectivity().checkConnectivity();
+      final hasNetwork = connectivity.isNotEmpty && !connectivity.contains(ConnectivityResult.none);
+      await _cacheManager.open();
+      final existingLocation = await _cacheManager.getLastLocation();
+      if (existingLocation == null) {
+        await _cacheManager.cacheLastLocation(21.1702, 72.8311);
+      }
+      final cachedLocation = await _cacheManager.getLastLocation();
+      if (!mounted) return;
+
+      setState(() {
+        _isOffline = !hasNetwork;
+        _isLoading = false;
+        if (cachedLocation != null) {
+          final lat = _sanitizeLocation(cachedLocation['latitude']);
+          final lng = _sanitizeLocation(cachedLocation['longitude']);
+          _locationLabel = 'Last truck location ? $lat, $lng';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Failed to load location: ${e.toString()}';
+      });
+    }
       }
     });
   }

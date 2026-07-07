@@ -3,6 +3,16 @@ import logger from '../middleware/logger.js';
 
 const OTP_TTL_SECONDS = 300;
 const OTP_LENGTH = 4;
+const OTP_RATE_LIMIT_WINDOW = 60;
+const OTP_MAX_PER_WINDOW = 3;
+
+async function checkOtpRateLimit(phone) {
+  if (!redisClient) return true;
+  const key = 'otp:rate:' + phone;
+  const count = await redisClient.incr(key);
+  if (count === 1) await redisClient.expire(key, OTP_RATE_LIMIT_WINDOW);
+  return count <= OTP_MAX_PER_WINDOW;
+}
 
 export async function generateAndStoreOtp(phone) {
   if (!redisClient) {

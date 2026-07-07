@@ -113,6 +113,7 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
     }, REPUTATION_RETRY_MAX, REPUTATION_RETRY_DELAY_MS);
   } catch (err) {
     logger.error(`[reputation] increaseReputation failed for driver ${driverWalletAddress} after ${REPUTATION_RETRY_MAX} retries: ${err.message}`);
+    throw err;
   }
 }
 

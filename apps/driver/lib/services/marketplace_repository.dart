@@ -200,6 +200,8 @@ class MarketplaceRepository {
       ).subscribe();
     } catch (e, st) {
       developer.log('Supabase/Realtime not available', error: e, stackTrace: st);
+      controller.close();
+      return const Stream.empty();
     }
 
     controller.onCancel = () {

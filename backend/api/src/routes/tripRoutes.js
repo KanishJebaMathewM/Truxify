@@ -4,8 +4,10 @@ import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
+import { startTimer, endTimer } from '../lib/routeTiming.js';
 
 const router = express.Router();
+const routeTimer = startTimer('tripRoutes');
 
 // ============================================================================
 // 🛡️ OFFLINE SYNC VALIDATION SCHEMAS (ISSUE #362)
@@ -297,4 +299,5 @@ router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
   }
 });
 
+endTimer(routeTimer);
 export default router;

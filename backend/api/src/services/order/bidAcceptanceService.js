@@ -87,7 +87,8 @@ export class BidAcceptanceService {
       escrow_status: 'funding',
     }).eq('id', orderId);
     if (escrowUpdateErr) {
-      this.logger?.warn?.('[escrow] Failed to update escrow booking reference:', escrowUpdateErr.message);
+      this.logger?.error?.('[escrow] Failed to update escrow booking reference:', escrowUpdateErr.message);
+      throw new DomainError(500, { error: 'Failed to initialize escrow securely. Please try again.' });
     }
 
     // Execute RPC to accept bid

@@ -104,6 +104,8 @@ describe('Profile Routes', () => {
         language: 'en',
         darkMode: false,
         isActive: true,
+        polygonWalletAddress: null,
+        walletAddress: null,
       });
 
       expect(res.body.extra).toEqual({
@@ -154,11 +156,13 @@ describe('Profile Routes', () => {
         fullName: 'John Driver',
         phone: '+919999999999',
         email: 'john@example.com',
-        companyName: null,
+        companyName: "",
         avatarUrl: 'https://r2.com/driver.jpg',
         language: 'hi',
         darkMode: true,
         isActive: true,
+        polygonWalletAddress: null,
+        walletAddress: null,
       });
 
       expect(res.body.extra).toEqual({

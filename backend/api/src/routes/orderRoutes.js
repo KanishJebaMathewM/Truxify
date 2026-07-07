@@ -45,8 +45,10 @@ import { predictDemand, predictPrice } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
+import { startTimer, endTimer } from '../lib/routeTiming.js';
 
 const router = express.Router();
+const routeTimer = startTimer('orderRoutes');
 
 // ── OTP brute-force protection (Redis + In-Memory Fallback) ────────────────────
 const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
@@ -1696,6 +1698,7 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRol
   }
 });
 
+endTimer(routeTimer);
 export default router;
 
 // Resolves #2056: Sub-controllers for order processing

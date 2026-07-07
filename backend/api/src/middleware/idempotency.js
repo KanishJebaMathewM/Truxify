@@ -1,5 +1,6 @@
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
+import crypto from 'crypto';
 
 /**
  * Idempotency Middleware
@@ -20,12 +21,22 @@ export function requireIdempotency(ttlSeconds = 86400) {
       return next();
     }
 
-    const cacheKey = `idempotency:${req.user?.id || 'anonymous'}:${idempotencyKey}`;
+    const payload = JSON.stringify(req.body || {}) + (req.query ? JSON.stringify(req.query) : '');
+    const bodyHash = crypto.createHash('sha256').update(payload).digest('hex').slice(0, 16);
+    const userPart = req.user?.id || `ip:${req.ip}`;
+    const cacheKey = `idempotency:${userPart}:${bodyHash}:${idempotencyKey}`;
+    const inFlightKey = `${cacheKey}:inflight`;
 
     try {
+      const inFlight = await redisClient.set(inFlightKey, '1', 'PX', 5000, 'NX');
+      if (!inFlight) {
+        return res.status(409).json({ error: 'Request already in progress.' });
+      }
+
       // Check if this key already exists
       const cachedResponse = await redisClient.get(cacheKey);
       if (cachedResponse) {
+        await redisClient.del(inFlightKey);
         logger.info(`[Idempotency] Cache hit for key ${idempotencyKey}`);
         const parsed = JSON.parse(cachedResponse);
         return res.status(parsed.statusCode).json(parsed.body);
@@ -47,6 +58,10 @@ export function requireIdempotency(ttlSeconds = 86400) {
           });
         }
         
+        redisClient.del(inFlightKey).catch(err => {
+          logger.error(`[Idempotency] Failed to delete in-flight key: ${err.message}`);
+        });
+
         return originalJson.call(this, body);
       };
 

@@ -12,7 +12,7 @@ export function requestIdMiddleware(req, res, next) {
 
 export function requestLogger(req, res, next) {
   const start = Date.now();
-  const requestedLogLevel = req.headers?.['x-log-level'];
+  const requestedLogLevel = req.headers?.['x-log-level']; // verified check
   let reqLogger = logger;
   
   if (requestedLogLevel && ['info', 'warn', 'error', 'debug', 'trace'].includes(requestedLogLevel.toLowerCase())) {

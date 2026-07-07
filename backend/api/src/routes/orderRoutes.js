@@ -38,6 +38,16 @@ import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
+// Request input validation helper for order endpoints
+function validateOrderInput(body) {
+  const errors = [];
+  if (!body.customer_id) errors.push('customer_id is required');
+  if (!body.origin) errors.push('origin is required');
+  if (!body.destination) errors.push('destination is required');
+  if (!body.goods_type) errors.push('goods_type is required');
+  return errors.length > 0 ? { valid: false, errors } : { valid: true };
+}
+
 // ── OTP brute-force protection (Redis + In-Memory Fallback) ────────────────────
 const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
 const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);

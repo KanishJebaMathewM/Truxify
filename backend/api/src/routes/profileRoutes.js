@@ -14,6 +14,15 @@ import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
 const router = express.Router();
 
+// Cache control middleware for profile endpoints
+function profileCacheControl(req, res, next) {
+  if (req.method === 'GET') {
+    res.setHeader('Cache-Control', 'private, max-age=30');
+    res.setHeader('Vary', 'Authorization');
+  }
+  next();
+}
+
 // GET PROFILE
 router.get('/', authenticate, userLimiter, async (req, res) => {
   try {

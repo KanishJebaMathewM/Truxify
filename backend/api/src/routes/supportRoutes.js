@@ -254,7 +254,7 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
 // ============================================================================
 // 5. GET SINGLE SUPPORT TICKET (AUTHENTICATED USER - OWNER)
 // ============================================================================
-router.get('/tickets/:id', authenticate, userLimiter, async (req, res) => {
+router.get('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const ticketId = req.params.id;
 
   try {
@@ -454,7 +454,7 @@ router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), 
  * @returns {object} 409 - Cannot comment on a closed ticket
  * @returns {object} 500 - Internal server error
  */
-router.post('/tickets/:id/comments', authenticate, userLimiter, validateBody(createTicketCommentSchema), async (req, res) => {
+router.post('/tickets/:id/comments', authenticate, userLimiter, validateParams(uuidParamSchema), validateBody(createTicketCommentSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { message } = req.body;
 

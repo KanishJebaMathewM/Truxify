@@ -177,6 +177,13 @@ app.use(sentryErrorHandler());
 
 // Error handling middleware
 app.use((err, req, res, next) => {
+  if (err && err.name === 'MulterError') {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    return res.status(status).json({
+      error: `File upload error: ${err.message}`,
+      code: err.code
+    });
+  }
   logger.error({ requestId: req.requestId, err }, 'Unhandled express exception');
   res.status(500).json({ error: 'Critical Internal Server Error.' });
 });

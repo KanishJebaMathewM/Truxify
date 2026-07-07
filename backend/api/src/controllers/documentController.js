@@ -79,6 +79,9 @@ export async function uploadDriverDocument(req, res) {
 
     if (insertError) {
       logger.error('[DocumentController] Failed to record document metadata:', insertError.message);
+      await supabase.storage.from('driver-documents').remove([storagePath]).catch((storageCleanErr) => {
+        logger.error('[DocumentController] Failed to clean up document storage path:', storageCleanErr.message);
+      });
       return res.status(500).json({ error: 'Failed to store document' });
     }
 

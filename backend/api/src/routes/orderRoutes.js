@@ -57,6 +57,22 @@ import logger from '../middleware/logger.js';
 const router = express.Router();
 const orderNotificationService = new OrderNotificationService();
 
+// Request input validation helper for order endpoints
+function validateOrderInput(body) {
+  const errors = [];
+  if (!body.customer_id) errors.push('customer_id is required');
+  if (!body.origin) errors.push('origin is required');
+  if (!body.destination) errors.push('destination is required');
+  if (!body.goods_type) errors.push('goods_type is required');
+  return errors.length > 0 ? { valid: false, errors } : { valid: true };
+}
+
+// ── OTP brute-force protection (Redis + In-Memory Fallback) ────────────────────
+const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
+const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
+const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
+const IN_MEMORY_OTP_MAP_MAX_SIZE = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || '10000', 10);
+const DELIVERY_OTP_READY_STATUSES = new Set(['arriving']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Rate limiter for the verify-delivery endpoint
@@ -112,7 +128,6 @@ const telemetryLimiter = rateLimit({
 const resendOtpLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
-  keyGenerator: (req) => req.user?.id || 'unauthenticated',
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id || 'unknown',
@@ -124,7 +139,6 @@ const resendOtpLimiter = rateLimit({
 const changeDropLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
-  keyGenerator: (req) => req.user?.id || 'unauthenticated',
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id || 'unknown',
@@ -582,7 +596,7 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
       return res.status(409).json({ error: 'A rating has already been submitted for this order.' });
     }
 
-    const { error: rpcErr } = await supabase.rpc('submit_rating_tx', {
+    const { data: ratingData, error: rpcErr } = await supabase.rpc('submit_rating_tx', {
       p_order_display_id: order.order_display_id,
       p_customer_id: req.user.id,
       p_driver_id: order.driver_id,
@@ -616,7 +630,7 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
           failed_at: new Date().toISOString(),
           retry_count: 0,
           last_error: repErr.message,
-        }).then().catch(() => {});
+        }).catch((dbErr) => logger.error('[reputation] Failed to log failure:', dbErr.message));
       });
     } else {
       logger.warn(

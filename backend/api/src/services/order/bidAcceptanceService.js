@@ -19,7 +19,7 @@ export class BidAcceptanceService {
   }
 
   async acceptBid({ orderId, bidId, customerId }) {
-    const { data: order } = await this.supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
+    const { data: order } = await this.supabase.from('orders').select('order_display_id, customer_id, version').eq('id', orderId).maybeSingle();
     if (!order || order.customer_id !== customerId) {
       throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
     }
@@ -102,9 +102,12 @@ export class BidAcceptanceService {
       p_truck_number: truckInfo?.number_plate || 'N/A',
       p_bid_amount: bid.bid_amount,
       p_order_display_id: order.order_display_id,
+      p_expected_version: order.version || 1,
     });
 
     if (rpcErr) {
+      const isConflict = ['BID_NOT_PENDING', 'LOAD_NOT_AVAILABLE', 'ORDER_NOT_PENDING', 'OPTIMISTIC_LOCK_FAIL'].some(e => rpcErr.message.includes(e));
+      
       // Compensating transaction: refund the escrow since RPC failed
       if (bookingId) {
         try {
@@ -122,6 +125,13 @@ export class BidAcceptanceService {
       if (revertErr) {
         this.logger?.error?.('[escrow] Failed to revert escrow status after RPC failure:', revertErr.message);
       }
+      
+      if (isConflict) {
+        throw new DomainError(409, {
+          error: 'Another bid acceptance is in progress for this order. Please try again.',
+        });
+      }
+
       throw new DomainError(500, {
         error: 'Failed to accept bid atomically.',
         details: rpcErr.message,

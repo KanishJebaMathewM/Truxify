@@ -29,13 +29,12 @@ import 'destination_picker_screen.dart';
 import '../widgets/pulsing_location_dot.dart';
 
 class HomeScreen extends StatefulWidget {
-  HomeScreen({
+  const HomeScreen({
     super.key,
-    MarketplaceRepository? marketplaceRepo,
-    DriverEarningsService? earningsService,
+    required this.marketplaceRepo,
+    required this.earningsService,
     this.mockLocationText,
-  }) : marketplaceRepo = marketplaceRepo ?? MarketplaceRepository(),
-       earningsService = earningsService ?? DriverEarningsService();
+  });
 
   final MarketplaceRepository marketplaceRepo;
   final DriverEarningsService earningsService;

@@ -40,14 +40,6 @@ async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-# ── Health Check ─────────────────────────────────────────────────────────────
-# Added for Issue #<number>: Node.js backend calls this before routing
-# any prediction request to verify the ML service is up.
-
-import time
-
-# Track when the service started (for uptime reporting)
-_SERVICE_START_TIME = time.time()
 
 app = FastAPI(
     title="Truxify ML Engine",
@@ -57,34 +49,6 @@ app = FastAPI(
     redoc_url="/redoc", 
 )
 
-@app.get(
-    "/health",
-    tags=["Health"],
-    summary="ML service health check",
-    response_description="Service status and loaded model count",
-)
-async def health_check():
-    """
-    Returns the current health status of the ML engine.
-
-    The Node.js API gateway calls this endpoint before routing
-    prediction requests. If this returns non-200, the gateway
-    returns a 503 to the Flutter app instead of a failed prediction.
-
-    Returns:
-        status: "ok" if service is healthy
-        uptime_seconds: time since service started
-        models_loaded: number of ML models currently in memory
-    """
-    return {
-        "status": "ok",
-        "uptime_seconds": round(time.time() - _SERVICE_START_TIME, 2),
-        # Replace `loaded_models` with your actual variable that holds loaded models
-        # If you don't have one, use a hardcoded count for now
-        "models_loaded": len(loaded_models) if "loaded_models" in dir() else "unknown",
-        "version": "1.0.0",
-    }
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 # CORS: restrict to known origins — no wildcard "*" to prevent unauthorized cross-origin access

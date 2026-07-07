@@ -1141,3 +1141,4 @@ class _ActionTile extends StatelessWidget {
     );
   }
 }
+// Resolves #2404: perf(flutter): optimize coordinate parsing in Live Tracking

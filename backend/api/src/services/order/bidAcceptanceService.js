@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { acquireLock, releaseLock } from '../../lib/redisLock.js';
 
 export class DomainError extends Error {
   constructor(status, payload) {
@@ -19,26 +20,33 @@ export class BidAcceptanceService {
   }
 
   async acceptBid({ orderId, bidId, customerId }) {
-    const { data: order } = await this.supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
-    if (!order || order.customer_id !== customerId) {
-      throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
+    const lockKey = `bid_accept_lock:${orderId}`;
+    const lockValue = await acquireLock(lockKey, 10000);
+    if (!lockValue) {
+      throw new DomainError(409, { error: 'Another bid acceptance is in progress for this order. Please try again.' });
     }
 
-    const { data: bid } = await this.supabase.from('load_bids').select('*').eq('id', bidId).maybeSingle();
-    if (!bid || bid.status !== 'pending') {
-      throw new DomainError(404, { error: 'Bid is not active or not found.' });
-    }
+    try {
+      const { data: order } = await this.supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
+      if (!order || order.customer_id !== customerId) {
+        throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
+      }
 
-    const { data: loadOffer, error: loadOfferErr } = await this.supabase.from('load_offers').select('id').eq('order_display_id', order.order_display_id).maybeSingle();
-    if (loadOfferErr) {
-      throw new DomainError(500, { error: 'Failed to verify bid ownership.', details: loadOfferErr.message });
-    }
-    if (!loadOffer) {
-      throw new DomainError(404, { error: 'Load offer for this order was not found.' });
-    }
-    if (bid.load_id !== loadOffer.id) {
-      throw new DomainError(403, { error: 'Access Denied: Bid does not belong to this order.' });
-    }
+      const { data: bid } = await this.supabase.from('load_bids').select('*').eq('id', bidId).maybeSingle();
+      if (!bid || bid.status !== 'pending') {
+        throw new DomainError(409, { error: 'Bid is no longer active or already accepted.' });
+      }
+
+      const { data: loadOffer, error: loadOfferErr } = await this.supabase.from('load_offers').select('id').eq('order_display_id', order.order_display_id).maybeSingle();
+      if (loadOfferErr) {
+        throw new DomainError(500, { error: 'Failed to verify bid ownership.', details: loadOfferErr.message });
+      }
+      if (!loadOffer) {
+        throw new DomainError(404, { error: 'Load offer for this order was not found.' });
+      }
+      if (bid.load_id !== loadOffer.id) {
+        throw new DomainError(403, { error: 'Access Denied: Bid does not belong to this order.' });
+      }
 
     const [driverDetailsResult, customerProfileResult] = await Promise.all([
       this.supabase.from('driver_details').select('polygon_wallet_address, rating, truck_id').eq('user_id', bid.driver_id).maybeSingle(),
@@ -105,6 +113,14 @@ export class BidAcceptanceService {
     });
 
     if (rpcErr) {
+      const isAlreadyAssigned =
+        rpcErr.message === 'OPTIMISTIC_LOCK_FAIL' ||
+        /already (assigned|accepted)/i.test(rpcErr.message);
+      if (isAlreadyAssigned) {
+        // Release lock before throwing so retries can proceed
+        await releaseLock(lockKey, lockValue);
+        throw new DomainError(409, { error: 'Load already accepted by another driver.' });
+      }
       // Compensating transaction: refund the escrow since RPC failed
       if (bookingId) {
         try {
@@ -158,5 +174,7 @@ export class BidAcceptanceService {
         depositTx,
       },
     };
+  } finally {
+    await releaseLock(lockKey, lockValue);
   }
 }

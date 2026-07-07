@@ -58,6 +58,14 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const inMemoryOtpFailedAttempts = new Map();
 
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  buildDepositTxFn: buildDepositTx,
+  recordDepositTxFn: recordDepositTx,
+  escrowRefundFn: escrowRefund,
+  logger,
+});
+
 function isOtpExpired(otpGeneratedAt) {
   if (!otpGeneratedAt) return true;
   const elapsed = Date.now() - new Date(otpGeneratedAt).getTime();

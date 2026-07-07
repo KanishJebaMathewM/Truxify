@@ -100,7 +100,10 @@ def predict_demand(features: List[float]) -> Optional[float]:
 
     loaded = load_model(MODEL_NAME)
     if loaded is None:
-        return None
+        train_demand_forecast_model()
+        loaded = load_model(MODEL_NAME)
+        if loaded is None:
+            return None
 
     model, scaler = loaded
     X = np.array(features).reshape(1, -1)

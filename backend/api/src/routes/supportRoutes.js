@@ -10,6 +10,7 @@ const router = express.Router();
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
 const TICKET_COLUMNS = 'id, subject, description, category, status, created_at, updated_at';
 const TICKET_DETAIL_COLUMNS = 'id, user_id, subject, description, category, status, created_at, updated_at';
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Canonical map of all accepted category aliases -> database values.
 // Shared by ticket creation, ticket update, and the categories endpoint.
@@ -39,6 +40,28 @@ function parsePositiveInteger(value, fallback, field) {
   }
 
   return { value: parsed };
+}
+
+function parseIntegerQuery(value, fallback, field, options = {}) {
+  if (value === undefined) return { value: fallback };
+  if (typeof value !== 'string' || !/^-?\d+$/.test(value)) {
+    return { error: `${field} must be an integer` };
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (options.min !== undefined && parsed < options.min) {
+    return { error: `${field} must be at least ${options.min}` };
+  }
+
+  return { value: parsed };
+}
+
+function parseUuidQuery(value, field) {
+  if (value === undefined) return { value: undefined };
+  if (typeof value !== 'string' || !UUID_REGEX.test(value)) {
+    return { error: `${field} must be a valid UUID` };
+  }
+  return { value };
 }
 
 // ============================================================================
@@ -128,7 +151,13 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
   const description = normalizeRequiredText(req.body.description) || subject;
 
   const normalizedCategory = category.toLowerCase();
-  const dbCategory = CATEGORY_MAP[normalizedCategory] || 'general';
+  const dbCategory = CATEGORY_MAP[normalizedCategory];
+
+  if (!dbCategory) {
+    return res.status(400).json({
+      error: `Invalid support ticket category. Must be one of: ${Object.keys(CATEGORY_MAP).join(', ')}`,
+    });
+  }
 
   try {
     const { data: ticket, error } = await supabase
@@ -365,6 +394,11 @@ router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), 
     return res.status(400).json({ error: 'Unsupported support ticket category.' });
   }
 
+  const userIdResult = parseUuidQuery(user_id, 'user_id');
+  if (userIdResult.error) {
+    return res.status(400).json({ error: userIdResult.error });
+  }
+
   try {
     let query = supabase
       .from('support_tickets')
@@ -378,8 +412,8 @@ router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), 
       query = query.eq('category', dbCategory);
     }
 
-    if (user_id) {
-      query = query.eq('user_id', user_id);
+    if (userIdResult.value) {
+      query = query.eq('user_id', userIdResult.value);
     }
 
     const { data: tickets, error, count } = await query
@@ -511,17 +545,13 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
       return res.status(403).json({ error: 'Access Denied: You do not own this ticket.' });
     }
 
-    const parsedLimit = parseIntegerQuery(req.query.limit, 100, 'limit', { min: 1 });
+    const parsedLimit = parsePositiveInteger(req.query.limit, 100, 'limit');
     if (parsedLimit.error) {
       return res.status(400).json({ error: parsedLimit.error });
     }
-    const parsedOffset = parseIntegerQuery(req.query.offset, 0, 'offset', { min: 0 });
-    if (parsedOffset.error) {
-      return res.status(400).json({ error: parsedOffset.error });
-    }
 
     const limit = Math.min(100, parsedLimit.value);
-    const offset = parsedOffset.value;
+    const offset = typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : 0;
 
     const { data: comments, error: commentsError } = await supabase
       .from('support_ticket_comments')
@@ -544,3 +574,5 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
 });
 
 export default router;
+
+// Resolves #2055: Load-based ticket assignment

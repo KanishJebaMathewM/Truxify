@@ -298,3 +298,149 @@ test('run function removes merge conflicts label if PR is mergeable', async () =
 
   assert.equal(removeLabelCalled, true);
 });
+
+test('run function detects GSSoC program signal from linked issue title/body', async () => {
+  let addedLabels = [];
+  const mockGithub = {
+    paginate: async (fn, params) => {
+      if (fn === mockGithub.rest.issues.listLabelsForRepo) return [{ name: 'gssoc:approved' }];
+      if (fn === mockGithub.rest.pulls.listFiles) return [];
+      if (fn === mockGithub.rest.issues.listComments) return [];
+      return [];
+    },
+    rest: {
+      pulls: {
+        get: async () => ({
+          data: {
+            number: 320,
+            title: 'fix: resolve auth issue',
+            body: 'Fixes #105',
+            labels: [],
+            mergeable: true
+          }
+        }),
+        listFiles: () => {}
+      },
+      issues: {
+        get: async ({ issue_number }) => {
+          if (issue_number === 105) {
+            return {
+              data: {
+                number: 105,
+                title: '[GSSOC 2026] Fix auth token error',
+                body: 'This issue is for GSSoC contributors.',
+                labels: [{ name: 'type:bug' }]
+              }
+            };
+          }
+          return { data: { labels: [] } };
+        },
+        listLabelsForRepo: () => {},
+        listComments: () => {},
+        createLabel: async () => {},
+        createComment: async () => {},
+        addLabels: async ({ labels }) => {
+          addedLabels = labels;
+        }
+      }
+    }
+  };
+
+  const mockContext = {
+    payload: {
+      pull_request: {
+        number: 320,
+        labels: []
+      }
+    },
+    repo: { owner: 'owner', repo: 'repo' }
+  };
+
+  const mockCore = {
+    info: () => {},
+    warning: () => {}
+  };
+
+  await run({
+    github: mockGithub,
+    context: mockContext,
+    core: mockCore,
+    rulesPath: undefined,
+    dryRun: false
+  });
+
+  assert.equal(addedLabels.includes('gssoc:approved'), true);
+});
+
+test('run function detects ECSoC program signal from linked issue title/body', async () => {
+  let addedLabels = [];
+  const mockGithub = {
+    paginate: async (fn, params) => {
+      if (fn === mockGithub.rest.issues.listLabelsForRepo) return [{ name: 'ECSoC26' }];
+      if (fn === mockGithub.rest.pulls.listFiles) return [];
+      if (fn === mockGithub.rest.issues.listComments) return [];
+      return [];
+    },
+    rest: {
+      pulls: {
+        get: async () => ({
+          data: {
+            number: 400,
+            title: 'feat: add customer screen',
+            body: 'Closes #200',
+            labels: [],
+            mergeable: true
+          }
+        }),
+        listFiles: () => {}
+      },
+      issues: {
+        get: async ({ issue_number }) => {
+          if (issue_number === 200) {
+            return {
+              data: {
+                number: 200,
+                title: 'feat: customer dashboard',
+                body: 'Task under ECSoC 2026 program.',
+                labels: []
+              }
+            };
+          }
+          return { data: { labels: [] } };
+        },
+        listLabelsForRepo: () => {},
+        listComments: () => {},
+        createLabel: async () => {},
+        createComment: async () => {},
+        addLabels: async ({ labels }) => {
+          addedLabels = labels;
+        }
+      }
+    }
+  };
+
+  const mockContext = {
+    payload: {
+      pull_request: {
+        number: 400,
+        labels: []
+      }
+    },
+    repo: { owner: 'owner', repo: 'repo' }
+  };
+
+  const mockCore = {
+    info: () => {},
+    warning: () => {}
+  };
+
+  await run({
+    github: mockGithub,
+    context: mockContext,
+    core: mockCore,
+    rulesPath: undefined,
+    dryRun: false
+  });
+
+  assert.equal(addedLabels.includes('ECSoC26'), true);
+});

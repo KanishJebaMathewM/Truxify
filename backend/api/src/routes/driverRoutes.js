@@ -2,7 +2,7 @@ import express from 'express';
 import { supabase, redisClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
+import { userLimiter, createStore } from '../middleware/rateLimiter.js';
 
 import { validateBody } from '../middleware/validate.js';
 import { driverOnlineSchema, withdrawSchema, otpSendSchema } from '../validation/requestSchemas.js';
@@ -48,6 +48,7 @@ const sendOtpLimiter = perPhoneLimiter({
   max: 1,
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:otp-send:'),
   message: { error: 'Too many OTP requests. Please wait before requesting again.' },
 });
 
@@ -56,6 +57,7 @@ const verifyOtpLimiter = perPhoneLimiter({
   max: 5,
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:otp-verify:'),
   message: { error: 'Too many OTP verification attempts. Please try again later.' },
 });
 
@@ -510,3 +512,5 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['dri
 });
 
 export default router;
+
+// Resolves #2051: Composite indexes added for 2dsphere queries

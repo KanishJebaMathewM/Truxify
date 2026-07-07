@@ -1,0 +1,1940 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Truxify ML Engine",
+    "description": "ML prediction service for load matching, pricing, ETA, and route optimization",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "description": "Health check endpoint for Docker container orchestration.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/": {
+      "get": {
+        "summary": "Root",
+        "operationId": "root__get",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/predict/demand": {
+      "post": {
+        "summary": "Predict Demand Endpoint",
+        "operationId": "predict_demand_endpoint_predict_demand_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DemandForecastInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemandForecastOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/predict/price": {
+      "post": {
+        "summary": "Predict Price Endpoint",
+        "operationId": "predict_price_endpoint_predict_price_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PricePredictInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricePredictOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/predict/eta": {
+      "post": {
+        "summary": "Predict Eta Endpoint",
+        "operationId": "predict_eta_endpoint_predict_eta_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ETAPredictInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ETAPredictOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/match/bilateral": {
+      "post": {
+        "summary": "Bilateral Match Endpoint",
+        "operationId": "bilateral_match_endpoint_match_bilateral_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BilateralMatchInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BilateralMatchOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/predict/driver-profit": {
+      "post": {
+        "summary": "Predict Driver Profit Endpoint",
+        "operationId": "predict_driver_profit_endpoint_predict_driver_profit_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DriverProfitInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriverProfitOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/optimise/packing": {
+      "post": {
+        "summary": "Packing Endpoint",
+        "operationId": "packing_endpoint_optimise_packing_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PackingInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PackingOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recommend/loads": {
+      "post": {
+        "summary": "Recommend Loads Endpoint",
+        "operationId": "recommend_loads_endpoint_recommend_loads_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendLoadsInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/recommend/trucks": {
+      "post": {
+        "summary": "Recommend Trucks Endpoint",
+        "operationId": "recommend_trucks_endpoint_recommend_trucks_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendTrucksInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/score/trust": {
+      "post": {
+        "summary": "Trust Score Endpoint",
+        "operationId": "trust_score_endpoint_score_trust_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustScoreInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrustScoreOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/match/deadhead": {
+      "post": {
+        "summary": "Deadhead Endpoint",
+        "operationId": "deadhead_endpoint_match_deadhead_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeadheadInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeadheadOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/optimise/mid-trip": {
+      "post": {
+        "summary": "Mid Trip Endpoint",
+        "operationId": "mid_trip_endpoint_optimise_mid_trip_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MidTripInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MidTripOutput"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/train/demand": {
+      "post": {
+        "summary": "Train Demand Endpoint",
+        "operationId": "train_demand_endpoint_train_demand_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/train/price": {
+      "post": {
+        "summary": "Train Price Endpoint",
+        "operationId": "train_price_endpoint_train_price_post",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models": {
+      "get": {
+        "summary": "List Models",
+        "operationId": "list_models_models_get",
+        "parameters": [
+          {
+            "name": "X-API-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AvailableCapacity": {
+        "properties": {
+          "weight_kg": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Weight Kg"
+          },
+          "length_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Length M"
+          },
+          "width_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Width M"
+          },
+          "height_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Height M"
+          }
+        },
+        "type": "object",
+        "required": [
+          "weight_kg",
+          "length_m",
+          "width_m",
+          "height_m"
+        ],
+        "title": "AvailableCapacity"
+      },
+      "AvailableLoad": {
+        "properties": {
+          "load_id": {
+            "type": "string",
+            "title": "Load Id"
+          },
+          "origin_lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Origin Lat"
+          },
+          "origin_lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Origin Lng"
+          },
+          "dest_lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Dest Lat"
+          },
+          "dest_lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Dest Lng"
+          },
+          "weight_kg": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Weight Kg"
+          },
+          "length_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Length M"
+          },
+          "width_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Width M"
+          },
+          "height_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Height M"
+          },
+          "pickup_deadline": {
+            "type": "string",
+            "title": "Pickup Deadline",
+            "description": "ISO datetime string"
+          },
+          "payment_inr": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Payment Inr"
+          }
+        },
+        "type": "object",
+        "required": [
+          "load_id",
+          "origin_lat",
+          "origin_lng",
+          "dest_lat",
+          "dest_lng",
+          "weight_kg",
+          "length_m",
+          "width_m",
+          "height_m",
+          "pickup_deadline",
+          "payment_inr"
+        ],
+        "title": "AvailableLoad"
+      },
+      "BilateralMatchInput": {
+        "properties": {
+          "loads": {
+            "items": {
+              "$ref": "#/components/schemas/LoadItem"
+            },
+            "type": "array",
+            "title": "Loads"
+          },
+          "drivers": {
+            "items": {
+              "$ref": "#/components/schemas/DriverItem"
+            },
+            "type": "array",
+            "title": "Drivers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loads",
+          "drivers"
+        ],
+        "title": "BilateralMatchInput"
+      },
+      "BilateralMatchOutput": {
+        "properties": {
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/MatchAssignment"
+            },
+            "type": "array",
+            "title": "Assignments"
+          },
+          "unmatched_loads": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Unmatched Loads"
+          },
+          "unmatched_drivers": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Unmatched Drivers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "assignments",
+          "unmatched_loads",
+          "unmatched_drivers"
+        ],
+        "title": "BilateralMatchOutput"
+      },
+      "DeadheadInput": {
+        "properties": {
+          "driver_destination": {
+            "$ref": "#/components/schemas/LocationPoint"
+          },
+          "truck_specs": {
+            "$ref": "#/components/schemas/TruckSpecs"
+          },
+          "arrival_time": {
+            "type": "string",
+            "title": "Arrival Time",
+            "description": "ISO datetime string"
+          },
+          "available_loads": {
+            "items": {
+              "$ref": "#/components/schemas/AvailableLoad"
+            },
+            "type": "array",
+            "title": "Available Loads"
+          }
+        },
+        "type": "object",
+        "required": [
+          "driver_destination",
+          "truck_specs",
+          "arrival_time",
+          "available_loads"
+        ],
+        "title": "DeadheadInput"
+      },
+      "DeadheadOutput": {
+        "properties": {
+          "recommendations": {
+            "items": {},
+            "type": "array",
+            "title": "Recommendations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recommendations"
+        ],
+        "title": "DeadheadOutput"
+      },
+      "DeliveryAddress": {
+        "properties": {
+          "lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat"
+          },
+          "lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lng"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lat",
+          "lng"
+        ],
+        "title": "DeliveryAddress"
+      },
+      "DemandForecastInput": {
+        "properties": {
+          "hour": {
+            "type": "number",
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Hour",
+            "description": "Hour of the day (0-23)"
+          },
+          "day_of_week": {
+            "type": "number",
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Day Of Week",
+            "description": "Day of week (0=Sunday, 6=Saturday)"
+          },
+          "temperature": {
+            "type": "number",
+            "title": "Temperature",
+            "description": "Temperature in Celsius"
+          },
+          "precipitation": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Precipitation",
+            "description": "Precipitation in mm"
+          },
+          "historical_volume": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Historical Volume",
+            "description": "Historical booking volume"
+          },
+          "nearby_drivers": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Nearby Drivers",
+            "description": "Number of nearby available drivers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hour",
+          "day_of_week",
+          "temperature",
+          "precipitation",
+          "historical_volume",
+          "nearby_drivers"
+        ],
+        "title": "DemandForecastInput"
+      },
+      "DemandForecastOutput": {
+        "properties": {
+          "predicted_demand": {
+            "type": "number",
+            "title": "Predicted Demand"
+          },
+          "model_version": {
+            "type": "string",
+            "title": "Model Version",
+            "default": "1.0.0"
+          },
+          "feature_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Feature Names",
+            "default": [
+              "hour",
+              "day_of_week",
+              "is_weekend",
+              "temperature",
+              "precipitation",
+              "historical_volume",
+              "nearby_drivers"
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "predicted_demand"
+        ],
+        "title": "DemandForecastOutput"
+      },
+      "DriverItem": {
+        "properties": {
+          "current_lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Current Lat"
+          },
+          "current_lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Current Lng"
+          },
+          "max_weight_kg": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Weight Kg"
+          },
+          "max_length_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Length M"
+          },
+          "max_width_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Width M"
+          },
+          "max_height_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Height M"
+          },
+          "preferred_dest_lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Preferred Dest Lat",
+            "default": 0.0
+          },
+          "preferred_dest_lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Preferred Dest Lng",
+            "default": 0.0
+          },
+          "rating": {
+            "type": "number",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Rating",
+            "default": 3.0
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_lat",
+          "current_lng",
+          "max_weight_kg",
+          "max_length_m",
+          "max_width_m",
+          "max_height_m"
+        ],
+        "title": "DriverItem"
+      },
+      "DriverProfitInput": {
+        "properties": {
+          "route_distance": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Route Distance",
+            "description": "Route distance in km"
+          },
+          "fuel_price": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Fuel Price",
+            "description": "Fuel price in INR/L"
+          },
+          "toll_estimate": {
+            "type": "number",
+            "minimum": 0.0,
+            "title": "Toll Estimate",
+            "description": "Toll estimate in INR"
+          },
+          "truck_mileage": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Truck Mileage",
+            "description": "Truck mileage in km/L"
+          },
+          "cargo_weight": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Cargo Weight",
+            "description": "Cargo weight in kg"
+          },
+          "trip_duration": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Trip Duration",
+            "description": "Trip duration in hours"
+          }
+        },
+        "type": "object",
+        "required": [
+          "route_distance",
+          "fuel_price",
+          "toll_estimate",
+          "truck_mileage",
+          "cargo_weight",
+          "trip_duration"
+        ],
+        "title": "DriverProfitInput"
+      },
+      "DriverProfitOutput": {
+        "properties": {
+          "predicted_profit": {
+            "type": "number",
+            "title": "Predicted Profit"
+          },
+          "confidence_interval": {
+            "type": "object",
+            "title": "Confidence Interval"
+          }
+        },
+        "type": "object",
+        "required": [
+          "predicted_profit",
+          "confidence_interval"
+        ],
+        "title": "DriverProfitOutput"
+      },
+      "ETAPredictInput": {
+        "properties": {
+          "route_distance": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Route Distance"
+          },
+          "time_of_day": {
+            "type": "integer",
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Time Of Day"
+          },
+          "day_of_week": {
+            "type": "integer",
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Day Of Week"
+          },
+          "route_type": {
+            "type": "string",
+            "title": "Route Type",
+            "description": "highway or city"
+          },
+          "historical_speed": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Historical Speed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "route_distance",
+          "time_of_day",
+          "day_of_week",
+          "route_type",
+          "historical_speed"
+        ],
+        "title": "ETAPredictInput"
+      },
+      "ETAPredictOutput": {
+        "properties": {
+          "eta_minutes": {
+            "type": "number",
+            "title": "Eta Minutes"
+          },
+          "confidence_interval": {
+            "type": "object",
+            "title": "Confidence Interval"
+          }
+        },
+        "type": "object",
+        "required": [
+          "eta_minutes",
+          "confidence_interval"
+        ],
+        "title": "ETAPredictOutput"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "LoadItem": {
+        "properties": {
+          "origin_lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Origin Lat"
+          },
+          "origin_lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Origin Lng"
+          },
+          "dest_lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Dest Lat"
+          },
+          "dest_lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Dest Lng"
+          },
+          "weight_kg": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Weight Kg"
+          },
+          "length_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Length M"
+          },
+          "width_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Width M"
+          },
+          "height_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Height M"
+          },
+          "deadline_hours": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Deadline Hours"
+          }
+        },
+        "type": "object",
+        "required": [
+          "origin_lat",
+          "origin_lng",
+          "dest_lat",
+          "dest_lng",
+          "weight_kg",
+          "length_m",
+          "width_m",
+          "height_m",
+          "deadline_hours"
+        ],
+        "title": "LoadItem"
+      },
+      "LocationPoint": {
+        "properties": {
+          "lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Lat"
+          },
+          "lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Lng"
+          }
+        },
+        "type": "object",
+        "required": [
+          "lat",
+          "lng"
+        ],
+        "title": "LocationPoint"
+      },
+      "MatchAssignment": {
+        "properties": {
+          "load_index": {
+            "type": "integer",
+            "title": "Load Index"
+          },
+          "driver_index": {
+            "type": "integer",
+            "title": "Driver Index"
+          },
+          "match_score": {
+            "type": "number",
+            "title": "Match Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "load_index",
+          "driver_index",
+          "match_score"
+        ],
+        "title": "MatchAssignment"
+      },
+      "MidTripInput": {
+        "properties": {
+          "current_location": {
+            "$ref": "#/components/schemas/LocationPoint"
+          },
+          "remaining_route": {
+            "items": {
+              "$ref": "#/components/schemas/LocationPoint"
+            },
+            "type": "array",
+            "title": "Remaining Route"
+          },
+          "available_capacity": {
+            "$ref": "#/components/schemas/AvailableCapacity"
+          },
+          "nearby_loads": {
+            "items": {
+              "$ref": "#/components/schemas/NearbyLoad"
+            },
+            "type": "array",
+            "title": "Nearby Loads"
+          }
+        },
+        "type": "object",
+        "required": [
+          "current_location",
+          "remaining_route",
+          "available_capacity",
+          "nearby_loads"
+        ],
+        "title": "MidTripInput"
+      },
+      "MidTripOutput": {
+        "properties": {
+          "recommendations": {
+            "items": {},
+            "type": "array",
+            "title": "Recommendations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recommendations"
+        ],
+        "title": "MidTripOutput"
+      },
+      "NearbyLoad": {
+        "properties": {
+          "load_id": {
+            "type": "string",
+            "title": "Load Id"
+          },
+          "pickup_lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Pickup Lat"
+          },
+          "pickup_lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Pickup Lng"
+          },
+          "dropoff_lat": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Dropoff Lat"
+          },
+          "dropoff_lng": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Dropoff Lng"
+          },
+          "weight_kg": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Weight Kg"
+          },
+          "length_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Length M"
+          },
+          "width_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Width M"
+          },
+          "height_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Height M"
+          },
+          "payment_inr": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Payment Inr"
+          },
+          "pickup_deadline": {
+            "type": "string",
+            "title": "Pickup Deadline",
+            "description": "ISO datetime string"
+          }
+        },
+        "type": "object",
+        "required": [
+          "load_id",
+          "pickup_lat",
+          "pickup_lng",
+          "dropoff_lat",
+          "dropoff_lng",
+          "weight_kg",
+          "length_m",
+          "width_m",
+          "height_m",
+          "payment_inr",
+          "pickup_deadline"
+        ],
+        "title": "NearbyLoad"
+      },
+      "PackageItem": {
+        "properties": {
+          "length": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Length"
+          },
+          "width": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Width"
+          },
+          "height": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Height"
+          },
+          "weight": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Weight"
+          }
+        },
+        "type": "object",
+        "required": [
+          "length",
+          "width",
+          "height",
+          "weight"
+        ],
+        "title": "PackageItem"
+      },
+      "PackingInput": {
+        "properties": {
+          "packages": {
+            "items": {
+              "$ref": "#/components/schemas/PackageItem"
+            },
+            "type": "array",
+            "title": "Packages"
+          },
+          "truck": {
+            "$ref": "#/components/schemas/TruckDimensions"
+          },
+          "delivery_addresses": {
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAddress"
+            },
+            "type": "array",
+            "title": "Delivery Addresses"
+          }
+        },
+        "type": "object",
+        "required": [
+          "packages",
+          "truck",
+          "delivery_addresses"
+        ],
+        "title": "PackingInput"
+      },
+      "PackingOutput": {
+        "properties": {
+          "packing_arrangement": {
+            "items": {},
+            "type": "array",
+            "title": "Packing Arrangement"
+          },
+          "unpacked_packages": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Unpacked Packages"
+          },
+          "stop_sequence": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Stop Sequence"
+          },
+          "utilization_pct": {
+            "type": "number",
+            "title": "Utilization Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "packing_arrangement",
+          "unpacked_packages",
+          "stop_sequence",
+          "utilization_pct"
+        ],
+        "title": "PackingOutput"
+      },
+      "PricePredictInput": {
+        "properties": {
+          "distance_km": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Distance Km",
+            "description": "Route distance in kilometres"
+          },
+          "cargo_weight_kg": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Cargo Weight Kg",
+            "description": "Cargo weight in kilograms"
+          },
+          "truck_type": {
+            "type": "string",
+            "title": "Truck Type",
+            "description": "Type of truck (light_truck, medium_truck, heavy_truck, trailer)",
+            "default": "medium_truck"
+          },
+          "route_origin": {
+            "type": "string",
+            "title": "Route Origin",
+            "description": "Origin location name",
+            "default": ""
+          },
+          "route_destination": {
+            "type": "string",
+            "title": "Route Destination",
+            "description": "Destination location name",
+            "default": ""
+          },
+          "hour_of_day": {
+            "type": "integer",
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Hour Of Day",
+            "description": "Hour of day (0-23)",
+            "default": 12
+          },
+          "day_of_week": {
+            "type": "integer",
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Day Of Week",
+            "description": "Day of week (0-6)",
+            "default": 3
+          },
+          "month": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "Month",
+            "description": "Month (1-12)",
+            "default": 6
+          },
+          "fuel_price": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Fuel Price",
+            "description": "Fuel price in INR/L",
+            "default": 105.0
+          },
+          "cargo_type": {
+            "type": "string",
+            "title": "Cargo Type",
+            "description": "Cargo type (general, perishable, fragile, hazardous, bulk)",
+            "default": "general"
+          }
+        },
+        "type": "object",
+        "required": [
+          "distance_km",
+          "cargo_weight_kg"
+        ],
+        "title": "PricePredictInput"
+      },
+      "PricePredictOutput": {
+        "properties": {
+          "estimated_price": {
+            "type": "number",
+            "title": "Estimated Price"
+          },
+          "min_price": {
+            "type": "number",
+            "title": "Min Price"
+          },
+          "max_price": {
+            "type": "number",
+            "title": "Max Price"
+          },
+          "currency": {
+            "type": "string",
+            "title": "Currency",
+            "default": "INR"
+          }
+        },
+        "type": "object",
+        "required": [
+          "estimated_price",
+          "min_price",
+          "max_price"
+        ],
+        "title": "PricePredictOutput"
+      },
+      "RecommendLoadsInput": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "User ID"
+          },
+          "booking_history": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Booking History"
+          },
+          "rated_drivers": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rated Drivers"
+          },
+          "top_n": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Top N",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "RecommendLoadsInput"
+      },
+      "RecommendOutput": {
+        "properties": {
+          "recommendations": {
+            "items": {},
+            "type": "array",
+            "title": "Recommendations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recommendations"
+        ],
+        "title": "RecommendOutput"
+      },
+      "RecommendTrucksInput": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id",
+            "description": "User ID"
+          },
+          "booking_history": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Booking History"
+          },
+          "rated_loads": {
+            "items": {
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rated Loads"
+          },
+          "top_n": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Top N",
+            "default": 5
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "RecommendTrucksInput"
+      },
+      "TrainResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "metrics": {
+            "type": "object",
+            "title": "Metrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "metrics"
+        ],
+        "title": "TrainResponse"
+      },
+      "TruckDimensions": {
+        "properties": {
+          "length": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Length"
+          },
+          "width": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Width"
+          },
+          "height": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Height"
+          },
+          "max_weight": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Weight"
+          }
+        },
+        "type": "object",
+        "required": [
+          "length",
+          "width",
+          "height",
+          "max_weight"
+        ],
+        "title": "TruckDimensions"
+      },
+      "TruckSpecs": {
+        "properties": {
+          "max_weight_kg": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Weight Kg"
+          },
+          "max_length_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Length M"
+          },
+          "max_width_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Width M"
+          },
+          "max_height_m": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Height M"
+          }
+        },
+        "type": "object",
+        "required": [
+          "max_weight_kg",
+          "max_length_m",
+          "max_width_m",
+          "max_height_m"
+        ],
+        "title": "TruckSpecs"
+      },
+      "TrustScoreInput": {
+        "properties": {
+          "cancellation_rate": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Cancellation Rate",
+            "description": "Cancellation rate (0-1)"
+          },
+          "on_time_pct": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "On Time Pct",
+            "description": "On-time delivery percentage"
+          },
+          "avg_rating": {
+            "type": "number",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Avg Rating",
+            "description": "Average rating (1-5)"
+          },
+          "dispute_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Dispute Count",
+            "description": "Number of disputes"
+          },
+          "is_verified": {
+            "type": "boolean",
+            "title": "Is Verified",
+            "description": "Whether user is verified"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cancellation_rate",
+          "on_time_pct",
+          "avg_rating",
+          "dispute_count",
+          "is_verified"
+        ],
+        "title": "TrustScoreInput"
+      },
+      "TrustScoreOutput": {
+        "properties": {
+          "trust_score": {
+            "type": "number",
+            "title": "Trust Score"
+          },
+          "risk_category": {
+            "type": "string",
+            "title": "Risk Category"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trust_score",
+          "risk_category"
+        ],
+        "title": "TrustScoreOutput"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

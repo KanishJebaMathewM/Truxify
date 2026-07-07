@@ -221,6 +221,16 @@ export async function submitEscrowRefund(orderDisplayId) {
     return { txHash: null, bookingId };
   }
 
+  try {
+    const booking = await escrowContract.bookings(bookingId);
+    if (booking && booking.amount === 0n && booking.customer !== ethers.ZeroAddress) {
+      logger.info(`[escrow] Already refunded or empty for booking ${orderDisplayId}, skipping.`);
+      return { txHash: null, bookingId, alreadyRefunded: true, waitForConfirmation: async () => ({ hash: null, status: 1 }) };
+    }
+  } catch (err) {
+    logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with refund.`);
+  }
+
   let tx;
   try {
     tx = await escrowContract.cancelBooking(bookingId);

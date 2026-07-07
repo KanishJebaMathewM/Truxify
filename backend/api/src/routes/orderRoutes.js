@@ -33,11 +33,20 @@ import {
   ESCROW_MATIC_PER_PAISA,
 } from '../services/escrow.js';
 import { sendDeliveryOtpNotification, storeDeliveryOtp, getActiveDeliveryOtp, verifyDeliveryOtp, expireDeliveryOtps } from '../services/notificationService.js';
+import { BidAcceptanceService, DomainError } from '../services/order/bidAcceptanceService.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  buildDepositTxFn: buildDepositTx,
+  recordDepositTxFn: recordDepositTx,
+  escrowRefundFn: submitEscrowRefund,
+  logger,
+});
 
 // ── OTP brute-force protection (Redis + In-Memory Fallback) ────────────────────
 const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);

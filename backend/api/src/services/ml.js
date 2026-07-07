@@ -23,12 +23,12 @@ mlBreaker.fallback(() => {
 // Startup validation
 if (!process.env.ML_API_KEY) {
     logger.warn('[ML] WARNING: ML_API_KEY is not set. ML features will be unavailable.');
+}
 
 function guardMlApiKey() {
   if (!process.env.ML_API_KEY) {
     throw new Error("[ML] ML_API_KEY is not configured. ML features are unavailable.");
   }
-}
 }
 
 /**

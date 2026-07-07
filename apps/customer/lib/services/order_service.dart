@@ -15,6 +15,29 @@ class OrderService {
 
   final ApiClient _apiClient;
 
+  String? _lastError;
+  int _retryCount = 0;
+  static const int _maxRetries = 2;
+
+  void _clearError() {
+    _lastError = null;
+    _retryCount = 0;
+  }
+
+  String _getLastError() => _lastError ?? 'Unknown error';
+
+  bool _validateCoordinate(double value, double min, double max, String name) {
+    if (value.isNaN || value.isInfinite) {
+      _lastError = '$name must be a valid number';
+      return false;
+    }
+    if (value < min || value > max) {
+      _lastError = '$name must be between $min and $max';
+      return false;
+    }
+    return true;
+  }
+
   Map<String, String> _customHeaders() {
     final userId = SupabaseService.requireUserId();
     return <String, String>{

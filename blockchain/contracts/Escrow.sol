@@ -118,14 +118,15 @@ contract Escrow {
         BookingEscrow storage booking = escrows[bookingId];
         require(booking.status == EscrowStatus.Funded, "Escrow not funded");
 
-        booking.status = EscrowStatus.Released;
         uint256 amount = booking.amount;
+        address driver = booking.driver;
+        booking.status = EscrowStatus.Released;
         booking.amount = 0;
 
-        pendingWithdrawals[booking.driver] += amount;
-        releaseTimestamps[booking.driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
+        pendingWithdrawals[driver] += amount;
+        releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
-        emit Released(bookingId, booking.driver, amount);
+        emit Released(bookingId, driver, amount);
     }
 
     /// @notice Refunds funds back to the customer if the booking is cancelled.
@@ -134,14 +135,15 @@ contract Escrow {
         BookingEscrow storage booking = escrows[bookingId];
         require(booking.status == EscrowStatus.Funded, "Escrow not funded");
 
-        booking.status = EscrowStatus.Refunded;
         uint256 amount = booking.amount;
+        address customer = booking.customer;
+        booking.status = EscrowStatus.Refunded;
         booking.amount = 0;
 
-        pendingWithdrawals[booking.customer] += amount;
-        releaseTimestamps[booking.customer] = block.timestamp + WITHDRAWAL_TIMEOUT;
+        pendingWithdrawals[customer] += amount;
+        releaseTimestamps[customer] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
-        emit Refunded(bookingId, booking.customer, amount);
+        emit Refunded(bookingId, customer, amount);
     }
 
     /// @notice Cancels the booking and splits the escrowed funds between the driver and the customer.

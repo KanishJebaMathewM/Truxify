@@ -1,5 +1,22 @@
 import { z } from 'zod';
 
+// Generic field validation helpers
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isValidPhone(phone) {
+  return /^\+?[\d\s\-()]{7,15}$/.test(phone);
+}
+
+function isValidUuid(str) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
+function isValidNumberPlate(str) {
+  return /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/.test(str);
+}
+
 const coerceNumber = (schema) => z.preprocess(
   (val) => {
     if (val === undefined || val === null || val === '') {

@@ -357,7 +357,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.01),
+              color: Colors.black.withValues(alpha: 0.01),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -418,8 +418,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
         boxShadow: [
           BoxShadow(
             color: isDark
-                ? Colors.black.withOpacity(0.25)
-                : Colors.black.withOpacity(0.02),
+                ? Colors.black.withValues(alpha: 0.25)
+                : Colors.black.withValues(alpha: 0.02),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -541,18 +541,18 @@ class _EarningsScreenState extends State<EarningsScreen> {
 
               // Determine color based on earnings magnitude relative to max ₹8,400
               Color cellBgColor = isDark
-                  ? TruxifyColors.darkBorder.withOpacity(0.5)
+                  ? TruxifyColors.darkBorder.withValues(alpha: 0.5)
                   : Theme.of(context)
                       .colorScheme
                       .outlineVariant
-                      .withOpacity(0.3);
+                      .withValues(alpha: 0.3);
               Color textColor = Theme.of(context).colorScheme.onSurface;
               FontWeight textWeight = FontWeight.normal;
 
               if (earnings > 0) {
                 final double scale = (earnings / 8400.0).clamp(0.0, 1.0);
                 final double opacity = 0.15 + (scale * 0.75);
-                cellBgColor = TruxifyColors.accent.withOpacity(opacity);
+                cellBgColor = TruxifyColors.accent.withValues(alpha: opacity);
 
                 if (opacity > 0.6) {
                   textColor = Colors.white;
@@ -568,7 +568,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                 cellBgColor = Theme.of(context)
                     .colorScheme
                     .outlineVariant
-                    .withOpacity(0.6);
+                    .withValues(alpha: 0.6);
                 textColor = TruxifyColors.adaptiveSecondaryText(context);
               }
 
@@ -589,7 +589,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     boxShadow: isSelected
                         ? [
                             BoxShadow(
-                              color: TruxifyColors.accent.withOpacity(0.3),
+                              color: TruxifyColors.accent.withValues(alpha: 0.3),
                               blurRadius: 6,
                               spreadRadius: 1,
                             ),
@@ -631,18 +631,18 @@ class _EarningsScreenState extends State<EarningsScreen> {
               const SizedBox(width: 4),
               _buildLegendBox(
                 isDark
-                    ? TruxifyColors.darkBorder.withOpacity(0.5)
+                    ? TruxifyColors.darkBorder.withValues(alpha: 0.5)
                     : Theme.of(context)
                         .colorScheme
                         .outlineVariant
-                        .withOpacity(0.3),
+                        .withValues(alpha: 0.3),
               ),
               const SizedBox(width: 2),
-              _buildLegendBox(TruxifyColors.accent.withOpacity(0.2)),
+              _buildLegendBox(TruxifyColors.accent.withValues(alpha: 0.2)),
               const SizedBox(width: 2),
-              _buildLegendBox(TruxifyColors.accent.withOpacity(0.45)),
+              _buildLegendBox(TruxifyColors.accent.withValues(alpha: 0.45)),
               const SizedBox(width: 2),
-              _buildLegendBox(TruxifyColors.accent.withOpacity(0.7)),
+              _buildLegendBox(TruxifyColors.accent.withValues(alpha: 0.7)),
               const SizedBox(width: 2),
               _buildLegendBox(TruxifyColors.accent),
               const SizedBox(width: 4),
@@ -798,7 +798,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, color: color.withOpacity(0.7), size: 14),
+              Icon(icon, color: color.withValues(alpha: 0.7), size: 14),
               const SizedBox(width: 6),
               Text(
                 label,

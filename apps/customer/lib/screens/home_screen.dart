@@ -11,7 +11,6 @@ import '../widgets/app_logo.dart';
 import '../widgets/app_page_route.dart';
 import '../widgets/shipment_card.dart';
 import '../widgets/common_widgets.dart';
-import '../widgets/recent_route_card.dart';
 import '../services/order_service.dart';
 import '../services/profile_service.dart';
 import 'live_tracking_screen.dart';
@@ -65,8 +64,8 @@ class _HomeScreenState extends State<HomeScreen> {
         _orderService.fetchActiveOrders(),
       ]);
       if (!mounted) return;
-      final profile = results[0] as Map<String, dynamic>;
-      final orders = results[1] as List<Map<String, dynamic>>;
+      final profile = results[0] is Map<String, dynamic> ? results[0] as Map<String, dynamic> : <String, dynamic>{};
+      final orders = results[1] is List ? List<Map<String, dynamic>>.from(results[1] as List) : <Map<String, dynamic>>[];
       setState(() {
         _customerName = (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '').trim();
         _activeOrders = orders;

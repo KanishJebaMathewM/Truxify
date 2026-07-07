@@ -1,8 +1,8 @@
 import express from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import crypto from 'crypto';
-import { ethers } from 'ethers';
-import { bidLimiter, userLimiter, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
+
+import { bidLimiter, userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { supabase, redisClient, mongoDb } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
@@ -22,107 +22,38 @@ import {
   cancelOrderSchema
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
-import { predictDemand, predictPrice } from '../services/ml.js';
 import {
+  escrowRefund,
   buildDepositTx,
   recordDepositTx,
-  escrowRelease,
-  bookingIdFromUuid,
   submitEscrowRefund,
   submitEscrowCancelWithPenalty,
   confirmEscrowRefund,
-  ESCROW_MATIC_PER_PAISA,
 } from '../services/escrow.js';
-import { sendDeliveryOtpNotification, storeDeliveryOtp, getActiveDeliveryOtp, verifyDeliveryOtp, expireDeliveryOtps } from '../services/notificationService.js';
+import { BidAcceptanceService, DomainError } from '../services/order/bidAcceptanceService.js';
+import { expireDeliveryOtps } from '../services/notificationService.js';
+import {
+  verifyDelivery,
+  generateDeliveryOtp,
+  resendDeliveryOtp,
+  sendOtpNotification,
+} from '../services/order/deliveryVerificationService.js';
+import { predictDemand, predictPrice } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
-// ── OTP brute-force protection (Redis + In-Memory Fallback) ────────────────────
-const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
-const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
-const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
-const IN_MEMORY_OTP_MAP_MAX_SIZE = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || '10000', 10);
-const DELIVERY_OTP_READY_STATUSES = new Set(['arriving']);
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  buildDepositTxFn: buildDepositTx,
+  recordDepositTxFn: recordDepositTx,
+  escrowRefundFn: escrowRefund,
+  logger,
+});
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-const inMemoryOtpFailedAttempts = new Map();
-
-function isOtpExpired(otpGeneratedAt) {
-  if (!otpGeneratedAt) return true;
-  const elapsed = Date.now() - new Date(otpGeneratedAt).getTime();
-  return elapsed > OTP_TTL_MINUTES * 60 * 1000;
-}
-
-async function checkOtpLockout(orderId) {
-  if (redisClient) {
-    try {
-      const lockKey = `otp_lockout:${orderId}`;
-      const isLocked = await redisClient.get(lockKey);
-      return !!isLocked;
-    } catch (err) {
-      logger.error('[OTP] Redis error in checkOtpLockout, falling back to memory:', err.message);
-    }
-  }
-  const record = inMemoryOtpFailedAttempts.get(orderId);
-  if (!record || !record.lockedUntil) return false;
-  if (Date.now() >= record.lockedUntil) {
-    inMemoryOtpFailedAttempts.delete(orderId);
-    return false;
-  }
-  return true;
-}
-
-async function recordOtpFailure(orderId) {
-  if (redisClient) {
-    try {
-      const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-      
-      const count = await redisClient.incr(countKey);
-      if (count === 1) await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
-      if (count >= OTP_MAX_FAILED_ATTEMPTS) {
-        await redisClient.set(lockKey, '1', 'EX', OTP_LOCKOUT_MINUTES * 60);
-      }
-      return count;
-    } catch (err) {
-      logger.error('[OTP] Redis error in recordOtpFailure, falling back to memory:', err.message);
-    }
-  }
-  
-  if (inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
-    const oldestKey = inMemoryOtpFailedAttempts.keys().next().value;
-    inMemoryOtpFailedAttempts.delete(oldestKey);
-  }
-
-  let record = inMemoryOtpFailedAttempts.get(orderId);
-  if (!record) {
-    record = { count: 0, lockedUntil: null };
-    inMemoryOtpFailedAttempts.set(orderId, record);
-  }
-  record.count += 1;
-  if (record.count >= OTP_MAX_FAILED_ATTEMPTS) {
-    record.lockedUntil = Date.now() + OTP_LOCKOUT_MINUTES * 60 * 1000;
-  }
-  return record.count;
-}
-
-async function clearOtpState(orderId) {
-  if (redisClient) {
-    try {
-      const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-      await redisClient.del(countKey, lockKey);
-      return;
-    } catch (err) {
-      logger.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);
-    }
-  }
-  inMemoryOtpFailedAttempts.delete(orderId);
-}
-
 
 // Rate limiter for the verify-delivery endpoint
 const verifyDeliveryLimiter = rateLimit({
@@ -130,6 +61,8 @@ const verifyDeliveryLimiter = rateLimit({
   max: process.env.NODE_ENV === 'test' ? 1000 : 20,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || 'unknown',
+  store: createStore('rl:verify-delivery:'),
   message: { error: 'Too many delivery verification attempts. Please try again later.' },
 });
 
@@ -138,6 +71,7 @@ const milestoneLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
   keyGenerator: (req) => req.user.id,
+  store: createStore('rl:milestone:'),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many milestone updates. Please slow down.' },
@@ -148,6 +82,7 @@ const predictDemandLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 10,
   keyGenerator: (req) => req.user?.id || 'unauthenticated',
+  store: createStore('rl:predict-demand:'),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many demand prediction requests. Please try again later.' },
@@ -163,24 +98,31 @@ const telemetryLimiter = rateLimit({
     }
     return req.user.id;
   },
+  store: createStore('rl:telemetry:'),
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many telemetry requests. Please slow down.' },
+  message: { error: 'Too many telemetry requests. Please try again later.' },
 });
 
+// Rate limiter for resend-otp endpoint
 const resendOtpLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || 'unknown',
+  store: createStore('rl:resend-otp:'),
   message: { error: 'Too many OTP resend requests. Please try again later.' },
 });
 
+// Rate limiter for change-drop endpoint
 const changeDropLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
+  max: process.env.NODE_ENV === 'test' ? 1000 : 5,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || 'unknown',
+  store: createStore('rl:change-drop:'),
   message: { error: 'Too many drop change requests. Please try again later.' },
 });
 
@@ -207,6 +149,13 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), validateB
     is_stackable, is_fragile, special_requirements,
     payment_method_id, upi_id
   } = req.body;
+
+  if (pickup_address && pickup_address.length > 200) {
+    return res.status(400).json({ error: 'pickup_address too long (max 200 chars)' });
+  }
+  if (drop_address && drop_address.length > 200) {
+    return res.status(400).json({ error: 'drop_address too long (max 200 chars)' });
+  }
 
   if (!pickup_address || pickup_lat == null || pickup_lng == null || !drop_address || drop_lat == null || drop_lng == null || !goods_type || weight_tonnes == null) {
     return res.status(400).json({ error: 'Missing required routing or cargo specification fields.' });
@@ -635,7 +584,7 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
       return res.status(409).json({ error: 'A rating has already been submitted for this order.' });
     }
 
-    const { error: rpcErr } = await supabase.rpc('submit_rating_tx', {
+    const { data: ratingData, error: rpcErr } = await supabase.rpc('submit_rating_tx', {
       p_order_display_id: order.order_display_id,
       p_customer_id: req.user.id,
       p_driver_id: order.driver_id,
@@ -662,6 +611,14 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
       // Fire-and-forget: blockchain confirmation must never block the HTTP response.
       void awardReputationPoints(polygonAddress, stars).catch((repErr) => {
         logger.error('[reputation] On-chain reputation update failed:', repErr.message);
+        supabase.from('reputation_failures').insert({
+          driver_wallet: polygonAddress,
+          stars,
+          rating_id: ratingData?.id ?? null,
+          failed_at: new Date().toISOString(),
+          retry_count: 0,
+          last_error: repErr.message,
+        }).catch((dbErr) => logger.error('[reputation] Failed to log failure:', dbErr.message));
       });
     } else {
       logger.warn(
@@ -745,148 +702,20 @@ router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), va
 router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
   const orderId = req.params.id;
   const bidId = req.params.bidId;
-  // Acquire a distributed lock on this order to prevent concurrent bid acceptance
-  const lockKey = `bid_accept_lock:${orderId}`;
-  const lockTimeoutMs = 10000;
-  let lockValue = null;
-  if (redisClient) {
-    lockValue = crypto.randomUUID();
-    const acquired = await redisClient.set(lockKey, lockValue, 'PX', lockTimeoutMs, 'NX');
-    if (!acquired) {
-      return res.status(409).json({ error: 'Another bid acceptance is in progress for this order. Please try again.' });
-    }
-  }
+
   try {
-    const { data: order } = await supabase.from('orders').select('order_display_id, customer_id, version').eq('id', orderId).maybeSingle();
-    if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-
-    const { data: bid } = await supabase.from('load_bids').select('*').eq('id', bidId).maybeSingle();
-    if (!bid || bid.status !== 'pending') return res.status(404).json({ error: 'Bid is not active or not found.' });
-
-    const { data: loadOffer, error: loadOfferErr } = await supabase.from('load_offers').select('id').eq('order_display_id', order.order_display_id).maybeSingle();
-    if (loadOfferErr) return res.status(500).json({ error: 'Failed to verify bid ownership.', details: loadOfferErr.message });
-    if (!loadOffer) return res.status(404).json({ error: 'Load offer for this order was not found.' });
-    if (bid.load_id !== loadOffer.id) return res.status(403).json({ error: 'Access Denied: Bid does not belong to this order.' });
-
-    // Fetch wallet addresses BEFORE any state change to validate escrow readiness
-    const [driverDetailsResult, customerProfileResult] = await Promise.all([
-      supabase.from('driver_details').select('polygon_wallet_address').eq('user_id', bid.driver_id).maybeSingle(),
-      supabase.from('profiles').select('polygon_wallet_address').eq('id', req.user.id).maybeSingle(),
-    ]);
-
-    const driverWallet = driverDetailsResult.data?.polygon_wallet_address ?? null;
-    const customerWallet = customerProfileResult.data?.polygon_wallet_address ?? null;
-
-    if (!driverWallet || !customerWallet) {
-      logger.warn(`[escrow] Missing wallet address: driver=${!!driverWallet}, customer=${!!customerWallet} — rejecting bid acceptance.`);
-      return res.status(422).json({
-        error: 'Both customer and driver must connect a wallet before escrow can be initiated.'
-      });
-    }
-
-    const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', bid.driver_id).maybeSingle();
-    const { data: details } = await supabase.from('driver_details').select('rating, truck_id').eq('user_id', bid.driver_id).maybeSingle();
-
-    let truckInfo = null;
-    if (details && details.truck_id) {
-      const { data, error: truckErr } = await supabase.from('trucks').select('id, name, number_plate').eq('id', details.truck_id).maybeSingle();
-      if (truckErr) logger.error('Truck lookup error during bid accept:', truckErr.message);
-      truckInfo = data;
-    }
-
-    // Phase 1: Build unsigned deposit tx for customer to sign
-    let depositTxData = null;
-    if (driverWallet && customerWallet) {
-      const maticPerPaisa = ESCROW_MATIC_PER_PAISA;
-      if (!Number.isFinite(maticPerPaisa) || maticPerPaisa <= 0) {
-        logger.warn('[escrow] ESCROW_MATIC_PER_PAISA not configured — skipping escrow deposit.');
-      } else {
-        const maticAmount = (bid.bid_amount * maticPerPaisa).toFixed(18);
-        const maxEscrowMatic = Number.parseFloat(process.env.MAX_ESCROW_MATIC || '5');
-        if (!Number.isFinite(maxEscrowMatic) || maxEscrowMatic <= 0) {
-          logger.error('[escrow] MAX_ESCROW_MATIC is invalid — refusing deposit.');
-          return res.status(500).json({ error: 'Escrow configuration error. Please contact support.' });
-        }
-        if (Number.parseFloat(maticAmount) > maxEscrowMatic) {
-          return res.status(400).json({ error: 'Computed escrow amount exceeds safety cap. Check ESCROW_MATIC_PER_PAISA configuration.' });
-        }
-        const amountWei = ethers.parseEther(maticAmount);
-        const { txData, bookingId } = await buildDepositTx(
-          order.order_display_id, customerWallet, driverWallet, amountWei,
-        );
-        if (txData) {
-          if (typeof txData === 'string' && txData.startsWith('0x')) {
-            try {
-              const parsed = ethers.Transaction.from(txData);
-              depositTxData = {
-                to: parsed.to,
-                data: parsed.data,
-                value: parsed.value ? parsed.value.toString() : undefined,
-              };
-            } catch (parseErr) {
-              depositTxData = {
-                to: process.env.ESCROW_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000',
-                data: txData,
-              };
-            }
-          } else {
-            depositTxData = txData;
-          }
-        }
-      }
-    }
-
-    // Phase 2: Atomically accept the bid
-    const { error: rpcErr } = await supabase.rpc('accept_bid_tx', {
-      p_bid_id: bidId, p_order_id: orderId, p_load_id: bid.load_id, p_driver_id: bid.driver_id,
-      p_truck_id: truckInfo?.id || null, p_driver_name: profile?.full_name || 'Assigned Driver',
-      p_driver_rating: details?.rating || 0.00, p_truck_number: truckInfo?.number_plate || 'N/A',
-      p_bid_amount: bid.bid_amount, p_order_display_id: order.order_display_id,
-      p_expected_version: order.version
+    const result = await bidAcceptanceService.acceptBid({
+      orderId,
+      bidId,
+      customerId: req.user.id,
     });
-
-    if (rpcErr) {
-      if (rpcErr.message === 'OPTIMISTIC_LOCK_FAIL') {
-        return res.status(409).json({ error: 'Load already accepted by another driver' });
-      }
-      return res.status(500).json({
-        error: 'Failed to accept bid atomically.',
-        details: rpcErr.message,
-      });
-    }
-
-    // Phase 3: Only after bid is accepted, write escrow pre-update to DB
-    if (depositTxData) {
-      const bookingId = bookingIdFromUuid(order.order_display_id);
-      await supabase.from('orders').update({
-        escrow_booking_id: bookingId,
-        escrow_status: 'funding',
-        version: order.version + 2
-      }).eq('id', orderId).eq('version', order.version + 1);
-    }
-
-    res.json({
-      message: 'Bid accepted. Awaiting customer deposit signature.',
-      depositTx: depositTxData,
-    });
+    return res.status(result.status).json(result.body);
   } catch (err) {
-    logger.error({ err }, '[orderRoutes] accept bid error');
-    res.status(500).json({ error: 'Internal Server Error' });
-  } finally {
-    if (redisClient && lockValue) {
-      const luaScript = `
-        if redis.call('GET', KEYS[1]) == ARGV[1] then
-          redis.call('DEL', KEYS[1])
-          return 1
-        end
-        return 0
-      `;
-      try {
-        await redisClient.eval(luaScript, 1, lockKey, lockValue);
-      } catch (err) {
-        logger.warn('[orderRoutes] Failed to release accept-bid lock for key %s: %s', lockKey, err.message);
-      }
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
     }
+    logger.error('Bid acceptance exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -894,20 +723,6 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
 // 12. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 // ============================================================================
 router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver']), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
-  const orderId = req.params.id;
-  const { milestone } = req.body;
-
-  const milestoneMap = {
-    'Truck Assigned': 'truck_assigned',
-    'En Route to Pickup': 'en_route_pickup',
-    'Arrived at Pickup': 'arrived_pickup',
-    'Goods Loaded': 'picked_up',
-    'In Transit': 'in_transit',
-    'Arriving': 'arriving',
-  };
-
-  if (milestone === 'Delivered') return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
-
   try {
     const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
@@ -943,16 +758,8 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
     let generatedOtp = null;
 
     if (milestone === 'In Transit') {
-      const activeOtp = await getActiveDeliveryOtp(orderId);
-      if (!activeOtp) {
-        generatedOtp = crypto.randomInt(100000, 1000000).toString();
-        const stored = await storeDeliveryOtp(orderId, generatedOtp, OTP_TTL_MINUTES);
-        if (stored) {
-          await clearOtpState(orderId);
-        }
-      } else {
-        logger.warn(`[OTP] Driver ${req.user.id} attempted OTP regeneration for order ${orderId}`);
-      }
+      const result = await generateDeliveryOtp({ orderId });
+      generatedOtp = result.otp;
     }
 
     const { error: timelineErr } = await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() }).eq('order_display_id', order.order_display_id).eq('milestone', milestone);
@@ -970,20 +777,16 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
     }
 
     if (generatedOtp) {
-      const notifResult = await sendDeliveryOtpNotification(order.customer_id, order.order_display_id, generatedOtp);
-      if (!notifResult.success) {
-        logger.warn(`[OrderRoutes] Delivery OTP notification failed for order ${order.order_display_id} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
-        await supabase.from('orders').update({
-          notification_failed: true,
-          updated_at: new Date().toISOString(),
-        }).eq('id', orderId);
-      }
+      await sendOtpNotification({ orderId, customerId: order.customer_id, orderDisplayId: order.order_display_id, otp: generatedOtp });
     }
 
     const response = { message: 'Milestone updated successfully.', order: updatedOrder, milestone, status };
 
     res.json(response);
   } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -995,169 +798,28 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
   const orderId = req.params.id;
   const { otp } = req.body;
 
-  // Check for active lockout from previous failed attempts
-  if (await checkOtpLockout(orderId)) {
-    return res.status(429).json({
-      error: `Too many failed OTP attempts. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes.`,
-    });
-  }
-
   try {
-    const { data: order, error: orderErr } = await supabase.from('orders')
-      .select('id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status')
-      .eq('id', orderId)
-      .maybeSingle();
-    if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
-    if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
-    if (!DELIVERY_OTP_READY_STATUSES.has(order.status)) {
-      return res.status(409).json({ error: 'Delivery OTP can only be verified after the shipment reaches the delivery location.' });
-    }
-
-    const otpRecord = await getActiveDeliveryOtp(orderId);
-    if (!otpRecord) {
-      return res.status(400).json({
-        error: 'OTP not available or has expired. Please request a new delivery OTP.',
-      });
-    }
-
-    const submittedHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
-    let isMatch = false;
-    if (otpRecord.otp_hash && otpRecord.otp_hash.length === submittedHash.length) {
-      isMatch = crypto.timingSafeEqual(
-        Buffer.from(otpRecord.otp_hash, 'hex'),
-        Buffer.from(submittedHash, 'hex')
-      );
-    }
-    if (!isMatch) {
-      const count = await recordOtpFailure(orderId);
-      const remaining = Math.max(0, OTP_MAX_FAILED_ATTEMPTS - count);
-      const message = remaining > 0
-        ? `Invalid OTP. ${remaining} attempt(s) remaining before lockout.`
-        : `Invalid OTP. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes due to too many failed attempts.`;
-      logger.warn(`[OTP] Failed verification attempt for order ${orderId} by driver ${req.user.id}. ${remaining} attempts remaining.`);
-      return res.status(400).json({ error: message });
-    }
-
-    // Guard against cancellation or a previous successful verification.
-    const { data: preUpdatedOrder, error: updateErr } = await supabase.from('orders').update({
-      updated_at: new Date().toISOString()
-    })
-      .eq('id', orderId)
-      .not('status', 'eq', 'cancelled')
-      .not('status', 'eq', 'payment_released')
-      .select('id, order_display_id, status')
-      .single();
-
-    if (updateErr) {
-      if (updateErr.code === 'PGRST116') {
-        return res.status(409).json({ error: 'Order was already cancelled or payment released.' });
-      }
-      return res.status(500).json({ error: 'Failed to verify OTP.', details: updateErr.message });
-    }
-
-    // Phase 1: Execute blockchain escrow release BEFORE crediting the driver's wallet.
-    // If the blockchain call fails, the database state is NOT modified and the driver can retry.
-    if (order.escrow_booking_id && order.escrow_status !== 'funded' && order.escrow_status !== 'release_failed') {
-      return res.status(400).json({ error: `Cannot release payment: Escrow deposit was never completed or is in an invalid state (${order.escrow_status}).` });
-    }
-
-    let releaseTxHash = null;
-    let escrowAlreadyReleased = false;
-    if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
-      try {
-        const releaseResult = await escrowRelease(order.order_display_id);
-        if (releaseResult.txHash) {
-          releaseTxHash = releaseResult.txHash;
-        } else if (releaseResult.alreadyReleased) {
-          escrowAlreadyReleased = true;
-        } else {
-          throw new Error('Escrow release returned no transaction hash');
-        }
-      } catch (releaseErr) {
-        logger.error('[escrow] Blockchain release failed for order', orderId, ':', releaseErr.message);
-        return res.status(503).json({
-          error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
-          retryable: true,
-        });
-      }
-    } else {
-      logger.info(`[escrow] Order ${orderId} has no escrow_booking_id — skipping on-chain release.`);
-    }
-
-    // Phase 2: Only on blockchain success (or skip), call complete_trip_tx to credit the driver's wallet.
-    const { data: tripData, error: rpcErr } = await supabase.rpc('complete_trip_tx', {
-      p_order_id: orderId,
-      p_otp_id: otpRecord.id,
-      p_release_tx_hash: releaseTxHash,
+    const { escrowUpdateFailed } = await verifyDelivery({
+      orderId,
+      driverId: req.user.id,
+      otp,
     });
-    if (rpcErr) {
-      logger.error('complete_trip_tx RPC failed:', rpcErr.message);
-      return res.status(500).json({ error: 'Failed to complete trip and release payment.', details: rpcErr.message });
-    }
 
-    // Clear brute-force state only after the OTP and trip transaction commits.
-    await clearOtpState(orderId);
-    // Post-RPC verification: confirm the order was actually updated to payment_released
-    const { data: verifiedOrder, error: verifyErr } = await supabase
-      .from('orders')
-      .select('status, escrow_status, escrow_release_attempts')
-      .eq('id', orderId)
-      .maybeSingle();
-
-    if (verifyErr || !verifiedOrder) {
-      logger.error(`[verify-delivery] Failed to verify order status after RPC for order ${orderId}`);
-      return res.status(500).json({ error: 'Failed to verify order status after payment release.' });
-    }
-
-    if (verifiedOrder.status !== 'payment_released') {
-      logger.warn(`[verify-delivery] Order ${orderId} status changed to "${verifiedOrder.status}" — payment was not released.`);
-      return res.status(409).json({
-        error: 'Order status changed during processing. Payment was not released.',
-      });
-    }
-
-    // OTP is only consumed after the RPC and blockchain release succeed — if either fails the driver can retry
-    await verifyDeliveryOtp(orderId);
-    await clearOtpState(orderId);
-
-    // Record blockchain release status in the database.
-    if (releaseTxHash || escrowAlreadyReleased) {
-      const { error: releaseUpdateErr } = await supabase.from('orders').update({
+    if (escrowUpdateFailed) {
+      return res.status(202).json({
+        message: 'Delivery verified successfully. Escrow payout requires reconciliation.',
         escrow_status: 'released',
-        escrow_release_error: null,
-        escrow_released_at: new Date().toISOString(),
-        release_tx_hash: releaseTxHash,
-      }).eq('id', orderId);
-
-      if (releaseUpdateErr) {
-        logger.error('[escrow] Release confirmed but persistence failed:', releaseUpdateErr.message);
-        return res.status(202).json({
-          message: 'Delivery verified successfully. Escrow payout requires reconciliation.',
-          escrow_status: 'released',
-          payment_released: true,
-        });
-      }
-
-      const driverId = tripData?.driver_id || order.driver_id;
-      const displayId = tripData?.order_display_id || order.order_display_id;
-      if (driverId) {
-        const { error: walletErr } = await supabase
-          .from('wallet_transactions')
-          .update({ description: `Escrow payout for ${displayId}` })
-          .eq('driver_id', driverId)
-          .eq('order_display_id', displayId)
-          .eq('txn_type', 'credit');
-
-        if (walletErr) {
-          logger.error('[wallet] Failed to persist escrow payout:', walletErr.message);
-        }
-      }
+        payment_released: true,
+      });
     }
 
     res.json({ message: 'Delivery verified successfully! Payment released to driver.' });
   } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
     logger.error('[verify-delivery] Exception:', err.message);
-    res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -1172,29 +834,18 @@ router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requ
     if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
     if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
 
-    const terminalStatuses = ['delivered', 'cancelled', 'payment_released'];
-    if (terminalStatuses.includes(order.status)) {
-      return res.status(400).json({ error: 'Cannot resend OTP for a completed or cancelled order.' });
-    }
-    if (!DELIVERY_OTP_READY_STATUSES.has(order.status)) {
-      return res.status(409).json({ error: 'Delivery OTP can only be sent after the shipment reaches the delivery location.' });
-    }
+    const { expiresInMinutes } = await resendDeliveryOtp({
+      orderId,
+      customerId: order.customer_id,
+      orderDisplayId: order.order_display_id,
+      orderStatus: order.status,
+    });
 
-    const otp = crypto.randomInt(100000, 1000000).toString();
-    const stored = await storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
-    if (!stored) {
-      return res.status(500).json({ error: 'Failed to generate delivery OTP.' });
-    }
-
-    await clearOtpState(orderId);
-
-    const notifResult = await sendDeliveryOtpNotification(order.customer_id, order.order_display_id, otp);
-    if (!notifResult.success) {
-      logger.warn(`[OrderRoutes] Resend OTP notification failed for order ${order.order_display_id} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
-    }
-
-    res.json({ message: 'New delivery OTP sent.', expiresInMinutes: OTP_TTL_MINUTES });
+    res.json({ message: 'New delivery OTP sent.', expiresInMinutes });
   } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
     logger.error('[OrderRoutes] Resend OTP error:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   }
@@ -1822,3 +1473,5 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRol
 });
 
 export default router;
+
+// Resolves #2056: Sub-controllers for order processing

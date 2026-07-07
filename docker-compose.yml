@@ -38,6 +38,12 @@ services:
       ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
     volumes:
       - ./backend/ml:/app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
   db:
     image: postgis/postgis:15-3.3-alpine
     ports:

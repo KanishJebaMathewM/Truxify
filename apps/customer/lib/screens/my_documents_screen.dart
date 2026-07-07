@@ -243,7 +243,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                     width: 40,
                     height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.grey.withOpacity(0.3),
+                      color: Colors.grey.withValues(alpha: 0.3),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -353,7 +353,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey.withOpacity(0.3),
+                    color: Colors.grey.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -526,7 +526,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                           width: 44,
                           height: 44,
                           decoration: BoxDecoration(
-                            color: isWarning ? Colors.red.withOpacity(0.1) : TruxifyColors.accentLight,
+                            color: isWarning ? Colors.red.withValues(alpha: 0.1) : TruxifyColors.accentLight,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Icon(icon, color: isWarning ? Colors.red : TruxifyColors.accent, size: 22),
@@ -546,7 +546,7 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: statusColor.withOpacity(0.15),
+                                  color: statusColor.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(4),
                                 ),
                                 child: Text(

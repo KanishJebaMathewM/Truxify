@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "@openzeppelin/contracts/access/Ownable.sol";
+
 /// @title Reputation System for Truxify
 /// @notice Manages driver reputation scores capped at MAX_REPUTATION.
 /// @dev Only authorized relayers can update scores.
-contract Reputation {
-    address public owner;
+contract Reputation is Ownable {
     mapping(address => bool) public authorizedRelayers;
     mapping(address => uint256) private scores;
 
@@ -15,11 +16,6 @@ contract Reputation {
     event ReputationIncreased(address indexed driver, uint256 points, uint256 score);
     event ReputationDecreased(address indexed driver, uint256 points, uint256 score);
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner");
-        _;
-    }
-
     modifier onlyRelayer() {
         require(authorizedRelayers[msg.sender], "Not authorized relayer");
         _;
@@ -27,8 +23,7 @@ contract Reputation {
 
     /// @notice Initializes the contract and sets the initial relayer.
     /// @param initialRelayer Address of the first authorized relayer.
-    constructor(address initialRelayer) {
-        owner = msg.sender;
+    constructor(address initialRelayer) Ownable(msg.sender) {
         if (initialRelayer != address(0)) {
             authorizedRelayers[initialRelayer] = true;
             emit RelayerUpdated(initialRelayer, true);

@@ -15,3 +15,5 @@ router.post('/register', authenticate, deviceLimiter, validateBody(registerDevic
 router.delete('/unregister', authenticate, deviceLimiter, validateBody(unregisterDeviceSchema), unregisterDeviceToken);
 
 export default router;
+
+// Resolves #2058: Rate limit device registration

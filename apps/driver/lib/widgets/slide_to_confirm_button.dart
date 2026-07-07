@@ -35,9 +35,9 @@ class _SlideToConfirmButtonState extends State<SlideToConfirmButton> {
           height: 52,
           width: double.infinity,
           decoration: BoxDecoration(
-            color: widget.backgroundColor.withOpacity(0.08),
+            color: widget.backgroundColor.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: widget.backgroundColor.withOpacity(0.2)),
+            border: Border.all(color: widget.backgroundColor.withValues(alpha: 0.2)),
           ),
           child: Stack(
             children: [
@@ -97,7 +97,7 @@ class _SlideToConfirmButtonState extends State<SlideToConfirmButton> {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: widget.backgroundColor.withOpacity(0.3),
+                          color: widget.backgroundColor.withValues(alpha: 0.3),
                           blurRadius: 6,
                           offset: const Offset(0, 2),
                         ),

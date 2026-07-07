@@ -307,7 +307,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                   Text(
                     trip.date,
                     style: GoogleFonts.dmSans(
-                      color: Colors.white.withOpacity(0.7),
+                      color: Colors.white.withValues(alpha: 0.7),
                       fontSize: 12,
                     ),
                   ),
@@ -330,7 +330,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                             Text(
                               'Distance',
                               style: GoogleFonts.dmSans(
-                                color: Colors.white.withOpacity(0.5),
+                                color: Colors.white.withValues(alpha: 0.5),
                                 fontSize: 10,
                               ),
                             ),
@@ -340,7 +340,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                       Container(
                         width: 1,
                         height: 28,
-                        color: Colors.white.withOpacity(0.15),
+                        color: Colors.white.withValues(alpha: 0.15),
                       ),
                       Expanded(
                         child: Column(
@@ -357,7 +357,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                             Text(
                               'Duration',
                               style: GoogleFonts.dmSans(
-                                color: Colors.white.withOpacity(0.5),
+                                color: Colors.white.withValues(alpha: 0.5),
                                 fontSize: 10,
                               ),
                             ),
@@ -367,7 +367,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                       Container(
                         width: 1,
                         height: 28,
-                        color: Colors.white.withOpacity(0.15),
+                        color: Colors.white.withValues(alpha: 0.15),
                       ),
                       Expanded(
                         child: Column(
@@ -387,7 +387,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                                 color:Theme.of(context)
                                               .colorScheme
                                               .onSurface
-                                              .withOpacity(0.6),
+                                              .withValues(alpha: 0.6),
                                 fontSize: 10,
                               ),
                             ),
@@ -498,7 +498,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                                       color: TruxifyColors.accent,
                                       borderStrokeWidth: 1.5,
                                       borderColor:
-                                          Colors.white.withOpacity(0.8),
+                                          Colors.white.withValues(alpha: 0.8),
                                     ),
                                   ],
                                 ),

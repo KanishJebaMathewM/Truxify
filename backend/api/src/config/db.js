@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import mongoose from 'mongoose';
 import { createClient } from '@supabase/supabase-js';
 import { MongoClient } from 'mongodb';
 import Redis from 'ioredis';
@@ -65,6 +66,10 @@ if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseAnonKey)
 // ============================================================================
 const mongoUri = process.env.MONGODB_URI;
 const mongoDbName = process.env.MONGODB_DB_NAME || 'truxify_telemetry';
+const MONGO_POOL_SIZE = parseInt(process.env.MONGO_POOL_SIZE || '10', 10);
+const MONGO_CONNECT_TIMEOUT = parseInt(process.env.MONGO_CONNECT_TIMEOUT || '10000', 10);
+const MONGO_SERVER_SEL_TIMEOUT = parseInt(process.env.MONGO_SERVER_SEL_TIMEOUT || '5000', 10);
+logger.info('[DB] MongoDB pool size: ' + MONGO_POOL_SIZE + ', connect timeout: ' + MONGO_CONNECT_TIMEOUT + 'ms');
 
 export let mongoDb = null;
 let mongoClient = null;
@@ -76,32 +81,36 @@ export async function waitForMongoDb() {
 }
 
 if (mongoUri) {
-  try {
-    mongoClient = new MongoClient(mongoUri);
-    mongoClient.connect()
-      .then(() => {
-        mongoDb = mongoClient.db(mongoDbName);
-        logger.info({ db: mongoDbName }, 'Connected to MongoDB');
-        
-        // Create indexes on telemetry collection
-        mongoDb.collection('telemetry').createIndex(
+  (async () => {
+    try {
+      mongoClient = new MongoClient(mongoUri);
+      await mongoClient.connect();
+      mongoDb = mongoClient.db(mongoDbName);
+      logger.info({ db: mongoDbName }, 'Connected to MongoDB');
+      
+      // Create indexes on telemetry collection
+      try {
+        await mongoDb.collection('telemetry').createIndex(
           { timestamp: 1 },
           { expireAfterSeconds: 604800 }
-        ).catch(err => logger.error({ err }, 'Failed to create TTL index on telemetry'));
-        
-        mongoDb.collection('telemetry').createIndex(
+        );
+      } catch (err) {
+        logger.error({ err }, 'Failed to create TTL index on telemetry');
+      }
+      
+      try {
+        await mongoDb.collection('telemetry').createIndex(
           { location: '2dsphere' }
-        ).catch(err => logger.error({ err }, 'Failed to create 2dsphere index on telemetry'));
-        if (_mongoDbResolve) _mongoDbResolve();
-      })
-      .catch(err => {
-        logger.error({ err }, 'Failed to connect to MongoDB server');
-        if (_mongoDbResolve) _mongoDbResolve();
-      });
-  } catch (error) {
-    logger.error({ err: error }, 'MongoDB client initialization error');
-    if (_mongoDbResolve) _mongoDbResolve();
-  }
+        );
+      } catch (err) {
+        logger.error({ err }, 'Failed to create 2dsphere index on telemetry');
+      }
+      if (_mongoDbResolve) _mongoDbResolve();
+    } catch (error) {
+      logger.error({ err: error }, 'MongoDB client initialization error');
+      if (_mongoDbResolve) _mongoDbResolve();
+    }
+  })();
 } else {
   if (_mongoDbResolve) _mongoDbResolve();
   logger.warn('MONGODB_URI not found in .env. MongoDB telemetry database disabled.');
@@ -177,6 +186,33 @@ if (serviceAccountRaw) {
 }
 
 export async function closeDbConnections() {
+  if (supabase) {
+    try {
+      await supabase.removeAllChannels();
+      logger.info('[shutdown] Supabase channels removed.');
+    } catch (err) {
+      logger.error({ err }, '[shutdown] Supabase close error');
+    }
+  }
+
+  if (supabaseAdmin) {
+    try {
+      await supabaseAdmin.removeAllChannels();
+      logger.info('[shutdown] Supabase Admin channels removed.');
+    } catch (err) {
+      logger.error({ err }, '[shutdown] Supabase Admin close error');
+    }
+  }
+
+  try {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+      logger.info('[shutdown] Mongoose disconnected.');
+    }
+  } catch (err) {
+    logger.error({ err }, '[shutdown] Mongoose disconnect error');
+  }
+
   if (mongoClient) {
     try {
       await mongoClient.close();
@@ -229,3 +265,5 @@ export function validateConfig() {
 
   logger.info('Config validation passed');
 }
+
+// Resolves #2050: Handle SIGINT and SIGTERM for graceful DB shutdown

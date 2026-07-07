@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:flutter/services.dart';
 
 import '../services/auth_service.dart';
@@ -31,6 +32,7 @@ const _countryCodes = [
 
 class _LoginScreenState extends State<LoginScreen> {
   final AuthService _authService = AuthService();
+  final LocalAuthentication _localAuth = LocalAuthentication();
   final TextEditingController _phoneController = TextEditingController();
   final List<TextEditingController> _otpControllers =
       List.generate(6, (_) => TextEditingController());
@@ -72,6 +74,43 @@ class _LoginScreenState extends State<LoginScreen> {
         }
         return KeyEventResult.ignored;
       };
+    }
+  }
+
+  Future<void> _authenticateWithBiometrics() async {
+    try {
+      final canCheckBiometrics = await _localAuth.canCheckBiometrics;
+      final isDeviceSupported = await _localAuth.isDeviceSupported();
+      if (!canCheckBiometrics || !isDeviceSupported) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Biometrics not supported on this device')),
+        );
+        return;
+      }
+      
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Authenticate to log in',
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: true,
+        ),
+      );
+      
+      if (authenticated) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Biometric authentication successful. Please login with OTP to link your account.'),
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Biometric error: $e')),
+      );
     }
   }
 
@@ -316,6 +355,17 @@ class _LoginScreenState extends State<LoginScreen> {
         PrimaryButton(
           label: _sendingOtp ? 'Sending OTP...' : 'Send OTP',
           onPressed: _sendingOtp ? null : _sendOtp,
+        ),
+        const SizedBox(height: 18),
+        Center(
+          child: TextButton.icon(
+            onPressed: _authenticateWithBiometrics,
+            icon: const Icon(Icons.fingerprint, size: 28),
+            label: const Text('Login with Biometrics'),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+          ),
         ),
         const SizedBox(height: 18),
         InfoCard(

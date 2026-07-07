@@ -35,6 +35,8 @@ class TripService {
     return value.endsWith('/') ? value.substring(0, value.length - 1) : value;
   }
 
+  String _encodePathSegment(String value) => Uri.encodeComponent(value);
+
   Future<Map<String, String>> _authHeaders() async {
     String? accessToken;
     try {
@@ -122,7 +124,9 @@ class TripService {
   Future<List<Map<String, dynamic>>> fetchTripItems(
     String tripDisplayId,
   ) async {
-    final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/items');
+    final uri = Uri.parse(
+      '$_apiBaseUrl/api/trips/${_encodePathSegment(tripDisplayId)}/items',
+    );
     final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -130,13 +134,16 @@ class TripService {
     }
 
     final body = jsonDecode(response.body);
-    return List<Map<String, dynamic>>.from(body as List);
+    if (body is! List) return [];
+    return List<Map<String, dynamic>>.from(body);
   }
 
   Future<List<Map<String, dynamic>>> fetchTripStops(
     String tripDisplayId,
   ) async {
-    final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/stops');
+    final uri = Uri.parse(
+      '$_apiBaseUrl/api/trips/${_encodePathSegment(tripDisplayId)}/stops',
+    );
     final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -144,13 +151,16 @@ class TripService {
     }
 
     final body = jsonDecode(response.body);
-    return List<Map<String, dynamic>>.from(body as List);
+    if (body is! List) return [];
+    return List<Map<String, dynamic>>.from(body);
   }
 
   Future<List<Map<String, dynamic>>> fetchRouteMapPoints(
     String tripDisplayId,
   ) async {
-    final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/route-points');
+    final uri = Uri.parse(
+      '$_apiBaseUrl/api/trips/${_encodePathSegment(tripDisplayId)}/route-points',
+    );
     final response = await _httpClient.get(uri, headers: await _authHeaders());
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -158,7 +168,8 @@ class TripService {
     }
 
     final body = jsonDecode(response.body);
-    return List<Map<String, dynamic>>.from(body as List);
+    if (body is! List) return [];
+    return List<Map<String, dynamic>>.from(body);
   }
 
   Future<void> markStopCompleted(
@@ -183,8 +194,7 @@ class TripService {
     );
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>?;
-      throw Exception(body?['error'] as String? ?? 'Failed to update online status');
+      throw Exception(_errorMessage(response, 'Failed to update online status'));
     }
   }
 
@@ -196,6 +206,10 @@ class TripService {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw Exception(_errorMessage(response, 'Failed to start trip'));
     }
+  }
+
+  void dispose() {
+    _httpClient.close();
   }
 
   String _errorMessage(http.Response response, String fallback) {

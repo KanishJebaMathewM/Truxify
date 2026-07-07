@@ -23,15 +23,16 @@ dependencies:
   web_socket_channel: ^3.0.0
 
   google_fonts: ^8.1.0
+  flutter_riverpod: ^2.5.1
   flutter_map: ^8.1.1
-  latlong2: ^0.9.1
+  latlong2: ^0.10.1
   http: ^1.6.0
   shared_preferences: ^2.5.5
   intl: ^0.20.2
   url_launcher: ^6.3.2
   geolocator: ^14.0.2
   shimmer: ^3.0.0
-  permission_handler: ^11.4.0
+  permission_handler: ^12.0.3
 
 dev_dependencies:
   flutter_lints: ^6.0.0

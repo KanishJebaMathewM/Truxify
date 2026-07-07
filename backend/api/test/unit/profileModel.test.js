@@ -181,3 +181,62 @@ describe('ProfileModel.fromDriverDetails', () => {
     expect(result.walletTotal).toBe(0);
   });
 });
+
+describe('ProfileModel.mergeProfileData', () => {
+  it('merges profile, customer stats and driver details into one object', () => {
+    const profile = {
+      id: 'profile-123',
+      firebase_uid: 'firebase-uid-abc',
+      role: 'driver',
+      full_name: 'Ramesh Kumar',
+    };
+    const stats = { total_orders: 12, total_saved: 500, co2_reduced_kg: 20 };
+    const driverDetails = { truck_id: 'truck-1', rating: 4.2, total_trips: 30 };
+
+    const result = ProfileModel.mergeProfileData(profile, stats, driverDetails);
+
+    expect(result.id).toBe('profile-123');
+    expect(result.fullName).toBe('Ramesh Kumar');
+    expect(result.customerStats).toEqual({
+      totalOrders: 12,
+      totalSaved: 500,
+      co2ReducedKg: 20,
+    });
+    expect(result.driverDetails).toMatchObject({
+      truckId: 'truck-1',
+      rating: 4.2,
+      totalTrips: 30,
+    });
+  });
+
+  it('sets customerStats and driverDetails to null when their inputs are null', () => {
+    const profile = { id: 'profile-456', role: 'customer' };
+
+    const result = ProfileModel.mergeProfileData(profile, null, null);
+
+    expect(result.id).toBe('profile-456');
+    expect(result.customerStats).toBeNull();
+    expect(result.driverDetails).toBeNull();
+  });
+
+  it('returns a profile with role "user" and no id when profile is null', () => {
+    const result = ProfileModel.mergeProfileData(null, undefined, undefined);
+
+    expect(result.id).toBeUndefined();
+    expect(result.customerStats).toEqual({
+      totalOrders: 0,
+      totalSaved: 0,
+      co2ReducedKg: 0,
+    });
+    expect(result.driverDetails).toEqual({
+      truckId: null,
+      rating: 0,
+      totalTrips: 0,
+      completionRate: 0,
+      isOnline: false,
+      walletConfirmed: 0,
+      walletPending: 0,
+      walletTotal: 0,
+    });
+  });
+});

@@ -61,6 +61,7 @@ m.supabase.rpc = vi.fn().mockImplementation(async (fnName, args) => {
   return originalRpc(fnName, args);
 });
 let mockRedis = null;
+afterEach(() => { mockRedis = null; });
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
@@ -2128,6 +2129,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     submitEscrowRefundMock.mockReset();
     submitEscrowRefundMock.mockReset();
     confirmEscrowRefundMock.mockReset();
+    mockRedis = null;
   });
 
   it('allows customer to change drop and returns recalculated pricing', async () => {
@@ -2263,7 +2265,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
-    expect(res.status).toBe(202);
+    if(res.status !== 202) console.log('ERROR:', res.body); expect(res.status).toBe(202);
     expect(res.body.escrow_status).toBe('refund_failed');
     expect(res.body.retryable).toBe(true);
     const stored = m.store.orders.find(o => o.id === 'aaaa0005-0000-4000-8000-000000000005');

@@ -1,0 +1,43 @@
+name: Remove Links from Non-Contributors
+
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+  pull_request_target:
+    types: [opened, edited]
+  workflow_dispatch:
+    inputs:
+      scan_all:
+        description: 'Scan and clean all existing issues, PRs, and comments across the repository'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  remove-links:
+    name: Remove Unwanted Links
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Remove links posted by non-contributors
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const cleaner = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/remove-non-contributor-links.js`);
+            if (context.eventName === 'workflow_dispatch' || context.inputs?.scan_all) {
+              await cleaner.scanAll({ github, context, core });
+            } else {
+              await cleaner.run({ github, context, core });
+            }

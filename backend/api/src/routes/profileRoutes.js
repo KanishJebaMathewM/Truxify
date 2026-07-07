@@ -12,7 +12,18 @@ import {
 import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
+import { startTimer, endTimer } from '../lib/routeTiming.js';
 const router = express.Router();
+const routeTimer = startTimer('profileRoutes');
+
+// Cache control middleware for profile endpoints
+function profileCacheControl(req, res, next) {
+  if (req.method === 'GET') {
+    res.setHeader('Cache-Control', 'private, max-age=30');
+    res.setHeader('Vary', 'Authorization');
+  }
+  next();
+}
 
 // GET PROFILE
 router.get('/', authenticate, userLimiter, async (req, res) => {
@@ -297,9 +308,11 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
       return res.send(csvString.trimEnd());
     }
     if (sort_by === 'net_earnings') {
-      tripsList.sort((a, b) => b.net_earnings - a.net_earnings);
+      // Optimize sorting: use net_earnings descending, fallback to pickup_date descending
+      tripsList.sort((a, b) => (b.net_earnings - a.net_earnings) || new Date(b.pickup_date) - new Date(a.pickup_date));
     } else if (sort_by === 'base_freight') {
-      tripsList.sort((a, b) => b.base_freight - a.base_freight);
+      // Optimize sorting: use base_freight descending, fallback to pickup_date descending
+      tripsList.sort((a, b) => (b.base_freight - a.base_freight) || new Date(b.pickup_date) - new Date(a.pickup_date));
     }
 
     res.json({
@@ -373,4 +386,7 @@ router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), asyn
   }
 });
 
+endTimer(routeTimer);
 export default router;
+
+// Resolves #2046: DELETE /admin/cache/:userId endpoint

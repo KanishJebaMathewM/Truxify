@@ -12,7 +12,7 @@ class TruckRepository {
     final response = await _client
         .from('trucks')
         .select()
-        .eq('driver_id', driverId)
+        .eq('owner_id', driverId)
         .maybeSingle();
 
     if (response == null) {

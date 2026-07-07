@@ -2,34 +2,38 @@ import asyncio
 import hmac
 import logging
 import os
+import time
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from .models.eta_prediction import eta_predictor
+from .app.models.eta_prediction import eta_predictor
 
-from .models.demand_forecast import (
+from .app.models.demand_forecast import (
     predict_demand,
     train_demand_forecast_model,
     FEATURE_NAMES,
 )
-from .models.price_prediction import predict_price, train_price_model
-from .models.bilateral_matcher import match_bilateral
-from .models.driver_profit import driver_profit_predictor
-from .models.bin_packing import optimise_packing
-from .models.collaborative_filter import collaborative_filter
-from .models.trust_scorer import trust_scorer
-from .models.deadhead_eliminator import find_return_loads
-from .models.mid_trip_reoptimiser import find_mid_trip_loads
-from .models.base import model_exists
-from .models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
-from .models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
+from .app.models.price_prediction import predict_price, train_price_model
+from .app.models.bilateral_matcher import match_bilateral
+from .app.models.driver_profit import driver_profit_predictor
+from .app.models.bin_packing import optimise_packing
+from .app.models.collaborative_filter import collaborative_filter
+from .app.models.trust_scorer import trust_scorer
+from .app.models.deadhead_eliminator import find_return_loads
+from .app.models.mid_trip_reoptimiser import find_mid_trip_loads
+from .app.models.base import model_exists
+from .app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
+from .app.models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Track loaded models for health reporting
+loaded_models: set[str] = set()
 
 async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     ml_api_key = os.environ.get("ML_API_KEY")
@@ -39,11 +43,16 @@ async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
+
 app = FastAPI(
     title="Truxify ML Engine",
-    description="Machine Learning microservice for Truxify",
+    description="ML prediction service for load matching, pricing, ETA, and route optimization",
     version="1.0.0",
+    docs_url="/docs",      # Swagger UI at /docs
+    redoc_url="/redoc", 
 )
+
+
 
 # CORS: restrict to known origins — no wildcard "*" to prevent unauthorized cross-origin access
 app.add_middleware(
@@ -64,6 +73,10 @@ app.add_middleware(
 async def startup_event():
     from .models.base import preload_all_models
     logger.info("ML Engine starting, pre-loading models...")
+    loaded_models.add("demand_forecast")
+    loaded_models.add("price_prediction")
+    loaded_models.add("eta_prediction")
+    loaded_models.add("driver_profit")
     await preload_all_models()
     logger.info("ML Engine startup complete")
 
@@ -375,6 +388,7 @@ async def health():
         "status": "healthy" if all_ready else "degraded",
         "service": "ml-engine",
         "models": models,
+        "models_loaded": len(loaded_models),
     }
 
 

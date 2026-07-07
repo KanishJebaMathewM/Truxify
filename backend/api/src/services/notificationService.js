@@ -17,6 +17,13 @@ const INVALID_TOKEN_CODES = new Set([
 
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 2000, 4000];
+const RETRY_BASE_DELAY = 500;
+const RETRY_MAX_DELAY = 5000;
+
+function calculateRetryBackoff(attempt) {
+  const delay = Math.min(RETRY_BASE_DELAY * Math.pow(2, attempt), RETRY_MAX_DELAY);
+  return delay + Math.floor(Math.random() * 200);
+}
 
 async function getUserFcmToken(userId) {
   if (!supabase) return null;
@@ -147,18 +154,29 @@ export async function getActiveDeliveryOtp(orderId) {
   return data;
 }
 
-export async function verifyDeliveryOtp(orderId) {
-  const { error } = await supabase
+export async function verifyDeliveryOtp(otpId) {
+  // Target a specific OTP record by ID instead of bulk-updating all
+  // unverified OTPs for an order. This ensures only the matched OTP
+  // (which was validated by the caller via timing-safe hash comparison)
+  // is consumed, preventing any future caller from bypassing verification.
+  const { data, error } = await supabase
     .from('delivery_otps')
     .update({
       verified: true,
       verified_at: new Date().toISOString(),
     })
-    .eq('order_id', orderId)
-    .eq('verified', false);
+    .eq('id', otpId)
+    .eq('verified', false)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     logger.error('[NotificationService] Failed to verify OTP:', error.message);
+    return false;
+  }
+
+  if (!data) {
+    logger.warn('[NotificationService] OTP not found or already verified:', otpId);
     return false;
   }
 

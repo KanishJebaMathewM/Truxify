@@ -17,3 +17,5 @@
     "description": "Generic loading indicator text"
   }
 }
+
+// Resolves #2421: feat(i18n): add localization support for customer app

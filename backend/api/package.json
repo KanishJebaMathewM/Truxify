@@ -30,7 +30,7 @@
     "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.0",
     "mongodb": "^7.4.0",
-    "mongoose": "^9.7.3",
+    "mongoose": "^9.7.4",
     "multer": "^2.2.0",
     "opossum": "^10.0.0",
     "pino": "^10.3.1",
@@ -42,12 +42,12 @@
     "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
-  "overrides": {
-    "uuid": "^11.1.1",
-    "protobufjs": "^7.5.4"
-  },
+
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@vitest/coverage-v8": "^4.1.9",
+    "eslint": "^10.6.0",
+    "eslint-plugin-import": "^2.29.1",
     "globals": "^17.7.0",
     "nodemon": "^3.1.2",
     "supertest": "^7.2.2",

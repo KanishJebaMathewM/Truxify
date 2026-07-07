@@ -127,7 +127,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         dropLng: finalDropLng,
         pickupTime: widget.draft.dateLabel,
         goodsType: widget.draft.goodsType,
-        weightTonnes: weight!,
+        weightTonnes: weight,
         paymentMethodId: _selectedPayment?.id,
       );
 

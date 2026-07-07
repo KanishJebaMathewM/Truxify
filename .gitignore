@@ -68,3 +68,8 @@ docker-compose.override.yml
 
 # Google Services config file (contains API keys/secrets)
 **/google-services.json
+
+# Open .gitignore and add:
+echo "" >> .gitignore
+echo "# Dart define env files (contain API keys)" >> .gitignore
+echo "dart_defines/*.env" >> .gitignore

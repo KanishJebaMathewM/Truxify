@@ -56,19 +56,22 @@ const defaultMockSupabase = {
   }),
 };
 
+supabaseRef.current = defaultMockSupabase;
+const useMockSupabase = () => {
+  supabaseRef.current = defaultMockSupabase;
+};
+
 vi.mock('../../src/config/db.js', () => ({
   get supabase() {
     return supabaseRef.current;
   },
 }));
 
-const useMockSupabase = () => { supabaseRef.current = defaultMockSupabase; };
-
 import { getProfile, getCustomerStats, getDriverDetails } from '../../src/services/profileService.js';
 
 describe('getProfile', () => {
   beforeEach(() => {
-    supabaseRef.current = { ...defaultMockSupabase };
+    supabaseRef.current = defaultMockSupabase;
   });
 
   it('throws when supabase is not configured', async () => {
@@ -104,7 +107,7 @@ describe('getProfile', () => {
 
 describe('getCustomerStats', () => {
   beforeEach(() => {
-    supabaseRef.current = { ...defaultMockSupabase };
+    supabaseRef.current = defaultMockSupabase;
   });
 
   it('throws when supabase is not configured', async () => {
@@ -140,7 +143,7 @@ describe('getCustomerStats', () => {
 
 describe('getDriverDetails', () => {
   beforeEach(() => {
-    supabaseRef.current = { ...defaultMockSupabase };
+    supabaseRef.current = defaultMockSupabase;
   });
 
   it('throws when supabase is not configured', async () => {
@@ -174,5 +177,73 @@ describe('getDriverDetails', () => {
     };
     const result = await getDriverDetails('new-driver-without-details');
     expect(result).toBeNull();
+  });
+});
+
+describe('createProfile', () => {
+  beforeEach(() => {
+    supabaseRef.current = defaultMockSupabase;
+  });
+
+  it('throws when supabase is not configured', async () => {
+    supabaseRef.current = null;
+    const { createProfile } = await import('../../src/services/profileService.js');
+    await expect(createProfile({})).rejects.toThrow('Supabase client not configured');
+  });
+
+  it('creates profile on successful query', async () => {
+    const mockInsertSelectSingle = vi.fn().mockResolvedValue({ data: { id: 'new' }, error: null });
+    supabaseRef.current = {
+      from: vi.fn().mockReturnValue({
+        insert: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnValue({
+            single: mockInsertSelectSingle
+          })
+        })
+      })
+    };
+    const { createProfile } = await import('../../src/services/profileService.js');
+    const result = await createProfile({ name: 'test' });
+    expect(result).toEqual({ id: 'new' });
+  });
+});
+
+describe('updateProfile', () => {
+  beforeEach(() => {
+    supabaseRef.current = defaultMockSupabase;
+  });
+
+  it('throws when supabase is not configured', async () => {
+    supabaseRef.current = null;
+    const { updateProfile } = await import('../../src/services/profileService.js');
+    await expect(updateProfile('id', {})).rejects.toThrow('Supabase client not configured');
+  });
+
+  it('updates profile on successful query', async () => {
+    const mockUpdateEqSelectSingle = vi.fn().mockResolvedValue({ data: { id: 'id' }, error: null });
+    supabaseRef.current = {
+      from: vi.fn().mockReturnValue({
+        update: vi.fn().mockReturnValue({
+          eq: vi.fn().mockReturnValue({
+            select: vi.fn().mockReturnValue({
+              single: mockUpdateEqSelectSingle
+            })
+          })
+        })
+      })
+    };
+    const { updateProfile } = await import('../../src/services/profileService.js');
+    const result = await updateProfile('id', { name: 'test' });
+    expect(result).toEqual({ id: 'id' });
+  });
+});
+
+describe('invalidateProfileCache', () => {
+  it('calls redisClient.del correctly', async () => {
+    const mockDel = vi.fn().mockResolvedValue(1);
+    vi.mocked(await import('../../src/config/db.js')).redisClient = { del: mockDel };
+    const { invalidateProfileCache } = await import('../../src/services/profileService.js');
+    await invalidateProfileCache('123');
+    expect(mockDel).toHaveBeenCalledWith('profile:123');
   });
 });

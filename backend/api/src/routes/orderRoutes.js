@@ -808,6 +808,12 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
 
   if (milestone === 'Delivered') return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
 
+  const lockKey = `milestone_lock:${orderId}`;
+  const lockValue = await acquireLock(lockKey, 10000);
+  if (!lockValue) {
+    return res.status(409).json({ error: 'A milestone update is currently in progress. Please try again.' });
+  }
+
   try {
     const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
@@ -885,6 +891,8 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
     res.json(response);
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    await releaseLock(lockKey, lockValue);
   }
 });
 

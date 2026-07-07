@@ -4,6 +4,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema } from '../validation/requestSchemas.js';
+import logger from '../middleware/logger.js';
 import { startTimer, endTimer } from '../lib/routeTiming.js';
 
 const router = express.Router();
@@ -94,6 +95,7 @@ router.get('/faqs', async (req, res) => {
 
     res.json(faqs || []);
   } catch (err) {
+    logger.error('FAQs fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -186,6 +188,7 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
       ticket,
     });
   } catch (err) {
+    logger.error('Ticket creation error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -249,6 +252,7 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
       },
     });
   } catch (err) {
+    logger.error('Tickets list error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -283,6 +287,7 @@ router.get('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSc
 
     res.json(ticket);
   } catch (err) {
+    logger.error('Single ticket fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -368,6 +373,7 @@ router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicke
       ticket: updatedTicket,
     });
   } catch (err) {
+    logger.error('Ticket update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -439,6 +445,7 @@ router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), 
       },
     });
   } catch (err) {
+    logger.error('Admin tickets list error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -510,6 +517,7 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, validateParams(u
       comment,
     });
   } catch (err) {
+    logger.error('Ticket comment creation error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -571,6 +579,7 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
 
     res.json(comments || []);
   } catch (err) {
+    logger.error('Ticket comments fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

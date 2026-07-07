@@ -25,6 +25,11 @@ contract Escrow {
     event Deposited(bytes32 indexed bookingId, address indexed customer, address indexed driver, uint256 amount);
     event Released(bytes32 indexed bookingId, address indexed driver, uint256 amount);
     event Refunded(bytes32 indexed bookingId, address indexed customer, uint256 amount);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event ContractPaused(address indexed by, uint256 timestamp);
+    event ContractResumed(address indexed by, uint256 timestamp);
+    event LowBalanceWarning(address indexed contractAddress, uint256 balance);
+    event MaxEscrowAmountUpdated(uint256 oldMax, uint256 newMax);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner");

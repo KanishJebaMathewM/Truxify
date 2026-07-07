@@ -17,6 +17,13 @@ export const loadFilterQuerySchema = z.object({
   max_price: nonNegativeDecimalString('max_price').optional(),
   distance: nonNegativeDecimalString('distance').optional(),
 }).passthrough().superRefine((filters, ctx) => {
+  if (filters.distance !== undefined && (typeof filters.distance !== 'number' || filters.distance <= 0)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['distance'],
+      message: 'distance must be a positive number',
+    });
+  }
   if (
     filters.min_price !== undefined
     && filters.max_price !== undefined

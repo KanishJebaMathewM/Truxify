@@ -82,7 +82,7 @@ app.use(helmet({
     useDefaults: true,
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"], // Adjust if strict CSP is needed for frontend
+      scriptSrc: ["'self'"], // Strict CSP enforced
       objectSrc: ["'none'"],
       upgradeInsecureRequests: [],
     },

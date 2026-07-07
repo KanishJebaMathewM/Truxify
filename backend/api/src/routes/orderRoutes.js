@@ -48,6 +48,15 @@ import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  buildDepositTxFn: buildDepositTx,
+  escrowDepositFn: escrowDeposit,
+  recordDepositTxFn: recordDepositTx,
+  escrowRefundFn: escrowRefund,
+  logger
+});
+
 // ── OTP brute-force protection (Redis + In-Memory Fallback) ────────────────────
 const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
 const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
@@ -782,7 +791,7 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
     });
     return res.status(result.status).json(result.body);
   } catch (err) {
-    if (err instanceof DomainError) {
+    if (err.status && err.payload) {
       return res.status(err.status).json(err.payload);
     }
     logger.error('Bid acceptance exception:', err.message);

@@ -55,6 +55,15 @@ if (process.env.NODE_ENV === 'production' && !process.env.ML_API_KEY) {
 if (!process.env.DRIVER_LOGIN_OTP) {
   logger.warn('DRIVER_LOGIN_OTP is not set. Driver OTP login will be disabled until it is configured in production.');
 }
+// Startup audit logging for security compliance
+logger.info('[Startup] Node version: ' + process.version);
+logger.info('[Startup] Environment: ' + process.env.NODE_ENV);
+if (process.env.SENTRY_DSN) {
+  logger.info('[Startup] Sentry error tracking is enabled');
+}
+if (process.env.ALLOWED_ORIGINS) {
+  logger.info('[Startup] CORS allowed origins: ' + process.env.ALLOWED_ORIGINS);
+}
 const app = express();
 const server = http.createServer(app);
 

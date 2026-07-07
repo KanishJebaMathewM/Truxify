@@ -17,6 +17,13 @@ const INVALID_TOKEN_CODES = new Set([
 
 const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1000, 2000, 4000];
+const RETRY_BASE_DELAY = 500;
+const RETRY_MAX_DELAY = 5000;
+
+function calculateRetryBackoff(attempt) {
+  const delay = Math.min(RETRY_BASE_DELAY * Math.pow(2, attempt), RETRY_MAX_DELAY);
+  return delay + Math.floor(Math.random() * 200);
+}
 
 async function getUserFcmToken(userId) {
   if (!supabase) return null;
@@ -202,7 +209,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       .insert({
         user_id: customerId,
         title,
-        body,
+        body: `Your delivery verification OTP has been sent for order ${orderDisplayId}.`,
         notif_type: 'order_update',
         metadata: { order_display_id: orderDisplayId, delivery_otp_hash: otpHash },
       });

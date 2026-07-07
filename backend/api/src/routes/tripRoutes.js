@@ -4,6 +4,8 @@ import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
+import { validateParams } from '../middleware/validate.js';
+import { uuidParamSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
@@ -201,7 +203,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
  *
  * Optional query param: ?type=gpsUpdate  (filters by event_type)
  */
-router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
+router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const tripId = req.params.id;
   const { type, sort, min_lat, max_lat, min_lng, max_lng } = req.query;
   const isAscending = sort !== 'desc';
@@ -215,7 +217,12 @@ router.get('/:id/events', authenticate, userLimiter, async (req, res) => {
       .order('event_timestamp', { ascending: isAscending });
 
     if (eventsErr) {
-      return res.status(500).json({ error: 'Failed to fetch trip events.', details: eventsErr.message });
+      return res.status(500).json({
+        error: 'Failed to fetch trip events.',
+        code: 'TRIP_EVENTS_FETCH_ERROR',
+        details: eventsErr.message,
+        timestamp: new Date().toISOString(),
+      });
     }
 
     if (!events || events.length === 0) {

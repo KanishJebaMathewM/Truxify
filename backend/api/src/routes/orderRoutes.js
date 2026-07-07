@@ -42,6 +42,17 @@ import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+const orderNotificationService = new OrderNotificationService();
+
+// Request input validation helper for order endpoints
+function validateOrderInput(body) {
+  const errors = [];
+  if (!body.customer_id) errors.push('customer_id is required');
+  if (!body.origin) errors.push('origin is required');
+  if (!body.destination) errors.push('destination is required');
+  if (!body.goods_type) errors.push('goods_type is required');
+  return errors.length > 0 ? { valid: false, errors } : { valid: true };
+}
 
 // ── OTP constants and state management moved to orderMilestoneService ──
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -100,7 +111,6 @@ const telemetryLimiter = rateLimit({
 const resendOtpLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
-  keyGenerator: (req) => req.user?.id || 'unauthenticated',
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id || 'unknown',
@@ -112,7 +122,6 @@ const resendOtpLimiter = rateLimit({
 const changeDropLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 5,
-  keyGenerator: (req) => req.user?.id || 'unauthenticated',
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id || 'unknown',
@@ -570,7 +579,7 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
       return res.status(409).json({ error: 'A rating has already been submitted for this order.' });
     }
 
-    const { error: rpcErr } = await supabase.rpc('submit_rating_tx', {
+    const { data: ratingData, error: rpcErr } = await supabase.rpc('submit_rating_tx', {
       p_order_display_id: order.order_display_id,
       p_customer_id: req.user.id,
       p_driver_id: order.driver_id,
@@ -604,7 +613,7 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
           failed_at: new Date().toISOString(),
           retry_count: 0,
           last_error: repErr.message,
-        }).then().catch(() => {});
+        }).catch((dbErr) => logger.error('[reputation] Failed to log failure:', dbErr.message));
       });
     } else {
       logger.warn(
@@ -763,17 +772,14 @@ router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requ
       return res.status(409).json({ error: 'Delivery OTP can only be sent after the shipment reaches the delivery location.' });
     }
 
-    const otp = crypto.randomInt(100000, 1000000).toString();
-    const stored = await storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
-    if (!stored) {
+    const result = await orderNotificationService.sendOrderNotification({
+      type: 'delivery_otp_resend',
+      orderId,
+      orderDisplayId: order.order_display_id,
+      customerId: order.customer_id,
+    });
+    if (!result.otp) {
       return res.status(500).json({ error: 'Failed to generate delivery OTP.' });
-    }
-
-    await clearOtpState(orderId);
-
-    const notifResult = await sendDeliveryOtpNotification(order.customer_id, order.order_display_id, otp);
-    if (!notifResult.success) {
-      logger.warn(`[OrderRoutes] Resend OTP notification failed for order ${order.order_display_id} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
     }
 
     res.json({ message: 'New delivery OTP sent.', expiresInMinutes: OTP_TTL_MINUTES });

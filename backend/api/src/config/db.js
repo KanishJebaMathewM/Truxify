@@ -65,6 +65,10 @@ if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseAnonKey)
 // ============================================================================
 const mongoUri = process.env.MONGODB_URI;
 const mongoDbName = process.env.MONGODB_DB_NAME || 'truxify_telemetry';
+const MONGO_POOL_SIZE = parseInt(process.env.MONGO_POOL_SIZE || '10', 10);
+const MONGO_CONNECT_TIMEOUT = parseInt(process.env.MONGO_CONNECT_TIMEOUT || '10000', 10);
+const MONGO_SERVER_SEL_TIMEOUT = parseInt(process.env.MONGO_SERVER_SEL_TIMEOUT || '5000', 10);
+logger.info('[DB] MongoDB pool size: ' + MONGO_POOL_SIZE + ', connect timeout: ' + MONGO_CONNECT_TIMEOUT + 'ms');
 
 export let mongoDb = null;
 let mongoClient = null;

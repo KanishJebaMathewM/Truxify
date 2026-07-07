@@ -82,7 +82,11 @@ export async function authenticate(req, res, next) {
   // Token Authentication Flow
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Access Denied. No token provided.' });
+    return res.status(401).json({
+      error: 'Access Denied. No token provided.',
+      hint: 'Include a Bearer token in the Authorization header.',
+      docs: 'See /docs/auth.md for authentication flow.'
+    });
   }
 
   const token = authHeader.split(' ')[1];

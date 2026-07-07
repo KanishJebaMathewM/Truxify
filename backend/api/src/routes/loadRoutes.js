@@ -8,8 +8,10 @@ import { validateParams } from '../middleware/validate.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { uuidParamSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
+import { startTimer, endTimer } from '../lib/routeTiming.js';
 
 const router = express.Router();
+const routeTimer = startTimer('loadRoutes');
 
 // ============================================================================
 // 1. GET ALL AVAILABLE LOAD OFFERS (DRIVER)
@@ -209,5 +211,6 @@ router.get('/:id', authenticate, userLimiter, requireRole(['driver']), validateP
   }
 });
 
+endTimer(routeTimer);
 export default router;
 

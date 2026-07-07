@@ -130,7 +130,7 @@ export async function recordDepositTx(bookingId, txHash, expectedSenderAddress =
   }
 
   const provider = escrowContract.runner.provider;
-  const receipt = await provider.waitForTransaction(txHash, 1);
+  const receipt = await provider.waitForTransaction(txHash, 1, 60_000);
   if (!receipt || receipt.status === 0) {
     return { error: 'Transaction reverted or not found on chain' };
   }
@@ -254,7 +254,7 @@ export async function confirmEscrowRefund(txHash) {
     throw new Error('Invalid escrow refund transaction hash.');
   }
 
-  const receipt = await escrowContract.runner.provider.waitForTransaction(txHash, 1);
+  const receipt = await escrowContract.runner.provider.waitForTransaction(txHash, 1, 60_000);
   if (!receipt || receipt.status === 0) {
     throw new Error('Escrow refund transaction reverted or was not found.');
   }

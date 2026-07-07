@@ -22,6 +22,21 @@
 import { ethers } from 'ethers';
 import logger from '../middleware/logger.js';
 
+// Safe math utilities for reputation calculations
+function safeAdd(a, b) {
+  const result = Number(a) + Number(b);
+  return Number.isFinite(result) ? result : 0;
+}
+
+function safeSubtract(a, b) {
+  const result = Math.max(0, Number(a) - Number(b));
+  return Number.isFinite(result) ? result : 0;
+}
+
+function clampReputation(value) {
+  return Math.max(0, Math.min(100, Number(value) || 0));
+}
+
 // Minimal ABI — only the subset the backend needs to call.
 const REPUTATION_ABI = [
   'function increaseReputation(address driver, uint256 points) external',
@@ -113,6 +128,7 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
     }, REPUTATION_RETRY_MAX, REPUTATION_RETRY_DELAY_MS);
   } catch (err) {
     logger.error(`[reputation] increaseReputation failed for driver ${driverWalletAddress} after ${REPUTATION_RETRY_MAX} retries: ${err.message}`);
+    throw err;
   }
 }
 

@@ -4,8 +4,10 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema } from '../validation/requestSchemas.js';
+import { startTimer, endTimer } from '../lib/routeTiming.js';
 
 const router = express.Router();
+const routeTimer = startTimer('supportRoutes');
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
 const TICKET_COLUMNS = 'id, subject, description, category, status, created_at, updated_at';
@@ -254,7 +256,7 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
 // ============================================================================
 // 5. GET SINGLE SUPPORT TICKET (AUTHENTICATED USER - OWNER)
 // ============================================================================
-router.get('/tickets/:id', authenticate, userLimiter, async (req, res) => {
+router.get('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const ticketId = req.params.id;
 
   try {
@@ -454,7 +456,7 @@ router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), 
  * @returns {object} 409 - Cannot comment on a closed ticket
  * @returns {object} 500 - Internal server error
  */
-router.post('/tickets/:id/comments', authenticate, userLimiter, validateBody(createTicketCommentSchema), async (req, res) => {
+router.post('/tickets/:id/comments', authenticate, userLimiter, validateParams(uuidParamSchema), validateBody(createTicketCommentSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { message } = req.body;
 
@@ -573,6 +575,7 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
   }
 });
 
+endTimer(routeTimer);
 export default router;
 
 // Resolves #2055: Load-based ticket assignment

@@ -127,4 +127,54 @@ describe("Escrow", function () {
 
     await assertRejectsWith(attacker.attackRelease(id), "Driver payout failed");
   });
+
+  it("emits events on deposit, release, and refund", async function () {
+    const { escrow, relayer, customer, driver } = await deployEscrow();
+    const id = bookingId("events");
+    const amount = ethers.parseEther("0.5");
+
+    await expect(escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount }))
+      .to.emit(escrow, "EscrowDeposited")
+      .withArgs(id, customer.address, driver.address, amount);
+
+    await expect(escrow.connect(relayer).releaseFunds(id))
+      .to.emit(escrow, "EscrowReleased")
+      .withArgs(id, driver.address, amount);
+
+    const refundId = bookingId("events-refund");
+    await escrow.connect(customer).deposit(refundId, customer.address, driver.address, { value: amount });
+    await expect(escrow.connect(relayer).refundFunds(refundId))
+      .to.emit(escrow, "EscrowRefunded")
+      .withArgs(refundId, customer.address, amount);
+  });
+
+  it("handles concurrent escrows correctly", async function () {
+    const { escrow, relayer, customer, driver } = await deployEscrow();
+    const ids = Array.from({ length: 5 }, (_, i) => bookingId(`concurrent-${i}`));
+    const amount = ethers.parseEther("0.1");
+
+    for (const id of ids) {
+      await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount });
+    }
+
+    for (const id of ids) {
+      const saved = await escrow.escrows(id);
+      assert.equal(saved.status, 1n);
+      assert.equal(saved.amount, amount);
+    }
+
+    const totalBalance = await ethers.provider.getBalance(await escrow.getAddress());
+    assert.equal(totalBalance, amount * BigInt(ids.length));
+  });
+
+  it("only allows owner to manage relayers", async function () {
+    const { escrow, owner, outsider } = await deployEscrow();
+    await assertRejectsWith(
+      escrow.connect(outsider).setRelayer(outsider.address, true),
+      "Only owner"
+    );
+    await escrow.connect(owner).setRelayer(outsider.address, true);
+    const isAuthorized = await escrow.authorizedRelayers(outsider.address);
+    assert.equal(isAuthorized, true);
+  });
 });

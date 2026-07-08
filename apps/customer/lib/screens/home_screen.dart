@@ -32,6 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _locationLabel = 'Surat, Gujarat';
   String _customerName = '';
   List<Map<String, dynamic>> _activeOrders = [];
+  bool _isOffline = false;
 
   @override
   void initState() {

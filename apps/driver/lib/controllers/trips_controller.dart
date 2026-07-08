@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/app_models.dart';
 import '../services/trip_service.dart';
 
 final tripsControllerProvider = ChangeNotifierProvider((ref) => TripsController());

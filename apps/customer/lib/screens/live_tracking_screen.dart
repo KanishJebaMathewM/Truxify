@@ -50,6 +50,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   // ── Route polyline state ──────────────────────────────────────────────
   Timer? _routeRefreshTimer;
   bool _isFetchingRoute = false;
+  bool _isLoadingDetails = false;
   DateTime? _lastRouteFetchAt;
   bool _isRouteLoading = false;
   static const Duration _routeRefreshInterval = Duration(seconds: 30);

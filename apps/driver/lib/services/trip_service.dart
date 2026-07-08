@@ -25,18 +25,6 @@ class TripService {
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
 
   String? _lastErrorMessage;
-  bool _isDisposed = false;
-
-  String _requireNonEmpty(String value, String name) {
-    if (value.isEmpty) throw ArgumentError('$name must not be empty');
-    return value;
-  }
-
-  Map<String, dynamic> _sanitizePayload(Map<String, dynamic> payload) {
-    payload.removeWhere((k, v) => v == null);
-    return payload;
-  }
-
   String get _driverId {
     final user = _client.auth.currentUser;
     if (user == null) {

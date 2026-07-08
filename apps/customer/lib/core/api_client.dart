@@ -266,6 +266,13 @@ class ApiClient {
       );
     }
 
+    if (response.statusCode == 415) {
+      throw const ApiException(
+        415,
+        'Unsupported Media Type: The app sent data in an incorrect format.',
+      );
+    }
+
     String message;
     try {
       final decoded = jsonDecode(response.body);

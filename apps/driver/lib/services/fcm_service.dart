@@ -10,9 +10,24 @@ class FcmService {
     defaultValue: 'http://localhost:5000',
   );
 
+  static String? _currentToken;
+  static bool _isInitialized = false;
+  static final List<RemoteMessage> _pendingMessages = [];
+
+  static String? get currentToken => _currentToken;
+  static bool get isInitialized => _isInitialized;
+
   static Future<void> initializeAndRegister() async {
     try {
+      _isInitialized = true;
       final messaging = FirebaseMessaging.instance;
+
+      FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+      final initialMessage = await messaging.getInitialMessage();
+      if (initialMessage != null) {
+        _pendingMessages.add(initialMessage);
+      }
 
       final settings = await messaging.requestPermission(
         alert: true,
@@ -28,10 +43,12 @@ class FcmService {
           settings.authorizationStatus == AuthorizationStatus.provisional) {
         final token = await messaging.getToken();
         if (token != null) {
+          _currentToken = token;
           await _sendTokenToBackend(token);
         }
 
         messaging.onTokenRefresh.listen((newToken) async {
+          _currentToken = newToken;
           await _sendTokenToBackend(newToken);
         });
       } else {
@@ -42,8 +59,24 @@ class FcmService {
     }
   }
 
+  static void _handleForegroundMessage(RemoteMessage message) {
+    debugPrint('[FCM] Foreground message: ${message.messageId}');
+  }
+
+  static void _handleNotificationTap(RemoteMessage message) {
+    debugPrint('[FCM] Notification tapped: ${message.messageId}');
+    _pendingMessages.add(message);
+  }
+
+  static List<RemoteMessage> consumePendingMessages() {
+    final messages = List<RemoteMessage>.from(_pendingMessages);
+    _pendingMessages.clear();
+    return messages;
+  }
+
   static Future<void> clearToken() async {
     try {
+      _currentToken = null;
       await _sendTokenToBackend(null);
     } catch (e) {
       debugPrint('[FCM] Clearing token failed: $e');

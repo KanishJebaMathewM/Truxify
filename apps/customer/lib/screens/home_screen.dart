@@ -32,7 +32,6 @@ class _HomeScreenState extends State<HomeScreen> {
   String _locationLabel = 'Surat, Gujarat';
   String _customerName = '';
   List<Map<String, dynamic>> _activeOrders = [];
-  bool _isOffline = false;
 
   @override
   void initState() {
@@ -52,7 +51,6 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
 
     setState(() {
-      _isOffline = !hasNetwork;
       if (cachedLocation != null) {
         _locationLabel = 'Last truck location \u2022 ${cachedLocation['latitude']?.toStringAsFixed(3)}, ${cachedLocation['longitude']?.toStringAsFixed(3)}';
       }

@@ -50,7 +50,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   // ── Route polyline state ──────────────────────────────────────────────
   Timer? _routeRefreshTimer;
   bool _isFetchingRoute = false;
-  bool _isLoadingDetails = false;
   DateTime? _lastRouteFetchAt;
   bool _isRouteLoading = false;
   static const Duration _routeRefreshInterval = Duration(seconds: 30);
@@ -382,16 +381,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         setState(() {
           _driverName = _fallbackDriverText;
           _truckNumber = _fallbackTruckText;
-          _isLoadingDetails = false;
         });
       }
       return;
-    }
-
-    if (mounted) {
-      setState(() {
-        _isLoadingDetails = true;
-      });
     }
 
     try {
@@ -418,7 +410,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         final tnFallback = _order?['truck_number']?.toString().trim();
         _truckNumber = results[1] ??
             (tnFallback != null && tnFallback.isNotEmpty ? tnFallback : _fallbackTruckText);
-        _isLoadingDetails = false;
       });
     } catch (e) {
       debugPrint('Error fetching driver/truck details: $e');
@@ -429,7 +420,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       }
 
       setState(() {
-        _isLoadingDetails = false;
         final dnFallback = _order?['driver_name']?.toString().trim();
         _driverName = dnFallback != null && dnFallback.isNotEmpty ? dnFallback : _fallbackDriverText;
         final tnFallback = _order?['truck_number']?.toString().trim();

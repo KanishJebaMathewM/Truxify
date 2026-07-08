@@ -32,7 +32,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final AuthService _authService = AuthService();
   bool _loading = false;
   int? _resendToken;
-  String? _verificationId;
   String _selectedCode = '+91';
   int _expectedDigits = 10;
 
@@ -79,7 +78,6 @@ class _LoginScreenState extends State<LoginScreen> {
           if (!mounted) return;
           setState(() {
             _loading = false;
-            _verificationId = verificationId;
             _resendToken = resendToken;
           });
           Navigator.of(context).pushNamed(

@@ -1,4 +1,4 @@
-import rateLimit, { MemoryStore, ipKeyGenerator } from 'express-rate-limit';
+import rateLimit, { MemoryStore } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
@@ -85,7 +85,17 @@ function buildStore(prefix) {
  * into one rate-limit bucket.
  */
 export function safeIpKeyGenerator(req, res) {
-  return ipKeyGenerator(req, res);
+  if (req.ip) return req.ip;
+  if (req.headers && req.headers['x-forwarded-for']) {
+    return req.headers['x-forwarded-for'].split(',')[0].trim();
+  }
+  if (req.socket && req.socket.remoteAddress) {
+    return req.socket.remoteAddress;
+  }
+  if (req.connection && req.connection.remoteAddress) {
+    return req.connection.remoteAddress;
+  }
+  return 'unknown';
 }
 
 /**

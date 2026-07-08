@@ -13,10 +13,12 @@ Future<void> setupTestEnvironment() async {
   try {
     await Supabase.initialize(
       url: 'https://mock-project.supabase.co',
-      anonKey: 'mock-anon-key',
+      publishableKey: 'mock-anon-key',
     );
+    // ignore: avoid_print
     print('Supabase initialized for tests');
   } catch (e) {
+    // ignore: avoid_print
     print('Supabase already initialized: $e');
   }
 
@@ -29,8 +31,10 @@ Future<void> setupTestEnvironment() async {
         projectId: 'mock-project-id',
       ),
     );
+    // ignore: avoid_print
     print('Firebase initialized for tests');
   } catch (e) {
+    // ignore: avoid_print
     print('Firebase already initialized: $e');
   }
 }

@@ -53,8 +53,8 @@ class _ShellScreenState extends State<ShellScreen> {
       _buildTabNavigator(
         _homeNavigatorKey,
         HomeScreen(
-          marketplaceRepo: widget.marketplaceRepo,
-          earningsService: widget.earningsService,
+          marketplaceRepo: widget.marketplaceRepo ?? MarketplaceRepository(),
+          earningsService: widget.earningsService ?? DriverEarningsService(),
           mockLocationText: widget.mockLocationText,
         ),
       ),

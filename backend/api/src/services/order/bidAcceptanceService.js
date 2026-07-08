@@ -1,16 +1,12 @@
 import { ethers } from 'ethers';
+import { DomainError } from './domainError.js';
 
-export class DomainError extends Error {
-  constructor(status, payload) {
-    super(payload?.error || payload?.message || 'Domain Error');
-    this.status = status;
-    this.payload = payload;
-  }
-}
+// Re-export for backward compatibility — prefer importing from domainError.js
+export { DomainError } from './domainError.js';
 
 export class BidAcceptanceService {
-  constructor({ supabase, buildDepositTxFn, escrowDepositFn, recordDepositTxFn, escrowRefundFn, logger, notificationDispatcher }) {
-    this.supabase = supabase;
+  constructor({ orderRepository, buildDepositTxFn, escrowDepositFn, recordDepositTxFn, escrowRefundFn, logger, notificationDispatcher }) {
+    this.orderRepository = orderRepository;
     this.buildDepositTxFn = buildDepositTxFn || escrowDepositFn || (async () => ({ bookingId: 'mock-booking-id' }));
     this.recordDepositTxFn = recordDepositTxFn;
     this.escrowRefundFn = escrowRefundFn;
@@ -19,17 +15,23 @@ export class BidAcceptanceService {
   }
 
   async acceptBid({ orderId, bidId, customerId }) {
-    const { data: order } = await this.supabase.from('orders').select('order_display_id, customer_id').eq('id', orderId).maybeSingle();
+    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'order_display_id, customer_id');
+    if (orderErr) {
+      throw new DomainError(500, { error: 'Failed to retrieve order.', details: orderErr.message });
+    }
     if (!order || order.customer_id !== customerId) {
       throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
     }
 
-    const { data: bid } = await this.supabase.from('load_bids').select('*').eq('id', bidId).maybeSingle();
+    const { data: bid, error: bidErr } = await this.orderRepository.findBidById(bidId);
+    if (bidErr) {
+      throw new DomainError(500, { error: 'Failed to retrieve bid.', details: bidErr.message });
+    }
     if (!bid || bid.status !== 'pending') {
       throw new DomainError(404, { error: 'Bid is not active or not found.' });
     }
 
-    const { data: loadOffer, error: loadOfferErr } = await this.supabase.from('load_offers').select('id').eq('order_display_id', order.order_display_id).maybeSingle();
+    const { data: loadOffer, error: loadOfferErr } = await this.orderRepository.findLoadOfferByOrderDisplayId(order.order_display_id);
     if (loadOfferErr) {
       throw new DomainError(500, { error: 'Failed to verify bid ownership.', details: loadOfferErr.message });
     }
@@ -41,8 +43,8 @@ export class BidAcceptanceService {
     }
 
     const [driverDetailsResult, customerProfileResult] = await Promise.all([
-      this.supabase.from('driver_details').select('polygon_wallet_address, rating, truck_id').eq('user_id', bid.driver_id).maybeSingle(),
-      this.supabase.from('profiles').select('polygon_wallet_address').eq('id', customerId).maybeSingle(),
+      this.orderRepository.findDriverDetail(bid.driver_id),
+      this.orderRepository.findCustomerWallet(customerId),
     ]);
 
     const driverWallet = driverDetailsResult.data?.polygon_wallet_address ?? null;
@@ -56,42 +58,46 @@ export class BidAcceptanceService {
     }
 
     const [{ data: profile }, { data: details }] = await Promise.all([
-      this.supabase.from('profiles').select('full_name').eq('id', bid.driver_id).maybeSingle(),
-      this.supabase.from('driver_details').select('rating, truck_id').eq('user_id', bid.driver_id).maybeSingle(),
+      this.orderRepository.findProfile(bid.driver_id, 'full_name'),
+      this.orderRepository.findDriverDetailWithRating(bid.driver_id),
     ]);
 
     let truckInfo = null;
     if (details && details.truck_id) {
-      const { data, error: truckErr } = await this.supabase.from('trucks').select('id, name, number_plate').eq('id', details.truck_id).maybeSingle();
+      const { data: truck, error: truckErr } = await this.orderRepository.findTruckWithDetails(details.truck_id);
       if (truckErr) {
         this.logger?.error?.('Truck lookup error during bid accept:', truckErr.message);
       }
-      truckInfo = data;
+      truckInfo = truck;
     }
 
     // Build the escrow deposit transaction
-    let depositTx = null;
-    let bookingId = null;
+    let depositTx;
+    let bookingId;
     const amountWei = ethers.parseEther((bid.bid_amount / 100).toFixed(2).toString());
-    try {
-      const buildResult = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
-      depositTx = buildResult;
-      bookingId = buildResult?.bookingId || `escrow:${order.order_display_id}`;
-    } catch (buildErr) {
-      throw buildErr; // Let it bubble up as a generic error to return 500
+    const buildResult = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
+    depositTx = buildResult;
+    bookingId = buildResult?.bookingId || `escrow:${order.order_display_id}`;
+
+    // Guard against silent escrow disable: if buildDepositTx returned
+    // null txData (contract not initialised), reject immediately.
+    if (!buildResult?.txData) {
+      this.logger?.error?.('[escrow] Escrow deposit tx could not be built — escrow contract is not reachable or misconfigured.');
+      throw new DomainError(502, {
+        error: 'Escrow is not configured. Escrow deposit transaction could not be built.',
+        details: 'The escrow contract is unreachable or the blockchain environment variables are not set.',
+        recovery: 'This order cannot proceed with escrow protection. Please contact support.',
+      });
     }
 
     // Update order with escrow booking info
-    const { error: escrowUpdateErr } = await this.supabase.from('orders').update({
-      escrow_booking_id: bookingId,
-      escrow_status: 'funding',
-    }).eq('id', orderId);
+    const { error: escrowUpdateErr } = await this.orderRepository.updateEscrowBooking(orderId, bookingId, 'funding');
     if (escrowUpdateErr) {
       this.logger?.warn?.('[escrow] Failed to update escrow booking reference:', escrowUpdateErr.message);
     }
 
     // Execute RPC to accept bid
-    const { error: rpcErr } = await this.supabase.rpc('accept_bid_tx', {
+    const { error: rpcErr } = await this.orderRepository.executeRpc('accept_bid_tx', {
       p_bid_id: bidId,
       p_order_id: orderId,
       p_load_id: bid.load_id,
@@ -105,7 +111,6 @@ export class BidAcceptanceService {
     });
 
     if (rpcErr) {
-      // Compensating transaction: refund the escrow since RPC failed
       if (bookingId) {
         try {
           await this.escrowRefundFn(order.order_display_id);
@@ -115,10 +120,7 @@ export class BidAcceptanceService {
         }
       }
       // Revert escrow status back to pending since RPC failed
-      const { error: revertErr } = await this.supabase.from('orders').update({
-        escrow_status: 'pending',
-        escrow_booking_id: null,
-      }).eq('id', orderId);
+      const { error: revertErr } = await this.orderRepository.revertEscrowStatus(orderId);
       if (revertErr) {
         this.logger?.error?.('[escrow] Failed to revert escrow status after RPC failure:', revertErr.message);
       }
@@ -129,14 +131,12 @@ export class BidAcceptanceService {
       });
     }
 
-    // Record the deposit transaction
     try {
-      await this.recordDepositTxFn(order.order_display_id, depositTx?.to, depositTx?.data);
+      await this.recordDepositTxFn(bookingId, depositTx?.hash || depositTx?.transactionHash || '');
     } catch (recordErr) {
       this.logger?.warn?.('[escrow] Failed to record deposit TX:', recordErr.message);
     }
 
-    // Send notifications
     if (this.notificationDispatcher) {
       try {
         await this.notificationDispatcher({

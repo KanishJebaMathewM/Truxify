@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { supabase, redisClient } from '../../config/db.js';
+import { redisClient } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
 import {
   sendDeliveryOtpNotification,
@@ -83,6 +83,10 @@ export async function clearOtpState(orderId) {
 }
 
 export class OrderNotificationService {
+  constructor(orderRepository) {
+    this.orderRepository = orderRepository;
+  }
+
   /**
    * Generate, persist, and dispatch an order-related notification.
    *
@@ -113,10 +117,10 @@ export class OrderNotificationService {
     if (!notifResult.success) {
       logger.warn(`[OrderNotification] Delivery OTP notification failed for order ${orderDisplayId} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
       if (type === 'delivery_otp_in_transit') {
-        await supabase.from('orders').update({
+        await this.orderRepository.updateOrder(orderId, {
           notification_failed: true,
           updated_at: new Date().toISOString(),
-        }).eq('id', orderId);
+        });
       }
     }
 

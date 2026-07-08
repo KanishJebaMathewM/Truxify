@@ -4,8 +4,8 @@ import { getDriverReputation } from '../services/reputation.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter, createStore } from '../middleware/rateLimiter.js';
 
-import { validateBody } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, otpSendSchema } from '../validation/requestSchemas.js';
+import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
+import { driverOnlineSchema, withdrawSchema, otpSendSchema, driverIdParamSchema, paginationQuerySchema, daysQuerySchema, earningsHistoryQuerySchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
@@ -145,23 +145,9 @@ router.put('/online', authenticate, userLimiter, requireRole(['driver']), valida
 // ============================================================================
 // 3. FETCH WALLET TRANSACTION HISTORY (DRIVER)
 // ============================================================================
-router.get('/wallet/history', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/wallet/history', authenticate, userLimiter, requireRole(['driver']), validateQuery(paginationQuerySchema), async (req, res) => {
   try {
-    const page = parseInt(req.query.page || '1', 10);
-    const limit = parseInt(req.query.limit || '20', 10);
-
-    // Validation
-    if (isNaN(page) || page < 1) {
-      return res.status(400).json({
-        error: 'page must be greater than or equal to 1'
-      });
-    }
-
-    if (isNaN(limit) || limit < 1 || limit > 100) {
-      return res.status(400).json({
-        error: 'limit must be between 1 and 100'
-      });
-    }
+    const { page, limit } = req.query;
 
     const from = (page - 1) * limit;
     const to = from + limit - 1;
@@ -204,15 +190,8 @@ router.get('/wallet/history', authenticate, userLimiter, requireRole(['driver'])
 // ============================================================================
 // 4. FETCH Aggregated daily/weekly earnings summaries for chart (DRIVER)
 // ============================================================================
-router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
-  const daysParam = req.query.days ?? '30';
-  const limitDays = typeof daysParam === 'string' ? Number(daysParam) : NaN;
-
-  if (!Number.isInteger(limitDays) || limitDays < 1 || limitDays > 365) {
-    return res.status(400).json({
-      error: 'days must be an integer between 1 and 365'
-    });
-  }
+router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver']), validateQuery(daysQuerySchema), async (req, res) => {
+  const { days: limitDays } = req.query;
 
   try {
     const cutoff = new Date();
@@ -240,18 +219,8 @@ router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 // 5. FETCH DRIVER TRIPS (DRIVER)
 // ============================================================================
-router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
-  const { status } = req.query;
-  const rawPage = req.query.page;
-  const rawLimit = req.query.limit;
-  const parsedPage = parseInt(rawPage, 10);
-  const parsedLimit = parseInt(rawLimit, 10);
-  if (rawPage !== undefined && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
-    return res.status(400).json({ error: 'page must be a positive integer' });
-  }
-  if (rawLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) {
-    return res.status(400).json({ error: 'limit must be a positive integer' });
-  }
+router.get('/trips', authenticate, userLimiter, requireRole(['driver']), validateQuery(earningsHistoryQuerySchema), async (req, res) => {
+  const { status, page: parsedPage, limit: parsedLimit } = req.query;
   const page = parsedPage || 1;
   const limit = Math.min(100, Math.max(1, parsedLimit || 10));
 
@@ -347,18 +316,9 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
 // ============================================================================
 // 9. FETCH DRIVER BIDS (DRIVER)
 // ============================================================================
-router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/bids', authenticate, userLimiter, requireRole(['driver']), validateQuery(paginationQuerySchema), async (req, res) => {
   try {
-    const rawPage = req.query.page;
-    const rawLimit = req.query.limit;
-    const parsedPage = parseInt(rawPage, 10);
-    const parsedLimit = parseInt(rawLimit, 10);
-    if (rawPage !== undefined && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
-      return res.status(400).json({ error: 'page must be a positive integer' });
-    }
-    if (rawLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) {
-      return res.status(400).json({ error: 'limit must be a positive integer' });
-    }
+    const { page: parsedPage, limit: parsedLimit } = req.query;
     const page = parsedPage || 1;
     const limit = Math.min(100, Math.max(1, parsedLimit || 10));
     const from = (page - 1) * limit;
@@ -439,7 +399,7 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 // 11. GET DRIVER REPUTATION (DRIVER)
 // ============================================================================
-router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['driver']), validateParams(driverIdParamSchema), async (req, res) => {
   const { driverId } = req.params;
 
   if (driverId !== req.user.id) {

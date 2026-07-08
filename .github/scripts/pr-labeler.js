@@ -302,33 +302,78 @@ Please reply to this PR with either **GSSOC** or **ECSoC** so we can label it co
     detectedPrograms
   });
 
-  // Handle merge conflict label
+  // Handle merge conflict and merge ready labels
   const isConflict = pullRequest.mergeable === false || pullRequest.mergeable_state === 'dirty';
   const hasConflictLabel = currentLabels.map(normalize).includes('merge conflicts');
+  const hasReadyLabel = currentLabels.map(normalize).includes('merge ready');
 
-  if (isConflict && !hasConflictLabel) {
-    if (!availableLabels.map(normalize).includes('merge conflicts')) {
-      if (!dryRun) {
-        await ensureLabelExists(github, owner, repo, 'merge conflicts', 'd73a4a', 'PR has merge conflicts');
+  if (isConflict) {
+    if (!hasConflictLabel) {
+      if (!availableLabels.map(normalize).includes('merge conflicts')) {
+        if (!dryRun) {
+          await ensureLabelExists(github, owner, repo, 'merge conflicts', 'd73a4a', 'PR has merge conflicts');
+        }
+        availableLabels.push('merge conflicts');
       }
-      availableLabels.push('merge conflicts');
+      labelsToAdd.push('merge conflicts');
+
+      // Post comment notifying the author about the merge conflict
+      if (!dryRun) {
+        try {
+          const author = pullRequest.user ? pullRequest.user.login : 'author';
+          await github.rest.issues.createComment({
+            owner,
+            repo,
+            issue_number: pullNumber,
+            body: `@${author}, please resolve the commit so that it will be merged soon ......`
+          });
+          core.info(`Posted merge conflict comment on PR #${pullNumber}`);
+        } catch (error) {
+          core.warning(`Failed to post merge conflict comment: ${error.message}`);
+        }
+      }
     }
-    labelsToAdd.push('merge conflicts');
+    if (hasReadyLabel) {
+      core.info(`PR has conflicts but has 'merge ready' label. Removing the label...`);
+      if (!dryRun) {
+        try {
+          await github.rest.issues.removeLabel({
+            owner,
+            repo,
+            issue_number: pullNumber,
+            name: 'merge ready'
+          });
+        } catch (error) {
+          core.warning(`Failed to remove 'merge ready' label: ${error.message}`);
+        }
+      }
+    }
   }
 
   const isClean = pullRequest.mergeable === true;
-  if (isClean && hasConflictLabel) {
-    core.info(`PR is mergeable and has 'merge conflicts' label. Removing the label...`);
-    if (!dryRun) {
-      try {
-        await github.rest.issues.removeLabel({
-          owner,
-          repo,
-          issue_number: pullNumber,
-          name: 'merge conflicts'
-        });
-      } catch (error) {
-        core.warning(`Failed to remove 'merge conflicts' label: ${error.message}`);
+  if (isClean) {
+    if (!hasReadyLabel) {
+      if (!availableLabels.map(normalize).includes('merge ready')) {
+        if (!dryRun) {
+          await ensureLabelExists(github, owner, repo, 'merge ready', '2cbe4e', 'PR is mergeable and has no conflicts');
+        }
+        availableLabels.push('merge ready');
+      }
+      labelsToAdd.push('merge ready');
+    }
+    if (hasConflictLabel) {
+      core.info(`PR is mergeable and has 'merge conflicts' label. Removing the label...`);
+      if (!dryRun) {
+        try {
+          await github.rest.issues.removeLabel({
+            owner,
+            repo,
+            issue_number: pullNumber,
+            name: 'merge conflicts'
+          });
+        } catch (error) {
+          core.warning(`Failed to remove 'merge conflicts' label: ${error.message}`);
+        }
       }
     }
   }

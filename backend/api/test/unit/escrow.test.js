@@ -9,7 +9,7 @@
  * Run with:  npm test -- test/unit/escrow.test.js
  */
 import { describe, it, expect, vi } from 'vitest';
-import { getEscrowBookingId, buildDepositTx, escrowRelease, submitEscrowRefund, confirmEscrowRefund, ESCROW_MATIC_PER_PAISA } from '../../src/services/escrow.js';
+import { getEscrowBookingId, buildDepositTx, escrowRelease, submitEscrowRefund, confirmEscrowRefund, ESCROW_MATIC_PER_PAISA, isEscrowEnabled } from '../../src/services/escrow.js';
 
 describe('escrow service — getEscrowBookingId', () => {
   it('returns a hex string prefixed with 0x', () => {
@@ -70,6 +70,12 @@ describe('escrow service — getEscrowBookingId', () => {
       delete process.env.ESCROW_MATIC_PER_PAISA;
     }
     vi.resetModules();
+  });
+});
+
+describe('escrow service — isEscrowEnabled', () => {
+  it('returns false when blockchain env vars are not set (escrowContract is null)', () => {
+    expect(isEscrowEnabled()).toBe(false);
   });
 });
 

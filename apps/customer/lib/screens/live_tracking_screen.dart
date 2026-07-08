@@ -491,8 +491,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   }
 
   Future<void> _showCallDriver() async {
-    final driverName = _driverName;
-    final truckNumber = _truckNumber;
     final phone = _driverPhone;
 
     if (phone == null || phone.isEmpty) {
@@ -609,12 +607,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                               // refresh outer order state
                               await _loadOrder();
 
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               Navigator.of(context).pop();
                               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Drop location updated successfully')));
                             } catch (e) {
                               setModalState(() => isLoading = false);
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to change drop: $e')));
                             }
                           },
@@ -671,12 +669,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                             final rawFee = resp['cancellation_fee'];
                             final feeInRupees = rawFee != null ? (rawFee as num) / 100 : 0;
                             await _loadOrder();
-                            if (!mounted) return;
+                            if (!context.mounted) return;
                             Navigator.of(context).pop();
                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Order cancelled. Fee: ₹${feeInRupees.toStringAsFixed(2)}')));
                           } catch (e) {
                             setModalState(() => isLoading = false);
-                            if (!mounted) return;
+                            if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to cancel order: $e')));
                           }
                         },
@@ -1047,13 +1045,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                                     color: TruxifyColors.adaptiveSecondaryText(
                                         context))),
                         const SizedBox(height: 6),
-                        Text('ETA: ${eta}',
+                        Text('ETA: $eta',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyMedium
                                 ?.copyWith(fontWeight: FontWeight.w700)),
                         const SizedBox(height: 6),
-                        Text('Current location: ${currentLocation}',
+                        Text('Current location: $currentLocation',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyMedium

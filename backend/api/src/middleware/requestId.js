@@ -35,3 +35,12 @@ export function requestLogger(req, res, next) {
   });
   next();
 }
+
+export function addTracingHeaders(req, res, next) {
+  res.setHeader('X-Trace-Id', req.requestId);
+  res.setHeader('X-Span-Id', randomUUID().slice(0, 8));
+  if (req.user?.id) {
+    res.setHeader('X-User-Id', req.user.id.slice(0, 8));
+  }
+  next();
+}

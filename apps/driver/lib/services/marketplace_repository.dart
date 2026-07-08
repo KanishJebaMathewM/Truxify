@@ -31,6 +31,14 @@ class MarketplaceRepository {
 
   String _encodePathSegment(String value) => Uri.encodeComponent(value);
 
+  Future<Map<String, String>> _authHeaders() async {
+    final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
+    return <String, String>{
+      'Content-Type': 'application/json',
+      if (accessToken != null) 'Authorization': 'Bearer $accessToken',
+    };
+  }
+
   Future<List<LoadOffer>> fetchLoadOffers() async {
     final path = '/api/orders/load-offers';
     try {
@@ -170,7 +178,9 @@ class MarketplaceRepository {
             final newRecord = payload.newRecord;
             if (newRecord.isNotEmpty) {
               final offer = _mapLoadOffer(newRecord);
-              controller.add(offer);
+              if (!controller.add(offer)) {
+                developer.log('No active subscribers, dropping load offer');
+              }
             }
           } catch (e, st) {
             developer.log('Error mapping load offer', error: e, stackTrace: st);

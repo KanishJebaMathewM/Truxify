@@ -42,10 +42,13 @@ describe("Escrow", function () {
 
     const driverBefore = await ethers.provider.getBalance(driver.address);
     await escrow.connect(relayer).releaseFunds(id);
+    const tx = await escrow.connect(driver).withdraw();
+    const receipt = await tx.wait();
+    const gasUsed = receipt.gasUsed * receipt.gasPrice;
     const driverAfter = await ethers.provider.getBalance(driver.address);
     const saved = await escrow.escrows(id);
 
-    assert.equal(driverAfter - driverBefore, amount);
+    assert.equal(driverAfter - driverBefore + gasUsed, amount);
     assert.equal(saved.status, 2n);
     assert.equal(saved.amount, 0n);
   });
@@ -57,10 +60,16 @@ describe("Escrow", function () {
     await escrow.connect(customer).deposit(id, customer.address, driver.address, { value: amount });
 
     await escrow.connect(relayer).refundFunds(id);
+    const customerBefore = await ethers.provider.getBalance(customer.address);
+    const tx = await escrow.connect(customer).withdraw();
+    const receipt = await tx.wait();
+    const gasUsed = receipt.gasUsed * receipt.gasPrice;
+    const customerAfter = await ethers.provider.getBalance(customer.address);
     const saved = await escrow.escrows(id);
 
     assert.equal(saved.status, 3n);
     assert.equal(saved.amount, 0n);
+    assert.equal(customerAfter - customerBefore + gasUsed, amount);
     assert.equal(await ethers.provider.getBalance(await escrow.getAddress()), 0n);
   });
 
@@ -123,9 +132,10 @@ describe("Escrow", function () {
     await attacker.waitForDeployment();
 
     const id = bookingId("reentrant-booking");
-    await escrow.connect(owner).setRelayer(await attacker.getAddress(), true);
+    await escrow.connect(owner).setRelayer(owner.address, true);
     await escrow.connect(customer).deposit(id, customer.address, await attacker.getAddress(), { value: 1000n });
 
-    await assertRejectsWith(attacker.attackRelease(id), "Driver payout failed");
+    await escrow.connect(owner).releaseFunds(id);
+    await assertRejectsWith(attacker.attackWithdraw(), "Withdrawal failed");
   });
 });

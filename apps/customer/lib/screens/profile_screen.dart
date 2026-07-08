@@ -11,7 +11,10 @@ import '../controllers/app_controller.dart';
 import '../core/offline/cache/cache_manager.dart';
 import '../repositories/address_repository.dart';
 import '../repositories/payment_repository.dart';
+import '../services/auth_service.dart';
 import '../services/profile_service.dart';
+import '../l10n/app_localizations.dart';
+import '../widgets/truxify_button.dart';
 import '../services/fcm_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
@@ -184,7 +187,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               Text(
-                'Polygon Wallet Address',
+                AppLocalizations.of(context)!.polygonWalletAddress,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.bold,
                     ),
@@ -257,15 +260,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         setState(() {
                           _walletAddress = address;
                         });
+                        if (!context.mounted) return;
                         Navigator.of(context).pop();
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Wallet address updated'),
-                              backgroundColor: TruxifyColors.success,
-                            ),
-                          );
-                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(AppLocalizations.of(context)!.walletAddressUpdated),
+                            backgroundColor: TruxifyColors.success,
+                          ),
+                        );
                       } else {
                         final body = jsonDecode(response.body)
                             as Map<String, dynamic>;
@@ -283,7 +285,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       if (context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: Text('Error: $e'),
+                            content: Text(AppLocalizations.of(context)!.error(e.toString())),
                             backgroundColor: TruxifyColors.errorRed,
                           ),
                         );
@@ -298,7 +300,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: const Text('Save Wallet Address'),
+                  child: Text(AppLocalizations.of(context)!.saveWalletAddress),
                 ),
               ),
             ],
@@ -319,6 +321,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     await _cacheManager.open();
     await _cacheManager.cacheProfile({});
+    
+    if (!context.mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       AppPageRoute(builder: (_) => const LoginScreen()),
       (route) => false,
@@ -722,11 +726,11 @@ class _ThemeModeTile extends StatelessWidget {
                 segments: const [
                   ButtonSegment<ThemeMode>(
                     value: ThemeMode.light,
-                    label: Text('Light'),
+                    label: Text(AppLocalizations.of(context)!.lightTheme),
                   ),
                   ButtonSegment<ThemeMode>(
                     value: ThemeMode.dark,
-                    label: Text('Dark'),
+                    label: Text(AppLocalizations.of(context)!.darkTheme),
                   ),
                 ],
                 selected: {selectedTheme},

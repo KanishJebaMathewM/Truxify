@@ -13,6 +13,7 @@ import '../widgets/shipment_card.dart';
 import '../widgets/common_widgets.dart';
 import '../services/order_service.dart';
 import '../services/profile_service.dart';
+import '../l10n/app_localizations.dart';
 import 'live_tracking_screen.dart';
 import 'notifications_screen.dart';
 
@@ -88,7 +89,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showComingSoon(BuildContext context, String title) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$title coming soon')));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(AppLocalizations.of(context)!.comingSoon(title))));
   }
 
   ShipmentCardData? _buildShipmentFromOrder(Map<String, dynamic> order) {
@@ -177,7 +178,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('$greeting, $displayName \u{1f44b}', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
+                      Text(AppLocalizations.of(context)!.greetingMessage(greeting, displayName), style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
                       const SizedBox(height: 6),
                       Text(
                         DateFormat('EEEE, d MMMM yyyy').format(now),
@@ -190,7 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ? Padding(
                               padding: const EdgeInsets.symmetric(vertical: 24),
                               child: Center(
-                                child: Text('No active shipments', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
+                                child: Text(AppLocalizations.of(context)!.noActiveShipments, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                               ),
                             )
                           : SizedBox(
@@ -236,7 +237,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Center(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(vertical: 24),
-                          child: Text('Route history coming soon', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
+                          child: Text(AppLocalizations.of(context)!.routeHistoryComingSoon, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                         ),
                       ),
                       const SizedBox(height: 8),

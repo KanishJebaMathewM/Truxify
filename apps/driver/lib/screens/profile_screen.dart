@@ -7,7 +7,6 @@ import 'package:http/http.dart' as http;
 import '../controllers/app_controller.dart';
 import '../core/app_routes.dart';
 import '../core/config.dart';
-import '../models/app_models.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
@@ -52,12 +51,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _fetchReputation();
   }
 
-  Future<void> _loadSavedLanguage() async {
-    final prefs = await SharedPreferences.getInstance();
-    final saved = prefs.getString('driver_language');
-    if (saved != null && mounted) {
-      setState(() => _currentLanguage = saved);
-    }
+  @override
+  void dispose() {
+    super.dispose();
   }
 
   Future<void> _loadWalletAddress() async {
@@ -502,7 +498,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   try {
                     final client = Supabase.instance.client;
                     final token = client.auth.currentSession?.accessToken;
-                    final userId = client.auth.currentUser?.id ?? '';
                     final response = await http.put(
                       Uri.parse('${const String.fromEnvironment('TRUXIFY_API_BASE_URL', defaultValue: 'http://localhost:5000')}/api/profile/wallet'),
                       headers: <String, String>{
@@ -517,16 +512,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       setState(() {
                         _walletAddress = address;
                       });
+                      if (!context.mounted) return;
                       Navigator.of(context).pop();
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content:
-                                Text('Wallet address updated successfully'),
-                            backgroundColor: TruxifyColors.success,
-                          ),
-                        );
-                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content:
+                              Text('Wallet address updated successfully'),
+                          backgroundColor: TruxifyColors.success,
+                        ),
+                      );
                     } else {
                       final body = jsonDecode(response.body)
                           as Map<String, dynamic>;

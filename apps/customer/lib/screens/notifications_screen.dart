@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:truxify_shared/truxify_shared.dart';
 import 'package:truxify_shared/truxify_shared.dart' as shared;
 
 class NotificationsScreen extends StatelessWidget {

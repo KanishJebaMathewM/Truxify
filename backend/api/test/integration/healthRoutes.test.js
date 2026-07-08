@@ -70,6 +70,7 @@ describe('GET /api/health', () => {
       supabase: 'connected',
       mongodb: 'connected',
       redis: 'connected',
+      escrow: 'not_configured',
       firebase: 'configured',
       polygon: 'configured'
     });
@@ -137,6 +138,7 @@ describe('GET /api/health', () => {
       supabase: 'not_configured',
       mongodb: 'not_configured',
       redis: 'not_configured',
+      escrow: 'not_configured',
       firebase: 'not_configured',
       polygon: 'not_configured'
     });
@@ -156,5 +158,19 @@ describe('GET /api/health/live', () => {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ok');
     expect(res.body.uptime).toBeTypeOf('number');
+  });
+});
+
+describe('GET /api/health/ready', () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+  });
+
+  it('returns ready status with services information', async () => {
+    const res = await request(app).get('/api/health/ready');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ready');
   });
 });

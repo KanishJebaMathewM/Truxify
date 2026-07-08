@@ -23,13 +23,14 @@
  */
 
 import { ethers } from 'ethers';
+import * as Sentry from '@sentry/node';
 import logger from '../middleware/logger.js';
 
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver) external payable',
   'function releasePayment(uint256 bookingId) external',
   'function cancelBooking(uint256 bookingId) external',
-  'function bookings(uint256 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, uint256 createdAt)',
+  'function bookings(bytes32 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, uint256 createdAt)',
 ];
 
 const rpcUrl            = process.env.POLYGON_RPC_URL;
@@ -48,12 +49,46 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     logger.info('✅ Polygon Escrow contract client initialised.');
   } catch (err) {
     logger.error('❌ Failed to initialise Escrow contract client:', err.message);
+    Sentry.captureException(err);
   }
 } else {
   logger.warn(
     '⚠️  POLYGON_RPC_URL / ESCROW_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY ' +
     'not set. Escrow payments disabled.'
   );
+}
+
+/**
+ * Check whether the escrow contract client has been successfully initialised.
+ * @returns {boolean}
+ */
+export function isEscrowEnabled() {
+  return escrowContract !== null;
+}
+
+/**
+ * Health check for the escrow system.
+ * Returns the status of the escrow contract client and optionally makes a
+ * lightweight eth_call to verify the contract is reachable on-chain.
+ *
+ * @returns {Promise<{status: string, chainId?: number, error?: string}>}
+ */
+export async function checkEscrowHealth() {
+  if (!escrowContract) {
+    return { status: 'not_configured' };
+  }
+
+  try {
+    const provider = escrowContract.runner.provider;
+    const network = await provider.getNetwork();
+    return {
+      status: 'connected',
+      chainId: Number(network.chainId),
+    };
+  } catch (err) {
+    logger.error('[escrow] Health check failed:', err.message);
+    return { status: 'failed', error: err.message };
+  }
 }
 
 /**

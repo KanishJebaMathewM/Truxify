@@ -5,6 +5,21 @@ function formatValidationIssues(error) {
   }));
 }
 
+export function validateArray(schema) {
+  return (req, res, next) => {
+    if (!Array.isArray(req.body)) {
+      return res.status(400).json({ error: 'Expected an array in request body' });
+    }
+    const results = req.body.map(item => schema.safeParse(item));
+    const errors = results.filter(r => !r.success).map(r => formatValidationIssues(r.error));
+    if (errors.length > 0) {
+      return res.status(400).json({ error: 'Array validation failed', details: errors.flat() });
+    }
+    req.body = results.map(r => r.data);
+    return next();
+  };
+}
+
 export function validateBody(schema) {
   return (req, res, next) => {
     const result = schema.safeParse(req.body);

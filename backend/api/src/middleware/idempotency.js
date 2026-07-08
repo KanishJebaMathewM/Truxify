@@ -7,7 +7,7 @@ import logger from './logger.js';
  * 
  * @param {number} ttlSeconds - Time to live for the idempotency key in seconds
  */
-export function requireIdempotency(ttlSeconds = 86400) {
+export function requireIdempotency(ttlSeconds = 3600) {
   return async (req, res, next) => {
     const idempotencyKey = req.headers['x-idempotency-key'];
     
@@ -16,14 +16,14 @@ export function requireIdempotency(ttlSeconds = 86400) {
     }
 
     if (!redisClient) {
-      logger.warn('[Idempotency] Redis client not available. Bypassing idempotency check.');
       return next();
     }
 
-    const cacheKey = `idempotency:${req.user?.id || 'anonymous'}:${idempotencyKey}`;
+    // Identity: authenticated user ID or fallback to anonymous
+    const identity = req.user?.id || 'anonymous';
+    const cacheKey = `idempotency:${identity}:${idempotencyKey}`;
 
     try {
-      // Check if this key already exists
       const cachedResponse = await redisClient.get(cacheKey);
       if (cachedResponse) {
         logger.info(`[Idempotency] Cache hit for key ${idempotencyKey}`);

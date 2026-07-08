@@ -15,6 +15,25 @@ export const osrmBreaker = new CircuitBreaker(async (url, options) => {
 });
 
 
+const RECOVERABLE_ERRORS = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'FETCH_ERR'];
+
+async function withRetry(fn, options = {}) {
+  const { retries = 2, baseDelay = 300, label = 'operation' } = options;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt < retries && RECOVERABLE_ERRORS.some(e => err.code === e || err.message?.includes(e))) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        logger.warn(`[osrm] ${label} failed (attempt ${attempt + 1}/${retries + 1}), retrying in ${delay}ms`);
+        await new Promise(r => setTimeout(r, delay));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 const DEFAULT_OSRM_BASE_URL = 'https://router.project-osrm.org';
 const DEFAULT_TIMEOUT_MS = 1500;
 const DEFAULT_MAX_RETRIES = 3;

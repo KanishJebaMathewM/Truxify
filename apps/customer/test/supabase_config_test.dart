@@ -8,8 +8,8 @@ void main() {
       // If run with defines, they should match the passed values.
       final isConfigured = SupabaseConfig.isConfigured;
       expect(SupabaseConfig.url, isA<String>());
-      expect(SupabaseConfig.anonKey, isA<String>());
-      expect(isConfigured, equals(SupabaseConfig.url.isNotEmpty && SupabaseConfig.anonKey.isNotEmpty));
+      expect(SupabaseConfig.publishableKey, isA<String>());
+      expect(isConfigured, equals(SupabaseConfig.url.isNotEmpty && SupabaseConfig.publishableKey.isNotEmpty));
     });
   });
 }

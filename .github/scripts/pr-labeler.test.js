@@ -176,10 +176,14 @@ test('selectLabels matches new performance, design, devops, and accessibility pr
   assert.deepEqual(labelsA11y, ['gssoc:approved', 'type:accessibility']);
 });
 
-test('run function adds merge conflicts label if PR is not mergeable', async () => {
+test('run function adds merge conflicts label, removes merge ready label, and comments if PR is not mergeable', async () => {
+  let commentCreated = false;
+  let removeLabelCalled = false;
+  let addLabelsCalled = false;
+
   const mockGithub = {
     paginate: async (fn, params) => {
-      if (fn === mockGithub.rest.issues.listLabelsForRepo) return [{ name: 'merge conflicts' }];
+      if (fn === mockGithub.rest.issues.listLabelsForRepo) return [{ name: 'merge conflicts' }, { name: 'merge ready' }];
       if (fn === mockGithub.rest.pulls.listFiles) return [];
       if (fn === mockGithub.rest.issues.listComments) return [];
       return [];
@@ -191,7 +195,8 @@ test('run function adds merge conflicts label if PR is not mergeable', async () 
             number: 123,
             title: 'feat: new feature',
             body: 'GSSoC',
-            labels: [],
+            user: { login: 'testuser' },
+            labels: [{ name: 'merge ready' }],
             mergeable: false,
             mergeable_state: 'dirty'
           }
@@ -203,9 +208,17 @@ test('run function adds merge conflicts label if PR is not mergeable', async () 
         listLabelsForRepo: () => {},
         listComments: () => {},
         createLabel: async () => {},
-        createComment: async () => {},
+        createComment: async ({ body }) => {
+          assert.equal(body, '@testuser, please resolve the commit so that it will be merged soon ......');
+          commentCreated = true;
+        },
         addLabels: async ({ labels }) => {
           assert.equal(labels.includes('merge conflicts'), true);
+          addLabelsCalled = true;
+        },
+        removeLabel: async ({ name }) => {
+          assert.equal(name, 'merge ready');
+          removeLabelCalled = true;
         }
       }
     }
@@ -215,7 +228,8 @@ test('run function adds merge conflicts label if PR is not mergeable', async () 
     payload: {
       pull_request: {
         number: 123,
-        labels: []
+        user: { login: 'testuser' },
+        labels: [{ name: 'merge ready' }]
       }
     },
     repo: { owner: 'owner', repo: 'repo' }
@@ -233,13 +247,19 @@ test('run function adds merge conflicts label if PR is not mergeable', async () 
     rulesPath: undefined,
     dryRun: false
   });
+
+  assert.equal(commentCreated, true);
+  assert.equal(removeLabelCalled, true);
+  assert.equal(addLabelsCalled, true);
 });
 
-test('run function removes merge conflicts label if PR is mergeable', async () => {
+test('run function removes merge conflicts label and adds merge ready label if PR is mergeable', async () => {
   let removeLabelCalled = false;
+  let addLabelsCalled = false;
+
   const mockGithub = {
     paginate: async (fn, params) => {
-      if (fn === mockGithub.rest.issues.listLabelsForRepo) return [{ name: 'merge conflicts' }];
+      if (fn === mockGithub.rest.issues.listLabelsForRepo) return [{ name: 'merge conflicts' }, { name: 'merge ready' }];
       if (fn === mockGithub.rest.pulls.listFiles) return [];
       if (fn === mockGithub.rest.issues.listComments) return [];
       return [];
@@ -251,6 +271,7 @@ test('run function removes merge conflicts label if PR is mergeable', async () =
             number: 123,
             title: 'feat: new feature',
             body: 'GSSoC',
+            user: { login: 'testuser' },
             labels: [{ name: 'merge conflicts' }],
             mergeable: true,
             mergeable_state: 'clean'
@@ -264,7 +285,10 @@ test('run function removes merge conflicts label if PR is mergeable', async () =
         listComments: () => {},
         createLabel: async () => {},
         createComment: async () => {},
-        addLabels: async () => {},
+        addLabels: async ({ labels }) => {
+          assert.equal(labels.includes('merge ready'), true);
+          addLabelsCalled = true;
+        },
         removeLabel: async ({ name }) => {
           assert.equal(name, 'merge conflicts');
           removeLabelCalled = true;
@@ -277,6 +301,7 @@ test('run function removes merge conflicts label if PR is mergeable', async () =
     payload: {
       pull_request: {
         number: 123,
+        user: { login: 'testuser' },
         labels: [{ name: 'merge conflicts' }]
       }
     },
@@ -297,6 +322,7 @@ test('run function removes merge conflicts label if PR is mergeable', async () =
   });
 
   assert.equal(removeLabelCalled, true);
+  assert.equal(addLabelsCalled, true);
 });
 
 test('run function detects GSSoC program signal from linked issue title/body', async () => {

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.main import app
+from main import app
 from app.models.base import MODEL_STORAGE_DIR
 
 client = TestClient(app)
@@ -67,7 +67,7 @@ def test_auth_valid_key(monkeypatch):
 def test_auth_dev_mode_bypass(monkeypatch):
     monkeypatch.delenv("ML_API_KEY", raising=False)
     response = client.post("/predict/demand", json=_auth_payload())
-    assert response.status_code == 200
+    assert response.status_code == 503
 
 
 def test_health_no_auth_required(monkeypatch):

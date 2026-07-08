@@ -15,7 +15,65 @@
   "loadingText": "Loading...",
   "@loadingText": {
     "description": "Generic loading indicator text"
+  },
+  "comingSoon": "{title} coming soon",
+  "@comingSoon": {
+    "description": "Coming soon message",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Feature"
+      }
+    }
+  },
+  "greetingMessage": "{greeting}, {displayName} 👋",
+  "@greetingMessage": {
+    "description": "Greeting message with name",
+    "placeholders": {
+      "greeting": {
+        "type": "String",
+        "example": "Good morning"
+      },
+      "displayName": {
+        "type": "String",
+        "example": "John"
+      }
+    }
+  },
+  "noActiveShipments": "No active shipments",
+  "@noActiveShipments": {
+    "description": "Text shown when there are no active shipments"
+  },
+  "routeHistoryComingSoon": "Route history coming soon",
+  "@routeHistoryComingSoon": {
+    "description": "Text shown for route history placeholder"
+  },
+  "walletAddressUpdated": "Wallet address updated",
+  "@walletAddressUpdated": {
+    "description": "Success message when wallet address is updated"
+  },
+  "polygonWalletAddress": "Polygon Wallet Address", "saveWalletAddress": "Save Wallet Address",
+  "@saveWalletAddress": {
+    "description": "Button text to save wallet address"
+  },
+  "error": "Error: {errorMsg}",
+  "@error": {
+    "description": "Error message format",
+    "placeholders": {
+      "errorMsg": {
+        "type": "String",
+        "example": "Something went wrong"
+      }
+    }
+  },
+  "lightTheme": "Light",
+  "@lightTheme": {
+    "description": "Light theme option"
+  },
+  "darkTheme": "Dark",
+  "@darkTheme": {
+    "description": "Dark theme option"
   }
 }
 
-// Resolves #2421: feat(i18n): add localization support for customer app
+

@@ -253,3 +253,10 @@ export const updateProfileSchema = z.object({
   is_online: z.boolean().optional(),
   verification_status: z.enum(['pending', 'verified', 'rejected']).optional(),
 }).strict();
+
+export const truckFilterQuerySchema = z.object({ name: z.string().optional(), min_capacity: coerceNumber(z.number().nonnegative()).optional(), max_capacity: coerceNumber(z.number().nonnegative()).optional(), }).strict();
+export const supportTicketQuerySchema = z.object({ status: z.enum(['open', 'in_progress', 'resolved', 'closed']).optional(), category: z.string().optional(), user_id: z.string().uuid('user_id must be a valid UUID').optional(), page: coerceNumber(z.number().int().min(1)).default(1), limit: coerceNumber(z.number().int().min(1).max(100)).default(20), sort: z.enum(['desc', 'asc']).default('desc'), }).strict();
+export const paginationQuerySchema = z.object({ page: coerceNumber(z.number().int().min(1)).default(1), limit: coerceNumber(z.number().int().min(1).max(100)).default(20) });
+
+export const daysQuerySchema = z.object({ days: coerceNumber(z.number().int().min(1).max(365)).default(30) });
+export const earningsHistoryQuerySchema = z.object({ status: z.enum(['completed', 'pending', 'cancelled']).optional(), page: coerceNumber(z.number().int().min(1)).default(1), limit: coerceNumber(z.number().int().min(1).max(100)).default(20) });

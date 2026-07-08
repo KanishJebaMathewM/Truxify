@@ -71,6 +71,7 @@ class ETAPredictor:
 
         with open(MODEL_PATH, "wb") as f:
             pickle.dump(self.model, f)
+        self._save_hash()
 
     def _save_hash(self):
         with open(MODEL_PATH, "rb") as f:

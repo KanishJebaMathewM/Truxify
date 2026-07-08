@@ -163,5 +163,3 @@ export async function getDriverReputation(walletAddress) {
     return null;
   }
 }
-
-// Fix: added AbortController support for ethers RPC calls to prevent hanging promises.

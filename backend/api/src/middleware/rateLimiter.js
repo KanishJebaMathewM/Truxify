@@ -85,15 +85,12 @@ function buildStore(prefix) {
  * into one rate-limit bucket.
  */
 export function safeIpKeyGenerator(req) {
-  // Uses req.ip (which respects Express trust proxy setting) to resolve the
-  // real client IP behind a reverse proxy (Nginx, Cloudflare, ALB). Falls
-  // back to the raw TCP socket address for direct-connection deployments.
-  // The ipKeyGenerator helper from express-rate-limit normalizes IPv6
-  // addresses to prevent IP rotation bypasses (ERR_ERL_KEY_GEN_IPV6).
-  if (req.ip) return ipKeyGenerator(req.ip);
-  return req.socket?.remoteAddress
-    || req.connection?.remoteAddress
-    || 'unknown';
+  let ip = req.ip || req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
+  if (typeof ip === 'string') {
+    ip = ip.replace(/^::ffff:/, '');
+    if (ip === '::1') ip = '127.0.0.1';
+  }
+  return ip;
 }
 
 /**

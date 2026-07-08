@@ -28,6 +28,7 @@ Future<void> setupTests() async {
   } on AssertionError {
     await Supabase.initialize(
       url: 'http://localhost:54321',
+      // ignore: deprecated_member_use
       anonKey: 'mock-anon-key',
     );
   }

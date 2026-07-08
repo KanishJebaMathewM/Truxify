@@ -69,13 +69,9 @@ export class BidAcceptanceService {
     let depositTx = null;
     let bookingId = null;
     const amountWei = ethers.parseEther((bid.bid_amount / 100).toFixed(2).toString());
-    try {
-      const buildResult = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
-      depositTx = buildResult;
-      bookingId = buildResult?.bookingId || `escrow:${order.order_display_id}`;
-    } catch (buildErr) {
-      throw buildErr; // Let it bubble up as a generic error to return 500
-    }
+    const buildResult = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
+    depositTx = buildResult;
+    bookingId = buildResult?.bookingId || `escrow:${order.order_display_id}`;
 
     // Update order with escrow booking info
     const { error: escrowUpdateErr } = await this.supabase.from('orders').update({

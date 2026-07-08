@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 
 class FcmService {
-  static const String ApiClient.defaultBaseUrl = String.fromEnvironment(
+  static const String defaultBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
     defaultValue: 'http://localhost:5000',
   );

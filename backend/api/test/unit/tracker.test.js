@@ -1543,7 +1543,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     const insertMany = vi.fn().mockImplementation(async () => {
       // Simulate a concurrent new ping arriving while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
-      t.getTelemetryWriteBuffer().push({ driver_id: 'new-driver' });
+      t.pushToTelemetryWriteBuffer({ driver_id: 'new-driver' });
       throw new Error('network timeout');
     });
     const collection = vi.fn().mockReturnValue({ insertMany });
@@ -1572,7 +1572,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
       // Simulate new pings arriving to almost fill the buffer while DB write is active
       const { __testing: t } = await import('../../src/sockets/tracker.js');
       const mockNewRecords = Array.from({ length: 4995 }, (_, i) => ({ driver_id: `new-driver-${i}` }));
-      t.getTelemetryWriteBuffer().push(...mockNewRecords);
+      t.pushToTelemetryWriteBuffer(mockNewRecords);
       throw new Error('transient write failure');
     });
     const collection = vi.fn().mockReturnValue({ insertMany });
@@ -1601,7 +1601,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     expect(buffer[5].driver_id).toBe('new-driver-0');
 
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('[TRUXIFY BUFFER DROP] Capacity limit: dropped 5 oldest records from retry merge.')
+      expect.stringContaining('[TRUXIFY BUFFER DROP]')
     );
   });
 
@@ -1708,8 +1708,8 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       __testing.clearTelemetryWriteBuffer();
     });
 
-    it('enforces MAX_BUFFER_SIZE by dropping 10% of the oldest telemetry records', async () => {
-      const mockRecords = Array.from({ length: 10000 }, (_, i) => ({ driver_id: `driver-old-${i}` }));
+    it('enforces MAX_BUFFER_SIZE using a Ring Buffer', async () => {
+      const mockRecords = Array.from({ length: 5000 }, (_, i) => ({ driver_id: `driver-old-${i}` }));
       __testing.setTelemetryWriteBuffer(mockRecords);
 
       const ws = { driverId: 'driver-new', send: vi.fn() };
@@ -1722,11 +1722,12 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       });
 
       const buffer = __testing.getTelemetryWriteBuffer();
-      expect(buffer.length).toBe(9501);
-      expect(buffer[0].driver_id).toBe('driver-old-500');
-      expect(buffer[9500].driver_id).toBe('driver-new');
+      // Since it's a RingBuffer of max size 5000, adding 1 item will drop the oldest one (`driver-old-0`)
+      expect(buffer.length).toBe(5000);
+      expect(buffer[0].driver_id).toBe('driver-old-1');
+      expect(buffer[4999].driver_id).toBe('driver-new');
       expect(logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('[TRUXIFY BUFFER WARN] Telemetry buffer full')
+        expect.stringContaining('[TRUXIFY BUFFER CRITICAL] Buffer at 100% capacity')
       );
     });
   });

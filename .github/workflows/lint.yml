@@ -25,7 +25,7 @@ jobs:
           cache-dependency-path: backend/api/package-lock.json
       - name: Install dependencies
         working-directory: backend/api
-        run: npm ci --workspaces=false
+        run: npm ci --workspaces=false --legacy-peer-deps
       - name: Run ESLint
         working-directory: backend/api
         run: npm run lint

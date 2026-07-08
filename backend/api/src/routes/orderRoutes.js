@@ -44,6 +44,13 @@ import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  buildDepositTxFn: buildDepositTx,
+  recordDepositTxFn: recordDepositTx,
+  escrowRefundFn: escrowRefund,
+  logger,
+});
 
 const orderValidationService = new OrderValidationService({ supabase, logger });
 const orderMilestoneService = new OrderMilestoneService({ orderValidationService });
@@ -551,7 +558,6 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
         supabase.from('reputation_failures').insert({
           driver_wallet: polygonAddress,
           stars,
-          rating_id: ratingData?.id ?? null,
           failed_at: new Date().toISOString(),
           retry_count: 0,
           last_error: repErr.message,
@@ -666,6 +672,73 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
 router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver']), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   const orderId = req.params.id;
   const { milestone } = req.body;
+  try {
+    const orderId = req.params.id;
+    const { milestone } = req.body;
+    const milestoneMap = {
+      'Arrived at Pickup': 'at_pickup',
+      'Goods Loaded': 'in_transit',
+      'In Transit': 'in_transit',
+      'Arrived at Drop-off': 'at_dropoff',
+      'Goods Unloaded': 'at_dropoff'
+    };
+    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
+    if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
+
+    const { data: timeline, error: tlErr } = await supabase
+      .from('order_timeline')
+      .select('milestone, sort_order, completed')
+      .eq('order_display_id', order.order_display_id)
+      .order('sort_order', { ascending: true });
+    if (tlErr) return res.status(500).json({ error: 'Failed to fetch order timeline.' });
+
+    const canonicalMilestones = new Set([...Object.keys(milestoneMap), 'Order Placed', 'Delivered']);
+    const lastCompleted = [...timeline].reverse().find(t => t.completed && canonicalMilestones.has(t.milestone));
+    const lastCompletedSortOrder = lastCompleted ? lastCompleted.sort_order : 10;
+
+    const timelineEntry = timeline.find(t => t.milestone === milestone);
+    if (!timelineEntry) return res.status(400).json({ error: `Milestone "${milestone}" is not part of this order's timeline.` });
+
+    if (timelineEntry.completed) {
+      return res.status(409).json({ error: `Milestone "${milestone}" has already been completed.` });
+    }
+
+    const nextExpected = timeline.find(t => !t.completed && t.sort_order > lastCompletedSortOrder);
+    if (!nextExpected || nextExpected.sort_order !== timelineEntry.sort_order) {
+      return res.status(422).json({
+        error: `Milestone out of sequence. Expected "${nextExpected ? nextExpected.milestone : 'none'}" before "${milestone}".`,
+      });
+    }
+
+    const status = milestoneMap[milestone];
+    const updates = { status, updated_at: new Date().toISOString() };
+    let generatedOtp = null;
+
+    if (milestone === 'In Transit') {
+      const result = await generateDeliveryOtp({ orderId });
+      generatedOtp = result.otp;
+    }
+
+    const { error: timelineErr } = await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() }).eq('order_display_id', order.order_display_id).eq('milestone', milestone);
+    if (timelineErr) return res.status(500).json({ error: 'Failed to update order timeline.', details: timelineErr.message });
+
+    const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update(updates).eq('id', orderId).select('*').single();
+    if (updateErr) {
+      // Roll back the timeline mark since the order update failed
+      await supabase
+        .from('order_timeline')
+        .update({ completed: false, milestone_time: null })
+        .eq('order_display_id', order.order_display_id)
+        .eq('milestone', milestone);
+      return res.status(500).json({ error: 'Failed to update order.', details: updateErr.message });
+    }
+
+    if (generatedOtp) {
+      await sendOtpNotification({ orderId, customerId: order.customer_id, orderDisplayId: order.order_display_id, otp: generatedOtp });
+    }
+
+    const response = { message: 'Milestone updated successfully.', order: updatedOrder, milestone, status };
 
   try {
     const result = await orderMilestoneService.updateMilestone({ orderId, milestone, driverId: req.user.id });

@@ -1254,18 +1254,6 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
     await expireDeliveryOtps(order.id);
 
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
-    if (result.status === 202) {
-      return res.status(202).json(result.body);
-    }
-
-    const cancellationFee = updatedOrder?.cancellation_fee ?? 0;
-
-    await orderTimelineService.completeOrderPlacedMilestone(order.order_display_id);
-
-    await expireDeliveryOtps(order.id);
-
-    return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
-    return res.json(result.body);
   } catch (err) {
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);

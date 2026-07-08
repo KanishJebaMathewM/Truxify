@@ -1,6 +1,6 @@
-const { ethers } = require("hardhat");
+import { ethers } from "hardhat";
 
-async function main() {
+export async function main() {
   const [deployer] = await ethers.getSigners();
   console.log("Deploying contracts with account:", deployer.address);
   console.log("Account balance:", (await ethers.provider.getBalance(deployer.address)).toString());

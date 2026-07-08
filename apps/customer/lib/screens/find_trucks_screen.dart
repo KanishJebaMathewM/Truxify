@@ -374,10 +374,6 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         setState(() => _weightErrorText = error);
-        // Trigger estimate update after validation
-        if (error == null) {
-          _estimatePrice();
-        }
       }
     });
 
@@ -809,7 +805,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                 child: Column(
                   children: [
                     DropdownButtonFormField<String>(
-                      initialValue: _goodsType,
+                      value: _goodsType,
                       items: _goodsTypes
                           .map((type) => DropdownMenuItem(value: type, child: Text(type)))
                           .toList(),

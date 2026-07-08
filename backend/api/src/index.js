@@ -9,7 +9,10 @@ import tripRoutes from './routes/tripRoutes.js'
 import deviceRoutes from './routes/deviceRoutes.js'
 import documentRoutes from './routes/documentRoutes.js'
 
-import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js'
+import { closeDbConnections, waitForMongoDb, validateConfig, supabase } from './config/db.js'
+import { OrderRepository } from './repositories/orderRepository.js'
+
+const orderRepository = new OrderRepository(supabase)
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
@@ -24,6 +27,7 @@ import truckRoutes from './routes/truckRoutes.js'
 import authRoutes from './routes/authRoutes.js'
 import healthRoutes from './routes/healthRoutes.js'
 import adminRoutes from './routes/adminRoutes.js'
+import lookupRoutes from './routes/lookupRoutes.js'
 
 import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
@@ -33,6 +37,10 @@ import {
   startEscrowRefundReconciliation,
   stopEscrowRefundReconciliation
 } from './services/escrowRefundReconciliation.js'
+import {
+  startReputationReconciliation,
+  stopReputationReconciliation,
+} from './services/reputationReconciliation.js'
 
 // Configuration load from root folder is handled in db.js
 
@@ -56,6 +64,10 @@ if (process.env.BYPASS_AUTH === 'true' && process.env.NODE_ENV !== 'development'
 if (process.env.NODE_ENV === 'production' && !process.env.ML_API_KEY) {
   logger.fatal('ML_API_KEY is not set. ML engine calls will fail with 401 errors. Set ML_API_KEY and restart.')
   process.exit(1)
+}
+if (process.env.NODE_ENV === 'production' && (!process.env.POLYGON_RPC_URL || !process.env.ESCROW_CONTRACT_ADDRESS || !process.env.RELAYER_WALLET_PRIVATE_KEY)) {
+  logger.fatal('Escrow environment variables (POLYGON_RPC_URL, ESCROW_CONTRACT_ADDRESS, RELAYER_WALLET_PRIVATE_KEY) are not set. These are required in production for on-chain escrow protection. Set all three and restart.');
+  process.exit(1);
 }
 if (!process.env.DRIVER_LOGIN_OTP) {
   logger.warn('DRIVER_LOGIN_OTP is not set. Driver OTP login will be disabled until it is configured in production.')
@@ -136,25 +148,26 @@ app.use(requestLogger)
 // ============================================================================
 // RATE LIMITING
 // ============================================================================
-app.use('/api/', globalLimiter)
 app.use('/api/health', healthLimiter)
+app.use('/api/health', healthRoutes)
+app.use('/api/', globalLimiter)
 app.use('/api/v1/trips', tripRoutes)
 
 // ============================================================================
 // REST API ROUTING
 // ============================================================================
-app.use('/api/health', healthRoutes)
 
-app.use('/api/orders', orderRoutes)
-app.use('/api/driver', driverRoutes)
-app.use('/api/loads', loadRoutes)
-app.use('/api/support', supportRoutes)
-app.use('/api/profile', profileRoutes)
-app.use('/api/devices', deviceRoutes)
-app.use('/api/driver/documents', documentRoutes)
-app.use('/api/trucks', truckRoutes)
-app.use('/api/auth', authLimiter, authRoutes)
-app.use('/api/v1/admin', adminRoutes)
+  app.use('/api/orders', orderRoutes)
+  app.use('/api/driver', driverRoutes)
+  app.use('/api/loads', loadRoutes)
+  app.use('/api/support', supportRoutes)
+  app.use('/api/profile', profileRoutes)
+  app.use('/api/devices', deviceRoutes)
+  app.use('/api/driver/documents', documentRoutes)
+  app.use('/api/trucks', truckRoutes)
+  app.use('/api/v1', lookupRoutes)
+  app.use('/api/auth', authLimiter, authRoutes)
+  app.use('/api/v1/admin', adminRoutes)
 
 // Setup Swagger Documentation
 setupSwagger(app)
@@ -192,7 +205,7 @@ app.use((err, req, res, next) => {
 // WEBSOCKET SERVER INIT (wait for MongoDB before accepting WebSocket connections)
 // ============================================================================
 await waitForMongoDb()
-initWebSocketServer(server)
+initWebSocketServer(server, orderRepository)
 initLocationServer(server)
 
 // ============================================================================
@@ -202,8 +215,9 @@ const PORT = process.env.PORT || 5000
 
 server.listen(PORT, () => {
   logger.info(`Truxify API listening on port ${PORT}`)
-  startEscrowRefundReconciliation()
+  startEscrowRefundReconciliation(orderRepository)
   startEscrowReleaseReconciliation()
+  startReputationReconciliation()
 })
 
 // ============================================================================
@@ -228,6 +242,7 @@ async function shutdown (signal) {
   // Stop reconciliation timers so no new work starts during the drain.
   stopEscrowRefundReconciliation()
   stopEscrowReleaseReconciliation()
+  stopReputationReconciliation()
 
   const forceExit = setTimeout(() => {
     logger.error('[shutdown] Timeout exceeded — forcing exit.')

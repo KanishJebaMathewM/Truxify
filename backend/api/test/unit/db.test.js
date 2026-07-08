@@ -13,12 +13,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('dotenv', () => ({
-  default: {
-    config: vi.fn(),
-  },
-}));
-
 describe('db config — env-var guards', () => {
   const originalEnv = {};
 
@@ -34,6 +28,54 @@ describe('db config — env-var guards', () => {
 
   beforeEach(() => {
     vi.resetModules();
+
+    // Register mocks dynamically after resetModules
+    vi.doMock('dotenv', () => ({
+      default: { config: vi.fn() },
+      config: vi.fn(),
+    }));
+
+    vi.doMock('mongodb', () => {
+      const mDb = {
+        collection: vi.fn().mockReturnValue({
+          createIndex: vi.fn().mockResolvedValue({}),
+        }),
+      };
+      const mClient = {
+        connect: vi.fn().mockResolvedValue({}),
+        db: vi.fn().mockReturnValue(mDb),
+        close: vi.fn().mockResolvedValue({}),
+      };
+      return {
+        MongoClient: vi.fn().mockImplementation(() => mClient),
+      };
+    });
+
+    vi.doMock('ioredis', () => {
+      const mRedis = {
+        on: vi.fn(),
+        quit: vi.fn().mockResolvedValue({}),
+        disconnect: vi.fn(),
+      };
+      return {
+        default: vi.fn().mockImplementation(() => mRedis),
+      };
+    });
+
+    vi.doMock('@supabase/supabase-js', () => ({
+      createClient: vi.fn().mockReturnValue({
+        removeAllChannels: vi.fn().mockResolvedValue({}),
+      }),
+    }));
+
+    vi.doMock('firebase-admin', () => ({
+      apps: [],
+      initializeApp: vi.fn().mockReturnValue({}),
+      credential: {
+        cert: vi.fn().mockReturnValue({}),
+      },
+    }));
+
     // Snapshot env
     ENV_VARS.forEach((k) => {
       originalEnv[k] = process.env[k];
@@ -108,6 +150,53 @@ describe('db config — waitForMongoDb', () => {
 
   beforeEach(() => {
     vi.resetModules();
+
+    vi.doMock('dotenv', () => ({
+      default: { config: vi.fn() },
+      config: vi.fn(),
+    }));
+
+    vi.doMock('mongodb', () => {
+      const mDb = {
+        collection: vi.fn().mockReturnValue({
+          createIndex: vi.fn().mockResolvedValue({}),
+        }),
+      };
+      const mClient = {
+        connect: vi.fn().mockResolvedValue({}),
+        db: vi.fn().mockReturnValue(mDb),
+        close: vi.fn().mockResolvedValue({}),
+      };
+      return {
+        MongoClient: vi.fn().mockImplementation(() => mClient),
+      };
+    });
+
+    vi.doMock('ioredis', () => {
+      const mRedis = {
+        on: vi.fn(),
+        quit: vi.fn().mockResolvedValue({}),
+        disconnect: vi.fn(),
+      };
+      return {
+        default: vi.fn().mockImplementation(() => mRedis),
+      };
+    });
+
+    vi.doMock('@supabase/supabase-js', () => ({
+      createClient: vi.fn().mockReturnValue({
+        removeAllChannels: vi.fn().mockResolvedValue({}),
+      }),
+    }));
+
+    vi.doMock('firebase-admin', () => ({
+      apps: [],
+      initializeApp: vi.fn().mockReturnValue({}),
+      credential: {
+        cert: vi.fn().mockReturnValue({}),
+      },
+    }));
+
     ENV_VARS.forEach((k) => {
       originalEnv[k] = process.env[k];
       delete process.env[k];

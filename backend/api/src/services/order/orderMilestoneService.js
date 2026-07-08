@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { supabase, redisClient } from '../../config/db.js';
+import { redisClient } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
 import {
   sendDeliveryOtpNotification,
@@ -9,6 +9,10 @@ import {
 } from '../notificationService.js';
 import { escrowRelease } from '../escrow.js';
 import { DomainError } from './bidAcceptanceService.js';
+import { OrderTimelineService } from './orderTimelineService.js';
+
+const orderTimelineService = new OrderTimelineService({ supabase, logger });
+import { DomainError } from './domainError.js';
 
 export const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
 const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
@@ -86,6 +90,12 @@ export async function clearOtpState(orderId) {
 }
 
 export class OrderMilestoneService {
+  constructor(orderRepository) {
+    this.orderRepository = orderRepository;
+  constructor({ orderValidationService } = {}) {
+    this.validation = orderValidationService;
+  }
+
   async updateMilestone({ orderId, milestone, driverId }) {
     const milestoneMap = {
       'Truck Assigned': 'truck_assigned',
@@ -100,16 +110,13 @@ export class OrderMilestoneService {
       throw new DomainError(400, { error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
     }
 
-    const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
+    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId);
     if (orderErr || !order) throw new DomainError(404, { error: 'Order not found.' });
     if (order.driver_id !== driverId) throw new DomainError(403, { error: 'Access Denied: You are not assigned to this order.' });
 
-    const { data: timeline, error: tlErr } = await supabase
-      .from('order_timeline')
-      .select('milestone, sort_order, completed')
-      .eq('order_display_id', order.order_display_id)
-      .order('sort_order', { ascending: true });
+    const { data: timeline, error: tlErr } = await this.orderRepository.getTimelineWithSortCheck(order.order_display_id);
     if (tlErr) throw new DomainError(500, { error: 'Failed to fetch order timeline.' });
+    const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
 
     const canonicalMilestones = new Set([...Object.keys(milestoneMap), 'Order Placed', 'Delivered']);
     const lastCompleted = [...timeline].reverse().find(t => t.completed && canonicalMilestones.has(t.milestone));
@@ -146,16 +153,14 @@ export class OrderMilestoneService {
       }
     }
 
-    const { error: timelineErr } = await supabase.from('order_timeline').update({ completed: true, milestone_time: new Date().toISOString() }).eq('order_display_id', order.order_display_id).eq('milestone', milestone);
+    const { error: timelineErr } = await this.orderRepository.updateTimelineMilestone(order.order_display_id, milestone, { completed: true, milestone_time: new Date().toISOString() });
     if (timelineErr) throw new DomainError(500, { error: 'Failed to update order timeline.', details: timelineErr.message });
+    await orderTimelineService.completeMilestone(order.order_display_id, milestone);
 
-    const { data: updatedOrder, error: updateErr } = await supabase.from('orders').update(updates).eq('id', orderId).select('*').single();
+    const { data: updatedOrder, error: updateErr } = await this.orderRepository.updateOrder(orderId, updates);
     if (updateErr) {
-      await supabase
-        .from('order_timeline')
-        .update({ completed: false, milestone_time: null })
-        .eq('order_display_id', order.order_display_id)
-        .eq('milestone', milestone);
+      await this.orderRepository.updateTimelineMilestone(order.order_display_id, milestone, { completed: false, milestone_time: null });
+      await orderTimelineService.resetMilestone(order.order_display_id, milestone);
       throw new DomainError(500, { error: 'Failed to update order.', details: updateErr.message });
     }
 
@@ -163,10 +168,10 @@ export class OrderMilestoneService {
       const notifResult = await sendDeliveryOtpNotification(order.customer_id, order.order_display_id, generatedOtp);
       if (!notifResult.success) {
         logger.warn(`[OrderRoutes] Delivery OTP notification failed for order ${order.order_display_id} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
-        await supabase.from('orders').update({
+        await this.orderRepository.updateOrder(orderId, {
           notification_failed: true,
           updated_at: new Date().toISOString(),
-        }).eq('id', orderId);
+        });
       }
     }
 
@@ -180,10 +185,7 @@ export class OrderMilestoneService {
       });
     }
 
-    const { data: order, error: orderErr } = await supabase.from('orders')
-      .select('id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status')
-      .eq('id', orderId)
-      .maybeSingle();
+    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status');
     if (orderErr || !order) throw new DomainError(404, { error: 'Order not found.' });
     if (order.driver_id !== driverId) throw new DomainError(403, { error: 'Access Denied: You are not assigned to this order.' });
     if (!DELIVERY_OTP_READY_STATUSES.has(order.status)) {
@@ -215,20 +217,17 @@ export class OrderMilestoneService {
       throw new DomainError(400, { error: message });
     }
 
-    const { data: preUpdatedOrder, error: updateErr } = await supabase.from('orders').update({
-      updated_at: new Date().toISOString()
-    })
-      .eq('id', orderId)
-      .not('status', 'eq', 'cancelled')
-      .not('status', 'eq', 'payment_released')
-      .select('id, order_display_id, status')
-      .single();
+    const guardResult = await this.orderRepository.updateOrderGuardStatus(
+      orderId,
+      { updated_at: new Date().toISOString() },
+      ['cancelled', 'payment_released']
+    );
 
-    if (updateErr) {
-      if (updateErr.code === 'PGRST116') {
+    if (guardResult.error) {
+      if (guardResult.error.code === 'PGRST116') {
         throw new DomainError(409, { error: 'Order was already cancelled or payment released.' });
       }
-      throw new DomainError(500, { error: 'Failed to verify OTP.', details: updateErr.message });
+      throw new DomainError(500, { error: 'Failed to verify OTP.', details: guardResult.error.message });
     }
 
     let releaseTxHash = null;
@@ -254,7 +253,7 @@ export class OrderMilestoneService {
       logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
     }
 
-    const { data: tripData, error: rpcErr } = await supabase.rpc('complete_trip_tx', {
+    const { data: tripData, error: rpcErr } = await this.orderRepository.executeRpc('complete_trip_tx', {
       p_order_id: orderId,
       p_otp_id: otpRecord.id,
       p_release_tx_hash: releaseTxHash,
@@ -264,11 +263,7 @@ export class OrderMilestoneService {
       throw new DomainError(500, { error: 'Failed to complete trip and release payment.', details: rpcErr.message });
     }
 
-    const { data: verifiedOrder, error: verifyErr } = await supabase
-      .from('orders')
-      .select('status, escrow_status, escrow_release_attempts')
-      .eq('id', orderId)
-      .maybeSingle();
+    const { data: verifiedOrder, error: verifyErr } = await this.orderRepository.findOrderById(orderId, 'status, escrow_status, escrow_release_attempts');
 
     if (verifyErr || !verifiedOrder) {
       logger.error(`[verify-delivery] Failed to verify order status after RPC for order ${orderId}`);
@@ -286,12 +281,12 @@ export class OrderMilestoneService {
     await clearOtpState(orderId);
 
     if (releaseTxHash || escrowAlreadyReleased) {
-      const { error: releaseUpdateErr } = await supabase.from('orders').update({
+      const { error: releaseUpdateErr } = await this.orderRepository.updateOrder(orderId, {
         escrow_status: 'released',
         escrow_release_error: null,
         escrow_released_at: new Date().toISOString(),
         release_tx_hash: releaseTxHash,
-      }).eq('id', orderId);
+      });
 
       if (releaseUpdateErr) {
         logger.error('[escrow] Release confirmed but persistence failed:', releaseUpdateErr.message);
@@ -301,12 +296,11 @@ export class OrderMilestoneService {
       const driverIdVal = tripData?.driver_id || order.driver_id;
       const displayId = tripData?.order_display_id || order.order_display_id;
       if (driverIdVal) {
-        const { error: walletErr } = await supabase
-          .from('wallet_transactions')
-          .update({ description: `Escrow payout for ${displayId}` })
-          .eq('driver_id', driverIdVal)
-          .eq('order_display_id', displayId)
-          .eq('txn_type', 'credit');
+        const { error: walletErr } = await this.orderRepository.updateWalletTransaction(
+          driverIdVal,
+          displayId,
+          { description: `Escrow payout for ${displayId}` }
+        );
 
         if (walletErr) {
           logger.error('[wallet] Failed to persist escrow payout:', walletErr.message);

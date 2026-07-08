@@ -23,6 +23,10 @@ export async function generateAndStoreOtp(phone) {
 }
 
 export async function verifyOtp(phone, otp) {
+  if (!phone || typeof phone !== 'string' || !phone.trim()) {
+    logger.warn('[otp] Invalid phone number provided for verification.');
+    return false;
+  }
   if (!redisClient) {
     if (process.env.NODE_ENV === 'production') {
       logger.error('[otp] Redis unavailable in production — rejecting OTP verification.');

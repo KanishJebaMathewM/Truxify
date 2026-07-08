@@ -1,3 +1,4 @@
+import logger from '../middleware/logger.js';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 
@@ -29,5 +30,9 @@ const options = {
 const swaggerSpec = swaggerJsdoc(options);
 
 export const setupSwagger = (app) => {
+  if (process.env.NODE_ENV === 'production') {
+    logger.warn('[Swagger] Disabling Swagger UI in production');
+    return;
+  }
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 };

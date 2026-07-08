@@ -37,7 +37,7 @@ void main() {
 
     testWidgets('PulsingLocationDot renders inactive state correctly', (WidgetTester tester) async {
       await tester.pumpWidget(
-        MaterialApp(
+        const MaterialApp(
           home: Scaffold(
             body: PulsingLocationDot(isActive: false),
           ),
@@ -45,12 +45,18 @@ void main() {
       );
 
       expect(find.byType(PulsingLocationDot), findsOneWidget);
-      expect(find.byType(AnimatedBuilder), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(PulsingLocationDot),
+          matching: find.byType(AnimatedBuilder),
+        ),
+        findsNothing,
+      );
     });
 
     testWidgets('PulsingLocationDot renders active state correctly', (WidgetTester tester) async {
       await tester.pumpWidget(
-        MaterialApp(
+        const MaterialApp(
           home: Scaffold(
             body: PulsingLocationDot(isActive: true),
           ),
@@ -58,9 +64,17 @@ void main() {
       );
 
       expect(find.byType(PulsingLocationDot), findsOneWidget);
-      expect(find.byType(AnimatedBuilder), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(PulsingLocationDot),
+          matching: find.byType(AnimatedBuilder),
+        ),
+        findsOneWidget,
+      );
       
       // Stop the animation from running indefinitely so the test can finish
+      // pumpAndSettle would timeout here since the animation repeats forever.
+      await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
     });
   });

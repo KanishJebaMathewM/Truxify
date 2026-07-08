@@ -703,6 +703,14 @@ router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), va
 // ============================================================================
 // 11. ACCEPT BID (CUSTOMER)
 // ============================================================================
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  buildDepositTxFn: buildDepositTx,
+  recordDepositTxFn: recordDepositTx,
+  escrowRefundFn: escrowRefund,
+  logger
+});
+
 router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
   const orderId = req.params.id;
   const bidId = req.params.bidId;

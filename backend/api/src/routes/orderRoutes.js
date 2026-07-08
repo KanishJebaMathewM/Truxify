@@ -51,14 +51,6 @@ const bidAcceptanceService = new BidAcceptanceService({
   logger,
 });
 
-const bidAcceptanceService = new BidAcceptanceService({
-  supabase,
-  buildDepositTxFn: buildDepositTx,
-  recordDepositTxFn: recordDepositTx,
-  escrowRefundFn: escrowRefund,
-  logger,
-});
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Rate limiter for the verify-delivery endpoint

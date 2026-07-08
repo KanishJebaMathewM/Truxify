@@ -227,9 +227,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
 
   let fcmResult;
   try { fcmResult = await sendFcmNotification(
-      customerId,
-    { title: 'Delivery Verification OTP', body: realBody },
-    { orderDisplayId, notifType: 'delivery_otp' }
+      customerId,    { title: 'Delivery Verification OTP', body: maskedBody },    { orderDisplayId, notifType: 'delivery_otp' }
   ); } catch (err) { logger.warn({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error'); }
 
   if (process.env.TWILIO_AUTH_TOKEN) {

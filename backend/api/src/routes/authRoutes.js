@@ -71,6 +71,17 @@ router.post('/logout', authenticate, async (req, res) => {
   });
 });
 
+/**
+ * @openapi
+ * /api/auth/session:
+ *   get:
+ *     summary: Retrieve current authenticated session user details
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current session user
+ */
 // GET /api/auth/session
 router.get('/session', authenticate, userLimiter, (req, res) => {
   return res.json({

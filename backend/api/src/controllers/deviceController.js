@@ -1,6 +1,20 @@
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
+const VALID_PLATFORMS = ['android', 'ios', 'web'];
+
+function validateFcmToken(token) {
+  if (!token || typeof token !== 'string') return 'fcmToken must be a non-empty string';
+  if (token.length < 10 || token.length > 4096) return 'fcmToken length must be between 10 and 4096';
+  if (!/^[a-zA-Z0-9\-_:]+$/.test(token)) return 'fcmToken contains invalid characters';
+  return null;
+}
+
+function validatePlatform(platform) {
+  if (!platform) return null;
+  return VALID_PLATFORMS.includes(platform) ? null : `Platform must be one of: ${VALID_PLATFORMS.join(', ')}`;
+}
+
 /**
  * Register / update FCM token for a user device
  */
@@ -15,10 +29,14 @@ export async function registerDeviceToken(req, res) {
       });
     }
 
-    if (!fcmToken) {
-      return res.status(400).json({
-        error: 'fcmToken is required'
-      });
+    const tokenErr = validateFcmToken(fcmToken);
+    if (tokenErr) {
+      return res.status(400).json({ error: tokenErr });
+    }
+
+    const platErr = validatePlatform(platform);
+    if (platErr) {
+      return res.status(400).json({ error: platErr });
     }
 
     const tokenUpdatedAt = new Date().toISOString();

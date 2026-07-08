@@ -75,15 +75,45 @@ class TelemetryRingBuffer {
   prepend(items) {
     if (!items || items.length === 0) return 0;
     let dropped = 0;
-    for (let i = items.length - 1; i >= 0; i--) {
-      this.head = (this.head - 1 + this.capacity) % this.capacity;
-      this.buffer[this.head] = items[i];
-      if (this.size < this.capacity) {
-        this.size++;
-      } else {
-        dropped++;
-        this.tail = this.head;
+    
+    // If prepending all items would exceed capacity, we drop the oldest ones (the first ones in `items`).
+    let itemsToPrepend = items;
+    if (this.size + items.length > this.capacity) {
+      const dropCount = this.size + items.length - this.capacity;
+      
+      // If we are dropping items, the oldest ones are the ones we drop.
+      // We can drop from `items` (since they are the oldest overall)
+      if (dropCount >= items.length) {
+        // If we drop more than items.length, it means items are entirely dropped,
+        // and we also need to drop from the front of the current buffer.
+        // Actually, if we just push them, the buffer handles dropping oldest.
+        // But wait, prepend adds to the FRONT (oldest). 
+        // If we drop, we just don't add the oldest of the `items`.
       }
+      
+      dropped = dropCount;
+      // We only keep the last (capacity - this.size) items, unless items is larger than capacity,
+      // in which case we just keep the last `capacity` items and clear the buffer.
+      const keepCount = Math.min(items.length, this.capacity);
+      const startIdx = items.length - keepCount;
+      itemsToPrepend = items.slice(startIdx);
+      
+      // If adding these still exceeds capacity (because this.size is large),
+      // we must drop from the CURRENT buffer's oldest? No, itemsToPrepend ARE the oldest!
+      // So if this.size + itemsToPrepend.length > capacity, we just don't prepend some of itemsToPrepend!
+      // Wait, we just did that! keepCount is at most capacity.
+      // The remaining itemsToPrepend will fit if we drop from the FRONT of itemsToPrepend.
+      const availableSpace = this.capacity - this.size;
+      if (availableSpace < itemsToPrepend.length) {
+         // drop the oldest from itemsToPrepend
+         itemsToPrepend = itemsToPrepend.slice(itemsToPrepend.length - availableSpace);
+      }
+    }
+
+    for (let i = itemsToPrepend.length - 1; i >= 0; i--) {
+      this.head = (this.head - 1 + this.capacity) % this.capacity;
+      this.buffer[this.head] = itemsToPrepend[i];
+      this.size++;
     }
     return dropped;
   }
@@ -733,7 +763,6 @@ async function flushTelemetryBuffer() {
           logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
         }
       }
-      }
     } finally {
       currentFlushPromise = null;
       flushMutex = false;
@@ -1082,7 +1111,7 @@ export const __testing = {
   flushTelemetryBuffer,
   removeClientFromAllSubscriptions,
   getTelemetryWriteBuffer() {
-    return telemetryWriteBuffer;
+    return telemetryWriteBuffer.toArray();
   },
   getTelemetryFlushBuffer() {
     return telemetryFlushBuffer;
@@ -1093,6 +1122,13 @@ export const __testing = {
   },
   setTelemetryFlushBuffer(records) {
     telemetryFlushBuffer = records;
+  },
+  pushToTelemetryWriteBuffer(records) {
+    if (Array.isArray(records)) {
+      for (const r of records) telemetryWriteBuffer.push(r);
+    } else {
+      telemetryWriteBuffer.push(records);
+    }
   },
   clearTelemetryWriteBuffer() {
     telemetryWriteBuffer.clear();

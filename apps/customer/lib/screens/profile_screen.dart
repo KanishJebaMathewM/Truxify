@@ -257,15 +257,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         setState(() {
                           _walletAddress = address;
                         });
+                        if (!context.mounted) return;
                         Navigator.of(context).pop();
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Wallet address updated'),
-                              backgroundColor: TruxifyColors.success,
-                            ),
-                          );
-                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Wallet address updated'),
+                            backgroundColor: TruxifyColors.success,
+                          ),
+                        );
                       } else {
                         final body = jsonDecode(response.body)
                             as Map<String, dynamic>;
@@ -319,6 +318,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     await _cacheManager.open();
     await _cacheManager.cacheProfile({});
+    
+    if (!context.mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
       AppPageRoute(builder: (_) => const LoginScreen()),
       (route) => false,

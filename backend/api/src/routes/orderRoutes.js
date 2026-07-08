@@ -44,6 +44,13 @@ import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  buildDepositTxFn: buildDepositTx,
+  recordDepositTxFn: recordDepositTx,
+  escrowRefundFn: escrowRefund,
+  logger,
+});
 
 const bidAcceptanceService = new BidAcceptanceService({
   supabase,
@@ -614,7 +621,6 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
         supabase.from('reputation_failures').insert({
           driver_wallet: polygonAddress,
           stars,
-          rating_id: ratingData?.id ?? null,
           failed_at: new Date().toISOString(),
           retry_count: 0,
           last_error: repErr.message,
@@ -724,6 +730,15 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
 // ============================================================================
 router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver']), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   try {
+    const orderId = req.params.id;
+    const { milestone } = req.body;
+    const milestoneMap = {
+      'Arrived at Pickup': 'at_pickup',
+      'Goods Loaded': 'in_transit',
+      'In Transit': 'in_transit',
+      'Arrived at Drop-off': 'at_dropoff',
+      'Goods Unloaded': 'at_dropoff'
+    };
     const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
     if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });

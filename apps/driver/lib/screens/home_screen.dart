@@ -121,8 +121,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoadMatching(LoadOffer load) {
     if (_currentLocationText != null && _currentLocationText!.isNotEmpty) {
       final locationLower = _currentLocationText!.toLowerCase();
-      final routeLower = (load.route ?? '').toLowerCase();
-      final pickupLower = (load.pickup ?? '').toLowerCase();
+      final routeLower = load.route.toLowerCase();
+      final pickupLower = load.pickup.toLowerCase();
 
       final parts = locationLower
           .split(',')
@@ -298,7 +298,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
 
       debugPrint(
@@ -1284,7 +1284,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Switch(
                 value: _isOnline,
                 onChanged: (_) => _toggleOnlineState(),
-                activeColor: TruxifyColors.success,
+                activeThumbColor: TruxifyColors.success,
               ),
             ],
           ),
@@ -1571,7 +1571,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     setState(() => _isTripStarted = true);
                   }
                 } catch (e) {
-                  if (mounted) {
+                  if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Failed to start trip: $e')),
                     );

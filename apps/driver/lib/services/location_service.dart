@@ -271,6 +271,7 @@ class LocationService {
   }
 
   void _scheduleReconnect() {
+    _closeWebSocket();
     _channel = null;
     final socketSubscription = _socketSubscription;
     _socketSubscription = null;

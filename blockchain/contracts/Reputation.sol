@@ -58,7 +58,7 @@ contract Reputation is Ownable, Pausable {
         uint256 current = scores[driver];
         if (current >= MAX_REPUTATION) return;
         uint256 newScore = current + points;
-        if (newScore < current || newScore > MAX_REPUTATION) {
+        if (newScore > MAX_REPUTATION) {
             scores[driver] = MAX_REPUTATION;
         } else {
             scores[driver] = newScore;

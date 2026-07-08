@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../core/api_client.dart';
+import 'order_cache.dart';
 
 class OrderService {
   OrderService({
@@ -248,10 +249,25 @@ class OrderService {
 
   Future<List<Map<String, dynamic>>> fetchHistoryOrders() async {
     try {
-      final body = await _apiClient.get(
-        '/api/orders/history',
-      );
-      return _historyFromResponse(body);
+      final cachedOrders = await OrderCache.getCachedOrders();
+      if (cachedOrders.isNotEmpty) {
+        _refreshHistoryOrders().catchError((_) {});
+        return cachedOrders;
+      }
+      return await _refreshHistoryOrders();
+    } catch (e) {
+      final cachedOrders = await OrderCache.getCachedOrders();
+      if (cachedOrders.isNotEmpty) return cachedOrders;
+      throw StateError('Failed to fetch history orders: $e');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _refreshHistoryOrders() async {
+    try {
+      final body = await _apiClient.get('/api/orders/history');
+      final orders = _historyFromResponse(body);
+      await OrderCache.cacheOrders(orders);
+      return orders;
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {

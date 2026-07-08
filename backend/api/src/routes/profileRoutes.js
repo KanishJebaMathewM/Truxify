@@ -209,11 +209,12 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
   try {
     const userId = req.user.id;
     const { fcmToken } = req.body;
+    const trimmedToken = fcmToken?.trim();
 
     const { error } = await supabase
       .from('profiles')
       .update({
-        fcm_token: fcmToken,
+        fcm_token: trimmedToken,
         fcm_token_updated_at: new Date().toISOString(),
       })
       .eq('id', userId);

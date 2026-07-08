@@ -43,6 +43,13 @@ import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+const bidAcceptanceService = new BidAcceptanceService({
+  supabase,
+  buildDepositTxFn: buildDepositTx,
+  recordDepositTxFn: recordDepositTx,
+  escrowRefundFn: escrowRefund,
+  logger,
+});
 
 const bidAcceptanceService = new BidAcceptanceService({
   supabase,
@@ -612,7 +619,6 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
         supabase.from('reputation_failures').insert({
           driver_wallet: polygonAddress,
           stars,
-          rating_id: ratingData?.id ?? null,
           failed_at: new Date().toISOString(),
           retry_count: 0,
           last_error: repErr.message,

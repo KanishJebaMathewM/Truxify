@@ -369,30 +369,33 @@ router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) 
 // ============================================================================
 router.get('/history', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
   try {
-    const pageParam = req.query.page ?? '1';
+    const cursor = req.query.cursor;
     const limitParam = req.query.limit ?? '10';
-    const page = typeof pageParam === 'string' ? Number(pageParam) : NaN;
     const limit = typeof limitParam === 'string' ? Number(limitParam) : NaN;
-
-    if (!Number.isInteger(page) || page < 1) {
-      return res.status(400).json({ error: 'page must be greater than or equal to 1' });
-    }
 
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
       return res.status(400).json({ error: 'limit must be between 1 and 100' });
     }
 
-    const from = (page - 1) * limit;
-    const to = from + limit - 1;
-
-    const { data: history, error, count } = await supabase
+    let query = supabase
       .from('orders')
       .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, created_at', { count: 'exact' })
       .eq('customer_id', req.user.id)
       .order('created_at', { ascending: false })
-      .range(from, to);
+      .limit(limit);
+
+    if (cursor) {
+      query = query.lt('created_at', cursor);
+    }
+
+    const { data: history, error, count } = await query;
 
     if (error) return res.status(500).json({ error: 'Failed to fetch history.', details: error.message });
+
+    let nextCursor = null;
+    if (history && history.length === limit) {
+      nextCursor = history[history.length - 1].created_at;
+    }
 
     const driverIds = [...new Set((history || []).filter(o => o.driver_id).map(o => o.driver_id))];
     if (driverIds.length > 0) {
@@ -402,10 +405,9 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
     }
 
     res.json({
-      page,
       limit,
       total: count || 0,
-      totalPages: Math.ceil((count || 0) / limit),
+      nextCursor,
       history: history || []
     });
   } catch (err) {

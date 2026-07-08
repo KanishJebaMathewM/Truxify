@@ -72,8 +72,8 @@ void main() {
     when(() => apiClient.get('/api/profile'))
         .thenThrow(const ApiException(400, 'Bad Request'));
 
-    expect(
-      () => profileService.fetchProfile(),
+    await expectLater(
+      profileService.fetchProfile(),
       throwsA(isA<StateError>().having((e) => e.message, 'message', 'Bad Request')),
     );
   });
@@ -85,8 +85,8 @@ void main() {
     when(() => apiClient.get('/api/profile'))
         .thenThrow(const ApiException(503, 'Service Unavailable'));
 
-    expect(
-      () => profileService.fetchProfile(),
+    await expectLater(
+      profileService.fetchProfile(),
       throwsA(isA<StateError>().having(
         (e) => e.message,
         'message',

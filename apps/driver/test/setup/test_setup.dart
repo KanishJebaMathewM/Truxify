@@ -13,8 +13,7 @@ Future<void> setupTestEnvironment() async {
   try {
     await Supabase.initialize(
       url: 'https://mock-project.supabase.co',
-      // ignore: deprecated_member_use
-      anonKey: 'mock-anon-key',
+      publishableKey: 'mock-anon-key',
     );
     // ignore: avoid_print
     print('Supabase initialized for tests');

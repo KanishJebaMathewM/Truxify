@@ -8,8 +8,7 @@ void setupTestEnvironment() {
   try {
     Supabase.initialize(
       url: 'https://mock-project.supabase.co',
-      // ignore: deprecated_member_use
-      anonKey: 'mock-anon-key',
+      publishableKey: 'mock-anon-key',
     );
   } catch (_) {}
   

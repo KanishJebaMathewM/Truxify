@@ -28,6 +28,7 @@ import adminRoutes from './routes/adminRoutes.js'
 import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
 import { requestIdMiddleware, requestLogger } from './middleware/requestId.js'
+import { contentTypeMiddleware } from './middleware/contentType.js'
 import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js'
 import {
   startEscrowRefundReconciliation,
@@ -125,6 +126,7 @@ if (process.env.NODE_ENV === 'production') {
 // Payload parsers
 app.use(express.json({ limit: '1mb' })) // Added payload limit for security
 app.use(express.urlencoded({ extended: true, limit: '1mb' }))
+app.use(contentTypeMiddleware)
 
 // ============================================================================
 // REQUEST ID + REQUEST LOGGER — registered before all routes and rate limiters

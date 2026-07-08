@@ -514,6 +514,76 @@ describe('Bid Routes', () => {
     }
   });
 
+  it('POST /:id/bids/:bidId/accept returns 500 when Phase 3 escrow update fails', async () => {
+    mockBuildDepositTx.mockResolvedValue({ txData: '0xdeadbeef', bookingId: 'escrow:MOCK' });
+
+    m.store.orders.push({
+      id: 'order-escrow-update-fail',
+      customer_id: 'customer-1',
+      order_display_id: 'OD-ESCROW-FAIL',
+    });
+
+    m.store.load_offers.push({
+      id: 'load-escrow-update-fail',
+      order_display_id: 'OD-ESCROW-FAIL',
+      status: 'available',
+    });
+
+    m.store.load_bids.push({
+      id: 'bid-escrow-update-fail',
+      load_id: 'load-escrow-update-fail',
+      driver_id: 'driver-1',
+      bid_amount: 50000,
+      status: 'pending',
+    });
+
+    m.store.profiles.push(
+      { id: 'customer-1', full_name: 'Customer One', polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678' },
+      { id: 'driver-1', full_name: 'Driver One' },
+    );
+
+    m.store.driver_details.push({
+      user_id: 'driver-1',
+      rating: 4.9,
+      total_trips: 100,
+      completion_rate: 98,
+      truck_id: null,
+      polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
+    });
+
+    const originalFrom = m.supabase.from;
+    try {
+      m.supabase.from = vi.fn((table) => {
+        const query = originalFrom(table);
+        if (table === 'orders') {
+          const originalUpdate = query.update;
+          query.update = vi.fn((payload) => {
+            if (payload.escrow_status === 'funding') {
+              const mockEq = vi.fn().mockReturnThis();
+              return {
+                eq: mockEq,
+                then: (resolve) => resolve({ error: { message: 'Synthetic Phase 3 error' } })
+              };
+            }
+            return originalUpdate.call(query, payload);
+          });
+        }
+        return query;
+      });
+
+      const app = buildApp();
+      const res = await request(app)
+        .post('/api/orders/order-escrow-update-fail/bids/bid-escrow-update-fail/accept')
+        .set(CUSTOMER);
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Failed to initialize escrow securely. Please try again.');
+      expect(res.body.depositTx).toBeUndefined();
+    } finally {
+      m.supabase.from = originalFrom;
+    }
+  });
+
   it('POST /:id/bids/:bidId/accept rejects with 422 when customer wallet missing', async () => {
     m.store.orders.push({
       id: 'order-no-cust-wallet',

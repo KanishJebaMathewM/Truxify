@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:truxify_driver/models/earnings_daily_model.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../theme/app_theme.dart';
 import '../widgets/earnings_shimmer.dart';
 
@@ -270,6 +271,13 @@ class _EarningsScreenState extends State<EarningsScreen> {
                         child: _isLoading
                             ? const SummaryCardsShimmer(key: ValueKey('summary_shimmer'))
                             : _buildOverallSummaryCards(key: const ValueKey('summary_content')),
+                      ),
+                      const SizedBox(height: 24),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _isLoading
+                            ? const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()))
+                            : _buildEarningsChartCard(key: const ValueKey('chart_content')),
                       ),
                       const SizedBox(height: 24),
                       AnimatedSwitcher(

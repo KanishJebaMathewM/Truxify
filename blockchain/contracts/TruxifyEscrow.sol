@@ -51,31 +51,31 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     // ─── Events ──────────────────────────────────────────────────────────────
 
     event BookingCreated(
-        uint256 indexed bookingId,
+        bytes32 indexed bookingId,
         address indexed customer,
         address indexed driver,
         uint256 amount
     );
 
     event PaymentReleased(
-        uint256 indexed bookingId,
+        bytes32 indexed bookingId,
         address indexed driver,
         uint256 amount
     );
 
     event BookingCancelled(
-        uint256 indexed bookingId,
+        bytes32 indexed bookingId,
         address indexed customer,
         uint256 refundAmount
     );
 
     event BookingDisputed(
-        uint256 indexed bookingId,
+        bytes32 indexed bookingId,
         address indexed raisedBy
     );
 
     event WithdrawalReady(
-        uint256 indexed bookingId,
+        bytes32 indexed bookingId,
         address indexed recipient,
         uint256 amount
     );
@@ -99,7 +99,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      * @param driver    Truck driver's wallet address
      */
     function createBooking(
-        uint256 bookingId,
+        bytes32 bookingId,
         address payable driver
     ) external payable {
         require(msg.value > 0, "TruxifyEscrow: Payment required");
@@ -134,7 +134,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      *
      * @param bookingId The booking whose payment to release
      */
-    function releasePayment(uint256 bookingId)
+    function releasePayment(bytes32 bookingId)
         external
         onlyOwner
         nonReentrant
@@ -173,7 +173,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      *
      * @param bookingId The booking to cancel and refund
      */
-    function cancelBooking(uint256 bookingId)
+    function cancelBooking(bytes32 bookingId)
         external
         nonReentrant
         whenNotPaused
@@ -212,7 +212,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      *
      * @param bookingId The booking to flag
      */
-    function raiseDispute(uint256 bookingId) external {
+    function raiseDispute(bytes32 bookingId) external {
         Booking storage booking = bookings[bookingId];
 
         require(
@@ -232,7 +232,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     /**
      * @dev View function to inspect any booking.
      */
-    function getBooking(uint256 bookingId)
+    function getBooking(bytes32 bookingId)
         external
         view
         returns (Booking memory)

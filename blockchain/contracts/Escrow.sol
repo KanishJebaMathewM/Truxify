@@ -35,6 +35,7 @@ contract Escrow is Pausable {
     event Refunded(bytes32 indexed bookingId, address indexed customer, uint256 amount);
     event Withdrawn(address indexed recipient, uint256 amount);
     event EmergencyRecovered(address indexed recipient, uint256 amount);
+    event FundsReleased(bytes32 indexed orderId, uint256 amount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Only owner");
@@ -119,6 +120,7 @@ contract Escrow is Pausable {
         releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
 
         emit Released(bookingId, driver, amount);
+        emit FundsReleased(bookingId, amount);
     }
 
     /// @notice Refunds funds back to the customer if the booking is cancelled.

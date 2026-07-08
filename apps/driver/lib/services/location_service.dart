@@ -29,8 +29,32 @@ class LocationService {
   // Throttling configuration: send ping if moved 15m+ OR 30 seconds passed
   static const double _minDistanceMeters = 15.0;
   static const Duration _maxInterval = Duration(seconds: 30);
+  static const double _speedThresholdKmh = 5.0;
 
   bool get isTracking => _isTracking;
+  Position? _trackingStartPosition;
+  double _totalDistanceKm = 0;
+  int _locationUpdates = 0;
+
+  double get totalDistanceKm => _totalDistanceKm;
+  int get locationUpdates => _locationUpdates;
+
+  void _recordPosition(Position pos) {
+    if (_trackingStartPosition != null) {
+      _totalDistanceKm += Geolocator.distanceBetween(
+        _trackingStartPosition!.latitude, _trackingStartPosition!.longitude,
+        pos.latitude, pos.longitude,
+      ) / 1000;
+    }
+    _trackingStartPosition = pos;
+    _locationUpdates++;
+  }
+
+  void resetTrackingStats() {
+    _trackingStartPosition = null;
+    _totalDistanceKm = 0;
+    _locationUpdates = 0;
+  }
 
   Future<void> startTracking() async {
     if (_isTracking) return;

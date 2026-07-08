@@ -55,6 +55,63 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<List<ll.LatLng>>? _routeFuture;
   DestinationPickResult? _destination;
   bool _isSearchExpanded = false;
+
+  List<Marker>? _cachedMarkers;
+  ll.LatLng? _lastDest;
+  ll.LatLng? _lastLoc;
+  int _lastCheckpointsCount = -1;
+
+  List<Marker> _getMarkers(List<ll.LatLng> checkpoints) {
+    if (_lastDest == _destination?.point &&
+        _lastLoc == _currentLocation &&
+        _lastCheckpointsCount == checkpoints.length &&
+        _cachedMarkers != null) {
+      return _cachedMarkers!;
+    }
+
+    _lastDest = _destination?.point;
+    _lastLoc = _currentLocation;
+    _lastCheckpointsCount = checkpoints.length;
+
+    _cachedMarkers = [
+      if (_currentLocation != null)
+        Marker(
+          point: _currentLocation!,
+          width: 54,
+          height: 54,
+          alignment: Alignment.center,
+          child: const RouteMarker(
+            icon: Icons.my_location_rounded,
+            fillColor: TruxifyColors.success,
+            shadowColor: TruxifyColors.success,
+          ),
+        ),
+      ...checkpoints.asMap().entries.map(
+            (entry) => Marker(
+              point: entry.value,
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              child: RouteCheckpointMarker(
+                  key: ValueKey('chk_${entry.key}'), label: '${entry.key + 1}'),
+            ),
+          ),
+      if (_destination != null)
+        Marker(
+          point: _destination!.point,
+          width: 54,
+          height: 54,
+          alignment: Alignment.center,
+          child: const RouteMarker(
+            icon: Icons.location_on_rounded,
+            fillColor: TruxifyColors.errorRed,
+            shadowColor: TruxifyColors.errorRed,
+          ),
+        ),
+    ];
+    return _cachedMarkers!;
+  }
+
   bool _isDestinationExpanded = false;
   bool _isOnline = true;
   bool _isRefreshingLocation = false;
@@ -1051,40 +1108,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             MarkerLayer(
-              markers: [
-                Marker(
-                  point: _currentLocation!,
-                  width: 54,
-                  height: 54,
-                  alignment: Alignment.center,
-                  child: const RouteMarker(
-                    icon: Icons.my_location_rounded,
-                    fillColor: TruxifyColors.success,
-                    shadowColor: TruxifyColors.success,
-                  ),
-                ),
-                ...checkpoints.asMap().entries.map(
-                      (entry) => Marker(
-                        point: entry.value,
-                        width: 34,
-                        height: 34,
-                        alignment: Alignment.center,
-                        child:
-                            RouteCheckpointMarker(label: '${entry.key + 1}'),
-                      ),
-                    ),
-                Marker(
-                  point: _destination!.point,
-                  width: 54,
-                  height: 54,
-                  alignment: Alignment.center,
-                  child: const RouteMarker(
-                    icon: Icons.location_on_rounded,
-                    fillColor: TruxifyColors.errorRed,
-                    shadowColor: TruxifyColors.errorRed,
-                  ),
-                ),
-              ],
+              markers: _getMarkers(checkpoints),
             ),
           ],
         );

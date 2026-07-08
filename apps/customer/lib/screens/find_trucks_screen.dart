@@ -374,10 +374,6 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         setState(() => _weightErrorText = error);
-        // Trigger estimate update after validation
-        if (error == null) {
-          _estimatePrice();
-        }
       }
     });
 

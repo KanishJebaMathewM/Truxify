@@ -13,6 +13,7 @@ import '../widgets/common_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/fcm_service.dart';
 import '../core/supabase_config.dart';
+import '../services/api_client.dart';
 import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
 import 'notifications_screen.dart';
 import '../utils/validators.dart';
@@ -496,43 +497,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   final address = walletController.text.trim();
                   if (address.isEmpty) return;
                   try {
-                    final client = Supabase.instance.client;
-                    final token = client.auth.currentSession?.accessToken;
-                    final response = await http.put(
-                      Uri.parse('${const String.fromEnvironment('TRUXIFY_API_BASE_URL', defaultValue: 'http://localhost:5000')}/api/profile/wallet'),
-                      headers: <String, String>{
-                        'Content-Type': 'application/json',
-                        if (token != null) 'Authorization': 'Bearer $token',
-                      },
-                      body: jsonEncode(<String, String>{
-                        'wallet_address': address,
-                      }),
+                    final apiClient = ApiClient();
+                    await apiClient.put('/api/profile/wallet', body: {
+                      'wallet_address': address,
+                    });
+                    setState(() {
+                      _walletAddress = address;
+                    });
+                    if (!context.mounted) return;
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content:
+                            Text('Wallet address updated successfully'),
+                        backgroundColor: TruxifyColors.success,
+                      ),
                     );
-                    if (response.statusCode == 200) {
-                      setState(() {
-                        _walletAddress = address;
-                      });
-                      if (!context.mounted) return;
-                      Navigator.of(context).pop();
+                  } on ApiException catch (e) {
+                    if (context.mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content:
-                              Text('Wallet address updated successfully'),
-                          backgroundColor: TruxifyColors.success,
+                        SnackBar(
+                          content: Text(e.message),
+                          backgroundColor: TruxifyColors.errorRed,
                         ),
                       );
-                    } else {
-                      final body = jsonDecode(response.body)
-                          as Map<String, dynamic>;
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(body['error']?.toString() ??
-                                'Failed to update wallet'),
-                            backgroundColor: TruxifyColors.errorRed,
-                          ),
-                        );
-                      }
                     }
                   } catch (e) {
                     if (context.mounted) {

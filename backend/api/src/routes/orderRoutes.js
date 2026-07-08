@@ -167,12 +167,17 @@ router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), a
 // 3. FETCH LOAD OFFERS (MARKETPLACE)
 // ============================================================================
 router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+  const from = (page - 1) * limit;
+  const to = page * limit - 1;
   try {
     const { data: offers, error } = await supabase
       .from('load_offers')
       .select('*')
       .eq('is_en_route', false)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(from, to);
 
     if (error) return res.status(500).json({ error: 'Failed to fetch load offers.', details: error.message });
     res.json(offers);
@@ -186,12 +191,17 @@ router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
 // 4. FETCH EN-ROUTE LOADS (MARKETPLACE)
 // ============================================================================
 router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+  const from = (page - 1) * limit;
+  const to = page * limit - 1;
   try {
     const { data: offers, error } = await supabase
       .from('load_offers')
       .select('*')
       .eq('is_en_route', true)
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(from, to);
 
     if (error) return res.status(500).json({ error: 'Failed to fetch en-route loads.', details: error.message });
     res.json(offers);

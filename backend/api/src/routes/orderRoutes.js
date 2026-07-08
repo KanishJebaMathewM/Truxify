@@ -619,7 +619,6 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
         supabase.from('reputation_failures').insert({
           driver_wallet: polygonAddress,
           stars,
-          rating_id: ratingData?.id ?? null,
           failed_at: new Date().toISOString(),
           retry_count: 0,
           last_error: repErr.message,

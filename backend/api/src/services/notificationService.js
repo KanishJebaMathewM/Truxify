@@ -103,7 +103,7 @@ export async function sendFcmNotification(userId, notification, data = {}) {
 
       if (isTransientError(err.code) && attempt < MAX_RETRIES - 1) {
         logger.info(`[FCM] Retrying after ${RETRY_DELAYS[attempt]}ms for user ${userId}`);
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS[attempt]));
+        const delay = calculateRetryBackoff(attempt); await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
   }
@@ -199,8 +199,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
   logger.info(`[NotificationService] Delivering OTP for Order ${orderDisplayId} to Customer ${customerId}`);
 
   const title = 'Delivery Verification OTP';
-  const realBody = `Your delivery OTP for order ${orderDisplayId} is ${otp}. Share this with the driver only after verifying your cargo has arrived safely.`;
-  const maskedBody = `Your delivery OTP for order ${orderDisplayId} has been sent. Share this with the driver only after verifying your cargo has arrived safely.`;
+  const body = `Your delivery OTP for order ${orderDisplayId} has been generated. Share this with the driver only after verifying your cargo has arrived safely.`;
   const otpHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
 
   let dbSuccess = false;
@@ -210,7 +209,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       .insert({
         user_id: customerId,
         title,
-        body: maskedBody,
+        body,
         notif_type: 'order_update',
         metadata: { order_display_id: orderDisplayId, delivery_otp_hash: otpHash },
       });
@@ -228,7 +227,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
   let fcmResult;
   try { fcmResult = await sendFcmNotification(
       customerId,
-    { title: 'Delivery Verification OTP', body: realBody },
+    { title: 'Delivery Verification OTP', body },
     { orderDisplayId, notifType: 'delivery_otp' }
   ); } catch (err) { logger.warn({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error'); }
 

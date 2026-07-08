@@ -4,8 +4,8 @@ import { getDriverReputation } from '../services/reputation.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter, createStore } from '../middleware/rateLimiter.js';
 
-import { validateBody } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, otpSendSchema } from '../validation/requestSchemas.js';
+import { validateBody, validateParams } from '../middleware/validate.js';
+import { driverOnlineSchema, withdrawSchema, otpSendSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
@@ -439,7 +439,7 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 // 11. GET DRIVER REPUTATION (DRIVER)
 // ============================================================================
-router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['driver']), validateParams(uuidParamSchema), async (req, res) => {
   const { driverId } = req.params;
 
   if (driverId !== req.user.id) {

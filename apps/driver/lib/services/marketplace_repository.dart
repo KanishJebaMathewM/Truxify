@@ -1,21 +1,19 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:developer' as developer;
 
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_models.dart';
 import '../models/marketplace_models.dart';
+import 'api_client.dart';
 
 class MarketplaceRepository {
   MarketplaceRepository({
     SupabaseClient? client,
-    http.Client? httpClient,
+    ApiClient? apiClient,
     String? apiBaseUrl,
   })  : _providedClient = client,
-        _httpClient = httpClient ?? http.Client(),
+        _apiClient = apiClient ?? ApiClient(baseUrl: apiBaseUrl),
         _apiBaseUrl = (apiBaseUrl ?? defaultApiBaseUrl).replaceFirst(
           RegExp(r'/$'),
           '',
@@ -28,14 +26,13 @@ class MarketplaceRepository {
 
   final SupabaseClient? _providedClient;
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
-  final http.Client _httpClient;
+  final ApiClient _apiClient;
   final String _apiBaseUrl;
 
   String _encodePathSegment(String value) => Uri.encodeComponent(value);
 
   Future<Map<String, String>> _authHeaders() async {
     final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
-    final userId = _client.auth.currentUser?.id ?? '';
     return <String, String>{
       'Content-Type': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',
@@ -43,71 +40,61 @@ class MarketplaceRepository {
   }
 
   Future<List<LoadOffer>> fetchLoadOffers() async {
-    final uri = Uri.parse('$_apiBaseUrl/api/orders/load-offers');
-    final response = await _httpClient.get(uri, headers: await _authHeaders());
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('Failed to fetch load offers');
+    final path = '/api/orders/load-offers';
+    try {
+      final decoded = await _apiClient.get(path);
+      if (decoded is! List) throw StateError('Unexpected response type');
+      return decoded.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
+    } catch (e) {
+      if (e is ApiException) throw StateError(e.message);
+      rethrow;
     }
-
-    final decoded = jsonDecode(response.body);
-    if (decoded is! List) throw StateError('Unexpected response type');
-    return decoded.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
   }
 
   Future<List<LoadOffer>> fetchEnRouteLoads() async {
-    final uri = Uri.parse('$_apiBaseUrl/api/orders/load-offers/en-route');
-    final response = await _httpClient.get(uri, headers: await _authHeaders());
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('Failed to fetch en-route loads');
+    final path = '/api/orders/load-offers/en-route';
+    try {
+      final decoded = await _apiClient.get(path);
+      if (decoded is! List) throw StateError('Unexpected response type');
+      return decoded.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
+    } catch (e) {
+      if (e is ApiException) throw StateError(e.message);
+      rethrow;
     }
-
-    final decoded = jsonDecode(response.body);
-    if (decoded is! List) throw StateError('Unexpected response type');
-    return decoded.cast<Map<String, dynamic>>().map(_mapLoadOffer).toList(growable: false);
   }
 
   Future<DriverBid> submitBid({
     required String loadId,
     required num amount,
   }) async {
-    final uri = Uri.parse(
-      '$_apiBaseUrl/api/orders/${_encodePathSegment(loadId)}/bids',
-    );
-    final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
-    final response = await _httpClient.post(
-      uri,
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        if (accessToken != null) 'Authorization': 'Bearer $accessToken',
-      },
-      body: jsonEncode(<String, dynamic>{
-        'bid_amount': (amount * 100).round(),
-      }),
-    );
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError(_errorMessage(response, 'Failed to submit bid.'));
+    final path = '/api/orders/${_encodePathSegment(loadId)}/bids';
+    try {
+      final decoded = await _apiClient.post(
+        path,
+        body: <String, dynamic>{
+          'bid_amount': (amount * 100).round(),
+        },
+      ) as Map<String, dynamic>;
+      
+      return DriverBid.fromJson(Map<String, dynamic>.from(decoded['bid'] as Map));
+    } catch (e) {
+      if (e is ApiException) throw StateError(e.message);
+      rethrow;
     }
-
-    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-    return DriverBid.fromJson(Map<String, dynamic>.from(decoded['bid'] as Map));
   }
 
   Future<List<DriverBid>> fetchDriverBids() async {
-    final uri = Uri.parse('$_apiBaseUrl/api/driver/bids');
-    final response = await _httpClient.get(uri, headers: await _authHeaders());
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw StateError('Failed to fetch driver bids');
+    final path = '/api/driver/bids';
+    try {
+      final decoded = await _apiClient.get(path);
+      final body = decoded is Map<String, dynamic>
+          ? decoded['bids'] as List? ?? const []
+          : decoded as List;
+      return body.cast<Map<String, dynamic>>().map(DriverBid.fromJson).toList(growable: false);
+    } catch (e) {
+      if (e is ApiException) throw StateError(e.message);
+      rethrow;
     }
-
-    final decoded = jsonDecode(response.body);
-    final body = decoded is Map<String, dynamic>
-        ? decoded['bids'] as List? ?? const []
-        : decoded as List;
-    return body.cast<Map<String, dynamic>>().map(DriverBid.fromJson).toList(growable: false);
   }
 
   LoadOffer _mapLoadOffer(Map<String, dynamic> row) {
@@ -191,7 +178,9 @@ class MarketplaceRepository {
             final newRecord = payload.newRecord;
             if (newRecord.isNotEmpty) {
               final offer = _mapLoadOffer(newRecord);
-              controller.add(offer);
+              if (!controller.add(offer)) {
+                developer.log('No active subscribers, dropping load offer');
+              }
             }
           } catch (e, st) {
             developer.log('Error mapping load offer', error: e, stackTrace: st);
@@ -216,19 +205,6 @@ class MarketplaceRepository {
     };
 
     return controller.stream;
-  }
-
-  String _errorMessage(http.Response response, String fallback) {
-    try {
-      final decoded = jsonDecode(response.body);
-      if (decoded is Map<String, dynamic>) {
-        final message = decoded['error'] ?? decoded['message'];
-        if (message != null) return message.toString();
-      }
-    } catch (_) {
-      // Fall through to the status-aware fallback below.
-    }
-    return '$fallback (${response.statusCode})';
   }
 
   String _formatCurrency(num value) {

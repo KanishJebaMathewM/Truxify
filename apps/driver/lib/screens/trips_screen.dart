@@ -5,7 +5,6 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/app_routes.dart';
-import '../core/driver_session.dart';
 import '../core/supabase_config.dart';
 import '../models/app_models.dart';
 import '../models/marketplace_models.dart';

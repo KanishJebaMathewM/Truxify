@@ -52,6 +52,23 @@ class TripService {
 
   String _encodePathSegment(String value) => Uri.encodeComponent(value);
 
+  static const int _maxRetries = 3;
+
+  Future<T> _withExponentialBackoff<T>(Future<T> Function() operation) async {
+    int attempts = 0;
+    while (attempts < _maxRetries) {
+      try {
+        return await operation();
+      } catch (e) {
+        attempts++;
+        if (attempts >= _maxRetries) rethrow;
+        // Exponential backoff: 2^attempts seconds (e.g. 2s, 4s, 8s)
+        await Future.delayed(Duration(seconds: 1 << attempts));
+      }
+    }
+    throw Exception('Operation failed after $_maxRetries attempts');
+  }
+
   Future<Map<String, String>> _authHeaders() async {
     String? accessToken;
     try {
@@ -191,13 +208,15 @@ class TripService {
     String stopId,
     String tripDisplayId,
   ) async {
-    await verifyTripOwnership(tripDisplayId);
-    final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/stops/$stopId/complete');
-    final response = await _httpClient.put(uri, headers: await _authHeaders());
+    return _withExponentialBackoff(() async {
+      await verifyTripOwnership(tripDisplayId);
+      final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/stops/$stopId/complete');
+      final response = await _httpClient.put(uri, headers: await _authHeaders());
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception(_errorMessage(response, 'Failed to mark stop completed'));
-    }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(_errorMessage(response, 'Failed to mark stop completed'));
+      }
+    });
   }
 
   Future<void> updateOnlineStatus(bool isOnline) async {
@@ -214,13 +233,15 @@ class TripService {
   }
 
   Future<void> startTrip(String tripDisplayId) async {
-    await verifyTripOwnership(tripDisplayId);
-    final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/start');
-    final response = await _httpClient.put(uri, headers: await _authHeaders());
+    return _withExponentialBackoff(() async {
+      await verifyTripOwnership(tripDisplayId);
+      final uri = Uri.parse('$_apiBaseUrl/api/trips/$tripDisplayId/start');
+      final response = await _httpClient.put(uri, headers: await _authHeaders());
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw Exception(_errorMessage(response, 'Failed to start trip'));
-    }
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception(_errorMessage(response, 'Failed to start trip'));
+      }
+    });
   }
 
   void dispose() {

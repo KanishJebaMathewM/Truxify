@@ -70,6 +70,7 @@ describe('GET /api/health', () => {
       supabase: 'connected',
       mongodb: 'connected',
       redis: 'connected',
+      escrow: 'not_configured',
       firebase: 'configured',
       polygon: 'configured'
     });
@@ -137,6 +138,7 @@ describe('GET /api/health', () => {
       supabase: 'not_configured',
       mongodb: 'not_configured',
       redis: 'not_configured',
+      escrow: 'not_configured',
       firebase: 'not_configured',
       polygon: 'not_configured'
     });

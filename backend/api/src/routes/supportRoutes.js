@@ -3,7 +3,8 @@ import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
-import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema } from '../validation/requestSchemas.js';
+import logger from '../middleware/logger.js';
+import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import { startTimer, endTimer } from '../lib/routeTiming.js';
 
 const router = express.Router();
@@ -152,7 +153,7 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
   const category = normalizeRequiredText(req.body.category);
   const description = normalizeRequiredText(req.body.description) || subject;
 
-  const normalizedCategory = category.toLowerCase();
+  const normalizedCategory = category.toLowerCase().trim();
   const dbCategory = CATEGORY_MAP[normalizedCategory];
 
   if (!dbCategory) {

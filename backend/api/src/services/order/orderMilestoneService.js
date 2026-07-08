@@ -8,7 +8,7 @@ import {
   verifyDeliveryOtp,
 } from '../notificationService.js';
 import { escrowRelease } from '../escrow.js';
-import { DomainError } from './bidAcceptanceService.js';
+import { DomainError } from './domainError.js';
 
 export const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
 const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
@@ -86,6 +86,10 @@ export async function clearOtpState(orderId) {
 }
 
 export class OrderMilestoneService {
+  constructor({ orderValidationService } = {}) {
+    this.validation = orderValidationService;
+  }
+
   async updateMilestone({ orderId, milestone, driverId }) {
     const milestoneMap = {
       'Truck Assigned': 'truck_assigned',

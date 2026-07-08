@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -25,9 +24,25 @@ class TripService {
 
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
 
+  String? _lastErrorMessage;
+  bool _isDisposed = false;
+
+  String _requireNonEmpty(String value, String name) {
+    if (value.isEmpty) throw ArgumentError('$name must not be empty');
+    return value;
+  }
+
+  Map<String, dynamic> _sanitizePayload(Map<String, dynamic> payload) {
+    payload.removeWhere((k, v) => v == null);
+    return payload;
+  }
+
   String get _driverId {
     final user = _client.auth.currentUser;
-    if (user == null) throw Exception('Driver not authenticated');
+    if (user == null) {
+      _lastErrorMessage = 'Driver not authenticated';
+      throw Exception(_lastErrorMessage);
+    }
     return user.id;
   }
 

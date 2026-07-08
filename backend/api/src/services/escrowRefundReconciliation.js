@@ -4,6 +4,28 @@ import { confirmEscrowRefund, submitEscrowRefund } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import os from 'os';
 
+const RECONCILIATION_EVENTS = {
+  STARTED: 'reconciliation:started',
+  COMPLETED: 'reconciliation:completed',
+  FAILED: 'reconciliation:failed',
+  CLAIMED: 'reconciliation:claimed',
+  SKIPPED: 'reconciliation:skipped',
+};
+
+function logReconciliationEvent(event, details = {}) {
+  logger.info({ event, ...details }, `[escrow-reconciliation] ${event}`);
+}
+
+function createReconciliationSummary(results) {
+  return {
+    total: results.length,
+    succeeded: results.filter(r => r.success).length,
+    failed: results.filter(r => !r.success).length,
+    skipped: results.filter(r => r.skipped).length,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 const DEFAULT_INTERVAL_MS = 60_000;
 const LOCK_KEY = 'escrow:reconciliation:lock';
 const LOCK_TTL_SECONDS = 120;
@@ -86,6 +108,9 @@ export async function reconcilePendingEscrowRefunds() {
 
         const receipt = await confirmEscrowRefund(refundTxHash);
         const refundedAt = new Date().toISOString();
+        const { data: cur } = await supabase.from('orders').select('status').eq('id', order.id).maybeSingle();
+        if (cur && (cur.status === 'delivered' || cur.status === 'payment_released')) { logger.info('[escrow] Order already delivered - skip refund'); continue; }
+
         const { error: updateError } = await supabase
           .from('orders')
           .update({

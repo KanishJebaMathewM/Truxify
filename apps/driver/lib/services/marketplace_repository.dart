@@ -35,7 +35,6 @@ class MarketplaceRepository {
 
   Future<Map<String, String>> _authHeaders() async {
     final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
-    final userId = _client.auth.currentUser?.id ?? '';
     return <String, String>{
       'Content-Type': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',
@@ -191,7 +190,9 @@ class MarketplaceRepository {
             final newRecord = payload.newRecord;
             if (newRecord.isNotEmpty) {
               final offer = _mapLoadOffer(newRecord);
-              controller.add(offer);
+              if (!controller.add(offer)) {
+                developer.log('No active subscribers, dropping load offer');
+              }
             }
           } catch (e, st) {
             developer.log('Error mapping load offer', error: e, stackTrace: st);

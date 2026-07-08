@@ -7,6 +7,48 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 
+const TELEMETRY_SCHEMA = {
+  lat: { type: 'number', required: true, min: -90, max: 90 },
+  lng: { type: 'number', required: true, min: -180, max: 180 },
+  driverId: { type: 'string', required: true, minLen: 1 },
+  timestamp: { type: 'number', required: true },
+  speed: { type: 'number', required: false, min: 0, max: 200 },
+  heading: { type: 'number', required: false, min: 0, max: 360 },
+};
+
+function validateTelemetryPayload(data) {
+  const errors = [];
+  for (const [field, rules] of Object.entries(TELEMETRY_SCHEMA)) {
+    const value = data[field];
+    if (rules.required && (value === undefined || value === null)) {
+      errors.push(`${field} is required`);
+      continue;
+    }
+    if (value === undefined || value === null) continue;
+    if (rules.type === 'number' && (typeof value !== 'number' || isNaN(value))) {
+      errors.push(`${field} must be a valid number`);
+    }
+    if (rules.type === 'string' && typeof value !== 'string') {
+      errors.push(`${field} must be a string`);
+    }
+    if (rules.min !== undefined && value < rules.min) errors.push(`${field} must be >= ${rules.min}`);
+    if (rules.max !== undefined && value > rules.max) errors.push(`${field} must be <= ${rules.max}`);
+    if (rules.minLen !== undefined && String(value).length < rules.minLen) errors.push(`${field} is too short`);
+  }
+  return errors.length > 0 ? errors : null;
+}
+
+function sanitizeTelemetryData(data) {
+  const sanitized = {};
+  for (const [field, rules] of Object.entries(TELEMETRY_SCHEMA)) {
+    const value = data[field];
+    if (value !== undefined && value !== null) {
+      sanitized[field] = rules.type === 'number' ? Number(value) : String(value);
+    }
+  }
+  return sanitized;
+}
+
 let mongoDbOverride = null;
 const getMongoDb = () => mongoDbOverride || mongoDb;
 
@@ -74,16 +116,13 @@ class TelemetryRingBuffer {
 
   prepend(items) {
     if (!items || items.length === 0) return 0;
-    let dropped = 0;
-    for (let i = items.length - 1; i >= 0; i--) {
+    const available = this.capacity - this.size;
+    const toInsert = items.length > available ? items.slice(items.length - available) : items;
+    const dropped = items.length > available ? items.length - available : 0;
+    for (let i = toInsert.length - 1; i >= 0; i--) {
       this.head = (this.head - 1 + this.capacity) % this.capacity;
-      this.buffer[this.head] = items[i];
-      if (this.size < this.capacity) {
-        this.size++;
-      } else {
-        dropped++;
-        this.tail = this.head;
-      }
+      this.buffer[this.head] = toInsert[i];
+      this.size++;
     }
     return dropped;
   }
@@ -733,7 +772,6 @@ async function flushTelemetryBuffer() {
           logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
         }
       }
-      }
     } finally {
       currentFlushPromise = null;
       flushMutex = false;
@@ -1082,7 +1120,7 @@ export const __testing = {
   flushTelemetryBuffer,
   removeClientFromAllSubscriptions,
   getTelemetryWriteBuffer() {
-    return telemetryWriteBuffer;
+    return telemetryWriteBuffer.toArray();
   },
   getTelemetryFlushBuffer() {
     return telemetryFlushBuffer;
@@ -1093,6 +1131,13 @@ export const __testing = {
   },
   setTelemetryFlushBuffer(records) {
     telemetryFlushBuffer = records;
+  },
+  pushToTelemetryWriteBuffer(records) {
+    if (Array.isArray(records)) {
+      for (const r of records) telemetryWriteBuffer.push(r);
+    } else {
+      telemetryWriteBuffer.push(records);
+    }
   },
   clearTelemetryWriteBuffer() {
     telemetryWriteBuffer.clear();

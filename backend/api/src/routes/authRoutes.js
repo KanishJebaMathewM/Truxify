@@ -72,7 +72,7 @@ router.post('/logout', authenticate, async (req, res) => {
 });
 
 // GET /api/auth/session
-router.get('/session', authenticate, (req, res) => {
+router.get('/session', authenticate, userLimiter, (req, res) => {
   return res.json({
     user: req.user
   });

@@ -3,6 +3,8 @@ services:
     build:
       context: ./backend/api
       target: development
+    env_file:
+      - .env
     ports:
       - "5000:5000"
     env_file:

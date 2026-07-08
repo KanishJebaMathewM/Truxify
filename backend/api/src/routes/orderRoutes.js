@@ -807,7 +807,7 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
 // ============================================================================
 // 13. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
 // ============================================================================
-router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['driver']), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
+router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['driver']), verifyDeliveryLimiter, requireIdempotency(600), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   const orderId = req.params.id;
   const { otp } = req.body;
 

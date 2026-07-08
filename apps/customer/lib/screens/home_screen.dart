@@ -27,7 +27,6 @@ class _HomeScreenState extends State<HomeScreen> {
   final CacheManager _cacheManager = CacheManager();
   final OrderService _orderService = OrderService();
   final ProfileService _profileService = ProfileService();
-  bool _isOffline = false;
   bool _isLoading = true;
   String? _error;
   String _locationLabel = 'Surat, Gujarat';

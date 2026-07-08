@@ -724,9 +724,14 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
   try {
     const orderId = req.params.id;
     const { milestone } = req.body;
+    if (milestone === 'Delivered') {
+      return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
+    }
+
     const milestoneMap = {
-      'Arrived at Pickup': 'at_pickup',
-      'Goods Loaded': 'in_transit',
+      'En Route to Pickup': 'en_route_pickup',
+      'Arrived at Pickup': 'arrived_pickup',
+      'Goods Loaded': 'picked_up',
       'In Transit': 'in_transit',
       'Arrived at Drop-off': 'at_dropoff',
       'Goods Unloaded': 'at_dropoff'

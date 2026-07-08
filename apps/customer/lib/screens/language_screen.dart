@@ -126,7 +126,7 @@ class _LanguageScreenState extends State<LanguageScreen> {
                     'name': _languages[_selectedLanguageIndex]['name']
                   },
                 });
-                if (!mounted) return;
+                if (!context.mounted) return;
                 _showLanguageChangedSnackBar();
                 Navigator.of(context).pop();
               },

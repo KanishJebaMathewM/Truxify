@@ -71,6 +71,26 @@ const verifyOtpLimiter = perPhoneLimiter({
   message: { error: 'Too many OTP verification attempts. Please try again later.' },
 });
 
+// ============================================================================
+// OTP AUTHENTICATION
+// ============================================================================
+router.post('/otp/send', sendOtpLimiter, validateBody(otpSendSchema), async (req, res) => {
+  const { phone } = req.body;
+  const otp = await generateAndStoreOtp(phone);
+  if (!otp) {
+    return res.status(503).json({ error: 'OTP service unavailable. Please try again later.' });
+  }
+  return res.json({ message: 'OTP sent successfully.' });
+});
+
+router.post('/otp/verify', verifyOtpLimiter, validateBody(loginOtpSchema), async (req, res) => {
+  const { phone, otp } = req.body;
+  const valid = await verifyOtp(phone, otp);
+  if (!valid) {
+    return res.status(400).json({ error: 'Invalid OTP. Please try again.' });
+  }
+  return res.json({ message: 'OTP verified successfully.', verified: true });
+});
 
 // ============================================================================
 // 1. GET DRIVER STATS (DRIVER)

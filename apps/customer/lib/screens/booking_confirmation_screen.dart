@@ -275,7 +275,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                         ?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<PaymentMethod>(
-                  value: _selectedPayment,
+                  initialValue: _selectedPayment,
                   decoration: InputDecoration(
                     labelText: 'Select payment method',
                     helperText: _isLoading
@@ -302,7 +302,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<SavedAddress>(
-                  value: _selectedAddress,
+                  initialValue: _selectedAddress,
                   decoration: InputDecoration(
                     labelText: 'Select saved address',
                     helperText: _isLoading

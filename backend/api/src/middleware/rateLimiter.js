@@ -84,13 +84,8 @@ function buildStore(prefix) {
  * IP instead of the real client, collapsing all users behind the same proxy
  * into one rate-limit bucket.
  */
-export function safeIpKeyGenerator(req) {
-  let ip = req.ip || req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
-  if (typeof ip === 'string') {
-    ip = ip.replace(/^::ffff:/, '');
-    if (ip === '::1') ip = '127.0.0.1';
-  }
-  return ip;
+export function safeIpKeyGenerator(req, res) {
+  return ipKeyGenerator(req, res);
 }
 
 /**
@@ -99,10 +94,10 @@ export function safeIpKeyGenerator(req) {
  * users sharing a public IP (e.g. mobile clients behind carrier-grade NAT) are
  * limited independently rather than against one shared bucket.
  */
-export function userKeyGenerator(req) {
+export function userKeyGenerator(req, res) {
   if (req.user?.id) return `user:${req.user.id}`;
   if (req.user?.uid) return `uid:${req.user.uid}`;
-  return safeIpKeyGenerator(req);
+  return safeIpKeyGenerator(req, res);
 }
 
 // Coarse, pre-auth IP limiter. It runs before authentication, so it can only
@@ -168,10 +163,10 @@ export const deviceLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
+  keyGenerator: (req, res) => {
     if (req.user?.id) return `user:${req.user.id}`;
     if (req.user?.uid) return `uid:${req.user.uid}`;
-    return safeIpKeyGenerator(req);
+    return safeIpKeyGenerator(req, res);
   },
   store: buildStore('rl:device:'),
   message: { error: 'Rate limit exceeded', retryAfter: 600 },

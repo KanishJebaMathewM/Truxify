@@ -41,7 +41,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   String _driverName = _loadingDriverText;
   String? _driverPhone;
   String _truckNumber = _loadingTruckText;
-  bool _isLoadingDetails = false;
   LatLng? _previousPosition;
   LatLng? _currentPosition;
   ResilientWebSocket? _trackingWebSocket;

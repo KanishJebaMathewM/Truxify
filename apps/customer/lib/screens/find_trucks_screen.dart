@@ -9,7 +9,6 @@ import '../widgets/app_page_route.dart';
 import '../widgets/common_widgets.dart';
 import 'location_picker_screen.dart';
 import 'truck_results_screen.dart';
-import 'package:truxify_shared/shimmer_widget.dart';
 import '../services/order_service.dart';
 
 class FindTrucksScreen extends StatefulWidget {
@@ -464,7 +463,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                       style: Theme.of(context).textTheme.labelMedium),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
-                    value: _filterTruckType,
+                    initialValue: _filterTruckType,
                     items: truckTypes
                         .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                         .toList(),
@@ -508,7 +507,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                       style: Theme.of(context).textTheme.labelMedium),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
-                    value: _filterMaterialType,
+                    initialValue: _filterMaterialType,
                     items: materialTypes
                         .map((m) => DropdownMenuItem(value: m, child: Text(m)))
                         .toList(),

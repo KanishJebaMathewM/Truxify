@@ -118,7 +118,7 @@ class TruckResultData {
     final etaMinutes = json['etaMinutes'];
     final etaStr = etaMinutes != null
         ? (etaMinutes < 60
-            ? '${etaMinutes} mins'
+            ? '$etaMinutes mins'
             : '${(etaMinutes / 60).toStringAsFixed(1)} hrs')
         : '—';
 

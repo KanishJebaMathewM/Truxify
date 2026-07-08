@@ -242,9 +242,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     try {
                       final client = Supabase.instance.client;
                       final token = client.auth.currentSession?.accessToken;
-                      final userId = client.auth.currentUser?.id ?? '';
                       final response = await http.put(
-                        Uri.parse('${ApiClient.defaultBaseUrl}/api/profile/wallet'),
+                        Uri.parse('${FcmService.defaultBaseUrl}/api/profile/wallet'),
                         headers: <String, String>{
                           'Content-Type': 'application/json',
                           if (token != null) 'Authorization': 'Bearer $token',

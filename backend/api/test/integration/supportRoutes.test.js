@@ -231,7 +231,7 @@ describe('Support Routes', () => {
   describe('GET /tickets/:id', () => {
     beforeEach(() => {
       m.store.support_tickets.push({
-        id: 'ticket-123',
+        id: '123e4567-e89b-12d3-a456-426614174000',
         user_id: 'customer-1',
         subject: 'My ticket',
         category: 'general',
@@ -243,17 +243,18 @@ describe('Support Routes', () => {
 
     it('returns 200 and the ticket for the owner', async () => {
       const res = await request(buildApp())
-        .get('/api/support/tickets/ticket-123')
+        .get('/api/support/tickets/123e4567-e89b-12d3-a456-426614174000')
         .set(CUSTOMER_HEADERS);
 
+      if (res.status !== 200) console.log(res.body);
       expect(res.status).toBe(200);
-      expect(res.body.id).toBe('ticket-123');
+      expect(res.body.id).toBe('123e4567-e89b-12d3-a456-426614174000');
       expect(res.body.user_id).toBe('customer-1');
     });
 
     it('returns 200 and the ticket for an admin', async () => {
       const res = await request(buildApp())
-        .get('/api/support/tickets/ticket-123')
+        .get('/api/support/tickets/123e4567-e89b-12d3-a456-426614174000')
         .set({
           'x-user-id': 'admin-1',
           'x-user-role': 'admin',
@@ -261,12 +262,12 @@ describe('Support Routes', () => {
         });
 
       expect(res.status).toBe(200);
-      expect(res.body.id).toBe('ticket-123');
+      expect(res.body.id).toBe('123e4567-e89b-12d3-a456-426614174000');
     });
 
     it('returns 403 for an authenticated user who is not the owner', async () => {
       const res = await request(buildApp())
-        .get('/api/support/tickets/ticket-123')
+        .get('/api/support/tickets/123e4567-e89b-12d3-a456-426614174000')
         .set({
           'x-user-id': 'customer-2',
           'x-user-role': 'customer',
@@ -277,9 +278,9 @@ describe('Support Routes', () => {
       expect(res.body.error).toBe('Access Denied: You do not own this ticket.');
     });
 
-    it('returns 404 for a non-existent ticket', async () => {
+    it('returns 404 for a 123e4567-e89b-12d3-a456-426614174001 ticket', async () => {
       const res = await request(buildApp())
-        .get('/api/support/tickets/non-existent')
+        .get('/api/support/tickets/123e4567-e89b-12d3-a456-426614174001')
         .set(CUSTOMER_HEADERS);
 
       expect(res.status).toBe(404);
@@ -290,7 +291,7 @@ describe('Support Routes', () => {
   describe('PATCH /tickets/:id', () => {
     it('allows owner to update subject, description, and category', async () => {
       m.store.support_tickets.push({
-        id: 'ticket-123',
+        id: '123e4567-e89b-12d3-a456-426614174000',
         user_id: 'customer-1',
         subject: 'My ticket',
         description: 'Detail',
@@ -301,7 +302,7 @@ describe('Support Routes', () => {
       });
 
       const res = await request(buildApp())
-        .patch('/api/support/tickets/ticket-123')
+        .patch('/api/support/tickets/123e4567-e89b-12d3-a456-426614174000')
         .set(CUSTOMER_HEADERS)
         .send({
           subject: 'New subject',
@@ -317,14 +318,14 @@ describe('Support Routes', () => {
 
     it('allows owner to change status to closed', async () => {
       m.store.support_tickets.push({
-        id: 'ticket-123',
+        id: '123e4567-e89b-12d3-a456-426614174000',
         user_id: 'customer-1',
         subject: 'My ticket',
         status: 'open',
       });
 
       const res = await request(buildApp())
-        .patch('/api/support/tickets/ticket-123')
+        .patch('/api/support/tickets/123e4567-e89b-12d3-a456-426614174000')
         .set(CUSTOMER_HEADERS)
         .send({ status: 'closed' });
 
@@ -334,14 +335,14 @@ describe('Support Routes', () => {
 
     it('denies owner from changing status to in_progress or resolved', async () => {
       m.store.support_tickets.push({
-        id: 'ticket-123',
+        id: '123e4567-e89b-12d3-a456-426614174000',
         user_id: 'customer-1',
         subject: 'My ticket',
         status: 'open',
       });
 
       const res = await request(buildApp())
-        .patch('/api/support/tickets/ticket-123')
+        .patch('/api/support/tickets/123e4567-e89b-12d3-a456-426614174000')
         .set(CUSTOMER_HEADERS)
         .send({ status: 'in_progress' });
 
@@ -351,14 +352,14 @@ describe('Support Routes', () => {
 
     it('allows admin to change status to in_progress or resolved', async () => {
       m.store.support_tickets.push({
-        id: 'ticket-123',
+        id: '123e4567-e89b-12d3-a456-426614174000',
         user_id: 'customer-1',
         subject: 'My ticket',
         status: 'open',
       });
 
       const res = await request(buildApp())
-        .patch('/api/support/tickets/ticket-123')
+        .patch('/api/support/tickets/123e4567-e89b-12d3-a456-426614174000')
         .set({
           'x-user-id': 'admin-1',
           'x-user-role': 'admin',
@@ -372,14 +373,14 @@ describe('Support Routes', () => {
 
     it('returns 400 when attempting to update a closed ticket', async () => {
       m.store.support_tickets.push({
-        id: 'ticket-123',
+        id: '123e4567-e89b-12d3-a456-426614174000',
         user_id: 'customer-1',
         subject: 'My ticket',
         status: 'closed',
       });
 
       const res = await request(buildApp())
-        .patch('/api/support/tickets/ticket-123')
+        .patch('/api/support/tickets/123e4567-e89b-12d3-a456-426614174000')
         .set(CUSTOMER_HEADERS)
         .send({ subject: 'New subject' });
 
@@ -389,14 +390,14 @@ describe('Support Routes', () => {
 
     it('returns 403 for non-owner and non-admin', async () => {
       m.store.support_tickets.push({
-        id: 'ticket-123',
+        id: '123e4567-e89b-12d3-a456-426614174000',
         user_id: 'customer-1',
         subject: 'My ticket',
         status: 'open',
       });
 
       const res = await request(buildApp())
-        .patch('/api/support/tickets/ticket-123')
+        .patch('/api/support/tickets/123e4567-e89b-12d3-a456-426614174000')
         .set({
           'x-user-id': 'customer-2',
           'x-user-role': 'customer',
@@ -605,9 +606,9 @@ describe('Support Routes', () => {
       expect(res.body[0].message).toBe('Second');
     });
 
-    it('POST /tickets/:id/comments returns 404 for commenting on non-existent ticket', async () => {
+    it('POST /tickets/:id/comments returns 404 for commenting on 123e4567-e89b-12d3-a456-426614174001 ticket', async () => {
       const res = await request(buildApp())
-        .post('/api/support/tickets/non-existent-ticket-id/comments')
+        .post('/api/support/tickets/123e4567-e89b-12d3-a456-426614174001/comments')
         .set(CUSTOMER_HEADERS)
         .send({ message: 'Hello' });
 

@@ -39,7 +39,7 @@ services:
     volumes:
       - ./backend/ml:/app
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || curl -sf http://localhost:8000/health"]
       interval: 30s
       timeout: 5s
       retries: 5

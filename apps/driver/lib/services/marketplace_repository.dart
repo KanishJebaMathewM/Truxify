@@ -35,7 +35,6 @@ class MarketplaceRepository {
 
   Future<Map<String, String>> _authHeaders() async {
     final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
-    final userId = _client.auth.currentUser?.id ?? '';
     return <String, String>{
       'Content-Type': 'application/json',
       if (accessToken != null) 'Authorization': 'Bearer $accessToken',

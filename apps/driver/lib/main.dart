@@ -5,7 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/firebase_config.dart';
 // Remove the import of 'core/supabase_config.dart' – we now use Env
-import 'package:truxify/config/env.dart';  // Adjust package name to match your pubspec
+import 'package:truxify_driver/config/env.dart';  // Adjust package name to match your pubspec
 
 Future<void> main() async {
   // Ensure Flutter engine is initialized.

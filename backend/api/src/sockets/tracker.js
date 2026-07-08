@@ -733,7 +733,6 @@ async function flushTelemetryBuffer() {
           logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
         }
       }
-      }
     } finally {
       currentFlushPromise = null;
       flushMutex = false;

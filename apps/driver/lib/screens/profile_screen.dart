@@ -502,7 +502,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   try {
                     final client = Supabase.instance.client;
                     final token = client.auth.currentSession?.accessToken;
-                    final userId = client.auth.currentUser?.id ?? '';
                     final response = await http.put(
                       Uri.parse('${const String.fromEnvironment('TRUXIFY_API_BASE_URL', defaultValue: 'http://localhost:5000')}/api/profile/wallet'),
                       headers: <String, String>{

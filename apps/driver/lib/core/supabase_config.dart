@@ -5,8 +5,8 @@ class SupabaseConfig {
   static const String url = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
 
   /// Supabase anonymous key.
-  static const String anonKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
+  static const String publishableKey = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
 
-  /// Helper to check if credentials are provided.
-  static bool get isConfigured => url.isNotEmpty && anonKey.isNotEmpty;
+  /// Returns true if the Supabase URL and Anon Key are properly configured.
+  static bool get isConfigured => url.isNotEmpty && publishableKey.isNotEmpty;
 }

@@ -36,6 +36,11 @@ contract Reputation {
         emit RelayerUpdated(relayer, authorized);
     }
 
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "Invalid owner");
+        owner = newOwner;
+    }
+
     function increaseReputation(address driver, uint256 points) external onlyRelayer {
         require(driver != address(0), "Invalid driver");
         uint256 newScore = scores[driver] + points;
@@ -50,7 +55,28 @@ contract Reputation {
         emit ReputationDecreased(driver, points, scores[driver]);
     }
 
+    function batchIncreaseReputation(
+        address[] calldata drivers,
+        uint256[] calldata points
+    ) external onlyRelayer {
+        require(drivers.length == points.length, "Array length mismatch");
+        for (uint256 i = 0; i < drivers.length; i++) {
+            require(drivers[i] != address(0), "Invalid driver");
+            uint256 newScore = scores[drivers[i]] + points[i];
+            scores[drivers[i]] = newScore > MAX_REPUTATION ? MAX_REPUTATION : newScore;
+            emit ReputationIncreased(drivers[i], points[i], scores[drivers[i]]);
+        }
+    }
+
     function getReputation(address driver) external view returns (uint256) {
         return scores[driver];
+    }
+
+    function getReputations(address[] calldata drivers) external view returns (uint256[] memory) {
+        uint256[] memory result = new uint256[](drivers.length);
+        for (uint256 i = 0; i < drivers.length; i++) {
+            result[i] = scores[drivers[i]];
+        }
+        return result;
     }
 }

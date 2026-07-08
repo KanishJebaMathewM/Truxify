@@ -30,6 +30,45 @@ class MarketplaceRepository {
   final http.Client _httpClient;
   final String _apiBaseUrl;
 
+  final List<String> _searchHistory = [];
+  String? _lastFilter;
+  double? _lastMinWeight;
+  double? _lastMaxWeight;
+  String? _lastSortBy;
+  bool _lastSortAsc = true;
+
+  void recordSearch(String query) {
+    _searchHistory.remove(query);
+    _searchHistory.insert(0, query);
+    if (_searchHistory.length > 10) _searchHistory.removeLast();
+  }
+
+  List<String> get recentSearches => List.unmodifiable(_searchHistory);
+
+  void clearSearchHistory() => _searchHistory.clear();
+
+  void setFilter({
+    String? filter,
+    double? minWeight,
+    double? maxWeight,
+    String? sortBy,
+    bool? sortAsc,
+  }) {
+    _lastFilter = filter;
+    _lastMinWeight = minWeight;
+    _lastMaxWeight = maxWeight;
+    _lastSortBy = sortBy;
+    if (sortAsc != null) _lastSortAsc = sortAsc;
+  }
+
+  Map<String, dynamic> get activeFilters => {
+    'filter': _lastFilter,
+    'minWeight': _lastMinWeight,
+    'maxWeight': _lastMaxWeight,
+    'sortBy': _lastSortBy,
+    'sortAsc': _lastSortAsc,
+  };
+
   Future<Map<String, String>> _authHeaders() async {
     final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
     final userId = _client.auth.currentUser?.id ?? '';

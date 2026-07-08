@@ -226,6 +226,10 @@ describe('profileCache utility', () => {
   });
 
   describe('isValidCachedProfile', () => {
+    beforeEach(() => {
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: null }));
+    });
+
     it('returns false for invalid inputs (null, array, string, non-object)', async () => {
       const { isValidCachedProfile } = await import('../../src/lib/profileCache.js');
       expect(isValidCachedProfile('uid123', null)).toBe(false);

@@ -101,7 +101,6 @@ class FcmService {
       return;
     }
     final accessToken = await firebaseUser?.getIdToken();
-    final fullName = firebaseUser?.displayName;
 
     final response = await http.put(
       Uri.parse('$_apiBaseUrl/api/profile/fcm-token'),

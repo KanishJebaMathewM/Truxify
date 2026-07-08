@@ -3,7 +3,8 @@ import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
-import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema } from '../validation/requestSchemas.js';
+import logger from '../middleware/logger.js';
+import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import { startTimer, endTimer } from '../lib/routeTiming.js';
 
 const router = express.Router();

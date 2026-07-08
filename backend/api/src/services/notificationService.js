@@ -227,7 +227,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
   let fcmResult;
   try { fcmResult = await sendFcmNotification(
       customerId,
-    { title: 'Delivery Verification OTP', body },
+    { title: 'Delivery Verification OTP', body: `Your delivery verification OTP has been sent for order ${orderDisplayId}.` },
     { orderDisplayId, notifType: 'delivery_otp' }
   ); } catch (err) { logger.warn({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error'); }
 

@@ -42,7 +42,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     // ─── State ───────────────────────────────────────────────────────────────
 
-    mapping(bytes32 => Booking) public bookings;
+    mapping(uint256 => Booking) public bookings;
     uint256 public bookingCount;
     mapping(address => uint256) public pendingWithdrawals;
     mapping(address => uint256) public releaseTimestamps;

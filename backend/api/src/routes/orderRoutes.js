@@ -1,5 +1,5 @@
 import express from 'express';
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit, {} from 'express-rate-limit';
 import crypto from 'crypto';
 
 import { bidLimiter, userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';

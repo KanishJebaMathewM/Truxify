@@ -3,6 +3,27 @@ import logger from '../middleware/logger.js';
 
 export const TTL_SECONDS = 900; // 15 minutes
 export const TOMBSTONE_TTL_SECONDS = 30; // 30 seconds
+
+let cacheHits = 0;
+let cacheMisses = 0;
+let cacheSets = 0;
+
+export function getCacheStats() {
+  const total = cacheHits + cacheMisses;
+  return {
+    hits: cacheHits,
+    misses: cacheMisses,
+    sets: cacheSets,
+    total,
+    hitRate: total > 0 ? (cacheHits / total * 100).toFixed(1) + '%' : '0%',
+  };
+}
+
+export function resetCacheStats() {
+  cacheHits = 0;
+  cacheMisses = 0;
+  cacheSets = 0;
+}
 const cacheKey = (firebaseUid) => `user:profile:${firebaseUid}`;
 const supabaseCacheKey = (userId) => `user:profile:sb:${userId}`;
 
@@ -103,10 +124,18 @@ export function isValidCachedSupabaseProfile(userId, cachedProfile) {
  */
 export async function getCachedProfile(firebaseUid) {
   const redisClient = getRedisClient();
-  if (!redisClient || !firebaseUid) return null;
+  if (!redisClient || !firebaseUid) {
+    cacheMisses++;
+    return null;
+  }
   try {
     const raw = await redisClient.get(cacheKey(firebaseUid));
-    return raw ? JSON.parse(raw) : null;
+    if (raw) {
+      cacheHits++;
+      return JSON.parse(raw);
+    }
+    cacheMisses++;
+    return null;
   } catch (err) {
     logCacheError('getCachedProfile', err);
     // On read or parsing failure, attempt a best-effort delete of the corrupted key

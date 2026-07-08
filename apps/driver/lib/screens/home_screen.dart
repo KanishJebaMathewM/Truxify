@@ -1,4 +1,3 @@
-// ignore_for_file: unused_element, unused_field
 
 import 'dart:async';
 import 'dart:convert';
@@ -84,6 +83,36 @@ class _HomeScreenState extends State<HomeScreen> {
   List<TripRecord> _tripHistory = [];
   bool _isLoadingMetrics = true;
   String? _metricsError;
+  String? _networkError;
+  int _retryCount = 0;
+
+  String _sanitizeCoordinate(dynamic coord) {
+    if (coord == null) return '0.0';
+    if (coord is double) return coord.toStringAsFixed(6);
+    if (coord is int) return coord.toStringAsFixed(6);
+    return (double.tryParse(coord.toString()) ?? 0.0).toStringAsFixed(6);
+  }
+
+  void _clearNetworkError() {
+    if (_networkError != null) {
+      setState(() => _networkError = null);
+    }
+  }
+
+  Future<void> _withRetry(Future<void> Function() fn) async {
+    try {
+      _retryCount = 0;
+      await fn();
+    } catch (e) {
+      _retryCount++;
+      if (_retryCount <= 3) {
+        await Future.delayed(Duration(seconds: _retryCount));
+        await fn();
+      } else {
+        setState(() => _networkError = 'Operation failed after $_retryCount retries');
+      }
+    }
+  }
 
   @override
   void initState() {

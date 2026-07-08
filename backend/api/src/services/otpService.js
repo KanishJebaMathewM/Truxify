@@ -10,6 +10,10 @@ export async function generateAndStoreOtp(phone) {
     logger.warn('[otp] Redis not available, cannot generate OTP.');
     return null;
   }
+  if (!phone || typeof phone !== 'string' || !phone.trim()) {
+    logger.warn('[otp] Invalid phone number provided.');
+    return null;
+  }
   const min = Math.pow(10, OTP_LENGTH - 1);
   const max = Math.pow(10, OTP_LENGTH) - 1;
   const otp = String(crypto.randomInt(min, max + 1));
@@ -19,6 +23,10 @@ export async function generateAndStoreOtp(phone) {
 }
 
 export async function verifyOtp(phone, otp) {
+  if (!phone || typeof phone !== 'string' || !phone.trim()) {
+    logger.warn('[otp] Invalid phone number provided for verification.');
+    return false;
+  }
   if (!redisClient) {
     if (process.env.NODE_ENV === 'production') {
       logger.error('[otp] Redis unavailable in production — rejecting OTP verification.');

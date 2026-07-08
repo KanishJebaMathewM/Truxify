@@ -1,0 +1,16 @@
+{
+  "@@locale": "hi",
+  "appTitle": "ट्रक्सिफाई",
+  "loginTitle": "ट्रक्सिफाई में आपका स्वागत है",
+  "bookLoadButton": "लोड बुक करें",
+  "loadingText": "लोड हो रहा है...",
+  "comingSoon": "{title} जल्द आ रहा है",
+  "greetingMessage": "{greeting}, {displayName} 👋",
+  "noActiveShipments": "कोई सक्रिय शिपमेंट नहीं",
+  "routeHistoryComingSoon": "रूट इतिहास जल्द आ रहा है",
+  "walletAddressUpdated": "वॉलेट पता अपडेट किया गया",
+  "saveWalletAddress": "वॉलेट पता सहेजें",
+  "error": "त्रुटि: {errorMsg}",
+  "lightTheme": "हल्का",
+  "darkTheme": "गहरा"
+}

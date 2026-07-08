@@ -775,6 +775,9 @@ async function flushTelemetryBuffer() {
     } finally {
       currentFlushPromise = null;
       flushMutex = false;
+      }
+    } finally {
+      flushMutex = false;
     }
   })();
 

@@ -8,11 +8,11 @@ let io = null;
 const BATCH_FLUSH_INTERVAL_MS = 2000;
 const gpsBuffer = [];
 const GPS_BUFFER_MAX = 10000;
-let gpsBufferMutex = false;
+let gpsBufferBusy = false;
 
 setInterval(async () => {
-  if (gpsBuffer.length === 0 || gpsBufferMutex) return;
-  gpsBufferMutex = true;
+  if (gpsBuffer.length === 0 || gpsBufferBusy) return;
+  gpsBufferBusy = true;
   
   const batch = gpsBuffer.splice(0, gpsBuffer.length);
   
@@ -22,7 +22,7 @@ setInterval(async () => {
   } catch (error) {
     logger.error({ error: error.message }, '[WS] Failed to bulk insert GPS buffer to MongoDB');
   } finally {
-    gpsBufferMutex = false;
+    gpsBufferBusy = false;
   }
 }, BATCH_FLUSH_INTERVAL_MS);
 
@@ -55,9 +55,9 @@ export function initLocationServer(httpServer) {
     cors: {
       origin: process.env.ALLOWED_ORIGINS?.split(",") || (
         process.env.NODE_ENV === 'production'
-          ? process.env.ALLOWED_ORIGINS?.split(",")
+          ? []
           : ["http://localhost:3000", "http://localhost:5000"]
-      ) || (process.env.NODE_ENV === 'production' ? [] : ["http://localhost:3000", "http://localhost:5000"]),
+      ),
       methods: ["GET", "POST"],
       credentials: true,
     },
@@ -110,7 +110,7 @@ export function initLocationServer(httpServer) {
         const gpsTimestamp = timestamp ? new Date(timestamp) : new Date();
 
         // 1. Buffer GPS point to MongoDB time-series collection
-        if (!gpsBufferMutex) {
+        if (!gpsBufferBusy) {
           if (gpsBuffer.length >= GPS_BUFFER_MAX) {
             gpsBuffer.splice(0, gpsBuffer.length - GPS_BUFFER_MAX + 1);
           }

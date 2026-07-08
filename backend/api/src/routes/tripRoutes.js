@@ -1,8 +1,10 @@
 import express from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/db.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import { validateParams } from '../middleware/validate.js';
+import { uuidParamSchema } from '../validation/requestSchemas.js';
 import logger from '../middleware/logger.js';
 import { validateParams } from '../middleware/validate.js';
 import { uuidParamSchema } from '../validation/requestSchemas.js';

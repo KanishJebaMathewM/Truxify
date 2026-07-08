@@ -67,7 +67,7 @@ class FcmService {
     }
     final accessToken = await firebaseUser.getIdToken();
 
-    final response = await http.delete(
+    final response = await http.post(
       Uri.parse('$_apiBaseUrl/api/devices/unregister'),
       headers: <String, String>{
         'Content-Type': 'application/json',

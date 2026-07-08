@@ -114,7 +114,7 @@ export const globalLimiter = rateLimit({
   max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: safeIpKeyGenerator,
+  keyGenerator: userKeyGenerator,
   store: buildStore('rl:global:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
   skip: (req) => req.path === '/health' || req.path.startsWith('/health/'),

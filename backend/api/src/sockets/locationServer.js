@@ -7,6 +7,7 @@ let io = null;
 // Telemetry Bulk Insert Buffer
 const BATCH_FLUSH_INTERVAL_MS = 2000;
 const gpsBuffer = [];
+const GPS_BUFFER_MAX = 10000;
 
 setInterval(async () => {
   if (gpsBuffer.length === 0) return;
@@ -105,6 +106,9 @@ export function initLocationServer(httpServer) {
         const gpsTimestamp = timestamp ? new Date(timestamp) : new Date();
 
         // 1. Buffer GPS point to MongoDB time-series collection
+        if (gpsBuffer.length >= GPS_BUFFER_MAX) {
+          gpsBuffer.splice(0, gpsBuffer.length - GPS_BUFFER_MAX + 1);
+        }
         gpsBuffer.push({
           bookingId,
           driverId,

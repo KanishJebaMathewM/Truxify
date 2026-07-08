@@ -176,6 +176,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: DropdownButton<String>(
                         value: _selectedCode,
                         isDense: true,
+                        isExpanded: true,
                         dropdownColor: colorScheme.surface,
                         style: TextStyle(
                           color: colorScheme.onSurface,

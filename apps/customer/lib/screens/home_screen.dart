@@ -40,7 +40,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadData() async {
-    final connectivity = await Connectivity().checkConnectivity();
     await _cacheManager.open();
     final existingLocation = await _cacheManager.getLastLocation();
     if (existingLocation == null) {

@@ -127,7 +127,7 @@ export class BidAcceptanceService {
 
     // Record the deposit transaction
     try {
-      await this.recordDepositTxFn(order.order_display_id, depositTx?.to, depositTx?.data);
+      await this.recordDepositTxFn(bookingId, depositTx?.hash || depositTx?.transactionHash || depositTx?.txData?.hash || '');
     } catch (recordErr) {
       this.logger?.warn?.('[escrow] Failed to record deposit TX:', recordErr.message);
     }

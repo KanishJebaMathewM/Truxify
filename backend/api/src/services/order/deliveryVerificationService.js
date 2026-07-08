@@ -147,7 +147,10 @@ export async function validateDeliveryOtp({ orderId, driverId, otp }) {
 }
 
 export async function completeDeliveryOtp({ otpRecordId, orderId }) {
-  await verifyDeliveryOtp(otpRecordId);
+  const verified = await verifyDeliveryOtp(otpRecordId);
+  if (!verified) {
+    logger.warn('[DeliveryVerificationService] Failed to mark OTP as verified for order', orderId);
+  }
   await clearOtpState(orderId);
 }
 

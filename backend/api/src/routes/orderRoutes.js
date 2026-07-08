@@ -720,7 +720,19 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
 // ============================================================================
 // 12. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 // ============================================================================
+const milestoneMap = {
+  'Truck Assigned': 'truck_assigned',
+  'En Route to Pickup': 'en_route_pickup',
+  'Arrived at Pickup': 'arrived_pickup',
+  'Goods Loaded': 'picked_up',
+  'In Transit': 'in_transit',
+  'Arriving': 'arriving',
+  'Delivered': 'delivered',
+};
+
 router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver']), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
+  const milestone = req.body?.milestone;
+  const orderId = req.params.id;
   try {
     const { data: order, error: orderErr } = await supabase.from('orders').select('*').eq('id', orderId).maybeSingle();
     if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });

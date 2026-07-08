@@ -2,11 +2,12 @@
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /// @title Escrow System for Truxify
 /// @notice Manages escrow deposits, releases, and refunds for bookings.
 /// @dev Uses authorized relayers to trigger state changes.
-contract Escrow is Pausable {
+contract Escrow is Pausable, ReentrancyGuard {
     enum EscrowStatus {
         None,
         Funded,
@@ -26,7 +27,7 @@ contract Escrow is Pausable {
     mapping(bytes32 => BookingEscrow) public escrows;
     mapping(address => uint256) public pendingWithdrawals;
     mapping(address => uint256) public releaseTimestamps;
-    bool private locked;
+
     uint256 public constant WITHDRAWAL_TIMEOUT = 30 days;
 
     event RelayerUpdated(address indexed relayer, bool authorized);
@@ -46,12 +47,6 @@ contract Escrow is Pausable {
         _;
     }
 
-    modifier nonReentrant() {
-        require(!locked, "Reentrant call");
-        locked = true;
-        _;
-        locked = false;
-    }
 
     /// @notice Initializes the contract and sets the initial relayer.
     /// @param initialRelayer Address of the first authorized relayer.

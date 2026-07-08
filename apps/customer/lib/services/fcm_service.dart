@@ -10,11 +10,19 @@ class FcmService {
     defaultValue: 'http://localhost:5000',
   );
 
+  static String? _currentToken;
+  static bool _initialized = false;
+
+  static String? get currentToken => _currentToken;
+  static bool get isInitialized => _initialized;
+
   static Future<void> initializeAndRegister() async {
     try {
-      // Firebase is already initialized in main.dart.
-
+      _initialized = true;
       final messaging = FirebaseMessaging.instance;
+
+      FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
 
       final settings = await messaging.requestPermission(
         alert: true,
@@ -30,10 +38,12 @@ class FcmService {
           settings.authorizationStatus == AuthorizationStatus.provisional) {
         final token = await messaging.getToken();
         if (token != null) {
+          _currentToken = token;
           await _sendTokenToBackend(token);
         }
 
         messaging.onTokenRefresh.listen((newToken) async {
+          _currentToken = newToken;
           await _sendTokenToBackend(newToken);
         });
       } else {
@@ -44,8 +54,17 @@ class FcmService {
     }
   }
 
+  static void _handleForegroundMessage(RemoteMessage message) {
+    debugPrint('[FCM Customer] Foreground notification: ${message.notification?.title}');
+  }
+
+  static void _handleNotificationTap(RemoteMessage message) {
+    debugPrint('[FCM Customer] Notification tapped: ${message.notification?.title}');
+  }
+
   static Future<void> clearToken() async {
     try {
+      _currentToken = null;
       await _sendTokenToBackend(null);
     } catch (e) {
       debugPrint('[FCM] Clearing token failed: $e');
@@ -65,6 +84,7 @@ class FcmService {
       Uri.parse('$_apiBaseUrl/api/profile/fcm-token'),
       headers: <String, String>{
         'Content-Type': 'application/json',
+        'x-user-role': 'customer',
         if (idToken != null && idToken.isNotEmpty)
           'Authorization': 'Bearer $idToken',
       },

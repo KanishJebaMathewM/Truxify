@@ -7,11 +7,12 @@ let io = null;
 // Telemetry Bulk Insert Buffer
 const BATCH_FLUSH_INTERVAL_MS = 2000;
 const gpsBuffer = [];
+let gpsBufferBusy = false;
 
 setInterval(async () => {
-  if (gpsBuffer.length === 0) return;
+  if (gpsBuffer.length === 0 || gpsBufferBusy) return;
+  gpsBufferBusy = true;
   
-  // Safely extract the current batch
   const batch = gpsBuffer.splice(0, gpsBuffer.length);
   
   try {
@@ -19,6 +20,8 @@ setInterval(async () => {
     logger.debug(`[WS] Bulk inserted ${batch.length} GPS points into MongoDB.`);
   } catch (error) {
     logger.error({ error: error.message }, '[WS] Failed to bulk insert GPS buffer to MongoDB');
+  } finally {
+    gpsBufferBusy = false;
   }
 }, BATCH_FLUSH_INTERVAL_MS);
 

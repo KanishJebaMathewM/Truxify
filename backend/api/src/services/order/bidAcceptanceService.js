@@ -72,6 +72,7 @@ export class BidAcceptanceService {
     // Build the escrow deposit transaction
     const amountWei = ethers.parseEther((bid.bid_amount / 100).toFixed(2).toString());
     const buildResult = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
+    const depositTx = buildResult;
     const bookingId = buildResult?.bookingId || `escrow:${order.order_display_id}`;
 
     // Update order with escrow booking info

@@ -31,6 +31,7 @@ import lookupRoutes from './routes/lookupRoutes.js'
 
 import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
+import { correlationIdMiddleware } from './middleware/correlationId.js'
 import { requestIdMiddleware, requestLogger } from './middleware/requestId.js'
 import { requireJsonContent } from './middleware/contentType.js'
 import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js'
@@ -140,9 +141,15 @@ app.use(express.json({ limit: '1mb' })) // Added payload limit for security
 app.use(express.urlencoded({ extended: true, limit: '1mb' }))
 
 // ============================================================================
-// REQUEST ID + REQUEST LOGGER — registered before all routes and rate limiters
-// so that every incoming request (including rate-limited or 404) is logged.
+// CORRELATION ID + REQUEST ID + REQUEST LOGGER
+// Registered before all routes and rate limiters so that every incoming
+// request (including rate-limited or 404) is logged with a correlation ID.
+// 1. correlationIdMiddleware — sets up AsyncLocalStorage so all downstream
+//    log calls automatically include the correlationId (via logger Proxy).
+// 2. requestIdMiddleware   — adds X-Request-Id header & req.requestId.
+// 3. requestLogger         — logs request start / finish metadata.
 // ============================================================================
+app.use(correlationIdMiddleware)
 app.use(requestIdMiddleware)
 app.use(requestLogger)
 

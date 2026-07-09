@@ -604,6 +604,8 @@ router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bid
 // ============================================================================
 router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
   try {
+    const orderId = req.params.id;
+    const { stars, comment } = req.body;
     const { data: order, error: orderErr } = await orderRepository.findOrderById(orderId, 'id, order_display_id, customer_id, driver_id, status');
 
     if (orderErr) {

@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabase } from '../config/db.js';
+import { supabase, mongoDb } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
@@ -251,11 +251,38 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       logger.warn({ err: mlErr.message }, 'Price prediction unavailable during search, falling back to base pricing');
     }
 
+    let nearbyDriverIds = [];
+    if (mongoDb) {
+      try {
+        const maxDistanceMeters = 50000; // 50km radius
+        const nearbyTelemetry = await mongoDb.collection('telemetry').find({
+          location: {
+            $near: {
+              $geometry: {
+                type: "Point",
+                coordinates: [numPickupLng, numPickupLat]
+              },
+              $maxDistance: maxDistanceMeters
+            }
+          }
+        }).toArray();
+
+        nearbyDriverIds = [...new Set(nearbyTelemetry.map(t => t.driver_id))];
+      } catch (mongoErr) {
+        logger.error('MongoDB telemetry search error:', mongoErr.message);
+      }
+    }
+
+    if (nearbyDriverIds.length === 0) {
+      return res.json([]);
+    }
+
     const { data: drivers, error: driversErr } = await supabase
       .from('driver_details')
       .select('user_id, rating, total_trips, completion_rate, truck_id')
       .eq('is_online', true)
-      .not('truck_id', 'is', null);
+      .not('truck_id', 'is', null)
+      .in('user_id', nearbyDriverIds);
 
     if (driversErr) {
       logger.error('Driver search error:', driversErr.message);

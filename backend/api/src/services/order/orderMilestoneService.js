@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { redisClient } from '../../config/db.js';
+import { redisClient, supabase } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
 import {
   sendDeliveryOtpNotification,

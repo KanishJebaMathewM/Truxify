@@ -810,18 +810,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       body: Stack(
         children: [
           Positioned.fill(
-            child: AnimatedBuilder(
-              animation: _movementController,
-              builder: (context, child) {
-                return FlutterMap(
-                  options: const MapOptions(
-                    initialCenter: LatLng(24.25, 74.40),
-                    initialZoom: 6.2,
-                    minZoom: 5,
-                    maxZoom: 16,
-                  ),
-                  children: [
-                    TileLayer(
+            child: FlutterMap(
+              options: const MapOptions(
+                initialCenter: LatLng(24.25, 74.40),
+                initialZoom: 6.2,
+                minZoom: 5,
+                maxZoom: 16,
+              ),
+              children: [
+                TileLayer(
                       urlTemplate:
                           'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       tileProvider: CancellableNetworkTileProvider(),
@@ -836,24 +833,29 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                         ),
                       ],
                     ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: _routePoints.first,
-                          width: 30,
-                          height: 30,
-                          child: Icon(Icons.trip_origin_rounded,
-                              color: Colors.blue, size: 22),
-                        ),
-                        Marker(
-                          point: _routePoints.last,
-                          width: 34,
-                          height: 34,
-                          child: Icon(Icons.place_rounded,
-                              color: Colors.redAccent, size: 26),
-                        ),
-                        ..._buildTruckMarkers(),
-                      ],
+                    AnimatedBuilder(
+                      animation: _movementController,
+                      builder: (context, _) {
+                        return MarkerLayer(
+                          markers: [
+                            Marker(
+                              point: _routePoints.first,
+                              width: 30,
+                              height: 30,
+                              child: const Icon(Icons.trip_origin_rounded,
+                                  color: Colors.blue, size: 22),
+                            ),
+                            Marker(
+                              point: _routePoints.last,
+                              width: 34,
+                              height: 34,
+                              child: const Icon(Icons.place_rounded,
+                                  color: Colors.redAccent, size: 26),
+                            ),
+                            ..._buildTruckMarkers(),
+                          ],
+                        );
+                      }
                     ),
                   ],
                 );

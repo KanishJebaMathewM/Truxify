@@ -39,6 +39,8 @@ vi.mock('../../src/config/db.js', () => ({
   },
 }));
 
+import { OrderRepository } from '../../src/repositories/orderRepository.js';
+
 const {
   closeWebSocketServer,
   handleLocationPing,
@@ -49,10 +51,13 @@ const {
 } = await import('../../src/sockets/tracker.js');
 
 describe('tracker WebSocket telemetry authorization', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     dbMock.store.orders = [];
     dbMock.calls = [];
     __testing.resetTrackingSubscriptions();
+    const { supabase } = await import('../../src/config/db.js');
+    const orderRepo = new OrderRepository(supabase);
+    __testing.setOrderRepository(orderRepo);
     vi.clearAllMocks();
   });
 
@@ -218,7 +223,7 @@ describe('tracker graceful shutdown', () => {
     expect(clearIntervalSpy).toHaveBeenCalledWith(heartbeatInterval);
     expect(client.close).toHaveBeenCalledWith(1001, 'Server shutting down');
     expect(server.close).toHaveBeenCalled();
-    expect(__testing.getTelemetryWriteBuffer()).toHaveLength(1);
+    expect(__testing.getTelemetryWriteBuffer().toArray()).toHaveLength(1);
     expect(__testing.getShutdownState()).toEqual({
       isSchedulerActive: false,
       hasTelemetryFlushInterval: false,
@@ -268,7 +273,7 @@ describe('tracker graceful shutdown', () => {
     await closeWs();
 
     expect(insertMany).toHaveBeenCalled();
-    expect(t.getTelemetryWriteBuffer().length).toBe(0);
+    expect(t.getTelemetryWriteBuffer().size).toBe(0);
     expect(warnSpy).not.toHaveBeenCalled();
 
     warnSpy.mockRestore();
@@ -290,7 +295,7 @@ describe('tracker graceful shutdown', () => {
 
     await closeWs();
 
-    expect(t.getTelemetryWriteBuffer().length).toBe(2);
+    expect(t.getTelemetryWriteBuffer().size).toBe(2);
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('[TRUXIFY SHUTDOWN] MongoDB not available.')
     );
@@ -1152,13 +1157,13 @@ describe('flushTelemetryBuffer - direct', () => {
       longitude: 77.5,
     });
 
-    const bufferBefore = __testing.getTelemetryWriteBuffer().length;
+    const bufferBefore = __testing.getTelemetryWriteBuffer().size;
     expect(bufferBefore).toBeGreaterThan(0);
 
     // mongoDb is null in mock — flush should retain buffer
     await __testing.flushTelemetryBuffer();
 
-    const bufferAfter = __testing.getTelemetryWriteBuffer().length;
+    const bufferAfter = __testing.getTelemetryWriteBuffer().size;
     expect(bufferAfter).toBe(bufferBefore);
   });
 });
@@ -1421,7 +1426,7 @@ describe('handleLocationPing - server timestamp handling', () => {
       device_timestamp: deviceTs.toISOString(),
     });
 
-    const buffer = t.getTelemetryWriteBuffer();
+    const buffer = t.getTelemetryWriteBuffer().toArray();
     expect(buffer).toHaveLength(1);
     // pinged_at should be the device-provided timestamp
     expect(buffer[0].pinged_at.getTime()).toBe(deviceTs.getTime());
@@ -1536,7 +1541,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
 
     expect(collection).toHaveBeenCalledWith('telemetry');
     expect(insertMany).toHaveBeenCalled();
-    expect(t.getTelemetryWriteBuffer().length).toBe(0);
+    expect(t.getTelemetryWriteBuffer().size).toBe(0);
   });
 
   it('re-queues buffer on transient MongoDB error', async () => {
@@ -1561,7 +1566,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     await t.flushTelemetryBuffer();
 
     // Failed records (old-driver) must be prepended and new records (new-driver) appended
-    const buffer = t.getTelemetryWriteBuffer();
+    const buffer = t.getTelemetryWriteBuffer().toArray();
     expect(buffer).toHaveLength(2);
     expect(buffer[0].driver_id).toBe('old-driver');
     expect(buffer[1].driver_id).toBe('new-driver');
@@ -1592,7 +1597,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
 
     await t.flushTelemetryBuffer();
 
-    const buffer = t.getTelemetryWriteBuffer();
+    const buffer = t.getTelemetryWriteBuffer().toArray();
     // 5000 is MAX_BUFFER_SIZE. 4995 new records + 5 kept old records = 5000 records.
     expect(buffer).toHaveLength(5000);
     // The first 5 old records (indices 0 to 4) should be dropped, keeping only indices 5 to 9.
@@ -1601,7 +1606,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     expect(buffer[5].driver_id).toBe('new-driver-0');
 
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('[TRUXIFY BUFFER DROP]')
+      expect.stringContaining('[TRUXIFY BUFFER DROP] Dropped 5 oldest records due to capacity after flush failure.')
     );
   });
 
@@ -1630,7 +1635,7 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     await t.flushTelemetryBuffer();
 
     // Validation errors should be discarded, not re-queued
-    expect(t.getTelemetryWriteBuffer().length).toBe(0);
+    expect(t.getTelemetryWriteBuffer().size).toBe(0);
   });
 });
 
@@ -1721,9 +1726,8 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         longitude: 77.5946,
       });
 
-      const buffer = __testing.getTelemetryWriteBuffer();
-      // Since it's a RingBuffer of max size 5000, adding 1 item will drop the oldest one (`driver-old-0`)
-      expect(buffer.length).toBe(5000);
+      const buffer = __testing.getTelemetryWriteBuffer().toArray();
+      expect(buffer.length).toBe(5000); // RingBuffer max capacity is 5000
       expect(buffer[0].driver_id).toBe('driver-old-1');
       expect(buffer[4999].driver_id).toBe('driver-new');
       expect(logger.warn).toHaveBeenCalledWith(
@@ -1747,7 +1751,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         }));
       }
 
-      const buffer = __testing.getTelemetryWriteBuffer();
+      const buffer = __testing.getTelemetryWriteBuffer().toArray();
       expect(buffer.length).toBe(5);
     });
 
@@ -1761,7 +1765,7 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         }));
       }
 
-      const buffer = __testing.getTelemetryWriteBuffer();
+      const buffer = __testing.getTelemetryWriteBuffer().toArray();
       expect(buffer.length).toBe(10);
     });
   });

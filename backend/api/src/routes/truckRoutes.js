@@ -3,7 +3,7 @@ import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
-import { paramIdSchema, uuidParamSchema, registerTruckSchema } from '../validation/requestSchemas.js';
+import { uuidParamSchema, registerTruckSchema } from '../validation/requestSchemas.js';
 import { getRouteEstimate } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { predictPrice } from '../services/ml.js';
@@ -175,7 +175,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     is_fragile, is_stackable
   } = req.query;
 
-  if (!pickup_lat || !pickup_lng || !drop_lat || !drop_lng || !weight_tonnes) {
+  if (pickup_lat == null || pickup_lng == null || drop_lat == null || drop_lng == null || weight_tonnes == null) {
     return res.status(400).json({ error: 'Missing required query parameters: pickup_lat, pickup_lng, drop_lat, drop_lng, weight_tonnes' });
   }
 

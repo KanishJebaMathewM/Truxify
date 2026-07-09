@@ -1,15 +1,10 @@
-import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 
-class FcmService {
-  static const String _apiBaseUrl = String.fromEnvironment(
-    'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
-  );
+import 'api_client.dart';
 
+class FcmService {
   static Future<void> initializeAndRegister() async {
     try {
       final messaging = FirebaseMessaging.instance;
@@ -67,7 +62,7 @@ class FcmService {
     }
     final accessToken = await firebaseUser.getIdToken();
 
-    final response = await http.delete(
+    final response = await http.post(
       Uri.parse('$_apiBaseUrl/api/devices/unregister'),
       headers: <String, String>{
         'Content-Type': 'application/json',
@@ -80,8 +75,10 @@ class FcmService {
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       debugPrint('[FCM] Device token unregistered successfully.');
-    } else {
-      debugPrint('[FCM] Failed to unregister device token: ${response.body}');
+    } catch (e) {
+      debugPrint('[FCM] Failed to unregister device token: $e');
+    } finally {
+      apiClient.dispose();
     }
   }
 
@@ -113,10 +110,19 @@ class FcmService {
       }),
     );
 
-    if (response.statusCode >= 200 && response.statusCode < 300) {
+    final apiClient = ApiClient();
+    try {
+      await apiClient.put(
+        '/api/profile/fcm-token',
+        body: <String, dynamic>{
+          'fcmToken': token,
+        },
+      );
       debugPrint('[FCM] Token updated successfully on backend.');
-    } else {
-      debugPrint('[FCM] Failed to update token on backend: ${response.body}');
+    } catch (e) {
+      debugPrint('[FCM] Failed to update token on backend: $e');
+    } finally {
+      apiClient.dispose();
     }
   }
 }

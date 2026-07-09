@@ -70,7 +70,7 @@ class FcmService {
     final accessToken = await firebaseUser.getIdToken();
 
     final response = await http.delete(
-      Uri.parse('$_apiBaseUrl/api/devices/unregister'),
+      Uri.parse('defaultBaseUrl/api/devices/unregister'),
       headers: <String, String>{
         'Content-Type': 'application/json',
         if (accessToken != null && accessToken.isNotEmpty) 'Authorization': 'Bearer $accessToken',
@@ -105,7 +105,7 @@ class FcmService {
     final idToken = await firebaseUser.getIdToken();
 
     final response = await http.put(
-      Uri.parse('$_apiBaseUrl/api/profile/fcm-token'),
+      Uri.parse('defaultBaseUrl/api/profile/fcm-token'),
       headers: <String, String>{
         'Content-Type': 'application/json',
         if (idToken != null && idToken.isNotEmpty)

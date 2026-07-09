@@ -23,6 +23,7 @@
  */
 
 import { ethers } from 'ethers';
+import * as Sentry from '@sentry/node';
 import logger from '../middleware/logger.js';
 
 const ESCROW_ABI = [
@@ -50,6 +51,7 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
     logger.error('❌ Failed to initialise Escrow contract client:', err.message);
+    Sentry.captureException(err);
   }
 } else {
   logger.warn(
@@ -76,6 +78,39 @@ export function paisaToMaticWei(paisa) {
     logger.warn(`[escrow] Deposit ${matic} MATIC exceeds safety cap of ${MAX_ESCROW_MATIC} MATIC (${paisa} paisa @ ${ESCROW_MATIC_PER_PAISA} MATIC/paisa)`);
   }
   return ethers.parseEther(matic.toFixed(18));
+}
+
+/**
+ * Check whether the escrow contract client has been successfully initialised.
+ * @returns {boolean}
+ */
+export function isEscrowEnabled() {
+  return escrowContract !== null;
+}
+
+/**
+ * Health check for the escrow system.
+ * Returns the status of the escrow contract client and optionally makes a
+ * lightweight eth_call to verify the contract is reachable on-chain.
+ *
+ * @returns {Promise<{status: string, chainId?: number, error?: string}>}
+ */
+export async function checkEscrowHealth() {
+  if (!escrowContract) {
+    return { status: 'not_configured' };
+  }
+
+  try {
+    const provider = escrowContract.runner.provider;
+    const network = await provider.getNetwork();
+    return {
+      status: 'connected',
+      chainId: Number(network.chainId),
+    };
+  } catch (err) {
+    logger.error('[escrow] Health check failed:', err.message);
+    return { status: 'failed', error: err.message };
+  }
 }
 
 /**

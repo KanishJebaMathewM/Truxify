@@ -164,7 +164,7 @@ class TripService {
     String tripDisplayId,
   ) async {
     await verifyTripOwnership(tripDisplayId);
-    final path = '/api/trips/$tripDisplayId/stops/$stopId/complete';
+    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
     try {
       await _apiClient.put(path);
     } catch (e) {
@@ -188,7 +188,7 @@ class TripService {
 
   Future<void> startTrip(String tripDisplayId) async {
     await verifyTripOwnership(tripDisplayId);
-    final path = '/api/trips/$tripDisplayId/start';
+    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/start';
     try {
       await _apiClient.put(path);
     } catch (e) {

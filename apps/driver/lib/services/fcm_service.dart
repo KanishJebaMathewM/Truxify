@@ -1,15 +1,10 @@
-import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter/foundation.dart';
 
-class FcmService {
-  static const String _apiBaseUrl = String.fromEnvironment(
-    'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
-  );
+import 'api_client.dart';
 
+class FcmService {
   static Future<void> initializeAndRegister() async {
     try {
       final messaging = FirebaseMessaging.instance;
@@ -42,6 +37,51 @@ class FcmService {
     }
   }
 
+  /// Unregisters the current device's FCM token from the backend.
+  /// Must be called before signing out so a logged-out device stops
+  /// receiving push notifications intended for the next user of a
+  /// shared device.
+  static Future<void> unregisterToken() async {
+    try {
+      final messaging = FirebaseMessaging.instance;
+      final token = await messaging.getToken();
+      if (token == null) {
+        return;
+      }
+      await _unregisterTokenFromBackend(token);
+    } catch (e) {
+      debugPrint('[FCM] Unregistering token failed: $e');
+    }
+  }
+
+  static Future<void> _unregisterTokenFromBackend(String token) async {
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    if (firebaseUser == null) {
+      debugPrint('[FCM] No authenticated user, skipping token unregister.');
+      return;
+    }
+    final accessToken = await firebaseUser.getIdToken();
+
+    final response = await http.post(
+      Uri.parse('$_apiBaseUrl/api/devices/unregister'),
+      headers: <String, String>{
+        'Content-Type': 'application/json',
+        if (accessToken != null && accessToken.isNotEmpty) 'Authorization': 'Bearer $accessToken',
+      },
+      body: jsonEncode(<String, dynamic>{
+        'fcmToken': token,
+      }),
+    );
+
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      debugPrint('[FCM] Device token unregistered successfully.');
+    } catch (e) {
+      debugPrint('[FCM] Failed to unregister device token: $e');
+    } finally {
+      apiClient.dispose();
+    }
+  }
+
   static Future<void> clearToken() async {
     try {
       await _sendTokenToBackend(null);
@@ -57,24 +97,19 @@ class FcmService {
       debugPrint('[FCM] No authenticated user, skipping token upload.');
       return;
     }
-    final accessToken = await firebaseUser?.getIdToken();
-    final fullName = firebaseUser?.displayName;
-
-    final response = await http.put(
-      Uri.parse('$_apiBaseUrl/api/profile/fcm-token'),
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        if (accessToken != null && accessToken.isNotEmpty) 'Authorization': 'Bearer $accessToken',
-      },
-      body: jsonEncode(<String, dynamic>{
-        'fcmToken': token,
-      }),
-    );
-
-    if (response.statusCode >= 200 && response.statusCode < 300) {
+    final apiClient = ApiClient();
+    try {
+      await apiClient.put(
+        '/api/profile/fcm-token',
+        body: <String, dynamic>{
+          'fcmToken': token,
+        },
+      );
       debugPrint('[FCM] Token updated successfully on backend.');
-    } else {
-      debugPrint('[FCM] Failed to update token on backend: ${response.body}');
+    } catch (e) {
+      debugPrint('[FCM] Failed to update token on backend: $e');
+    } finally {
+      apiClient.dispose();
     }
   }
 }

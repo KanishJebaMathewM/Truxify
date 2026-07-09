@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 interface IEscrow {
     function releaseFunds(bytes32 bookingId) external;
+    function withdraw() external;
 }
 
 contract ReentrantDriver {
@@ -19,16 +20,15 @@ contract ReentrantDriver {
         attackEnabled = true;
     }
 
-    function attackRelease(bytes32 targetBookingId) external {
-        bookingId = targetBookingId;
+    function attackWithdraw() external {
         attackEnabled = true;
-        escrow.releaseFunds(targetBookingId);
+        escrow.withdraw();
     }
 
     receive() external payable {
         if (attackEnabled) {
             attackEnabled = false;
-            escrow.releaseFunds(bookingId);
+            escrow.withdraw();
         }
     }
 }

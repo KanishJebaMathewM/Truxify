@@ -3,6 +3,8 @@ services:
     build:
       context: ./backend/api
       target: development
+    env_file:
+      - .env
     ports:
       - "5000:5000"
     env_file:
@@ -17,8 +19,12 @@ services:
       - ./backend/api:/app
       - /app/node_modules
     depends_on:
-      - mongo
-      - redis
+      db:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:5000/api/health/live || curl -sf http://localhost:5000/api/health/live"]
       interval: 30s
@@ -30,35 +36,44 @@ services:
     build:
       context: ./backend/ml
     container_name: truxify-ml-engine
+    env_file:
+      - .env
     ports:
       - "8001:8000"
     environment:
       ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
     volumes:
       - ./backend/ml:/app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
   db:
-    image: postgis/postgis:15-3.3-alpine
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
-      POSTGRES_DB: ${POSTGRES_DB:-truxify}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
+       image: postgis/postgis:15-3.3-alpine
+       healthcheck:
+         test: ["CMD-SHELL", "pg_isready -U postgres"]
+         interval: 10s
+         timeout: 5s
+         retries: 5
+         start_period: 10s
   mongo:
     image: mongo:6-jammy
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 volumes:
   mongo_data:
   postgres_data:

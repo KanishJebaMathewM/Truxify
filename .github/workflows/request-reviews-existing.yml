@@ -1,0 +1,49 @@
+name: Request Reviews on Existing PRs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+
+jobs:
+  request-reviews:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request reviews for all open PRs
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const reviewer = 'KanishJebaMathewM';
+
+            console.log(`Fetching all open PRs for ${owner}/${repo}...`);
+            const openPRs = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100
+            });
+
+            console.log(`Found ${openPRs.length} open PR(s). Requesting review from @${reviewer}...`);
+
+            for (const pr of openPRs) {
+              // Check if the author is the reviewer (GitHub doesn't allow self-review requests)
+              if (pr.user.login.toLowerCase() === reviewer.toLowerCase()) {
+                console.log(`Skipping PR #${pr.number} because it was opened by @${reviewer} themselves.`);
+                continue;
+              }
+
+              try {
+                await github.rest.pulls.requestReviewers({
+                  owner,
+                  repo,
+                  pull_number: pr.number,
+                  reviewers: [reviewer]
+                });
+                console.log(`Requested review from @${reviewer} for PR #${pr.number}`);
+              } catch (e) {
+                console.error(`Failed to request review for PR #${pr.number}: ${e.message}`);
+              }
+            }

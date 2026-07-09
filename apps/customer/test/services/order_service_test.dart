@@ -76,6 +76,18 @@ void main() {
     expect(order404, isNull);
   });
 
+  test('fetchTruckNumber encodes truck id path segment', () async {
+    when(() => apiClient.get('/api/trucks/truck%2F123%23plate/number'))
+        .thenAnswer((_) async => {'number_plate': 'MH-01-AB-1234'});
+
+    final number = await orderService.fetchTruckNumber('truck/123#plate');
+
+    expect(number, equals('MH-01-AB-1234'));
+    verify(
+      () => apiClient.get('/api/trucks/truck%2F123%23plate/number'),
+    ).called(1);
+  });
+
   group('estimatePriceRange', () {
     test('returns correct min and max when prices are integers', () async {
       when(() => apiClient.get(

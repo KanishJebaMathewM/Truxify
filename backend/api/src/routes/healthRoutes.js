@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 import { healthLimiter } from '../middleware/rateLimiter.js';
+import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
@@ -59,6 +60,11 @@ function checkFirebase() {
   return firebaseAdmin ? 'configured' : 'not_configured';
 }
 
+async function checkEscrow() {
+  const result = await checkEscrowHealth();
+  return result.status;
+}
+
 function checkPolygon() {
   return process.env.POLYGON_RPC_URL ? 'configured' : 'not_configured';
 }
@@ -69,16 +75,18 @@ const CRITICAL_UNHEALTHY_OPTIONAL = new Set(['failed']);
 
 // GET /api/health — full dependency check; returns 503 when a critical service fails
 router.get('/', healthLimiter, async (req, res) => {
-  const [supabaseStatus, mongoStatus, redisStatus] = await Promise.all([
+  const [supabaseStatus, mongoStatus, redisStatus, escrowStatus] = await Promise.all([
     checkSupabase(),
     checkMongo(),
     checkRedis(),
+    checkEscrow(),
   ]);
 
   const services = {
     supabase: supabaseStatus,
     mongodb: mongoStatus,
     redis: redisStatus,
+    escrow: escrowStatus,
     firebase: checkFirebase(),
     polygon: checkPolygon(),
   };
@@ -97,12 +105,38 @@ router.get('/', healthLimiter, async (req, res) => {
     status,
     services,
     uptime: process.uptime(),
+    memory: process.memoryUsage(),
   });
 });
 
 // GET /api/health/live — liveness probe; always 200 as long as the process is up
 router.get('/live', healthLimiter, (req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// GET /api/health/ready — readiness probe for k8s
+router.get('/ready', healthLimiter, async (req, res) => {
+  const [supabaseStatus, mongoStatus, redisStatus] = await Promise.all([
+    checkSupabase(),
+    checkMongo(),
+    checkRedis(),
+  ]);
+
+  const services = {
+    supabase: supabaseStatus,
+    mongodb: mongoStatus,
+    redis: redisStatus,
+  };
+
+  const criticalFailed =
+    CRITICAL_UNHEALTHY.has(supabaseStatus) ||
+    CRITICAL_UNHEALTHY_OPTIONAL.has(mongoStatus);
+
+  if (criticalFailed) {
+    return res.status(503).json({ status: 'not_ready', services });
+  }
+
+  return res.status(200).json({ status: 'ready', services });
 });
 
 export default router;

@@ -1,8 +1,11 @@
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'dart:io';
+import 'package:http/io_client.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Exception thrown when an API request fails after token refresh.
@@ -38,13 +41,23 @@ class ApiException implements Exception {
 /// final data = await client.get('/api/orders');
 /// ```
 class ApiClient {
+  static http.Client _createPinnedClient() {
+    if (kIsWeb) return http.Client();
+    final securityContext = SecurityContext(withTrustedRoots: true);
+    final ioClient = HttpClient(context: securityContext)
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
+        return false;
+      };
+    return IOClient(ioClient);
+  }
+
   ApiClient({
     SupabaseClient? supabaseClient,
     http.Client? httpClient,
     String? baseUrl,
   })  : _providedSupabase = supabaseClient,
         _isClientOwned = httpClient == null,
-        _http = httpClient ?? http.Client(),
+        _http = httpClient ?? _createPinnedClient(),
         _baseUrl = _normalise(_getBaseUrl(baseUrl));
 
   final SupabaseClient? _providedSupabase;
@@ -52,6 +65,25 @@ class ApiClient {
   final http.Client _http;
   final bool _isClientOwned;
   final String _baseUrl;
+  int _retryCount = 0;
+  static const int _maxRetries = 2;
+  static const Duration _retryDelay = Duration(milliseconds: 500);
+
+  Future<dynamic> _withRetry(Future<dynamic> Function() request) async {
+    for (int attempt = 0; attempt <= _maxRetries; attempt++) {
+      try {
+        _retryCount = attempt;
+        return await request();
+      } catch (e) {
+        if (attempt >= _maxRetries) rethrow;
+        await Future.delayed(_retryDelay * (attempt + 1));
+      }
+    }
+    return null;
+  }
+
+  void resetRetryCount() => _retryCount = 0;
+  int get retryCount => _retryCount;
 
   static String _getBaseUrl(String? overrideUrl) {
     if (overrideUrl != null) return overrideUrl;
@@ -63,6 +95,13 @@ class ApiClient {
         'Set --dart-define=TRUXIFY_API_BASE_URL=<url> for production builds.',
       );
     }
+    return defaultBaseUrl;
+  }
+
+  static String get defaultBaseUrl {
+    const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
+    if (envUrl.isNotEmpty) return envUrl;
+    if (kReleaseMode) throw StateError('TRUXIFY_API_BASE_URL must be set in release mode');
     return 'http://localhost:5000';
   }
 
@@ -96,6 +135,7 @@ class ApiClient {
     final t = token ?? _accessToken;
     return <String, String>{
       'Content-Type': 'application/json',
+      'Accept-Language': ui.PlatformDispatcher.instance.locale.languageCode,
       if (t != null && t.isNotEmpty) 'Authorization': 'Bearer $t',
       ...?additionalHeaders,
     };

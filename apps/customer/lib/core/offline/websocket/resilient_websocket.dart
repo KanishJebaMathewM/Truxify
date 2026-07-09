@@ -75,6 +75,10 @@ class ResilientWebSocket {
     _attempt += 1;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(capped, () async {
+      await _cleanupChannel();
+      if (_closed) {
+        return;
+      }
       await _connectOnce();
     });
   }
@@ -93,9 +97,14 @@ class ResilientWebSocket {
     _closed = true;
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
+    await _cleanupChannel();
+    await _controller.close();
+  }
+
+  Future<void> _cleanupChannel() async {
     await _subscription?.cancel();
     await _channel?.sink.close();
+    _subscription = null;
     _channel = null;
-    await _controller.close();
   }
 }

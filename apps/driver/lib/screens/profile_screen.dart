@@ -1,12 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
 
 import '../controllers/app_controller.dart';
 import '../core/app_routes.dart';
 import '../core/config.dart';
-import '../models/app_models.dart';
 import '../data/mock_data.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
@@ -32,12 +32,12 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  String _driverName = driverName;
-  String _driverPhone = '+91 98765 43210';
-  String _driverEmail = 'kanish.jeba@truxify.com';
+  String _driverName = '';
+  String _driverPhone = '';
+  String _driverEmail = '';
   String _currentLanguage = 'English';
   String _walletAddress = '';
-  String _truckNumber = driverTruckNumber;
+  String _truckNumber = '';
 
   bool _isLoadingReputation = true;
   double? _platformRating;
@@ -49,6 +49,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     _loadWalletAddress();
     _fetchReputation();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
   }
 
   Future<void> _loadWalletAddress() async {
@@ -493,7 +498,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   try {
                     final client = Supabase.instance.client;
                     final token = client.auth.currentSession?.accessToken;
-                    final userId = client.auth.currentUser?.id ?? '';
                     final response = await http.put(
                       Uri.parse('${const String.fromEnvironment('TRUXIFY_API_BASE_URL', defaultValue: 'http://localhost:5000')}/api/profile/wallet'),
                       headers: <String, String>{
@@ -508,16 +512,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       setState(() {
                         _walletAddress = address;
                       });
+                      if (!context.mounted) return;
                       Navigator.of(context).pop();
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content:
-                                Text('Wallet address updated successfully'),
-                            backgroundColor: TruxifyColors.success,
-                          ),
-                        );
-                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content:
+                              Text('Wallet address updated successfully'),
+                          backgroundColor: TruxifyColors.success,
+                        ),
+                      );
                     } else {
                       final body = jsonDecode(response.body)
                           as Map<String, dynamic>;
@@ -620,7 +623,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
+                color: color.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
               child: Icon(icon, color: color, size: 20),
@@ -740,7 +743,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: TruxifyColors.accent.withOpacity(0.15),
+                  color: TruxifyColors.accent.withValues(alpha: 0.15),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),
@@ -753,7 +756,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(
-                        color: Colors.white.withOpacity(0.2), width: 3),
+                        color: Colors.white.withValues(alpha: 0.2), width: 3),
                   ),
                   child: CircleAvatar(
                     radius: 30,
@@ -791,7 +794,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         '$driverTruck · $_truckNumber',
                         style: GoogleFonts.dmSans(
                           fontSize: 12,
-                          color: Colors.white.withOpacity(0.85),
+                          color: Colors.white.withValues(alpha: 0.85),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -799,7 +802,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.15),
+                          color: Colors.white.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Row(
@@ -1147,7 +1150,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     }
                   }
 
-                  // Clear FCM token on logout
+                  // Unregister and clear FCM token on logout so this device stops
+                  // receiving push notifications for the signed-out account.
+                  await FcmService.unregisterToken();
                   await FcmService.clearToken();
 
                   await client.auth.signOut();

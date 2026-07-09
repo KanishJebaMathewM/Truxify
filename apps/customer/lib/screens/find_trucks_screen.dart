@@ -263,6 +263,17 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   }
 
   RouteDraft _buildDraft() {
+    DateTime? pickupDate;
+    final parsed = _parseDateTimeLabel(_composeDateTimeLabel());
+    if (parsed != null) {
+      pickupDate = DateTime(
+        parsed.date.year,
+        parsed.date.month,
+        parsed.date.day,
+        parsed.time.hour,
+        parsed.time.minute,
+      );
+    }
     return RouteDraft(
       pickup: _pickupController.text,
       drop: _dropController.text,
@@ -273,6 +284,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       stacked: _stacked,
       fragile: _fragile,
       requirements: _requirements.toList(),
+      pickupDate: pickupDate,
       pickupLat: _pickupPoint?.latitude,
       pickupLng: _pickupPoint?.longitude,
       dropLat: _dropPoint?.latitude,
@@ -374,10 +386,6 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         setState(() => _weightErrorText = error);
-        // Trigger estimate update after validation
-        if (error == null) {
-          _estimatePrice();
-        }
       }
     });
 
@@ -809,7 +817,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                 child: Column(
                   children: [
                     DropdownButtonFormField<String>(
-                      initialValue: _goodsType,
+                      value: _goodsType,
                       items: _goodsTypes
                           .map((type) => DropdownMenuItem(value: type, child: Text(type)))
                           .toList(),
@@ -1020,7 +1028,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                               : TruxifyColors.border)),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
+                          color: Colors.black.withValues(alpha: 0.05),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),

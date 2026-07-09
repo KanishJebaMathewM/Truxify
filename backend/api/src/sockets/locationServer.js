@@ -3,14 +3,16 @@ import logger from "../middleware/logger.js";
 import { GpsLog } from "../models/GpsLog.js";
 import { supabase } from "../config/db.js";
 
+let io = null;
 // Telemetry Bulk Insert Buffer
 const BATCH_FLUSH_INTERVAL_MS = 2000;
 const gpsBuffer = [];
+let gpsBufferBusy = false;
 
 setInterval(async () => {
-  if (gpsBuffer.length === 0) return;
+  if (gpsBuffer.length === 0 || gpsBufferBusy) return;
+  gpsBufferBusy = true;
   
-  // Safely extract the current batch
   const batch = gpsBuffer.splice(0, gpsBuffer.length);
   
   try {
@@ -18,12 +20,15 @@ setInterval(async () => {
     logger.debug(`[WS] Bulk inserted ${batch.length} GPS points into MongoDB.`);
   } catch (error) {
     logger.error({ error: error.message }, '[WS] Failed to bulk insert GPS buffer to MongoDB');
+  } finally {
+    gpsBufferBusy = false;
   }
 }, BATCH_FLUSH_INTERVAL_MS);
 
 /**
- * Attaches the Truxify Live Location WebSocket server to an existing
- * Node.js HTTP server.
+ * Initializes the Truxify Live Location WebSocket server on top of an existing
+ * Node.js HTTP server. Should be called once during startup after MongoDB
+ * is available.
  *
  * Architecture:
  *  /driver namespace — Driver app sends GPS updates here
@@ -40,13 +45,18 @@ setInterval(async () => {
  *
  * @param {import("http").Server} httpServer - Existing HTTP server instance
  */
-export function attachLocationServer(httpServer) {
-  const io = new Server(httpServer, {
+export function initLocationServer(httpServer) {
+  if (io) {
+    logger.warn('[initLocationServer] Already initialized — skipping duplicate call.');
+    return;
+  }
+  io = new Server(httpServer, {
     cors: {
-      origin: process.env.ALLOWED_ORIGINS?.split(",") || [
-        "http://localhost:3000",
-        "http://localhost:5000",
-      ],
+      origin: process.env.ALLOWED_ORIGINS?.split(",") || (
+        process.env.NODE_ENV === 'production'
+          ? []
+          : ["http://localhost:3000", "http://localhost:5000"]
+      ),
       methods: ["GET", "POST"],
       credentials: true,
     },
@@ -323,8 +333,6 @@ async function verifyCustomerToken(socket, next) {
 async function verifyBookingOwnership(customerId, bookingId) {
   try {
     // Use Supabase client from existing db module
-    // Import Supabase client from existing db module
-    const { supabase } = await import("../config/db.js");
 
     const { data, error } = await supabase
       .from("bookings")
@@ -339,4 +347,33 @@ async function verifyBookingOwnership(customerId, bookingId) {
     logger.error({ err }, '[WS] isCustomerAuthorized error');
     return false;
   }
+}
+
+/**
+ * Gracefully closes the location WebSocket server.
+ * Should be called during shutdown to release all Socket.IO resources.
+ */
+export async function closeLocationServer() {
+  if (!io) {
+    return;
+  }
+  return new Promise((resolve) => {
+    let resolved = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        logger.warn('[closeLocationServer] Timeout — forcing close.');
+        resolve();
+      }
+    }, 5000);
+
+    io.close(() => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timer);
+        logger.info('[closeLocationServer] Location WebSocket server closed.');
+        resolve();
+      }
+    });
+  });
 }

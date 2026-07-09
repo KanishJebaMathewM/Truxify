@@ -119,8 +119,10 @@ async function fetchPullRequestFiles(github, owner, repo, pullNumber) {
   return files.map((file) => file.filename);
 }
 
-async function fetchIssueLabels(github, owner, repo, issueNumbers) {
+async function fetchLinkedIssueDetails(github, owner, repo, issueNumbers) {
   const labels = new Set();
+  const issueTexts = [];
+
   for (const issueNumber of issueNumbers) {
     try {
       const response = await github.rest.issues.get({
@@ -128,18 +130,29 @@ async function fetchIssueLabels(github, owner, repo, issueNumbers) {
         repo,
         issue_number: issueNumber
       });
-      addLabels(
-        labels,
-        (response.data.labels || []).map((label) =>
+      const issue = response.data;
+      if (issue) {
+        const issueLabels = (issue.labels || []).map((label) =>
           typeof label === 'string' ? label : label.name
-        )
-      );
+        );
+        addLabels(labels, issueLabels);
+        issueTexts.push(`${issue.title || ''}\n${issue.body || ''}\n${issueLabels.join(' ')}`);
+      }
     } catch (error) {
       // Missing or cross-repository issue references should not block PR labeling.
       continue;
     }
   }
-  return [...labels];
+
+  return {
+    labels: [...labels],
+    text: issueTexts.join('\n')
+  };
+}
+
+async function fetchIssueLabels(github, owner, repo, issueNumbers) {
+  const details = await fetchLinkedIssueDetails(github, owner, repo, issueNumbers);
+  return details.labels;
 }
 
 async function ensureLabelExists(github, owner, repo, name, color, description) {
@@ -200,8 +213,13 @@ async function run({ github, context, core, rulesPath = DEFAULT_RULES_PATH, dryR
   const hasAutomatedComment = comments.some(c => c.body && c.body.includes(AUTOMATED_COMMENT_BODY));
   const otherComments = comments.filter(c => !(c.body && c.body.includes(AUTOMATED_COMMENT_BODY)));
 
-  // Combine title, body, and all comments (excluding the automated comment) for program detection
-  let searchSource = `${pullRequest.title}\n${pullRequest.body || ''}`;
+  // Find linked issue numbers and fetch their details (title, body, labels)
+  const linkedIssueNumbers = findLinkedIssueNumbers(`${pullRequest.title}\n${pullRequest.body || ''}`);
+  const linkedIssueDetails = await fetchLinkedIssueDetails(github, owner, repo, linkedIssueNumbers);
+  const linkedIssueLabels = linkedIssueDetails.labels;
+
+  // Combine title, body, all comments (excluding the automated comment), and linked issue details for program detection
+  let searchSource = `${pullRequest.title}\n${pullRequest.body || ''}\n${linkedIssueDetails.text}`;
   for (const c of otherComments) {
     searchSource += `\n${c.body || ''}`;
   }
@@ -269,8 +287,6 @@ Please reply to this PR with either **GSSOC** or **ECSoC** so we can label it co
   }
 
   const changedFiles = await fetchPullRequestFiles(github, owner, repo, pullNumber);
-  const linkedIssueNumbers = findLinkedIssueNumbers(`${pullRequest.title}\n${pullRequest.body || ''}`);
-  const linkedIssueLabels = await fetchIssueLabels(github, owner, repo, linkedIssueNumbers);
   const currentLabels = (pullRequest.labels || []).map((label) =>
     typeof label === 'string' ? label : label.name
   );
@@ -286,33 +302,78 @@ Please reply to this PR with either **GSSOC** or **ECSoC** so we can label it co
     detectedPrograms
   });
 
-  // Handle merge conflict label
+  // Handle merge conflict and merge ready labels
   const isConflict = pullRequest.mergeable === false || pullRequest.mergeable_state === 'dirty';
   const hasConflictLabel = currentLabels.map(normalize).includes('merge conflicts');
+  const hasReadyLabel = currentLabels.map(normalize).includes('merge ready');
 
-  if (isConflict && !hasConflictLabel) {
-    if (!availableLabels.map(normalize).includes('merge conflicts')) {
-      if (!dryRun) {
-        await ensureLabelExists(github, owner, repo, 'merge conflicts', 'd73a4a', 'PR has merge conflicts');
+  if (isConflict) {
+    if (!hasConflictLabel) {
+      if (!availableLabels.map(normalize).includes('merge conflicts')) {
+        if (!dryRun) {
+          await ensureLabelExists(github, owner, repo, 'merge conflicts', 'd73a4a', 'PR has merge conflicts');
+        }
+        availableLabels.push('merge conflicts');
       }
-      availableLabels.push('merge conflicts');
+      labelsToAdd.push('merge conflicts');
+
+      // Post comment notifying the author about the merge conflict
+      if (!dryRun) {
+        try {
+          const author = pullRequest.user ? pullRequest.user.login : 'author';
+          await github.rest.issues.createComment({
+            owner,
+            repo,
+            issue_number: pullNumber,
+            body: `@${author}, please resolve the commit so that it will be merged soon ......`
+          });
+          core.info(`Posted merge conflict comment on PR #${pullNumber}`);
+        } catch (error) {
+          core.warning(`Failed to post merge conflict comment: ${error.message}`);
+        }
+      }
     }
-    labelsToAdd.push('merge conflicts');
+    if (hasReadyLabel) {
+      core.info(`PR has conflicts but has 'merge ready' label. Removing the label...`);
+      if (!dryRun) {
+        try {
+          await github.rest.issues.removeLabel({
+            owner,
+            repo,
+            issue_number: pullNumber,
+            name: 'merge ready'
+          });
+        } catch (error) {
+          core.warning(`Failed to remove 'merge ready' label: ${error.message}`);
+        }
+      }
+    }
   }
 
   const isClean = pullRequest.mergeable === true;
-  if (isClean && hasConflictLabel) {
-    core.info(`PR is mergeable and has 'merge conflicts' label. Removing the label...`);
-    if (!dryRun) {
-      try {
-        await github.rest.issues.removeLabel({
-          owner,
-          repo,
-          issue_number: pullNumber,
-          name: 'merge conflicts'
-        });
-      } catch (error) {
-        core.warning(`Failed to remove 'merge conflicts' label: ${error.message}`);
+  if (isClean) {
+    if (!hasReadyLabel) {
+      if (!availableLabels.map(normalize).includes('merge ready')) {
+        if (!dryRun) {
+          await ensureLabelExists(github, owner, repo, 'merge ready', '2cbe4e', 'PR is mergeable and has no conflicts');
+        }
+        availableLabels.push('merge ready');
+      }
+      labelsToAdd.push('merge ready');
+    }
+    if (hasConflictLabel) {
+      core.info(`PR is mergeable and has 'merge conflicts' label. Removing the label...`);
+      if (!dryRun) {
+        try {
+          await github.rest.issues.removeLabel({
+            owner,
+            repo,
+            issue_number: pullNumber,
+            name: 'merge conflicts'
+          });
+        } catch (error) {
+          core.warning(`Failed to remove 'merge conflicts' label: ${error.message}`);
+        }
       }
     }
   }
@@ -338,6 +399,8 @@ Please reply to this PR with either **GSSOC** or **ECSoC** so we can label it co
 }
 
 module.exports = {
+  fetchLinkedIssueDetails,
+  fetchIssueLabels,
   findLinkedIssueNumbers,
   hasProgramSignal,
   loadRules,

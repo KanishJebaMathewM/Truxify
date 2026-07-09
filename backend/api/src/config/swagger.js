@@ -1,5 +1,9 @@
+import logger from '../middleware/logger.js';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
+
+// Use environment variable for Swagger server URL
+const apiUrl = process.env.API_PUBLIC_URL || 'http://localhost:5000/api';
 
 const options = {
   definition: {
@@ -11,8 +15,10 @@ const options = {
     },
     servers: [
       {
-        url: process.env.API_PUBLIC_URL || 'http://localhost:5000/api',
-        description: process.env.API_PUBLIC_URL ? 'Server' : 'Development server',
+        url: apiUrl,
+        description: process.env.API_PUBLIC_URL
+          ? 'Configured server'
+          : 'Development server',
       },
     ],
   },
@@ -22,5 +28,9 @@ const options = {
 const swaggerSpec = swaggerJsdoc(options);
 
 export const setupSwagger = (app) => {
+  if (process.env.NODE_ENV === 'production') {
+    logger.warn('[Swagger] Disabling Swagger UI in production');
+    return;
+  }
   app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 };

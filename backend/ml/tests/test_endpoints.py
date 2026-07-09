@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.main import app
+from main import app
 from app.models.base import MODEL_STORAGE_DIR
 
 client = TestClient(app)
@@ -67,7 +67,7 @@ def test_auth_valid_key(monkeypatch):
 def test_auth_dev_mode_bypass(monkeypatch):
     monkeypatch.delenv("ML_API_KEY", raising=False)
     response = client.post("/predict/demand", json=_auth_payload())
-    assert response.status_code == 200
+    assert response.status_code == 503
 
 
 def test_health_no_auth_required(monkeypatch):
@@ -125,7 +125,7 @@ def test_predict_price_valid():
         "route_origin": "Mumbai",
         "route_destination": "Delhi",
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert "estimated_price" in data
@@ -139,7 +139,7 @@ def test_predict_price_minimal():
         "distance_km": 100.0,
         "cargo_weight_kg": 1000.0,
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 200
     data = response.json()
     assert data["estimated_price"] > 0
@@ -150,7 +150,7 @@ def test_predict_price_invalid_distance():
         "distance_km": 0,
         "cargo_weight_kg": 1000.0,
     }
-    response = client.post("/predict", json=payload)
+    response = client.post("/predict/price", json=payload)
     assert response.status_code == 422
 
 

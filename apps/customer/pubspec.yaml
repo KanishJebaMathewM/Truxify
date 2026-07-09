@@ -22,16 +22,18 @@ dependencies:
   flutter_map_cancellable_tile_provider: ^3.0.0
   google_fonts: ^8.1.0
   intl: ^0.20.2
-  latlong2: ^0.9.1
+  latlong2: ^0.10.1
   http: ^1.2.2
   sqflite: ^2.3.0
   path: ^1.9.0
   connectivity_plus: ^7.1.1
-  geocoding: ^4.0.0
+  geocoding: ^5.0.0
+  flutter_secure_storage: ^9.2.2
   geolocator: ^14.0.2
   shared_preferences: ^2.5.5
   uuid: ^4.5.3
   web_socket_channel: ^3.0.0
+  local_auth: ^2.2.0
   shimmer: ^3.0.0
   url_launcher: ^6.3.1
 

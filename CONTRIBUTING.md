@@ -50,6 +50,67 @@ Truxify is structured as a monorepo containing the following components:
 
 ---
 
+## Backend Architecture
+
+The backend API (`backend/api`) follows a layered service-oriented architecture. Understanding this structure is essential before contributing new features.
+
+### Service Layer
+
+Routes are thin — they parse the request, delegate to a service, and send the response. All business logic lives in services:
+
+```text
+┌─────────────────────────────────────────────┐
+│                  ROUTES                      │
+│   (thin: parse + delegate + respond)        │
+├─────────────────────────────────────────────┤
+│                 MIDDLEWARE                   │
+│  auth · correlation-id · idempotency · log  │
+├─────────────────────────────────────────────┤
+│                 SERVICES                     │
+│  OrderService · OrderLifecycleService        │
+│  OrderValidationService · TimelineService   │
+│  NotificationService · DriverService        │
+│  LoadService · TrackingService              │
+├─────────────────────────────────────────────┤
+│                REPOSITORIES                  │
+│  OrderRepository · DriverRepository         │
+│  BidRepository · LoadRepository             │
+│  TimelineRepository                         │
+├─────────────────────────────────────────────┤
+│            SUPABASE (PostgreSQL)             │
+│  via supabase-js (service_role key)         │
+│  + MongoDB (GPS logs) + Redis (cache/queue) │
+└─────────────────────────────────────────────┘
+```
+
+### Adding New Logic
+
+| If you need to… | Put it in… |
+|---|---|
+| Handle a new API request | A **route** in `src/routes/` |
+| Validate business rules | An **assertion** in the appropriate **service** |
+| Query or mutate the database | A **repository** method |
+| Orchestrate a multi-step workflow | A **service** that coordinates repositories |
+| Send a notification | The **NotificationService** |
+| Add cross-cutting behaviour | **Middleware** in `src/middleware/` |
+
+### Architecture Decision Records
+
+Detailed design decisions — including why each pattern was chosen, the alternatives considered, and the consequences — are documented as Architecture Decision Records (ADRs):
+
+| ADR | Topic |
+|-----|-------|
+| [ADR-0001](docs/architecture/adr/ADR-0001-service-layer.md) | Service Decomposition |
+| [ADR-0002](docs/architecture/adr/ADR-0002-repository-pattern.md) | Repository Pattern |
+| [ADR-0003](docs/architecture/adr/ADR-0003-order-lifecycle.md) | Order Lifecycle Orchestrator |
+| [ADR-0004](docs/architecture/adr/ADR-0004-validation-workflow.md) | Validation & Workflow |
+| [ADR-0005](docs/architecture/adr/ADR-0005-timeline-management.md) | Timeline Management |
+| [ADR-0006](docs/architecture/adr/ADR-0006-notification-workflow.md) | Notification & OTP Workflow |
+
+Read the full set at `docs/architecture/adr/`.
+
+---
+
 ## Development Setup
 
 ### 1. Fork and Clone the Repository
@@ -570,3 +631,39 @@ By participating in this project, you agree to follow our Code of Conduct.
 ---
 
 Thank you for contributing to Truxify and helping make logistics management more efficient and accessible for everyone!
+
+
+## ⚠️ Environment Setup (Required Before Running)
+
+Truxify uses `--dart-define` flags to separate dev/staging/prod environments.
+**Never run `flutter run` without these flags — it will connect to production services.**
+
+### Step 1: Copy the dev template
+```bash
+cp dart_defines/dev.env.example dart_defines/dev.env
+```
+
+### Step 2: Fill in your local values in `dart_defines/dev.env`
+
+For local Supabase, use:
+- `SUPABASE_URL=http://localhost:54321` (default Supabase local dev port)
+- Get your local anon key from `supabase start` output
+
+### Step 3: Run with dart-defines
+
+**Mac/Linux:**
+```bash
+flutter run --dart-define=ENV=dev \
+            --dart-define=SUPABASE_URL=http://localhost:54321 \
+            --dart-define=SUPABASE_ANON_KEY=your-local-key \
+            --dart-define=API_BASE_URL=http://localhost:3000
+```
+
+**Windows PowerShell:**
+```powershell
+flutter run `
+  --dart-define=ENV=dev `
+  --dart-define=SUPABASE_URL=http://localhost:54321 `
+  --dart-define=SUPABASE_ANON_KEY=your-local-key `
+  --dart-define=API_BASE_URL=http://localhost:3000
+```

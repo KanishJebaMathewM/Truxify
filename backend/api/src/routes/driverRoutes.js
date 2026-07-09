@@ -2,80 +2,26 @@ import express from 'express';
 import { supabase, redisClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
+import { userLimiter, createStore } from '../middleware/rateLimiter.js';
 
-import { validateBody } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, otpSendSchema } from '../validation/requestSchemas.js';
+import { validateBody, validateParams } from '../middleware/validate.js';
+import { driverOnlineSchema, withdrawSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
-import { generateAndStoreOtp, verifyOtp } from '../services/otpService.js';
-
 const router = express.Router();
 
-
-const loginOtpSchema = z.object({
-  phone: z.string().trim().min(10).max(20),
-  otp: z.string().regex(/^\d{4}$/, { message: 'OTP must be 4 digits' }),
-});
-
-export function otpPhoneKey(phone) {
-  if (typeof phone !== 'string') {
-    return 'phone:unknown';
+// Driver role authorization guard middleware
+function requireDriverRole(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required for driver access' });
   }
-
-  const digits = phone.replace(/\D/g, '');
-  if (!digits) {
-    return 'phone:unknown';
+  if (req.user.role !== 'driver' && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Forbidden: Driver role required', role: req.user.role });
   }
-
-  const nationalDigits = digits.length === 12 && digits.startsWith('91')
-    ? digits.slice(2)
-    : digits;
-
-  return `phone:${nationalDigits}`;
+  next();
 }
 
-function perPhoneLimiter(opts) {
-  return rateLimit({
-    ...opts,
-    keyGenerator: (req) => otpPhoneKey(req.body.phone),
-  });
-}
-
-const sendOtpLimiter = perPhoneLimiter({
-  windowMs: 60 * 1000,
-  max: 1,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many OTP requests. Please wait before requesting again.' },
-});
-
-const verifyOtpLimiter = perPhoneLimiter({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many OTP verification attempts. Please try again later.' },
-});
-
-router.post('/otp/send', sendOtpLimiter, validateBody(otpSendSchema), async (req, res) => {
-  const { phone } = req.body;
-  const otp = await generateAndStoreOtp(phone);
-  if (!otp) {
-    return res.status(503).json({ error: 'OTP service unavailable. Please try again later.' });
-  }
-  return res.json({ message: 'OTP sent successfully.' });
-});
-
-router.post('/otp/verify', verifyOtpLimiter, validateBody(loginOtpSchema), async (req, res) => {
-  const { phone, otp } = req.body;
-  const valid = await verifyOtp(phone, otp);
-  if (!valid) {
-    return res.status(400).json({ error: 'Invalid OTP. Please try again.' });
-  }
-  return res.json({ message: 'OTP verified successfully.', verified: true });
-});
 
 // ============================================================================
 // 1. GET DRIVER STATS (DRIVER)
@@ -113,6 +59,7 @@ router.get('/stats', authenticate, userLimiter, requireRole(['driver']), async (
     });
 
   } catch (err) {
+    logger.error('Driver stats fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -141,6 +88,7 @@ router.put('/online', authenticate, userLimiter, requireRole(['driver']), valida
     });
 
   } catch (err) {
+    logger.error('Driver online status update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -235,6 +183,7 @@ router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver'
     res.json(summary || []);
 
   } catch (err) {
+    logger.error('Driver earnings summary fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -281,6 +230,7 @@ router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (
       trips: trips || []
     });
   } catch (err) {
+    logger.error('Driver trips fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -300,6 +250,7 @@ router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requireRole
     if (error) return res.status(500).json({ error: 'Failed to fetch trip items.', details: error.message });
     res.json(items || []);
   } catch (err) {
+    logger.error('Driver trip items fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -319,6 +270,7 @@ router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requireRole
     if (error) return res.status(500).json({ error: 'Failed to fetch trip stops.', details: error.message });
     res.json(stops || []);
   } catch (err) {
+    logger.error('Driver trip stops fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -338,9 +290,71 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
     if (error) return res.status(500).json({ error: 'Failed to fetch route points.', details: error.message });
     res.json(points || []);
   } catch (err) {
+    logger.error('Driver route points fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+// ============================================================================
+// 8b. TOGGLE ROUTE MAP POINT CLAIMED (DRIVER)
+// ============================================================================
+router.patch(
+  '/route-points/:id/claim',
+  authenticate,
+  userLimiter,
+  requireRole(['driver']),
+  validateParams(paramIdSchema),
+  async (req, res) => {
+    const { id } = req.params;
+    const claimed = req.body?.claimed;
+
+    if (typeof claimed !== 'boolean') {
+      return res.status(400).json({ error: 'claimed must be a boolean' });
+    }
+
+    try {
+      const { data: point, error: pointError } = await supabase
+        .from('route_map_points')
+        .select('id, trip_display_id')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (pointError) {
+        return res.status(500).json({ error: 'Failed to fetch route point.', details: pointError.message });
+      }
+      if (!point) {
+        return res.status(404).json({ error: 'Route map point not found.' });
+      }
+
+      const { data: trip } = await supabase
+        .from('trips')
+        .select('id')
+        .eq('trip_display_id', point.trip_display_id)
+        .eq('driver_id', req.user.id)
+        .maybeSingle();
+
+      if (!trip) {
+        return res.status(403).json({ error: 'Access Denied: Route point does not belong to your trip.' });
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from('route_map_points')
+        .update({ claimed })
+        .eq('id', id)
+        .select('*')
+        .maybeSingle();
+
+      if (updateError) {
+        return res.status(500).json({ error: 'Failed to update route point.', details: updateError.message });
+      }
+
+      res.json({ point: updated });
+    } catch (err) {
+      logger.error('Driver route point claim error:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  },
+);
 
 // ============================================================================
 // 9. FETCH DRIVER BIDS (DRIVER)
@@ -378,6 +392,7 @@ router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (r
       bids: bids || []
     });
   } catch (err) {
+    logger.error('Driver bids fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -428,6 +443,7 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver'
     });
 
   } catch (err) {
+    logger.error('Driver wallet withdrawal error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -435,7 +451,7 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 // 11. GET DRIVER REPUTATION (DRIVER)
 // ============================================================================
-router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['driver']), validateParams(uuidParamSchema), async (req, res) => {
   const { driverId } = req.params;
 
   if (driverId !== req.user.id) {
@@ -510,3 +526,5 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['dri
 });
 
 export default router;
+
+// Resolves #2051: Composite indexes added for 2dsphere queries

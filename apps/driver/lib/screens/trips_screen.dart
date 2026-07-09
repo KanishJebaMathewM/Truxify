@@ -1,16 +1,17 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/app_routes.dart';
-import '../core/driver_session.dart';
 import '../core/supabase_config.dart';
 import '../models/app_models.dart';
 import '../models/marketplace_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../services/marketplace_repository.dart';
+import '../services/trip_cache.dart';
 import '../services/trip_service.dart';
 import 'package:truxify_shared/shimmer_widget.dart';
 
@@ -36,10 +37,14 @@ class _TripsScreenState extends State<TripsScreen> {
   Map<String, List<Map<String, dynamic>>> _routePointsByTripId = {};
 
   bool _isLoadingTrips = true;
+  bool _isLoadingMoreTrips = false;
+  final ScrollController _scrollController = ScrollController();
 
   String? _tripsError;
   String? _nextTripsCursor;
   bool _hasMoreTrips = true;
+  bool _isOfflineTripsData = false;
+  DateTime? _offlineTripsSavedAt;
 
   bool _marketplaceLoading = false;
   String? _marketplaceError;
@@ -59,6 +64,7 @@ class _TripsScreenState extends State<TripsScreen> {
   void initState() {
     super.initState();
     _tripService = TripService();
+    _scrollController.addListener(_onScroll);
     _loadTrips();
     if (SupabaseConfig.isConfigured) {
       _refreshMarketplace();
@@ -105,17 +111,98 @@ class _TripsScreenState extends State<TripsScreen> {
         _nextTripsCursor = result['nextCursor'] as String?;
         _hasMoreTrips = result['hasMore'] as bool? ?? false;
         _isLoadingTrips = false;
+        _isOfflineTripsData = false;
+        _offlineTripsSavedAt = null;
       });
+
+      // Cache the freshly loaded trips so they remain available if a later
+      // load fails because the network is unavailable mid-trip.
+      unawaited(TripCache.save(
+        trips: trips,
+        stopsByTripId: stopsByTrip,
+        routePointsByTripId: routePointsByTrip,
+      ));
     } catch (e) {
       debugPrint('Failed to load trips: $e');
       if (!mounted) return;
+
+      final cached = await TripCache.load();
+      if (cached != null && cached.trips.isNotEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _trips = cached.trips;
+          _tripStopsByTripId = cached.stopsByTripId;
+          _routePointsByTripId = cached.routePointsByTripId;
+          _hasMoreTrips = false;
+          _isLoadingTrips = false;
+          _tripsError = null;
+          _isOfflineTripsData = true;
+          _offlineTripsSavedAt = cached.savedAt;
+        });
+        return;
+      }
+
       setState(() {
         _isLoadingTrips = false;
         _tripsError = e.toString();
+        _isOfflineTripsData = false;
       });
     }
   }
 
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      _loadMoreTrips();
+    }
+  }
+
+  Future<void> _loadMoreTrips() async {
+    if (_isLoadingMoreTrips || !_hasMoreTrips || _isLoadingTrips) return;
+    
+    setState(() {
+      _isLoadingMoreTrips = true;
+    });
+
+    try {
+      final result = await _tripService.fetchTripHistory(
+        cursor: _nextTripsCursor,
+        limit: 20,
+      );
+      final newTrips = result['trips'] as List<Map<String, dynamic>>;
+
+      final stopsByTrip = <String, List<Map<String, dynamic>>>{};
+      final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
+
+      await Future.wait(newTrips.map((trip) async {
+        final tripId = trip['trip_display_id']?.toString();
+        if (tripId == null || tripId.isEmpty) return;
+
+        final results = await Future.wait([
+          _tripService.fetchTripStops(tripId),
+          _tripService.fetchRouteMapPoints(tripId),
+        ]);
+        stopsByTrip[tripId] = results[0];
+        routePointsByTrip[tripId] = results[1];
+      }));
+
+      if (!mounted) return;
+
+      setState(() {
+        _trips.addAll(newTrips);
+        _tripStopsByTripId.addAll(stopsByTrip);
+        _routePointsByTripId.addAll(routePointsByTrip);
+        _nextTripsCursor = result['nextCursor'] as String?;
+        _hasMoreTrips = result['hasMore'] as bool? ?? false;
+        _isLoadingMoreTrips = false;
+      });
+    } catch (e) {
+      debugPrint('Failed to load more trips: $e');
+      if (!mounted) return;
+      setState(() {
+        _isLoadingMoreTrips = false;
+      });
+    }
+  }
 
   Future<void> _completeCurrentStop(String tripId) async {
     final stops = _tripStopsByTripId[tripId] ?? [];
@@ -268,8 +355,7 @@ class _TripsScreenState extends State<TripsScreen> {
       final results = await Future.wait([
         _marketplaceRepository.fetchLoadOffers(),
         _marketplaceRepository.fetchEnRouteLoads(),
-        _marketplaceRepository.fetchDriverBids(
-            driverId: DriverSession.driverId),
+        _marketplaceRepository.fetchDriverBids(),
       ]);
 
       final standardLoads = results[0] as List<LoadOffer>;
@@ -309,6 +395,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
     if (SupabaseConfig.isConfigured && _bidChannel != null) {
       Supabase.instance.client.removeChannel(_bidChannel!);
     }
@@ -558,7 +645,6 @@ class _TripsScreenState extends State<TripsScreen> {
                       try {
                         final bid = await _marketplaceRepository.submitBid(
                           loadId: loadId,
-                          driverId: DriverSession.driverId,
                           amount: amount,
                         );
                         if (!context.mounted) return;
@@ -720,6 +806,9 @@ class _TripsScreenState extends State<TripsScreen> {
                 ),
               ),
 
+              if (_isOfflineTripsData)
+                _OfflineTripsBanner(savedAt: _offlineTripsSavedAt),
+
               // Trips List
               Expanded(
                 child: RefreshIndicator(
@@ -772,12 +861,20 @@ class _TripsScreenState extends State<TripsScreen> {
                                   ],
                                 )
                               : ListView.builder(
+                                  controller: _scrollController,
                                   physics:
                                       const AlwaysScrollableScrollPhysics(),
                                   padding: const EdgeInsets.all(12),
-                                  itemCount: trips.length,
-                                  itemBuilder: (context, index) =>
-                                      _buildTripCard(context, trips[index]),
+                                  itemCount: trips.length + (_hasMoreTrips && trips.isNotEmpty ? 1 : 0),
+                                  itemBuilder: (context, index) {
+                                    if (index == trips.length) {
+                                      return const Padding(
+                                        padding: EdgeInsets.symmetric(vertical: 16.0),
+                                        child: Center(child: CircularProgressIndicator()),
+                                      );
+                                    }
+                                    return _buildTripCard(context, trips[index]);
+                                  },
                                 ),
                 ),
               ),
@@ -876,7 +973,7 @@ class _TripsScreenState extends State<TripsScreen> {
           ),
           boxShadow: [
             BoxShadow(
-              color: TruxifyColors.accent.withOpacity(0.06),
+              color: TruxifyColors.accent.withValues(alpha: 0.06),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -1079,6 +1176,24 @@ class _TripsScreenState extends State<TripsScreen> {
                 ),
                 width: 12,
                 height: 12,
+                onTap: () {
+                  final mapPoint = RouteMapPoint(
+                    id: point['id']?.toString() ?? '',
+                    title: (point['label'] ?? point['title'] ?? 'Stop').toString(),
+                    subtitle: (point['address'] ?? point['subtitle'] ?? '').toString(),
+                    details: (point['details'] ?? '').toString(),
+                    progress: (point['progress'] as num?)?.toDouble() ?? 0.0,
+                    claimed: point['is_claimed'] == true,
+                    icon: Icons.place,
+                    latitude: (point['latitude'] as num).toDouble(),
+                    longitude: (point['longitude'] as num).toDouble(),
+                    loadOfferId: point['load_offer_id']?.toString(),
+                  );
+                  Navigator.of(context).pushNamed(
+                    AppRoutes.loadPointDetail,
+                    arguments: mapPoint,
+                  );
+                },
                 child: Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
@@ -1186,7 +1301,7 @@ class _MarketplaceBody extends StatelessWidget {
                 const SizedBox(height: 14),
                 Text('Could not load marketplace. Pull down to retry.',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                      color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                     )),
               ],
             ),
@@ -1492,6 +1607,60 @@ class _BidBottomSheetState extends State<_BidBottomSheet> {
             label: 'Cancel',
             onPressed: _submitting ? null : () => Navigator.of(context).pop(),
             color: TruxifyColors.secondaryText,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OfflineTripsBanner extends StatelessWidget {
+  const _OfflineTripsBanner({required this.savedAt});
+
+  final DateTime? savedAt;
+
+  String _formatSavedAt(DateTime time) {
+    final now = DateTime.now();
+    final diff = now.difference(time);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final label = savedAt != null
+        ? 'Offline mode — showing trips saved ${_formatSavedAt(savedAt!)}'
+        : 'Offline mode — showing your last saved trips';
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark
+            ? TruxifyColors.darkSecondaryBackground
+            : TruxifyColors.errorLight,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isDark ? TruxifyColors.darkBorder : TruxifyColors.border,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.cloud_off_rounded,
+              size: 18, color: TruxifyColors.adaptiveSecondaryText(context)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: GoogleFonts.dmSans(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: TruxifyColors.adaptiveSecondaryText(context),
+              ),
+            ),
           ),
         ],
       ),

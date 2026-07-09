@@ -106,9 +106,24 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
       return;
     }
 
+    final weight = double.tryParse(widget.draft.weightTonnes);
+    if (weight == null || weight <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid weight. Please enter a valid weight.')),
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
 
     try {
+      final pickupDate = widget.draft.pickupDate;
+      final pickupTime = pickupDate != null
+          ? '${pickupDate.hour.toString().padLeft(2, '0')}:'
+              '${pickupDate.minute.toString().padLeft(2, '0')}'
+          : widget.draft.dateLabel;
+
       final orderId = await _orderService.createOrder(
         pickupAddress: widget.draft.pickup,
         dropAddress: _selectedAddress?.fullAddress ?? widget.draft.drop,
@@ -116,9 +131,10 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         pickupLng: widget.draft.pickupLng!,
         dropLat: finalDropLat,
         dropLng: finalDropLng,
-        pickupTime: widget.draft.dateLabel,
+        pickupTime: pickupTime,
+        pickupDate: pickupDate,
         goodsType: widget.draft.goodsType,
-        weightTonnes: double.tryParse(widget.draft.weightTonnes) ?? 0,
+        weightTonnes: weight,
         paymentMethodId: _selectedPayment?.id,
       );
 

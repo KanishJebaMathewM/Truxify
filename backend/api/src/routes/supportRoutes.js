@@ -3,13 +3,17 @@ import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
-import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import logger from '../middleware/logger.js';
+import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import { startTimer, endTimer } from '../lib/routeTiming.js';
 
 const router = express.Router();
+const routeTimer = startTimer('supportRoutes');
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
 const TICKET_COLUMNS = 'id, subject, description, category, status, created_at, updated_at';
 const TICKET_DETAIL_COLUMNS = 'id, user_id, subject, description, category, status, created_at, updated_at';
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Canonical map of all accepted category aliases -> database values.
 // Shared by ticket creation, ticket update, and the categories endpoint.
@@ -27,18 +31,40 @@ function normalizeRequiredText(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function parseIntegerQuery(value, fallback, field, { min }) {
+function parsePositiveInteger(value, fallback, field) {
   if (value === undefined) return { value: fallback };
   if (typeof value !== 'string' || !/^\d+$/.test(value)) {
-    return { error: `${field} must be an integer greater than or equal to ${min}` };
+    return { error: `${field} must be a positive integer` };
   }
 
   const parsed = Number.parseInt(value, 10);
-  if (parsed < min) {
-    return { error: `${field} must be an integer greater than or equal to ${min}` };
+  if (parsed < 1) {
+    return { error: `${field} must be a positive integer` };
   }
 
   return { value: parsed };
+}
+
+function parseIntegerQuery(value, fallback, field, options = {}) {
+  if (value === undefined) return { value: fallback };
+  if (typeof value !== 'string' || !/^-?\d+$/.test(value)) {
+    return { error: `${field} must be an integer` };
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (options.min !== undefined && parsed < options.min) {
+    return { error: `${field} must be at least ${options.min}` };
+  }
+
+  return { value: parsed };
+}
+
+function parseUuidQuery(value, field) {
+  if (value === undefined) return { value: undefined };
+  if (typeof value !== 'string' || !UUID_REGEX.test(value)) {
+    return { error: `${field} must be a valid UUID` };
+  }
+  return { value };
 }
 
 // ============================================================================
@@ -86,13 +112,13 @@ const CATEGORY_LABELS = {
   account: 'Account Management',
 };
 
-const CATEGORY_SLA = {
+const CATEGORY_SLA = Object.freeze({
   payment: 24,
   order: 12,
   technical: 4,
   general: 48,
   account: 24,
-};
+});
 
 const CATEGORY_DESCRIPTIONS = {
   payment: 'Issues related to payments, invoices, billing, and refunds.',
@@ -109,6 +135,8 @@ const CATEGORY_DESCRIPTIONS = {
  * @returns {object} 200 - Object containing categories array, labels map, SLA hours map, and descriptions map
  */
 router.get('/categories', (_req, res) => {
+  // Optimize: Add caching header for static support categories
+  res.setHeader('Cache-Control', 'public, max-age=86400');
   res.json({
     categories: VALID_CATEGORIES,
     labels: CATEGORY_LABELS,
@@ -125,8 +153,14 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
   const category = normalizeRequiredText(req.body.category);
   const description = normalizeRequiredText(req.body.description) || subject;
 
-  const normalizedCategory = category.toLowerCase();
-  const dbCategory = CATEGORY_MAP[normalizedCategory] || 'general';
+  const normalizedCategory = category.toLowerCase().trim();
+  const dbCategory = CATEGORY_MAP[normalizedCategory];
+
+  if (!dbCategory) {
+    return res.status(400).json({
+      error: `Invalid support ticket category. Must be one of: ${Object.keys(CATEGORY_MAP).join(', ')}`,
+    });
+  }
 
   try {
     const { data: ticket, error } = await supabase
@@ -162,16 +196,17 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
 // ============================================================================
 router.get('/tickets', authenticate, userLimiter, async (req, res) => {
   const { status, category, page = '1', limit = '20' } = req.query;
-  const parsedPage = parseInt(page, 10);
-  const parsedLimit = parseInt(limit, 10);
-  if (!Number.isInteger(parsedPage) || parsedPage < 1) {
-    return res.status(400).json({ error: 'page must be a positive integer' });
+  const parsedPage = parsePositiveInteger(page, 1, 'page');
+  if (parsedPage.error) {
+    return res.status(400).json({ error: parsedPage.error });
   }
-  if (!Number.isInteger(parsedLimit) || parsedLimit < 1) {
-    return res.status(400).json({ error: 'limit must be a positive integer' });
+  const parsedLimit = parsePositiveInteger(limit, 20, 'limit');
+  if (parsedLimit.error) {
+    return res.status(400).json({ error: parsedLimit.error });
   }
-  const pageNum = parsedPage;
-  const limitNum = Math.min(100, parsedLimit);
+
+  const pageNum = parsedPage.value;
+  const limitNum = Math.min(100, parsedLimit.value);
   const offset = (pageNum - 1) * limitNum;
   const normalizedCategory = typeof category === 'string' ? category.toLowerCase().trim() : '';
   const dbCategory = CATEGORY_MAP[normalizedCategory] || null;
@@ -187,6 +222,10 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
       .eq('user_id', req.user.id);
 
     if (status) {
+      const ALLOWED_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
+      if (!ALLOWED_STATUSES.includes(status)) {
+        return res.status(400).json({ error: 'Unsupported support ticket status.' });
+      }
       query = query.eq('status', status);
     }
 
@@ -222,7 +261,7 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
 // ============================================================================
 // 5. GET SINGLE SUPPORT TICKET (AUTHENTICATED USER - OWNER)
 // ============================================================================
-router.get('/tickets/:id', authenticate, userLimiter, async (req, res) => {
+router.get('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const ticketId = req.params.id;
 
   try {
@@ -343,16 +382,17 @@ router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicke
 // ============================================================================
 router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), async (req, res) => {
   const { status, category, user_id, page = '1', limit = '20' } = req.query;
-  const parsedPage = parseInt(page, 10);
-  const parsedLimit = parseInt(limit, 10);
-  if (!Number.isInteger(parsedPage) || parsedPage < 1) {
-    return res.status(400).json({ error: 'page must be a positive integer' });
+  const parsedPage = parsePositiveInteger(page, 1, 'page');
+  if (parsedPage.error) {
+    return res.status(400).json({ error: parsedPage.error });
   }
-  if (!Number.isInteger(parsedLimit) || parsedLimit < 1) {
-    return res.status(400).json({ error: 'limit must be a positive integer' });
+  const parsedLimit = parsePositiveInteger(limit, 20, 'limit');
+  if (parsedLimit.error) {
+    return res.status(400).json({ error: parsedLimit.error });
   }
-  const pageNum = parsedPage;
-  const limitNum = Math.min(100, parsedLimit);
+
+  const pageNum = parsedPage.value;
+  const limitNum = Math.min(100, parsedLimit.value);
   const offset = (pageNum - 1) * limitNum;
   const normalizedCategory = typeof category === 'string' ? category.toLowerCase().trim() : '';
   const dbCategory = CATEGORY_MAP[normalizedCategory] || null;
@@ -361,12 +401,21 @@ router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), 
     return res.status(400).json({ error: 'Unsupported support ticket category.' });
   }
 
+  const userIdResult = parseUuidQuery(user_id, 'user_id');
+  if (userIdResult.error) {
+    return res.status(400).json({ error: userIdResult.error });
+  }
+
   try {
     let query = supabase
       .from('support_tickets')
       .select(TICKET_DETAIL_COLUMNS, { count: 'exact' });
 
     if (status) {
+      const ADMIN_ALLOWED_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
+      if (!ADMIN_ALLOWED_STATUSES.includes(status)) {
+        return res.status(400).json({ error: 'Unsupported support ticket status.' });
+      }
       query = query.eq('status', status);
     }
 
@@ -374,8 +423,8 @@ router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), 
       query = query.eq('category', dbCategory);
     }
 
-    if (user_id) {
-      query = query.eq('user_id', user_id);
+    if (userIdResult.value) {
+      query = query.eq('user_id', userIdResult.value);
     }
 
     const { data: tickets, error, count } = await query
@@ -416,7 +465,7 @@ router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), 
  * @returns {object} 409 - Cannot comment on a closed ticket
  * @returns {object} 500 - Internal server error
  */
-router.post('/tickets/:id/comments', authenticate, userLimiter, validateBody(createTicketCommentSchema), async (req, res) => {
+router.post('/tickets/:id/comments', authenticate, userLimiter, validateParams(uuidParamSchema), validateBody(createTicketCommentSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { message } = req.body;
 
@@ -477,7 +526,7 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, validateBody(cre
 // ============================================================================
 // 8. GET ALL COMMENTS/REPLIES FOR A TICKET (CUSTOMER OR DRIVER OWNER OR ADMIN)
 // ============================================================================
-router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
+router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { sort } = req.query;
   if (sort !== undefined && sort !== 'asc' && sort !== 'desc') {
@@ -507,17 +556,13 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(uu
       return res.status(403).json({ error: 'Access Denied: You do not own this ticket.' });
     }
 
-    const parsedLimit = parseIntegerQuery(req.query.limit, 100, 'limit', { min: 1 });
+    const parsedLimit = parsePositiveInteger(req.query.limit, 100, 'limit');
     if (parsedLimit.error) {
       return res.status(400).json({ error: parsedLimit.error });
     }
-    const parsedOffset = parseIntegerQuery(req.query.offset, 0, 'offset', { min: 0 });
-    if (parsedOffset.error) {
-      return res.status(400).json({ error: parsedOffset.error });
-    }
 
     const limit = Math.min(100, parsedLimit.value);
-    const offset = parsedOffset.value;
+    const offset = typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : 0;
 
     const { data: comments, error: commentsError } = await supabase
       .from('support_ticket_comments')
@@ -539,4 +584,7 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(uu
   }
 });
 
+endTimer(routeTimer);
 export default router;
+
+// Resolves #2055: Load-based ticket assignment

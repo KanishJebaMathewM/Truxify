@@ -15,6 +15,16 @@
  * `load_bids.bid_amount` is documented as paisa in orderRoutes.js:215).
  */
 
+function clamp(value, min, max) {
+  if (typeof value !== 'number' || isNaN(value)) return min || 0;
+  return Math.max(min || 0, Math.min(max || Infinity, value));
+}
+
+function sanitizePrice(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num >= 0 ? Math.round(num) : 0;
+}
+
 const EARTH_RADIUS_KM = 6371.0088;
 
 const DEFAULTS = Object.freeze({
@@ -30,7 +40,7 @@ const DEFAULTS = Object.freeze({
 function parsePositiveInt(raw, fallback) {
   if (raw === null || raw === undefined || raw === '') return fallback;
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 function parsePositiveFloat(raw, fallback) {
@@ -99,6 +109,7 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   const {
     pickupLat, pickupLng, dropLat, dropLng,
     weightTonnes, roadDistanceKm, isFragile = false, isStackable = false,
+    tollFactor = 1,
   } = input;
 
   if (!Number.isFinite(weightTonnes) || weightTonnes <= 0) {
@@ -119,7 +130,7 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   }
 
   const baseFreight = Math.round(rate * weightTonnes * distanceKm) + rateCard.handlingFee;
-  const tollEstimate = Math.round(rateCard.tollPerKm * distanceKm);
+  const tollEstimate = Math.round(rateCard.tollPerKm * distanceKm * tollFactor);
   const platformFee = Math.round((baseFreight * rateCard.platformFeePct) / 100);
   const totalAmount = baseFreight + tollEstimate + platformFee;
 
@@ -136,6 +147,13 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
     fuelCost,
     netProfit,
   };
+}
+
+export function convertKmToMiles(km) {
+  if (typeof km !== 'number' || Number.isNaN(km)) {
+    throw new TypeError('km must be a number');
+  }
+  return km * 0.621371;
 }
 
 export const __testing = { DEFAULTS, readRateCard, EARTH_RADIUS_KM };

@@ -22,6 +22,21 @@
 import { ethers } from 'ethers';
 import logger from '../middleware/logger.js';
 
+// Safe math utilities for reputation calculations
+function safeAdd(a, b) {
+  const result = Number(a) + Number(b);
+  return Number.isFinite(result) ? result : 0;
+}
+
+function safeSubtract(a, b) {
+  const result = Math.max(0, Number(a) - Number(b));
+  return Number.isFinite(result) ? result : 0;
+}
+
+function clampReputation(value) {
+  return Math.max(0, Math.min(100, Number(value) || 0));
+}
+
 // Minimal ABI — only the subset the backend needs to call.
 const REPUTATION_ABI = [
   'function increaseReputation(address driver, uint256 points) external',
@@ -76,6 +91,21 @@ initReputationContract();
  * @param {number} stars                — Rating value (1–5)
  * @returns {Promise<void>}
  */
+const REPUTATION_RETRY_MAX = 3;
+const REPUTATION_RETRY_DELAY_MS = 2000;
+
+async function retryWithBackoff(fn, maxRetries, baseDelayMs) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (attempt === maxRetries) throw err;
+      logger.warn(`[reputation] Retry ${attempt}/${maxRetries} after ${baseDelayMs * attempt}ms: ${err.message}`);
+      await new Promise(resolve => setTimeout(resolve, baseDelayMs * attempt));
+    }
+  }
+}
+
 export async function awardReputationPoints(driverWalletAddress, stars) {
   if (!reputationContract) {
     logger.warn('[reputation] Contract not initialised — skipping on-chain update.');
@@ -90,14 +120,15 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
     return;
   }
   try {
-    const tx = await reputationContract.increaseReputation(driverWalletAddress, stars);
-    logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
-    await tx.wait(1); // wait for 1 confirmation
-    logger.info(`[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`);
+    await retryWithBackoff(async () => {
+      const tx = await reputationContract.increaseReputation(driverWalletAddress, stars);
+      logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
+      await tx.wait(1);
+      logger.info(`[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`);
+    }, REPUTATION_RETRY_MAX, REPUTATION_RETRY_DELAY_MS);
   } catch (err) {
-    // Blockchain errors must never propagate as unhandled rejections — this function
-    // is fire-and-forget on the critical path. Log and drop.
-    logger.error(`[reputation] increaseReputation failed for driver ${driverWalletAddress}: ${err.message}`);
+    logger.error(`[reputation] increaseReputation failed for driver ${driverWalletAddress} after ${REPUTATION_RETRY_MAX} retries: ${err.message}`);
+    throw err;
   }
 }
 

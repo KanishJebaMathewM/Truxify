@@ -1694,6 +1694,11 @@ as $$
 declare
   v_new_avg numeric(3,2);
 begin
+  -- Step 0: Validate star rating range
+  if p_stars < 1 or p_stars > 5 then
+    raise exception 'Star rating must be between 1 and 5, got %', p_stars;
+  end if;
+
   -- Step 1: Insert the rating
   insert into ratings (order_display_id, customer_id, driver_id, stars, comment)
   values (p_order_display_id, p_customer_id, p_driver_id, p_stars, p_comment);

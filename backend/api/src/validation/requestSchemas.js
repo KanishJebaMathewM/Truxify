@@ -1,5 +1,22 @@
 import { z } from 'zod';
 
+// Generic field validation helpers
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function isValidPhone(phone) {
+  return /^\+?[\d\s\-()]{7,15}$/.test(phone);
+}
+
+function isValidUuid(str) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+}
+
+function isValidNumberPlate(str) {
+  return /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/.test(str);
+}
+
 const coerceNumber = (schema) => z.preprocess(
   (val) => {
     if (val === undefined || val === null || val === '') {
@@ -155,6 +172,13 @@ export const registerDeviceSchema = z.object({
   platform: z.enum(['android', 'ios', 'web'], {
     invalid_type_error: 'platform must be one of: android, ios, web',
   }).default('android'),
+  metadata: z.record(z.any()).optional(),
+}).strict();
+
+export const unregisterDeviceSchema = z.object({
+  fcmToken: z.string()
+    .min(10, { message: 'fcmToken must be at least 10 characters' })
+    .max(4096, { message: 'fcmToken is too long' }),
 }).strict();
 
 export const updateFcmTokenSchema = z.object({
@@ -205,7 +229,9 @@ export const driverStatementSchema = z.object({
 const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
 
 export const otpSendSchema = z.object({
-  phone: z.string().trim().min(10).max(20),
+  phone: z.string().trim().min(10).max(20).refine(isValidPhone, {
+    message: 'Phone must be a valid number (digits, optional +, spaces/dashes/parens)',
+  }),
 }).strict();
 
 export const registerTruckSchema = z.object({
@@ -227,4 +253,5 @@ export const updateProfileSchema = z.object({
   language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').optional(),
   dark_mode: z.boolean().optional(),
   is_online: z.boolean().optional(),
+  verification_status: z.enum(['pending', 'verified', 'rejected']).optional(),
 }).strict();

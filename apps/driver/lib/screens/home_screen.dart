@@ -1,4 +1,3 @@
-// ignore_for_file: unused_element, unused_field
 
 import 'dart:async';
 import 'dart:convert';
@@ -8,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:truxify_driver/widgets/slide_to_confirm_button.dart';
@@ -29,13 +29,12 @@ import 'destination_picker_screen.dart';
 import '../widgets/pulsing_location_dot.dart';
 
 class HomeScreen extends StatefulWidget {
-  HomeScreen({
+  const HomeScreen({
     super.key,
-    MarketplaceRepository? marketplaceRepo,
-    DriverEarningsService? earningsService,
+    required this.marketplaceRepo,
+    required this.earningsService,
     this.mockLocationText,
-  }) : marketplaceRepo = marketplaceRepo ?? MarketplaceRepository(),
-       earningsService = earningsService ?? DriverEarningsService();
+  });
 
   final MarketplaceRepository marketplaceRepo;
   final DriverEarningsService earningsService;
@@ -46,6 +45,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  bool _isOffline = false;
   // Null until GPS resolves — no hardcoded coordinates anywhere
   ll.LatLng? _currentLocation;
 
@@ -57,6 +57,63 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<List<ll.LatLng>>? _routeFuture;
   DestinationPickResult? _destination;
   bool _isSearchExpanded = false;
+
+  List<Marker>? _cachedMarkers;
+  ll.LatLng? _lastDest;
+  ll.LatLng? _lastLoc;
+  int _lastCheckpointsCount = -1;
+
+  List<Marker> _getMarkers(List<ll.LatLng> checkpoints) {
+    if (_lastDest == _destination?.point &&
+        _lastLoc == _currentLocation &&
+        _lastCheckpointsCount == checkpoints.length &&
+        _cachedMarkers != null) {
+      return _cachedMarkers!;
+    }
+
+    _lastDest = _destination?.point;
+    _lastLoc = _currentLocation;
+    _lastCheckpointsCount = checkpoints.length;
+
+    _cachedMarkers = [
+      if (_currentLocation != null)
+        Marker(
+          point: _currentLocation!,
+          width: 54,
+          height: 54,
+          alignment: Alignment.center,
+          child: const RouteMarker(
+            icon: Icons.my_location_rounded,
+            fillColor: TruxifyColors.success,
+            shadowColor: TruxifyColors.success,
+          ),
+        ),
+      ...checkpoints.asMap().entries.map(
+            (entry) => Marker(
+              point: entry.value,
+              width: 34,
+              height: 34,
+              alignment: Alignment.center,
+              child: RouteCheckpointMarker(
+                  key: ValueKey('chk_${entry.key}'), label: '${entry.key + 1}'),
+            ),
+          ),
+      if (_destination != null)
+        Marker(
+          point: _destination!.point,
+          width: 54,
+          height: 54,
+          alignment: Alignment.center,
+          child: const RouteMarker(
+            icon: Icons.location_on_rounded,
+            fillColor: TruxifyColors.errorRed,
+            shadowColor: TruxifyColors.errorRed,
+          ),
+        ),
+    ];
+    return _cachedMarkers!;
+  }
+
   bool _isDestinationExpanded = false;
   bool _isOnline = true;
   bool _isRefreshingLocation = false;
@@ -85,6 +142,36 @@ class _HomeScreenState extends State<HomeScreen> {
   List<TripRecord> _tripHistory = [];
   bool _isLoadingMetrics = true;
   String? _metricsError;
+  String? _networkError;
+  int _retryCount = 0;
+
+  String _sanitizeCoordinate(dynamic coord) {
+    if (coord == null) return '0.0';
+    if (coord is double) return coord.toStringAsFixed(6);
+    if (coord is int) return coord.toStringAsFixed(6);
+    return (double.tryParse(coord.toString()) ?? 0.0).toStringAsFixed(6);
+  }
+
+  void _clearNetworkError() {
+    if (_networkError != null) {
+      setState(() => _networkError = null);
+    }
+  }
+
+  Future<void> _withRetry(Future<void> Function() fn) async {
+    try {
+      _retryCount = 0;
+      await fn();
+    } catch (e) {
+      _retryCount++;
+      if (_retryCount <= 3) {
+        await Future.delayed(Duration(seconds: _retryCount));
+        await fn();
+      } else {
+        setState(() => _networkError = 'Operation failed after $_retryCount retries');
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -175,8 +262,8 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       final results = await Future.wait([
         _earningsService.fetchTodayEarningsSummary().catchError((_) => null),
-        _earningsService.fetchDriverStats().catchError((_) => null),
-        _tripService.fetchTripHistory(limit: 50).catchError((_) => null),
+        _earningsService.fetchDriverStats().catchError((_) => <String, dynamic>{}),
+        _tripService.fetchTripHistory(limit: 50).catchError((_) => <String, dynamic>{'trips': []}),
       ]);
 
       if (!mounted) return;
@@ -197,7 +284,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       setState(() {
         _todayEarnings = results[0] as EarningsDailyModel?;
-        final stats = results[1] as Map<String, dynamic>;
+        final stats = results[1] as Map<String, dynamic>? ?? <String, dynamic>{};
         _driverRating = (stats['rating'] as num?)?.toDouble();
         _tripHistory = historyList;
         _isLoadingMetrics = false;
@@ -299,7 +386,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
 
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
       );
 
       debugPrint(
@@ -435,23 +522,37 @@ class _HomeScreenState extends State<HomeScreen> {
             ? '$truckPlate · $truckModel'
             : (activeTrip['truck_label'] as String?) ?? 'Truck assigned';
 
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('cached_trip_id', tripId);
+        await prefs.setString('cached_truck_label', truckLabel);
+        await prefs.setString('cached_distance', (activeTrip['distance'] as String?) ?? (activeTrip['trip_distance'] as String?) ?? '');
+        await prefs.setString('cached_duration', (activeTrip['duration'] as String?) ?? (activeTrip['trip_duration'] as String?) ?? '');
+        await prefs.setString('cached_payout', (activeTrip['estimated_payout'] as String?) ?? (activeTrip['price'] as String?) ?? (activeTrip['payout'] as String?) ?? '');
+        
+        final isTripStarted = stops.any((s) => s['is_completed'] == true || s['is_current'] == true);
+        await prefs.setBool('cached_is_started', isTripStarted);
+
         setState(() {
+          _isOffline = false;
           _activeTripId = tripId;
           _activeTruckLabel = truckLabel;
-          _activeTripDistance = (activeTrip['distance'] as String?) ??
-              (activeTrip['trip_distance'] as String?) ?? '';
-          _activeTripDuration = (activeTrip['duration'] as String?) ??
-              (activeTrip['trip_duration'] as String?) ?? '';
-          _activeTripPayout = (activeTrip['estimated_payout'] as String?) ??
-              (activeTrip['price'] as String?) ??
-              (activeTrip['payout'] as String?) ?? '';
-          _isTripStarted = stops.any((s) => s['is_completed'] == true || s['is_current'] == true);
+          _activeTripDistance = prefs.getString('cached_distance') ?? '';
+          _activeTripDuration = prefs.getString('cached_duration') ?? '';
+          _activeTripPayout = prefs.getString('cached_payout') ?? '';
+          _isTripStarted = isTripStarted;
         });
         
         if (stops.isNotEmpty) {
           final lastStop = stops.last;
           final address = lastStop['drop_location'] as String;
+          await prefs.setString('cached_address', address);
+          
           final dropPoint = await GeocodeService.resolvePlace(address);
+          if (dropPoint != null) {
+            await prefs.setDouble('cached_drop_lat', dropPoint.latitude);
+            await prefs.setDouble('cached_drop_lng', dropPoint.longitude);
+          }
+          
           if (dropPoint != null && mounted) {
             setState(() {
               _destination = DestinationPickResult(address: address, point: dropPoint);
@@ -463,8 +564,11 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         }
       } else {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('cached_trip_id');
         if (mounted) {
           setState(() {
+            _isOffline = false;
             _activeTripId = null;
             _isTripStarted = false;
             _destination = null;
@@ -474,6 +578,27 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       debugPrint('Error loading active trip: $e');
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString('cached_trip_id') != null && mounted) {
+        setState(() {
+          _isOffline = true;
+          _activeTripId = prefs.getString('cached_trip_id');
+          _activeTruckLabel = prefs.getString('cached_truck_label') ?? '';
+          _activeTripDistance = prefs.getString('cached_distance') ?? '';
+          _activeTripDuration = prefs.getString('cached_duration') ?? '';
+          _activeTripPayout = prefs.getString('cached_payout') ?? '';
+          _isTripStarted = prefs.getBool('cached_is_started') ?? false;
+        });
+        final address = prefs.getString('cached_address');
+        final lat = prefs.getDouble('cached_drop_lat');
+        final lng = prefs.getDouble('cached_drop_lng');
+        if (address != null && lat != null && lng != null) {
+          final dropPoint = ll.LatLng(lat, lng);
+          setState(() {
+            _destination = DestinationPickResult(address: address, point: dropPoint);
+          });
+        }
+      }
     }
   }
 
@@ -639,9 +764,34 @@ class _HomeScreenState extends State<HomeScreen> {
               top: 12,
               child: SafeArea(
                 bottom: false,
-                child: _isTripStarted
-                    ? _buildActiveNavigationHeader(context)
-                    : _buildSearchCard(context),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_isOffline)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: TruxifyColors.errorRed,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.cloud_off_rounded, color: Colors.white, size: 16),
+                            const SizedBox(width: 8),
+                            Text(
+                              'You are offline. Using cached trip details.',
+                              style: GoogleFonts.dmSans(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    _isTripStarted
+                        ? _buildActiveNavigationHeader(context)
+                        : _buildSearchCard(context),
+                  ],
+                ),
               ),
             ),
 
@@ -667,7 +817,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       borderRadius: BorderRadius.circular(14),
                       boxShadow: [
                         BoxShadow(
-                          color: TruxifyColors.accent.withOpacity(0.25),
+                          color: TruxifyColors.accent.withValues(alpha: 0.25),
                           blurRadius: 12,
                           offset: const Offset(0, 4),
                         ),
@@ -709,7 +859,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 overflow: TextOverflow.ellipsis,
                                 style: GoogleFonts.dmSans(
                                   fontSize: 10,
-                                  color: Colors.white.withOpacity(0.85),
+                                  color: Colors.white.withValues(alpha: 0.85),
                                 ),
                               ),
                             ],
@@ -750,7 +900,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           },
                           child: Icon(
                             Icons.close_rounded,
-                            color: Colors.white.withOpacity(0.7),
+                            color: Colors.white.withValues(alpha: 0.7),
                             size: 20,
                           ),
                         ),
@@ -818,7 +968,7 @@ class _HomeScreenState extends State<HomeScreen> {
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 18,
             offset: const Offset(0, 4),
           ),
@@ -1018,45 +1168,12 @@ class _HomeScreenState extends State<HomeScreen> {
                   strokeWidth: 5.0,
                   color: TruxifyColors.accent,
                   borderStrokeWidth: 2.0,
-                  borderColor: Colors.white.withOpacity(0.8),
+                  borderColor: Colors.white.withValues(alpha: 0.8),
                 ),
               ],
             ),
             MarkerLayer(
-              markers: [
-                Marker(
-                  point: _currentLocation!,
-                  width: 54,
-                  height: 54,
-                  alignment: Alignment.center,
-                  child: const RouteMarker(
-                    icon: Icons.my_location_rounded,
-                    fillColor: TruxifyColors.success,
-                    shadowColor: TruxifyColors.success,
-                  ),
-                ),
-                ...checkpoints.asMap().entries.map(
-                      (entry) => Marker(
-                        point: entry.value,
-                        width: 34,
-                        height: 34,
-                        alignment: Alignment.center,
-                        child:
-                            RouteCheckpointMarker(label: '${entry.key + 1}'),
-                      ),
-                    ),
-                Marker(
-                  point: _destination!.point,
-                  width: 54,
-                  height: 54,
-                  alignment: Alignment.center,
-                  child: const RouteMarker(
-                    icon: Icons.location_on_rounded,
-                    fillColor: TruxifyColors.errorRed,
-                    shadowColor: TruxifyColors.errorRed,
-                  ),
-                ),
-              ],
+              markers: _getMarkers(checkpoints),
             ),
           ],
         );
@@ -1111,7 +1228,7 @@ class _HomeScreenState extends State<HomeScreen> {
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 18,
             offset: const Offset(0, 6),
           ),
@@ -1240,7 +1357,7 @@ class _HomeScreenState extends State<HomeScreen> {
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -1264,7 +1381,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: (_isOnline ? TruxifyColors.success : TruxifyColors.secondaryText).withOpacity(0.4),
+                          color: (_isOnline ? TruxifyColors.success : TruxifyColors.secondaryText).withValues(alpha: 0.4),
                           blurRadius: 6,
                           spreadRadius: 2,
                         ),
@@ -1285,7 +1402,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Switch(
                 value: _isOnline,
                 onChanged: (_) => _toggleOnlineState(),
-                activeColor: TruxifyColors.success,
+                activeThumbColor: TruxifyColors.success,
               ),
             ],
           ),
@@ -1480,7 +1597,7 @@ class _HomeScreenState extends State<HomeScreen> {
         border: Border.all(color: TruxifyColors.border),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
+            color: Colors.black.withValues(alpha: 0.08),
             blurRadius: 20,
             offset: const Offset(0, 4),
           ),
@@ -1572,7 +1689,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     setState(() => _isTripStarted = true);
                   }
                 } catch (e) {
-                  if (mounted) {
+                  if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('Failed to start trip: $e')),
                     );

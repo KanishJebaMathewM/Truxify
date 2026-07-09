@@ -8,6 +8,12 @@ if (!process.env.ML_API_KEY) {
     logger.warn('[ML] WARNING: ML_API_KEY is not set. ML features will be unavailable.');
 }
 
+function guardMlApiKey() {
+  if (!process.env.ML_API_KEY) {
+    throw new Error("[ML] ML_API_KEY is not configured. ML features are unavailable.");
+  }
+}
+
 /**
  * Utility: build headers with optional API key
  */
@@ -34,8 +40,8 @@ async function handleResponse(response) {
 
     try {
         return JSON.parse(text);
-    } catch {
-        throw new Error('[ML] Invalid JSON response from ML engine');
+    } catch (err) {
+        throw new Error(`[ML] Invalid JSON response from ML engine: ${err.message}`);
     }
 }
 
@@ -56,6 +62,7 @@ function getBaseUrl() {
  * @returns {Promise<object>}
  */
 export async function predictDemand(features = {}) {
+  guardMlApiKey();
     const url = `${getBaseUrl()}/predict/demand`;
 
     const response = await fetch(url, {
@@ -80,7 +87,8 @@ export async function predictPrice({
     routeOrigin = '',
     routeDestination = '',
 } = {}) {
-    const url = `${getBaseUrl()}/predict`;
+  guardMlApiKey();
+    const url = `${getBaseUrl()}/predict/price`;
 
     const payload = {
         distance_km: distanceKm,

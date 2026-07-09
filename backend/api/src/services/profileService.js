@@ -1,4 +1,5 @@
-import { supabase } from '../config/db.js';
+import { supabase, redisClient } from '../config/db.js';
+import logger from '../middleware/logger.js';
 
 export async function getProfile(userId) {
   if (!supabase) {
@@ -43,4 +44,28 @@ export async function getDriverDetails(userId) {
 
   if (error) throw error;
   return data;
+}
+
+export async function createProfile(profileData) {
+  if (!supabase) throw new Error('Supabase client not configured');
+  const { data, error } = await supabase.from('profiles').insert(profileData).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateProfile(userId, updateData) {
+  if (!supabase) throw new Error('Supabase client not configured');
+  const { data, error } = await supabase.from('profiles').update(updateData).eq('id', userId).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function invalidateProfileCache(userId) {
+  if (redisClient) {
+    try {
+      await redisClient.del(`profile:${userId}`);
+    } catch (err) {
+      logger.error({ err }, 'Redis cache invalidation error');
+    }
+  }
 }

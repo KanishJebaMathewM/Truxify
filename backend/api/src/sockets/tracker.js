@@ -5,12 +5,71 @@ import logger from '../middleware/logger.js';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
+
+const TELEMETRY_SCHEMA = {
+  lat: { type: 'number', required: true, min: -90, max: 90 },
+  lng: { type: 'number', required: true, min: -180, max: 180 },
+  driverId: { type: 'string', required: true, minLen: 1 },
+  timestamp: { type: 'number', required: true },
+  speed: { type: 'number', required: false, min: 0, max: 200 },
+  heading: { type: 'number', required: false, min: 0, max: 360 },
+};
+
+function validateTelemetryPayload(data) {
+  const errors = [];
+  for (const [field, rules] of Object.entries(TELEMETRY_SCHEMA)) {
+    const value = data[field];
+    if (rules.required && (value === undefined || value === null)) {
+      errors.push(`${field} is required`);
+      continue;
+    }
+    if (value === undefined || value === null) continue;
+    if (rules.type === 'number' && (typeof value !== 'number' || isNaN(value))) {
+      errors.push(`${field} must be a valid number`);
+    }
+    if (rules.type === 'string' && typeof value !== 'string') {
+      errors.push(`${field} must be a string`);
+    }
+    if (rules.min !== undefined && value < rules.min) errors.push(`${field} must be >= ${rules.min}`);
+    if (rules.max !== undefined && value > rules.max) errors.push(`${field} must be <= ${rules.max}`);
+    if (rules.minLen !== undefined && String(value).length < rules.minLen) errors.push(`${field} is too short`);
+  }
+  return errors.length > 0 ? errors : null;
+}
+
+function sanitizeTelemetryData(data) {
+  const sanitized = {};
+  for (const [field, rules] of Object.entries(TELEMETRY_SCHEMA)) {
+    const value = data[field];
+    if (value !== undefined && value !== null) {
+      sanitized[field] = rules.type === 'number' ? Number(value) : String(value);
+    }
+  }
+  return sanitized;
+}
 
 let mongoDbOverride = null;
 const getMongoDb = () => mongoDbOverride || mongoDb;
 
+let _orderRepository = null;
+
 let telemetryDropCounter = 0;
-const RECOVERY_FILE_PATH = path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
+const RECOVERY_FILE_PATH = process.env.RECOVERY_FILE_PATH || path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
+
+function scrubPII(record) {
+  const scrubbed = { ...record };
+  if (scrubbed.driver_id) {
+    scrubbed.driver_id = 'scrubbed:' + crypto.createHash('sha256').update(scrubbed.driver_id).digest('hex').slice(0, 12);
+  }
+  if (typeof scrubbed.lat === 'number') {
+    scrubbed.lat = Math.round(scrubbed.lat * 100) / 100;
+  }
+  if (typeof scrubbed.lng === 'number') {
+    scrubbed.lng = Math.round(scrubbed.lng * 100) / 100;
+  }
+  return scrubbed;
+}
 
 // In-memory mapping of active client subscriptions
 const trackingSubscriptions = new Map();
@@ -29,11 +88,63 @@ const consecutiveDropCount = new Map();
 // =====================================================================
 // EXTRA STORAGE & BUFFER CONFIGURATIONS (#269)
 // =====================================================================
+class TelemetryRingBuffer {
+  constructor(capacity) {
+    this.capacity = capacity;
+    this.buffer = new Array(capacity);
+    this.head = 0;
+    this.tail = 0;
+    this.size = 0;
+  }
+
+  push(item) {
+    this.buffer[this.tail] = item;
+    this.tail = (this.tail + 1) % this.capacity;
+    if (this.size < this.capacity) {
+      this.size++;
+    } else {
+      this.head = (this.head + 1) % this.capacity;
+    }
+  }
+
+  toArray() {
+    if (this.size === 0) return [];
+    const result = new Array(this.size);
+    for (let i = 0; i < this.size; i++) {
+      result[i] = this.buffer[(this.head + i) % this.capacity];
+    }
+    return result;
+  }
+
+  prepend(items) {
+    if (!items || items.length === 0) return 0;
+    const available = this.capacity - this.size;
+    const toInsert = items.length > available ? items.slice(items.length - available) : items;
+    const dropped = items.length > available ? items.length - available : 0;
+    for (let i = toInsert.length - 1; i >= 0; i--) {
+      this.head = (this.head - 1 + this.capacity) % this.capacity;
+      this.buffer[this.head] = toInsert[i];
+      this.size++;
+    }
+    return dropped;
+  }
+
+  clear() {
+    this.head = 0;
+    this.tail = 0;
+    this.size = 0;
+  }
+
+  get length() {
+    return this.size;
+  }
+}
+
 const MAX_BUFFER_SIZE = 5000;
 const BUFFER_WARN_THRESHOLD = 0.5;
 const BUFFER_CRIT_THRESHOLD = 0.8;
 const BUFFER_MONITOR_INTERVAL_MS = 30000;
-let telemetryWriteBuffer = [];
+const telemetryWriteBuffer = new TelemetryRingBuffer(MAX_BUFFER_SIZE);
 let telemetryFlushBuffer = [];
 let currentFlushPromise = null;
 let flushMutex = false;
@@ -105,7 +216,8 @@ export function rejectWebSocketUpgrade(socket) {
 /**
  * Initialize WebSockets Server and bind event handlers
  */
-export function initWebSocketServer(server) {
+export function initWebSocketServer(server, orderRepository) {
+  _orderRepository = orderRepository;
   const wss = new WebSocketServer({ noServer: true });
   wsServer = wss;
 
@@ -138,12 +250,17 @@ export function initWebSocketServer(server) {
         ws.close(4003, 'BYPASS_AUTH is not allowed in production');
         return;
       }
+      const devToken = reqUrl.searchParams.get('dev_access_token');
+      if (!devToken || !process.env.DEV_ACCESS_TOKEN || devToken !== process.env.DEV_ACCESS_TOKEN) {
+        ws.close(4001, 'Unauthorized: Missing or invalid dev_access_token');
+        return;
+      }
       ws.driverId = reqUrl.searchParams.get('driver_id') || 'test_driver';
       ws.user = {
         id: reqUrl.searchParams.get('user_id') || ws.driverId,
         role: reqUrl.searchParams.get('user_role') || 'driver',
       };
-      logger.info(`🔓 WS Auth bypassed for driver: ${ws.driverId}`);
+      logger.warn({ event: 'WS_BYPASS_AUTH_USED', driverId: ws.driverId, role: ws.user.role }, 'WS Auth bypassed via DEV_ACCESS_TOKEN');
     } else {
       if (!token) {
         ws.close(4001, 'Unauthorized: No token provided');
@@ -237,7 +354,7 @@ export function initWebSocketServer(server) {
     });
 
     ws.on('message', (message) => {
-      handleTrackingMessage(ws, message);
+      handleTrackingMessage(ws, message, req);
     });
 
     ws.on('close', () => {
@@ -291,7 +408,7 @@ function isMessageRateLimited(ws) {
   return state.count > MAX_MSG_PER_SECOND;
 }
 
-export async function handleTrackingMessage(ws, message) {
+export async function handleTrackingMessage(ws, message, req) {
   if (isMessageRateLimited(ws)) {
     return;
   }
@@ -313,7 +430,7 @@ export async function handleTrackingMessage(ws, message) {
 
     switch (event) {
       case 'location_ping':
-        await handleLocationPing(ws, data);
+        await handleLocationPing(ws, data, req);
         break;
 
       case 'subscribe_tracking':
@@ -333,7 +450,7 @@ export async function handleTrackingMessage(ws, message) {
   }
 }
 
-export async function handleLocationPing(ws, data) {
+export async function handleLocationPing(ws, data, req) {
   const driver_id = ws.driverId;
 
   if (!driver_id) {
@@ -343,7 +460,7 @@ export async function handleLocationPing(ws, data) {
   const { driver_id: payloadDriverId, speed, bearing, device_timestamp } = data;
 
   if (payloadDriverId && payloadDriverId !== driver_id) {
-    const clientIp = ws.upgradeReq?.socket?.remoteAddress || 'unknown';
+    const clientIp = req ? getClientIp(req) : 'unknown';
     logger.error({
       event: 'SPOOFED_LOCATION_ATTEMPT',
       authenticatedDriver: driver_id,
@@ -438,22 +555,29 @@ export async function handleLocationPing(ws, data) {
     }
   }
 
-  // Resolve order details from Supabase
+  // Resolve order details from Supabase and verify driver ownership
   let orderUUID = data.orderId || data.order_id || null;
   let orderDisplayId = data.order_display_id || null;
 
-  if (supabase && (orderUUID || orderDisplayId)) {
+  if (_orderRepository && (orderUUID || orderDisplayId)) {
     try {
-      let query = supabase.from('orders').select('id, order_display_id');
-      if (orderUUID && orderUUID.includes('-')) {
-        query = query.eq('id', orderUUID);
-      } else if (orderDisplayId) {
-        query = query.eq('order_display_id', orderDisplayId);
-      } else {
-        query = query.eq('order_display_id', orderUUID);
-      }
-      const { data: order } = await query.maybeSingle();
+      const idToLookup = orderUUID || orderDisplayId;
+      const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
       if (order) {
+        // Verify the authenticated driver is assigned to this order
+        if (order.driver_id !== driver_id) {
+          logger.warn({
+            event: 'UNAUTHORIZED_ORDER_TRACKING',
+            driverId: driver_id,
+            orderId: order.id,
+            orderDisplayId: order.order_display_id,
+            assignedDriverId: order.driver_id,
+          }, 'Driver attempted to submit location for order they are not assigned to');
+          return ws.send(JSON.stringify({
+            error: 'Not authorized to track this order',
+            orderId: orderDisplayId || orderUUID,
+          }));
+        }
         orderUUID = order.id;
         orderDisplayId = order.order_display_id;
       }
@@ -464,11 +588,8 @@ export async function handleLocationPing(ws, data) {
 
   // Buffer write with capacity limit (always push to active buffer)
   if (telemetryWriteBuffer.length >= MAX_BUFFER_SIZE) {
-    const dropCount = Math.floor(MAX_BUFFER_SIZE * 0.1);
-    telemetryWriteBuffer.splice(0, dropCount);
-    telemetryTotalDropped += dropCount;
-    telemetryOverflowDropped += dropCount;
-    logger.warn(`[TRUXIFY BUFFER WARN] Telemetry buffer full: dropped ${dropCount} oldest records. Total dropped: ${telemetryTotalDropped}. Size: ${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}`);
+    telemetryTotalDropped++;
+    telemetryOverflowDropped++;
   }
   telemetryWriteBuffer.push({
     driver_id,
@@ -587,15 +708,19 @@ async function flushTelemetryBuffer() {
   if (flushMutex) return;
   flushMutex = true;
 
-  let recordsToFlush = [];
-  if (telemetryFlushBuffer.length > 0) {
-    recordsToFlush = [...telemetryFlushBuffer];
-    telemetryFlushBuffer = [...telemetryWriteBuffer];
-    telemetryWriteBuffer = [];
-  } else {
-    recordsToFlush = [...telemetryWriteBuffer];
-    telemetryWriteBuffer = [];
-  }
+  // Atomic buffer swap: take everything pending (retry queue first, then the
+  // active buffer) and reset both. Any ping that arrives while the insert is
+  // in flight lands in the fresh active buffer, and on failure the taken
+  // records are prepended back so oldest data retries first. Taking a merged
+  // snapshot (instead of aliasing the active buffer as the flush buffer)
+  // avoids re-queueing the same array twice on transient failures.
+  const recordsToFlush = telemetryFlushBuffer.length > 0
+    ? [...telemetryFlushBuffer, ...telemetryWriteBuffer.toArray()]
+    : telemetryWriteBuffer.toArray();
+  telemetryFlushBuffer = [];
+  telemetryWriteBuffer.clear();
+
+  flushMutex = false;
 
   if (recordsToFlush.length === 0) {
     flushMutex = false;
@@ -627,10 +752,8 @@ async function flushTelemetryBuffer() {
           ? recordsToFlush.filter((_, i) => !err.writeErrors.some(e => e.index === i))
           : [];
         if (succeeded.length > 0) {
-          telemetryWriteBuffer = [...succeeded, ...telemetryWriteBuffer];
-          if (telemetryWriteBuffer.length > MAX_BUFFER_SIZE) {
-            const overflowDrop = telemetryWriteBuffer.length - MAX_BUFFER_SIZE;
-            telemetryWriteBuffer.splice(0, overflowDrop);
+          const overflowDrop = telemetryWriteBuffer.prepend(succeeded);
+          if (overflowDrop > 0) {
             telemetryTotalDropped += overflowDrop;
             telemetryOverflowDropped += overflowDrop;
             logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after partial insert.`);
@@ -638,18 +761,11 @@ async function flushTelemetryBuffer() {
         }
       } else {
         flushBackoffMs = Math.min(flushBackoffMs * 2, 60000);
-        telemetryFlushBuffer = [...recordsToFlush, ...telemetryFlushBuffer];
-        let overflowDrop = telemetryFlushBuffer.length + telemetryWriteBuffer.length - MAX_BUFFER_SIZE;
+        const overflowDrop = telemetryWriteBuffer.prepend(recordsToFlush);
         if (overflowDrop > 0) {
-          if (overflowDrop > telemetryFlushBuffer.length) {
-            telemetryWriteBuffer.splice(0, overflowDrop - telemetryFlushBuffer.length);
-            telemetryFlushBuffer = [];
-          } else {
-            telemetryFlushBuffer.splice(0, overflowDrop);
-          }
           telemetryTotalDropped += overflowDrop;
           telemetryOverflowDropped += overflowDrop;
-          logger.warn(`[TRUXIFY BUFFER DROP] Capacity limit: dropped ${overflowDrop} oldest records from retry merge.`);
+          logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
         }
       }
     } finally {
@@ -700,7 +816,7 @@ function loadRecoveryFile() {
       if (content) {
         const records = content.split('\n').filter(Boolean).map(line => JSON.parse(line));
         if (records.length > 0) {
-          telemetryWriteBuffer = [...records, ...telemetryWriteBuffer].slice(-MAX_BUFFER_SIZE);
+          telemetryWriteBuffer.prepend(records);
           logger.info(`[TRUXIFY RECOVERY] Loaded ${records.length} telemetry records from recovery file. Buffer size: ${telemetryWriteBuffer.length}`);
         }
       }
@@ -752,8 +868,8 @@ export async function closeWebSocketServer() {
       const dataLoss = telemetryWriteBuffer.length;
       if (dataLoss > 0) {
         try {
-          const lines = telemetryWriteBuffer.map(r => JSON.stringify(r)).join('\n');
-          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', 'utf-8');
+          const lines = telemetryWriteBuffer.toArray().map(r => JSON.stringify(scrubPII(r))).join('\n');
+          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', { encoding: 'utf-8', mode: 0o600 });
           logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available. Wrote ${dataLoss} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`);
         } catch (fileErr) {
           logger.error(`[TRUXIFY SHUTDOWN] Failed to write recovery file: ${fileErr.message}. ${dataLoss} records lost.`);
@@ -852,15 +968,11 @@ async function canSubscribe(ws, { order_display_id, driver_id }) {
     return driver_id === userId || driver_id === ws.driverId;
   }
 
-  if (!order_display_id || !supabase) {
+  if (!order_display_id || !_orderRepository) {
     return false;
   }
 
-  const { data: order, error } = await supabase
-    .from('orders')
-    .select('customer_id, driver_id')
-    .eq('order_display_id', order_display_id)
-    .maybeSingle();
+  const { data: order, error } = await _orderRepository.findOrderByDisplayId(order_display_id, 'customer_id, driver_id');
 
   if (error || !order) {
     return false;
@@ -991,6 +1103,9 @@ export const __testing = {
   resetTrackingSubscriptions() {
     trackingSubscriptions.clear();
   },
+  setOrderRepository(repo) {
+    _orderRepository = repo;
+  },
   async restoreSubscriptions(ws) {
     await restoreSubscriptions(ws);
   },
@@ -1006,13 +1121,21 @@ export const __testing = {
     return telemetryFlushBuffer;
   },
   setTelemetryWriteBuffer(records) {
-    telemetryWriteBuffer = records;
+    telemetryWriteBuffer.clear();
+    if (records) telemetryWriteBuffer.prepend(records);
   },
   setTelemetryFlushBuffer(records) {
     telemetryFlushBuffer = records;
   },
+  pushToTelemetryWriteBuffer(records) {
+    if (Array.isArray(records)) {
+      for (const r of records) telemetryWriteBuffer.push(r);
+    } else {
+      telemetryWriteBuffer.push(records);
+    }
+  },
   clearTelemetryWriteBuffer() {
-    telemetryWriteBuffer = [];
+    telemetryWriteBuffer.clear();
   },
   clearTelemetryFlushBuffer() {
     telemetryFlushBuffer = [];
@@ -1046,3 +1169,5 @@ export const __testing = {
 };
 
 // Fix: implemented exponential backoff (retry count * 1000ms) for Supabase channel reconnects.
+
+// Resolves #2045: Cache channels per orderUUID

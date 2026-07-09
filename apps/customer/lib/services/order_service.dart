@@ -153,7 +153,8 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/my/active',
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      if (body is! List) return <Map<String, dynamic>>[];
+      return List<Map<String, dynamic>>.from(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -261,7 +262,7 @@ class OrderService {
   Future<String?> fetchDriverName(String driverId) async {
     try {
       final body = await _apiClient.get(
-        '/api/profile/$driverId/name',
+        '/api/profile/${_encodePathSegment(driverId)}/name',
       ) as Map<String, dynamic>?;
       final fullName = body?['full_name']?.toString().trim();
       return (fullName != null && fullName.isNotEmpty) ? fullName : null;
@@ -274,7 +275,7 @@ class OrderService {
   Future<String?> fetchTruckNumber(String truckId) async {
     try {
       final body = await _apiClient.get(
-        '/api/trucks/$truckId/number',
+        '/api/trucks/${_encodePathSegment(truckId)}/number',
       ) as Map<String, dynamic>?;
       final numberPlate = body?['number_plate']?.toString().trim();
       return (numberPlate != null && numberPlate.isNotEmpty) ? numberPlate : null;

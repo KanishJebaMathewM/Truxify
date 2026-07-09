@@ -146,13 +146,13 @@ if %NODEMAJOR% LSS 20 (
     call :success "Node.js version OK"
 )
 
-flutter --version
+call flutter --version
 
 call :success "Flutter detected"
 
 call :section "Flutter Doctor"
 
-flutter doctor
+call flutter doctor
 
 echo.
 choice /M "Continue with setup"
@@ -515,7 +515,7 @@ if exist backend\api (
 
     pushd backend\api
 
-    npm run | findstr "seed" >nul
+    call npm run | findstr "seed" >nul
 
     if errorlevel 1 (
 
@@ -550,7 +550,7 @@ if exist .husky\pre-commit (
     call :success "Husky hooks detected."
 ) else (
     if exist package.json (
-        npm run | findstr "prepare" >nul
+        call npm run | findstr "prepare" >nul
         if not errorlevel 1 (
             call npm run prepare
             call :success "Git hooks prepared."
@@ -567,7 +567,7 @@ call :section "Flutter Static Analysis"
 if exist apps\customer (
     pushd apps\customer
     call :info "Analyzing Customer App..."
-    flutter analyze
+    call flutter analyze
     if errorlevel 1 (
         call :warn "Customer App contains analyzer warnings/errors."
     ) else (
@@ -579,7 +579,7 @@ if exist apps\customer (
 if exist apps\driver (
     pushd apps\driver
     call :info "Analyzing Driver App..."
-    flutter analyze
+    call flutter analyze
     if errorlevel 1 (
         call :warn "Driver App contains analyzer warnings/errors."
     ) else (
@@ -598,7 +598,7 @@ if exist backend\api (
 
     pushd backend\api
 
-    npm run | findstr "test" >nul
+    call npm run | findstr "test" >nul
 
     if not errorlevel 1 (
 
@@ -608,7 +608,7 @@ if exist backend\api (
         if errorlevel 2 (
             call :warn "Backend tests skipped."
         ) else (
-            npm test
+            call npm test
 
             if errorlevel 1 (
                 call :warn "Some backend tests failed."
@@ -695,7 +695,7 @@ choice /M "Check for outdated npm packages"
 if errorlevel 2 goto skipNpm
 
 pushd backend\api
-npm outdated
+call npm outdated
 popd
 
 :skipNpm
@@ -706,11 +706,11 @@ choice /M "Check Flutter packages"
 if errorlevel 2 goto skipFlutter
 
 pushd apps\customer
-flutter pub outdated
+call flutter pub outdated
 popd
 
 pushd apps\driver
-flutter pub outdated
+call flutter pub outdated
 popd
 
 :skipFlutter

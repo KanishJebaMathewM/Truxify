@@ -230,7 +230,9 @@ CONTINUE=${CONTINUE:-Y}
 if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
   warn "Setup cancelled."
   exit 0
-fi#######################################
+fi
+
+#######################################
 # Environment File Setup
 #######################################
 
@@ -290,16 +292,24 @@ read -rp "Enable BYPASS_AUTH for local development? (y/N): " ENABLE_AUTH
 
 if [[ "$ENABLE_AUTH" =~ ^[Yy]$ ]]; then
 
-  if grep -q "^BYPASS_AUTH=" .env 2>/dev/null; then
+  update_env_var() {
+    local key="$1"
+    local value="$2"
 
-    sed -i.bak 's/^BYPASS_AUTH=.*/BYPASS_AUTH=true/' .env 2>/dev/null || \
-      sed -i '' 's/^BYPASS_AUTH=.*/BYPASS_AUTH=true/' .env
+    if grep -q "^${key}=" .env 2>/dev/null; then
+      sed -i.bak "s/^${key}=.*/${key}=${value}/" .env 2>/dev/null || \
+        sed -i '' "s/^${key}=.*/${key}=${value}/" .env
+      rm -f .env.bak
+    else
+      echo "${key}=${value}" >> .env
+    fi
+  }
 
-  else
-    echo "BYPASS_AUTH=true" >> .env
-  fi
+  update_env_var "BYPASS_AUTH" "true"
+  update_env_var "NODE_ENV" "development"
 
   success "BYPASS_AUTH enabled"
+  success "NODE_ENV set to development"
 fi
 
 #######################################
@@ -312,7 +322,11 @@ pushd backend/api >/dev/null
 
 info "Running npm install..."
 
-npm install
+if [[ -f package-lock.json ]]; then
+    npm ci
+else
+    npm install
+fi
 
 success "Backend dependencies installed."
 
@@ -385,7 +399,11 @@ if [[ -f package.json ]]; then
 
   section "Installing Root Node Packages"
 
-  npm install
+  if [[ -f package-lock.json ]]; then
+    npm ci
+else
+    npm install
+fi
 
   success "Root dependencies installed."
 fi
@@ -400,12 +418,17 @@ if [[ -f blockchain/package.json ]]; then
 
   pushd blockchain >/dev/null
 
-  npm install
+  if [[ -f package-lock.json ]]; then
+    npm ci
+else
+    npm install
+fi
 
   popd >/dev/null
 
   success "Blockchain dependencies installed."
-fi#######################################
+fi
+#######################################
 # Run Repository Utility Scripts
 #######################################
 
@@ -494,39 +517,35 @@ if [[ "$START_DOCKER" =~ ^[Yy]$ ]]; then
   fi
 
 fi
-
 #######################################
 # Database Check
 #######################################
 
-section "Database"
-
-if docker compose ps db >/dev/null 2>&1; then
-  success "PostgreSQL service detected."
+if [[ -n "$(docker compose ps -q --status running db 2>/dev/null)" ]]; then
+    success "PostgreSQL service detected."
 else
-  warn "Database container not detected."
+    warn "Database container not detected."
 fi
 
 #######################################
 # MongoDB Check
 #######################################
 
-if docker compose ps mongo >/dev/null 2>&1; then
-  success "MongoDB service detected."
+if [[ -n "$(docker compose ps -q --status running mongo 2>/dev/null)" ]]; then
+    success "MongoDB service detected."
 else
-  warn "MongoDB container not detected."
+    warn "MongoDB container not detected."
 fi
 
 #######################################
 # Redis Check
 #######################################
 
-if docker compose ps redis >/dev/null 2>&1; then
-  success "Redis service detected."
+if [[ -n "$(docker compose ps -q --status running redis 2>/dev/null)" ]]; then
+    success "Redis service detected."
 else
-  warn "Redis container not detected."
+    warn "Redis container not detected."
 fi
-
 #######################################
 # Optional Database Seed
 #######################################
@@ -536,23 +555,22 @@ read -rp "Run database seed if available? (y/N): " RUN_SEED
 
 if [[ "$RUN_SEED" =~ ^[Yy]$ ]]; then
 
-  if npm run | grep -q "seed"; then
+  pushd backend/api >/dev/null
+
+  if npm run 2>/dev/null | grep -q "seed"; then
 
     section "Running Seed"
 
-    pushd backend/api >/dev/null
-
     npm run seed
-
-    popd >/dev/null
 
     success "Database seeded."
 
   else
     warn "No seed command found."
   fi
-fi
 
+  popd >/dev/null
+fi
 #######################################
 # Git Hooks
 #######################################
@@ -836,9 +854,9 @@ success "Dependencies installed"
 success "Environment files prepared"
 
 if [[ "$START_DOCKER" =~ ^[Yy]$ ]]; then
-    success "Docker services started"
+  success "Docker services started"
 else
-    warn "Docker services were not started"
+  warn "Docker services were not started"
 fi
 
 echo
@@ -893,9 +911,9 @@ EOF
 
 if grep -q "YOUR_" .env 2>/dev/null; then
 
-    echo
-    warn "Your .env still contains placeholder values."
-    warn "Update it before running the application."
+  echo
+  warn "Your .env still contains placeholder values."
+  warn "Update it before running the application."
 fi
 
 #######################################

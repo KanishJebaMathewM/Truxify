@@ -345,6 +345,67 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
 });
 
 // ============================================================================
+// 8b. TOGGLE ROUTE MAP POINT CLAIMED (DRIVER)
+// ============================================================================
+router.patch(
+  '/route-points/:id/claim',
+  authenticate,
+  userLimiter,
+  requireRole(['driver']),
+  validateParams(paramIdSchema),
+  async (req, res) => {
+    const { id } = req.params;
+    const claimed = req.body?.claimed;
+
+    if (typeof claimed !== 'boolean') {
+      return res.status(400).json({ error: 'claimed must be a boolean' });
+    }
+
+    try {
+      const { data: point, error: pointError } = await supabase
+        .from('route_map_points')
+        .select('id, trip_display_id')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (pointError) {
+        return res.status(500).json({ error: 'Failed to fetch route point.', details: pointError.message });
+      }
+      if (!point) {
+        return res.status(404).json({ error: 'Route map point not found.' });
+      }
+
+      const { data: trip } = await supabase
+        .from('trips')
+        .select('id')
+        .eq('trip_display_id', point.trip_display_id)
+        .eq('driver_id', req.user.id)
+        .maybeSingle();
+
+      if (!trip) {
+        return res.status(403).json({ error: 'Access Denied: Route point does not belong to your trip.' });
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from('route_map_points')
+        .update({ claimed })
+        .eq('id', id)
+        .select('*')
+        .maybeSingle();
+
+      if (updateError) {
+        return res.status(500).json({ error: 'Failed to update route point.', details: updateError.message });
+      }
+
+      res.json({ point: updated });
+    } catch (err) {
+      logger.error('Driver route point claim error:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  },
+);
+
+// ============================================================================
 // 9. FETCH DRIVER BIDS (DRIVER)
 // ============================================================================
 router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {

@@ -197,6 +197,19 @@ class TripService {
     }
   }
 
+  Future<void> setRoutePointClaimed(String pointId, bool claimed) async {
+    final path = '/api/driver/route-points/${_encodePathSegment(pointId)}/claim';
+    try {
+      await _apiClient.patch(
+        path,
+        body: <String, dynamic>{'claimed': claimed},
+      );
+    } catch (e) {
+      if (e is ApiException) throw Exception(e.message);
+      rethrow;
+    }
+  }
+
   void dispose() {
     _apiClient.dispose();
   }

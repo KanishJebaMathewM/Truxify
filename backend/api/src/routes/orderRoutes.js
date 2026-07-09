@@ -1273,14 +1273,10 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
   const { txHash } = req.body;
 
   const lockKey = `deposit_lock:${orderId}`;
-  const lockTimeoutMs = 10000;
   let lockValue = null;
-  if (redisClient) {
-    lockValue = crypto.randomUUID();
-    const acquired = await redisClient.set(lockKey, lockValue, 'PX', lockTimeoutMs, 'NX');
-    if (!acquired) {
-      return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
-    }
+  lockValue = await acquireLock(lockKey, 10000);
+  if (!lockValue) {
+    return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
   }
 
   try {
@@ -1289,6 +1285,10 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
     if (fetchErr || !order) return res.status(404).json({ error: 'Order not found' });
     if (order.customer_id !== req.user.id) {
       return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
+    }
+    // Pre-check: if already funded (crash recovery), return success idempotently
+    if (order.escrow_status === 'funded') {
+      return res.json({ message: 'Escrow already confirmed.', txHash: order.deposit_tx_hash });
     }
     if (order.escrow_status !== 'funding') {
       return res.status(400).json({ error: 'Order is not in funding state' });
@@ -1305,7 +1305,21 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
     const bookingId = order.escrow_booking_id || `escrow:${order.order_display_id}`;
     const result = await recordDepositTx(bookingId, txHash, customerWallet);
 
-    if (result.error) return res.status(422).json({ error: result.error });
+    if (result.error) {
+      // If already funded on-chain but DB missed it, treat as success
+      if (result.alreadyFunded) {
+        const { error: updateErr } = await supabase.from('orders').update({
+          escrow_status: 'funded',
+          deposit_tx_hash: result.txHash,
+          escrow_deposited_at: new Date().toISOString(),
+        }).eq('id', orderId).eq('escrow_status', 'funding');
+
+        if (!updateErr) {
+          return res.json({ message: 'Escrow deposit confirmed (recovered).', txHash: result.txHash });
+        }
+      }
+      return res.status(422).json({ error: result.error });
+    }
 
     const { error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
       escrow_status: 'funded',
@@ -1326,20 +1340,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
     logger.error('[confirm-deposit] Exception:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   } finally {
-    if (redisClient && lockValue) {
-      const luaScript = `
-        if redis.call('GET', KEYS[1]) == ARGV[1] then
-          redis.call('DEL', KEYS[1])
-          return 1
-        end
-        return 0
-      `;
-      try {
-        await redisClient.eval(luaScript, 1, lockKey, lockValue);
-      } catch (err) {
-        logger.warn('[confirm-deposit] Failed to release deposit lock for key %s: %s', lockKey, err.message);
-      }
-    }
+    await releaseLock(lockKey, lockValue);
   }
 });
 

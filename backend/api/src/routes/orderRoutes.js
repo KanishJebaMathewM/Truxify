@@ -41,6 +41,7 @@ import {
   verifyDeliveryOtp,
   expireDeliveryOtps
 } from '../services/notificationService.js';
+import { CouponService } from '../services/couponService.js';
 import { predictDemand } from '../services/ml.js';
 import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
 import { DomainError } from '../services/order/domainError.js';
@@ -1501,6 +1502,32 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRol
     }
     logger.error({ err }, 'Fetch order route exception');
     return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// COUPON REDEMPTION
+// ============================================================================
+const couponService = new CouponService(orderRepository);
+
+const couponRedeemSchema = z.object({
+  coupon_code: z.string().min(1, 'Coupon code is required').max(50),
+});
+
+router.post('/:id/coupon/redeem', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(couponRedeemSchema), async (req, res) => {
+  try {
+    const result = await couponService.redeemCoupon({
+      couponCode: req.body.coupon_code,
+      customerId: req.user.id,
+      orderId: req.params.id,
+    });
+    res.json({ message: 'Coupon redeemed successfully.', ...result });
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('[coupon] Redemption error:', err.message);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

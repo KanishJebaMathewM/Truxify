@@ -713,4 +713,46 @@ export class OrderRepository {
         p_instance_id: instanceId,
       }), 'claimRefundReconciliation');
   }
+
+  // ===================================================================
+  // COUPONS
+  // ===================================================================
+
+  async findCouponByCode(code) {
+    return this._retryableQuery(() => this.supabase
+      .from('coupons')
+      .select('*')
+      .eq('code', code)
+      .maybeSingle(), 'findCouponByCode');
+  }
+
+  async findCouponRedemption(couponCode, customerId) {
+    return this._retryableQuery(() => this.supabase
+      .from('coupon_redemptions')
+      .select('id')
+      .eq('coupon_code', couponCode)
+      .eq('customer_id', customerId)
+      .maybeSingle(), 'findCouponRedemption');
+  }
+
+  async redeemCouponAtomic(couponCode, customerId, orderId) {
+    return this._retryableQuery(() => this.supabase
+      .rpc('redeem_coupon_atomic', {
+        p_coupon_code: couponCode,
+        p_customer_id: customerId,
+        p_order_id: orderId,
+      }), 'redeemCouponAtomic');
+  }
+
+  // ===================================================================
+  // SUPPLIER STATUS
+  // ===================================================================
+
+  async upsertSupplierStatus(data) {
+    return this._retryableQuery(() => this.supabase
+      .from('supplier_status')
+      .upsert(data, { onConflict: 'supplier_id, order_id' })
+      .select('*')
+      .single(), 'upsertSupplierStatus');
+  }
 }

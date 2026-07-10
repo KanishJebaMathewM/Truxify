@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { redisClient } from '../../config/db.js';
+import { redisClient, supabase } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
 import {
   sendDeliveryOtpNotification,
@@ -7,93 +7,25 @@ import {
   getActiveDeliveryOtp,
   verifyDeliveryOtp,
 } from '../notificationService.js';
+import {
+  checkOtpLockout,
+  recordOtpFailure,
+  clearOtpState,
+  OTP_TTL_MINUTES,
+  OTP_MAX_FAILED_ATTEMPTS,
+  OTP_LOCKOUT_MINUTES,
+  DELIVERY_OTP_READY_STATUSES,
+} from './orderNotificationService.js';
 import { escrowRelease } from '../escrow.js';
-import { DomainError } from './bidAcceptanceService.js';
+import { DomainError } from './domainError.js';
 import { OrderTimelineService } from './orderTimelineService.js';
 
 const orderTimelineService = new OrderTimelineService({ supabase, logger });
-import { DomainError } from './domainError.js';
-
-export const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
-const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
-export const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
-const IN_MEMORY_OTP_MAP_MAX_SIZE = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || '10000', 10);
-export const DELIVERY_OTP_READY_STATUSES = new Set(['arriving']);
-
-const inMemoryOtpFailedAttempts = new Map();
-
-export async function checkOtpLockout(orderId) {
-  if (redisClient) {
-    try {
-      const lockKey = `otp_lockout:${orderId}`;
-      const isLocked = await redisClient.get(lockKey);
-      return !!isLocked;
-    } catch (err) {
-      logger.error('[OTP] Redis error in checkOtpLockout, falling back to memory:', err.message);
-    }
-  }
-  const record = inMemoryOtpFailedAttempts.get(orderId);
-  if (!record || !record.lockedUntil) return false;
-  if (Date.now() >= record.lockedUntil) {
-    inMemoryOtpFailedAttempts.delete(orderId);
-    return false;
-  }
-  return true;
-}
-
-export async function recordOtpFailure(orderId) {
-  if (redisClient) {
-    try {
-      const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-
-      const count = await redisClient.incr(countKey);
-      if (count === 1) await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
-      if (count >= OTP_MAX_FAILED_ATTEMPTS) {
-        await redisClient.set(lockKey, '1', 'EX', OTP_LOCKOUT_MINUTES * 60);
-      }
-      return count;
-    } catch (err) {
-      logger.error('[OTP] Redis error in recordOtpFailure, falling back to memory:', err.message);
-    }
-  }
-
-  if (inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
-    const oldestKey = inMemoryOtpFailedAttempts.keys().next().value;
-    inMemoryOtpFailedAttempts.delete(oldestKey);
-  }
-
-  let record = inMemoryOtpFailedAttempts.get(orderId);
-  if (!record) {
-    record = { count: 0, lockedUntil: null };
-    inMemoryOtpFailedAttempts.set(orderId, record);
-  }
-  record.count += 1;
-  if (record.count >= OTP_MAX_FAILED_ATTEMPTS) {
-    record.lockedUntil = Date.now() + OTP_LOCKOUT_MINUTES * 60 * 1000;
-  }
-  return record.count;
-}
-
-export async function clearOtpState(orderId) {
-  if (redisClient) {
-    try {
-      const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-      await redisClient.del(countKey, lockKey);
-      return;
-    } catch (err) {
-      logger.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);
-    }
-  }
-  inMemoryOtpFailedAttempts.delete(orderId);
-}
 
 export class OrderMilestoneService {
-  constructor(orderRepository) {
-    this.orderRepository = orderRepository;
-  constructor({ orderValidationService } = {}) {
-    this.validation = orderValidationService;
+  constructor(args = {}) {
+    if (args.orderRepository) this.orderRepository = args.orderRepository;
+    if (args.orderValidationService) this.validation = args.orderValidationService;
   }
 
   async updateMilestone({ orderId, milestone, driverId }) {

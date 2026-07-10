@@ -229,7 +229,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       customerId,
     { title: 'Delivery Verification OTP', body: `Your delivery verification OTP has been sent for order ${orderDisplayId}.` },
     { orderDisplayId, notifType: 'delivery_otp' }
-  ); } catch (err) { logger.warn({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error'); }
+  ); } catch (err) { logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error'); }
 
   if (process.env.TWILIO_AUTH_TOKEN) {
     logger.info(`[NotificationService] [SMS] SMS stub: Sending OTP for order ${orderDisplayId} (masked)`);
@@ -256,6 +256,6 @@ export async function sendPushNotification(userId, title, body, notifType, metad
   }
 
   let fcmResult;
-  try { fcmResult = await sendFcmNotification(userId, { title, body }, { notifType, ...metadata }); } catch (err) { logger.warn('[NotificationService] Unexpected sendFcmNotification error: %s', err?.message ?? err); }
+  try { fcmResult = await sendFcmNotification(userId, { title, body }, { notifType, ...metadata }); } catch (err) { logger.error('[NotificationService] Unexpected sendFcmNotification error: %s', err?.message ?? err); }
   return { success: fcmResult?.success, fcm: fcmResult };
 }

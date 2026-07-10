@@ -470,15 +470,6 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
   const orderId = req.params.id;
 
   try {
-    const result = await orderRepository.findOrderByAnyId(orderId, '*');
-    const order = result.data;
-    const orderErr = result.error;
-    if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-
-    if (order.customer_id !== req.user.id && order.driver_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    }
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertOrderAccess(order, req.user.id);
@@ -897,7 +888,6 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
       driverId: req.user.id,
       otp,
     });
-    const { escrowUpdateFailed } = await orderLifecycleService.verifyDeliveryFn(req.params.id, req.user.id, req.body.otp);
 
     if (escrowUpdateFailed) {
       return res.status(202).json({
@@ -1051,7 +1041,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
       return res.status(err.status).json(err.payload);
     }
     logger.error('Change drop exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 
@@ -1227,7 +1217,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
 
     const updatePayload = {
       status: 'cancelled',
-      cancellation_reason: reason,
+      cancellation_reason: reason ?? order.cancellation_reason,
       updated_at: new Date().toISOString(),
     };
 
@@ -1259,7 +1249,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
       return res.status(err.status).json(err.payload);
     }
     logger.error('Cancel order exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 
@@ -1408,7 +1398,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
       return res.status(err.status).json(err.payload);
     }
     logger.error({ err }, 'Fetch driver location exception');
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 
@@ -1500,7 +1490,7 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRol
       return res.status(err.status).json(err.payload);
     }
     logger.error({ err }, 'Fetch order route exception');
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 

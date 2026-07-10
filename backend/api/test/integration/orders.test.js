@@ -89,12 +89,14 @@ vi.mock('../../src/services/reputation.js', () => ({
 const escrowReleaseMock = vi.fn();
 const submitEscrowRefundMock = vi.fn();
 const confirmEscrowRefundMock = vi.fn();
+const submitEscrowCancelWithPenaltyMock = vi.fn();
 vi.mock('../../src/services/escrow.js', async () => {
   const actual = await vi.importActual('../../src/services/escrow.js');
   return {
     ...actual,
     escrowRelease: escrowReleaseMock,
     submitEscrowRefund: submitEscrowRefundMock,
+    submitEscrowCancelWithPenalty: submitEscrowCancelWithPenaltyMock,
     confirmEscrowRefund: confirmEscrowRefundMock,
   };
 });
@@ -351,7 +353,7 @@ describe('POST /api/orders — server-side pricing contract', () => {
   });
   it('driver can update milestone when assigned to order', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
       status: 'truck_assigned'
@@ -367,7 +369,7 @@ describe('POST /api/orders — server-side pricing contract', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/order-1/milestones')
+      .put('/api/orders/11111111-1111-1111-1111-111111111111/milestones')
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -376,13 +378,13 @@ describe('POST /api/orders — server-side pricing contract', () => {
         milestone: 'Goods Loaded'
       });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/Milestone updated successfully/i);
   });
 
   it('En Route to Pickup milestone does not set status to picked_up', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
       status: 'truck_assigned'
@@ -398,7 +400,7 @@ describe('POST /api/orders — server-side pricing contract', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/order-1/milestones')
+      .put('/api/orders/11111111-1111-1111-1111-111111111111/milestones')
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -407,14 +409,14 @@ describe('POST /api/orders — server-side pricing contract', () => {
         milestone: 'En Route to Pickup'
       });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body.status).toBe('en_route_pickup');
     expect(res.body.status).not.toBe('picked_up');
   });
 
   it('Arrived at Pickup milestone sets status to arrived_pickup', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
       status: 'en_route_pickup'
@@ -430,7 +432,7 @@ describe('POST /api/orders — server-side pricing contract', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/order-1/milestones')
+      .put('/api/orders/11111111-1111-1111-1111-111111111111/milestones')
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -439,13 +441,13 @@ describe('POST /api/orders — server-side pricing contract', () => {
         milestone: 'Arrived at Pickup'
       });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body.status).toBe('arrived_pickup');
   });
 
   it('Goods Loaded milestone sets status to picked_up', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
       status: 'truck_assigned'
@@ -461,7 +463,7 @@ describe('POST /api/orders — server-side pricing contract', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/order-1/milestones')
+      .put('/api/orders/11111111-1111-1111-1111-111111111111/milestones')
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -470,13 +472,13 @@ describe('POST /api/orders — server-side pricing contract', () => {
         milestone: 'Goods Loaded'
       });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body.status).toBe('picked_up');
   });
 
   it('returns 403 when driver is not assigned to order', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: 'driver-999',
       order_display_id: 'ORD001'
     }];
@@ -484,7 +486,7 @@ describe('POST /api/orders — server-side pricing contract', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/order-1/milestones')
+      .put('/api/orders/11111111-1111-1111-1111-111111111111/milestones')
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -597,7 +599,7 @@ describe('POST /api/orders/:id/bids/:bidId/accept — bid ownership', () => {
 
   it('returns 404 when load offer for order not found', async () => {
     m.store.orders.push({
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       order_display_id: 'OD-NOOFFER',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
     });
@@ -613,7 +615,7 @@ describe('POST /api/orders/:id/bids/:bidId/accept — bid ownership', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .post('/api/orders/order-1/bids/bid-1/accept')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/bids/bid-1/accept')
       .set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(404);
@@ -628,7 +630,7 @@ describe('GET /api/orders/history — order history', () => {
 
   it('returns order history for customer', async () => {
     m.store.orders.push({
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       status: 'pending',
       created_at: '2026-06-01',
@@ -640,10 +642,10 @@ describe('GET /api/orders/history — order history', () => {
       .get('/api/orders/history')
       .set(CUSTOMER_HEADERS);
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(Array.isArray(res.body.history)).toBe(true);
     expect(res.body.history).toHaveLength(1);
-    expect(res.body.history[0].id).toBe('order-1');
+    expect(res.body.history[0].id).toBe('11111111-1111-1111-1111-111111111111');
   });
 
   it('returns 500 on DB error', async () => {
@@ -680,7 +682,7 @@ describe('GET /api/orders/:id — order details', () => {
 
   it('returns 403 when user does not own the order', async () => {
     m.store.orders.push({
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       customer_id: 'someone-else',
       driver_id: null,
       order_display_id: 'OD1',
@@ -689,7 +691,7 @@ describe('GET /api/orders/:id — order details', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .get('/api/orders/order-1')
+      .get('/api/orders/11111111-1111-1111-1111-111111111111')
       .set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(403);
@@ -697,7 +699,7 @@ describe('GET /api/orders/:id — order details', () => {
 
   it('returns order details with timeline for owner', async () => {
     m.store.orders.push({
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       driver_id: null,
       order_display_id: 'OD1',
@@ -713,17 +715,17 @@ describe('GET /api/orders/:id — order details', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .get('/api/orders/order-1')
+      .get('/api/orders/11111111-1111-1111-1111-111111111111')
       .set(CUSTOMER_HEADERS);
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
-    expect(res.body.order.id).toBe('order-1');
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
+    expect(res.body.order.id).toBe('11111111-1111-1111-1111-111111111111');
     expect(Array.isArray(res.body.timeline)).toBe(true);
   });
 
   it('returns order details with driver profile when driver assigned', async () => {
     m.store.orders.push({
-      id: 'order-2',
+      id: '22222222-2222-2222-2222-222222222222',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       driver_id: 'driver-1',
       order_display_id: 'OD2',
@@ -745,16 +747,16 @@ describe('GET /api/orders/:id — order details', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .get('/api/orders/order-2')
+      .get('/api/orders/22222222-2222-2222-2222-222222222222')
       .set(CUSTOMER_HEADERS);
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body.driver.name).toBe('Test Driver');
   });
 
   it('does not expose delivery_otp on order for any role (isolated table)', async () => {
     m.store.orders.push({
-      id: 'order-3',
+      id: '33333333-3333-3333-3333-333333333333',
       customer_id: 'customer-123',
       driver_id: 'driver-123',
       order_display_id: 'OD3',
@@ -764,7 +766,7 @@ describe('GET /api/orders/:id — order details', () => {
 
     // 1. Customer request — no delivery_otp on order object
     const customerRes = await request(app)
-      .get('/api/orders/OD3')
+      .get('/api/orders/33333333-3333-3333-3333-333333333333')
       .set({
         'x-user-id': 'customer-123',
         'x-user-role': 'customer'
@@ -774,7 +776,7 @@ describe('GET /api/orders/:id — order details', () => {
 
     // 2. Driver request — also no delivery_otp
     const driverRes = await request(app)
-      .get('/api/orders/OD3')
+      .get('/api/orders/33333333-3333-3333-3333-333333333333')
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -789,7 +791,7 @@ describe('GET /api/orders/:id — order details', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .get('/api/orders/OD1')
+      .get('/api/orders/11111111-1111-1111-1111-111111111111')
       .set(CUSTOMER_HEADERS);
 
     expect(res.status).toBe(500);
@@ -837,7 +839,7 @@ describe('PUT /api/orders/:id/milestones — edge cases', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/order-1/milestones')
+      .put('/api/orders/11111111-1111-1111-1111-111111111111/milestones')
       .set(DRIVER_HEADERS)
       .send({ milestone: 'Invalid Milestone' });
 
@@ -857,7 +859,7 @@ describe('PUT /api/orders/:id/milestones — edge cases', () => {
 
   it('returns 500 when order update fails', async () => {
     m.store.orders.push({
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: DRIVER_HEADERS['x-user-id'],
       order_display_id: 'OD1',
     });
@@ -885,7 +887,7 @@ describe('PUT /api/orders/:id/milestones — edge cases', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/order-1/milestones')
+      .put('/api/orders/11111111-1111-1111-1111-111111111111/milestones')
       .set(DRIVER_HEADERS)
       .send({ milestone: 'Goods Loaded' });
 
@@ -906,7 +908,7 @@ describe('GET /api/orders/:id/bids — bids query error', () => {
 
   it('returns 500 when bids query fails', async () => {
     m.store.orders.push({
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       order_display_id: 'OD1',
     });
@@ -928,7 +930,7 @@ describe('GET /api/orders/:id/bids — bids query error', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .get('/api/orders/order-1/bids')
+      .get('/api/orders/11111111-1111-1111-1111-111111111111/bids')
       .set(CUSTOMER_HEADERS);
 
     m.supabase.from = originalFrom;
@@ -946,7 +948,7 @@ describe('PUT /api/orders/:id/milestones — timeline update error', () => {
 
   it('returns 500 when timeline update fails', async () => {
     m.store.orders.push({
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: DRIVER_HEADERS['x-user-id'],
       order_display_id: 'OD1',
     });
@@ -975,7 +977,7 @@ describe('PUT /api/orders/:id/milestones — timeline update error', () => {
     const app = buildApp();
 
     const res = await request(app)
-      .put('/api/orders/order-1/milestones')
+      .put('/api/orders/11111111-1111-1111-1111-111111111111/milestones')
       .set(DRIVER_HEADERS)
       .send({ milestone: 'In Transit' });
 
@@ -1001,7 +1003,7 @@ describe('Delivery OTP Verification and Milestones', () => {
 
   it('blocks direct transition to Delivered milestone with descriptive message', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
       status: 'in_transit'
@@ -1009,7 +1011,7 @@ describe('Delivery OTP Verification and Milestones', () => {
 
     const app = buildApp();
     const res = await request(app)
-      .put('/api/orders/order-1/milestones')
+      .put('/api/orders/11111111-1111-1111-1111-111111111111/milestones')
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
@@ -1022,7 +1024,7 @@ describe('Delivery OTP Verification and Milestones', () => {
 
   it('generates OTP in isolated table but does not return it in response when moving to In Transit milestone', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       customer_id: 'customer-456',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
@@ -1039,18 +1041,18 @@ describe('Delivery OTP Verification and Milestones', () => {
 
     const app = buildApp();
     const res = await request(app)
-      .put('/api/orders/order-1/milestones')
+      .put('/api/orders/11111111-1111-1111-1111-111111111111/milestones')
       .set({
         'x-user-id': 'driver-123',
         'x-user-role': 'driver'
       })
       .send({ milestone: 'In Transit' });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty('otp');
     expect(res.body.order).not.toHaveProperty('delivery_otp');
 
-    const otpRecord = m.store.delivery_otps.find(o => o.order_id === 'order-1');
+    const otpRecord = m.store.delivery_otps.find(o => o.order_id === '11111111-1111-1111-1111-111111111111');
     expect(otpRecord).toBeTruthy();
     expect(otpRecord.otp_hash).toMatch(/^[a-f0-9]{64}$/); // SHA-256 hash
     expect(otpRecord.verified).toBe(false);
@@ -1068,7 +1070,7 @@ describe('Delivery OTP Verification and Milestones', () => {
   it('fails OTP verification if missing OTP', async () => {
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/verify-delivery')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/verify-delivery')
       .set('X-Idempotency-Key', Math.random().toString())
       .set({
         'x-user-id': 'driver-123',
@@ -1087,7 +1089,7 @@ describe('Delivery OTP Verification and Milestones', () => {
 
   it('fails OTP verification if driver is not assigned', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: 'driver-different',
       order_display_id: 'ORD001',
       delivery_otp: '123456',
@@ -1096,7 +1098,7 @@ describe('Delivery OTP Verification and Milestones', () => {
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/verify-delivery')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/verify-delivery')
       .set('X-Idempotency-Key', Math.random().toString())
       .set({
         'x-user-id': 'driver-123',
@@ -1110,14 +1112,14 @@ describe('Delivery OTP Verification and Milestones', () => {
 
   it('fails OTP verification if OTP is invalid', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
       status: 'arriving'
     }];
     m.store.delivery_otps = [{
       id: 'otp-1',
-      order_id: 'order-1',
+      order_id: '11111111-1111-1111-1111-111111111111',
       otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
       expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       verified: false,
@@ -1126,7 +1128,7 @@ describe('Delivery OTP Verification and Milestones', () => {
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/verify-delivery')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/verify-delivery')
       .set('X-Idempotency-Key', Math.random().toString())
       .set({
         'x-user-id': 'driver-123',
@@ -1140,14 +1142,14 @@ describe('Delivery OTP Verification and Milestones', () => {
 
   it('verifies delivery successfully with correct OTP, updates status and calls RPC', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       driver_id: 'driver-123',
       order_display_id: 'ORD001',
       status: 'arriving'
     }];
     m.store.delivery_otps = [{
       id: 'otp-1',
-      order_id: 'order-1',
+      order_id: '11111111-1111-1111-1111-111111111111',
       otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
       expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       verified: false,
@@ -1161,7 +1163,7 @@ describe('Delivery OTP Verification and Milestones', () => {
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/verify-delivery')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/verify-delivery')
       .set('X-Idempotency-Key', Math.random().toString())
       .set({
         'x-user-id': 'driver-123',
@@ -1169,14 +1171,14 @@ describe('Delivery OTP Verification and Milestones', () => {
       })
       .send({ otp: 123456 }); // Numeric input, verifies type safety
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/Delivery verified successfully/i);
 
-    const order = m.store.orders.find(o => o.id === 'order-1');
+    const order = m.store.orders.find(o => o.id === '11111111-1111-1111-1111-111111111111');
     expect(order.status).toBe('payment_released');
 
     // OTP record should be marked as verified in isolated table
-    const otpRecord = m.store.delivery_otps.find(o => o.order_id === 'order-1');
+    const otpRecord = m.store.delivery_otps.find(o => o.order_id === '11111111-1111-1111-1111-111111111111');
     expect(otpRecord.verified).toBe(true);
 
     const timeline = m.store.order_timeline.find(t => t.order_display_id === 'ORD001' && t.milestone === 'Delivered');
@@ -1185,7 +1187,7 @@ describe('Delivery OTP Verification and Milestones', () => {
     const rpcCall = m.calls.find(c => c.rpc === 'complete_trip_tx');
     expect(rpcCall).toBeTruthy();
     expect(rpcCall.args).toEqual({
-      p_order_id: 'order-1',
+      p_order_id: '11111111-1111-1111-1111-111111111111',
       p_otp_id: 'otp-1',
       // Escrow payout hash is only set once the release succeeds
       p_release_tx_hash: null,
@@ -1243,7 +1245,7 @@ describe('Delivery OTP Verification and Milestones', () => {
     });
 
     m.store.orders = [{
-      id: 'order-2',
+      id: '22222222-2222-2222-2222-222222222222',
       driver_id: 'driver-456',
       order_display_id: 'ORD002',
       status: 'arriving',
@@ -1252,7 +1254,7 @@ describe('Delivery OTP Verification and Milestones', () => {
     }];
     m.store.delivery_otps = [{
       id: 'otp-2',
-      order_id: 'order-2',
+      order_id: '22222222-2222-2222-2222-222222222222',
       otp_hash: crypto.createHash('sha256').update('123456').digest('hex'),
       expires_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
       verified: false,
@@ -1266,7 +1268,7 @@ describe('Delivery OTP Verification and Milestones', () => {
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-2/verify-delivery')
+      .post('/api/orders/22222222-2222-2222-2222-222222222222/verify-delivery')
       .set('X-Idempotency-Key', Math.random().toString())
       .set({
         'x-user-id': 'driver-456',
@@ -1274,7 +1276,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       })
       .send({ otp: 123456 });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
 
     // The release hash now flows through complete_trip_tx and the orders
     // update; wallet_transactions only receives the payout description.
@@ -1598,7 +1600,7 @@ describe('Delivery OTP Verification and Milestones', () => {
       })
       .send({ milestone: 'In Transit' });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty('otp');
     expect(res.body.order).not.toHaveProperty('delivery_otp');
 
@@ -1671,6 +1673,9 @@ describe('Delivery OTP Verification and Milestones', () => {
       };
 
       mockRedis = null; // defaults to null
+    });
+    afterEach(() => {
+      mockRedis = null;
     });
 
     it('uses active Redis client to store verification failures and locks out after max attempts', async () => {
@@ -1805,7 +1810,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
   it('submits a rating for the order owner after delivery and calls submit_rating_tx', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       order_display_id: 'ORD-1',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       driver_id: 'driver-123',
@@ -1814,7 +1819,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 5, comment: 'Great delivery' });
 
@@ -1834,7 +1839,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
   it('rejects duplicate ratings for the same order', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       order_display_id: 'ORD-1',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       driver_id: 'driver-123',
@@ -1850,7 +1855,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 4, comment: 'Second attempt' });
 
@@ -1861,7 +1866,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
   it('rejects rating submission before delivery', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       order_display_id: 'ORD-1',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       driver_id: 'driver-123',
@@ -1870,7 +1875,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 5, comment: 'Too early' });
 
@@ -1881,7 +1886,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
   it('rejects non-owner customers', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       order_display_id: 'ORD-1',
       customer_id: 'someone-else',
       driver_id: 'driver-123',
@@ -1890,7 +1895,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 5, comment: 'Not mine' });
 
@@ -1901,7 +1906,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
   it('rejects invalid rating payloads', async () => {
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       order_display_id: 'ORD-1',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       driver_id: 'driver-123',
@@ -1910,7 +1915,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 6 });
 
@@ -1921,7 +1926,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
   it('triggers on-chain reputation update when driver has a polygon_wallet_address', async () => {
     awardReputationPointsMock.mockClear();
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       order_display_id: 'ORD-1',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       driver_id: 'driver-123',
@@ -1934,7 +1939,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 4, comment: 'Good job' });
 
@@ -1951,7 +1956,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
   it('skips on-chain update when driver has no polygon_wallet_address', async () => {
     awardReputationPointsMock.mockClear();
     m.store.orders = [{
-      id: 'order-1',
+      id: '11111111-1111-1111-1111-111111111111',
       order_display_id: 'ORD-1',
       customer_id: CUSTOMER_HEADERS['x-user-id'],
       driver_id: 'driver-no-wallet',
@@ -1964,7 +1969,7 @@ describe('POST /api/orders/:id/ratings — delivered order reputation flow', () 
 
     const app = buildApp();
     const res = await request(app)
-      .post('/api/orders/order-1/ratings')
+      .post('/api/orders/11111111-1111-1111-1111-111111111111/ratings')
       .set(CUSTOMER_HEADERS)
       .send({ stars: 3 });
 
@@ -2000,7 +2005,7 @@ describe('POST /api/orders/predict-demand — ML demand prediction', () => {
         nearby_drivers: 15,
       });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body).toEqual({
       predicted_demand: 42.5,
       model_version: '1.0.0',
@@ -2122,6 +2127,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     routeEstimateMock.mockReset();
     routeEstimateMock.mockResolvedValue({ distanceKm: 100 });
     submitEscrowRefundMock.mockReset();
+    submitEscrowRefundMock.mockReset();
     confirmEscrowRefundMock.mockReset();
     mockRedis = null;
   });
@@ -2148,7 +2154,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ drop_address: 'New Drop Place', drop_lat: 22.22, drop_lng: 88.88 });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('pricing');
     expect(res.body.pricing).toHaveProperty('total_amount');
     const stored = m.store.orders.find(o => o.id === 'aaaa0001-0000-4000-8000-000000000001');
@@ -2200,7 +2206,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('cancellation_fee');
     expect(res.body.cancellation_fee).toBe(500);
     const stored = m.store.orders.find(o => o.id === 'aaaa0003-0000-4000-8000-000000000003');
@@ -2234,7 +2240,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     const stored = m.store.orders.find(o => o.id === 'aaaa0004-0000-4000-8000-000000000004');
     expect(stored.status).toBe('cancelled');
     expect(stored.escrow_status).toBe('refunded');
@@ -2287,8 +2293,9 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
-    console.log(res.body); if(res.status !== 200) console.log('ERROR:', res.body); expect(res.status).toBe(200);
+    if(res.status !== 200) throw new Error(JSON.stringify(res.body)); expect(res.status).toBe(200);
     expect(confirmEscrowRefundMock).toHaveBeenCalledWith(txHash);
+    expect(submitEscrowRefundMock).not.toHaveBeenCalled();
     expect(submitEscrowRefundMock).not.toHaveBeenCalled();
     expect(m.store.orders[0].escrow_status).toBe('refunded');
   });

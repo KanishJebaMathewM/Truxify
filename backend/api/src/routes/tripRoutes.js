@@ -314,4 +314,100 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
   }
 });
 
+// ============================================================================
+// MARK STOP COMPLETED (DRIVER)
+// ============================================================================
+router.put('/:tripDisplayId/stops/:stopId/complete', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+  const { tripDisplayId, stopId } = req.params;
+
+  try {
+    const { data: trip } = await supabase.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
+    if (!trip) return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
+
+    const updatedStop = await supabase.from('trip_stops').update({
+      is_completed: true,
+      is_current: false,
+    }).eq('id', stopId).eq('trip_display_id', tripDisplayId).select().maybeSingle();
+
+    if (updatedStop.error) {
+      logger.error('[tripRoutes] Failed to update stop:', updatedStop.error.message);
+      return res.status(500).json({ error: 'Database error while updating stop.' });
+    }
+    if (!updatedStop.data) return res.status(404).json({ error: 'Stop not found or does not belong to this trip.' });
+
+    const nextStops = await supabase.from('trip_stops').select()
+      .eq('trip_display_id', tripDisplayId)
+      .eq('is_completed', false)
+      .order('sort_order')
+      .limit(1);
+
+    if (nextStops.data && nextStops.data.length > 0) {
+      await supabase.from('trip_stops').update({ is_current: true })
+        .eq('id', nextStops.data[0].id)
+        .eq('trip_display_id', tripDisplayId);
+    } else {
+      await supabase.from('trips').update({ status: 'completed' })
+        .eq('trip_display_id', tripDisplayId)
+        .eq('driver_id', req.user.id);
+    }
+
+    res.json({ message: 'Stop marked as completed.' });
+  } catch (err) {
+    logger.error('[tripRoutes] markStopCompleted error:', err.message);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// START TRIP (DRIVER)
+// ============================================================================
+router.put('/:tripDisplayId/start', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+  const { tripDisplayId } = req.params;
+
+  try {
+    const { data: trip } = await supabase.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
+    if (!trip) return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
+
+    // ENFORCEMENT CHECK: Ensure order is funded before trip can start
+    // A driver has at most one active order associated with their active trip.
+    const { data: order, error: orderErr } = await supabase.from('orders')
+      .select('escrow_status')
+      .eq('driver_id', req.user.id)
+      .in('status', ['truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up'])
+      .maybeSingle();
+
+    if (orderErr) return res.status(500).json({ error: 'Failed to verify order funding status.' });
+    if (!order) return res.status(404).json({ error: 'Active order not found for this driver.' });
+    if (order.escrow_status !== 'funded') {
+      return res.status(403).json({ error: `Cannot start trip: Escrow is not funded (current status: ${order.escrow_status}).` });
+    }
+
+    const stops = await supabase.from('trip_stops').select()
+      .eq('trip_display_id', tripDisplayId)
+      .eq('is_completed', false)
+      .order('sort_order')
+      .limit(1);
+
+    if (!stops.data || stops.data.length === 0) {
+      return res.status(400).json({ error: 'No active stops found for this trip.' });
+    }
+
+    const firstStopId = stops.data[0].id;
+    const updatedStop = await supabase.from('trip_stops').update({ is_current: true })
+      .eq('id', firstStopId)
+      .eq('trip_display_id', tripDisplayId)
+      .select()
+      .maybeSingle();
+
+    if (!updatedStop.data) {
+      return res.status(500).json({ error: 'Failed to start trip: Stop not found or update failed.' });
+    }
+
+    res.json({ message: 'Trip started.', stop_id: firstStopId });
+  } catch (err) {
+    logger.error('[tripRoutes] startTrip error:', err.message);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 export default router;

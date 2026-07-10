@@ -5,7 +5,16 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export function requestIdMiddleware(req, res, next) {
   const header = req.headers['x-request-id'];
-  req.requestId = (typeof header === 'string' && header.trim()) ? header.trim() : randomUUID();
+  let validId = null;
+  if (typeof header === 'string') {
+    const trimmed = header.trim();
+    if (UUID_RE.test(trimmed)) {
+      validId = trimmed;
+    } else if (trimmed.length > 0 && trimmed.length <= 100 && /^[\w-]+$/.test(trimmed)) {
+      validId = trimmed;
+    }
+  }
+  req.requestId = validId || randomUUID();
   res.setHeader('X-Request-Id', req.requestId);
   next();
 }

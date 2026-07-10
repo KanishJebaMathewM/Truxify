@@ -105,7 +105,7 @@ export class DeliveryVerificationService {
       });
     }
 
-    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status');
+    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status, escrow_booking_id');
 
     if (orderErr || !order) {
       throw new DomainError(404, { error: 'Order not found.' });
@@ -226,12 +226,9 @@ export class DeliveryVerificationService {
     if (guardResult.error) {
       throw new DomainError(409, { error: 'Order was already cancelled or payment released.' });
     }
-  if (guardErr) {
-    if (guardErr.code === 'PGRST116') {
-      throw new DomainError(409, { error: 'Order was already cancelled or payment released.' });
+    if (order.escrow_booking_id && order.escrow_status !== 'funded' && order.escrow_status !== 'release_failed') {
+      throw new DomainError(400, { error: `Cannot release payment: Escrow deposit was never completed or is in an invalid state (${order.escrow_status}).` });
     }
-    throw new DomainError(500, { error: 'Failed to verify OTP.', details: guardErr.message });
-  }
 
     let releaseTxHash = null;
     let escrowAlreadyReleased = false;

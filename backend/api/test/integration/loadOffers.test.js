@@ -369,7 +369,7 @@ describe('Load Offers Routes Integration Tests', () => {
   describe('GET /api/loads/:id (Get Single Load)', () => {
     it('successfully gets a single available load', async () => {
       m.store.load_offers.push({
-        id: 'load-123',
+        id: '11111111-1111-1111-1111-111111111111',
         pickup_address: 'Pune',
         drop_address: 'Mumbai',
         freight_value: 500000,
@@ -377,11 +377,11 @@ describe('Load Offers Routes Integration Tests', () => {
       });
 
       const res = await request(buildApp())
-        .get('/api/loads/load-123')
+        .get('/api/loads/11111111-1111-1111-1111-111111111111')
         .set(DRIVER_HEADERS);
 
       expect(res.status).toBe(200);
-      expect(res.body.load.id).toBe('load-123');
+      expect(res.body.load.id).toBe('11111111-1111-1111-1111-111111111111');
       expect(res.body.load.pickup).toBe('Pune');
       expect(res.body.load.destination).toBe('Mumbai');
       expect(res.body.load.estimated_price).toBe(5000);

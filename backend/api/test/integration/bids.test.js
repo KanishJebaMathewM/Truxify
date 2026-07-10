@@ -57,6 +57,7 @@ describe('Bid Routes', () => {
     m.store.trucks = [];
     m.calls.length = 0;
     mockBuildDepositTx.mockReset();
+    mockBuildDepositTx.mockResolvedValue({ txData: 'mock_tx_data', bookingId: 'mock_booking_id' });
     mockRecordDepositTx.mockReset();
     mockEscrowRefund.mockReset();
     mockEscrowDeposit.mockResolvedValue({ txHash: '0xdefaultescrow' });
@@ -281,7 +282,7 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept executes RPC', async () => {
-    mockBuildDepositTx.mockResolvedValue({ to: '0xescrow', data: '0xdeadbeef' });
+    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' } });
 
     m.store.orders.push({
       id: 'order-1',
@@ -332,7 +333,7 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept triggers escrow deposit when wallet addresses present', async () => {
-    mockBuildDepositTx.mockResolvedValue({ to: '0xescrow', data: '0xdeadbeef', bookingId: 'escrow:OD-ESCROW' });
+    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' }, bookingId: 'escrow:OD-ESCROW' });
 
     m.store.orders.push({
       id: 'order-escrow',

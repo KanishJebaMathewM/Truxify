@@ -166,6 +166,19 @@ describe('GET /api/health/ready', () => {
 
   beforeEach(() => {
     app = buildApp();
+    mockSupabase = {
+      from: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({ data: [{ 1: 1 }], error: null })
+    };
+    mockMongoDb = {
+      admin: () => ({
+        ping: vi.fn().mockResolvedValue({ ok: 1 })
+      })
+    };
+    mockRedisClient = {
+      ping: vi.fn().mockResolvedValue('PONG')
+    };
   });
 
   it('returns ready status with services information', async () => {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
 import 'dart:developer' as developer;
@@ -114,6 +115,8 @@ class ApiClient {
   /// Falls back to Supabase session token if no Firebase user is signed in.
   String? _cachedFirebaseToken;
 
+  Completer<String?>? _pendingTokenRefresh;
+
   Future<String?> get _accessTokenAsync async {
     try {
       final firebaseUser = FirebaseAuth.instance.currentUser;
@@ -142,22 +145,35 @@ class ApiClient {
   }
 
   Future<String?> _refreshedToken() async {
+    // Deduplicate concurrent refresh attempts: only one caller performs
+    // the refresh; others await the same result.
+    if (_pendingTokenRefresh != null) {
+      return _pendingTokenRefresh!.future;
+    }
+    final completer = Completer<String?>();
+    _pendingTokenRefresh = completer;
     try {
       // Prefer Firebase token refresh.
       final firebaseUser = FirebaseAuth.instance.currentUser;
       if (firebaseUser != null) {
         final token = await firebaseUser.getIdToken(true);
         _cachedFirebaseToken = token;
+        completer.complete(token);
         return token;
       }
       // Fall back to Supabase session refresh.
       final res = await _supabase.auth.refreshSession();
-      return res.session?.accessToken;
+      final token = res.session?.accessToken;
+      completer.complete(token);
+      return token;
     } catch (e) {
+      if (!completer.isCompleted) completer.complete(null);
       if (kDebugMode) {
         developer.log('[ApiClient] Token refresh failed: $e', name: 'ApiClient');
       }
       return null;
+    } finally {
+      _pendingTokenRefresh = null;
     }
   }
 

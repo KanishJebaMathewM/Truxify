@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -115,6 +116,7 @@ class ApiClient {
     final t = token ?? _accessToken;
     return <String, String>{
       'Content-Type': 'application/json',
+      'Accept-Language': ui.PlatformDispatcher.instance.locale.languageCode,
       if (t != null && t.isNotEmpty) 'Authorization': 'Bearer $t',
       ...?additionalHeaders,
     };

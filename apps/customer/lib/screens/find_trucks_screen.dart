@@ -263,6 +263,17 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   }
 
   RouteDraft _buildDraft() {
+    DateTime? pickupDate;
+    final parsed = _parseDateTimeLabel(_composeDateTimeLabel());
+    if (parsed != null) {
+      pickupDate = DateTime(
+        parsed.date.year,
+        parsed.date.month,
+        parsed.date.day,
+        parsed.time.hour,
+        parsed.time.minute,
+      );
+    }
     return RouteDraft(
       pickup: _pickupController.text,
       drop: _dropController.text,
@@ -273,6 +284,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       stacked: _stacked,
       fragile: _fragile,
       requirements: _requirements.toList(),
+      pickupDate: pickupDate,
       pickupLat: _pickupPoint?.latitude,
       pickupLng: _pickupPoint?.longitude,
       dropLat: _dropPoint?.latitude,

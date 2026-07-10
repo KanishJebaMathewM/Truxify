@@ -31,3 +31,16 @@ class FirebaseConfig {
       messagingSenderId.isNotEmpty &&
       projectId.isNotEmpty;
 }
+
+class FirebaseSettings {
+  static const bool useEmulator = bool.fromEnvironment('USE_FIREBASE_EMULATOR');
+  static const String emulatorHost = String.fromEnvironment('FIREBASE_EMULATOR_HOST', defaultValue: 'localhost');
+  static const int emulatorPort = int.fromEnvironment('FIREBASE_EMULATOR_PORT', defaultValue: 9099);
+  static const String apiKey = String.fromEnvironment('FIREBASE_API_KEY');
+  static const String projectId = String.fromEnvironment('FIREBASE_PROJECT_ID');
+  static const String appId = String.fromEnvironment('FIREBASE_APP_ID');
+
+  static bool get isConfigured => apiKey.isNotEmpty && projectId.isNotEmpty;
+  static bool get isEmulatorMode => useEmulator && isConfigured;
+  static String get messagingUrl => 'https://.firebaseio.com';
+}

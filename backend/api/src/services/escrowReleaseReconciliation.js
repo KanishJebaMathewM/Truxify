@@ -84,8 +84,8 @@ export async function reconcilePendingEscrowReleases() {
         const releaseAttemptedAt = new Date().toISOString();
         const releaseAttempts = (order.escrow_release_attempts || 0) + 1;
 
-        const { txHash } = await escrowRelease(order.order_display_id);
-        if (!txHash) {
+        const { txHash, alreadyReleased } = await escrowRelease(order.order_display_id);
+        if (!txHash && !alreadyReleased) {
           throw new Error('Escrow release did not return a transaction hash');
         }
 
@@ -94,7 +94,7 @@ export async function reconcilePendingEscrowReleases() {
           .from('orders')
           .update({
             escrow_status: 'released',
-            release_tx_hash: txHash,
+            release_tx_hash: txHash || order.release_tx_hash,
             escrow_release_error: null,
             escrow_released_at: releasedAt,
             escrow_release_attempts: releaseAttempts,

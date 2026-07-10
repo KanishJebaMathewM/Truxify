@@ -167,6 +167,58 @@ const WS_UPGRADE_RATE_WINDOW_SECONDS = 60;
 const MAX_MSG_PER_SECOND = 10;
 const messageRateTracker = new WeakMap();
 
+// =====================================================================
+// DRIVER → ORDER CACHE (performance: avoid repeated Supabase lookups)
+// =====================================================================
+const DRIVER_ORDER_CACHE_TTL_SECONDS = 60;
+const DRIVER_ORDER_CACHE_KEY_PREFIX = 'driver:active-order:';
+
+/**
+ * Retrieve the cached active order mapping for a driver.
+ * Returns { orderId, orderDisplayId } or null on miss / error.
+ */
+async function getCachedDriverOrder(driverId) {
+  if (!redisClient) return null;
+  try {
+    const cached = await redisClient.get(`${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`);
+    if (cached) {
+      return JSON.parse(cached);
+    }
+  } catch (err) {
+    logger.error('Redis driver order cache get error:', err.message);
+  }
+  return null;
+}
+
+/**
+ * Store the driver → active order mapping in Redis.
+ */
+async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
+  if (!redisClient || !orderId) return;
+  try {
+    await redisClient.set(
+      `${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`,
+      JSON.stringify({ orderId, orderDisplayId }),
+      'EX',
+      DRIVER_ORDER_CACHE_TTL_SECONDS,
+    );
+  } catch (err) {
+    logger.error('Redis driver order cache set error:', err.message);
+  }
+}
+
+/**
+ * Invalidate cached active order for a driver.
+ */
+async function invalidateDriverOrderCache(driverId) {
+  if (!redisClient) return;
+  try {
+    await redisClient.del(`${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`);
+  } catch (err) {
+    logger.error('Redis driver order cache invalidate error:', err.message);
+  }
+}
+
 function getClientIp(request) {
   const forwardedFor = request.headers?.['x-forwarded-for'];
 
@@ -561,25 +613,36 @@ export async function handleLocationPing(ws, data, req) {
 
   if (_orderRepository && (orderUUID || orderDisplayId)) {
     try {
-      const idToLookup = orderUUID || orderDisplayId;
-      const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
-      if (order) {
-        // Verify the authenticated driver is assigned to this order
-        if (order.driver_id !== driver_id) {
-          logger.warn({
-            event: 'UNAUTHORIZED_ORDER_TRACKING',
-            driverId: driver_id,
-            orderId: order.id,
-            orderDisplayId: order.order_display_id,
-            assignedDriverId: order.driver_id,
-          }, 'Driver attempted to submit location for order they are not assigned to');
-          return ws.send(JSON.stringify({
-            error: 'Not authorized to track this order',
-            orderId: orderDisplayId || orderUUID,
-          }));
+      // ── Cache-first order resolution ────────────────────────────────
+      // Check Redis for a cached driver→order mapping before hitting the
+      // database.  This avoids repeated Supabase queries for the same
+      // driver during an active trip.
+      const cached = await getCachedDriverOrder(driver_id);
+      if (cached) {
+        orderUUID = cached.orderId;
+        orderDisplayId = cached.orderDisplayId;
+      } else {
+        const idToLookup = orderUUID || orderDisplayId;
+        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        if (order) {
+          // Verify the authenticated driver is assigned to this order
+          if (order.driver_id !== driver_id) {
+            logger.warn({
+              event: 'UNAUTHORIZED_ORDER_TRACKING',
+              driverId: driver_id,
+              orderId: order.id,
+              orderDisplayId: order.order_display_id,
+              assignedDriverId: order.driver_id,
+            }, 'Driver attempted to submit location for order they are not assigned to');
+            return ws.send(JSON.stringify({
+              error: 'Not authorized to track this order',
+              orderId: orderDisplayId || orderUUID,
+            }));
+          }
+          orderUUID = order.id;
+          orderDisplayId = order.order_display_id;
+          await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
         }
-        orderUUID = order.id;
-        orderDisplayId = order.order_display_id;
       }
     } catch (err) {
       logger.error('Failed to resolve order details in tracker:', err.message);
@@ -1056,6 +1119,9 @@ async function removeClientFromAllSubscriptions(ws) {
         } catch (err) {
           logger.error('Redis subscription expire error on disconnect:', err.message);
         }
+        // Invalidate the driver→order cache when the last socket for this
+        // driver disconnects so a stale mapping does not persist.
+        await invalidateDriverOrderCache(subscriberId);
       }
     }
   }
@@ -1166,6 +1232,12 @@ export const __testing = {
   get MAX_CONSECUTIVE_DROPS() {
     return MAX_CONSECUTIVE_DROPS;
   },
+  // ── Driver order cache helpers (for testing) ──────────────────────
+  getCachedDriverOrder,
+  setCachedDriverOrder,
+  invalidateDriverOrderCache,
+  DRIVER_ORDER_CACHE_KEY_PREFIX,
+  DRIVER_ORDER_CACHE_TTL_SECONDS,
 };
 
 // Fix: implemented exponential backoff (retry count * 1000ms) for Supabase channel reconnects.

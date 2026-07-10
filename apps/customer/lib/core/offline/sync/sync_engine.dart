@@ -135,3 +135,22 @@ class SyncEngine {
     return Duration(milliseconds: delayMs > 8000 ? 8000 : delayMs);
   }
 }
+class SyncMetrics {
+  int totalEvents = 0;
+  int syncedEvents = 0;
+  int failedEvents = 0;
+  DateTime? lastSyncAt;
+  Duration lastSyncDuration = Duration.zero;
+
+  double get syncProgress => totalEvents > 0 ? syncedEvents / totalEvents : 1.0;
+  bool get isComplete => failedEvents == 0 && syncedEvents == totalEvents;
+  String get summary => 'Synced syncedEvents/totalEvents (failedEvents failed)';
+
+  void recordSync(int count, Duration duration) {
+    syncedEvents += count;
+    lastSyncAt = DateTime.now();
+    lastSyncDuration = duration;
+  }
+  void recordFailure() { failedEvents++; }
+  void reset() { totalEvents = 0; syncedEvents = 0; failedEvents = 0; }
+}

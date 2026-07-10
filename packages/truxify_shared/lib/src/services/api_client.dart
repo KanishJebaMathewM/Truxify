@@ -180,8 +180,23 @@ class ApiClient {
   // ── URI building and path normalization ───────────────────────────
 
   Uri _buildUri(String path) {
-    final cleanPath = path.startsWith('/') ? path : '/$path';
-    return Uri.parse('$_baseUrl$cleanPath');
+    final baseUri = Uri.parse(_baseUrl);
+    final cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    final queryStart = cleanPath.indexOf('?');
+    final rawPath = queryStart == -1
+        ? cleanPath
+        : cleanPath.substring(0, queryStart);
+    final rawQuery =
+        queryStart == -1 ? null : cleanPath.substring(queryStart + 1);
+    final baseSegments =
+        baseUri.pathSegments.where((segment) => segment.isNotEmpty);
+    final requestSegments =
+        rawPath.split('/').where((segment) => segment.isNotEmpty);
+
+    return baseUri.replace(
+      pathSegments: <String>[...baseSegments, ...requestSegments],
+      query: rawQuery?.isEmpty == true ? null : rawQuery,
+    );
   }
 
   // ── HTTP methods ──────────────────────────────────────────────────

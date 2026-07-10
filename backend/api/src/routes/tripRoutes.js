@@ -6,8 +6,6 @@ import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams } from '../middleware/validate.js';
 import { uuidParamSchema } from '../validation/requestSchemas.js';
 import logger from '../middleware/logger.js';
-import { validateParams } from '../middleware/validate.js';
-import { uuidParamSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 

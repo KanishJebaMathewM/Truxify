@@ -177,6 +177,14 @@ class _OrdersScreenState extends State<OrdersScreen>
                   ? order['truck_number'].toString().trim()
                   : '—',
               timeline: const [],
+              goodsType: order['goods_type']?.toString(),
+              weightTonnes: order['weight_tonnes']?.toString(),
+              dimensions: (order['length_ft'] != null && order['width_ft'] != null && order['height_ft'] != null)
+                  ? '${order['length_ft']} × ${order['width_ft']} × ${order['height_ft']}'
+                  : null,
+              isStackable: order['is_stackable'] as bool?,
+              isFragile: order['is_fragile'] as bool?,
+              specialRequirements: order['special_requirements']?.toString(),
             );
           }).toList();
         });

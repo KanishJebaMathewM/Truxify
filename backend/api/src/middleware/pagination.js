@@ -4,6 +4,7 @@
  */
 export function validatePagination(options = {}) {
   const maxLimit = options.maxLimit || 100;
+  const maxOffset = options.maxOffset || 10000;
   const defaultLimit = options.defaultLimit || 10;
   const defaultOffset = options.defaultOffset || 0;
 
@@ -24,14 +25,14 @@ export function validatePagination(options = {}) {
     if (req.query.offset) {
       const parsed = parseInt(req.query.offset, 10);
       if (Number.isFinite(parsed) && parsed >= 0) {
-        offset = parsed;
+        offset = Math.min(parsed, maxOffset);
       } else {
         return res.status(400).json({ error: 'Invalid offset parameter' });
       }
     } else if (req.query.page) {
        const parsedPage = parseInt(req.query.page, 10);
        if (Number.isFinite(parsedPage) && parsedPage > 0) {
-          offset = (parsedPage - 1) * limit;
+          offset = Math.min((parsedPage - 1) * limit, maxOffset);
        } else {
           return res.status(400).json({ error: 'Invalid page parameter' });
        }

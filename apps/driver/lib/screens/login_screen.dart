@@ -86,6 +86,7 @@ class _LoginScreenState extends State<LoginScreen> {
             arguments: <String, String>{
               'phone': phone,
               'verificationId': verificationId,
+              'countryCode': _selectedCode,
             },
           );
         },

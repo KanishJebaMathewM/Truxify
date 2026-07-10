@@ -315,6 +315,43 @@ class CacheManager {
     return rows.isEmpty ? null : rows.first['updated_at'] as String?;
   }
 
+  Future<int> clearTable(String tableName) async {
+    final db = await open();
+    return db.delete(tableName);
+  }
+
+  Future<void> clearAll() async {
+    final db = await open();
+    await db.delete('orders');
+    await db.delete('profile');
+    await db.delete('documents');
+    await db.delete('settings');
+    await db.delete('last_location');
+    await db.delete('milestones');
+  }
+
+  Future<int> removeStaleOrders({Duration maxAge = const Duration(days: 7)}) async {
+    final db = await open();
+    final cutoff = DateTime.now().toUtc().subtract(maxAge).toIso8601String();
+    return db.delete('orders', where: 'updated_at < ?', whereArgs: [cutoff]);
+  }
+
+  Future<int> getCacheSize(String tableName) async {
+    final db = await open();
+    final result = await db.rawQuery('SELECT COUNT(*) as cnt FROM $tableName');
+    if (result.isEmpty) return 0;
+    return (result.first['cnt'] as int?) ?? 0;
+  }
+
+  Future<Map<String, int>> getAllTableSizes() async {
+    final tables = ['orders', 'profile', 'documents', 'settings', 'last_location', 'milestones'];
+    final result = <String, int>{};
+    for (final table in tables) {
+      result[table] = await getCacheSize(table);
+    }
+    return result;
+  }
+
   Future<void> close() async {
     await _database?.close();
     _database = null;

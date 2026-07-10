@@ -37,8 +37,6 @@ loaded_models: set[str] = set()
 
 async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     ml_api_key = os.environ.get("ML_API_KEY")
-    if ml_api_key == "test_key":
-        return
     if not ml_api_key:
         logger.warning("ML_API_KEY not set - ML engine running without authentication")
         raise HTTPException(status_code=503, detail="ML engine not configured: missing ML_API_KEY")

@@ -124,8 +124,16 @@ class OrderService {
     try {
       final body = await _apiClient.get(
         '/api/orders/${_encodePathSegment(orderDisplayId)}',
-      ) as Map<String, dynamic>?;
-      return body?['order'] as Map<String, dynamic>?;
+      );
+      if (body is! Map<String, dynamic>) {
+        throw StateError('Unexpected order response type');
+      }
+
+      final order = body['order'];
+      if (order == null) return null;
+      if (order is Map<String, dynamic>) return order;
+      if (order is Map) return Map<String, dynamic>.from(order);
+      throw StateError('Unexpected order payload type');
     } on ApiException catch (e) {
       if (e.statusCode == 404) return null;
       throw StateError(e.message);

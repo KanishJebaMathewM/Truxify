@@ -77,6 +77,29 @@ void main() {
     expect(order404, isNull);
   });
 
+  test('fetchOrderById returns null for null order payload', () async {
+    when(() => apiClient.get('/api/orders/ORD-123'))
+        .thenAnswer((_) async => {'order': null});
+
+    expect(await orderService.fetchOrderById('ORD-123'), isNull);
+  });
+
+  test('fetchOrderById rejects malformed order payloads', () async {
+    when(() => apiClient.get('/api/orders/ORD-123'))
+        .thenAnswer((_) async => {'order': []});
+
+    await expectLater(
+      () => orderService.fetchOrderById('ORD-123'),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('Failed to fetch order'),
+        ),
+      ),
+    );
+  });
+
   test('fetchOrders accepts wrapped and bare history lists', () async {
     when(() => apiClient.get('/api/orders/history'))
         .thenAnswer((_) async => {'history': [{'id': 'ORD-1'}]});

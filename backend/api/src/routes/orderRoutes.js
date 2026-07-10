@@ -27,6 +27,7 @@ import {
   buildDepositTx,
   recordDepositTx,
   submitEscrowRefund,
+  submitEscrowCancelWithPenalty,
   confirmEscrowRefund,
 } from '../services/escrow.js';
 import { BidAcceptanceService, DomainError } from '../services/order/bidAcceptanceService.js';
@@ -470,15 +471,7 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
   const orderId = req.params.id;
 
   try {
-    const result = await orderRepository.findOrderByAnyId(orderId, '*');
-    const order = result.data;
-    const orderErr = result.error;
-    if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
 
-    if (order.customer_id !== req.user.id && order.driver_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    }
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertOrderAccess(order, req.user.id);
@@ -1051,7 +1044,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
       return res.status(err.status).json(err.payload);
     }
     logger.error('Change drop exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 
@@ -1089,6 +1082,16 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
     const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(order.escrow_status);
     let workingOrder = order;
 
+    let calculatedPenalty = order.cancellation_fee ?? 0;
+    if (order.total_amount) {
+      if (['assigned'].includes(order.status)) {
+        calculatedPenalty = order.total_amount * 0.10;
+      } else if (['arrived_pickup', 'picked_up', 'in_transit', 'arrived_dropoff'].includes(order.status)) {
+        calculatedPenalty = order.total_amount * 0.50;
+      }
+    }
+    calculatedPenalty = Math.round(calculatedPenalty);
+
     // Persist cancellation before touching the blockchain. A failed or delayed
     // refund must never leave the order available for continued work.
     if (requiresRefund && (order.status !== 'cancelled' || order.escrow_status !== 'refund_pending')) {
@@ -1098,6 +1101,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
         {
           status: 'cancelled',
           cancellation_reason: reason ?? order.cancellation_reason,
+          cancellation_fee: calculatedPenalty,
           escrow_status: 'refund_pending',
           escrow_refund_error: null,
           escrow_refund_attempts: (order.escrow_refund_attempts ?? 0) + 1,
@@ -1137,7 +1141,14 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           if (refundTxHash) {
             receipt = await confirmEscrowRefund(refundTxHash);
           } else {
-            const submitted = await submitEscrowRefund(order.order_display_id);
+            let submitted;
+            if (calculatedPenalty > 0) {
+              const maticAmount = (calculatedPenalty * ESCROW_MATIC_PER_PAISA).toFixed(18);
+              const driverFeeWei = ethers.parseEther(maticAmount);
+              submitted = await submitEscrowCancelWithPenalty(order.order_display_id, driverFeeWei);
+            } else {
+              submitted = await submitEscrowRefund(order.order_display_id);
+            }
             refundTxHash = submitted.txHash;
             if (!refundTxHash || !submitted.waitForConfirmation) {
               throw new Error('Escrow refund transaction was not submitted.');
@@ -1227,7 +1238,8 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
 
     const updatePayload = {
       status: 'cancelled',
-      cancellation_reason: reason,
+      cancellation_reason: reason ?? order.cancellation_reason,
+      cancellation_fee: calculatedPenalty,
       updated_at: new Date().toISOString(),
     };
 
@@ -1259,7 +1271,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
       return res.status(err.status).json(err.payload);
     }
     logger.error('Cancel order exception:', err.message);
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 
@@ -1408,7 +1420,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
       return res.status(err.status).json(err.payload);
     }
     logger.error({ err }, 'Fetch driver location exception');
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 
@@ -1500,7 +1512,7 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRol
       return res.status(err.status).json(err.payload);
     }
     logger.error({ err }, 'Fetch order route exception');
-    return res.status(500).json({ error: 'Internal Server Error' });
+    return res.status(500).json({ error: 'Internal Server Error'});
   }
 });
 

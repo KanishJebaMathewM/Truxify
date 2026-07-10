@@ -209,7 +209,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
       .insert({
         user_id: customerId,
         title,
-        body: `Your delivery verification OTP has been sent for order ${orderDisplayId}.`,
+        body,
         notif_type: 'order_update',
         metadata: { order_display_id: orderDisplayId, delivery_otp_hash: otpHash },
       });
@@ -227,9 +227,9 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
   let fcmResult;
   try { fcmResult = await sendFcmNotification(
       customerId,
-    { title: 'Delivery Verification OTP', body: `Your delivery verification OTP has been sent for order ${orderDisplayId}.` },
+    { title: 'Delivery Verification OTP', body },
     { orderDisplayId, notifType: 'delivery_otp' }
-  ); } catch (err) { logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error'); }
+  ); } catch (err) { logger.warn({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error'); }
 
   if (process.env.TWILIO_AUTH_TOKEN) {
     logger.info(`[NotificationService] [SMS] SMS stub: Sending OTP for order ${orderDisplayId} (masked)`);

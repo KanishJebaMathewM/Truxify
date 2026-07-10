@@ -149,6 +149,32 @@ contract Escrow is Pausable {
         emit Refunded(bookingId, customer, amount);
     }
 
+    /// @notice Cancels the booking and splits the escrowed funds between the driver and the customer.
+    /// @param bookingId The unique identifier of the booking.
+    /// @param driverFee The amount to be paid to the driver as a penalty.
+    function cancelWithPenalty(bytes32 bookingId, uint256 driverFee) external onlyRelayer nonReentrant whenNotPaused {
+        BookingEscrow storage booking = escrows[bookingId];
+        require(booking.status == EscrowStatus.Funded, "Escrow not funded");
+        require(driverFee <= booking.amount, "Penalty exceeds amount");
+
+        booking.status = EscrowStatus.Refunded;
+        uint256 amount = booking.amount;
+        uint256 customerRefund = amount - driverFee;
+        booking.amount = 0;
+
+        if (driverFee > 0) {
+            pendingWithdrawals[booking.driver] += driverFee;
+            releaseTimestamps[booking.driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
+            emit Released(bookingId, booking.driver, driverFee);
+        }
+
+        if (customerRefund > 0) {
+            pendingWithdrawals[booking.customer] += customerRefund;
+            releaseTimestamps[booking.customer] = block.timestamp + WITHDRAWAL_TIMEOUT;
+            emit Refunded(bookingId, booking.customer, customerRefund);
+        }
+    }
+
     /// @notice Allows a user (driver or customer) to withdraw their pending funds.
     function withdraw() external nonReentrant whenNotPaused {
         uint256 amount = pendingWithdrawals[msg.sender];

@@ -63,7 +63,25 @@ class AddressRepository {
 class AddressValidator {
   static const int maxAddresses = 20;
   static const int minLength = 5;
-  static bool isValid(String addr) => addr.trim().length >= minLength && addr.trim().contains(RegExp(r'[a-zA-Z]'));
-  static String normalizeLabel(String label) => label.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '_');
-  static bool isDuplicate(String existing, String newLabel) => normalizeLabel(existing) == normalizeLabel(newLabel);
+  static const int maxLength = 500;
+
+  static bool isValid(String addr) {
+    final trimmed = addr.trim();
+    if (trimmed.length < minLength || trimmed.length > maxLength) return false;
+    if (!trimmed.contains(RegExp(r'[a-zA-Z]'))) return false;
+    return true;
+  }
+
+  static String normalizeLabel(String label) {
+    return label.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '_');
+  }
+
+  static bool isDuplicate(String existing, String newLabel) {
+    return normalizeLabel(existing) == normalizeLabel(newLabel);
+  }
+
+  static String truncate(String addr, int maxLen) {
+    if (addr.length <= maxLen) return addr;
+    return addr.substring(0, maxLen - 3) + '...';
+  }
 }

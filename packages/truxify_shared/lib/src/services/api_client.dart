@@ -104,8 +104,14 @@ class ApiClient {
     return _supabase.auth.currentSession?.accessToken;
   }
 
-  String? get _accessToken =>
-      _cachedFirebaseToken ?? _supabase.auth.currentSession?.accessToken;
+  String? get _accessToken {
+    if (_cachedFirebaseToken != null) return _cachedFirebaseToken;
+    try {
+      return _supabase.auth.currentSession?.accessToken;
+    } catch (_) {
+      return null;
+    }
+  }
 
   Map<String, String> _headers({String? token, Map<String, String>? additionalHeaders}) {
     final t = token ?? _accessToken;

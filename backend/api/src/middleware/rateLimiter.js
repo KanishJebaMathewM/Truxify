@@ -110,6 +110,7 @@ export const globalLimiter = rateLimit({
   max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { ip: false },
   keyGenerator: safeIpKeyGenerator,
   store: createStore('rl:global:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
@@ -124,6 +125,7 @@ export const userLimiter = rateLimit({
   max: 300,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { ip: false },
   keyGenerator: userKeyGenerator,
   store: createStore('rl:user:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
@@ -134,6 +136,7 @@ export const healthLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { ip: false },
   keyGenerator: safeIpKeyGenerator,
   store: createStore('rl:health:'),
   message: { error: 'Rate limit exceeded', retryAfter: 60 },
@@ -144,6 +147,7 @@ export const authLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { ip: false },
   keyGenerator: safeIpKeyGenerator,
   store: createStore('rl:auth:'),
   message: { error: 'Rate limit exceeded', retryAfter: 3600 },
@@ -154,6 +158,7 @@ export const bidLimiter = rateLimit({
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { ip: false },
   keyGenerator: userKeyGenerator,
   store: createStore('rl:bid:'),
   message: { error: 'Rate limit exceeded', retryAfter: 60 },
@@ -164,6 +169,7 @@ export const deviceLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { ip: false },
   keyGenerator: (req) => {
     if (req.user?.id) return `user:${req.user.id}`;
     if (req.user?.uid) return `uid:${req.user.uid}`;

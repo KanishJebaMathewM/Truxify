@@ -19,8 +19,12 @@ vi.mock('../../src/services/reputation.js', () => ({
   getDriverReputation: getDriverReputationMock,
 }));
 
+vi.mock('../../src/services/otpService.js', () => ({
+  generateAndStoreOtp: vi.fn().mockResolvedValue('1234'),
+  verifyOtp: vi.fn((_phone, otp) => Promise.resolve(otp === '1234')),
+}));
 
-const { default: driverRouter } = await import('../../src/routes/driverRoutes.js');
+const { default: driverRouter, otpPhoneKey } = await import('../../src/routes/driverRoutes.js');
 
 
 function buildApp() {
@@ -31,7 +35,7 @@ function buildApp() {
 }
 
 const DRIVER_HEADERS = {
-  'x-user-id': 'driver-1',
+  'x-user-id': '11111111-1111-4111-8111-111111111111',
   'x-user-role': 'driver',
 };
 
@@ -44,6 +48,19 @@ describe('Driver Routes', () => {
     m.calls.length = 0;
   });
 
+  describe('otpPhoneKey', () => {
+    it('normalizes equivalent phone number formats to one limiter key', () => {
+      expect(otpPhoneKey('9876543210')).toBe('phone:9876543210');
+      expect(otpPhoneKey(' 98765 43210 ')).toBe('phone:9876543210');
+      expect(otpPhoneKey('+91 98765-43210')).toBe('phone:9876543210');
+      expect(otpPhoneKey('919876543210')).toBe('phone:9876543210');
+    });
+
+    it('uses an unknown fallback for non-string or empty phone values', () => {
+      expect(otpPhoneKey(undefined)).toBe('phone:unknown');
+      expect(otpPhoneKey('---')).toBe('phone:unknown');
+    });
+  });
 
   it('GET /stats returns 404 when driver profile does not exist', async () => {
     const app = buildApp();
@@ -60,7 +77,7 @@ describe('Driver Routes', () => {
 
   it('GET /stats returns driver statistics', async () => {
     m.store.driver_details.push({
-      user_id: 'driver-1',
+      user_id: '11111111-1111-4111-8111-111111111111',
       rating: 4.9,
       total_trips: 50,
       completion_rate: 98,
@@ -82,10 +99,9 @@ describe('Driver Routes', () => {
     expect(res.body.truck).toBe(null);
   });
 
-
   it('GET /stats returns truck details when truck assigned', async () => {
     m.store.driver_details.push({
-      user_id: 'driver-1',
+      user_id: '11111111-1111-4111-8111-111111111111',
       rating: 5,
       total_trips: 10,
       completion_rate: 100,
@@ -153,7 +169,7 @@ describe('Driver Routes', () => {
 
   it('GET /wallet/history returns transactions', async () => {
     m.store.wallet_transactions.push({
-      driver_id: 'driver-1',
+      driver_id: '11111111-1111-4111-8111-111111111111',
       amount: 500,
       created_at: '2026-06-01',
     });
@@ -170,7 +186,7 @@ describe('Driver Routes', () => {
 
   it('GET /earnings/summary returns earnings data', async () => {
     m.store.earnings_daily.push({
-      driver_id: 'driver-1',
+      driver_id: '11111111-1111-4111-8111-111111111111',
       day_date: '2026-06-01',
       amount: 5000,
       trip_count: 3,
@@ -191,8 +207,8 @@ describe('Driver Routes', () => {
     const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
     m.store.earnings_daily.push(
-      { driver_id: 'driver-1', day_date: yesterday, amount: 1000, trip_count: 1 },
-      { driver_id: 'driver-1', day_date: today, amount: 2000, trip_count: 2 }
+      { driver_id: '11111111-1111-4111-8111-111111111111', day_date: yesterday, amount: 1000, trip_count: 1 },
+      { driver_id: '11111111-1111-4111-8111-111111111111', day_date: today, amount: 2000, trip_count: 2 }
     );
 
     const app = buildApp();
@@ -219,8 +235,8 @@ describe('Driver Routes', () => {
     const oldDateStr = oldDate.toISOString().split('T')[0];
 
     m.store.earnings_daily.push(
-      { driver_id: 'driver-1', day_date: oldDateStr, amount: 500, trip_count: 1 },
-      ...dates.map((d, i) => ({ driver_id: 'driver-1', day_date: d, amount: (i + 1) * 100, trip_count: i + 1 }))
+      { driver_id: '11111111-1111-4111-8111-111111111111', day_date: oldDateStr, amount: 500, trip_count: 1 },
+      ...dates.map((d, i) => ({ driver_id: '11111111-1111-4111-8111-111111111111', day_date: d, amount: (i + 1) * 100, trip_count: i + 1 }))
     );
 
     const app = buildApp();
@@ -263,7 +279,7 @@ describe('Driver Routes', () => {
 
   it('POST /wallet/withdraw rejects insufficient balance', async () => {
     m.store.driver_details.push({
-      user_id: 'driver-1',
+      user_id: '11111111-1111-4111-8111-111111111111',
       wallet_confirmed: 1000,
     });
 
@@ -280,7 +296,7 @@ describe('Driver Routes', () => {
 
   it('POST /wallet/withdraw succeeds and calls RPC', async () => {
     m.store.driver_details.push({
-      user_id: 'driver-1',
+      user_id: '11111111-1111-4111-8111-111111111111',
       wallet_confirmed: 10000,
     });
 
@@ -364,7 +380,7 @@ describe('Driver Routes', () => {
 
   it('POST /wallet/withdraw returns 400 when RPC fails', async () => {
     m.store.driver_details.push({
-      user_id: 'driver-1',
+      user_id: '11111111-1111-4111-8111-111111111111',
       wallet_confirmed: 10000,
     });
 
@@ -393,7 +409,7 @@ describe('Driver Routes', () => {
 
     it('returns both platform rating and on-chain score when wallet exists and blockchain responds', async () => {
       m.store.driver_details.push({
-        user_id: 'driver-1',
+        user_id: '11111111-1111-4111-8111-111111111111',
         rating: 4.8,
         polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
       });
@@ -402,12 +418,12 @@ describe('Driver Routes', () => {
 
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/driver-1/reputation')
+        .get('/api/drivers/11111111-1111-4111-8111-111111111111/reputation')
         .set(DRIVER_HEADERS);
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        driverId: 'driver-1',
+        driverId: '11111111-1111-4111-8111-111111111111',
         walletAddress: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
         onChainScore: 92,
         supabaseRating: 4.8,
@@ -417,19 +433,19 @@ describe('Driver Routes', () => {
 
     it('returns onChainScore null and walletAddress null when driver has no wallet', async () => {
       m.store.driver_details.push({
-        user_id: 'driver-1',
+        user_id: '11111111-1111-4111-8111-111111111111',
         rating: 4.8,
         polygon_wallet_address: null,
       });
 
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/driver-1/reputation')
+        .get('/api/drivers/11111111-1111-4111-8111-111111111111/reputation')
         .set(DRIVER_HEADERS);
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        driverId: 'driver-1',
+        driverId: '11111111-1111-4111-8111-111111111111',
         walletAddress: null,
         onChainScore: null,
         supabaseRating: 4.8,
@@ -439,7 +455,7 @@ describe('Driver Routes', () => {
 
     it('returns onChainScore null and supabase rating when blockchain/contract fails', async () => {
       m.store.driver_details.push({
-        user_id: 'driver-1',
+        user_id: '11111111-1111-4111-8111-111111111111',
         rating: 4.8,
         polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
       });
@@ -448,12 +464,12 @@ describe('Driver Routes', () => {
 
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/driver-1/reputation')
+        .get('/api/drivers/11111111-1111-4111-8111-111111111111/reputation')
         .set(DRIVER_HEADERS);
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        driverId: 'driver-1',
+        driverId: '11111111-1111-4111-8111-111111111111',
         walletAddress: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
         onChainScore: null,
         supabaseRating: 4.8,
@@ -464,7 +480,7 @@ describe('Driver Routes', () => {
     it('returns 404 if driver profile is not found', async () => {
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/driver-1/reputation')
+        .get('/api/drivers/11111111-1111-4111-8111-111111111111/reputation')
         .set(DRIVER_HEADERS);
 
       expect(res.status).toBe(404);
@@ -478,8 +494,8 @@ describe('Driver Routes', () => {
 
     it('returns the paginated bids response shape consumed by the driver app', async () => {
       m.store.load_bids.push(
-        { id: 'bid-1', driver_id: 'driver-1', load_id: 'load-1', bid_amount: 5000, created_at: '2026-01-02T00:00:00.000Z' },
-        { id: 'bid-2', driver_id: 'driver-1', load_id: 'load-2', bid_amount: 7500, created_at: '2026-01-01T00:00:00.000Z' },
+        { id: 'bid-1', driver_id: '11111111-1111-4111-8111-111111111111', load_id: 'load-1', bid_amount: 5000, created_at: '2026-01-02T00:00:00.000Z' },
+        { id: 'bid-2', driver_id: '11111111-1111-4111-8111-111111111111', load_id: 'load-2', bid_amount: 7500, created_at: '2026-01-01T00:00:00.000Z' },
       );
 
       const app = buildApp();
@@ -501,7 +517,7 @@ describe('Driver Routes', () => {
 
     it('only returns bids belonging to the requesting driver', async () => {
       m.store.load_bids.push(
-        { id: 'bid-mine', driver_id: 'driver-1', load_id: 'load-1', bid_amount: 5000, created_at: '2026-01-01T00:00:00.000Z' },
+        { id: 'bid-mine', driver_id: '11111111-1111-4111-8111-111111111111', load_id: 'load-1', bid_amount: 5000, created_at: '2026-01-01T00:00:00.000Z' },
         { id: 'bid-other', driver_id: 'driver-2', load_id: 'load-2', bid_amount: 9000, created_at: '2026-01-01T00:00:00.000Z' },
       );
 

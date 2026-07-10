@@ -113,7 +113,7 @@ describe('tracker', () => {
     it('buffers valid location ping', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 19.076, lng: 72.877 });
-      const buffer = __testing.getTelemetryWriteBuffer();
+      const buffer = __testing.getTelemetryWriteBuffer().toArray();
       expect(buffer.length).toBe(1);
       expect(buffer[0].lat).toBe(19.076);
       expect(buffer[0].lng).toBe(72.877);
@@ -141,7 +141,7 @@ describe('tracker', () => {
     });
 
     it('getTelemetryWriteBuffer returns an array', () => {
-      const buf = __testing.getTelemetryWriteBuffer();
+      const buf = __testing.getTelemetryWriteBuffer().toArray();
       expect(Array.isArray(buf)).toBe(true);
     });
   });

@@ -10,10 +10,16 @@ import '../widgets/app_logo.dart';
 import '../widgets/common_widgets.dart';
 
 class OtpScreen extends StatefulWidget {
-  const OtpScreen({super.key, required this.phone, required this.verificationId});
+  const OtpScreen({
+    super.key,
+    required this.phone,
+    required this.verificationId,
+    this.countryCode = '+91',
+  });
 
   final String phone;
   final String verificationId;
+  final String countryCode;
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
@@ -118,7 +124,7 @@ class _OtpScreenState extends State<OtpScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Sent to +91 ${widget.phone}',
+                'Sent to ${widget.countryCode} ${widget.phone}',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: TruxifyColors.adaptiveSecondaryText(context),
                     ),

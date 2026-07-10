@@ -16,6 +16,7 @@ const orderRepository = new OrderRepository(supabase)
 import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
+import { validateEscrowSetup } from './services/escrow.js'
 
 // Load REST routes
 import orderRoutes from './routes/orderRoutes.js'
@@ -32,7 +33,9 @@ import demandRoutes from './routes/demandRoutes.js'
 
 import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
+import { correlationIdMiddleware } from './middleware/correlationId.js'
 import { requestIdMiddleware, requestLogger } from './middleware/requestId.js'
+import { requireJsonContent } from './middleware/contentType.js'
 import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js'
 import {
   startEscrowRefundReconciliation,
@@ -67,12 +70,26 @@ if (process.env.NODE_ENV === 'production' && !process.env.ML_API_KEY) {
   process.exit(1)
 }
 if (process.env.NODE_ENV === 'production' && (!process.env.POLYGON_RPC_URL || !process.env.ESCROW_CONTRACT_ADDRESS || !process.env.RELAYER_WALLET_PRIVATE_KEY)) {
-  logger.fatal('Escrow environment variables (POLYGON_RPC_URL, ESCROW_CONTRACT_ADDRESS, RELAYER_WALLET_PRIVATE_KEY) are not set. These are required in production for on-chain escrow protection. Set all three and restart.');
-  process.exit(1);
+  logger.fatal('Escrow environment variables (POLYGON_RPC_URL, ESCROW_CONTRACT_ADDRESS, RELAYER_WALLET_PRIVATE_KEY) are not set. These are required in production for on-chain escrow protection. Set all three and restart.')
+  process.exit(1)
 }
 if (!process.env.DRIVER_LOGIN_OTP) {
   logger.warn('DRIVER_LOGIN_OTP is not set. Driver OTP login will be disabled until it is configured in production.')
 }
+// Validate escrow contract deployment — log warning if validation fails,
+// but don't crash (non-escrow functionality should still work).
+validateEscrowSetup().then((valid) => {
+  if (valid) {
+    logger.info('✅ Escrow contract deployment validated.')
+  } else {
+    logger.warn(
+      '⚠️  Escrow contract validation failed. Escrow operations will return ' +
+      '{ txData: null } and orders will proceed without on-chain protection. ' +
+      'Check ESCROW_CONTRACT_ADDRESS and the deployed contract.'
+    )
+  }
+})
+
 const app = express()
 const server = http.createServer(app)
 
@@ -140,11 +157,22 @@ app.use(express.json({ limit: '1mb' })) // Added payload limit for security
 app.use(express.urlencoded({ extended: true, limit: '1mb' }))
 
 // ============================================================================
-// REQUEST ID + REQUEST LOGGER — registered before all routes and rate limiters
-// so that every incoming request (including rate-limited or 404) is logged.
+// CORRELATION ID + REQUEST ID + REQUEST LOGGER
+// Registered before all routes and rate limiters so that every incoming
+// request (including rate-limited or 404) is logged with a correlation ID.
+// 1. correlationIdMiddleware — sets up AsyncLocalStorage so all downstream
+//    log calls automatically include the correlationId (via logger Proxy).
+// 2. requestIdMiddleware   — adds X-Request-Id header & req.requestId.
+// 3. requestLogger         — logs request start / finish metadata.
 // ============================================================================
+app.use(correlationIdMiddleware)
 app.use(requestIdMiddleware)
 app.use(requestLogger)
+
+// Enforce a known request content-type on mutating requests (POST/PUT/PATCH).
+// `requireJsonContent` only rejects unrecognized media types; the three
+// allowed types match the parsers registered above.
+app.use(requireJsonContent)
 
 // ============================================================================
 // RATE LIMITING
@@ -155,21 +183,25 @@ app.use('/api/', globalLimiter)
 app.use('/api/v1/trips', tripRoutes)
 
 // ============================================================================
+// REQUEST-SCOPED CACHE — created per-request, destroyed after response.
+// Registers before all routes so every request handler benefits.
+// ============================================================================
+app.use('/api', requestCacheMiddleware)
+
+// ============================================================================
 // REST API ROUTING
 // ============================================================================
-
-  app.use('/api/orders', orderRoutes)
-  app.use('/api/driver', driverRoutes)
-  app.use('/api/loads', loadRoutes)
-  app.use('/api/support', supportRoutes)
-  app.use('/api/profile', profileRoutes)
-  app.use('/api/devices', deviceRoutes)
-  app.use('/api/driver/documents', documentRoutes)
-  app.use('/api/trucks', truckRoutes)
-  app.use('/api/v1', lookupRoutes)
-  app.use('/api/auth', authLimiter, authRoutes)
-  app.use('/api/v1/admin', adminRoutes)
-  app.use('/api/demand-heatmap', demandRoutes)
+app.use('/api/orders', orderRoutes)
+app.use('/api/driver', driverRoutes)
+app.use('/api/loads', loadRoutes)
+app.use('/api/support', supportRoutes)
+app.use('/api/profile', profileRoutes)
+app.use('/api/devices', deviceRoutes)
+app.use('/api/driver/documents', documentRoutes)
+app.use('/api/trucks', truckRoutes)
+app.use('/api/v1', lookupRoutes)
+app.use('/api/auth', authLimiter, authRoutes)
+app.use('/api/v1/admin', adminRoutes)
 
 // Setup Swagger Documentation
 setupSwagger(app)

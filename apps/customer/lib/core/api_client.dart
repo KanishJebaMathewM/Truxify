@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' as ui;
 import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -64,6 +65,25 @@ class ApiClient {
   final http.Client _http;
   final bool _isClientOwned;
   final String _baseUrl;
+  int _retryCount = 0;
+  static const int _maxRetries = 2;
+  static const Duration _retryDelay = Duration(milliseconds: 500);
+
+  Future<dynamic> _withRetry(Future<dynamic> Function() request) async {
+    for (int attempt = 0; attempt <= _maxRetries; attempt++) {
+      try {
+        _retryCount = attempt;
+        return await request();
+      } catch (e) {
+        if (attempt >= _maxRetries) rethrow;
+        await Future.delayed(_retryDelay * (attempt + 1));
+      }
+    }
+    return null;
+  }
+
+  void resetRetryCount() => _retryCount = 0;
+  int get retryCount => _retryCount;
 
   static String _getBaseUrl(String? overrideUrl) {
     if (overrideUrl != null) return overrideUrl;
@@ -115,6 +135,7 @@ class ApiClient {
     final t = token ?? _accessToken;
     return <String, String>{
       'Content-Type': 'application/json',
+      'Accept-Language': ui.PlatformDispatcher.instance.locale.languageCode,
       if (t != null && t.isNotEmpty) 'Authorization': 'Bearer $t',
       ...?additionalHeaders,
     };

@@ -97,19 +97,6 @@ class FcmService {
       debugPrint('[FCM] No authenticated user, skipping token upload.');
       return;
     }
-    final accessToken = await firebaseUser?.getIdToken();
-
-    final response = await http.put(
-      Uri.parse('$_apiBaseUrl/api/profile/fcm-token'),
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        if (accessToken != null && accessToken.isNotEmpty) 'Authorization': 'Bearer $accessToken',
-      },
-      body: jsonEncode(<String, dynamic>{
-        'fcmToken': token,
-      }),
-    );
-
     final apiClient = ApiClient();
     try {
       await apiClient.put(

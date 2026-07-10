@@ -22,6 +22,38 @@ class AuthService {
 
   final FirebaseAuth? _auth;
   final SupabaseClient? _supabase;
+  String? _lastAuthError;
+  bool _isAuthenticating = false;
+
+  bool get isAuthenticating => _isAuthenticating;
+  String? get lastAuthError => _lastAuthError;
+
+  void _clearError() => _lastAuthError = null;
+
+  bool _validatePhone(String phone) {
+    final clean = phone.replaceAll(RegExp(r'[\s\-()]'), '');
+    if (!clean.startsWith('+')) {
+      _lastAuthError = 'Phone must include country code (e.g. +91)';
+      return false;
+    }
+    if (clean.length < 10 || clean.length > 15) {
+      _lastAuthError = 'Invalid phone number length';
+      return false;
+    }
+    return true;
+  }
+
+  bool _validateOtp(String otp) {
+    if (otp.length != 6) {
+      _lastAuthError = 'OTP must be 6 digits';
+      return false;
+    }
+    if (!RegExp(r'^\d{6}$').hasMatch(otp)) {
+      _lastAuthError = 'OTP must contain only digits';
+      return false;
+    }
+    return true;
+  }
 
   /// Current authenticated user, or null if not signed in.
   User? get currentUser => _auth?.currentUser;

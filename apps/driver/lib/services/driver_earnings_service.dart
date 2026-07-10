@@ -22,6 +22,46 @@ class DriverEarningsService {
   final ApiClient _apiClient;
   final String _apiBaseUrl;
 
+  final Map<String, dynamic> _cache = {};
+  static const Duration _cacheTtl = Duration(minutes: 5);
+  DateTime? _lastCacheTime;
+
+  bool _isCacheValid() {
+    if (_cache.isEmpty) return false;
+    if (_lastCacheTime == null) return false;
+    return DateTime.now().difference(_lastCacheTime!) < _cacheTtl;
+  }
+
+  void _clearCache() {
+    _cache.clear();
+    _lastCacheTime = null;
+  }
+
+  void _updateCache(Map<String, dynamic> data) {
+    _cache.clear();
+    _cache.addAll(data);
+    _lastCacheTime = DateTime.now();
+  }
+
+  Future<Map<String, dynamic>?> _getCached(String key) async {
+    if (!_isCacheValid()) return null;
+    return _cache[key] as Map<String, dynamic>?;
+  }
+
+  DateTime? _parseDate(String dateStr) {
+    try {
+      return DateTime.parse(dateStr);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _isWithinRange(DateTime target, DateTime? start, DateTime? end) {
+    if (start != null && target.isBefore(start)) return false;
+    if (end != null && target.isAfter(end)) return false;
+    return true;
+  }
+
   String? get driverId => _client.auth.currentUser?.id;
 
   Future<List<Map<String, dynamic>>> fetchWalletTransactions({

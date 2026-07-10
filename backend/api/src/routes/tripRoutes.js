@@ -227,19 +227,27 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
 
     if (!events || events.length === 0) {
       // Check if the trip even exists
-      const { data: existingEvent } = await supabase
+      const { data: existingEvent, error: existingEventErr } = await supabase
         .from('trip_events')
         .select('trip_id')
         .eq('trip_id', tripId)
         .limit(1)
         .maybeSingle();
 
+      if (existingEventErr) {
+        logger.error('[TripRoutes] Failed to check existing trip events:', existingEventErr.message);
+      }
+
       // If no events found at all, check via orders whether this trip/order exists
-      const { data: order } = await supabase
+      const { data: order, error: orderErr } = await supabase
         .from('orders')
         .select('id, driver_id, customer_id')
         .eq('id', tripId)
         .maybeSingle();
+
+      if (orderErr) {
+        logger.error('[TripRoutes] Failed to check order for trip:', orderErr.message);
+      }
 
       if (!order && !existingEvent) {
         return res.status(404).json({ error: 'Trip not found.' });

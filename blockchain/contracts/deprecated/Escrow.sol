@@ -3,9 +3,20 @@ pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/utils/Pausable.sol";
 
-/// @title Escrow System for Truxify
-/// @notice Manages escrow deposits, releases, and refunds for bookings.
-/// @dev Uses authorized relayers to trigger state changes.
+/// @title Escrow System for Truxify (DEPRECATED)
+/// @notice ⚠️ THIS CONTRACT IS DEPRECATED. Do NOT deploy or reference it.
+///
+///   Active contract: TruxifyEscrow.sol (in contracts/)
+///   Reason for deprecation:
+///     - Incompatible ABI (bytes32 bookingId, relayer pattern)
+///     - Missing OpenZeppelin security standards (ReentrancyGuard, Ownable, Pausable)
+///     - The backend ABI (escrow.js) targets TruxifyEscrow.sol exclusively
+///
+///   If ESCROW_CONTRACT_ADDRESS points to this contract, ALL blockchain
+///   operations will silently fail because the function selectors do not match.
+///
+/// @dev Retained only for historical reference. Deployed instances should
+///      be migrated to TruxifyEscrow.sol before any further development.
 contract Escrow is Pausable {
     enum EscrowStatus {
         None,

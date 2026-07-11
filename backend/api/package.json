@@ -42,7 +42,6 @@
     "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
-
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@vitest/coverage-v8": "^4.1.9",

@@ -10,12 +10,23 @@
  */
 
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { authenticate } from '../middleware/auth.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
 import { firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
+  message: { success: false, message: 'Too many requests from this IP, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.use(authLimiter);
 
 export function withTimeout(operation, timeoutMs, message) {
   let timer;

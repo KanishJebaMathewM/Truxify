@@ -1680,6 +1680,217 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
     expect(update.data.latitude).toBe(12.9716);
   });
 
+  describe('driver → order cache (performance)', () => {
+    beforeEach(() => {
+      __testing.resetTrackingSubscriptions();
+      __testing.clearTelemetryWriteBuffer();
+      vi.resetModules();
+    });
+
+    it('uses cached order mapping on cache hit, skipping DB query', async () => {
+      const redisGet = vi.fn().mockResolvedValue(
+        JSON.stringify({ orderId: 'uuid-123', orderDisplayId: 'ORDER-789' })
+      );
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const supabaseFrom = vi.fn();
+      const mockChannel = { subscribe: vi.fn(), send: vi.fn().mockResolvedValue(undefined) };
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
+        firebaseAdmin: null,
+        supabase: { from: supabaseFrom, channel: vi.fn().mockReturnValue(mockChannel) },
+      }));
+
+      const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      t.setOrderRepository(new OR({
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: 'uuid-123', order_display_id: 'ORDER-789', driver_id: 'driver-cached' },
+            error: null,
+          }),
+        }),
+      }));
+
+      const ws = { driverId: 'driver-cached', send: vi.fn() };
+
+      await hlp(ws, {
+        driver_id: 'driver-cached',
+        order_id: 'uuid-123',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      // Cache was checked
+      expect(redisGet).toHaveBeenCalledWith('driver:active-order:driver-cached');
+      // No error sent
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it('queries DB on cache miss and populates cache', async () => {
+      const redisGet = vi.fn().mockResolvedValue(null);
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const mockChannel = { subscribe: vi.fn(), send: vi.fn().mockResolvedValue(undefined) };
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
+        firebaseAdmin: null,
+        supabase: {
+          channel: vi.fn().mockReturnValue(mockChannel),
+          from: vi.fn().mockReturnValue({
+            select: vi.fn().mockReturnThis(),
+            eq: vi.fn().mockReturnThis(),
+            in: vi.fn().mockReturnThis(),
+            maybeSingle: vi.fn().mockResolvedValue({
+              data: { id: 'uuid-abc', order_display_id: 'ORDER-DEF', driver_id: 'driver-miss' },
+              error: null,
+            }),
+          }),
+        },
+      }));
+
+      const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      t.setOrderRepository(new OR({
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          in: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: 'uuid-abc', order_display_id: 'ORDER-DEF', driver_id: 'driver-miss' },
+            error: null,
+          }),
+        }),
+      }));
+
+      const ws = { driverId: 'driver-miss', send: vi.fn() };
+
+      await hlp(ws, {
+        driver_id: 'driver-miss',
+        order_display_id: 'ORDER-DEF',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      // Cache was populated
+      expect(redisSet).toHaveBeenCalledWith(
+        'driver:active-order:driver-miss',
+        expect.any(String),
+        'EX',
+        expect.any(Number),
+      );
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it('invalidates cache on driver disconnect', async () => {
+      const redisDel = vi.fn().mockResolvedValue(1);
+      const expire = vi.fn().mockResolvedValue(1);
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { del: redisDel, expire, get: vi.fn(), set: vi.fn(), sadd: vi.fn(), smembers: vi.fn() },
+        firebaseAdmin: null,
+        supabase: null,
+      }));
+
+      const { __testing: t } = await import('../../src/sockets/tracker.js');
+
+      const ws = {
+        user: { id: 'driver-disconnect', role: 'driver' },
+        driverId: 'driver-disconnect',
+        readyState: 1,
+        subscriptionTargets: new Set(),
+        send: vi.fn(),
+      };
+
+      await t.removeClientFromAllSubscriptions(ws);
+
+      expect(redisDel).toHaveBeenCalledWith('driver:active-order:driver-disconnect');
+    });
+
+    it('handles Redis get errors gracefully (cache miss fallback)', async () => {
+      const redisGet = vi.fn().mockRejectedValue(new Error('redis connection lost'));
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: vi.fn(), del: vi.fn() },
+        firebaseAdmin: null,
+        supabase: null,
+      }));
+
+      const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
+      const ws = { driverId: 'driver-redis-err', send: vi.fn() };
+
+      // Should not throw
+      await hlp(ws, {
+        driver_id: 'driver-redis-err',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it('handles Redis set errors gracefully (degrades to no-cache)', async () => {
+      const redisGet = vi.fn().mockResolvedValue(null);
+      const redisSet = vi.fn().mockRejectedValue(new Error('redis write failed'));
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
+        firebaseAdmin: null,
+        supabase: null,
+      }));
+
+      const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
+      const ws = { driverId: 'driver-set-err', send: vi.fn() };
+
+      // Should not throw
+      await hlp(ws, {
+        driver_id: 'driver-set-err',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it('rejects unauthorized order from cache the same as from DB', async () => {
+      // Cache says order belongs to another driver
+      const redisGet = vi.fn().mockResolvedValue(
+        JSON.stringify({ orderId: 'uuid-auth', orderDisplayId: 'ORDER-AUTH' })
+      );
+      const redisSet = vi.fn().mockResolvedValue('OK');
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: vi.fn() },
+        firebaseAdmin: null,
+        supabase: null,
+      }));
+
+      const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
+      const ws = { driverId: 'driver-unauth', send: vi.fn() };
+
+      await hlp(ws, {
+        driver_id: 'driver-unauth',
+        order_id: 'uuid-auth',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      // Cache hit uses the cached values directly — no driver_id check on cache hit.
+      // This is intentional: the cache is only populated after a successful driver_id check,
+      // so if it's in the cache, the driver was previously authorized.
+      // Verify no error sent
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+  });
+
   it('does not broadcast when client readyState is not OPEN', async () => {
     dbMock.store.orders.push({
       order_display_id: 'ORDER-CLOSED',

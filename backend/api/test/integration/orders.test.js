@@ -20,7 +20,7 @@ import crypto from 'crypto';
 const routeEstimateMock = vi.fn();
 
 // Hoisted mock: swap supabase out for our in-memory builder.
-const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
+import { createSupabaseMock } from '../helpers/supabaseMock.js';
 
 const m = createSupabaseMock();
 let completeTripRpcError = null;
@@ -50,10 +50,10 @@ m.supabase.rpc = vi.fn().mockImplementation(async (fnName, args) => {
       otp.verified_at = new Date().toISOString();
       order.status = 'payment_released';
       order.updated_at = new Date().toISOString();
-      const timeline = m.store.order_timeline.find(t => t.order_display_id === order.order_display_id && t.milestone === 'Delivered');
-      if (timeline) {
-        timeline.completed = true;
-        timeline.milestone_time = new Date().toISOString();
+      const timelineEvent = m.store.order_timeline.find(t => t.order_display_id === order.order_display_id && t.milestone === 'Delivered');
+      if (timelineEvent) {
+        timelineEvent.completed = true;
+        timelineEvent.milestone_time = new Date().toISOString();
       }
     }
     return { data: null, error: null };
@@ -63,25 +63,25 @@ m.supabase.rpc = vi.fn().mockImplementation(async (fnName, args) => {
 let mockRedis = null;
 afterEach(() => { mockRedis = null; });
 
-vi.mock('../../src/config/db.js', () => ({
+vi.doMock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   firebaseAdmin: null,
   get redisClient() { return mockRedis; },
   mongoDb: null,
 }));
 
-vi.mock('../../src/sockets/tracker.js', () => ({
+vi.doMock('../../src/sockets/tracker.js', () => ({
   initWebSocketServer: () => ({}),
 }));
 
-vi.mock('../../src/services/osrm.js', () => ({
+vi.doMock('../../src/services/osrm.js', () => ({
   getRouteEstimate: routeEstimateMock,
 }));
 
 // Mock reputation service so tests never hit a real blockchain node.
 // awardReputationPointsMock is a vi.fn() the tests can inspect and configure.
 const awardReputationPointsMock = vi.fn().mockResolvedValue(undefined);
-vi.mock('../../src/services/reputation.js', () => ({
+vi.doMock('../../src/services/reputation.js', () => ({
   reputationContract: {},
   awardReputationPoints: awardReputationPointsMock,
 }));
@@ -89,7 +89,7 @@ vi.mock('../../src/services/reputation.js', () => ({
 const escrowReleaseMock = vi.fn();
 const submitEscrowRefundMock = vi.fn();
 const confirmEscrowRefundMock = vi.fn();
-vi.mock('../../src/services/escrow.js', async () => {
+vi.doMock('../../src/services/escrow.js', async () => {
   const actual = await vi.importActual('../../src/services/escrow.js');
   return {
     ...actual,
@@ -100,8 +100,12 @@ vi.mock('../../src/services/escrow.js', async () => {
 });
 
 const predictDemandMock = vi.fn();
-vi.mock('../../src/services/ml.js', () => ({
+vi.doMock('../../src/services/ml.js', () => ({
   predictDemand: predictDemandMock,
+}));
+
+vi.doMock('../../src/middleware/idempotency.js', () => ({
+  requireIdempotency: () => (req, res, next) => next(),
 }));
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
@@ -1179,8 +1183,8 @@ describe('Delivery OTP Verification and Milestones', () => {
     const otpRecord = m.store.delivery_otps.find(o => o.order_id === 'order-1');
     expect(otpRecord.verified).toBe(true);
 
-    const timeline = m.store.order_timeline.find(t => t.order_display_id === 'ORD001' && t.milestone === 'Delivered');
-    expect(timeline.completed).toBe(true);
+    const timelineEvent = m.store.order_timeline.find(t => t.order_display_id === 'ORD001' && t.milestone === 'Delivered');
+    expect(timelineEvent.completed).toBe(true);
 
     const rpcCall = m.calls.find(c => c.rpc === 'complete_trip_tx');
     expect(rpcCall).toBeTruthy();

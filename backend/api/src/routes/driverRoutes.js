@@ -303,7 +303,7 @@ router.patch(
   authenticate,
   userLimiter,
   requireRole(['driver']),
-  validateParams(paramIdSchema),
+  validateParams(uuidParamSchema),
   async (req, res) => {
     const { id } = req.params;
     const claimed = req.body?.claimed;
@@ -451,8 +451,8 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 // 11. GET DRIVER REPUTATION (DRIVER)
 // ============================================================================
-router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['driver']), validateParams(uuidParamSchema), async (req, res) => {
-  const { driverId } = req.params;
+router.get('/:id/reputation', authenticate, userLimiter, requireRole(['driver']), validateParams(uuidParamSchema), async (req, res) => {
+  const driverId = req.params.id;
 
   if (driverId !== req.user.id) {
     return res.status(403).json({ error: 'Forbidden' });

@@ -130,6 +130,156 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), requireId
   }
 
   try {
+    const routeEstimate = await getRouteEstimate({
+      pickupLat: Number(pickup_lat),
+      pickupLng: Number(pickup_lng),
+      dropLat: Number(drop_lat),
+      dropLng: Number(drop_lng),
+    });
+    pricing = computeOrderPricing({
+      pickupLat:  Number(pickup_lat),
+      pickupLng:  Number(pickup_lng),
+      dropLat:    Number(drop_lat),
+      dropLng:    Number(drop_lng),
+      weightTonnes: Number(weight_tonnes),
+      roadDistanceKm: routeEstimate?.distanceKm,
+      isFragile:   Boolean(is_fragile),
+      isStackable: Boolean(is_stackable),
+    });
+  } catch (pricingErr) {
+    logger.error('Pricing computation error:', pricingErr.message);
+    return res.status(400).json({
+      error: 'Unable to compute freight pricing for the given route/cargo.',
+      details: pricingErr.message,
+    });
+  }
+
+  let estimatedPrice = null;
+  try {
+    const mlResult = await predictPrice({
+      distanceKm: pricing.distanceKm,
+      cargoWeightKg: Number(weight_tonnes) * 1000,
+      routeOrigin: pickup_address,
+      routeDestination: drop_address,
+    });
+    if (!mlResult || typeof mlResult.estimated_price !== 'number' || mlResult.estimated_price <= 0) {
+      throw new Error(`Invalid or non-positive price prediction: ${JSON.stringify(mlResult)}`);
+    }
+    estimatedPrice = Math.round(mlResult.estimated_price * 100);
+  } catch (mlErr) {
+    logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
+  }
+
+  const MAX_ID_RETRIES = 3;
+  let order = null;
+  let orderErr = null;
+  let orderDisplayId = null;
+
+  try {
+    for (let attempt = 0; attempt < MAX_ID_RETRIES; attempt++) {
+      orderDisplayId = generateOrderDisplayId();
+      const result = await supabase
+        .from('orders')
+        .insert({
+          order_display_id: orderDisplayId,
+          customer_id: req.user.id,
+          status: 'pending',
+          pickup_address, pickup_lat, pickup_lng,
+          drop_address, drop_lat, drop_lng,
+          pickup_date, pickup_time,
+          goods_type, weight_tonnes, length_ft, width_ft, height_ft,
+          is_stackable, is_fragile, special_requirements,
+          base_freight: pricing.baseFreight,
+          toll_estimate: pricing.tollEstimate,
+          platform_fee: pricing.platformFee,
+          total_amount: pricing.totalAmount,
+          estimated_price: estimatedPrice,
+          payment_method_id, upi_id
+        })
+        .select('id, order_display_id, status, created_at')
+        .single();
+
+      order = result.data;
+      orderErr = result.error;
+
+      if (!orderErr || orderErr.code !== '23505') break;
+      logger.warn(`[Orders] display ID collision on ${orderDisplayId}, retrying (attempt ${attempt + 1}/${MAX_ID_RETRIES})`);
+    }
+
+    if (orderErr) {
+      logger.error('Order Insertion Error:', orderErr.message);
+      return res.status(500).json({ error: 'Failed to create order record.', details: orderErr.message });
+    }
+
+    const milestones = [
+      { order_display_id: orderDisplayId, milestone: 'Order Placed', milestone_time: new Date().toISOString(), completed: true, sort_order: 10 },
+      { order_display_id: orderDisplayId, milestone: 'Truck Assigned', milestone_time: null, completed: false, sort_order: 20 },
+      { order_display_id: orderDisplayId, milestone: 'En Route to Pickup', milestone_time: null, completed: false, sort_order: 30 },
+      { order_display_id: orderDisplayId, milestone: 'Arrived at Pickup', milestone_time: null, completed: false, sort_order: 35 },
+      { order_display_id: orderDisplayId, milestone: 'Goods Loaded', milestone_time: null, completed: false, sort_order: 40 },
+      { order_display_id: orderDisplayId, milestone: 'In Transit', milestone_time: null, completed: false, sort_order: 50 },
+      { order_display_id: orderDisplayId, milestone: 'Arriving', milestone_time: null, completed: false, sort_order: 55 },
+      { order_display_id: orderDisplayId, milestone: 'Delivered', milestone_time: null, completed: false, sort_order: 60 }
+    ];
+
+    const { error: timelineErr } = await orderRepository.createTimeline(milestones);
+
+    if (timelineErr) {
+      logger.error('Timeline Insertion Error:', timelineErr.message);
+      await orderRepository.deleteOrder(order.id);
+      return res.status(500).json({ error: 'Failed to create order timeline.', details: timelineErr.message });
+    }
+
+    const { error: offerErr } = await orderRepository
+      .createLoadOffer({
+    try {
+      await orderTimelineService.createOrderTimeline(orderDisplayId);
+    } catch (timelineErr) {
+      await supabase.from('orders').delete().eq('id', order.id);
+      if (timelineErr instanceof DomainError) {
+        return res.status(timelineErr.status).json(timelineErr.payload);
+      }
+      return res.status(500).json({ error: 'Failed to create order timeline.', details: timelineErr.message });
+    }
+
+    const { error: offerErr } = await supabase
+      .from('load_offers')
+      .insert({
+        order_display_id: orderDisplayId,
+        customer_id: req.user.id,
+        customer_name: req.user.fullName || 'Customer',
+        route_label: `${pickup_address.split(',')[0]} → ${drop_address.split(',')[0]}`,
+        route_subtitle: `${weight_tonnes} tonnes • ${goods_type}`,
+        pickup_address, pickup_lat, pickup_lng,
+        drop_address, drop_lat, drop_lng,
+        goods_type,
+        weight: `${weight_tonnes} tonnes`,
+        freight_value: pricing.totalAmount,
+        fuel_cost: pricing.fuelCost,
+        toll_cost: pricing.tollEstimate,
+        net_profit: pricing.netProfit,
+        extra_distance_km: pricing.distanceKm,
+        status: 'available'
+      });
+
+    if (offerErr) {
+      logger.error('Load Offer Insertion Error:', offerErr.message);
+      await orderRepository.deleteTimeline(orderDisplayId);
+      await orderRepository.deleteOrder(order.id);
+      return res.status(500).json({ error: 'Failed to create load offer.', details: offerErr.message });
+    }
+
+      await orderTimelineService.deleteOrderTimeline(orderDisplayId);
+      await supabase.from('orders').delete().eq('id', order.id);
+      return res.status(500).json({ error: 'Failed to create load offer.', details: offerErr.message });
+    }
+
+    const result = await createOrder({
+      orderData: req.body,
+      userId: req.user.id,
+      user: req.user,
+    });
+    return res.status(201).json(result);
     const { order } = await orderLifecycleService.createOrder(req.user.id, req.user.fullName || 'Customer', req.body);
     return res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
   } catch (err) {
@@ -163,10 +313,12 @@ router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), a
 router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-  const from = (page - 1) * limit;
-  const to = page * limit - 1;
   try {
     const { data: offers, error } = await orderRepository.findLoadOffers({ is_en_route: false });
+    const { data: offers, error } = await orderRepository.findLoadOffers(
+      { is_en_route: false },
+      { pagination: { page, limit } }
+    );
 
     if (error) return res.status(500).json({ error: 'Failed to fetch load offers.', details: error.message });
     res.json(offers);
@@ -182,10 +334,12 @@ router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
 router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-  const from = (page - 1) * limit;
-  const to = page * limit - 1;
   try {
     const { data: offers, error } = await orderRepository.findLoadOffers({ is_en_route: true });
+    const { data: offers, error } = await orderRepository.findLoadOffers(
+      { is_en_route: true },
+      { pagination: { page, limit } }
+    );
 
     if (error) return res.status(500).json({ error: 'Failed to fetch en-route loads.', details: error.message });
     res.json(offers);
@@ -269,6 +423,21 @@ router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSch
   const orderId = req.params.id;
 
   try {
+    let order = null;
+    if (UUID_RE.test(orderId)) {
+      const { data: orderById } = await orderRepository.findOrderForTimeline(orderId);
+      order = orderById;
+    }
+    if (!order) {
+      const { data: orderByDisplay } = await orderRepository.findOrderByDisplayForTimeline(orderId);
+      order = orderByDisplay;
+    }
+
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
+
+    if (order.customer_id !== req.user.id && order.driver_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access Denied: You do not own or are not assigned to this order.' });
+    }
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'customer_id, driver_id, order_display_id');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertOrderAccess(order, req.user.id);

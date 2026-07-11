@@ -15,8 +15,7 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 // ============================================================================
-// 1. SUPABASE CLIENTS — anon key for public access (RLS enforced),
-//    service role key for admin operations only (bypasses RLS)
+// 1. SUPABASE CLIENTS
 // ============================================================================
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
@@ -80,41 +79,35 @@ export async function waitForMongoDb() {
   await _mongoDbReady;
 }
 
-if (mongoUri) {
-  (async () => {
+// Wrap in async IIFE so mongoClient.connect() can use await instead of .then()
+// This ensures the module properly waits for the connection before reporting readiness
+(async () => {
+  if (mongoUri) {
     try {
       mongoClient = new MongoClient(mongoUri);
       await mongoClient.connect();
       mongoDb = mongoClient.db(mongoDbName);
       logger.info({ db: mongoDbName }, 'Connected to MongoDB');
-      
+
       // Create indexes on telemetry collection
-      try {
-        await mongoDb.collection('telemetry').createIndex(
-          { timestamp: 1 },
-          { expireAfterSeconds: 604800 }
-        );
-      } catch (err) {
-        logger.error({ err }, 'Failed to create TTL index on telemetry');
-      }
-      
-      try {
-        await mongoDb.collection('telemetry').createIndex(
-          { location: '2dsphere' }
-        );
-      } catch (err) {
-        logger.error({ err }, 'Failed to create 2dsphere index on telemetry');
-      }
+      mongoDb.collection('telemetry').createIndex(
+        { timestamp: 1 },
+        { expireAfterSeconds: 604800 }
+      ).catch(err => logger.error({ err }, 'Failed to create TTL index on telemetry'));
+
+      mongoDb.collection('telemetry').createIndex(
+        { location: '2dsphere' }
+      ).catch(err => logger.error({ err }, 'Failed to create 2dsphere index on telemetry'));
       if (_mongoDbResolve) _mongoDbResolve();
-    } catch (error) {
-      logger.error({ err: error }, 'MongoDB client initialization error');
+    } catch (err) {
+      logger.error({ err }, 'Failed to connect to MongoDB server');
       if (_mongoDbResolve) _mongoDbResolve();
     }
-  })();
-} else {
-  if (_mongoDbResolve) _mongoDbResolve();
-  logger.warn('MONGODB_URI not found in .env. MongoDB telemetry database disabled.');
-}
+  } else {
+    if (_mongoDbResolve) _mongoDbResolve();
+    logger.warn('MONGODB_URI not found in .env. MongoDB telemetry database disabled.');
+  }
+})();
 
 // ============================================================================
 // 3. UPSTASH REDIS CLIENT (Sessions, cache, rate limits)

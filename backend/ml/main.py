@@ -669,7 +669,7 @@ async def train_price_endpoint(_auth=Depends(verify_api_key)):
 
 @app.get("/models")
 async def list_models(_auth=Depends(verify_api_key)):
-    from .models.base import MODEL_STORAGE_DIR
+    from app.models.base import MODEL_STORAGE_DIR
     import os, json
     models = []
     if os.path.isdir(MODEL_STORAGE_DIR):

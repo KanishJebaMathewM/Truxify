@@ -428,7 +428,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   dimensions: '12 × 6 × 6',
                   stacked: true,
                   fragile: false,
-                  requirements: const ['Loading help needed'],
+                  requirements: currentOrder.specialRequirements != null && _currentOrder.specialRequirements!.isNotEmpty
+          ? [_currentOrder.specialRequirements!]
+          : const [],
                 ),
               );
             },

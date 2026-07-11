@@ -11,7 +11,7 @@ router.get('/dashboard', authenticate, requireRole(['admin']), async (req, res) 
       .from('profiles')
       .select('*', { count: 'exact', head: true })
       .eq('role', 'driver')
-      .eq('status', 'active');
+      .eq('is_active', true);
       
     if (driversErr) {
       logger.error('Error fetching active drivers:', driversErr.message);

@@ -2,7 +2,30 @@ import { supabase, redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { confirmEscrowRefund, submitEscrowRefund } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
+import { OrderRepository } from '../repositories/orderRepository.js';
 import os from 'os';
+
+const RECONCILIATION_EVENTS = {
+  STARTED: 'reconciliation:started',
+  COMPLETED: 'reconciliation:completed',
+  FAILED: 'reconciliation:failed',
+  CLAIMED: 'reconciliation:claimed',
+  SKIPPED: 'reconciliation:skipped',
+};
+
+function logReconciliationEvent(event, details = {}) {
+  logger.info({ event, ...details }, `[escrow-reconciliation] ${event}`);
+}
+
+function createReconciliationSummary(results) {
+  return {
+    total: results.length,
+    succeeded: results.filter(r => r.success).length,
+    failed: results.filter(r => !r.success).length,
+    skipped: results.filter(r => r.skipped).length,
+    timestamp: new Date().toISOString(),
+  };
+}
 
 const DEFAULT_INTERVAL_MS = 60_000;
 const LOCK_KEY = 'escrow:reconciliation:lock';
@@ -12,9 +35,11 @@ const MAX_RETRIES = 10;
 let reconciliationTimer = null;
 let reconciliationRunning = false;
 
-export async function reconcilePendingEscrowRefunds() {
+export async function reconcilePendingEscrowRefunds(passedOrderRepository) {
   if (reconciliationRunning) return;
   reconciliationRunning = true;
+
+  const orderRepository = passedOrderRepository || new OrderRepository(supabase);
 
   try {
     // Acquire a global lock just to prevent multiple instances from pulling the exact same batch unnecessarily
@@ -28,11 +53,7 @@ export async function reconcilePendingEscrowRefunds() {
     }
 
     const instanceId = process.env.HOSTNAME || os.hostname();
-    const { data: pendingOrders, error } = await supabase
-      .from('orders')
-      .select('id, order_display_id, refund_tx_hash, escrow_status, escrow_refund_retry_count')
-      .in('escrow_status', ['refund_pending', 'refund_failed'])
-      .limit(50);
+    const { data: pendingOrders, error } = await orderRepository.findPendingEscrowRefunds();
 
     if (error) {
       logger.error('[escrow-reconciliation] Failed to load pending refunds:', error.message);
@@ -54,11 +75,7 @@ export async function reconcilePendingEscrowRefunds() {
           continue;
         }
 
-        const { data: claimed, error: claimError } = await supabase
-          .rpc('claim_refund_reconciliation', {
-            p_order_id: order.id,
-            p_instance_id: instanceId,
-          });
+        const { data: claimed, error: claimError } = await orderRepository.claimRefundReconciliation(order.id, instanceId);
 
         if ((!claimed || (Array.isArray(claimed) && claimed.length === 0)) && !claimError) {
           logger.info(`[escrow-reconciliation] Order ${order.order_display_id} already claimed by another instance, skipping.`);
@@ -66,11 +83,7 @@ export async function reconcilePendingEscrowRefunds() {
         }
 
         if (claimError) {
-          const { data: existing } = await supabase
-            .from('orders')
-            .select('escrow_status, reconciled_by')
-            .eq('id', order.id)
-            .maybeSingle();
+          const { data: existing } = await orderRepository.findOrderById(order.id, 'escrow_status, reconciled_by');
           if (existing && (existing.escrow_status !== 'refund_pending' || existing.reconciled_by)) {
             logger.info(`[escrow-reconciliation] Order ${order.order_display_id} already processed, skipping.`);
             continue;
@@ -86,18 +99,14 @@ export async function reconcilePendingEscrowRefunds() {
 
         const receipt = await confirmEscrowRefund(refundTxHash);
         const refundedAt = new Date().toISOString();
-        const { error: updateError } = await supabase
-          .from('orders')
-          .update({
-            status: 'cancelled',
-            escrow_status: 'refunded',
-            refund_tx_hash: receipt.hash ?? refundTxHash,
-            escrow_refunded_at: refundedAt,
-            escrow_refund_error: null,
-            updated_at: refundedAt,
-          })
-          .eq('id', order.id)
-          .in('escrow_status', ['refund_pending', 'refund_failed']);
+        const { error: updateError } = await orderRepository.updateOrderWithFilter(order.id, {
+          status: 'cancelled',
+          escrow_status: 'refunded',
+          refund_tx_hash: receipt.hash ?? refundTxHash,
+          escrow_refunded_at: refundedAt,
+          escrow_refund_error: null,
+          updated_at: refundedAt,
+        }, [{ op: 'in', column: 'escrow_status', value: ['refund_pending', 'refund_failed'] }], 'id');
 
         if (updateError) {
           logger.error(
@@ -107,11 +116,11 @@ export async function reconcilePendingEscrowRefunds() {
         }
       } catch (err) {
         const newRetryCount = (order.escrow_refund_retry_count ?? 0) + 1;
-        await supabase.from('orders').update({
+        await orderRepository.updateOrder(order.id, {
           escrow_refund_retry_count: newRetryCount,
           escrow_refund_error: err.message,
           updated_at: new Date().toISOString(),
-        }).eq('id', order.id);
+        });
         logger.warn(
           `[escrow-reconciliation] Refund for ${order.order_display_id} is not confirmed yet (retry ${newRetryCount}/${MAX_RETRIES}):`,
           err.message
@@ -133,7 +142,7 @@ export async function reconcilePendingEscrowRefunds() {
   }
 }
 
-export function startEscrowRefundReconciliation() {
+export function startEscrowRefundReconciliation(orderRepository) {
   if (reconciliationTimer) return;
 
   const configuredInterval = Number(process.env.ESCROW_RECONCILIATION_INTERVAL_MS);
@@ -142,7 +151,7 @@ export function startEscrowRefundReconciliation() {
     : DEFAULT_INTERVAL_MS;
 
   reconciliationTimer = setInterval(() => {
-    void reconcilePendingEscrowRefunds();
+    void reconcilePendingEscrowRefunds(orderRepository);
   }, intervalMs);
   reconciliationTimer.unref?.();
 }

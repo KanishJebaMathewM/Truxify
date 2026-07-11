@@ -54,6 +54,7 @@ import {
 import { predictDemand, predictPrice } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 import logger from '../middleware/logger.js';
+import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import { OrderRepository } from '../repositories/orderRepository.js';
 import { OrderTimelineService } from '../services/order/orderTimelineService.js';
 import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
@@ -565,6 +566,8 @@ router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSch
 // ============================================================================
 router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
   try {
+    const loadOfferId = req.params.id;
+    const { bid_amount } = req.body;
     const { data: offer, error: offerErr } = await orderRepository.findLoadOfferById(loadOfferId);
     if (offerErr || !offer) return res.status(404).json({ error: 'Load offer not found.' });
     if (offer.status !== 'available') return res.status(410).json({ error: 'Load is no longer available for bidding.' });
@@ -604,6 +607,8 @@ router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bid
 // ============================================================================
 router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
   try {
+    const orderId = req.params.id;
+    const { stars, comment } = req.body;
     const { data: order, error: orderErr } = await orderRepository.findOrderById(orderId, 'id, order_display_id, customer_id, driver_id, status');
 
     if (orderErr) {

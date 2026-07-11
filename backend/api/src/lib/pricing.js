@@ -40,7 +40,7 @@ const DEFAULTS = Object.freeze({
 function parsePositiveInt(raw, fallback) {
   if (raw === null || raw === undefined || raw === '') return fallback;
   const n = Number(raw);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 function parsePositiveFloat(raw, fallback) {

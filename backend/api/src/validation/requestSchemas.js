@@ -229,7 +229,9 @@ export const driverStatementSchema = z.object({
 const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
 
 export const otpSendSchema = z.object({
-  phone: z.string().trim().min(10).max(20),
+  phone: z.string().trim().min(10).max(20).refine(isValidPhone, {
+    message: 'Phone must be a valid number (digits, optional +, spaces/dashes/parens)',
+  }),
 }).strict();
 
 export const registerTruckSchema = z.object({

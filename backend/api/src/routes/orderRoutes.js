@@ -129,7 +129,22 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), get
 router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), getOrderDetails);
 
 // 7. FETCH ORDER TIMELINE (CUSTOMER OR DRIVER)
-router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), getOrderTimeline);
+// ============================================================================
+router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id;
+
+  try {
+    let order = null;
+    if (UUID_RE.test(orderId)) {
+      const { data: orderById } = await orderRepository.findOrderForTimeline(orderId);
+      order = orderById;
+    }
+    if (!order) {
+      const { data: orderByDisplay } = await orderRepository.findOrderByDisplayForTimeline(orderId);
+      order = orderByDisplay;
+    }
+
+    if (!order) return res.status(404).json({ error: 'Order not found.' });
 
 // 8. SUBMIT BID FOR LOAD OFFER (DRIVER)
 router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), submitBid);

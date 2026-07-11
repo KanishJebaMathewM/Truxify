@@ -34,11 +34,8 @@ import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
 import { requestIdMiddleware, requestLogger } from './middleware/requestId.js'
-<<<<<<< feature/request-scoped-order-cache
 import { requestCacheMiddleware } from './middleware/requestCacheMiddleware.js'
-=======
 import { requireJsonContent } from './middleware/contentType.js'
->>>>>>> main
 import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js'
 import {
   startEscrowRefundReconciliation,

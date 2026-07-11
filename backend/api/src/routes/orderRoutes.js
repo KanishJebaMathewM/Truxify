@@ -221,8 +221,6 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), requireId
   try {
     for (let attempt = 0; attempt < MAX_ID_RETRIES; attempt++) {
       orderDisplayId = generateOrderDisplayId();
-      const result = await orderRepository
-        .createOrder({
       const result = await supabase
         .from('orders')
         .insert({
@@ -240,7 +238,6 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), requireId
           total_amount: pricing.totalAmount,
           estimated_price: estimatedPrice,
           payment_method_id, upi_id
-        });
         })
         .select('id, order_display_id, status, created_at')
         .single();
@@ -371,16 +368,11 @@ router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), a
 router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-  const from = (page - 1) * limit;
-  const to = page * limit - 1;
   try {
-    const { data: offers, error } = await orderRepository.findLoadOffers({ is_en_route: false });
-    const { data: offers, error } = await supabase
-      .from('load_offers')
-      .select('*')
-      .eq('is_en_route', false)
-      .order('created_at', { ascending: false })
-      .range(from, to);
+    const { data: offers, error } = await orderRepository.findLoadOffers(
+      { is_en_route: false },
+      { pagination: { page, limit } }
+    );
 
     if (error) return res.status(500).json({ error: 'Failed to fetch load offers.', details: error.message });
     res.json(offers);
@@ -396,16 +388,11 @@ router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
 router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-  const from = (page - 1) * limit;
-  const to = page * limit - 1;
   try {
-    const { data: offers, error } = await orderRepository.findLoadOffers({ is_en_route: true });
-    const { data: offers, error } = await supabase
-      .from('load_offers')
-      .select('*')
-      .eq('is_en_route', true)
-      .order('created_at', { ascending: false })
-      .range(from, to);
+    const { data: offers, error } = await orderRepository.findLoadOffers(
+      { is_en_route: true },
+      { pagination: { page, limit } }
+    );
 
     if (error) return res.status(500).json({ error: 'Failed to fetch en-route loads.', details: error.message });
     res.json(offers);
@@ -520,7 +507,7 @@ router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSch
 
   try {
     let order = null;
-    if (uuidRegex.test(orderId)) {
+    if (UUID_RE.test(orderId)) {
       const { data: orderById } = await orderRepository.findOrderForTimeline(orderId);
       order = orderById;
     }

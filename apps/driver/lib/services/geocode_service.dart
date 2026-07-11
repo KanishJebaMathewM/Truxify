@@ -10,6 +10,7 @@ class GeocodeService {
 
   static const int _maxCacheSize = 100;
   static final Map<String, LatLng?> _cache = <String, LatLng?>{};
+  static final Map<String, String> _reverseCache = <String, String>{};
 
   static void _addToCache(String key, LatLng? value) {
     if (_cache.length >= _maxCacheSize) {
@@ -61,12 +62,81 @@ class GeocodeService {
         return null;
       }
 
+      final displayName = item['display_name'] as String? ?? query;
       final ll = LatLng(lat, lon);
       _addToCache(key, ll);
+      _reverseCache['$lat,$lon'] = displayName;
       return ll;
     } catch (_) {
       _addToCache(key, null);
       return null;
     }
+  }
+
+  /// Reverse geocode coordinates to an address string.
+  static Future<String?> reverseGeocode(LatLng point) async {
+    final key = '${point.latitude},${point.longitude}';
+    if (_reverseCache.containsKey(key)) return _reverseCache[key];
+
+    final uri = Uri.https(
+      'nominatim.openstreetmap.org',
+      '/reverse',
+      <String, String>{
+        'lat': point.latitude.toStringAsFixed(6),
+        'lon': point.longitude.toStringAsFixed(6),
+        'format': 'jsonv2',
+      },
+    );
+
+    try {
+      final resp = await http
+          .get(uri, headers: const {
+            'Accept': 'application/json',
+            'User-Agent': 'Truxify-Driver-App',
+          })
+          .timeout(const Duration(seconds: 6));
+      if (resp.statusCode != 200) return null;
+
+      final decoded = jsonDecode(resp.body) as Map<String, dynamic>?;
+      final displayName = decoded?['display_name'] as String?;
+      if (displayName != null && displayName.isNotEmpty) {
+        _reverseCache[key] = displayName;
+      }
+      return displayName;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Search for autocomplete suggestions.
+  static Future<List<String>> autocomplete(String query) async {
+    if (query.trim().isEmpty) return [];
+    final uri = Uri.https(
+      'nominatim.openstreetmap.org',
+      '/search',
+      <String, String>{'q': query, 'format': 'jsonv2', 'limit': '5'},
+    );
+    try {
+      final resp = await http
+          .get(uri, headers: const {
+            'Accept': 'application/json',
+            'User-Agent': 'Truxify-Driver-App',
+          })
+          .timeout(const Duration(seconds: 4));
+      if (resp.statusCode != 200) return [];
+      final decoded = jsonDecode(resp.body) as List<dynamic>?;
+      if (decoded == null) return [];
+      return decoded
+          .map((e) => (e as Map<String, dynamic>)['display_name'] as String? ?? '')
+          .where((s) => s.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static void clearCache() {
+    _cache.clear();
+    _reverseCache.clear();
   }
 }

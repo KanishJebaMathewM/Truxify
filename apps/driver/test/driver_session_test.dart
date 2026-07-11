@@ -36,7 +36,6 @@ void main() {
   group('DriverSession Identity Resolution', () {
     test('driverId returns auth session UUID when authenticated', () {
       final fakeUser = FakeUser('auth-session-uuid-12345');
-      final mockAuth = MockGoTrueClient(mockUser: fakeUser);
 
       // Inject mock (would normally be done via dependency injection)
       // This test verifies the getter logic returns auth session ID

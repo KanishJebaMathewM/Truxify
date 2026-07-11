@@ -9,7 +9,6 @@ import { OrderRepository } from '../repositories/orderRepository.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
-import {
   createOrderSchema,
   submitBidSchema,
   submitRatingSchema,
@@ -22,7 +21,6 @@ import {
   cancelOrderSchema,
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
-import {
   escrowRefund,
   buildDepositTx,
   recordDepositTx,
@@ -34,7 +32,6 @@ import { DeliveryVerificationService } from '../services/order/deliveryVerificat
 import { expireDeliveryOtps } from '../services/notificationService.js';
 import { OrderTimelineService } from '../services/order/orderTimelineService.js';
 import { createOrder } from '../services/order/orderCreationService.js';
-import {
   sendDeliveryOtpNotification,
   storeDeliveryOtp,
   getActiveDeliveryOtp,
@@ -46,17 +43,12 @@ import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js'
 import { DomainError } from '../services/order/domainError.js';
 import { OrderValidationService } from '../services/order/orderValidationService.js';
 import { OrderMilestoneService } from '../services/order/orderMilestoneService.js';
-import { expireDeliveryOtps } from '../services/notificationService.js';
-import {
   verifyDelivery,
   resendDeliveryOtp,
 } from '../services/order/deliveryVerificationService.js';
 import { predictDemand, predictPrice } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 import logger from '../middleware/logger.js';
-import { OrderRepository } from '../repositories/orderRepository.js';
-import { OrderTimelineService } from '../services/order/orderTimelineService.js';
-import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
 import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
 
 const router = express.Router();

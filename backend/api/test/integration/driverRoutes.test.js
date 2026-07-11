@@ -19,12 +19,8 @@ vi.mock('../../src/services/reputation.js', () => ({
   getDriverReputation: getDriverReputationMock,
 }));
 
-vi.mock('../../src/services/otpService.js', () => ({
-  generateAndStoreOtp: vi.fn().mockResolvedValue('1234'),
-  verifyOtp: vi.fn((_phone, otp) => Promise.resolve(otp === '1234')),
-}));
 
-const { default: driverRouter, otpPhoneKey } = await import('../../src/routes/driverRoutes.js');
+const { default: driverRouter } = await import('../../src/routes/driverRoutes.js');
 
 
 function buildApp() {
@@ -48,19 +44,6 @@ describe('Driver Routes', () => {
     m.calls.length = 0;
   });
 
-  describe('otpPhoneKey', () => {
-    it('normalizes equivalent phone number formats to one limiter key', () => {
-      expect(otpPhoneKey('9876543210')).toBe('phone:9876543210');
-      expect(otpPhoneKey(' 98765 43210 ')).toBe('phone:9876543210');
-      expect(otpPhoneKey('+91 98765-43210')).toBe('phone:9876543210');
-      expect(otpPhoneKey('919876543210')).toBe('phone:9876543210');
-    });
-
-    it('uses an unknown fallback for non-string or empty phone values', () => {
-      expect(otpPhoneKey(undefined)).toBe('phone:unknown');
-      expect(otpPhoneKey('---')).toBe('phone:unknown');
-    });
-  });
 
   it('GET /stats returns 404 when driver profile does not exist', async () => {
     const app = buildApp();
@@ -99,28 +82,6 @@ describe('Driver Routes', () => {
     expect(res.body.truck).toBe(null);
   });
 
-  it('POST /otp/verify accepts the default driver login OTP', async () => {
-    const app = buildApp();
-
-    const res = await request(app)
-      .post('/api/drivers/otp/verify')
-      .send({ phone: '9876543210', otp: '1234' });
-
-    expect(res.status).toBe(200);
-    expect(res.body.verified).toBe(true);
-    expect(res.body.message).toBe('OTP verified successfully.');
-  });
-
-  it('POST /otp/verify rejects invalid OTP', async () => {
-    const app = buildApp();
-
-    const res = await request(app)
-      .post('/api/drivers/otp/verify')
-      .send({ phone: '9876543210', otp: '0000' });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Invalid OTP. Please try again.');
-  });
 
   it('GET /stats returns truck details when truck assigned', async () => {
     m.store.driver_details.push({

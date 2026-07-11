@@ -174,7 +174,7 @@ def match_bilateral(
     for r, c in zip(row_idx, col_idx):
         if cost[r, c] >= _PENALTY_INFEASIBLE:
             continue  # infeasible pairing – skip
-        score = round(max(0.0, 1.0 - cost[r, c] / 200.0), 4)  # 0‥1
+        score = round(min(1.0, max(0.0, 1.0 - cost[r, c] / 200.0)), 4)  # 0‥1
         assignments.append(
             {"load_index": int(r), "driver_index": int(c), "match_score": float(score)}
         )

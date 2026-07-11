@@ -1,3 +1,1 @@
-class AppConfig {
-  static const Duration syncTimeout = Duration(seconds: 15);
-}
+export 'package:truxify_shared/src/config/app_config.dart';

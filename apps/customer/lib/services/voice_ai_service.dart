@@ -2,11 +2,17 @@ class VoiceAiOrderInput {
   final String? status;
   final String? eta;
   final String? dropAddress;
+  final String? pickupAddress;
+  final String? driverName;
+  final String? truckType;
 
   const VoiceAiOrderInput({
     this.status,
     this.eta,
     this.dropAddress,
+    this.pickupAddress,
+    this.driverName,
+    this.truckType,
   });
 
   static VoiceAiOrderInput? fromMap(Map<String, dynamic>? map) {
@@ -15,8 +21,16 @@ class VoiceAiOrderInput {
       status: map['status']?.toString(),
       eta: map['eta']?.toString(),
       dropAddress: map['drop_address']?.toString(),
+      pickupAddress: map['pickup_address']?.toString(),
+      driverName: map['driver_name']?.toString(),
+      truckType: map['truck_type']?.toString(),
     );
   }
+
+  bool get hasDetailedInfo =>
+      driverName != null ||
+      truckType != null ||
+      pickupAddress != null;
 }
 
 class VoiceAiService {
@@ -60,12 +74,37 @@ class VoiceAiService {
         ? rawDropAddress
         : 'your destination';
 
+    final rawPickup = order.pickupAddress?.trim();
+    final pickup = (rawPickup != null && rawPickup.isNotEmpty) ? rawPickup : null;
+
+    final parts = <String>[];
+    parts.add('Your shipment is currently $status.');
+
+    if (order.driverName != null) {
+      parts.add('Your driver is ${order.driverName}.');
+    }
+    if (order.truckType != null) {
+      parts.add('Truck type: ${order.truckType}.');
+    }
+    if (pickup != null) {
+      parts.add('Pickup location: $pickup.');
+    }
     if (eta != null) {
-      return 'Your shipment is currently $status and expected to reach '
-             '$dropAddress by $eta.';
+      parts.add('Expected to reach $dropAddress by $eta.');
+    } else {
+      parts.add('ETA information is not yet available.');
     }
 
-    return 'Your shipment is currently $status. '
-           'ETA information is not yet available.';
+    return parts.join(' ');
+  }
+
+  static String buildSummary(VoiceAiOrderInput order) {
+    final sb = StringBuffer('Order Summary: ');
+    if (order.status != null) sb.write('Status: ${formatStatus(order.status)}. ');
+    if (order.pickupAddress != null) sb.write('Pickup: ${order.pickupAddress}. ');
+    if (order.dropAddress != null) sb.write('Drop: ${order.dropAddress}. ');
+    if (order.driverName != null) sb.write('Driver: ${order.driverName}. ');
+    if (order.eta != null) sb.write('ETA: ${order.eta}.');
+    return sb.toString();
   }
 }

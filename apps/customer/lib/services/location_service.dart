@@ -13,8 +13,27 @@ class LocationSuggestion {
 class LocationService {
   static const String _host = 'nominatim.openstreetmap.org';
   static const String _userAgent = 'Truxify Customer App';
+  static const int _maxCacheSize = 200;
+  static final Map<String, List<LocationSuggestion>> _searchCache = {};
+  static final Map<String, String> _reverseCache = {};
+
+  static void _cacheSearch(String query, List<LocationSuggestion> results) {
+    if (_searchCache.length >= _maxCacheSize) {
+      _searchCache.remove(_searchCache.keys.first);
+    }
+    _searchCache[query.toLowerCase().trim()] = results;
+  }
 
   Future<List<LocationSuggestion>> searchPlaces(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.length < 3) {
+      return const <LocationSuggestion>[];
+    }
+
+    final cacheKey = trimmed.toLowerCase();
+    if (_searchCache.containsKey(cacheKey)) {
+      return _searchCache[cacheKey]!;
+    }
     final trimmed = query.trim();
     if (trimmed.length < 3) {
       return const <LocationSuggestion>[];
@@ -62,9 +81,16 @@ class LocationService {
         })
         .whereType<LocationSuggestion>()
         .toList();
+
+    _cacheSearch(trimmed, results);
+    return results;
   }
 
   Future<String> resolveAddress(LatLng point) async {
+    final cacheKey = '${point.latitude.toStringAsFixed(4)},${point.longitude.toStringAsFixed(4)}';
+    if (_reverseCache.containsKey(cacheKey)) {
+      return _reverseCache[cacheKey]!;
+    }
     final uri = Uri.https(
       _host,
       '/reverse',
@@ -90,9 +116,26 @@ class LocationService {
     if (decoded is! Map<String, dynamic>) throw Exception('Reverse lookup failed: unexpected response type');
     final displayName = (decoded['display_name'] as String?)?.trim();
     if (displayName != null && displayName.isNotEmpty) {
+      _reverseCache[cacheKey] = displayName;
       return displayName;
     }
 
     throw Exception('Reverse lookup failed: missing display_name (${uri.path})');
+  }
+
+  String extractCity(String address) {
+    final parts = address.split(',');
+    return parts.length > 1 ? parts[parts.length - 3].trim() : parts.first.trim();
+  }
+
+  String extractShortAddress(String address) {
+    final parts = address.split(',').map((p) => p.trim()).toList();
+    if (parts.length > 3) return parts.sublist(0, 3).join(', ');
+    return address;
+  }
+
+  void clearCache() {
+    _searchCache.clear();
+    _reverseCache.clear();
   }
 }

@@ -72,6 +72,7 @@ class _TruxifyAppState extends State<TruxifyApp> {
                 (context) => OtpScreen(
                   phone: args['phone'] ?? '',
                   verificationId: args['verificationId'] ?? '',
+                  countryCode: args['countryCode'] ?? '+91',
                 ),
               );
 

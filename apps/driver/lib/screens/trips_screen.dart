@@ -1177,6 +1177,24 @@ class _TripsScreenState extends State<TripsScreen> {
                 ),
                 width: 12,
                 height: 12,
+                onTap: () {
+                  final mapPoint = RouteMapPoint(
+                    id: point['id']?.toString() ?? '',
+                    title: (point['label'] ?? point['title'] ?? 'Stop').toString(),
+                    subtitle: (point['address'] ?? point['subtitle'] ?? '').toString(),
+                    details: (point['details'] ?? '').toString(),
+                    progress: (point['progress'] as num?)?.toDouble() ?? 0.0,
+                    claimed: point['is_claimed'] == true,
+                    icon: Icons.place,
+                    latitude: (point['latitude'] as num).toDouble(),
+                    longitude: (point['longitude'] as num).toDouble(),
+                    loadOfferId: point['load_offer_id']?.toString(),
+                  );
+                  Navigator.of(context).pushNamed(
+                    AppRoutes.loadPointDetail,
+                    arguments: mapPoint,
+                  );
+                },
                 child: Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,

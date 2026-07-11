@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_core/firebase_core.dart';
 
@@ -8,7 +8,7 @@ void setupTestEnvironment() {
   try {
     Supabase.initialize(
       url: 'https://mock-project.supabase.co',
-      anonKey: 'mock-anon-key',
+      publishableKey: 'mock-anon-key',
     );
   } catch (_) {}
   

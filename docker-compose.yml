@@ -3,6 +3,8 @@ services:
     build:
       context: ./backend/api
       target: development
+    env_file:
+      - .env
     ports:
       - "5000:5000"
     env_file:
@@ -17,6 +19,8 @@ services:
       - ./backend/api:/app
       - /app/node_modules
     depends_on:
+      db:
+        condition: service_healthy
       mongo:
         condition: service_healthy
       redis:
@@ -32,6 +36,8 @@ services:
     build:
       context: ./backend/ml
     container_name: truxify-ml-engine
+    env_file:
+      - .env
     ports:
       - "8001:8000"
     environment:
@@ -45,40 +51,29 @@ services:
       retries: 5
       start_period: 30s
   db:
-    image: postgis/postgis:15-3.3-alpine
-    ports:
-      - "5432:5432"
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgrespassword}
-      POSTGRES_DB: ${POSTGRES_DB:-truxify}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
+       image: postgis/postgis:15-3.3-alpine
+       healthcheck:
+         test: ["CMD-SHELL", "pg_isready -U postgres"]
+         interval: 10s
+         timeout: 5s
+         retries: 5
+         start_period: 10s
   mongo:
     image: mongo:6-jammy
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 volumes:
   mongo_data:
   postgres_data:

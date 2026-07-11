@@ -85,7 +85,7 @@ function buildStore(prefix) {
  * into one rate-limit bucket.
  */
 export function safeIpKeyGenerator(req) {
-  let ip = req.ip || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
+  let ip = req.ip || req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
   if (typeof ip === 'string') {
     ip = ip.replace(/^::ffff:/, '');
     if (ip === '::1') ip = '127.0.0.1';
@@ -118,6 +118,7 @@ export const globalLimiter = rateLimit({
   store: buildStore('rl:global:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
   skip: (req) => req.path === '/health' || req.path.startsWith('/health/'),
+  validate: { ip: false },
 });
 
 // Per-user limiter, applied in the route chains immediately after the
@@ -131,6 +132,7 @@ export const userLimiter = rateLimit({
   keyGenerator: userKeyGenerator,
   store: buildStore('rl:user:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
+  validate: { ip: false },
 });
 
 export const healthLimiter = rateLimit({
@@ -141,6 +143,7 @@ export const healthLimiter = rateLimit({
   keyGenerator: safeIpKeyGenerator,
   store: buildStore('rl:health:'),
   message: { error: 'Rate limit exceeded', retryAfter: 60 },
+  validate: { ip: false },
 });
 
 export const authLimiter = rateLimit({
@@ -151,6 +154,7 @@ export const authLimiter = rateLimit({
   keyGenerator: safeIpKeyGenerator,
   store: buildStore('rl:auth:'),
   message: { error: 'Rate limit exceeded', retryAfter: 3600 },
+  validate: { ip: false },
 });
 
 export const bidLimiter = rateLimit({
@@ -161,6 +165,7 @@ export const bidLimiter = rateLimit({
   keyGenerator: userKeyGenerator,
   store: buildStore('rl:bid:'),
   message: { error: 'Rate limit exceeded', retryAfter: 60 },
+  validate: { ip: false },
 });
 
 export const deviceLimiter = rateLimit({
@@ -175,6 +180,7 @@ export const deviceLimiter = rateLimit({
   },
   store: buildStore('rl:device:'),
   message: { error: 'Rate limit exceeded', retryAfter: 600 },
+  validate: { ip: false },
 });
 
 /**

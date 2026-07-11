@@ -120,9 +120,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() {
-          _platformRating = data['supabaseRating'] != null
-              ? (data['supabaseRating'] as num).toDouble()
-              : null;
+          _platformRating = (data['supabaseRating'] as num?)?.toDouble() ?? 0.0;
           _onChainScore = data['onChainScore'] != null
               ? (data['onChainScore'] as num).toInt()
               : null;

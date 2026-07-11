@@ -29,7 +29,7 @@ import authRoutes from './routes/authRoutes.js'
 import healthRoutes from './routes/healthRoutes.js'
 import adminRoutes from './routes/adminRoutes.js'
 import lookupRoutes from './routes/lookupRoutes.js'
-
+import { getRoot, notFound } from './controllers/rootController.js'
 import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
@@ -207,17 +207,10 @@ app.use('/api/v1/admin', adminRoutes)
 setupSwagger(app)
 
 // Root route
-app.get('/', (req, res) => {
-  const wsHost = req.hostname || 'localhost'
-  const wsPort = process.env.PORT || 5000
-  res.send(`<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://${wsHost}:${wsPort}/ws/tracking</code></p>`)
-})
+app.get('/', getRoot)
 
 // Handling 404 Route Not Found
-app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint resource not found.' })
-})
-
+app.use(notFound)
 // Sentry error handler must come before the generic error handler;
 // it captures the exception automatically so we don't call captureException here.
 app.use(sentryErrorHandler())

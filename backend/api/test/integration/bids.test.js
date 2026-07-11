@@ -2,17 +2,21 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 
-const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
+import { createSupabaseMock } from '../helpers/supabaseMock.js';
 const m = createSupabaseMock();
 
-vi.mock('../../src/config/db.js', () => ({
+vi.doMock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,
 }));
 
-vi.mock('../../src/services/escrow.js', () => ({
+vi.doMock('../../src/middleware/idempotency.js', () => ({
+  requireIdempotency: () => (req, res, next) => next()
+}));
+
+vi.doMock('../../src/services/escrow.js', () => ({
   buildDepositTx: vi.fn(),
   recordDepositTx: vi.fn(),
   escrowDeposit: vi.fn(),
@@ -281,7 +285,7 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept executes RPC', async () => {
-    mockBuildDepositTx.mockResolvedValue({ to: '0xescrow', data: '0xdeadbeef' });
+    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' }, bookingId: 'escrow:booking' });
 
     m.store.orders.push({
       id: 'order-1',
@@ -322,7 +326,7 @@ describe('Bid Routes', () => {
       .set(CUSTOMER);
 
     expect(res.status).toBe(200);
-    expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
+    expect(res.body.depositTx.txData).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
     expect(mockBuildDepositTx).toHaveBeenCalled();
 
     const rpc = m.calls.find(c => c.rpc === 'accept_bid_tx');
@@ -332,7 +336,7 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept triggers escrow deposit when wallet addresses present', async () => {
-    mockBuildDepositTx.mockResolvedValue({ to: '0xescrow', data: '0xdeadbeef', bookingId: 'escrow:OD-ESCROW' });
+    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' }, bookingId: 'escrow:OD-ESCROW' });
 
     m.store.orders.push({
       id: 'order-escrow',
@@ -382,7 +386,7 @@ describe('Bid Routes', () => {
       '0xAbcdef1234567890Abcdef1234567890Abcdef12',
       500000000000000000000n,
     );
-    expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
+    expect(res.body.depositTx.txData).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
 
     let order = m.store.orders.find(o => o.id === 'order-escrow');
     expect(order.escrow_status).toBe('funding');
@@ -623,6 +627,7 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept returns 500 when load offer is already claimed', async () => {
+    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' } });
     m.store.orders.push({
       id: 'order-1',
       customer_id: 'customer-1',
@@ -663,6 +668,7 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept returns 500 when order is no longer pending', async () => {
+    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' } });
     m.store.orders.push({
       id: 'order-1',
       customer_id: 'customer-1',

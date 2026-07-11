@@ -1,10 +1,10 @@
 import crypto from 'crypto';
 import { DomainError } from './bidAcceptanceService.js';
 import {
-  verifyDelivery,
-  generateDeliveryOtp,
-  resendDeliveryOtp,
-  sendOtpNotification,
+  
+  
+  
+  
 } from './deliveryVerificationService.js';
 import { expireDeliveryOtps } from '../notificationService.js';
 import { acquireLock, releaseLock } from '../../lib/redisLock.js';
@@ -31,10 +31,11 @@ function generateOrderDisplayId() {
 }
 
 export class OrderLifecycleService {
-  constructor({ orderRepository, orderTimelineService, bidAcceptanceService }) {
+  constructor({ orderRepository, orderTimelineService, bidAcceptanceService, deliveryVerificationService }) {
     this.orderRepository = orderRepository;
     this.orderTimelineService = orderTimelineService;
     this.bidAcceptanceService = bidAcceptanceService;
+    this.deliveryVerificationService = deliveryVerificationService;
   }
 
   async createOrder(customerId, customerName, body) {
@@ -377,7 +378,7 @@ export class OrderLifecycleService {
     let generatedOtp = null;
 
     if (milestone === 'In Transit') {
-      const result = await generateDeliveryOtp({ orderId });
+      const result = await this.deliveryVerificationService.generateDeliveryOtp({ orderId });
       generatedOtp = result.otp;
     }
 
@@ -391,7 +392,7 @@ export class OrderLifecycleService {
     }
 
     if (generatedOtp) {
-      await sendOtpNotification({
+      await this.deliveryVerificationService.sendOtpNotification({
         orderId,
         customerId: order.customer_id,
         orderDisplayId: order.order_display_id,
@@ -403,7 +404,7 @@ export class OrderLifecycleService {
   }
 
   async verifyDeliveryFn(orderId, driverId, otp) {
-    return verifyDelivery({ orderId, driverId, otp });
+    return this.deliveryVerificationService.verifyDelivery({ orderId, driverId, otp });
   }
 
   async resendOtpFn(orderId, driverId) {
@@ -411,7 +412,7 @@ export class OrderLifecycleService {
     if (orderErr || !order) throw new DomainError(404, { error: 'Order not found.' });
     if (order.driver_id !== driverId) throw new DomainError(403, { error: 'Access Denied: You are not assigned to this order.' });
 
-    const { expiresInMinutes } = await resendDeliveryOtp({
+    const { expiresInMinutes } = await this.deliveryVerificationService.resendDeliveryOtp({
       orderId,
       customerId: order.customer_id,
       orderDisplayId: order.order_display_id,

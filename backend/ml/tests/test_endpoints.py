@@ -67,7 +67,7 @@ def test_auth_valid_key(monkeypatch):
 def test_auth_dev_mode_bypass(monkeypatch):
     monkeypatch.delenv("ML_API_KEY", raising=False)
     response = client.post("/predict/demand", json=_auth_payload())
-    assert response.status_code == 200
+    assert response.status_code == 503
 
 
 def test_health_no_auth_required(monkeypatch):

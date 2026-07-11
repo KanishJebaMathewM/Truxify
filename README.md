@@ -122,6 +122,12 @@ Truxify is built in 6 distinct layers, each solving a specific trust or efficien
 | Live Tracking | OSM + Leaflet + WebSockets | Real-time truck map inside customer app |
 | Route Display | Google Maps deep link | Driver multi-stop navigation, zero API cost |
 
+### Architecture Decision Records
+
+Detailed design decisions for the backend application layer — service decomposition, repository pattern, order lifecycle orchestration, validation workflow, timeline management, and notification/OTP workflow — are documented as Architecture Decision Records:
+
+👉 [docs/architecture/adr/](docs/architecture/adr/)
+
 ## 🧠 ML Layer
 10 connected models running on FastAPI:
 

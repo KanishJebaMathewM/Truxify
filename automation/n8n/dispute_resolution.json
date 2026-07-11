@@ -1,0 +1,168 @@
+{
+  "name": "Truxify Dispute Resolution Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "disputes",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "webhook-trigger",
+      "name": "Supabase Dispute Webhook"
+    },
+    {
+      "parameters": {
+        "url": "={{$json.body.record.order_api_url}}/api/orders/={{$json.body.record.id}}/logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        200,
+        0
+      ],
+      "id": "fetch-telemetry-logs",
+      "name": "Fetch GPS & Event Logs"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const logs = $input.item.json.logs || [];\nconst destLat = $node[\"Supabase Dispute Webhook\"].json.body.record.dest_lat;\nconst destLng = $node[\"Supabase Dispute Webhook\"].json.body.record.dest_lng;\nconst otpVerified = $node[\"Supabase Dispute Webhook\"].json.body.record.otp_verified || false;\n\n// Calculate geofence distance\nfunction getDistanceKm(lat1, lon1, lat2, lon2) {\n  const R = 6371; // Radius of the earth in km\n  const dLat = (lat2 - lat1) * Math.PI / 180;\n  const dLon = (lon2 - lon1) * Math.PI / 180;\n  const a = \n    Math.sin(dLat/2) * Math.sin(dLat/2) +\n    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *\n    Math.sin(dLon/2) * Math.sin(dLon/2);\n  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));\n  return R * c; // Distance in km\n}\n\nlet reachedDestination = false;\nfor (const log of logs) {\n  if (log.location && log.location.coordinates) {\n    const [lng, lat] = log.location.coordinates;\n    const dist = getDistanceKm(lat, lng, destLat, destLng);\n    if (dist <= 0.5) { // 500 meters geofence\n      reachedDestination = true;\n      break;\n    }\n  }\n}\n\nreturn {\n  reached_destination: reachedDestination,\n  otp_verified: otpVerified,\n  auto_resolvable: reachedDestination && otpVerified,\n  evidence_packaged: {\n    log_count: logs.length,\n    reached_destination: reachedDestination,\n    otp_verified: otpVerified\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ],
+      "id": "arbitration-logic",
+      "name": "Verify Geofence & OTP"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.auto_resolvable}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        600,
+        0
+      ],
+      "id": "resolution-branch",
+      "name": "Auto-Resolvable?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/={{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/release-dispute",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.INTERNAL_RELAYER_KEY}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        800,
+        -100
+      ],
+      "id": "release-escrow",
+      "name": "Trigger Escrow Payout"
+    },
+    {
+      "parameters": {
+        "toEmail": "disputes@truxify.org",
+        "subject": "Dispute Escalated: Booking ID {{$node[\"Supabase Dispute Webhook\"].json.body.record.order_display_id}}",
+        "htmlFormat": true,
+        "message": "<h3>Manual Arbitration Required</h3><p>Booking Display ID: {{$node[\"Supabase Dispute Webhook\"].json.body.record.order_display_id}}</p><p>Customer Wallet: {{$node[\"Supabase Dispute Webhook\"].json.body.record.customer_wallet}}</p><p>Driver Wallet: {{$node[\"Supabase Dispute Webhook\"].json.body.record.driver_wallet}}</p><p><strong>Evidence Package:</strong></p><ul><li>Reached Destination: {{$json.evidence_packaged.reached_destination}}</li><li>OTP Verified: {{$json.evidence_packaged.otp_verified}}</li><li>Log count analyzed: {{$json.evidence_packaged.log_count}}</li></ul><p>Please resolve this in the admin portal within 24 hours.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        100
+      ],
+      "id": "notify-arbitrators",
+      "name": "Escalate to Arbitrators"
+    }
+  ],
+  "connections": {
+    "webhook-trigger": {
+      "main": [
+        [
+          {
+            "node": "fetch-telemetry-logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetch-telemetry-logs": {
+      "main": [
+        [
+          {
+            "node": "arbitration-logic",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "arbitration-logic": {
+      "main": [
+        [
+          {
+            "node": "resolution-branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "resolution-branch": {
+      "main": [
+        [
+          {
+            "node": "release-escrow",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "notify-arbitrators",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "dispute-resolv-v1",
+  "id": "dispute-resolution-pipeline"
+}

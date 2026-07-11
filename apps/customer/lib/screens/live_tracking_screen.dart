@@ -491,8 +491,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   }
 
   Future<void> _showCallDriver() async {
-    final driverName = _driverName;
-    final truckNumber = _truckNumber;
     final phone = _driverPhone;
 
     if (phone == null || phone.isEmpty) {
@@ -609,12 +607,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                               // refresh outer order state
                               await _loadOrder();
 
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               Navigator.of(context).pop();
                               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Drop location updated successfully')));
                             } catch (e) {
                               setModalState(() => isLoading = false);
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to change drop: $e')));
                             }
                           },
@@ -671,12 +669,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                             final rawFee = resp['cancellation_fee'];
                             final feeInRupees = rawFee != null ? (rawFee as num) / 100 : 0;
                             await _loadOrder();
-                            if (!mounted) return;
+                            if (!context.mounted) return;
                             Navigator.of(context).pop();
                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Order cancelled. Fee: ₹${feeInRupees.toStringAsFixed(2)}')));
                           } catch (e) {
                             setModalState(() => isLoading = false);
-                            if (!mounted) return;
+                            if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to cancel order: $e')));
                           }
                         },
@@ -812,18 +810,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       body: Stack(
         children: [
           Positioned.fill(
-            child: AnimatedBuilder(
-              animation: _movementController,
-              builder: (context, child) {
-                return FlutterMap(
-                  options: const MapOptions(
-                    initialCenter: LatLng(24.25, 74.40),
-                    initialZoom: 6.2,
-                    minZoom: 5,
-                    maxZoom: 16,
-                  ),
-                  children: [
-                    TileLayer(
+            child: FlutterMap(
+              options: const MapOptions(
+                initialCenter: LatLng(24.25, 74.40),
+                initialZoom: 6.2,
+                minZoom: 5,
+                maxZoom: 16,
+              ),
+              children: [
+                TileLayer(
                       urlTemplate:
                           'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                       tileProvider: CancellableNetworkTileProvider(),
@@ -838,24 +833,29 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                         ),
                       ],
                     ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: _routePoints.first,
-                          width: 30,
-                          height: 30,
-                          child: Icon(Icons.trip_origin_rounded,
-                              color: Colors.blue, size: 22),
-                        ),
-                        Marker(
-                          point: _routePoints.last,
-                          width: 34,
-                          height: 34,
-                          child: Icon(Icons.place_rounded,
-                              color: Colors.redAccent, size: 26),
-                        ),
-                        ..._buildTruckMarkers(),
-                      ],
+                    AnimatedBuilder(
+                      animation: _movementController,
+                      builder: (context, _) {
+                        return MarkerLayer(
+                          markers: [
+                            Marker(
+                              point: _routePoints.first,
+                              width: 30,
+                              height: 30,
+                              child: const Icon(Icons.trip_origin_rounded,
+                                  color: Colors.blue, size: 22),
+                            ),
+                            Marker(
+                              point: _routePoints.last,
+                              width: 34,
+                              height: 34,
+                              child: const Icon(Icons.place_rounded,
+                                  color: Colors.redAccent, size: 26),
+                            ),
+                            ..._buildTruckMarkers(),
+                          ],
+                        );
+                      }
                     ),
                   ],
                 );
@@ -1045,13 +1045,13 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                                     color: TruxifyColors.adaptiveSecondaryText(
                                         context))),
                         const SizedBox(height: 6),
-                        Text('ETA: ${eta}',
+                        Text('ETA: $eta',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyMedium
                                 ?.copyWith(fontWeight: FontWeight.w700)),
                         const SizedBox(height: 6),
-                        Text('Current location: ${currentLocation}',
+                        Text('Current location: $currentLocation',
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyMedium

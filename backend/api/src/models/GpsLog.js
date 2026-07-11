@@ -68,8 +68,7 @@ const gpsLogSchema = new mongoose.Schema({
         timeField: "timestamp",
         metaField: "metadata",
         granularity: "seconds",
-    },
-    expireAfterSeconds: process.env.GPS_LOG_TTL || 60 * 60 * 24 * 30, // configurable TTL
+    }
 });
 
 // Compound index for faster queries by bookingId + timestamp

@@ -64,6 +64,9 @@ describe("TruxifyEscrow", function () {
       expect(booking.amount).to.equal(0);
       expect(booking.status).to.equal(1); // Delivered
 
+      // Withdraw the funds to driver
+      await escrow.connect(driver).withdraw();
+
       const driverBalanceAfter = await ethers.provider.getBalance(driver.address);
       expect(driverBalanceAfter).to.be.gt(driverBalanceBefore);
     });
@@ -119,10 +122,13 @@ describe("TruxifyEscrow", function () {
         value: ethers.parseEther("10.0"),
       });
 
-      // Attempt re-entrant drain — must revert or pay only once
+      // Release payment (succeeds, updates state and registers withdrawal)
+      await escrow.connect(owner).releasePayment(bookingId);
+
+      // Attempt re-entrant drain via withdraw — must revert
       await expect(
-        escrow.connect(owner).releasePayment(bookingId)
-      ).to.be.reverted; // ReentrancyGuardReentrantCall
+        malicious.attackWithdraw()
+      ).to.be.reverted;
 
       // Escrow should still hold funds (not drained)
       const escrowBalance = await ethers.provider.getBalance(await escrow.getAddress());
@@ -140,6 +146,10 @@ describe("TruxifyEscrow", function () {
 
       const balanceBefore = await ethers.provider.getBalance(customer.address);
       await escrow.connect(customer).cancelBooking(1);
+
+      // Withdraw refund
+      await escrow.connect(customer).withdraw();
+
       const balanceAfter = await ethers.provider.getBalance(customer.address);
 
       expect(balanceAfter).to.be.gt(balanceBefore);

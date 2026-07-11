@@ -2,11 +2,12 @@
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /// @title Reputation System for Truxify
 /// @notice Manages driver reputation scores capped at MAX_REPUTATION.
 /// @dev Only authorized relayers can update scores.
-contract Reputation is Ownable {
+contract Reputation is Ownable, Pausable {
     mapping(address => bool) public authorizedRelayers;
     mapping(address => uint256) private scores;
 
@@ -39,15 +40,25 @@ contract Reputation is Ownable {
         emit RelayerUpdated(relayer, authorized);
     }
 
+    /// @notice Pauses the contract, preventing score updates.
+    function pause() external onlyOwner {
+        _pause();
+    }
+
+    /// @notice Unpauses the contract.
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
     /// @notice Increases the reputation of a driver.
     /// @param driver Address of the driver.
     /// @param points Amount to increase.
-    function increaseReputation(address driver, uint256 points) external onlyRelayer {
+    function increaseReputation(address driver, uint256 points) external onlyRelayer whenNotPaused {
         require(driver != address(0), "Invalid driver");
         uint256 current = scores[driver];
-        if (current >= MAX_REPUTATION) return;
+        if (current >= MAX_REPUTATION) revert("already at max reputation");
         uint256 newScore = current + points;
-        if (newScore < current || newScore > MAX_REPUTATION) {
+        if (newScore > MAX_REPUTATION) {
             scores[driver] = MAX_REPUTATION;
         } else {
             scores[driver] = newScore;
@@ -58,7 +69,7 @@ contract Reputation is Ownable {
     /// @notice Decreases the reputation of a driver.
     /// @param driver Address of the driver.
     /// @param points Amount to decrease.
-    function decreaseReputation(address driver, uint256 points) external onlyRelayer {
+    function decreaseReputation(address driver, uint256 points) external onlyRelayer whenNotPaused {
         require(driver != address(0), "Invalid driver");
         uint256 current = scores[driver];
         scores[driver] = points >= current ? 0 : current - points;

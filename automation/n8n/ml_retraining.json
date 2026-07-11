@@ -1,0 +1,175 @@
+{
+  "name": "Weekly ML Model Retraining Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": {
+          "item": [
+            {
+              "mode": "everyWeek",
+              "hour": 2,
+              "weekday": "1"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "weekly-cron",
+      "name": "Weekly Cron (Monday 2 AM)"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COUNT(*) as new_booking_count FROM orders WHERE status = 'delivered' AND updated_at > NOW() - INTERVAL '7 days';"
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.1,
+      "position": [
+        200,
+        0
+      ],
+      "id": "count-new-bookings",
+      "name": "Count New Bookings in PostgreSQL"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$json.new_booking_count}}",
+              "value2": 100
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        400,
+        0
+      ],
+      "id": "threshold-check",
+      "name": "New Bookings >= 100?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.ML_ENGINE_URL}}/train/demand",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.ML_API_KEY}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        600,
+        -100
+      ],
+      "id": "trigger-demand-retraining",
+      "name": "Trigger Demand Model Retraining"
+    },
+    {
+      "parameters": {
+        "toEmail": "ml-alerts@truxify.org",
+        "subject": "ML Retraining Report: Demand Model Updated",
+        "htmlFormat": true,
+        "message": "<h3>ML Model Retraining Report</h3><p>Status: <strong>{{$node[\"Trigger Demand Model Retraining\"].json.status}}</strong></p><p><strong>Performance Metrics:</strong></p><ul><li>MAE (Mean Absolute Error): {{$node[\"Trigger Demand Model Retraining\"].json.metrics.mae}}</li><li>RMSE (Root Mean Squared Error): {{$node[\"Trigger Demand Model Retraining\"].json.metrics.rmse}}</li><li>R² Score: {{$node[\"Trigger Demand Model Retraining\"].json.metrics.r2}}</li><li>Training Samples Count: {{$node[\"Trigger Demand Model Retraining\"].json.metrics.n_samples}}</li></ul><p>The updated model has been auto-deployed to production storage.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        -100
+      ],
+      "id": "send-success-email",
+      "name": "Send Training Performance Report"
+    },
+    {
+      "parameters": {
+        "toEmail": "ml-alerts@truxify.org",
+        "subject": "ML Retraining Skipped: Insufficient Data",
+        "htmlFormat": true,
+        "message": "<h3>ML Model Retraining Skipped</h3><p>New completed bookings collected this week: <strong>{{$node[\"Count New Bookings in PostgreSQL\"].json.new_booking_count}}</strong></p><p>Required threshold: <strong>100</strong></p><p>Model retraining skipped. Existing model versions will remain active in production.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [
+        600,
+        100
+      ],
+      "id": "send-skip-email",
+      "name": "Notify Skipped Pipeline"
+    }
+  ],
+  "connections": {
+    "weekly-cron": {
+      "main": [
+        [
+          {
+            "node": "count-new-bookings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "count-new-bookings": {
+      "main": [
+        [
+          {
+            "node": "threshold-check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "threshold-check": {
+      "main": [
+        [
+          {
+            "node": "trigger-demand-retraining",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "send-skip-email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "trigger-demand-retraining": {
+      "main": [
+        [
+          {
+            "node": "send-success-email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "ml-retrain-v1",
+  "id": "ml-retraining-pipeline"
+}

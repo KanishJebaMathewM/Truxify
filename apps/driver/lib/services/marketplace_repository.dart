@@ -31,12 +31,8 @@ class MarketplaceRepository {
 
   String _encodePathSegment(String value) => Uri.encodeComponent(value);
 
-  Future<Map<String, String>> _authHeaders() async {
-    final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
-    return <String, String>{
-      'Content-Type': 'application/json',
-      if (accessToken != null) 'Authorization': 'Bearer $accessToken',
-    };
+  void dispose() {
+    _apiClient.dispose();
   }
 
   Future<List<LoadOffer>> fetchLoadOffers() async {

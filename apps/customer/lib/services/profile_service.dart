@@ -58,6 +58,21 @@ class ProfileService {
   }
 
 
+  Future<void> updateProfile({
+    required String fullName,
+    required String companyName,
+    required String phone,
+  }) async {
+    await _apiClient.put(
+      '/api/profile',
+      body: <String, String>{
+        'full_name': fullName,
+        'company_name': companyName,
+        'phone': phone,
+      },
+    );
+  }
+
   Future<void> logout() async {
     final userId = FirebaseAuth.instance.currentUser?.uid ?? SupabaseService.client.auth.currentUser?.id;
 

@@ -1,13 +1,10 @@
-import 'dart:convert';
-
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/widgets/menu_card.dart';
 import 'package:truxify/widgets/menu_item.dart';
 
 import '../controllers/app_controller.dart';
+import '../core/api_client.dart';
 import '../core/offline/cache/cache_manager.dart';
 import '../repositories/address_repository.dart';
 import '../repositories/payment_repository.dart';
@@ -243,20 +240,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     final address = walletController.text.trim();
                     if (address.isEmpty) return;
                     try {
-                      final client = Supabase.instance.client;
-                      final token = client.auth.currentSession?.accessToken;
-                      final userId = client.auth.currentUser?.id ?? '';
-                      final response = await http.put(
-                        Uri.parse('${ApiClient.defaultBaseUrl}/api/profile/wallet'),
-                        headers: <String, String>{
-                          'Content-Type': 'application/json',
-                          if (token != null) 'Authorization': 'Bearer $token',
-                        },
-                        body: jsonEncode(<String, String>{
-                          'wallet_address': address,
-                        }),
-                      );
-                      if (response.statusCode == 200) {
+                      final apiClient = ApiClient();
+                      try {
+                        await apiClient.put(
+                          '/api/profile/wallet',
+                          body: <String, String>{
+                            'wallet_address': address,
+                          },
+                        );
                         setState(() {
                           _walletAddress = address;
                         });
@@ -268,18 +259,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             backgroundColor: TruxifyColors.success,
                           ),
                         );
-                      } else {
-                        final body = jsonDecode(response.body)
-                            as Map<String, dynamic>;
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(body['error']?.toString() ??
-                                  'Failed to update wallet'),
-                              backgroundColor: TruxifyColors.errorRed,
-                            ),
-                          );
-                        }
+                      } finally {
+                        apiClient.dispose();
+                      }
+                    } on ApiException catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(e.message),
+                            backgroundColor: TruxifyColors.errorRed,
+                          ),
+                        );
                       }
                     } catch (e) {
                       if (context.mounted) {

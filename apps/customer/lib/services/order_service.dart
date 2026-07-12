@@ -7,11 +7,6 @@ class OrderService {
     ApiClient? apiClient,
   }) : _apiClient = apiClient ?? ApiClient();
 
-  static const String defaultApiBaseUrl = String.fromEnvironment(
-    'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
-  );
-
   final ApiClient _apiClient;
 
   String _encodePathSegment(String value) => Uri.encodeComponent(value);

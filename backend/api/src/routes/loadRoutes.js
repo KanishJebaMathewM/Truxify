@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
@@ -28,7 +29,7 @@ function sanitizeLoadFilters(query) {
 // 1. GET ALL AVAILABLE LOAD OFFERS (DRIVER)
 // GET /api/loads
 // ============================================================================
-router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), async (req, res) => {
   try {
     const filterResult = loadFilterQuerySchema.safeParse(req.query);
     if (!filterResult.success) {
@@ -198,7 +199,7 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
 // 2. GET SINGLE LOAD OFFER BY ID (DRIVER)
 // GET /api/loads/:id
 // ============================================================================
-router.get('/:id', authenticate, userLimiter, requireRole(['driver']), validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateParams(paramIdSchema), async (req, res) => {
   try {
     const { data: load, error } = await supabase
       .from('load_offers')

@@ -147,6 +147,10 @@ jobs:
         working-directory: blockchain
         run: npx hardhat compile
 
+      - name: Run contract tests
+        working-directory: blockchain
+        run: npx hardhat test
+
       - name: Verify backend ABI selectors match compiled contract
         run: bash scripts/check-escrow-abi.sh
 

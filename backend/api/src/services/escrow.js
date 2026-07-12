@@ -30,6 +30,7 @@
 import { ethers } from 'ethers'
 import * as Sentry from '@sentry/node'
 import logger from '../middleware/logger.js'
+import { measureExecution } from '../core/performanceMetrics.js'
 
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver) external payable',
@@ -78,6 +79,7 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
  * @returns {Promise<boolean>} — true if validation passed
  */
 export async function validateEscrowSetup () {
+  return measureExecution('EscrowService.validateEscrowSetup', async () => {
   if (!escrowContract) {
     logger.warn('[escrow] Setup validation skipped — contract not initialised (env vars missing).')
     return false
@@ -120,6 +122,7 @@ export async function validateEscrowSetup () {
   }
 
   return true
+  });
 }
 
 /**
@@ -138,6 +141,7 @@ export function isEscrowEnabled() {
  * @returns {Promise<{status: string, chainId?: number, error?: string}>}
  */
 export async function checkEscrowHealth() {
+  return measureExecution('EscrowService.checkEscrowHealth', async () => {
   if (!escrowContract) {
     return { status: 'not_configured' };
   }
@@ -153,6 +157,7 @@ export async function checkEscrowHealth() {
     logger.error('[escrow] Health check failed:', err.message);
     return { status: 'failed', error: err.message };
   }
+  });
 }
 
 /**
@@ -180,6 +185,7 @@ export function getEscrowBookingId (orderDisplayId) {
  * @returns {Promise<{txData: object|null, bookingId: string}>}
  */
 export async function buildDepositTx (orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
+  return measureExecution('EscrowService.buildDepositTx', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
   if (!escrowContract) {
     return { txData: null, bookingId }
@@ -207,9 +213,11 @@ export async function buildDepositTx (orderDisplayId, customerWalletAddress, dri
   }
   logger.info(`[escrow] Deposit tx built for booking ${orderDisplayId}`)
   return { txData, bookingId }
+  });
 }
 
 export async function recordDepositTx (bookingId, txHash, expectedSenderAddress = null) {
+  return measureExecution('EscrowService.recordDepositTx', async () => {
   if (!escrowContract) {
     return { error: 'Contract not initialised' }
   }
@@ -269,6 +277,7 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
 
   logger.info(`[escrow] deposit confirmed for booking ${bookingId} in block ${receipt.blockNumber}`)
   return { txHash: receipt.hash, bookingId }
+  });
 }
 
 /**
@@ -279,6 +288,7 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
  * @returns {Promise<{txHash: string|null, bookingId: string}>}
  */
 export async function escrowRelease (orderDisplayId) {
+  return measureExecution('EscrowService.escrowRelease', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
   if (!escrowContract) {
@@ -306,13 +316,14 @@ export async function escrowRelease (orderDisplayId) {
     logger.error(`[escrow] releaseFunds failed for booking ${orderDisplayId}: ${err.message}`)
     return { txHash: null, bookingId, error: err.message }
   }
+  });
 }
 
 /**
  * Submit an escrow refund and return its hash before confirmation.
- * Callers can persist the hash before waiting on the network.
  */
 export async function submitEscrowRefund (orderDisplayId) {
+  return measureExecution('EscrowService.submitEscrowRefund', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
   if (!escrowContract) {
@@ -340,12 +351,14 @@ export async function submitEscrowRefund (orderDisplayId) {
       return receipt
     }
   }
+  });
 }
 
 /**
  * Confirm a previously submitted refund transaction during a retry.
  */
 export async function confirmEscrowRefund (txHash) {
+  return measureExecution('EscrowService.confirmEscrowRefund', async () => {
   if (!escrowContract) {
     throw new Error('Escrow contract is not initialised.')
   }
@@ -358,6 +371,7 @@ export async function confirmEscrowRefund (txHash) {
     throw new Error('Escrow refund transaction reverted or was not found.')
   }
   return receipt
+  });
 }
 
 export function bookingIdFromUuid (orderId) {

@@ -8,6 +8,7 @@ class TripCache {
   static const String _tripsKey = 'truxify_driver_cached_trips';
   static const String _stopsKey = 'truxify_driver_cached_trip_stops';
   static const String _routePointsKey = 'truxify_driver_cached_route_points';
+  static const String _itemsKey = 'truxify_driver_cached_trip_items';
   static const String _savedAtKey = 'truxify_driver_cached_trips_saved_at';
   static const Duration _ttl = Duration(hours: 24);
 
@@ -15,11 +16,13 @@ class TripCache {
     required List<Map<String, dynamic>> trips,
     required Map<String, List<Map<String, dynamic>>> stopsByTripId,
     required Map<String, List<Map<String, dynamic>>> routePointsByTripId,
+    required Map<String, List<Map<String, dynamic>>> itemsByTripId,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tripsKey, jsonEncode(trips));
     await prefs.setString(_stopsKey, jsonEncode(stopsByTripId));
     await prefs.setString(_routePointsKey, jsonEncode(routePointsByTripId));
+    await prefs.setString(_itemsKey, jsonEncode(itemsByTripId));
     await prefs.setString(_savedAtKey, DateTime.now().toIso8601String());
   }
 
@@ -59,6 +62,18 @@ class TripCache {
         });
       }
 
+      final itemsRaw = prefs.getString(_itemsKey);
+      final itemsByTripId = <String, List<Map<String, dynamic>>>{};
+
+      if (itemsRaw != null) {
+      final decoded = jsonDecode(itemsRaw) as Map<String, dynamic>;
+      decoded.forEach((key, value) {
+      itemsByTripId[key] = List<Map<String, dynamic>>.from(
+      (value as List).map((e) => Map<String, dynamic>.from(e as Map)),
+      );
+      });
+    }
+
       final savedAtRaw = prefs.getString(_savedAtKey);
       final savedAt = savedAtRaw != null ? DateTime.tryParse(savedAtRaw) : null;
 
@@ -70,6 +85,7 @@ class TripCache {
         trips: trips,
         stopsByTripId: stopsByTripId,
         routePointsByTripId: routePointsByTripId,
+        itemsByTripId: itemsByTripId,
         savedAt: savedAt,
       );
     } catch (_) {
@@ -84,11 +100,13 @@ class TripCacheSnapshot {
     required this.trips,
     required this.stopsByTripId,
     required this.routePointsByTripId,
+    required this.itemsByTripId,
     required this.savedAt,
   });
 
   final List<Map<String, dynamic>> trips;
   final Map<String, List<Map<String, dynamic>>> stopsByTripId;
   final Map<String, List<Map<String, dynamic>>> routePointsByTripId;
+  final Map<String, List<Map<String, dynamic>>> itemsByTripId;
   final DateTime? savedAt;
 }

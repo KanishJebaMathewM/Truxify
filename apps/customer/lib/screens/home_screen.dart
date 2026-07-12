@@ -147,6 +147,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           IconButton(
+            tooltip: 'Notifications',
             onPressed: () => Navigator.of(context).push(
               AppPageRoute(builder: (_) => const NotificationsScreen()),
             ),

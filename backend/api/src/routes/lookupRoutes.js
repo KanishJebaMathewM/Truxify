@@ -9,7 +9,14 @@ async function getCachedOrFetch(key, fetchFn) {
   if (redisClient) {
     try {
       const cached = await redisClient.get(key);
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        try {
+          const parsed = JSON.parse(cached);
+          if (parsed !== null) return parsed;
+        } catch {
+          // fall through to fetch on malformed cached payload
+        }
+      }
     } catch (err) {
       logger.error({ err, key }, 'Redis cache get error');
     }

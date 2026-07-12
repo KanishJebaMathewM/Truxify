@@ -1,12 +1,17 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import crypto from 'crypto';
 
 import { bidLimiter, userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
+<<<<<<< feature/dependency-injection-services
+import { mongoDb } from '../config/db.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
+=======
 import { redisClient, mongoDb } from '../config/db.js';
 import { supabase } from '../config/db.js';
 import { OrderRepository } from '../repositories/orderRepository.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
+>>>>>>> main
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 import {
@@ -22,6 +27,10 @@ import {
   cancelOrderSchema,
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
+<<<<<<< feature/dependency-injection-services
+import { expireDeliveryOtps } from '../services/notificationService.js';
+import { DomainError } from '../services/order/domainError.js';
+=======
 import {
   escrowRefund,
   buildDepositTx,
@@ -29,11 +38,8 @@ import {
   submitEscrowRefund,
   confirmEscrowRefund,
 } from '../services/escrow.js';
-import { BidAcceptanceService, DomainError } from '../services/order/bidAcceptanceService.js';
+import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
 import { DeliveryVerificationService } from '../services/order/deliveryVerificationService.js';
-import { expireDeliveryOtps } from '../services/notificationService.js';
-import { OrderTimelineService } from '../services/order/orderTimelineService.js';
-import { createOrder } from '../services/order/orderCreationService.js';
 import {
   sendDeliveryOtpNotification,
   storeDeliveryOtp,
@@ -41,22 +47,26 @@ import {
   verifyDeliveryOtp,
   expireDeliveryOtps
 } from '../services/notificationService.js';
-import { predictDemand } from '../services/ml.js';
-import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
-import { DomainError } from '../services/order/domainError.js';
+import { OrderTimelineService } from '../services/order/orderTimelineService.js';
+import { createOrder } from '../services/order/orderCreationService.js';
 import { OrderValidationService } from '../services/order/orderValidationService.js';
 import { OrderMilestoneService } from '../services/order/orderMilestoneService.js';
-import { expireDeliveryOtps } from '../services/notificationService.js';
+import { predictDemand, predictPrice } from '../services/ml.js';
 import {
   verifyDelivery,
   resendDeliveryOtp,
 } from '../services/order/deliveryVerificationService.js';
-import { predictDemand, predictPrice } from '../services/ml.js';
+>>>>>>> main
 import { requireIdempotency } from '../middleware/idempotency.js';
+import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
-import { OrderRepository } from '../repositories/orderRepository.js';
-import { OrderTimelineService } from '../services/order/orderTimelineService.js';
-import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
+<<<<<<< feature/dependency-injection-services
+import { predictDemand } from '../services/ml.js';
+import { acquireLock, releaseLock } from '../lib/redisLock.js';
+import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
+import { computeOrderPricing } from '../lib/pricing.js';
+import {
+=======
 import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
 
 const router = express.Router();
@@ -79,12 +89,21 @@ const orderTimelineService = new OrderTimelineService({
 });
 
 const orderLifecycleService = new OrderLifecycleService({
+>>>>>>> main
   orderRepository,
+  orderValidationService,
+  orderMilestoneService,
   orderTimelineService,
-  bidAcceptanceService,
-});
+  orderLifecycleService,
+  deliveryVerificationService,
+  buildDepositTx,
+  recordDepositTx,
+  submitEscrowRefund,
+  confirmEscrowRefund,
+  escrowRefund,
+} from '../core/container.js';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const router = express.Router();
 
 const verifyDeliveryLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -154,7 +173,7 @@ const changeDropLimiter = rateLimit({
 // ============================================================================
 // 1. CREATE AN ORDER (CUSTOMER)
 // ============================================================================
-router.post('/', authenticate, userLimiter, requireRole(['customer']), requireIdempotency(86400), validateBody(createOrderSchema), async (req, res) => {
+router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requireIdempotency(86400), validateBody(createOrderSchema), async (req, res) => {
   const {
     pickup_address, pickup_lat, pickup_lng,
     drop_address, drop_lat, drop_lng,
@@ -324,7 +343,7 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), requireId
     });
     return res.status(201).json(result);
     const { order } = await orderLifecycleService.createOrder(req.user.id, req.user.fullName || 'Customer', req.body);
-    res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
+    return res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
   } catch (err) {
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
@@ -337,20 +356,8 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), requireId
 // ============================================================================
 // 2. FETCH MY ACTIVE ORDERS (CUSTOMER)
 // ============================================================================
-router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
+router.get('/my/active', authenticate, userLimiter, requirePolicy('order:view-active'), async (req, res) => {
   try {
-    const { data: orders, error } = await orderRepository
-      .findOrdersByCustomer(req.user.id, '*', activeStatuses, 'pickup_date', false);
-
-    if (error) return res.status(500).json({ error: 'Failed to fetch active orders.', details: error.message });
-
-    const driverIds = [...new Set(orders.filter(o => o.driver_id).map(o => o.driver_id))];
-    if (driverIds.length > 0) {
-      const { data: profiles } = await orderRepository.findProfilesByIds(driverIds, 'id, full_name');
-      const driverMap = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
-      orders.forEach(o => { o.driver_name = driverMap[o.driver_id] || 'Driver Assigned'; });
-    }
-
     const orders = await orderLifecycleService.getActiveOrders(req.user.id);
     res.json(orders);
   } catch (err) {
@@ -369,6 +376,7 @@ router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
   try {
+    const { data: offers, error } = await orderRepository.findLoadOffers({ is_en_route: false });
     const { data: offers, error } = await orderRepository.findLoadOffers(
       { is_en_route: false },
       { pagination: { page, limit } }
@@ -389,6 +397,7 @@ router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) 
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
   try {
+    const { data: offers, error } = await orderRepository.findLoadOffers({ is_en_route: true });
     const { data: offers, error } = await orderRepository.findLoadOffers(
       { is_en_route: true },
       { pagination: { page, limit } }
@@ -405,7 +414,7 @@ router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) 
 // ============================================================================
 // 5. FETCH MY ORDER HISTORY (CUSTOMER)
 // ============================================================================
-router.get('/history', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
+router.get('/history', authenticate, userLimiter, requirePolicy('order:view-history'), async (req, res) => {
   try {
     const pageParam = req.query.page ?? '1';
     const limitParam = req.query.limit ?? '10';
@@ -420,25 +429,6 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
       return res.status(400).json({ error: 'limit must be between 1 and 100' });
     }
 
-    const { data: history, error, count } = await orderRepository
-      .findOrdersWithCount(req.user.id, 'id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, created_at', { page, limit });
-
-    if (error) return res.status(500).json({ error: 'Failed to fetch history.', details: error.message });
-
-    const driverIds = [...new Set((history || []).filter(o => o.driver_id).map(o => o.driver_id))];
-    if (driverIds.length > 0) {
-      const { data: profiles } = await orderRepository.findProfilesByIds(driverIds, 'id, full_name');
-      const driverMap = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
-      (history || []).forEach(o => { o.driver_name = driverMap[o.driver_id] || 'Driver Assigned'; });
-    }
-
-    res.json({
-      page,
-      limit,
-      total: count || 0,
-      totalPages: Math.ceil((count || 0) / limit),
-      history: history || []
-    });
     const result = await orderLifecycleService.getOrderHistory(req.user.id, page, limit);
     res.json(result);
   } catch (err) {
@@ -457,22 +447,11 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
   const orderId = req.params.id;
 
   try {
-    const result = await orderRepository.findOrderByAnyId(orderId, '*');
-    const order = result.data;
-    const orderErr = result.error;
-    if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-
-    if (order.customer_id !== req.user.id && order.driver_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    }
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
-    orderValidationService.assertOrderAccess(order, req.user.id);
+    orderValidationService.assertOrderAccess(order, req.user);
 
     const responseOrder = { ...order };
-
-    const { data: timeline } = await orderRepository.getTimeline(order.order_display_id);
     const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
 
     let driverProfile = null;
@@ -504,6 +483,7 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
 // ============================================================================
 router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   try {
     let order = null;
@@ -523,21 +503,10 @@ router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSch
     }
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'customer_id, driver_id, order_display_id');
     orderValidationService.assertOrderFound(order);
-    orderValidationService.assertOrderAccess(order, req.user.id);
+    orderValidationService.assertOrderAccess(order, req.user);
 
-    const { data: timeline, error: timelineErr } = await orderRepository.getTimeline(order.order_display_id);
-
-    if (timelineErr) return res.status(500).json({ error: 'Failed to fetch timeline.', details: timelineErr.message });
-    res.json(timeline || []);
-    try {
-      const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
-      res.json(timeline);
-    } catch (timelineErr) {
-      if (timelineErr instanceof DomainError) {
-        return res.status(timelineErr.status).json(timelineErr.payload);
-      }
-      return res.status(500).json({ error: 'Failed to fetch timeline.' });
-    }
+    const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
+    res.json(timeline);
   } catch (err) {
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
@@ -550,8 +519,17 @@ router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSch
 // ============================================================================
 // 8. SUBMIT BID FOR LOAD OFFER (DRIVER)
 // ============================================================================
+<<<<<<< feature/dependency-injection-services
 router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
+  const { id: loadOfferId } = req.params;
+  const { bid_amount } = req.body;
+
   try {
+=======
+router.post('/:id/bids', authenticate, userLimiter, requirePolicy('bid:submit'), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
+  try {
+    const loadOfferId = req.params.id;
+    const { bid_amount } = req.body;
     const { data: offer, error: offerErr } = await orderRepository.findLoadOfferById(loadOfferId);
     if (offerErr || !offer) return res.status(404).json({ error: 'Load offer not found.' });
     if (offer.status !== 'available') return res.status(410).json({ error: 'Load is no longer available for bidding.' });
@@ -568,6 +546,7 @@ router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bid
     const { data: existingBid, error: existingBidErr } = await orderRepository.findExistingBid(loadOfferId, req.user.id, 'pending');
     if (existingBidErr) return res.status(500).json({ error: 'Failed to verify existing bids.', details: existingBidErr.message });
     if (existingBid) return res.status(409).json({ error: 'You already have a pending bid for this load.' });
+>>>>>>> main
     const offer = await orderValidationService.assertLoadOfferAvailable(loadOfferId);
     orderValidationService.assertNotOwnLoad(offer.customer_id, req.user.id);
     await orderValidationService.assertTruckAssigned(req.user.id);
@@ -589,8 +568,15 @@ router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bid
 // ============================================================================
 // 9. SUBMIT RATING FOR A DELIVERED ORDER (CUSTOMER)
 // ============================================================================
+<<<<<<< feature/dependency-injection-services
 router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
+  const { id: orderId } = req.params;
+  const { stars, comment } = req.body;
+=======
+router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:submit-rating'), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
   try {
+    const orderId = req.params.id;
+    const { stars, comment } = req.body;
     const { data: order, error: orderErr } = await orderRepository.findOrderById(orderId, 'id, order_display_id, customer_id, driver_id, status');
 
     if (orderErr) {
@@ -612,16 +598,9 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
     if (!order.driver_id) {
       return res.status(400).json({ error: 'Order does not have an assigned driver.' });
     }
+>>>>>>> main
 
-    const { data: existingRating, error: ratingCheckErr } = await orderRepository.findRatingByOrder(order.order_display_id, req.user.id);
-
-    if (ratingCheckErr) {
-      return res.status(500).json({ error: 'Failed to verify existing rating.', details: ratingCheckErr.message });
-    }
-
-    if (existingRating) {
-      return res.status(409).json({ error: 'A rating has already been submitted for this order.' });
-    }
+  try {
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, customer_id, driver_id, status');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
@@ -640,15 +619,10 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
       return res.status(500).json({ error: 'Failed to submit rating.', details: rpcErr.message });
     }
 
-    // Fetch driver's registered Polygon wallet address for on-chain reputation update.
-    // This is intentionally fire-and-forget — a blockchain failure must never block
-    // the HTTP response. The Supabase rating is the source of truth.
     const { data: driverDetails } = await orderRepository.findDriverWallet(order.driver_id);
-
     const polygonAddress = driverDetails?.polygon_wallet_address ?? null;
 
     if (polygonAddress) {
-      // Fire-and-forget: blockchain confirmation must never block the HTTP response.
       void awardReputationPoints(polygonAddress, stars).catch((repErr) => {
         logger.error('[reputation] On-chain reputation update failed:', repErr.message);
         orderRepository.insertReputationFailure({
@@ -660,9 +634,7 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
         }).catch((dbErr) => logger.error('[reputation] Failed to log failure:', dbErr.message));
       });
     } else {
-      logger.warn(
-        `[reputation] Driver ${order.driver_id} has no polygon_wallet_address — skipping on-chain update.`
-      );
+      logger.warn(`[reputation] Driver ${order.driver_id} has no polygon_wallet_address — skipping on-chain update.`);
     }
 
     return res.status(201).json({
@@ -687,13 +659,17 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
 // ============================================================================
 // 10. VIEW BIDS FOR AN ORDER (CUSTOMER)
 // ============================================================================
+<<<<<<< feature/dependency-injection-services
 router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), async (req, res) => {
+  const { id: orderId } = req.params;
+
+=======
+router.get('/:id/bids', authenticate, userLimiter, requirePolicy('order:view-bids'), validateParams(paramIdSchema), async (req, res) => {
+>>>>>>> main
   try {
-    const { data: order } = await orderRepository.findOrderById(orderId, 'order_display_id, customer_id');
-    if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'order_display_id, customer_id');
-    orderValidationService.assertOrderFound(order);
-    orderValidationService.assertCustomerOwnership(order, req.user.id);
+    if (!order) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
+    if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
 
     const { data: offer } = await orderRepository.findLoadOfferByOrderDisplayId(order.order_display_id);
     if (!offer) return res.json([]);
@@ -746,6 +722,9 @@ router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), va
 // ============================================================================
 // 11. ACCEPT BID (CUSTOMER)
 // ============================================================================
+<<<<<<< feature/dependency-injection-services
+router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['customer']), requireIdempotency(86400), validateParams(acceptBidParamsSchema), async (req, res) => {
+=======
 const bidAcceptanceService = new BidAcceptanceService({
   supabase,
   buildDepositTxFn: buildDepositTx,
@@ -754,7 +733,8 @@ const bidAcceptanceService = new BidAcceptanceService({
   logger
 });
 
-router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['customer']), requireIdempotency(86400), validateParams(acceptBidParamsSchema), async (req, res) => {
+router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requirePolicy('order:accept-bid'), requireIdempotency(86400), validateParams(acceptBidParamsSchema), async (req, res) => {
+>>>>>>> main
   try {
     const result = await orderLifecycleService.acceptBid(req.params.id, req.params.bidId, req.user.id);
     return res.status(result.status).json(result.body);
@@ -770,99 +750,15 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
 // ============================================================================
 // 12. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 // ============================================================================
-router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver']), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
+router.put('/:id/milestones', authenticate, userLimiter, requirePolicy('milestone:update'), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   const orderId = req.params.id;
   const { milestone } = req.body;
-
-  const milestoneMap = {
-    'Truck Assigned': 'truck_assigned',
-    'En Route to Pickup': 'en_route_pickup',
-    'Arrived at Pickup': 'arrived_pickup',
-    'Goods Loaded': 'picked_up',
-    'In Transit': 'in_transit',
-    'Arriving': 'arriving',
-  };
 
   try {
     if (milestone === 'Delivered') {
       return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
     }
 
-    const orderId = req.params.id;
-    const { milestone } = req.body;
-    const milestoneMap = {
-      'Arrived at Pickup': 'at_pickup',
-      'Goods Loaded': 'loaded',
-      'In Transit': 'in_transit',
-      'Arrived at Drop-off': 'at_dropoff',
-      'Goods Unloaded': 'at_dropoff'
-    };
-    const { data: order, error: orderErr } = await orderRepository.findOrderById(orderId, '*');
-    if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
-    if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
-
-    const { data: timeline, error: tlErr } = await orderRepository.getTimelineWithSortCheck(order.order_display_id);
-    if (tlErr) return res.status(500).json({ error: 'Failed to fetch order timeline.' });
-    let timeline;
-    try {
-      timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
-    } catch (tlErr) {
-      return res.status(500).json({ error: 'Failed to fetch order timeline.' });
-    }
-
-    const canonicalMilestones = new Set([...Object.keys(milestoneMap), 'Order Placed', 'Delivered']);
-    const lastCompleted = [...timeline].reverse().find(t => t.completed && canonicalMilestones.has(t.milestone));
-    const lastCompletedSortOrder = lastCompleted ? lastCompleted.sort_order : 10;
-
-    const timelineEntry = timeline.find(t => t.milestone === milestone);
-    if (!timelineEntry) return res.status(400).json({ error: `Milestone "${milestone}" is not part of this order's timeline.` });
-
-    if (timelineEntry.completed) {
-      return res.status(409).json({ error: `Milestone "${milestone}" has already been completed.` });
-    }
-
-    const nextExpected = timeline.find(t => !t.completed && t.sort_order > lastCompletedSortOrder);
-    if (!nextExpected || nextExpected.sort_order !== timelineEntry.sort_order) {
-      return res.status(422).json({
-        error: `Milestone out of sequence. Expected "${nextExpected ? nextExpected.milestone : 'none'}" before "${milestone}".`,
-      });
-    }
-
-    const status = milestoneMap[milestone];
-    const updates = { status, updated_at: new Date().toISOString() };
-    let generatedOtp = null;
-
-    if (milestone === 'In Transit') {
-      const result = await deliveryVerificationService.generateDeliveryOtp({ orderId });
-      generatedOtp = result.otp;
-    }
-
-    const { error: timelineErr } = await orderRepository.updateTimelineMilestone(order.order_display_id, milestone, { completed: true, milestone_time: new Date().toISOString() });
-    if (timelineErr) return res.status(500).json({ error: 'Failed to update order timeline.', details: timelineErr.message });
-    try {
-      await orderTimelineService.completeMilestone(order.order_display_id, milestone);
-    } catch (timelineErr) {
-      if (timelineErr instanceof DomainError) {
-        return res.status(timelineErr.status).json(timelineErr.payload);
-      }
-      return res.status(500).json({ error: 'Failed to update order timeline.', details: timelineErr.message });
-    }
-
-    const { data: updatedOrder, error: updateErr } = await orderRepository.updateOrder(orderId, updates);
-    if (updateErr) {
-      // Roll back the timeline mark since the order update failed
-      await orderRepository.updateTimelineMilestone(order.order_display_id, milestone, { completed: false, milestone_time: null });
-      await orderTimelineService.resetMilestone(order.order_display_id, milestone);
-      return res.status(500).json({ error: 'Failed to update order.', details: updateErr.message });
-    }
-
-    if (generatedOtp) {
-      await deliveryVerificationService.sendOtpNotification({ orderId, customerId: order.customer_id, orderDisplayId: order.order_display_id, otp: generatedOtp });
-    }
-
-    const response = { message: 'Milestone updated successfully.', order: updatedOrder, milestone, status };
-
-  try {
     const result = await orderMilestoneService.updateMilestone({ orderId, milestone, driverId: req.user.id });
     res.json({ message: 'Milestone updated successfully.', ...result });
   } catch (err) {
@@ -877,13 +773,8 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
 // ============================================================================
 // 13. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
 // ============================================================================
-router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['driver']), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
+router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('delivery:verify'), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   try {
-    const { escrowUpdateFailed } = await deliveryVerificationService.verifyDelivery({
-      orderId,
-      driverId: req.user.id,
-      otp,
-    });
     const { escrowUpdateFailed } = await orderLifecycleService.verifyDeliveryFn(req.params.id, req.user.id, req.body.otp);
 
     if (escrowUpdateFailed) {
@@ -907,11 +798,14 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
 // ============================================================================
 // 14. RESEND DELIVERY OTP (DRIVER)
 // ============================================================================
+<<<<<<< feature/dependency-injection-services
 router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requireRole(['driver']), validateParams(paramIdSchema), async (req, res) => {
+  const { id: orderId } = req.params;
+
+=======
+router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requirePolicy('delivery:resend-otp'), validateParams(paramIdSchema), async (req, res) => {
+>>>>>>> main
   try {
-    const { data: order, error: orderErr } = await orderRepository.findOrderById(orderId, 'id, order_display_id, driver_id, customer_id, status');
-    if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
-    if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, driver_id, customer_id, status');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertDriverAssignment(order, req.user.id);
@@ -936,24 +830,15 @@ router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requ
 // ============================================================================
 // 15. CHANGE DROP (CUSTOMER)
 // ============================================================================
+<<<<<<< feature/dependency-injection-services
 router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
+  const { id: orderId } = req.params;
+  const { drop_address, drop_lat, drop_lng } = req.body;
+
+=======
+router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, requirePolicy('order:change-drop'), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
+>>>>>>> main
   try {
-    const orderResult = await orderRepository.findOrderByAnyId(orderId, '*');
-    const order = orderResult.data;
-    const orderErr = orderResult.error;
-    if (orderErr) return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-    if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    if (order.escrow_status === 'funded' || order.status !== 'pending') {
-      const reason = order.escrow_status === 'funded'
-        ? 'after escrow has been funded'
-        : `after order status is '${order.status}'`;
-      return res.status(409).json({
-        error: `Drop location cannot be changed ${reason}.`,
-        recovery: 'Cancel this order to receive a refund, then rebook with the correct destination.',
-      });
-    }
-    if (order.weight_tonnes == null) return res.status(500).json({ error: 'Data inconsistency: Order is missing weight_tonnes.' });
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
@@ -1045,25 +930,19 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
 // ============================================================================
 // 16. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
 // ============================================================================
+<<<<<<< feature/dependency-injection-services
 router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']), requireIdempotency(86400), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
+  const { id: orderId } = req.params;
+  const { reason } = req.body;
+
+=======
+router.post('/:id/cancel', authenticate, userLimiter, requirePolicy('order:cancel'), requireIdempotency(86400), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
+>>>>>>> main
   try {
-    const orderResult = await orderRepository.findOrderByAnyId(orderId, '*');
-    const order = orderResult.data;
-    const orderErr = orderResult.error;
-    if (orderErr) return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-    if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
     await orderValidationService.assertDeliveryNotVerified(order.id);
-
-    // Prevent cancellation if delivery OTP was already verified
-    const { data: otpCheck, error: otpCheckErr } = await orderRepository.findVerifiedDeliveryOtp(order.id);
-
-    if (!otpCheckErr && otpCheck) {
-      return res.status(409).json({ error: 'Cannot cancel: delivery OTP has already been verified.' });
-    }
 
     if (order.status === 'cancelled' && order.escrow_status === 'refunded') {
       return res.json({
@@ -1076,8 +955,6 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
     const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(order.escrow_status);
     let workingOrder = order;
 
-    // Persist cancellation before touching the blockchain. A failed or delayed
-    // refund must never leave the order available for continued work.
     if (requiresRefund && (order.status !== 'cancelled' || order.escrow_status !== 'refund_pending')) {
       const attemptAt = new Date().toISOString();
       const { data: pendingOrder, error: pendingErr } = await orderRepository.updateOrderWithFilter(
@@ -1175,9 +1052,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
             });
           }
 
-          await orderRepository.updateTimelineMilestone(order.order_display_id, 'Order Placed', { completed: true, milestone_time: refundedAt });
           await orderTimelineService.completeOrderPlacedMilestone(order.order_display_id, refundedAt);
-
           await expireDeliveryOtps(order.id);
 
           return res.json({
@@ -1237,7 +1112,6 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
     const cancellationFee = updatedOrder?.cancellation_fee ?? 0;
 
     await orderRepository.updateTimelineMilestone(order.order_display_id, 'Order Placed', { completed: true, milestone_time: new Date().toISOString() });
-
     await expireDeliveryOtps(order.id);
 
     return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
@@ -1253,7 +1127,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
 // ============================================================================
 // 17. CONFIRM ESCROW DEPOSIT (CUSTOMER)
 // ============================================================================
-router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(
+router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('order:confirm-deposit'), validateParams(paramIdSchema), validateBody(
   z.object({ txHash: z.string().regex(/^0x([A-Fa-f0-9]{64})$/, 'Invalid transaction hash') }),
 ), async (req, res) => {
   const orderId = req.params.id;
@@ -1267,39 +1141,23 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
   }
 
   try {
-    const { data: order, error: fetchErr } = await orderRepository.findOrderById(orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status');
-
-    if (fetchErr || !order) return res.status(404).json({ error: 'Order not found' });
-    if (order.customer_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    }
-    // Pre-check: if already funded (crash recovery), return success idempotently
-    if (order.escrow_status === 'funded') {
-      return res.json({ message: 'Escrow already confirmed.', txHash: order.deposit_tx_hash });
-    }
-    if (order.escrow_status !== 'funding') {
-      return res.status(400).json({ error: 'Order is not in funding state' });
-    }
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
     orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
 
     const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
-
     const customerWallet = customerProfile?.polygon_wallet_address ?? null;
-
     const bookingId = order.escrow_booking_id || `escrow:${order.order_display_id}`;
     const result = await recordDepositTx(bookingId, txHash, customerWallet);
 
     if (result.error) {
-      // If already funded on-chain but DB missed it, treat as success
       if (result.alreadyFunded) {
-        const { error: updateErr } = await supabase.from('orders').update({
+        const { error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
           escrow_status: 'funded',
           deposit_tx_hash: result.txHash,
           escrow_deposited_at: new Date().toISOString(),
-        }).eq('id', orderId).eq('escrow_status', 'funding');
+        }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
 
         if (!updateErr) {
           return res.json({ message: 'Escrow deposit confirmed (recovered).', txHash: result.txHash });
@@ -1334,7 +1192,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
 // ============================================================================
 // 18. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
 // ============================================================================
-router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer', 'driver']), predictDemandLimiter, validateBody(predictDemandSchema), async (req, res) => {
+router.post('/predict-demand', authenticate, userLimiter, requirePolicy('order:predict-demand'), predictDemandLimiter, validateBody(predictDemandSchema), async (req, res) => {
   try {
     const prediction = await predictDemand(req.body);
     return res.json(prediction);
@@ -1350,7 +1208,7 @@ router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer
 // ============================================================================
 // 19. GET DRIVER LOCATION (CUSTOMER OR DRIVER)
 // ============================================================================
-router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location'), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
   try {
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, customer_id, driver_id, status');
@@ -1402,7 +1260,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
 // ============================================================================
 // 20. GET LIVE ROUTE GEOMETRY (CUSTOMER OR DRIVER)
 // ============================================================================
-router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-route'), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {

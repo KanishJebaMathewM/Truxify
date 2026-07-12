@@ -59,7 +59,7 @@ class LocationService {
 
     final decoded = jsonDecode(response.body);
     if (decoded is! List) return const <LocationSuggestion>[];
-    return decoded
+    final results = decoded
         .map((item) {
           if (item is! Map<String, dynamic>) return null;
           final json = item;

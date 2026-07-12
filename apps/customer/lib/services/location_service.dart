@@ -34,10 +34,6 @@ class LocationService {
     if (_searchCache.containsKey(cacheKey)) {
       return _searchCache[cacheKey]!;
     }
-    final trimmed = query.trim();
-    if (trimmed.length < 3) {
-      return const <LocationSuggestion>[];
-    }
 
     final uri = Uri.https(
       _host,

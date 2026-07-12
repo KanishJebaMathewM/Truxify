@@ -493,11 +493,12 @@ describe('POST /api/orders — server-side pricing contract', () => {
         milestone: 'Goods Loaded'
       });
 
+    if (res.status !== 403) console.log('ERROR:', res.body);
     expect(res.status).toBe(403);
   });
 
   it('returns 500 when orders insert fails', async () => {
-    routeEstimateMock.mockResolvedValue(null);
+    routeEstimateMock.mockResolvedValue({ distanceKm: 15, durationMin: 30 });
     m.programError('insert failed');
 
     const app = buildApp();

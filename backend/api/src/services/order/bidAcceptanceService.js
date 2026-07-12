@@ -1,12 +1,6 @@
 import { ethers } from 'ethers';
 
-export class DomainError extends Error {
-  constructor(status, payload) {
-    super(payload?.error || payload?.message || 'Domain Error');
-    this.status = status;
-    this.payload = payload;
-  }
-}
+import { DomainError } from './domainError.js';
 
 export class BidAcceptanceService {
   constructor({ supabase, buildDepositTxFn, escrowDepositFn, recordDepositTxFn, escrowRefundFn, logger, notificationDispatcher }) {
@@ -72,7 +66,10 @@ export class BidAcceptanceService {
     // Build the escrow deposit transaction
     const amountWei = ethers.parseEther((bid.bid_amount / 100).toFixed(2).toString());
     const buildResult = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
-    const depositTx = buildResult;
+    if (!buildResult || !buildResult.txData) {
+      throw new DomainError(502, { error: 'Escrow configuration missing or failed.' });
+    }
+    const depositTx = buildResult?.txData || null;
     const bookingId = buildResult?.bookingId || `escrow:${order.order_display_id}`;
 
     // Update order with escrow booking info

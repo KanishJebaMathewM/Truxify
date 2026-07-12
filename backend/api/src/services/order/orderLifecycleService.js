@@ -1,5 +1,4 @@
 import crypto from 'crypto';
-import { DomainError } from './bidAcceptanceService.js';
 import {
   verifyDelivery,
   generateDeliveryOtp,
@@ -16,6 +15,7 @@ import {
 } from '../escrow.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { getRouteEstimate } from '../osrm.js';
+import { DomainError } from './domainError.js';
 import { predictPrice } from '../ml.js';
 import { awardReputationPoints } from '../reputation.js';
 import logger from '../../middleware/logger.js';

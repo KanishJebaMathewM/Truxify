@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSupabaseMock } from '../../helpers/supabaseMock.js';
 import { OrderTimelineService } from '../../../src/services/order/orderTimelineService.js';
-import { DomainError } from '../../../src/services/order/bidAcceptanceService.js';
+import { DomainError } from '../../../src/services/order/domainError.js';
 
 describe('OrderTimelineService', () => {
   let m;

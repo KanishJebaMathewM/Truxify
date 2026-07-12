@@ -5,7 +5,7 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { userLimiter, createStore } from '../middleware/rateLimiter.js';
 
 import { validateBody, validateParams } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';

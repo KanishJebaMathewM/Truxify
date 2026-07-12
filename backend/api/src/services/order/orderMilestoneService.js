@@ -48,7 +48,6 @@ export class OrderMilestoneService {
 
     const { data: timeline, error: tlErr } = await this.orderRepository.getTimelineWithSortCheck(order.order_display_id);
     if (tlErr) throw new DomainError(500, { error: 'Failed to fetch order timeline.' });
-    const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
 
     const canonicalMilestones = new Set([...Object.keys(milestoneMap), 'Order Placed', 'Delivered']);
     const lastCompleted = [...timeline].reverse().find(t => t.completed && canonicalMilestones.has(t.milestone));

@@ -3,7 +3,7 @@ import { supabase } from '../../config/db.js';
 import { getRouteEstimate } from '../osrm.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { predictPrice } from '../ml.js';
-import { DomainError } from './bidAcceptanceService.js';
+import { DomainError } from './domainError.js';
 import logger from '../../middleware/logger.js';
 
 function generateOrderDisplayId() {

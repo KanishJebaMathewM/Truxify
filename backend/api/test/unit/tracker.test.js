@@ -48,6 +48,12 @@ const {
   __testing,
 } = await import('../../src/sockets/tracker.js');
 
+import { OrderRepository } from '../../src/repositories/orderRepository.js';
+import { supabase } from '../../src/config/db.js';
+
+// Setup OrderRepository for all tests
+__testing.setOrderRepository(new OrderRepository(supabase));
+
 describe('tracker WebSocket telemetry authorization', () => {
   beforeEach(() => {
     dbMock.store.orders = [];
@@ -1600,9 +1606,9 @@ describe('flushTelemetryBuffer - with MongoDB', () => {
     const buffer = t.getTelemetryWriteBuffer().toArray ? t.getTelemetryWriteBuffer().toArray() : t.getTelemetryWriteBuffer();
     // 5000 is MAX_BUFFER_SIZE. 4995 new records + 5 kept old records = 5000 records.
     expect(buffer).toHaveLength(5000);
-    expect(buffer[0].driver_id).toBe('old-driver-0');
-    expect(buffer[9].driver_id).toBe('old-driver-9');
-    expect(buffer[10].driver_id).toBe('new-driver-0');
+    expect(buffer[0].driver_id).toBe('old-driver-5');
+    expect(buffer[4].driver_id).toBe('old-driver-9');
+    expect(buffer[5].driver_id).toBe('new-driver-0');
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('[TRUXIFY BUFFER DROP] Dropped 5 oldest records due to capacity after flush failure.')

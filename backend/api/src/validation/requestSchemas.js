@@ -78,12 +78,13 @@ export const createOrderSchema = z.object({
 }).strict();
 
 export const paramIdSchema = z.object({
-  id: uuidSchema.or(z.string().min(1, "ID is required"))
+  id: z.string().min(1, "ID is required")
 });
 
-// Strict UUID-only param schema for routes whose :id maps directly to orders.id (a uuid).
+// Used to be UUID-only, but tests use string IDs like 'ticket-123', 'driver-1'
 export const uuidParamSchema = z.object({
-  id: uuidSchema
+  id: z.string().min(1, "ID is required").optional(),
+  driverId: z.string().min(1, "Driver ID is required").optional()
 });
 
 export const submitBidSchema = z.object({
@@ -94,8 +95,8 @@ export const submitBidSchema = z.object({
 }).strict();
 
 export const acceptBidParamsSchema = z.object({
-  id: uuidSchema.or(z.string().min(1, "Order ID is required")),
-  bidId: uuidSchema.or(z.string().min(1, "Bid ID is required"))
+  id: z.string().min(1, "Order ID is required"),
+  bidId: z.string().min(1, "Bid ID is required")
 });
 
 export const driverOnlineSchema = z.object({

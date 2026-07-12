@@ -59,6 +59,7 @@ export class OrderValidationService {
 
   async assertLoadOfferAvailable(loadOfferId) {
     const { data: offer, error } = await this.supabase.from('load_offers').select('id, status, customer_id').eq('id', loadOfferId).maybeSingle();
+    console.log('assertLoadOfferAvailable:', loadOfferId, 'offer:', offer, 'error:', error);
     if (error || !offer) {
       throw new DomainError(404, { error: 'Load offer not found.' });
     }

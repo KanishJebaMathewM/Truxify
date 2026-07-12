@@ -4,6 +4,8 @@ import logger from "../middleware/logger.js";
 import { GpsLog } from "../models/GpsLog.js";
 import { supabase } from "../config/db.js";
 
+let io;
+
 /**
  * Initializes the Truxify Live Location WebSocket server on top of an existing
  * Node.js HTTP server. Should be called once during startup after MongoDB

@@ -44,12 +44,16 @@ beforeEach(() => {
 
 describe('requireIdempotency middleware', () => {
   it('returns 400 when X-Idempotency-Key header is missing', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
     const middleware = requireIdempotency();
     const req = makeReq({ headers: {} });
     const res = makeRes();
     const next = makeNext();
 
     await middleware(req, res, next);
+    
+    process.env.NODE_ENV = originalEnv;
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({

@@ -1,4 +1,4 @@
-import rateLimit, { MemoryStore } from 'express-rate-limit';
+import rateLimit, { MemoryStore, ipKeyGenerator } from 'express-rate-limit';
 import { RedisStore } from 'rate-limit-redis';
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
@@ -72,6 +72,10 @@ class DeferredRedisStore {
   }
 }
 
+function buildStore(prefix) {
+  return createStore(prefix);
+}
+
 /**
  * Generates a rate-limit key from the proxy-resolved IP address.
  *
@@ -111,9 +115,10 @@ export const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
-  store: createStore('rl:global:'),
+  store: buildStore('rl:global:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
   skip: (req) => req.path === '/health' || req.path.startsWith('/health/'),
+  validate: { ip: false },
 });
 
 // Per-user limiter, applied in the route chains immediately after the
@@ -125,8 +130,9 @@ export const userLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: userKeyGenerator,
-  store: createStore('rl:user:'),
+  store: buildStore('rl:user:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
+  validate: { ip: false },
 });
 
 export const healthLimiter = rateLimit({
@@ -135,8 +141,9 @@ export const healthLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
-  store: createStore('rl:health:'),
+  store: buildStore('rl:health:'),
   message: { error: 'Rate limit exceeded', retryAfter: 60 },
+  validate: { ip: false },
 });
 
 export const authLimiter = rateLimit({
@@ -145,8 +152,9 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
-  store: createStore('rl:auth:'),
+  store: buildStore('rl:auth:'),
   message: { error: 'Rate limit exceeded', retryAfter: 3600 },
+  validate: { ip: false },
 });
 
 export const bidLimiter = rateLimit({
@@ -155,8 +163,9 @@ export const bidLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: userKeyGenerator,
-  store: createStore('rl:bid:'),
+  store: buildStore('rl:bid:'),
   message: { error: 'Rate limit exceeded', retryAfter: 60 },
+  validate: { ip: false },
 });
 
 export const deviceLimiter = rateLimit({
@@ -169,8 +178,9 @@ export const deviceLimiter = rateLimit({
     if (req.user?.uid) return `uid:${req.user.uid}`;
     return safeIpKeyGenerator(req);
   },
-  store: createStore('rl:device:'),
+  store: buildStore('rl:device:'),
   message: { error: 'Rate limit exceeded', retryAfter: 600 },
+  validate: { ip: false },
 });
 
 /**

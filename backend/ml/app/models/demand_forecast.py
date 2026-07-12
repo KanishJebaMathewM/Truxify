@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 MODEL_NAME = "demand_forecast"
 
+_model_cache = None
+_scaler_cache = None
+
 # NOTE: This module currently trains on synthetic (randomly generated) data
 # as a placeholder. Replace generate_synthetic_demand_data() with a real
 # data pipeline that loads historical trip/demand data from PostgreSQL or
@@ -86,26 +89,44 @@ def train_demand_forecast_model() -> dict:
     }
 
     save_model((model, scaler), MODEL_NAME, metrics)
+    invalidate_demand_cache()
     logger.info("Demand forecast model trained. R2: %.3f, MAE: %.3f", r2, mae)
     return metrics
 
 
-def predict_demand(features: List[float]) -> Optional[float]:
-    if len(features) != len(FEATURE_NAMES):
-        raise ValueError(f"Invalid input tensor shape. Expected {len(FEATURE_NAMES)} features, got {len(features)}")
-        
+def invalidate_demand_cache():
+    global _model_cache, _scaler_cache
+    _model_cache = None
+    _scaler_cache = None
+
+
+def _load_or_cache_model():
+    global _model_cache, _scaler_cache
+    if _model_cache is not None and _scaler_cache is not None:
+        return _model_cache, _scaler_cache
+
     if not model_exists(MODEL_NAME):
         train_demand_forecast_model()
-
 
     loaded = load_model(MODEL_NAME)
     if loaded is None:
         train_demand_forecast_model()
         loaded = load_model(MODEL_NAME)
         if loaded is None:
-            return None
+            return None, None
 
-    model, scaler = loaded
+    _model_cache, _scaler_cache = loaded
+    return _model_cache, _scaler_cache
+
+
+def predict_demand(features: List[float]) -> Optional[float]:
+    if len(features) != len(FEATURE_NAMES):
+        raise ValueError(f"Invalid input tensor shape. Expected {len(FEATURE_NAMES)} features, got {len(features)}")
+
+    model, scaler = _load_or_cache_model()
+    if model is None or scaler is None:
+        return None
+
     X = np.array(features).reshape(1, -1)
     X_scaled = scaler.transform(X)
     pred = model.predict(X_scaled)[0]

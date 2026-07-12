@@ -192,8 +192,12 @@ class CacheManager {
     }
 
     final decoded = _safeDecode(rows.first['value'] as String);
-      if (decoded == null) return null;
-      final payload = decoded as Map<String, dynamic>;
+    if (decoded is! Map) {
+      await db.delete('profile', where: 'key = ?', whereArgs: ['profile']);
+      return null;
+    }
+
+    final payload = Map<String, dynamic>.from(decoded);
     return <String, dynamic>{
       ...payload,
       '_cached_at': rows.first['updated_at'],

@@ -70,7 +70,10 @@ export async function reconcileFailedReputationUpdates() {
 
       try {
         await awardReputationPoints(row.driver_wallet, row.stars);
-        await supabase.from('reputation_failures').delete().eq('id', row.id);
+        const { error: deleteError } = await supabase.from('reputation_failures').delete().eq('id', row.id);
+        if (deleteError) {
+          throw new Error(`Award succeeded but failed to delete reconciled reputation failure ${row.id}: ${deleteError.message}`);
+        }
         logger.info(`[reputation-reconciliation] Successfully retried reputation update for ${row.driver_wallet}`);
       } catch (err) {
         const newRetryCount = (row.retry_count ?? 0) + 1;

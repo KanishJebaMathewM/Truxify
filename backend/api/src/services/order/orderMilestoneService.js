@@ -46,8 +46,6 @@ export class OrderMilestoneService {
     if (orderErr || !order) throw new DomainError(404, { error: 'Order not found.' });
     if (order.driver_id !== driverId) throw new DomainError(403, { error: 'Access Denied: You are not assigned to this order.' });
 
-    const { data: timeline, error: tlErr } = await this.orderRepository.getTimelineWithSortCheck(order.order_display_id);
-    if (tlErr) throw new DomainError(500, { error: 'Failed to fetch order timeline.' });
     const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
 
     const canonicalMilestones = new Set([...Object.keys(milestoneMap), 'Order Placed', 'Delivered']);

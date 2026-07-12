@@ -14,6 +14,7 @@ class LocationService {
   static const String _host = 'nominatim.openstreetmap.org';
   static const String _userAgent = 'Truxify Customer App';
   static const int _maxCacheSize = 200;
+  static const Duration _lookupTimeout = Duration(seconds: 8);
   static final Map<String, List<LocationSuggestion>> _searchCache = {};
   static final Map<String, String> _reverseCache = {};
 
@@ -34,10 +35,6 @@ class LocationService {
     if (_searchCache.containsKey(cacheKey)) {
       return _searchCache[cacheKey]!;
     }
-    final trimmed = query.trim();
-    if (trimmed.length < 3) {
-      return const <LocationSuggestion>[];
-    }
 
     final uri = Uri.https(
       _host,
@@ -56,14 +53,14 @@ class LocationService {
         'Accept': 'application/json',
         'User-Agent': _userAgent,
       },
-    );
+    ).timeout(_lookupTimeout);
     if (response.statusCode != 200) {
       throw Exception('Search failed: ${response.statusCode} (${uri.path})');
     }
 
     final decoded = jsonDecode(response.body);
     if (decoded is! List) return const <LocationSuggestion>[];
-    return decoded
+    final results = decoded
         .map((item) {
           if (item is! Map<String, dynamic>) return null;
           final json = item;
@@ -82,7 +79,7 @@ class LocationService {
         .whereType<LocationSuggestion>()
         .toList();
 
-    _cacheSearch(trimmed, results);
+    _cacheSearch(cacheKey, results);
     return results;
   }
 
@@ -107,7 +104,7 @@ class LocationService {
         'Accept': 'application/json',
         'User-Agent': _userAgent,
       },
-    );
+    ).timeout(_lookupTimeout);
     if (response.statusCode != 200) {
       throw Exception('Reverse lookup failed: ${response.statusCode} (${uri.path})');
     }

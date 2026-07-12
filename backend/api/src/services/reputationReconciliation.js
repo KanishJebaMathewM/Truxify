@@ -31,11 +31,21 @@ export async function reconcileFailedReputationUpdates() {
         }
       }, LEASE_EXTENSION_INTERVAL_MS);
     } catch (err) {
-      logger.error('[reputation-reconciliation] Failed to acquire Redis lock:', err.message);
+      logger.error('[reputation-reconciliation] Failed to acquire Redis lock, skipping batch:', err.message);
+      return;
     }
+  } else {
+    // Redis not configured — single-instance mode, use in-process guard only
   }
 
   if (!lockAcquired) {
+    // Without Redis there is no distributed lock and no per-row claim key, so
+    // multiple service instances would reconcile the same rows concurrently and
+    // double-award reputation. In that case skip rather than run unprotected.
+    if (!redisClient) {
+      logger.error('[reputation-reconciliation] Redis unavailable: cannot acquire a distributed lock. Skipping reconciliation to avoid unsafe concurrent awards across instances.');
+      return;
+    }
     if (reconciliationRunning) return;
     reconciliationRunning = true;
   }
@@ -70,7 +80,10 @@ export async function reconcileFailedReputationUpdates() {
 
       try {
         await awardReputationPoints(row.driver_wallet, row.stars);
-        await supabase.from('reputation_failures').delete().eq('id', row.id);
+        const { error: deleteError } = await supabase.from('reputation_failures').delete().eq('id', row.id);
+        if (deleteError) {
+          throw new Error(`Award succeeded but failed to delete reconciled reputation failure ${row.id}: ${deleteError.message}`);
+        }
         logger.info(`[reputation-reconciliation] Successfully retried reputation update for ${row.driver_wallet}`);
       } catch (err) {
         const newRetryCount = (row.retry_count ?? 0) + 1;

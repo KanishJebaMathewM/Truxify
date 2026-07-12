@@ -8,6 +8,7 @@ import {
 } from './deliveryVerificationService.js';
 import { expireDeliveryOtps } from '../notificationService.js';
 import { acquireLock, releaseLock } from '../../lib/redisLock.js';
+import { measureExecution } from '../../core/performanceMetrics.js';
 import {
   escrowRefund,
   recordDepositTx,
@@ -38,6 +39,7 @@ export class OrderLifecycleService {
   }
 
   async createOrder(customerId, customerName, body) {
+    return measureExecution('OrderLifecycleService.createOrder', async () => {
     const {
       pickup_address, pickup_lat, pickup_lng,
       drop_address, drop_lat, drop_lng,
@@ -158,9 +160,11 @@ export class OrderLifecycleService {
     }
 
     return { order };
+    });
   }
 
   async getActiveOrders(customerId) {
+    return measureExecution('OrderLifecycleService.getActiveOrders', async () => {
     const activeStatuses = ['pending', 'active', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving'];
 
     const { data: orders, error } = await this.orderRepository.findOrdersByCustomer(
@@ -177,9 +181,11 @@ export class OrderLifecycleService {
     }
 
     return orders;
+    });
   }
 
   async getOrderHistory(customerId, page, limit) {
+    return measureExecution('OrderLifecycleService.getOrderHistory', async () => {
     const { data: history, error, count } = await this.orderRepository.findOrdersWithCount(
       customerId,
       'id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, created_at',
@@ -202,9 +208,11 @@ export class OrderLifecycleService {
       totalPages: Math.ceil((count || 0) / limit),
       history: history || [],
     };
+    });
   }
 
   async getOrderDetail(orderId, userId) {
+    return measureExecution('OrderLifecycleService.getOrderDetail', async () => {
     const { data: order, error: orderErr } = await this.orderRepository.findOrderByAnyId(orderId, '*');
     if (orderErr) throw new DomainError(500, { error: 'Query failed.', details: orderErr.message });
     if (!order) throw new DomainError(404, { error: 'Order not found.' });
@@ -234,9 +242,11 @@ export class OrderLifecycleService {
     }
 
     return { order, timeline: timeline || [], driver: driverProfile };
+    });
   }
 
   async getOrderTimeline(orderId, userId) {
+    return measureExecution('OrderLifecycleService.getOrderTimeline', async () => {
     let order;
     if (UUID_RE.test(orderId)) {
       const { data } = await this.orderRepository.findOrderById(orderId, 'customer_id, driver_id, order_display_id');
@@ -257,9 +267,11 @@ export class OrderLifecycleService {
 
     if (timelineErr) throw new DomainError(500, { error: 'Failed to fetch timeline.', details: timelineErr.message });
     return timeline || [];
+    });
   }
 
   async submitBid(loadOfferId, driverId, bidAmount) {
+    return measureExecution('OrderLifecycleService.submitBid', async () => {
     const { data: offer, error: offerErr } = await this.orderRepository.findLoadOfferById(loadOfferId, 'id, status, customer_id');
     if (offerErr || !offer) throw new DomainError(404, { error: 'Load offer not found.' });
     if (offer.status !== 'available') throw new DomainError(410, { error: 'Load is no longer available for bidding.' });
@@ -287,9 +299,11 @@ export class OrderLifecycleService {
     if (bidErr) throw new DomainError(500, { error: 'Failed to record bid.', details: bidErr.message });
 
     return { message: 'Bid submitted successfully.', bid };
+    });
   }
 
   async getBidsForOrder(orderId, customerId) {
+    return measureExecution('OrderLifecycleService.getBidsForOrder', async () => {
     const { data: order } = await this.orderRepository.findOrderById(orderId, 'order_display_id, customer_id');
     if (!order || order.customer_id !== customerId) throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
 
@@ -332,17 +346,22 @@ export class OrderLifecycleService {
     });
 
     return enrichedBids;
+    });
   }
 
   async acceptBid(orderId, bidId, customerId) {
-    return this.bidAcceptanceService.acceptBid({ orderId, bidId, customerId });
+    return measureExecution('OrderLifecycleService.acceptBid', () =>
+      this.bidAcceptanceService.acceptBid({ orderId, bidId, customerId })
+    );
   }
 
   async updateMilestone(orderId, milestone, driverId) {
+    return measureExecution('OrderLifecycleService.updateMilestone', async () => {
     const milestoneMap = {
       'Arrived at Pickup': 'at_pickup',
       'Goods Loaded': 'in_transit',
       'In Transit': 'in_transit',
+      'Arriving': 'arriving',
       'Arrived at Drop-off': 'at_dropoff',
       'Goods Unloaded': 'at_dropoff',
     };
@@ -400,13 +419,17 @@ export class OrderLifecycleService {
     }
 
     return { order: updatedOrder, milestone, status };
+    });
   }
 
   async verifyDeliveryFn(orderId, driverId, otp) {
-    return verifyDelivery({ orderId, driverId, otp });
+    return measureExecution('OrderLifecycleService.verifyDeliveryFn', () =>
+      verifyDelivery({ orderId, driverId, otp })
+    );
   }
 
   async resendOtpFn(orderId, driverId) {
+    return measureExecution('OrderLifecycleService.resendOtpFn', async () => {
     const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'id, order_display_id, driver_id, customer_id, status');
     if (orderErr || !order) throw new DomainError(404, { error: 'Order not found.' });
     if (order.driver_id !== driverId) throw new DomainError(403, { error: 'Access Denied: You are not assigned to this order.' });
@@ -419,9 +442,11 @@ export class OrderLifecycleService {
     });
 
     return { expiresInMinutes };
+    });
   }
 
   async changeDrop(orderId, customerId, body) {
+    return measureExecution('OrderLifecycleService.changeDrop', async () => {
     const { drop_address, drop_lat, drop_lng } = body;
 
     const { data: order, error: orderErr } = await this.orderRepository.findOrderByAnyId(orderId, '*');
@@ -510,9 +535,11 @@ export class OrderLifecycleService {
       },
       order: updatedOrder,
     };
+    });
   }
 
   async cancelOrder(orderId, customerId, reason) {
+    return measureExecution('OrderLifecycleService.cancelOrder', async () => {
     const { data: order, error: orderErr } = await this.orderRepository.findOrderByAnyId(orderId, '*');
     if (orderErr) throw new DomainError(500, { error: 'Failed to fetch order.', details: orderErr.message });
     if (!order) throw new DomainError(404, { error: 'Order not found.' });
@@ -564,7 +591,18 @@ export class OrderLifecycleService {
 
     if (requiresRefund) {
       const lockKey = `escrow_lock:${workingOrder.id}`;
-      const lockValue = await acquireLock(lockKey, 30000);
+
+      let lockValue;
+      try {
+        lockValue = await acquireLock(lockKey, 30000);
+      } catch (lockErr) {
+        logger.error('[escrow] Lock service unavailable during cancellation for order', orderId, ':', lockErr.message);
+        throw new DomainError(503, {
+          error: 'Refund processing is temporarily unavailable. Please try again shortly.',
+          retryable: true,
+        });
+      }
+      
       if (!lockValue) {
         throw new DomainError(409, { error: 'Refund is currently being processed. Please try again later.' });
       }
@@ -692,9 +730,11 @@ export class OrderLifecycleService {
       status: 200,
       body: { message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder },
     };
+    });
   }
 
   async confirmDeposit(orderId, userId, txHash) {
+    return measureExecution('OrderLifecycleService.confirmDeposit', async () => {
     const { data: order, error: fetchErr } = await this.orderRepository.findOrderById(
       orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status'
     );
@@ -727,9 +767,11 @@ export class OrderLifecycleService {
     }
 
     return { message: 'Escrow deposit confirmed', txHash: result.txHash };
+    });
   }
 
   async submitRating(orderId, customerId, stars, comment) {
+    return measureExecution('OrderLifecycleService.submitRating', async () => {
     const { data: order, error: orderErr } = await this.orderRepository.findOrderById(
       orderId, 'id, order_display_id, customer_id, driver_id, status'
     );
@@ -785,5 +827,6 @@ export class OrderLifecycleService {
         comment,
       },
     };
+    });
   }
 }

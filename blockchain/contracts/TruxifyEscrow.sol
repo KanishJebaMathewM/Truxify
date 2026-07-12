@@ -161,7 +161,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
         // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[driver] += paymentAmount;
-        releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
+
+        uint256 newDeadline = block.timestamp + WITHDRAWAL_TIMEOUT;
+        if (releaseTimestamps[driver] == 0 || newDeadline < releaseTimestamps[driver]) {
+            releaseTimestamps[driver] = newDeadline;
+        }
 
         emit WithdrawalReady(bookingId, driver, paymentAmount);
         emit PaymentReleased(bookingId, driver, paymentAmount);
@@ -189,6 +193,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
+        require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
 
         // ── EFFECTS ───────────────────────────────────────────────────────
         uint256 refundAmount    = booking.amount;
@@ -200,7 +205,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
         // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[customer] += refundAmount;
-        releaseTimestamps[customer] = block.timestamp + WITHDRAWAL_TIMEOUT;
+
+        uint256 newDeadline = block.timestamp + WITHDRAWAL_TIMEOUT;
+        if (releaseTimestamps[customer] == 0 || newDeadline < releaseTimestamps[customer]) {
+            releaseTimestamps[customer] = newDeadline;
+        }
 
         emit WithdrawalReady(bookingId, customer, refundAmount);
         emit BookingCancelled(bookingId, customer, refundAmount);
@@ -265,6 +274,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      */
     function emergencyRecover(address recipient, uint256 amount) external onlyOwner nonReentrant {
         require(recipient != address(0), "Invalid recipient");
+        require(releaseTimestamps[recipient] > 0, "No pending withdrawal");
         require(block.timestamp > releaseTimestamps[recipient], "Withdrawal period active");
         require(pendingWithdrawals[recipient] >= amount, "Insufficient pending");
 

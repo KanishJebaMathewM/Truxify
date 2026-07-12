@@ -83,7 +83,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
         if (responded) return originalJson(body);
         responded = true;
 
-        if (isCacheable(res.statusCode)) {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
           const cacheData = JSON.stringify({ statusCode: res.statusCode, body });
 
           if (redisClient) {

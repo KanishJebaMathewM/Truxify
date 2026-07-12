@@ -1,10 +1,11 @@
 import crypto from 'crypto';
-import { supabase } from '../../config/db.js';
+import { supabase as defaultSupabase } from '../../config/db.js';
 import { getRouteEstimate } from '../osrm.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { predictPrice } from '../ml.js';
 import { DomainError } from './bidAcceptanceService.js';
 import logger from '../../middleware/logger.js';
+import { measureExecution } from '../../core/performanceMetrics.js';
 
 function generateOrderDisplayId() {
   const prefix = '#FF';
@@ -14,7 +15,9 @@ function generateOrderDisplayId() {
   return `${prefix}${dateStr}${random}`;
 }
 
+export async function createOrder({ orderData, userId, user, supabase = defaultSupabase }) {
 export async function createOrder({ orderData, userId, user }) {
+  return measureExecution('OrderCreationService.createOrder', async () => {
   const {
     pickup_address, pickup_lat, pickup_lng,
     drop_address, drop_lat, drop_lng,
@@ -157,4 +160,5 @@ export async function createOrder({ orderData, userId, user }) {
   }
 
   return { message: 'Order created successfully and broadcasted to loads board.', order };
+  });
 }

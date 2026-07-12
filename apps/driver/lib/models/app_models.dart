@@ -284,6 +284,9 @@ class TripItem {
     required this.destination,
     required this.earnings,
     required this.delivered,
+    required this.isFragile = false,
+    required this.isStackable = true,
+    this.specialRequirements,
   });
 
   final String customerName;
@@ -291,6 +294,9 @@ class TripItem {
   final String destination;
   final String earnings;
   final bool delivered;
+  final bool isFragile;
+  final bool isStackable;
+  final String? specialRequirements;
 }
 
 class PaymentBreakdown {

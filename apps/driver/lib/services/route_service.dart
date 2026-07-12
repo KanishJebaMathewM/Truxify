@@ -33,8 +33,14 @@ class RouteService {
       final out = <LatLng>[];
       for (final e in coordsList) {
         if (e is List && e.length >= 2) {
-          final lon = (e[0] as num).toDouble();
-          final lat = (e[1] as num).toDouble();
+          final lonValue = e[0];
+          final latValue = e[1];
+          if (lonValue is! num || latValue is! num) {
+            continue;
+          }
+
+          final lon = lonValue.toDouble();
+          final lat = latValue.toDouble();
           out.add(LatLng(lat, lon));
         }
       }

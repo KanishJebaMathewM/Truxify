@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSupabaseMock } from '../../helpers/supabaseMock.js';
+import { OrderRepository } from '../../../src/repositories/orderRepository.js';
 import { OrderTimelineService } from '../../../src/services/order/orderTimelineService.js';
 import { DomainError } from '../../../src/services/order/bidAcceptanceService.js';
 
@@ -9,10 +10,8 @@ describe('OrderTimelineService', () => {
 
   beforeEach(() => {
     m = createSupabaseMock();
-    service = new OrderTimelineService({
-      supabase: m.supabase,
-      logger: { error: vi.fn(), warn: vi.fn() },
-    });
+    const repo = new OrderRepository(m.supabase);
+    service = new OrderTimelineService(repo);
     m.store.orders = [];
     m.store.order_timeline = [];
     m.calls.length = 0;

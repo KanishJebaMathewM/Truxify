@@ -1,15 +1,15 @@
 import crypto from 'crypto';
-import { redisClient } from '../../config/db.js';
-import { DomainError } from './bidAcceptanceService.js';
 import { supabase, redisClient } from '../../config/db.js';
+import { redisClient } from '../../config/db.js';
 import { DomainError } from './domainError.js';
+import { measureExecution } from '../../core/performanceMetrics.js';
 import {
   sendDeliveryOtpNotification,
   storeDeliveryOtp,
   getActiveDeliveryOtp,
   verifyDeliveryOtp,
 } from '../notificationService.js';
-import { escrowRelease } from '../escrow.js';
+import { escrowRelease as defaultEscrowRelease } from '../escrow.js';
 import logger from '../../middleware/logger.js';
 
 const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
@@ -94,11 +94,19 @@ async function clearOtpState(orderId) {
 }
 
 export class DeliveryVerificationService {
-  constructor(orderRepository) {
+  constructor(orderRepository, deps = {}) {
     this.orderRepository = orderRepository;
+    this.notificationService = deps.notificationService || {
+      sendDeliveryOtpNotification,
+      storeDeliveryOtp,
+      getActiveDeliveryOtp,
+      verifyDeliveryOtp,
+    };
+    this.escrowReleaseFn = deps.escrowReleaseFn || defaultEscrowRelease;
   }
 
   async validateDeliveryOtp({ orderId, driverId, otp }) {
+    return measureExecution('DeliveryVerificationService.validateDeliveryOtp', async () => {
     if (await checkOtpLockout(orderId)) {
       throw new DomainError(429, {
         error: `Too many failed OTP attempts. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes.`,
@@ -121,7 +129,7 @@ export class DeliveryVerificationService {
       });
     }
 
-    const otpRecord = await getActiveDeliveryOtp(orderId);
+    const otpRecord = await this.notificationService.getActiveDeliveryOtp(orderId);
     if (!otpRecord) {
       throw new DomainError(400, {
         error: 'OTP not available or has expired. Please request a new delivery OTP.',
@@ -148,17 +156,23 @@ export class DeliveryVerificationService {
     }
 
     return { order, otpRecord };
+    });
   }
 
   async completeDeliveryOtp({ otpRecordId, orderId }) {
+    const verified = await this.notificationService.verifyDeliveryOtp(otpRecordId);
+    return measureExecution('DeliveryVerificationService.completeDeliveryOtp', async () => {
     const verified = await verifyDeliveryOtp(otpRecordId);
     if (!verified) {
       logger.warn('[DeliveryVerificationService] Failed to mark OTP as verified for order', orderId);
     }
     await clearOtpState(orderId);
+    });
   }
 
   async ensureDeliveryOtp({ orderId }) {
+    const activeOtp = await this.notificationService.getActiveDeliveryOtp(orderId);
+    return measureExecution('DeliveryVerificationService.ensureDeliveryOtp', async () => {
     const activeOtp = await getActiveDeliveryOtp(orderId);
     if (activeOtp) {
       logger.warn(`[DeliveryVerificationService] Driver attempted OTP regeneration for order ${orderId}`);
@@ -166,15 +180,17 @@ export class DeliveryVerificationService {
     }
 
     const otp = crypto.randomInt(100000, 1000000).toString();
-    const stored = await storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
+    const stored = await this.notificationService.storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
     if (!stored) {
       throw new Error('Failed to generate delivery OTP.');
     }
     await clearOtpState(orderId);
     return { generated: true, otp };
+    });
   }
 
   async resendDeliveryOtp({ orderId, customerId, orderDisplayId, orderStatus }) {
+    return measureExecution('DeliveryVerificationService.resendDeliveryOtp', async () => {
     const terminalStatuses = ['delivered', 'cancelled', 'payment_released'];
     if (terminalStatuses.includes(orderStatus)) {
       throw new DomainError(400, { error: 'Cannot resend OTP for a completed or cancelled order.' });
@@ -184,21 +200,24 @@ export class DeliveryVerificationService {
     }
 
     const otp = crypto.randomInt(100000, 1000000).toString();
-    const stored = await storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
+    const stored = await this.notificationService.storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
     if (!stored) {
       throw new Error('Failed to generate delivery OTP.');
     }
     await clearOtpState(orderId);
 
-    const notifResult = await sendDeliveryOtpNotification(customerId, orderDisplayId, otp);
+    const notifResult = await this.notificationService.sendDeliveryOtpNotification(customerId, orderDisplayId, otp);
     if (!notifResult.success) {
       logger.warn(`[DeliveryVerificationService] Resend OTP notification failed for order ${orderDisplayId} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
     }
 
     return { expiresInMinutes: OTP_TTL_MINUTES };
+    });
   }
 
   async sendOtpNotification({ orderId, customerId, orderDisplayId, otp }) {
+    const notifResult = await this.notificationService.sendDeliveryOtpNotification(customerId, orderDisplayId, otp);
+    return measureExecution('DeliveryVerificationService.sendOtpNotification', async () => {
     const notifResult = await sendDeliveryOtpNotification(customerId, orderDisplayId, otp);
     if (!notifResult.success) {
       logger.warn(`[DeliveryVerificationService] Delivery OTP notification failed for order ${orderDisplayId} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
@@ -207,14 +226,18 @@ export class DeliveryVerificationService {
         updated_at: new Date().toISOString(),
       });
     }
+    });
   }
 
   async generateDeliveryOtp({ orderId }) {
+    return measureExecution('DeliveryVerificationService.generateDeliveryOtp', async () => {
     const result = await this.ensureDeliveryOtp({ orderId });
     return { generated: result.generated, otp: result.otp };
+    });
   }
 
   async verifyDelivery({ orderId, driverId, otp }) {
+    return measureExecution('DeliveryVerificationService.verifyDelivery', async () => {
     const { order, otpRecord } = await this.validateDeliveryOtp({ orderId, driverId, otp });
 
     const guardResult = await this.orderRepository.updateOrderGuardStatus(
@@ -237,7 +260,7 @@ export class DeliveryVerificationService {
     let escrowAlreadyReleased = false;
     if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
       try {
-        const releaseResult = await escrowRelease(order.order_display_id);
+        const releaseResult = await this.escrowReleaseFn(order.order_display_id);
         if (releaseResult.txHash) {
           releaseTxHash = releaseResult.txHash;
         } else if (releaseResult.alreadyReleased) {
@@ -313,5 +336,6 @@ export class DeliveryVerificationService {
     }
 
     return { escrowUpdateFailed };
+    });
   }
 }

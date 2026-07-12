@@ -95,6 +95,9 @@ class TripService {
     if (page == null || page < 1) {
       throw ArgumentError.value(cursor, 'cursor', 'must be a positive integer');
     }
+    if (limit < 1) {
+      throw ArgumentError.value(limit, 'limit', 'must be a positive integer');
+    }
     var path = '/api/driver/trips?page=$page&limit=$limit';
     if (status != null) {
       path += '&status=${Uri.encodeQueryComponent(status)}';
@@ -102,12 +105,18 @@ class TripService {
     
     try {
       final body = await _apiClient.get(path);
-      final mapBody = body as Map<String, dynamic>;
-      final responsePage = mapBody['page'] as int? ?? page;
-      final totalPages = mapBody['totalPages'] as int? ?? responsePage;
+      if (body is! Map<String, dynamic>) {
+        throw StateError('Unexpected trip history response type');
+      }
+      final trips = body['trips'];
+      if (trips is! List) {
+        throw StateError('Unexpected trip history trips type');
+      }
+      final responsePage = body['page'] as int? ?? page;
+      final totalPages = body['totalPages'] as int? ?? responsePage;
       final hasMore = responsePage < totalPages;
       return {
-        'trips': List<Map<String, dynamic>>.from(mapBody['trips'] as List? ?? []),
+        'trips': List<Map<String, dynamic>>.from(trips),
         'nextCursor': hasMore ? '${responsePage + 1}' : null,
         'hasMore': hasMore,
       };

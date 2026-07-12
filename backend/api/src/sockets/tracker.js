@@ -86,6 +86,25 @@ const MAX_CONSECUTIVE_DROPS = 10;
 const consecutiveDropCount = new Map();
 
 // =====================================================================
+// DRIVER STATE TTL & LAZY CLEANUP
+// =====================================================================
+const TRACKER_DRIVER_STATE_TTL_MS = parseInt(process.env.TRACKER_DRIVER_STATE_TTL_MS, 10) || 900000; // default 15 min
+const DRIVER_STATE_SWEEP_THRESHOLD = 50;
+const DRIVER_STATE_SWEEP_INTERVAL_MS = 60000;
+let lastDriverStateSweep = 0;
+
+function sweepStaleDriverState(now) {
+  if (consecutiveDropCount.size < DRIVER_STATE_SWEEP_THRESHOLD) return;
+  if (now - lastDriverStateSweep < DRIVER_STATE_SWEEP_INTERVAL_MS) return;
+  lastDriverStateSweep = now;
+  for (const [driverId, entry] of consecutiveDropCount) {
+    if (now - entry.lastUpdated > TRACKER_DRIVER_STATE_TTL_MS) {
+      consecutiveDropCount.delete(driverId);
+    }
+  }
+}
+
+// =====================================================================
 // EXTRA STORAGE & BUFFER CONFIGURATIONS (#269)
 // =====================================================================
 class TelemetryRingBuffer {
@@ -155,6 +174,7 @@ let telemetryFlushTimeout = null;
 let wsServer = null;
 let wsHeartbeatInterval = null;
 let telemetryMonitorInterval = null;
+const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 180000; // 3 minutes
 
 // Observability counters
 let telemetryTotalFlushed = 0;
@@ -269,6 +289,11 @@ export function rejectWebSocketUpgrade(socket) {
  * Initialize WebSockets Server and bind event handlers
  */
 export function initWebSocketServer(server, orderRepository) {
+  if (wsServer) {
+    logger.warn('[initWebSocketServer] Already initialized — skipping duplicate call to prevent connection leaks.');
+    return;
+  }
+
   _orderRepository = orderRepository;
   const wss = new WebSocketServer({ noServer: true });
   wsServer = wss;
@@ -433,7 +458,7 @@ export function initWebSocketServer(server, orderRepository) {
       ws.isAlive = false;
       ws.ping();
     });
-  }, 30000);
+  }, HEARTBEAT_INTERVAL_MS);
 
   wss.on('close', () => {
     if (wsHeartbeatInterval) {
@@ -585,8 +610,10 @@ export async function handleLocationPing(ws, data, req) {
           logger.warn(`[TRUXIFY SEQUENCE CONTROL] Out-of-order telemetry dropped for Driver: ${driver_id}. Stale jitter detected.`);
 
           // Circuit breaker: if too many consecutive drops, reset the sequence
-          const currentCount = (consecutiveDropCount.get(driver_id) || 0) + 1;
-          consecutiveDropCount.set(driver_id, currentCount);
+          const prevEntry = consecutiveDropCount.get(driver_id);
+          const currentCount = (prevEntry ? prevEntry.count : 0) + 1;
+          consecutiveDropCount.set(driver_id, { count: currentCount, lastUpdated: serverNow });
+          sweepStaleDriverState(serverNow);
           if (currentCount >= MAX_CONSECUTIVE_DROPS) {
             logger.warn(
               `[TRUXIFY CIRCUIT BREAKER] Driver ${driver_id} exceeded max consecutive drops ` +
@@ -1098,6 +1125,13 @@ async function removeClientFromAllSubscriptions(ws) {
     }
   });
 
+  // Clean up the in-memory circuit breaker state so disconnected
+  // drivers do not cause unbounded memory growth. This runs regardless
+  // of Redis availability since consecutiveDropCount is always in-memory.
+  if (ws.driverId) {
+    consecutiveDropCount.delete(ws.driverId);
+  }
+
   if (redisClient) {
     const subscriberId = ws.user?.id || ws.driverId;
     if (subscriberId) {
@@ -1224,10 +1258,24 @@ export const __testing = {
     mongoDbOverride = val;
   },
   getConsecutiveDropCount(driverId) {
-    return consecutiveDropCount.get(driverId) || 0;
+    const entry = consecutiveDropCount.get(driverId);
+    return entry ? entry.count : 0;
   },
   clearConsecutiveDropCount() {
     consecutiveDropCount.clear();
+  },
+  getConsecutiveDropCountSize() {
+    return consecutiveDropCount.size;
+  },
+  getConsecutiveDropCountEntry(driverId) {
+    return consecutiveDropCount.get(driverId) || null;
+  },
+  getDriverStateTtlMs() {
+    return TRACKER_DRIVER_STATE_TTL_MS;
+  },
+  sweepStaleDriverState,
+  setLastDriverStateSweep(val) {
+    lastDriverStateSweep = val;
   },
   get MAX_CONSECUTIVE_DROPS() {
     return MAX_CONSECUTIVE_DROPS;

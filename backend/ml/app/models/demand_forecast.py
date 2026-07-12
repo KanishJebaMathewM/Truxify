@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 MODEL_NAME = "demand_forecast"
 
+# Module-level cache to avoid reloading from disk on every call
+_model_cache = None
+
 # NOTE: This module currently trains on synthetic (randomly generated) data
 # as a placeholder. Replace generate_synthetic_demand_data() with a real
 # data pipeline that loads historical trip/demand data from PostgreSQL or
@@ -93,19 +96,22 @@ def train_demand_forecast_model() -> dict:
 def predict_demand(features: List[float]) -> Optional[float]:
     if len(features) != len(FEATURE_NAMES):
         raise ValueError(f"Invalid input tensor shape. Expected {len(FEATURE_NAMES)} features, got {len(features)}")
-        
-    if not model_exists(MODEL_NAME):
-        train_demand_forecast_model()
 
+    global _model_cache
+    if _model_cache is None:
+        if not model_exists(MODEL_NAME):
+            train_demand_forecast_model()
 
-    loaded = load_model(MODEL_NAME)
-    if loaded is None:
-        train_demand_forecast_model()
         loaded = load_model(MODEL_NAME)
         if loaded is None:
-            return None
+            train_demand_forecast_model()
+            loaded = load_model(MODEL_NAME)
+            if loaded is None:
+                return None
 
-    model, scaler = loaded
+        _model_cache = loaded
+
+    model, scaler = _model_cache
     X = np.array(features).reshape(1, -1)
     X_scaled = scaler.transform(X)
     pred = model.predict(X_scaled)[0]

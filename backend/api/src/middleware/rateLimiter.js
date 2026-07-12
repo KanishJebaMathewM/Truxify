@@ -173,6 +173,23 @@ export const deviceLimiter = rateLimit({
   message: { error: 'Rate limit exceeded', retryAfter: 600 },
 });
 
+// Dedicated limiter for administrative endpoints. Admin operations perform
+// privileged actions (dashboard queries, cache invalidation, cross-user
+// ticket access) and deserve stricter limits than the general user limiter.
+// Keyed by authenticated user ID so each admin gets an independent bucket.
+const adminWindowMs = Number(process.env.ADMIN_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const adminMaxRequests = Number(process.env.ADMIN_RATE_LIMIT_MAX_REQUESTS) || 50;
+
+export const adminRateLimiter = rateLimit({
+  windowMs: adminWindowMs,
+  max: adminMaxRequests,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  store: createStore('rl:admin:'),
+  message: { error: 'Rate limit exceeded', retryAfter: Math.ceil(adminWindowMs / 1000) },
+});
+
 /**
  * Factory that creates a DeferredRedisStore — used by both the built-in
  * limiters in this module and by route-level limiters (orderRoutes,

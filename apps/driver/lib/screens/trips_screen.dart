@@ -35,6 +35,7 @@ class _TripsScreenState extends State<TripsScreen> {
   List<Map<String, dynamic>> _trips = [];
   Map<String, List<Map<String, dynamic>>> _tripStopsByTripId = {};
   Map<String, List<Map<String, dynamic>>> _routePointsByTripId = {};
+  Map<String, List<Map<String, dynamic>>> _itemsByTripId = {};
 
   bool _isLoadingTrips = true;
   bool _isLoadingMoreTrips = false;
@@ -87,19 +88,22 @@ class _TripsScreenState extends State<TripsScreen> {
       final result = await _tripService.fetchTripHistory(limit: 20);
       final trips = result['trips'] as List<Map<String, dynamic>>;
 
-      final stopsByTrip = <String, List<Map<String, dynamic>>>{};
-      final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
+    final stopsByTrip = <String, List<Map<String, dynamic>>>{};
+    final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
+    final itemsByTrip = <String, List<Map<String, dynamic>>>{};   // ← add this
 
-      await Future.wait(trips.map((trip) async {
-        final tripId = trip['trip_display_id']?.toString();
-        if (tripId == null || tripId.isEmpty) return;
+    await Future.wait(trips.map((trip) async {
+      final tripId = trip['trip_display_id']?.toString();
+      if (tripId == null || tripId.isEmpty) return;
 
-        final results = await Future.wait([
-          _tripService.fetchTripStops(tripId),
-          _tripService.fetchRouteMapPoints(tripId),
-        ]);
-        stopsByTrip[tripId] = results[0];
-        routePointsByTrip[tripId] = results[1];
+      final results = await Future.wait([
+        _tripService.fetchTripStops(tripId),
+        _tripService.fetchRouteMapPoints(tripId),
+        _tripService.fetchTripItems(tripId),   
+      ]);
+      stopsByTrip[tripId] = results[0];
+      routePointsByTrip[tripId]= results[1];
+      itemsByTrip[tripId] = results[2];   
       }));
 
       if (!mounted) return;
@@ -108,6 +112,7 @@ class _TripsScreenState extends State<TripsScreen> {
         _trips = trips;
         _tripStopsByTripId = stopsByTrip;
         _routePointsByTripId = routePointsByTrip;
+        _itemsByTripId = itemsByTrip;
         _nextTripsCursor = result['nextCursor'] as String?;
         _hasMoreTrips = result['hasMore'] as bool? ?? false;
         _isLoadingTrips = false;
@@ -121,6 +126,7 @@ class _TripsScreenState extends State<TripsScreen> {
         trips: trips,
         stopsByTripId: stopsByTrip,
         routePointsByTripId: routePointsByTrip,
+        itemsByTripId: itemsByTrip,
       ));
     } catch (e) {
       debugPrint('Failed to load trips: $e');
@@ -133,6 +139,7 @@ class _TripsScreenState extends State<TripsScreen> {
           _trips = cached.trips;
           _tripStopsByTripId = cached.stopsByTripId;
           _routePointsByTripId = cached.routePointsByTripId;
+          _itemsByTripId = cached.itemsByTripId;
           _hasMoreTrips = false;
           _isLoadingTrips = false;
           _tripsError = null;
@@ -172,6 +179,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
       final stopsByTrip = <String, List<Map<String, dynamic>>>{};
       final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
+      final itemsByTrip = <String, List<Map<String, dynamic>>>{};
 
       await Future.wait(newTrips.map((trip) async {
         final tripId = trip['trip_display_id']?.toString();
@@ -180,9 +188,11 @@ class _TripsScreenState extends State<TripsScreen> {
         final results = await Future.wait([
           _tripService.fetchTripStops(tripId),
           _tripService.fetchRouteMapPoints(tripId),
+          _tripService.fetchTripItems(tripId),
         ]);
         stopsByTrip[tripId] = results[0];
         routePointsByTrip[tripId] = results[1];
+        itemsByTrip[tripId] = results[2];
       }));
 
       if (!mounted) return;
@@ -191,6 +201,7 @@ class _TripsScreenState extends State<TripsScreen> {
         _trips.addAll(newTrips);
         _tripStopsByTripId.addAll(stopsByTrip);
         _routePointsByTripId.addAll(routePointsByTrip);
+        _itemsByTripId.addAll(itemsByTrip);
         _nextTripsCursor = result['nextCursor'] as String?;
         _hasMoreTrips = result['hasMore'] as bool? ?? false;
         _isLoadingMoreTrips = false;
@@ -231,34 +242,49 @@ class _TripsScreenState extends State<TripsScreen> {
         return TripStatusType.active;
     }
   }
-
   List<Trip> _mapSupabaseTripsToUiTrips() {
-    return _trips.map((row) {
-      return Trip(
-        route: row['route_label']?.toString() ?? 'Unknown route',
-        date: row['trip_date']?.toString() ?? '',
-        items: const [],
-        itemCount: row['distance']?.toString() ?? '',
-        distance: row['distance']?.toString() ?? '',
-        earnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
-        status: _mapStatus(row['status']?.toString()),
-        tripId: row['trip_display_id']?.toString() ?? '',
-        hash: '',
-        duration: row['duration']?.toString() ?? '',
-        endTime: '',
-        paymentBreakdown: PaymentBreakdown(
-          baseFreight:
-              '₹${((row['total_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
-          fuelDeducted: '₹0',
-          tollDeducted: '₹0',
-          platformFee: '₹0',
-          netEarnings:
-              '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
-        ),
-        tripItems: const [],
+  return _trips.map((row) {
+    final tripId = row['trip_display_id']?.toString() ?? '';
+    final rawItems = _itemsByTripId[tripId] ?? [];
+
+    final tripItems = rawItems.map((item) {
+      return TripItem(
+        customerName: item['customer_name']?.toString() ?? 'Unknown',
+        goods: item['goods']?.toString() ?? '',
+        destination: item['destination']?.toString() ?? '',
+        earnings: '₹${((item['earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+        delivered: item['is_delivered'] as bool? ?? false,
+        isFragile: item['is_fragile'] as bool? ?? false,
+        isStackable: item['is_stackable'] as bool? ?? true,
+        specialRequirements:
+          item['special_requirements']?.toString(),
       );
+      debugPrint(item.toString());
     }).toList();
-  }
+
+    return Trip(
+      route: row['route_label']?.toString() ?? 'Unknown route',
+      date: row['trip_date']?.toString() ?? '',
+      items: tripItems.map((i) => i.goods).toList(),
+      itemCount: row['distance']?.toString() ?? '',
+      distance: row['distance']?.toString() ?? '',
+      earnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+      status: _mapStatus(row['status']?.toString()),
+      tripId: tripId,
+      hash: '',
+      duration: row['duration']?.toString() ?? '',
+      endTime: '',
+      paymentBreakdown: PaymentBreakdown(
+        baseFreight: '₹${((row['total_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+        fuelDeducted: '₹0',
+        tollDeducted: '₹0',
+        platformFee: '₹0',
+        netEarnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+      ),
+      tripItems: tripItems,
+    );
+  }).toList();
+}
 
   List<Trip> _getFilteredAndSortedTrips() {
     List<Trip> trips = _mapSupabaseTripsToUiTrips();

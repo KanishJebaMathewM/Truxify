@@ -21,6 +21,7 @@
 
 import { ethers } from 'ethers';
 import logger from '../middleware/logger.js';
+import { measureExecution } from '../core/performanceMetrics.js';
 
 // Safe math utilities for reputation calculations
 function safeAdd(a, b) {
@@ -107,6 +108,7 @@ async function retryWithBackoff(fn, maxRetries, baseDelayMs) {
 }
 
 export async function awardReputationPoints(driverWalletAddress, stars) {
+  return measureExecution('ReputationService.awardReputationPoints', async () => {
   if (!reputationContract) {
     logger.warn('[reputation] Contract not initialised — skipping on-chain update.');
     return;
@@ -130,6 +132,7 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
     logger.error(`[reputation] increaseReputation failed for driver ${driverWalletAddress} after ${REPUTATION_RETRY_MAX} retries: ${err.message}`);
     throw err;
   }
+  });
 }
 
 /**
@@ -139,6 +142,7 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
  * @returns {Promise<number|null>}
  */
 export async function getDriverReputation(walletAddress) {
+  return measureExecution('ReputationService.getDriverReputation', async () => {
   if (!reputationContract) {
     logger.warn('[reputation] Contract not initialised — skipping on-chain retrieval.');
     return null;
@@ -162,4 +166,5 @@ export async function getDriverReputation(walletAddress) {
     logger.error(`[reputation] Failed to fetch on-chain reputation for ${walletAddress}: ${err.message}`);
     return null;
   }
+  });
 }

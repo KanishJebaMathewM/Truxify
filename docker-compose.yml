@@ -3,6 +3,7 @@ services:
     build:
       context: ./backend/api
       target: development
+    container_name: truxify-api
     env_file:
       - .env
     ports:
@@ -58,7 +59,10 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
-  
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
   ml-engine:
     build:
       context: ./backend/ml
@@ -159,6 +163,15 @@ services:
       - "5436:5432"
     volumes:
       - shard_west_data:/var/lib/postgresql/data
+
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  db:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: truxify-postgres
+
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
@@ -172,6 +185,13 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:6-jammy
+    container_name: truxify-mongo
+
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -185,12 +205,22 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: truxify-redis
+
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
+    restart: unless-stopped
+
 
 volumes:
   mongo_data:

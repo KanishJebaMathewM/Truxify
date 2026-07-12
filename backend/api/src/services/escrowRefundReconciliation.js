@@ -1,8 +1,7 @@
-import { supabase, redisClient } from '../config/db.js';
+import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { confirmEscrowRefund, submitEscrowRefund } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
-import { OrderRepository } from '../repositories/orderRepository.js';
 import os from 'os';
 
 const RECONCILIATION_EVENTS = {
@@ -35,21 +34,29 @@ const MAX_RETRIES = 10;
 let reconciliationTimer = null;
 let reconciliationRunning = false;
 
-export async function reconcilePendingEscrowRefunds(passedOrderRepository) {
+export async function reconcilePendingEscrowRefunds(orderRepository) {
+  if (!orderRepository) {
+    throw new Error('reconcilePendingEscrowRefunds requires an OrderRepository instance');
+  }
   if (reconciliationRunning) return;
   reconciliationRunning = true;
-
-  const orderRepository = passedOrderRepository || new OrderRepository(supabase);
 
   try {
     // Acquire a global lock just to prevent multiple instances from pulling the exact same batch unnecessarily
     let globalLockAcquired = false;
     if (redisClient) {
-      globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
+      try {
+        globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
+      } catch (err) {
+        logger.error('[escrow-reconciliation] Failed to acquire Redis global lock, skipping batch:', err.message);
+        return;
+      }
       if (!globalLockAcquired) {
         logger.info('[escrow-reconciliation] Global lock held by another instance, skipping batch pull.');
         return;
       }
+    } else {
+      // Redis not configured — single-instance mode, proceed without distributed lock
     }
 
     const instanceId = process.env.HOSTNAME || os.hostname();

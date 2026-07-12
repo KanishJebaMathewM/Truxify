@@ -1,8 +1,8 @@
 import { z } from 'zod';
 
-const VALID_LANGUAGES = ['en', 'hi', 'gu', 'mr', 'ta', 'te', 'kn', 'ml', 'bn', 'pa'];
+export const VALID_LANGUAGES = ['en', 'hi', 'gu', 'mr', 'ta', 'te', 'kn', 'ml', 'bn', 'pa'];
 
-function validateLanguage(lang) {
+export function validateLanguage(lang) {
   if (!lang) return true;
   return VALID_LANGUAGES.includes(lang);
 }

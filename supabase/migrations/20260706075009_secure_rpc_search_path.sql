@@ -237,9 +237,9 @@ BEGIN
   WHERE user_id = p_driver_id
   FOR UPDATE;
 
-  IF v_confirmed < p_amount THEN
+  IF COALESCE(v_confirmed, 0) < p_amount THEN
     RAISE EXCEPTION 'Insufficient balance: available %, requested %',
-      v_confirmed, p_amount;
+      COALESCE(v_confirmed, 0), p_amount;
   END IF;
 
   UPDATE driver_details

@@ -31,7 +31,9 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _phoneController = TextEditingController();
   final AuthService _authService = AuthService();
   bool _loading = false;
+  String? _verificationId;
   int? _resendToken;
+  String? _verificationId;
   String _selectedCode = '+91';
   int _expectedDigits = 10;
 

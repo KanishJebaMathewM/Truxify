@@ -108,3 +108,21 @@ class ResilientWebSocket {
     _channel = null;
   }
 }
+
+class ConnectionStats {
+  int reconnectCount = 0;
+  bool isConnected = false;
+  bool forceClosed = false;
+  static const int maxReconnects = 10;
+  static const int baseDelayMs = 1000;
+  static const int maxDelayMs = 30000;
+
+  bool get shouldReconnect => !forceClosed && reconnectCount < maxReconnects;
+  int get backoffMs {
+    final exponential = baseDelayMs * (1 << reconnectCount.clamp(0, 5));
+    return exponential > maxDelayMs ? maxDelayMs : exponential;
+  }
+  void reset() { reconnectCount = 0; forceClosed = false; }
+  void recordFailure() { reconnectCount++; isConnected = false; }
+  void recordSuccess() { reconnectCount = 0; isConnected = true; }
+}

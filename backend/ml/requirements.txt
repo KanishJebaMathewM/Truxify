@@ -8,7 +8,7 @@ pytest==9.0.3
 httpx==0.27.0
 scipy>=1.14.0
 tensorflow==2.13.0
-aiohttp==3.9.0
+aiohttp==3.14.1
 redis==5.0.0
 sqlalchemy==2.0.23
 pandas==2.1.4
@@ -21,3 +21,6 @@ cryptography==39.0.0
 numpy==1.26.2
 fastapi==0.104.1
 uvicorn==0.24.0
+requests==2.33.0
+python-dotenv==1.0.0
+

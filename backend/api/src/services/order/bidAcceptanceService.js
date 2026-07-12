@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import { DomainError } from './domainError.js';
+import { measureExecution } from '../../core/performanceMetrics.js';
 
 // Re-export for backward compatibility — prefer importing from domainError.js
 export { DomainError } from './domainError.js';
@@ -15,6 +16,7 @@ export class BidAcceptanceService {
   }
 
   async acceptBid({ orderId, bidId, customerId }) {
+    return measureExecution('BidAcceptanceService.acceptBid', async () => {
     const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'order_display_id, customer_id');
     if (orderErr) {
       throw new DomainError(500, { error: 'Failed to retrieve order.', details: orderErr.message });
@@ -131,12 +133,6 @@ export class BidAcceptanceService {
       });
     }
 
-    try {
-      await this.recordDepositTxFn(bookingId, depositTx?.hash || depositTx?.transactionHash || '');
-    } catch (recordErr) {
-      this.logger?.warn?.('[escrow] Failed to record deposit TX:', recordErr.message);
-    }
-
     if (this.notificationDispatcher) {
       try {
         await this.notificationDispatcher({
@@ -158,5 +154,6 @@ export class BidAcceptanceService {
         depositTx,
       },
     };
+    });
   }
 }

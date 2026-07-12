@@ -1,6 +1,7 @@
 import { supabase, firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
+import { measureExecution } from '../core/performanceMetrics.js';
 
 const TRANSIENT_ERROR_CODES = new Set([
   'messaging/too-many-topics',
@@ -112,6 +113,7 @@ export async function sendFcmNotification(userId, notification, data = {}) {
 }
 
 export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
+  return measureExecution('NotificationService.storeDeliveryOtp', async () => {
   const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
   const otpHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
 
@@ -133,9 +135,11 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
 
   logger.info(`[NotificationService] OTP stored for order ${orderId}, expires at ${expiresAt}`);
   return data;
+  });
 }
 
 export async function getActiveDeliveryOtp(orderId) {
+  return measureExecution('NotificationService.getActiveDeliveryOtp', async () => {
   const { data, error } = await supabase
     .from('delivery_otps')
     .select('id, otp_hash, expires_at')
@@ -152,9 +156,11 @@ export async function getActiveDeliveryOtp(orderId) {
   }
 
   return data;
+  });
 }
 
 export async function verifyDeliveryOtp(otpId) {
+  return measureExecution('NotificationService.verifyDeliveryOtp', async () => {
   // Target a specific OTP record by ID instead of bulk-updating all
   // unverified OTPs for an order. This ensures only the matched OTP
   // (which was validated by the caller via timing-safe hash comparison)
@@ -181,9 +187,11 @@ export async function verifyDeliveryOtp(otpId) {
   }
 
   return true;
+  });
 }
 
 export async function expireDeliveryOtps(orderId) {
+  return measureExecution('NotificationService.expireDeliveryOtps', async () => {
   const { error } = await supabase
     .from('delivery_otps')
     .update({ expires_at: new Date().toISOString() })
@@ -193,6 +201,7 @@ export async function expireDeliveryOtps(orderId) {
   if (error) {
     logger.error('[NotificationService] Failed to expire OTPs:', error.message);
   }
+  });
 }
 
 export async function sendDeliveryOtpNotification(customerId, orderDisplayId, otp) {
@@ -241,6 +250,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
 }
 
 export async function sendPushNotification(userId, title, body, notifType, metadata = {}) {
+  return measureExecution('NotificationService.sendPushNotification', async () => {
   if (supabase) {
     try {
       const { error } = await supabase
@@ -258,4 +268,5 @@ export async function sendPushNotification(userId, title, body, notifType, metad
   let fcmResult;
   try { fcmResult = await sendFcmNotification(userId, { title, body }, { notifType, ...metadata }); } catch (err) { logger.error('[NotificationService] Unexpected sendFcmNotification error: %s', err?.message ?? err); }
   return { success: fcmResult?.success, fcm: fcmResult };
+  });
 }

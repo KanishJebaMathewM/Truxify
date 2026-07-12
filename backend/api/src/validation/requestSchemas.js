@@ -1,20 +1,9 @@
 import { z } from 'zod';
+import { VALID_LANGUAGES } from '../schemas/profile.js';
 
 // Generic field validation helpers
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
 function isValidPhone(phone) {
   return /^\+?[\d\s\-()]{7,15}$/.test(phone);
-}
-
-function isValidUuid(str) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
-}
-
-function isValidNumberPlate(str) {
-  return /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/.test(str);
 }
 
 const coerceNumber = (schema) => z.preprocess(
@@ -250,7 +239,7 @@ export const registerTruckSchema = z.object({
 
 export const updateProfileSchema = z.object({
   full_name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name must be 100 characters or fewer').optional(),
-  language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').optional(),
+  language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').refine((v) => VALID_LANGUAGES.includes(v), { message: 'Unsupported language code' }).optional(),
   dark_mode: z.boolean().optional(),
   is_online: z.boolean().optional(),
   verification_status: z.enum(['pending', 'verified', 'rejected']).optional(),

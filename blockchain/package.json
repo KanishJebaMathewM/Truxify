@@ -35,7 +35,7 @@
     "hardhat-gas-reporter": "^2.0.2",
     "typechain": "^8.3.2",
     "typescript": "~6.0.3",
-    "viem": "^2.53.1"
+    "viem": "^2.55.1"
   },
   "description": "Truxify Blockchain Contracts - UUPS Proxy with DAO Governance, Escrow, and Reputation System",
   "main": "index.js",

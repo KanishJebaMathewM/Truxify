@@ -1,11 +1,6 @@
 import { z } from 'zod';
 
-const VALID_LANGUAGES = ['en', 'hi', 'gu', 'mr', 'ta', 'te', 'kn', 'ml', 'bn', 'pa'];
-
-function validateLanguage(lang) {
-  if (!lang) return true;
-  return VALID_LANGUAGES.includes(lang);
-}
+export const VALID_LANGUAGES = ['en', 'hi', 'gu', 'mr', 'ta', 'te', 'kn', 'ml', 'bn', 'pa'];
 
 export const updateProfileSchema = z.object({
   full_name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name must be 100 characters or fewer').optional(),

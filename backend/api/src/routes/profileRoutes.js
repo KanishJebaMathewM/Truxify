@@ -1,5 +1,9 @@
 import express from 'express';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { userLimiter, adminRateLimiter } from '../middleware/rateLimiter.js';
+import { z } from 'zod';
+import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
 import { updateProfileSchema, updateWalletSchema, driverStatementSchema, uuidParamSchema, updateFcmTokenSchema } from '../validation/requestSchemas.js';
@@ -12,9 +16,9 @@ import {
 import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
-import { startTimer, endTimer } from '../lib/routeTiming.js';
+
 const router = express.Router();
-const routeTimer = startTimer('profileRoutes');
+
 
 // Cache control middleware for profile endpoints
 function profileCacheControl(req, res, next) {
@@ -242,7 +246,7 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
 });
 
 // GET DRIVER STATEMENT
-router.get('/driver/statement', authenticate, requireRole(['driver']), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
+router.get('/driver/statement', authenticate, requirePolicy('profile:view-statement'), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
   const userId = req.user.id;
   const { start_date, end_date, sort_by, format } = req.query;
 
@@ -336,7 +340,8 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
 // Invalidates the profile cache for a specific user, forcing the next
 // authenticated request to refetch from Supabase. Use this after admin
 // operations that change role, status, or other cached profile fields.
-router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), validateParams(uuidParamSchema), async (req, res) => {
+router.delete('/admin/cache/:userId', authenticate, adminRateLimiter, requireRole(['admin']), validateParams(uuidParamSchema), async (req, res) => {
+router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('admin:invalidate-cache'), validateParams(z.object({ userId: z.string().min(1, 'userId is required') })), async (req, res) => {
   try {
     const targetUserId = req.params.userId;
     if (!targetUserId) {
@@ -387,7 +392,6 @@ router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), vali
   }
 });
 
-endTimer(routeTimer);
 export default router;
 
 // Resolves #2046: DELETE /admin/cache/:userId endpoint

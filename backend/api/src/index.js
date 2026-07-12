@@ -46,13 +46,11 @@ import shardManager from './services/sharding/ShardManager.js'
 import webrtcRoutes from './routes/webrtcRoutes.js'
 import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 
-
 // ============================================================================
 // 🆕 FRAUD DETECTION ROUTES
 // ============================================================================
 import fraudRoutes from './routes/fraudRoutes.js'
 import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
-
 
 import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
@@ -126,7 +124,6 @@ if (!process.env.WEBRTC_ENABLED) {
   logger.info('WebRTC signaling server will start by default')
 }
 
-
 // ============================================================================
 // 🆕 FRAUD DETECTION VALIDATION
 // ============================================================================
@@ -136,7 +133,6 @@ if (!process.env.FRAUD_THRESHOLD) {
 if (!process.env.BEHAVIORAL_ANALYTICS_ENABLED) {
   logger.info('Behavioral analytics enabled by default')
 }
-
 
 // Validate escrow contract deployment — log warning if validation fails,
 // but don't crash (non-escrow functionality should still work).
@@ -331,7 +327,6 @@ app.get('/api/webrtc/status', (req, res) => {
   })
 })
 
-
 // ============================================================================
 // 🆕 FRAUD DETECTION ROUTES
 // ============================================================================
@@ -348,7 +343,6 @@ app.get('/api/fraud/health', (req, res) => {
     timestamp: new Date().toISOString()
   })
 })
-
 
 // Setup Swagger Documentation
 setupSwagger(app)
@@ -406,9 +400,7 @@ server.listen(PORT, () => {
   logger.info(`🆕 Verification endpoints available at /api/verify and /api/oracle`)
   logger.info(`🆕 Geographic Sharding enabled with 4 shards (North, South, East, West)`)
   logger.info(`🆕 WebRTC P2P Mesh Network available at ws://localhost:${PORT}/webrtc`)
-
   logger.info(`🆕 Fraud Detection enabled with threshold: ${process.env.FRAUD_THRESHOLD || 0.7}`)
-
   startEscrowRefundReconciliation(orderRepository)
   startEscrowReleaseReconciliation()
   startReputationReconciliation()

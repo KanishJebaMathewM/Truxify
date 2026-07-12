@@ -82,7 +82,6 @@ services:
       retries: 5
       start_period: 30s
 
-
   db:
     image: postgis/postgis:15-3.3-alpine
     environment:
@@ -164,7 +163,6 @@ services:
       - "5436:5432"
     volumes:
       - shard_west_data:/var/lib/postgresql/data
-
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
@@ -179,7 +177,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
-
 
   mongo:
     image: mongo:6-jammy
@@ -201,14 +198,12 @@ services:
       retries: 5
       start_period: 10s
 
-
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-
     restart: unless-stopped
 
   redis:

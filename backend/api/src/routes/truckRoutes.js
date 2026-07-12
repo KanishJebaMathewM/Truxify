@@ -254,14 +254,12 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
         cargoWeightKg: numWeightTonnes * 1000,
         truckType: 'medium_truck',
       });
-      if (mlResult && typeof mlResult.estimated_price === 'number' && mlResult.estimated_price > 0) {
-        const estimatedPrice = Math.round(mlResult.estimated_price * 100);
-        finalTotalAmount = estimatedPrice;
-        finalPlatformFee = Math.round(estimatedPrice * 0.05);
-        finalBaseFreight = estimatedPrice - finalPlatformFee - finalTollEstimate;
-        if (finalBaseFreight < 0) {
-          finalBaseFreight = 0;
-          finalTollEstimate = estimatedPrice - finalPlatformFee;
+      if (mlResult && mlResult.estimatedPricePaisa > 0) {
+        finalTotalAmount = mlResult.estimatedPricePaisa;
+        finalPlatformFee = Math.round(mlResult.estimatedPricePaisa * 0.05);
+        finalBaseFreight = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee - finalTollEstimate);
+        if (finalBaseFreight === 0) {
+          finalTollEstimate = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee);
         }
         isAiEstimate = true;
       } else {

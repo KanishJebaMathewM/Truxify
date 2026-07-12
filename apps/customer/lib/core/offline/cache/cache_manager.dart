@@ -233,13 +233,26 @@ class CacheManager {
   Future<List<Map<String, dynamic>>> getDocuments() async {
     final db = await open();
     final rows = await db.query('documents', orderBy: 'updated_at DESC');
-    return rows.map((row) {
-      final payload = jsonDecode(row['payload'] as String) as Map<String, dynamic>;
-      return <String, dynamic>{
+
+    final results = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final decoded = _safeDecode(row['payload'] as String);
+      if (decoded is! Map) {
+        final id = row['id'];
+        if (id is String) {
+          await db.delete('documents', where: 'id = ?', whereArgs: [id]);
+        }
+        continue;
+      }
+
+      final payload = Map<String, dynamic>.from(decoded);
+      results.add(<String, dynamic>{
         ...payload,
         '_cached_at': row['updated_at'],
-      };
-    }).toList();
+      });
+    }
+
+    return results;
   }
 
   Future<void> cacheSettings(Map<String, dynamic> settings) async {

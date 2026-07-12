@@ -53,6 +53,9 @@ jobs:
       - name: Run Dart Analyzer
         working-directory: apps/customer
         run: dart analyze
+      - name: Run Dart Format
+        working-directory: apps/customer
+        run: dart format --output=none --set-exit-if-changed .
 
   driver-lint:
     name: Driver App Analyzer
@@ -74,3 +77,6 @@ jobs:
       - name: Run Dart Analyzer
         working-directory: apps/driver
         run: dart analyze
+      - name: Run Dart Format
+        working-directory: apps/driver
+        run: dart format --output=none --set-exit-if-changed .

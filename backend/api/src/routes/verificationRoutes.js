@@ -1,11 +1,14 @@
 import express from 'express';
 import VerificationService from '../services/verification/VerificationService.js';
+import { authenticate } from '../middleware/auth.js';
+import { validateParams, validateBody } from '../middleware/validate.js';
+import { verifyOrderParamsSchema, documentCheckSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 const verificationService = new VerificationService();
 
 // Verification endpoint for orders
-router.get('/order/:orderId', async (req, res) => {
+router.get('/order/:orderId', authenticate, validateParams(verifyOrderParamsSchema), async (req, res) => {
   try {
     const { orderId } = req.params;
     const result = await verificationService.verifyOrder(orderId);
@@ -23,7 +26,7 @@ router.get('/order/:orderId', async (req, res) => {
 });
 
 // Document integrity check
-router.post('/documents/check', async (req, res) => {
+router.post('/documents/check', authenticate, validateBody(documentCheckSchema), async (req, res) => {
   try {
     const { driverId } = req.body;
     const result = await verificationService.checkDocumentIntegrity(driverId);

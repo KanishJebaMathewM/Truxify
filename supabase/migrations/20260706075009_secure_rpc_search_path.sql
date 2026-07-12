@@ -99,8 +99,8 @@ BEGIN
   -- Use COALESCE to prefer bid_amount (immutable) over total_amount (mutable)
   UPDATE driver_details
   SET total_trips = total_trips + 1,
-      wallet_confirmed = wallet_confirmed + COALESCE(v_order.bid_amount, v_order.total_amount),
-      wallet_total = wallet_total + COALESCE(v_order.bid_amount, v_order.total_amount),
+      wallet_confirmed = wallet_confirmed + COALESCE(v_order.bid_amount, v_order.total_amount, 0),
+      wallet_total = wallet_total + COALESCE(v_order.bid_amount, v_order.total_amount, 0),
       updated_at = NOW()
   WHERE user_id = v_order.driver_id;
 
@@ -114,14 +114,14 @@ BEGIN
   ) VALUES (
     v_order.driver_id,
     v_order.order_display_id,
-    COALESCE(v_order.bid_amount, v_order.total_amount),
+    COALESCE(v_order.bid_amount, v_order.total_amount, 0),
     'credit',
     'confirmed',
     'Payout for Order ' || v_order.order_display_id
   );
 
   INSERT INTO earnings_daily (driver_id, day_date, amount, trip_count)
-  VALUES (v_order.driver_id, CURRENT_DATE, COALESCE(v_order.bid_amount, v_order.total_amount), 1)
+  VALUES (v_order.driver_id, CURRENT_DATE, COALESCE(v_order.bid_amount, v_order.total_amount, 0), 1)
   ON CONFLICT (driver_id, day_date)
   DO UPDATE SET
     amount = earnings_daily.amount + EXCLUDED.amount,

@@ -30,6 +30,12 @@ import healthRoutes from './routes/healthRoutes.js'
 import adminRoutes from './routes/adminRoutes.js'
 import lookupRoutes from './routes/lookupRoutes.js'
 
+// ============================================================================
+// 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
+// ============================================================================
+import verificationRoutes from './routes/verificationRoutes.js'
+import oracleRoutes from './routes/oracleRoutes.js'
+
 import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
@@ -76,6 +82,17 @@ if (process.env.NODE_ENV === 'production' && (!process.env.POLYGON_RPC_URL || !p
 if (!process.env.DRIVER_LOGIN_OTP) {
   logger.warn('DRIVER_LOGIN_OTP is not set. Driver OTP login will be disabled until it is configured in production.')
 }
+
+// ============================================================================
+// 🆕 ORACLE VALIDATION
+// ============================================================================
+if (!process.env.ORACLE_CONSENSUS_THRESHOLD) {
+  logger.warn('ORACLE_CONSENSUS_THRESHOLD not set, using default: 2')
+}
+if (!process.env.CHAINLINK_ENABLED && !process.env.BACKUP_ORACLE_ENABLED) {
+  logger.warn('No oracle providers enabled. Set CHAINLINK_ENABLED=true or BACKUP_ORACLE_ENABLED=true')
+}
+
 // Validate escrow contract deployment — log warning if validation fails,
 // but don't crash (non-escrow functionality should still work).
 validateEscrowSetup().then((valid) => {
@@ -203,6 +220,28 @@ app.use('/api/v1', lookupRoutes)
 app.use('/api/auth', authLimiter, authRoutes)
 app.use('/api/v1/admin', adminRoutes)
 
+// ============================================================================
+// 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
+// ============================================================================
+app.use('/api/verify', verificationRoutes)
+app.use('/api/oracle', oracleRoutes)
+
+// 🆕 Oracle Health Check Endpoint
+app.get('/api/oracle/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    version: '1.0.0',
+    oracleEnabled: true,
+    consensusThreshold: process.env.ORACLE_CONSENSUS_THRESHOLD || 2,
+    providers: {
+      chainlink: process.env.CHAINLINK_ENABLED === 'true',
+      customVerifier: true,
+      backupOracle: process.env.BACKUP_ORACLE_ENABLED === 'true'
+    },
+    timestamp: new Date().toISOString()
+  })
+})
+
 // Setup Swagger Documentation
 setupSwagger(app)
 
@@ -249,6 +288,8 @@ const PORT = process.env.PORT || 5000
 
 server.listen(PORT, () => {
   logger.info(`Truxify API listening on port ${PORT}`)
+  logger.info(`🆕 Oracle Service enabled with threshold: ${process.env.ORACLE_CONSENSUS_THRESHOLD || 2}`)
+  logger.info(`🆕 Verification endpoints available at /api/verify and /api/oracle`)
   startEscrowRefundReconciliation(orderRepository)
   startEscrowReleaseReconciliation()
   startReputationReconciliation()

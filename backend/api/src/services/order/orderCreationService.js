@@ -5,6 +5,7 @@ import { computeOrderPricing } from '../../lib/pricing.js';
 import { predictPrice } from '../ml.js';
 import { DomainError } from './bidAcceptanceService.js';
 import logger from '../../middleware/logger.js';
+import { measureExecution } from '../../core/performanceMetrics.js';
 
 function generateOrderDisplayId() {
   const prefix = '#FF';
@@ -15,6 +16,7 @@ function generateOrderDisplayId() {
 }
 
 export async function createOrder({ orderData, userId, user }) {
+  return measureExecution('OrderCreationService.createOrder', async () => {
   const {
     pickup_address, pickup_lat, pickup_lng,
     drop_address, drop_lat, drop_lng,
@@ -157,4 +159,5 @@ export async function createOrder({ orderData, userId, user }) {
   }
 
   return { message: 'Order created successfully and broadcasted to loads board.', order };
+  });
 }

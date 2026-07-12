@@ -31,7 +31,6 @@
     "helmet": "^8.2.0",
     "i18next": "^26.3.4",
     "i18next-http-middleware": "^3.9.7",
-    "ioredis": "^5.11.1",
     "ipfs-http-client": "^60.0.0",
     "jsonwebtoken": "^9.0.0",
     "mongodb": "^7.4.0",

@@ -11,6 +11,18 @@ class CacheManager {
       return null;
     }
   }
+
+  Map<String, dynamic>? _decodeMap(String json) {
+    final decoded = _safeDecode(json);
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    if (decoded is Map) {
+      return Map<String, dynamic>.from(decoded);
+    }
+    return null;
+  }
+
   static const _dbName = 'truxify_cache.db';
 
   Database? _database;
@@ -124,13 +136,23 @@ class CacheManager {
       limit: limit,
     );
 
-    final results = rows.map((row) {
-      final payload = jsonDecode(row['payload'] as String) as Map<String, dynamic>;
-      return <String, dynamic>{
+    final results = <Map<String, dynamic>>[];
+
+    for (final row in rows) {
+      final payload = _decodeMap(row['payload'] as String);
+      if (payload == null) {
+        final id = row['id'];
+        if (id is String) {
+          await db.delete('orders', where: 'id = ?', whereArgs: [id]);
+        }
+        continue;
+      }
+
+      results.add(<String, dynamic>{
         ...payload,
         '_cached_at': row['updated_at'],
-      };
-    }).toList();
+      });
+    }
 
     if (activeOnly) {
       const activeStatuses = {

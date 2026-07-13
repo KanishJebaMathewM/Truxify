@@ -72,6 +72,7 @@ import {
   startReputationReconciliation,
   stopReputationReconciliation,
 } from './services/reputationReconciliation.js'
+import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
 

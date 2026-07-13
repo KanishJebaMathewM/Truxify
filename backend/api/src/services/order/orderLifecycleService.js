@@ -18,7 +18,7 @@ import {
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { getRouteEstimate } from '../osrm.js';
 import { predictPrice } from '../ml.js';
-import { awardReputationPoints } from '../reputation.js';
+import { eventBus } from '../../core/events.js';
 import logger from '../../middleware/logger.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -792,16 +792,15 @@ export class OrderLifecycleService {
     const polygonAddress = driverDetails?.polygon_wallet_address ?? null;
 
     if (polygonAddress) {
-      void awardReputationPoints(polygonAddress, stars).catch(async (repErr) => {
-        logger.error('[reputation] On-chain reputation update failed:', repErr.message);
-        await this.orderRepository.insertReputationFailure({
-          driver_wallet: polygonAddress,
-          stars,
-          failed_at: new Date().toISOString(),
-          retry_count: 0,
-          last_error: repErr.message,
-        }).catch((dbErr) => logger.error('[reputation] Failed to log failure:', dbErr.message));
-      });
+      try {
+        eventBus.emitSafe('rating:submitted', { 
+          driverWallet: polygonAddress, 
+          stars, 
+          orderDisplayId: order.order_display_id 
+        });
+      } catch (err) {
+        logger.error(`[OrderLifecycle] Failed to emit rating:submitted event: ${err.message}`);
+      }
     } else {
       logger.warn(`[reputation] Driver ${order.driver_id} has no polygon_wallet_address — skipping on-chain update.`);
     }

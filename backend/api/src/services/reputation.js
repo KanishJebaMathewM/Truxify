@@ -34,10 +34,6 @@ function safeSubtract(a, b) {
   return Number.isFinite(result) ? result : 0;
 }
 
-function clampReputation(value) {
-  return Math.max(0, Math.min(100, Number(value) || 0));
-}
-
 // Minimal ABI — only the subset the backend needs to call.
 const REPUTATION_ABI = [
   'function increaseReputation(address driver, uint256 points) external',

@@ -23,6 +23,12 @@ function requireDriverRole(req, res, next) {
   next();
 }
 
+function parseIntegerQuery(value) {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(String(value))) return NaN;
+  return Number.parseInt(value, 10);
+}
+
 
 // ============================================================================
 // 1. GET DRIVER STATS (DRIVER)
@@ -99,8 +105,8 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
 // ============================================================================
 router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:view-wallet'), async (req, res) => {
   try {
-    const page = parseInt(req.query.page || '1', 10);
-    const limit = parseInt(req.query.limit || '20', 10);
+    const page = parseIntegerQuery(req.query.page) ?? 1;
+    const limit = parseIntegerQuery(req.query.limit) ?? 20;
 
     // Validation
     if (isNaN(page) || page < 1) {

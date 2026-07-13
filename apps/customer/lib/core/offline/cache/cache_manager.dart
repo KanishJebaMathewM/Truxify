@@ -4,6 +4,15 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 class CacheManager {
+  static const Set<String> _cacheTables = {
+    'orders',
+    'profile',
+    'documents',
+    'settings',
+    'last_location',
+    'milestones',
+  };
+
   dynamic _safeDecode(String json) {
     try {
       return jsonDecode(json);
@@ -361,6 +370,9 @@ class CacheManager {
   }
 
   Future<int> clearTable(String tableName) async {
+    if (!_cacheTables.contains(tableName)) {
+      throw ArgumentError.value(tableName, 'tableName', 'unknown cache table');
+    }
     final db = await open();
     return db.delete(tableName);
   }

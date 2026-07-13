@@ -1,4 +1,8 @@
 import logger from '../middleware/logger.js';
+import { LRUCache } from '../utils/cache.js';
+
+const demandCache = new LRUCache(100, 15 * 60 * 1000);
+const priceCache = new LRUCache(100, 15 * 60 * 1000);
 
 // Single source of truth for ML engine base URL
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
@@ -63,16 +67,22 @@ function getBaseUrl() {
  */
 export async function predictDemand(features = {}) {
   guardMlApiKey();
-    const url = `${getBaseUrl()}/predict/demand`;
+  const cacheKey = JSON.stringify(features);
+  const cached = demandCache.get(cacheKey);
+  if (cached !== undefined) return cached;
 
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(features),
-        signal: AbortSignal.timeout(5000),
-    });
+  const url = `${getBaseUrl()}/predict/demand`;
 
-    return handleResponse(response);
+  const response = await fetch(url, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(features),
+      signal: AbortSignal.timeout(5000),
+  });
+
+  const result = await handleResponse(response);
+  demandCache.set(cacheKey, result);
+  return result;
 }
 
 /**
@@ -88,24 +98,31 @@ export async function predictPrice({
     routeDestination = '',
 } = {}) {
   guardMlApiKey();
-    const url = `${getBaseUrl()}/predict/price`;
+  
+  const cacheKey = JSON.stringify({ distanceKm, cargoWeightKg, truckType, routeOrigin, routeDestination });
+  const cached = priceCache.get(cacheKey);
+  if (cached !== undefined) return cached;
 
-    const payload = {
-        distance_km: distanceKm,
-        cargo_weight_kg: cargoWeightKg,
-        truck_type: truckType,
-        route_origin: routeOrigin,
-        route_destination: routeDestination,
-    };
+  const url = `${getBaseUrl()}/predict/price`;
 
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: getHeaders(),
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(5000),
-    });
+  const payload = {
+      distance_km: distanceKm,
+      cargo_weight_kg: cargoWeightKg,
+      truck_type: truckType,
+      route_origin: routeOrigin,
+      route_destination: routeDestination,
+  };
 
-  return handleResponse(response);
+  const response = await fetch(url, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000),
+  });
+
+  const result = await handleResponse(response);
+  priceCache.set(cacheKey, result);
+  return result;
 }
 
 /**
@@ -314,3 +331,8 @@ export async function listModels() {
   });
   return handleResponse(response);
 }
+
+export const __testing = {
+  demandCache,
+  priceCache
+};

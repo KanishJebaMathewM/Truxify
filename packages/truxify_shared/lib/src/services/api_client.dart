@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
 import 'dart:developer' as developer;
@@ -7,6 +8,8 @@ import 'package:http/http.dart' as http;
 import 'dart:io';
 import 'package:http/io_client.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../config/app_config.dart';
 
 /// Exception thrown when an API request fails after token refresh.
 class ApiAuthException implements Exception {
@@ -55,16 +58,19 @@ class ApiClient {
     SupabaseClient? supabaseClient,
     http.Client? httpClient,
     String? baseUrl,
+    Duration? timeout,
   })  : _providedSupabase = supabaseClient,
         _isClientOwned = httpClient == null,
         _http = httpClient ?? _createPinnedClient(),
-        _baseUrl = _normalise(_getBaseUrl(baseUrl));
+        _baseUrl = _normalise(_getBaseUrl(baseUrl)),
+        _timeout = timeout ?? AppConfig.apiTimeout;
 
   final SupabaseClient? _providedSupabase;
   SupabaseClient get _supabase => _providedSupabase ?? Supabase.instance.client;
   final http.Client _http;
   final bool _isClientOwned;
   final String _baseUrl;
+  final Duration _timeout;
 
   static String _getBaseUrl(String? overrideUrl) {
     if (overrideUrl != null) return overrideUrl;
@@ -153,7 +159,7 @@ class ApiClient {
     if (!isRetry) {
       await _accessTokenAsync;
     }
-    final response = await fn(_headers(additionalHeaders: additionalHeaders));
+    final response = await fn(_headers(additionalHeaders: additionalHeaders)).timeout(_timeout);
 
     if (response.statusCode == 401 && !isRetry) {
       if (kDebugMode) {
@@ -170,7 +176,7 @@ class ApiClient {
         );
       }
 
-      final retryResponse = await fn(_headers(token: newToken, additionalHeaders: additionalHeaders));
+      final retryResponse = await fn(_headers(token: newToken, additionalHeaders: additionalHeaders)).timeout(_timeout);
       if (retryResponse.statusCode == 401) {
         throw const ApiAuthException(
           'Authentication failed after token refresh. Please log in again.',

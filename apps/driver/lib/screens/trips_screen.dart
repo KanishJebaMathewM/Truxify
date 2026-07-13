@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_shared/truxify_shared.dart';
+import 'package:truxify_shared/shimmer_widget.dart';
 import '../core/app_routes.dart';
 import '../core/supabase_config.dart';
 import '../models/app_models.dart';
@@ -13,7 +15,8 @@ import '../widgets/common_widgets.dart';
 import '../services/marketplace_repository.dart';
 import '../services/trip_cache.dart';
 import '../services/trip_service.dart';
-import 'package:truxify_shared/shimmer_widget.dart';
+import '../services/sync_service.dart';
+import 'pod_screen.dart';
 
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
@@ -64,6 +67,7 @@ class _TripsScreenState extends State<TripsScreen> {
   @override
   void initState() {
     super.initState();
+    SyncService.instance.startListening();
     _tripService = TripService();
     _scrollController.addListener(_onScroll);
     _loadTrips();
@@ -224,10 +228,22 @@ class _TripsScreenState extends State<TripsScreen> {
 
     if (currentStop.isEmpty) return;
 
-    await _tripService.markStopCompleted(
-      currentStop['id'].toString(),
-      currentStop['trip_display_id'].toString(),
-    );
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (context) => ProofOfDeliveryScreen(
+        tripDisplayId: currentStop['trip_display_id'].toString(),
+        stopId: currentStop['id'].toString(),
+        onComplete: (photoPath, signPath) async {
+          await SyncService.instance.queueOrSyncPoD(
+            tripDisplayId: currentStop['trip_display_id'].toString(),
+            stopId: currentStop['id'].toString(),
+            photoPath: photoPath,
+            signaturePath: signPath,
+          );
+        },
+      ),
+    ));
+    
     await _loadTrips();
   }
 
@@ -421,7 +437,9 @@ class _TripsScreenState extends State<TripsScreen> {
 
   @override
   void dispose() {
+    SyncService.instance.stopListening();
     _scrollController.dispose();
+    _marketScrollController.dispose();
     if (SupabaseConfig.isConfigured && _bidChannel != null) {
       Supabase.instance.client.removeChannel(_bidChannel!);
     }

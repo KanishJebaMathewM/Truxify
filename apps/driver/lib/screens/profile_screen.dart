@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:http/http.dart' as http;
 
 import '../controllers/app_controller.dart';
 import '../core/app_routes.dart';
@@ -96,40 +94,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
         return;
       }
 
-      const apiBaseUrl = String.fromEnvironment(
-        'TRUXIFY_API_BASE_URL',
-        defaultValue: 'http://localhost:5000',
-      );
+      final apiClient = ApiClient(timeout: AppConfig.profileUpdateTimeout);
+      try {
+        final data = await apiClient.get('/api/driver/$driverId/reputation');
 
-      final uri = Uri.parse('$apiBaseUrl/api/driver/$driverId/reputation');
-      final token = client.auth.currentSession?.accessToken;
-      final response = await http.get(
-        uri,
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
-        },
-      ).timeout(AppConfig.profileUpdateTimeout);
+        if (!mounted) return;
 
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        setState(() {
-          _platformRating = data['supabaseRating'] != null
-              ? (data['supabaseRating'] as num).toDouble()
-              : null;
-          _onChainScore = data['onChainScore'] != null
-              ? (data['onChainScore'] as num).toInt()
-              : null;
-          _walletAddress = data['walletAddress']?.toString() ?? '';
-          _isLoadingReputation = false;
-        });
-      } else {
-        setState(() {
-          _reputationUnavailable = true;
-          _isLoadingReputation = false;
-        });
+        if (data is Map<String, dynamic>) {
+          setState(() {
+            _platformRating = data['supabaseRating'] != null
+                ? (data['supabaseRating'] as num).toDouble()
+                : null;
+            _onChainScore = data['onChainScore'] != null
+                ? (data['onChainScore'] as num).toInt()
+                : null;
+            _walletAddress = data['walletAddress']?.toString() ?? '';
+            _isLoadingReputation = false;
+          });
+        } else {
+          setState(() {
+            _reputationUnavailable = true;
+            _isLoadingReputation = false;
+          });
+        }
+      } finally {
+        apiClient.dispose();
       }
     } catch (e) {
       if (mounted) {
@@ -496,19 +485,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   final address = walletController.text.trim();
                   if (address.isEmpty) return;
                   try {
-                    final client = Supabase.instance.client;
-                    final token = client.auth.currentSession?.accessToken;
-                    final response = await http.put(
-                      Uri.parse('${const String.fromEnvironment('TRUXIFY_API_BASE_URL', defaultValue: 'http://localhost:5000')}/api/profile/wallet'),
-                      headers: <String, String>{
-                        'Content-Type': 'application/json',
-                        if (token != null) 'Authorization': 'Bearer $token',
-                      },
-                      body: jsonEncode(<String, String>{
-                        'wallet_address': address,
-                      }),
-                    );
-                    if (response.statusCode == 200) {
+                    final apiClient = ApiClient();
+                    try {
+                      await apiClient.put(
+                        '/api/profile/wallet',
+                        body: <String, String>{
+                          'wallet_address': address,
+                        },
+                      );
                       setState(() {
                         _walletAddress = address;
                       });
@@ -521,18 +505,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           backgroundColor: TruxifyColors.success,
                         ),
                       );
-                    } else {
-                      final body = jsonDecode(response.body)
-                          as Map<String, dynamic>;
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(body['error']?.toString() ??
-                                'Failed to update wallet'),
-                            backgroundColor: TruxifyColors.errorRed,
-                          ),
-                        );
-                      }
+                    } finally {
+                      apiClient.dispose();
+                    }
+                  } on ApiException catch (e) {
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(e.message),
+                          backgroundColor: TruxifyColors.errorRed,
+                        ),
+                      );
                     }
                   } catch (e) {
                     if (context.mounted) {
@@ -1128,26 +1111,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
               try {
                 if (SupabaseConfig.isConfigured) {
                   final client = Supabase.instance.client;
-                  final session = client.auth.currentSession;
-                  final accessToken = session?.accessToken;
-                  final driverId = client.auth.currentUser?.id;
 
-                  if (accessToken != null && driverId != null) {
-                    const apiBaseUrl = String.fromEnvironment(
-                      'TRUXIFY_API_BASE_URL',
-                      defaultValue: 'http://localhost:5000',
-                    );
-                    try {
-                      await http.post(
-                        Uri.parse('$apiBaseUrl/api/auth/logout'),
-                        headers: <String, String>{
-                          'Content-Type': 'application/json',
-                          'Authorization': 'Bearer $accessToken',
-                        },
-                      ).timeout(AppConfig.quickActionTimeout);
-                    } catch (e) {
-                      debugPrint('Backend logout failed: $e');
-                    }
+                  final apiClient = ApiClient(timeout: AppConfig.quickActionTimeout);
+                  try {
+                    await apiClient.post('/api/auth/logout');
+                  } catch (e) {
+                    debugPrint('Backend logout failed: $e');
+                  } finally {
+                    apiClient.dispose();
                   }
 
                   // Unregister and clear FCM token on logout so this device stops

@@ -22,6 +22,23 @@ export 'src/repositories/support_repository.dart';
 // ── Screens ─────────────────────────────────────────────────────────
 export 'src/screens/help_center_screen.dart';
 export 'src/screens/notifications_screen.dart';
+export 'shimmer_widget.dart';
+
+export 'package:flutter/widgets.dart' show Widget, BuildContext;
+export 'package:http/http.dart' show Client, Response;
+
+class SharedHelpers {
+  static String truncate(String text, int maxLen) =>
+      text.length > maxLen ? '${text.substring(0, maxLen - 3)}...' : text;
+  static bool isValidEmail(String email) =>
+      RegExp(r'^[\w.+-]+@[\w-]+\.[\w.]+$').hasMatch(email);
+  static String capitalize(String s) =>
+      s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
+  static String formatPhone(String phone) =>
+      phone.replaceAll(RegExp(r'[\s\-()]'), '');
+  static String initials(String name) =>
+      name.split(' ').where((w) => w.isNotEmpty).take(2).map((w) => w[0].toUpperCase()).join();
+}
 
 // ── Widgets ─────────────────────────────────────────────────────────
 export 'shimmer_widget.dart';

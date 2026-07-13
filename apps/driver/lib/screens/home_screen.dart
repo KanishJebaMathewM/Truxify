@@ -10,7 +10,6 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
-import 'package:truxify_driver/widgets/slide_to_confirm_button.dart';
 
 import '../core/app_routes.dart';
 import '../models/app_models.dart';
@@ -22,11 +21,14 @@ import '../services/route_service.dart';
 import '../services/trip_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_theme.dart';
-import '../widgets/common_widgets.dart';
-import '../widgets/earnings_shimmer.dart';
 import '../widgets/map_markers.dart';
+import '../widgets/home/offline_banner.dart';
+import '../widgets/home/active_navigation_header.dart';
+import '../widgets/home/search_destination_card.dart';
+import '../widgets/home/new_load_notification_banner.dart';
+import '../widgets/home/driver_status_sheet.dart';
+import '../widgets/home/active_trip_sheet.dart';
 import 'destination_picker_screen.dart';
-import '../widgets/pulsing_location_dot.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -751,10 +753,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             // Map
             Positioned.fill(
-              child: _buildMapBody(
-                context,
-                showDestinationChip: _destination != null,
-              ),
+              child: _buildMapBody(context),
             ),
 
             // Top Bar
@@ -767,29 +766,21 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_isOffline)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                        decoration: BoxDecoration(
-                          color: TruxifyColors.errorRed,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.cloud_off_rounded, color: Colors.white, size: 16),
-                            const SizedBox(width: 8),
-                            Text(
-                              'You are offline. Using cached trip details.',
-                              style: GoogleFonts.dmSans(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                        ),
-                      ),
+                    if (_isOffline) const OfflineBanner(),
                     _isTripStarted
-                        ? _buildActiveNavigationHeader(context)
-                        : _buildSearchCard(context),
+                        ? ActiveNavigationHeader(
+                            destinationAddress:
+                                _destination?.address ?? 'Destination',
+                          )
+                        : SearchDestinationCard(
+                            currentLocationText: _currentLocationText,
+                            destination: _destination,
+                            isLoadingLocation: _isLoadingLocation,
+                            isRefreshingLocation: _isRefreshingLocation,
+                            locationError: _locationError,
+                            onRefreshLocation: _fetchCurrentLocation,
+                            onOpenDestinationPicker: _openDestinationPicker,
+                          ),
                   ],
                 ),
               ),
@@ -801,116 +792,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 left: 12,
                 right: 12,
                 top: 96,
-                child: GestureDetector(
-                  onTap: () {
+                child: NewLoadNotificationBanner(
+                  load: _latestNewLoad!,
+                  onView: () {},
+                  onDismiss: () {
                     setState(() => _dismissedNewLoad = true);
-                    Navigator.of(context).pushNamed(
-                      AppRoutes.loadDetail,
-                      arguments: _latestNewLoad,
-                    );
                   },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: TruxifyColors.accent,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [
-                        BoxShadow(
-                          color: TruxifyColors.accent.withValues(alpha: 0.25),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.local_shipping_rounded,
-                            color: Colors.white, size: 18),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                'New Load Available!',
-                                style: GoogleFonts.dmSans(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                _latestNewLoad!.route,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.dmSans(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              const SizedBox(height: 1),
-                              Text(
-                                '${_latestNewLoad!.weight != '—' ? '${_latestNewLoad!.weight} ' : ''}${_latestNewLoad!.goods} • ${_latestNewLoad!.estimatedProfit}',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.dmSans(
-                                  fontSize: 10,
-                                  color: Colors.white.withValues(alpha: 0.85),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        GestureDetector(
-                          key: const Key('realtime_notification_view_button'),
-                          onTap: () {
-                            setState(() => _dismissedNewLoad = true);
-                            Navigator.of(context).pushNamed(
-                              AppRoutes.loadDetail,
-                              arguments: _latestNewLoad,
-                            );
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              'View',
-                              style: GoogleFonts.dmSans(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: TruxifyColors.accent,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        GestureDetector(
-                          key: const Key('realtime_notification_close_button'),
-                          onTap: () {
-                            setState(() => _dismissedNewLoad = true);
-                          },
-                          child: Icon(
-                            Icons.close_rounded,
-                            color: Colors.white.withValues(alpha: 0.7),
-                            size: 20,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               ),
 
-            // Recenter FAB — hidden until GPS is ready
+            // Recenter FAB
             if (_currentLocation != null)
               AnimatedPositioned(
                 duration: const Duration(milliseconds: 300),
@@ -948,65 +839,57 @@ class _HomeScreenState extends State<HomeScreen> {
                       });
                     },
                     child: _destination == null
-                        ? _buildBottomSheet(context)
-                        : _buildActiveTripSheet(context),
+                        ? DriverStatusSheet(
+                            isOnline: _isOnline,
+                            isLoadingLocation: _isLoadingLocation,
+                            currentLocationLabel: _currentLocationLabel,
+                            isLoadingMetrics: _isLoadingMetrics,
+                            metricsError: _metricsError,
+                            todayEarnings: _todayEarnings,
+                            driverRating: _driverRating,
+                            onToggleOnline: _toggleOnlineState,
+                          )
+                        : ActiveTripSheet(
+                            isTripStarted: _isTripStarted,
+                            truckLabel: _activeTruckLabel,
+                            currentLocationLabel: _currentLocationLabel,
+                            destinationAddress:
+                                _destination?.address ?? 'Destination',
+                            distance: _activeTripDistance,
+                            duration: _activeTripDuration,
+                            payout: _activeTripPayout,
+                            onStartTrip: () async {
+                              if (_activeTripId == null) {
+                                setState(() => _isTripStarted = true);
+                                return;
+                              }
+                              try {
+                                await _tripService.startTrip(_activeTripId!);
+                                if (mounted) {
+                                  setState(() => _isTripStarted = true);
+                                }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                        content:
+                                            Text('Failed to start trip: $e')),
+                                  );
+                                }
+                              }
+                            },
+                            onCompleteTrip: () async {
+                              await _completeRide();
+                            },
+                            onCancel: _clearDestination,
+                            onOpenMaps: _openGoogleMapsRoute,
+                          ),
                   ),
                 ),
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildActiveNavigationHeader(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: TruxifyColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 18,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      child: Row(
-        children: [
-          const LivePulseDot(color: TruxifyColors.success, size: 10),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'NAVIGATION ACTIVE',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: TruxifyColors.success,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                Text(
-                  'Heading to ${_destination?.address ?? "Destination"}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.dmSans(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.onSurface,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -1053,8 +936,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return DateTime(year, month, day);
   }
 
-  Widget _buildMapBody(BuildContext context,
-      {required bool showDestinationChip}) {
+  Widget _buildMapBody(BuildContext context) {
     // Show loading spinner while GPS is being fetched
     if (_isLoadingLocation) {
       return Container(
@@ -1220,324 +1102,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return indexes.map((index) => routePoints[index]).toList(growable: false);
   }
 
-  Widget _buildSearchCard(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: TruxifyColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 18,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const PulsingLocationDot(),
-                Container(width: 1, height: 12, color: TruxifyColors.border),
-                const Icon(Icons.location_on_rounded,
-                    size: 14, color: TruxifyColors.errorRed),
-              ],
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  GestureDetector(
-                    onTap: _fetchCurrentLocation,
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: _isLoadingLocation
-                                ? Text(
-                                    'Fetching your location...',
-                                    style: GoogleFonts.dmSans(
-                                      fontSize: 13,
-                                      color:
-                                          TruxifyColors.adaptiveSecondaryText(
-                                              context),
-                                    ),
-                                  )
-                                : _locationError != null
-                                    ? Text(
-                                        _locationError!,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: GoogleFonts.dmSans(
-                                          fontSize: 13,
-                                          color: TruxifyColors.errorRed,
-                                        ),
-                                      )
-                                    : Text(
-                                        _currentLocationText ??
-                                            'Tap to refresh location',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: GoogleFonts.dmSans(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSurface,
-                                        ),
-                                      ),
-                          ),
-                          _isRefreshingLocation || _isLoadingLocation
-                              ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 1.5,
-                                    color: TruxifyColors.accent,
-                                  ),
-                                )
-                              : Icon(
-                                  _locationError != null
-                                      ? Icons.error_outline_rounded
-                                      : Icons.refresh_rounded,
-                                  size: 16,
-                                  color: _locationError != null
-                                      ? TruxifyColors.errorRed
-                                      : TruxifyColors.adaptiveSecondaryText(
-                                          context),
-                                ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const Divider(height: 12, color: TruxifyColors.border),
-                  GestureDetector(
-                    onTap: _openDestinationPicker,
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Text(
-                        _destination?.address ?? 'Where are you heading?',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.dmSans(
-                          fontSize: 13,
-                          fontWeight: _destination == null
-                              ? FontWeight.normal
-                              : FontWeight.w600,
-                          color: _destination == null
-                              ? TruxifyColors.hintText
-                              : TruxifyColors.primaryText,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBottomSheet(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        border: Border.all(color: TruxifyColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: _isOnline ? TruxifyColors.success : TruxifyColors.secondaryText,
-                      shape: BoxShape.circle,
-                      boxShadow: [
-                        BoxShadow(
-                          color: (_isOnline ? TruxifyColors.success : TruxifyColors.secondaryText).withValues(alpha: 0.4),
-                          blurRadius: 6,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _isOnline ? 'Online & Ready' : 'Offline',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                ],
-              ),
-              Switch(
-                value: _isOnline,
-                onChanged: (_) => _toggleOnlineState(),
-                activeThumbColor: TruxifyColors.success,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            !_isOnline
-                ? 'Offline. Go online to receive load assignments.'
-                : _isLoadingLocation
-                    ? 'Radar active. Fetching your location...'
-                    : 'Radar active. Looking for load assignments near $_currentLocationLabel...',
-            style: GoogleFonts.dmSans(
-              fontSize: 11,
-              color: TruxifyColors.adaptiveSecondaryText(context),
-            ),
-          ),
-          const SizedBox(height: 16),
-          if (_isLoadingMetrics)
-            const SummaryCardsShimmer()
-          else if (_metricsError != null)
-            _buildErrorMetrics()
-          else
-            _buildMetricsRow(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMetricsRow() {
-    final payValue = _todayEarnings != null
-        ? '₹${_todayEarnings!.amount.toStringAsFixed(0)}'
-        : '—';
-    final hoursValue = _todayEarnings != null
-        ? '${_todayEarnings!.hoursDriven.toStringAsFixed(1)} hrs'
-        : '—';
-    final ratingValue = _driverRating != null
-        ? _driverRating!.toStringAsFixed(2)
-        : '—';
-
-    return Row(
-      children: [
-        Expanded(
-          child: _buildShiftMetric(
-            icon: Icons.account_balance_wallet_outlined,
-            value: payValue,
-            label: 'Today\'s Pay',
-            labelKey: const Key('today_pay_label'),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _buildShiftMetric(
-            icon: Icons.timer_outlined,
-            value: hoursValue,
-            label: 'Shift Hours',
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _buildShiftMetric(
-            icon: Icons.star_border_rounded,
-            value: ratingValue,
-            label: 'Rating',
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildErrorMetrics() {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? Theme.of(context).colorScheme.surfaceContainerHighest
-            : TruxifyColors.background,
-        border: Border.all(color: TruxifyColors.border),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline_rounded,
-              size: 14, color: TruxifyColors.errorRed),
-          const SizedBox(width: 6),
-          Text(
-            'Metrics unavailable',
-            style: GoogleFonts.dmSans(
-              fontSize: 11,
-              color: TruxifyColors.errorRed,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildShiftMetric(
-      {required IconData icon,
-      required String value,
-      required String label,
-      Key? labelKey}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
-      decoration: BoxDecoration(
-        color: Theme.of(context).brightness == Brightness.dark
-            ? Theme.of(context).colorScheme.surfaceContainerHighest
-            : TruxifyColors.background,
-        border: Border.all(color: TruxifyColors.border),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        children: [
-          Icon(icon, size: 16, color: TruxifyColors.accent),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: GoogleFonts.dmSans(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-          Text(
-            label,
-            key: labelKey,
-            style: GoogleFonts.dmSans(
-              fontSize: 9,
-              color: TruxifyColors.adaptiveSecondaryText(context),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _openGoogleMapsRoute() async {
     if (_destination == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1588,159 +1152,5 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Widget _buildActiveTripSheet(BuildContext context) {
-    final routeStr = _destination?.address ?? 'Destination';
-    return Container(
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: TruxifyColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
-            blurRadius: 20,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _isTripStarted
-                      ? TruxifyColors.successLight
-                      : TruxifyColors.accentLight,
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  _isTripStarted ? 'EN-ROUTE' : 'ASSIGNED LOAD',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                    color: _isTripStarted
-                        ? TruxifyColors.success
-                        : TruxifyColors.accent,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _activeTruckLabel,
-                  style: GoogleFonts.dmSans(
-                    fontSize: 11,
-                    color: TruxifyColors.adaptiveSecondaryText(context),
-                  ),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.navigation_rounded),
-                color: TruxifyColors.accent,
-                onPressed: _openGoogleMapsRoute,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '$_currentLocationLabel → $routeStr',
-            style: GoogleFonts.dmSans(
-              fontSize: 15,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _buildTripSpec('Distance', _activeTripDistance.isNotEmpty ? _activeTripDistance : '--'),
-              _buildTripSpec('Est. Duration', _activeTripDuration.isNotEmpty ? _activeTripDuration : '--'),
-              _buildTripSpec('Est. Payout', _activeTripPayout.isNotEmpty ? _activeTripPayout : '--'),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (_isTripStarted) ...[
-            SlideToConfirmButton(
-              label: 'Slide to Complete Trip',
-              backgroundColor: TruxifyColors.success,
-              onConfirmed: () async {
-              await _completeRide();
-              },
-            ),
-          ] else ...[
-            SlideToConfirmButton(
-              label: 'Slide to Start Trip',
-              backgroundColor: TruxifyColors.accent,
-              onConfirmed: () async {
-                if (_activeTripId == null) {
-                  setState(() => _isTripStarted = true);
-                  return;
-                }
-                try {
-                  await _tripService.startTrip(_activeTripId!);
-                  if (mounted) {
-                    setState(() => _isTripStarted = true);
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to start trip: $e')),
-                    );
-                  }
-                }
-              },
-            ),
-            const SizedBox(height: 8),
-            Center(
-              child: InkWell(
-                onTap: _clearDestination,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text(
-                    'Cancel Assignment',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: TruxifyColors.adaptiveSecondaryText(context),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTripSpec(String label, String value) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.dmSans(
-            fontSize: 10,
-            color: TruxifyColors.adaptiveSecondaryText(context),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: GoogleFonts.dmSans(
-            fontSize: 13,
-            fontWeight: FontWeight.bold,
-            color: Theme.of(context).colorScheme.onSurface,
-          ),
-        ),
-      ],
-    );
-  }
 }
+

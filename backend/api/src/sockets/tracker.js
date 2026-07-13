@@ -78,6 +78,11 @@ const trackingSubscriptions = new Map();
 // channel per location ping. Reused across pings and cleaned up on disconnect.
 const locationChannels = new Map();
 
+// Reverse index from orderDisplayId to the set of orderUUID keys in locationChannels.
+// Used during disconnect cleanup so channels are properly removed when the last
+// subscriber for a display ID disconnects.
+const displayIdToLocationChannelKeys = new Map();
+
 // =====================================================================
 // CLOCK SKEW & CIRCUIT BREAKER CONFIGURATION (#596)
 // =====================================================================
@@ -759,6 +764,12 @@ export async function handleLocationPing(ws, data, req) {
       const channel = supabase.channel(`driver-location:${orderUUID}`);
       channel.subscribe();
       locationChannels.set(orderUUID, channel);
+      if (orderDisplayId) {
+        if (!displayIdToLocationChannelKeys.has(orderDisplayId)) {
+          displayIdToLocationChannelKeys.set(orderDisplayId, new Set());
+        }
+        displayIdToLocationChannelKeys.get(orderDisplayId).add(orderUUID);
+      }
     }
     const channel = locationChannels.get(orderUUID);
     channel.send({
@@ -1111,16 +1122,21 @@ async function removeClientFromAllSubscriptions(ws) {
     }
     if (clients.size === 0) {
       trackingSubscriptions.delete(key);
-      // Clean up the cached Supabase Realtime channel for this orderUUID
-      // so channels do not leak after the last subscriber disconnects.
-      if (locationChannels.has(key)) {
-        const channel = locationChannels.get(key);
-        // Guard against supabase being null (e.g. not configured in dev/test environments)
-        if (supabase) {
-          supabase.removeChannel(channel);
+      // Clean up cached Supabase Realtime channels associated with this
+      // subscription key via the reverse index so channels do not leak.
+      const channelKeys = displayIdToLocationChannelKeys.get(key);
+      if (channelKeys) {
+        for (const uuidKey of channelKeys) {
+          if (locationChannels.has(uuidKey)) {
+            const channel = locationChannels.get(uuidKey);
+            if (supabase) {
+              supabase.removeChannel(channel);
+            }
+            locationChannels.delete(uuidKey);
+            logger.info(`🔌 Removed Supabase Realtime channel for order "${uuidKey}" on last subscriber disconnect.`);
+          }
         }
-        locationChannels.delete(key);
-        logger.info(`🔌 Removed Supabase Realtime channel for order "${key}" on last subscriber disconnect.`);
+        displayIdToLocationChannelKeys.delete(key);
       }
     }
   });

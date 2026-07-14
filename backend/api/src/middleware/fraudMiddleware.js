@@ -3,7 +3,7 @@ import logger from './logger.js';
 
 export const fraudDetectionMiddleware = async (req, res, next) => {
   try {
-    const userId = req.user?.id || req.headers['x-user-id'];
+    const userId = req.user?.id;
     if (!userId) {
       return next();
     }
@@ -66,7 +66,7 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
 
 export const networkAnalysisMiddleware = async (req, res, next) => {
   try {
-    const userId = req.user?.id || req.headers['x-user-id'];
+    const userId = req.user?.id;
     if (!userId) {
       return next();
     }

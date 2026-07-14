@@ -356,7 +356,7 @@ export class OrderLifecycleService {
     return measureExecution('OrderLifecycleService.updateMilestone', async () => {
     const milestoneMap = {
       'Arrived at Pickup': 'at_pickup',
-      'Goods Loaded': 'in_transit',
+      'Goods Loaded': 'picked_up',
       'In Transit': 'in_transit',
       'Arriving': 'arriving',
       'Arrived at Drop-off': 'at_dropoff',

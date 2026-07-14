@@ -62,6 +62,17 @@ class DriverEarningsService {
     return true;
   }
 
+  List<Map<String, dynamic>> _mapResponseRows(Object? response, String label) {
+    if (response is! List) {
+      throw StateError('Unexpected $label response type');
+    }
+    return response.map((item) {
+      if (item is Map<String, dynamic>) return item;
+      if (item is Map) return Map<String, dynamic>.from(item);
+      throw StateError('Unexpected $label item type');
+    }).toList(growable: false);
+  }
+
   String? get driverId => _client.auth.currentUser?.id;
 
   Future<List<Map<String, dynamic>>> fetchWalletTransactions({
@@ -172,7 +183,7 @@ class DriverEarningsService {
         .eq('trip_date', day)
         .order('created_at', ascending: false);
 
-    return List<Map<String, dynamic>>.from(response);
+    return _mapResponseRows(response, 'completed trips');
   }
 
   /// Fetches today's earnings summary (amount, hours driven, trip count).

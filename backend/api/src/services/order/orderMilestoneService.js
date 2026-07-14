@@ -17,13 +17,10 @@ import {
 } from './orderNotificationService.js';
 import { escrowRelease } from '../escrow.js';
 import { DomainError } from './domainError.js';
-<<<<<<< feature/dependency-injection-services
-=======
 import { OrderTimelineService } from './orderTimelineService.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const orderTimelineService = new OrderTimelineService({ supabase, logger });
->>>>>>> main
 
 export class OrderMilestoneService {
   constructor(args = {}) {

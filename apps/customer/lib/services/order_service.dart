@@ -172,8 +172,14 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/my/active',
       );
-      if (body is! List) return <Map<String, dynamic>>[];
-      return List<Map<String, dynamic>>.from(body);
+      if (body is! List) {
+        throw StateError('Unexpected active orders response type');
+      }
+      return body.map((item) {
+        if (item is Map<String, dynamic>) return item;
+        if (item is Map) return Map<String, dynamic>.from(item);
+        throw StateError('Unexpected active order item type');
+      }).toList(growable: false);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {

@@ -5,6 +5,8 @@
  *   - predictDemand: successful response, auth failure, non-ok response, network error
  *   - predictPrice: successful response, auth failure, non-ok response, network error,
  *                   default truckType when not provided
+ *   - predictPrice validation: rejects NaN, Infinity, negative, missing fields,
+ *                              above-max, below-min; accepts valid with paisa conversion
  *
  * Run with:  npm run test:unit -- test/unit/ml.test.js
  */
@@ -14,6 +16,7 @@ const mockLogger = vi.hoisted(() => ({
   error: vi.fn(),
   info: vi.fn(),
   warn: vi.fn(),
+  debug: vi.fn(),
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -139,7 +142,7 @@ describe('ml service — predictPrice', () => {
     vi.restoreAllMocks();
   });
 
-  it('calls the ML engine /predict endpoint with correct body', async () => {
+  it('calls the ML engine /predict endpoint with correct body and returns validated result', async () => {
     const mockResponse = { estimated_price: 4500, currency: 'INR' };
     mockFetch.mockResolvedValueOnce({
       ok: true,
@@ -162,7 +165,10 @@ describe('ml service — predictPrice', () => {
     expect(body.truck_type).toBe('heavy_truck');
     expect(body.route_origin).toBe('Mumbai');
     expect(body.route_destination).toBe('Pune');
-    expect(result).toEqual(mockResponse);
+    expect(result.estimated_price).toBe(4500);
+    expect(result.estimatedPricePaisa).toBe(450000);
+    expect(result.estimatedPriceInr).toBe(4500);
+    expect(result.currency).toBe('INR');
   });
 
   it('defaults truckType to medium_truck when not provided', async () => {
@@ -226,5 +232,112 @@ describe('ml service — predictPrice', () => {
     await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
       .rejects
       .toThrow('Connection refused');
+  });
+
+  it('rejects NaN predicted price from ML engine (serialized as null by JSON)', async () => {
+    // JSON.stringify({estimated_price: NaN}) produces {"estimated_price":null}
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: null, currency: 'INR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction');
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: expect.any(String) }),
+      expect.stringContaining('rejected by validator'),
+    );
+  });
+
+  it('rejects Infinity predicted price from ML engine (serialized as null by JSON)', async () => {
+    // JSON.stringify({estimated_price: Infinity}) produces {"estimated_price":null}
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: null, currency: 'INR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction');
+  });
+
+  it('rejects negative predicted price from ML engine', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: -500, currency: 'INR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction: negative');
+  });
+
+  it('rejects null response from ML engine', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve('null'),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction: null_response');
+  });
+
+  it('rejects response with missing estimated_price field', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ currency: 'INR', min_price: 1000 })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction: missing_field');
+  });
+
+  it('rejects response with missing currency field', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 5000 })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction: missing_field');
+  });
+
+  it('rejects response with price above maximum', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 999999, currency: 'INR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction: above_maximum');
+  });
+
+  it('rejects response with price below minimum', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 10, currency: 'INR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction: below_minimum');
+  });
+
+  it('accepts valid response and returns estimatedPricePaisa', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 3000, currency: 'INR' })),
+    });
+
+    const result = await predictPrice({ distanceKm: 100, cargoWeightKg: 500 });
+    expect(result.estimatedPricePaisa).toBe(300000);
+    expect(result.estimatedPriceInr).toBe(3000);
+    expect(result.estimated_price).toBe(3000);
+    expect(result.currency).toBe('INR');
   });
 });

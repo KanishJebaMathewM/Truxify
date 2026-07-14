@@ -370,6 +370,9 @@ class CacheManager {
   }
 
   Future<int> clearTable(String tableName) async {
+    if (!_cacheTables.contains(tableName)) {
+      throw ArgumentError.value(tableName, 'tableName', 'unknown cache table');
+    }
     final db = await open();
     return db.delete(tableName);
   }

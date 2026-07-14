@@ -1,5 +1,4 @@
-import { supabase, redisClient } from '../config/db.js';
-import logger from '../middleware/logger.js';
+import { supabase } from '../config/db.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 
 export async function getProfile(userId) {
@@ -69,14 +68,4 @@ export async function updateProfile(userId, updateData) {
   if (error) throw error;
   return data;
   });
-}
-
-export async function invalidateProfileCache(userId) {
-  if (redisClient) {
-    try {
-      await redisClient.del(`profile:${userId}`);
-    } catch (err) {
-      logger.error({ err }, 'Redis cache invalidation error');
-    }
-  }
 }

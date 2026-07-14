@@ -15,6 +15,15 @@ class LocationService {
     defaultValue: 'http://localhost:5000',
   );
 
+  static void _assertNotLocalhost() {
+    if (defaultApiBaseUrl.contains('localhost') && kReleaseMode) {
+      throw AssertionError(
+        'TRUXIFY_API_BASE_URL is still set to localhost in release mode. '
+        'Provide a production API URL via --dart-define=TRUXIFY_API_BASE_URL=...'
+      );
+    }
+  }
+
   WebSocketChannel? _channel;
   StreamSubscription<Position>? _positionSubscription;
   StreamSubscription? _socketSubscription;
@@ -43,6 +52,7 @@ class LocationService {
   bool get isTracking => _isTracking;
 
   Future<void> startTracking() async {
+    _assertNotLocalhost();
     if (_isTracking) return;
 
     // Check location permission before starting tracking (fixes #1491)

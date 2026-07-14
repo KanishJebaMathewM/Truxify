@@ -39,8 +39,13 @@ describe('buildPagination', () => {
   });
 
   it('returns correct string pagination from string values', () => {
-    const result = buildPagination({ page: 2, limit: 15 });
+    const result = buildPagination({ page: '2', limit: '15' });
     expect(result).toEqual({ page: 2, limit: 15, offset: 15, from: 15, to: 29 });
+  });
+
+  it('falls back to defaults for malformed string values', () => {
+    const result = buildPagination({ page: '2abc', limit: '15abc' });
+    expect(result).toEqual({ page: 1, limit: 20, offset: 0, from: 0, to: 19 });
   });
 
   it('handles page 1 with no limit correctly', () => {
@@ -99,6 +104,19 @@ describe('Pagination Middleware', () => {
   it('returns 400 for invalid limit', () => {
     const middleware = validatePagination();
     const req = { query: { limit: 'abc' } };
+    const res = mockResponse();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ error: 'Invalid limit parameter' });
+  });
+
+  it('returns 400 for partially numeric limit values', () => {
+    const middleware = validatePagination();
+    const req = { query: { limit: '10abc' } };
     const res = mockResponse();
     const next = vi.fn();
 

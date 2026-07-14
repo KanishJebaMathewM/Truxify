@@ -84,6 +84,71 @@ describe('escrow service — getEscrowBookingId', () => {
   })
 })
 
+describe('escrow service — paisaToMaticWei', () => {
+  it('converts paisa to wei using the default rate (0.01 MATIC/paisa)', () => {
+    // 100 paisa × 0.01 = 1 MATIC = 10^18 wei
+    const wei = paisaToMaticWei(100);
+    expect(wei).toBe(1_000_000_000_000_000_000n);
+  });
+
+  it('converts 1 paisa to 0.01 MATIC (10^16 wei)', () => {
+    const wei = paisaToMaticWei(1);
+    expect(typeof wei).toBe('bigint');
+    expect(wei).toBe(10_000_000_000_000_000n);
+  });
+
+  it('converts 250000 paisa (₹2500) to 2500 MATIC', () => {
+    // 250000 × 0.01 = 2500 MATIC
+    const wei = paisaToMaticWei(250_000);
+    expect(wei).toBe(ethers.parseEther('2500'));
+  });
+
+  it('returns 0n for 0 paisa', () => {
+    const wei = paisaToMaticWei(0);
+    expect(wei).toBe(0n);
+  });
+
+  it('throws RangeError for negative paisa', () => {
+    expect(() => paisaToMaticWei(-100)).toThrow(RangeError);
+  });
+
+  it('throws RangeError for NaN paisa', () => {
+    expect(() => paisaToMaticWei(NaN)).toThrow(RangeError);
+  });
+
+  it('throws RangeError for Infinity paisa', () => {
+    expect(() => paisaToMaticWei(Infinity)).toThrow(RangeError);
+  });
+
+  it('throws RangeError for non-numeric strings', () => {
+    expect(() => paisaToMaticWei('not-a-number')).toThrow(RangeError);
+  });
+
+  it('handles string input for paisa', () => {
+    const wei = paisaToMaticWei('100');
+    expect(wei).toBe(1_000_000_000_000_000_000n);
+  });
+
+  it('converts using a custom rate when env var is overridden', async () => {
+    const originalEnv = process.env.ESCROW_MATIC_PER_PAISA;
+    process.env.ESCROW_MATIC_PER_PAISA = '0.05';
+
+    vi.resetModules();
+    const { paisaToMaticWei: customRateWei } = await import('../../src/services/escrow.js');
+
+    // 100 paisa × 0.05 = 5 MATIC = 5 * 10^18 wei
+    const wei = customRateWei(100);
+    expect(wei).toBe(ethers.parseEther('5'));
+
+    if (originalEnv !== undefined) {
+      process.env.ESCROW_MATIC_PER_PAISA = originalEnv;
+    } else {
+      delete process.env.ESCROW_MATIC_PER_PAISA;
+    }
+    vi.resetModules();
+  });
+});
+
 describe('escrow service — isEscrowEnabled', () => {
   it('returns false when blockchain env vars are not set (escrowContract is null)', () => {
     expect(isEscrowEnabled()).toBe(false);

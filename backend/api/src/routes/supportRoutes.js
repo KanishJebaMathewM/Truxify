@@ -566,7 +566,11 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
     }
 
     const limit = Math.min(100, parsedLimit.value);
-    const offset = typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : 0;
+    const parsedOffset = parseIntegerQuery(req.query.offset, 0, 'offset', { min: 0 });
+    if (parsedOffset.error) {
+      return res.status(400).json({ error: parsedOffset.error });
+    }
+    const offset = parsedOffset.value;
 
     const { data: comments, error: commentsError } = await supabase
       .from('support_ticket_comments')

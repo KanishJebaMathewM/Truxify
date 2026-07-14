@@ -1,22 +1,13 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
-<<<<<<< security/admin-rate-limiter
-import { authenticate, requireRole } from '../middleware/auth.js';
-import { adminRateLimiter } from '../middleware/rateLimiter.js';
-=======
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
->>>>>>> main
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
-<<<<<<< security/admin-rate-limiter
-router.get('/dashboard', authenticate, adminRateLimiter, requireRole(['admin']), async (req, res) => {
-=======
 router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-dashboard'), async (req, res) => {
->>>>>>> main
   try {
     const { count: activeDrivers, error: driversErr } = await supabase
       .from('profiles')

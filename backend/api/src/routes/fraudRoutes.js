@@ -1,6 +1,7 @@
 import express from 'express';
 import fraudDetection from '../services/fraud/FraudDetectionService.js';
 import { fraudDetectionMiddleware } from '../middleware/fraudMiddleware.js';
+import { authenticate } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -82,12 +83,21 @@ router.post('/fraud/review/:reviewId/resolve', async (req, res) => {
 });
 
 // Track behavior (for client reporting)
-router.post('/fraud/track', fraudDetectionMiddleware, async (req, res) => {
+router.post('/fraud/track', authenticate, fraudDetectionMiddleware, async (req, res) => {
   try {
-    const { userId, eventType, data } = req.body;
+    const { userId: bodyUserId, eventType, data } = req.body;
+    const userId = req.user.id;
+
+    if (bodyUserId && bodyUserId !== userId) {
+      return res.status(400).json({
+        success: false,
+        error: 'userId must match the authenticated user'
+      });
+    }
+
     const result = await fraudDetection.trackBehavior(userId, {
       type: eventType,
-      ...data
+      ...(data && typeof data === 'object' && !Array.isArray(data) ? data : {})
     });
     
     res.json({

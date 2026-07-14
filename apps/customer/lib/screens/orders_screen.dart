@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/widgets/order_card.dart';
 import '../constants/supabase_config.dart';
+import '../l10n/app_localizations.dart';
 import '../services/order_service.dart';
 import '../services/supabase_service.dart';
 import '../controllers/app_controller.dart';
@@ -335,26 +336,26 @@ class _OrdersScreenState extends State<OrdersScreen>
       child: Column(
         children: [
           OrderSearchBar(
-            title: 'Orders',
+            title: AppLocalizations.of(context)!.orders,
             isSearching: _isSearching,
             onToggle: _toggleSearch,
             controller: _searchController,
             onChanged: _onSearchChanged,
             searchQuery: _searchQuery,
-            hintText: 'Search by order ID, route, driver or status',
+            hintText: AppLocalizations.of(context)!.searchOrdersHint,
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
             child: TabBar(
               controller: _tabController,
-              tabs: const [Tab(text: 'Active'), Tab(text: 'History')],
+              tabs: [Tab(text: AppLocalizations.of(context)!.activeTab), Tab(text: AppLocalizations.of(context)!.historyTab)],
             ),
           ),
           if (_isOffline)
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
               child: Text(
-                'Offline mode • Last updated ${_formatLastUpdated(_lastUpdatedLabel)}',
+                '${AppLocalizations.of(context)!.offlineMode} \u2022 ${AppLocalizations.of(context)!.lastUpdated(_formatLastUpdated(_lastUpdatedLabel))}',
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
@@ -375,7 +376,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                           itemBuilder: (context, index) => const ShimmerOrderCard(),
                         )
                       : _filteredActiveOrders.isEmpty
-                          ? const Center(child: Text('No active orders'))
+                          ? Center(child: Text(AppLocalizations.of(context)!.noActiveOrders))
                           : ListView.separated(
                               padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                               itemCount: _filteredActiveOrders.length,
@@ -404,7 +405,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                           itemBuilder: (context, index) => const ShimmerOrderCard(),
                         )
                       : _filteredHistoryOrders.isEmpty
-                          ? const Center(child: Text('No history orders'))
+                          ? Center(child: Text(AppLocalizations.of(context)!.noHistoryOrders))
                           : ListView.separated(
                               padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                               itemCount: _filteredHistoryOrders.length,

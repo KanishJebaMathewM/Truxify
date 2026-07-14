@@ -23,19 +23,23 @@ import { ethers } from 'ethers';
 import logger from '../middleware/logger.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 
-// Safe math utilities for reputation calculations
+// Safe math utilities for reputation calculations.
+// Boundary clamping (0–MAX_REPUTATION) is handled by clampReputation.
 function safeAdd(a, b) {
   const result = Number(a) + Number(b);
   return Number.isFinite(result) ? result : 0;
 }
 
 function safeSubtract(a, b) {
-  const result = Math.max(0, Number(a) - Number(b));
+  const result = Number(a) - Number(b);
   return Number.isFinite(result) ? result : 0;
 }
 
+/** @type {number} Must match Reputation.sol MAX_REPUTATION constant */
+const MAX_REPUTATION = 10000;
+
 function clampReputation(value) {
-  return Math.max(0, Math.min(100, Number(value) || 0));
+  return Math.max(0, Math.min(MAX_REPUTATION, Number(value) || 0));
 }
 
 // Minimal ABI — only the subset the backend needs to call.

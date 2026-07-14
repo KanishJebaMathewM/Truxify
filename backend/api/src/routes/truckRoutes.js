@@ -175,8 +175,12 @@ router.get('/', authenticate, requirePolicy('truck:list-own'), userLimiter, asyn
 
 
 function parseBoolean(value) {
-  if (typeof value === 'boolean') return value;
-  return ['true', '1', 'yes'].includes(String(value).trim().toLowerCase());
+  if (value === undefined) return { value: false };
+  if (typeof value === 'boolean') return { value };
+  const normalized = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes'].includes(normalized)) return { value: true };
+  if (['false', '0', 'no'].includes(normalized)) return { value: false };
+  return { error: 'Boolean filters must be true or false' };
 }
 
 function isLatitude(value) {
@@ -222,6 +226,14 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
   if (numWeightTonnes <= 0 || numWeightTonnes > 50) {
     return res.status(400).json({ error: 'Weight must be between 0 and 50 tonnes' });
   }
+  const fragileFilter = parseBoolean(is_fragile);
+  if (fragileFilter.error) {
+    return res.status(400).json({ error: fragileFilter.error });
+  }
+  const stackableFilter = parseBoolean(is_stackable);
+  if (stackableFilter.error) {
+    return res.status(400).json({ error: stackableFilter.error });
+  }
 
   try {
     const routeEstimate = await getRouteEstimate({
@@ -238,8 +250,8 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       dropLng: numDropLng,
       weightTonnes: numWeightTonnes,
       roadDistanceKm: routeEstimate?.distanceKm,
-      isFragile: parseBoolean(is_fragile),
-      isStackable: parseBoolean(is_stackable),
+      isFragile: fragileFilter.value,
+      isStackable: stackableFilter.value,
     });
 
     let finalBaseFreight = pricing.baseFreight;
@@ -254,14 +266,12 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
         cargoWeightKg: numWeightTonnes * 1000,
         truckType: 'medium_truck',
       });
-      if (mlResult && typeof mlResult.estimated_price === 'number' && mlResult.estimated_price > 0) {
-        const estimatedPrice = Math.round(mlResult.estimated_price * 100);
-        finalTotalAmount = estimatedPrice;
-        finalPlatformFee = Math.round(estimatedPrice * 0.05);
-        finalBaseFreight = estimatedPrice - finalPlatformFee - finalTollEstimate;
-        if (finalBaseFreight < 0) {
-          finalBaseFreight = 0;
-          finalTollEstimate = estimatedPrice - finalPlatformFee;
+      if (mlResult && mlResult.estimatedPricePaisa > 0) {
+        finalTotalAmount = mlResult.estimatedPricePaisa;
+        finalPlatformFee = Math.round(mlResult.estimatedPricePaisa * 0.05);
+        finalBaseFreight = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee - finalTollEstimate);
+        if (finalBaseFreight === 0) {
+          finalTollEstimate = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee);
         }
         isAiEstimate = true;
       } else {

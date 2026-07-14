@@ -32,6 +32,8 @@ class MarketplaceRepository {
 
   String _encodePathSegment(String value) => Uri.encodeComponent(value);
 
+  void dispose() {
+    _apiClient.dispose();
   Future<String?> _firebaseAccessToken() async {
     try {
       return await FirebaseAuth.instance.currentUser?.getIdToken();

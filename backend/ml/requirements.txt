@@ -15,12 +15,22 @@ pandas==2.1.4
 numpy==1.26.2
 requests==2.31.0
 python-dotenv==1.0.0
+
+
+requests==2.31.0
+python-dotenv==1.2.2
 tensorflow==2.13.0
 redis==5.0.0
 cryptography==39.0.0
 numpy==1.26.2
 fastapi==0.104.1
 uvicorn==0.24.0
+
 requests==2.33.0
 python-dotenv==1.0.0
+
+
+requests==2.33.0
+python-dotenv==1.2.2
+
 

@@ -60,7 +60,7 @@ traffic_pipeline = TrafficPipeline(db_url, redis_url)
 async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     ml_api_key = os.environ.get("ML_API_KEY")
     if not ml_api_key:
-        logger.warning("ML_API_KEY not set - ML engine running without authentication")
+        logger.warning("ML_API_KEY not set - ML engine is unavailable (503)")
         raise HTTPException(status_code=503, detail="ML engine not configured: missing ML_API_KEY")
     if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")

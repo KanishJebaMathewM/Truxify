@@ -57,6 +57,19 @@ import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middlewar
 // ============================================================================
 import zkpRoutes from './routes/zkp.routes.js'
 
+
+// ============================================================================
+// 🆕 MULTI-CLOUD DISASTER RECOVERY
+// ============================================================================
+import drRoutes from '../../dr/routes.js'
+import multiCloudService from '../../dr/multi-cloud.service.js'
+
+// ============================================================================
+// 🆕 OPENTELEMETRY DISTRIBUTED TRACING
+// ============================================================================
+import tracing from './tracing/tracing.js'
+import { tracingMiddleware } from './middleware/tracingMiddleware.js'
+
 import logger from './middleware/logger.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
@@ -72,8 +85,14 @@ import {
   startReputationReconciliation,
   stopReputationReconciliation,
 } from './services/reputationReconciliation.js'
+import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
+
+// ============================================================================
+// 🆕 INITIALIZE OPENTELEMETRY TRACING
+// ============================================================================
+tracing.initialize('truxify-api')
 
 initSentry()
 
@@ -102,6 +121,13 @@ if (process.env.NODE_ENV === 'production' && (!process.env.POLYGON_RPC_URL || !p
 }
 if (!process.env.DRIVER_LOGIN_OTP) {
   logger.warn('DRIVER_LOGIN_OTP is not set. Driver OTP login will be disabled until it is configured in production.')
+}
+
+// ============================================================================
+// 🆕 OTEL VALIDATION
+// ============================================================================
+if (!process.env.OTEL_EXPORTER_OTLP_ENDPOINT) {
+  logger.warn('⚠️ OTEL_EXPORTER_OTLP_ENDPOINT not set. Using default: http://localhost:4317')
 }
 
 // ============================================================================
@@ -147,6 +173,23 @@ if (!process.env.KYC_VERIFIER_CONTRACT) {
 }
 if (!process.env.PRIVATE_KEY) {
   logger.warn('⚠️ PRIVATE_KEY not set. Cannot sign ZK proof transactions.')
+}
+
+
+// ============================================================================
+// 🆕 MULTI-CLOUD DR VALIDATION
+// ============================================================================
+if (!process.env.AWS_ACCESS_KEY || !process.env.AWS_SECRET_KEY) {
+  logger.warn('⚠️ AWS credentials not set. Multi-cloud DR may not work.')
+}
+if (!process.env.AZURE_CONNECTION_STRING) {
+  logger.warn('⚠️ Azure connection string not set. Multi-cloud DR may not work.')
+}
+if (!process.env.GCP_PROJECT_ID) {
+  logger.warn('⚠️ GCP credentials not set. Multi-cloud DR may not work.')
+}
+if (!process.env.ACTIVE_CLOUD) {
+  logger.warn('⚠️ ACTIVE_CLOUD not set. Using default: aws')
 }
 
 // Validate escrow contract deployment — log warning if validation fails,
@@ -228,6 +271,17 @@ if (process.env.NODE_ENV === 'production') {
 // Payload parsers
 app.use(express.json({ limit: '1mb' })) // Added payload limit for security
 app.use(express.urlencoded({ extended: true, limit: '1mb' }))
+
+// ============================================================================
+// 🆕 OPENTELEMETRY TRACING MIDDLEWARE
+// ============================================================================
+app.use(tracingMiddleware)
+
+// Track request start time
+app.use((req, res, next) => {
+  req._startTime = Date.now()
+  next()
+})
 
 // ============================================================================
 // CORRELATION ID + REQUEST ID + REQUEST LOGGER
@@ -375,6 +429,44 @@ app.get('/api/zkp/health', (req, res) => {
   })
 })
 
+
+// ============================================================================
+// 🆕 MULTI-CLOUD DISASTER RECOVERY ROUTES
+// ============================================================================
+app.use('/api', drRoutes)
+
+// 🆕 DR Health Check Endpoint
+app.get('/api/dr/health', async (req, res) => {
+  try {
+    const health = await multiCloudService.checkHealth();
+    res.json({
+      status: 'healthy',
+      data: health,
+      activeCloud: multiCloudService.activeCloud,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'unhealthy',
+      error: error.message
+    });
+  }
+})
+
+// ============================================================================
+// 🆕 OPENTELEMETRY HEALTH CHECK
+// ============================================================================
+app.get('/api/tracing/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    service: 'opentelemetry',
+    version: '1.0.0',
+    isEnabled: tracing.isInitialized,
+    timestamp: new Date().toISOString()
+  })
+})
+
+
 // Setup Swagger Documentation
 setupSwagger(app)
 
@@ -427,12 +519,16 @@ const PORT = process.env.PORT || 5000
 
 server.listen(PORT, () => {
   logger.info(`Truxify API listening on port ${PORT}`)
+  logger.info(`🆕 OpenTelemetry Tracing enabled (Jaeger: http://localhost:16686)`)
   logger.info(`🆕 Oracle Service enabled with threshold: ${process.env.ORACLE_CONSENSUS_THRESHOLD || 2}`)
   logger.info(`🆕 Verification endpoints available at /api/verify and /api/oracle`)
   logger.info(`🆕 Geographic Sharding enabled with 4 shards (North, South, East, West)`)
   logger.info(`🆕 WebRTC P2P Mesh Network available at ws://localhost:${PORT}/webrtc`)
   logger.info(`🆕 Fraud Detection enabled with threshold: ${process.env.FRAUD_THRESHOLD || 0.7}`)
   logger.info(`🆕 ZK-Proof KYC Verification enabled with contract: ${process.env.KYC_VERIFIER_CONTRACT || 'not-deployed'}`)
+
+  logger.info(`☁️ Multi-Cloud Disaster Recovery enabled (Active: ${process.env.ACTIVE_CLOUD || 'aws'})`)
+
   startEscrowRefundReconciliation(orderRepository)
   startEscrowReleaseReconciliation()
   startReputationReconciliation()
@@ -490,7 +586,11 @@ async function shutdown (signal) {
     await shardManager.closeAllConnections()
     logger.info('[shutdown] Shard connections closed.')
 
-    // 5. Close database/cache connections
+    // 5. Close OpenTelemetry tracing
+    await tracing.shutdown()
+    logger.info('[shutdown] OpenTelemetry tracing shut down.')
+
+    // 6. Close database/cache connections
     await closeDbConnections()
 
     logger.info('[shutdown] Clean exit.')

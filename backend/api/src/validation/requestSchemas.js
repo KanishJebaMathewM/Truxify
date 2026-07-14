@@ -244,3 +244,30 @@ export const updateProfileSchema = z.object({
   is_online: z.boolean().optional(),
   verification_status: z.enum(['pending', 'verified', 'rejected']).optional(),
 }).strict();
+
+// ── Oracle & Verification schemas ───────────────────────────────────────
+
+export const oracleConfirmSchema = z.object({
+  orderId: uuidSchema,
+  otp: z.string().regex(/^\d{6}$/, { message: 'OTP must be exactly 6 digits' }),
+  gpsCoordinates: z.object({
+    lat: latitudeSchema,
+    lng: longitudeSchema,
+  }),
+}).strict();
+
+export const oracleVerifyCrosschainSchema = z.object({
+  orderId: uuidSchema,
+  blockchainHash: z
+    .string()
+    .min(1, 'blockchainHash is required')
+    .regex(/^0x[a-fA-F0-9]+$/, { message: 'blockchainHash must be a 0x-prefixed hex string' }),
+}).strict();
+
+export const verifyOrderParamsSchema = z.object({
+  orderId: uuidSchema,
+});
+
+export const documentCheckSchema = z.object({
+  driverId: uuidSchema,
+}).strict();

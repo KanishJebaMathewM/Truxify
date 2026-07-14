@@ -130,8 +130,20 @@ class WebRTCSignalingServer {
 
   async relayWebRTCMessage(fromPeerId, message) {
     const { targetPeerId, data } = message;
+    const sourcePeer = this.peers.get(fromPeerId);
     const targetPeer = this.peers.get(targetPeerId);
-    if (targetPeer && targetPeer.ws.readyState === 1) {
+
+    if (!sourcePeer || !targetPeer) {
+      logger.warn(`WebRTC relay blocked for missing peer: ${fromPeerId} -> ${targetPeerId}`);
+      return;
+    }
+
+    if (sourcePeer.meshId !== targetPeer.meshId) {
+      logger.warn(`WebRTC relay blocked across meshes: ${fromPeerId} -> ${targetPeerId}`);
+      return;
+    }
+
+    if (targetPeer.ws.readyState === 1) {
       this.sendToPeer(targetPeerId, {
         ...data,
         fromPeerId
@@ -139,11 +151,40 @@ class WebRTCSignalingServer {
     }
   }
 
+  isValidLocation(location) {
+    const lat = Number(location?.lat);
+    const lng = Number(location?.lng);
+    return Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lng >= -180 &&
+      lng <= 180;
+  }
+
+  normalizeLocation(location) {
+    return {
+      ...location,
+      lat: Number(location.lat),
+      lng: Number(location.lng)
+    };
+  }
+
   async handleGPSData(peerId, data) {
+    if (!data || typeof data !== 'object' || !this.isValidLocation(data.location)) {
+      logger.warn(`Invalid WebRTC GPS payload dropped for peer ${peerId}`);
+      return;
+    }
+
+    const normalizedData = {
+      ...data,
+      location: this.normalizeLocation(data.location)
+    };
+
     // Store GPS data in MongoDB with offline sync flag
     const gpsEntry = {
       peerId,
-      data,
+      data: normalizedData,
       timestamp: Date.now(),
       synced: false
     };
@@ -156,11 +197,11 @@ class WebRTCSignalingServer {
     await this.redis.setex(
       `gps:${peerId}:latest`,
       300,
-      JSON.stringify(data)
+      JSON.stringify(normalizedData)
     );
 
     // Relayed to peers in mesh
-    await this.relayLocation(peerId, data.location);
+    await this.relayLocation(peerId, normalizedData.location);
   }
 
   async handleDisconnect(peerId) {

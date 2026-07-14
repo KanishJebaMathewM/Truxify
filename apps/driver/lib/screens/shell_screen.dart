@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../core/app_routes.dart';
+import '../l10n/app_localizations.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
@@ -84,9 +85,9 @@ class _ShellScreenState extends State<ShellScreen> {
 
   Route<dynamic> _errorRoute() {
     return truxifyPageRoute(
-      (context) => const Scaffold(
+      (context) => Scaffold(
         body: Center(
-          child: Text('Error: Invalid route arguments'),
+          child: Text(AppLocalizations.of(context)!.error),
         ),
       ),
     );
@@ -122,7 +123,7 @@ class _ShellScreenState extends State<ShellScreen> {
         final args = settings.arguments as DestinationPickerArgs?;
         return truxifyPageRoute(
           (context) => DestinationPickerScreen(
-            title: args?.title ?? 'Select Destination',
+            title: args?.title ?? AppLocalizations.of(context)!.whereAreYouHeading,
             initialQuery: args?.initialQuery,
             initialPoint: args?.initialPoint,
           ),
@@ -177,25 +178,25 @@ class _ShellScreenState extends State<ShellScreen> {
                 children: [
                   _NavItem(
                     icon: Icons.home_rounded,
-                    label: 'Home',
+                    label: AppLocalizations.of(context)!.home,
                     selected: currentIndex == 0,
                     onTap: () => _openTab(0),
                   ),
                   _NavItem(
                     icon: Icons.route_rounded,
-                    label: 'Trips',
+                    label: AppLocalizations.of(context)!.trips,
                     selected: currentIndex == 1,
                     onTap: () => _openTab(1),
                   ),
                   _NavItem(
                     icon: Icons.account_balance_wallet_outlined,
-                    label: 'Earnings',
+                    label: AppLocalizations.of(context)!.earnings,
                     selected: currentIndex == 2,
                     onTap: () => _openTab(2),
                   ),
                   _NavItem(
                     icon: Icons.person_rounded,
-                    label: 'Profile',
+                    label: AppLocalizations.of(context)!.profile,
                     selected: currentIndex == 3,
                     onTap: () => _openTab(3),
                   ),

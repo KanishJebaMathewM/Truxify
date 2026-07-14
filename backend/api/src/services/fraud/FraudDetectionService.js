@@ -245,16 +245,25 @@ class FraudDetectionService {
 
   async getUserConnections(userId) {
     // Get all connections (orders, trips, shared routes)
-    const { data: orders } = await supabase
+    const { data: orders, error } = await supabase
       .from('orders')
       .select('customer_id, driver_id')
       .or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
 
+    if (error) {
+      logger.error('Failed to load user fraud connections:', error);
+      return [];
+    }
+
+    if (!Array.isArray(orders)) {
+      return [];
+    }
+
     const connections = new Set();
     orders.forEach(order => {
-      if (order.customer_id === userId) {
+      if (order.customer_id === userId && order.driver_id) {
         connections.add(order.driver_id);
-      } else if (order.driver_id === userId) {
+      } else if (order.driver_id === userId && order.customer_id) {
         connections.add(order.customer_id);
       }
     });

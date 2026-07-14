@@ -1,0 +1,418 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Hindi (`hi`).
+class AppLocalizationsHi extends AppLocalizations {
+  AppLocalizationsHi([String locale = 'hi']) : super(locale);
+
+  @override
+  String get appTitle => '\u091F\u094D\u0930\u0915\u094D\u0938\u093F\u092B\u093E\u0908';
+
+  @override
+  String get loginTitle => '\u091F\u094D\u0930\u0915\u094D\u0938\u093F\u092B\u093E\u0908 \u092E\u0947\u0902 \u0906\u092A\u0915\u093E \u0938\u094D\u0935\u093E\u0917\u0924 \u0939\u0948';
+
+  @override
+  String get bookLoadButton => '\u0932\u094B\u0921 \u092C\u0941\u0915 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get loadingText => '\u0932\u094B\u0921 \u0939\u094B \u0930\u0939\u093E \u0939\u0948...';
+
+  @override
+  String comingSoon(String title) => '$title \u091C\u0932\u094D\u0926 \u0906 \u0930\u0939\u093E \u0939\u0948';
+
+  @override
+  String greetingMessage(String greeting, String displayName) => '$greeting, $displayName \u{1F44B}';
+
+  @override
+  String get noActiveShipments => '\u0915\u094B\u0908 \u0938\u0915\u094D\u0930\u093F\u092F \u0936\u093F\u092A\u092E\u0947\u0902\u091F \u0928\u0939\u0940\u0902';
+
+  @override
+  String get routeHistoryComingSoon => '\u0930\u0942\u091F \u0907\u0924\u093F\u0939\u093E\u0938 \u091C\u0932\u094D\u0926 \u0906 \u0930\u0939\u093E \u0939\u0948';
+
+  @override
+  String get walletAddressUpdated => '\u0935\u0949\u0932\u0947\u091F \u092A\u0924\u093E \u0905\u092A\u0921\u0947\u091F \u0915\u093F\u092F\u093E \u0917\u092F\u093E';
+
+  @override
+  String get polygonWalletAddress => '\u092A\u0949\u0932\u0940\u0917\u0949\u0928 \u0935\u0949\u0932\u0947\u091F \u092A\u0924\u093E';
+
+  @override
+  String get saveWalletAddress => '\u0935\u0949\u0932\u0947\u091F \u092A\u0924\u093E \u0938\u0939\u0947\u091C\u0947\u0902';
+
+  @override
+  String error(String errorMsg) => '\u0924\u094D\u0930\u0941\u091F\u093F: $errorMsg';
+
+  @override
+  String get lightTheme => '\u0939\u0932\u094D\u0915\u093E';
+
+  @override
+  String get darkTheme => '\u0917\u0939\u0930\u093E';
+
+  @override
+  String get retry => '\u092A\u0941\u0928\u093E\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get cancel => '\u0930\u0926\u094D\u0926 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get save => '\u0938\u0939\u0947\u091C\u0947\u0902';
+
+  @override
+  String get close => '\u092C\u0902\u0926 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get apply => '\u0932\u093E\u0917\u0942 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get reset => '\u0930\u0940\u0938\u0947\u091F \u0915\u0930\u0947\u0902';
+
+  @override
+  String get search => '\u0916\u094B\u091C\u0947\u0902';
+
+  @override
+  String get welcomeBack => '\u0935\u093E\u092A\u0938\u0940 \u092A\u0930 \u0938\u094D\u0935\u093E\u0917\u0924 \u0939\u0948';
+
+  @override
+  String get signInSubtitle => '\u091C\u093E\u0930\u0940 \u0930\u0916\u0928\u0947 \u0915\u0947 \u0932\u093F\u092F\u0947 \u0938\u093E\u0907\u0928 \u0907\u0928 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get phoneNumber => '\u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930';
+
+  @override
+  String get sendOtp => 'OTP \u092D\u0947\u091C\u0947\u0902';
+
+  @override
+  String get sendingOtp => 'OTP \u092D\u0947\u091C\u093E \u091C\u093E \u0930\u0939\u093E \u0939\u0948...';
+
+  @override
+  String get verifyingOtp => '\u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0939\u094B \u0930\u0939\u093E \u0939\u0948...';
+
+  @override
+  String get verifyOtp => 'OTP \u0938\u0924\u094D\u092F\u093E\u092A\u093F\u0924 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get loginWithBiometrics => '\u092C\u093E\u092F\u094B\u092E\u0947\u091F\u094D\u0930\u093F\u0915\u094D\u0938 \u0938\u0947 \u0932\u0949\u0917\u093F\u0928 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get biometricsNotSupported => '\u0907\u0938 \u0921\u093F\u0935\u093E\u0907\u0938 \u092A\u0930 \u092C\u093E\u092F\u094B\u092E\u0947\u091F\u094D\u0930\u093F\u0915\u094D\u0938 \u0938\u092E\u0930\u094D\u0925\u093F\u0924 \u0928\u0939\u0940\u0902 \u0939\u0948';
+
+  @override
+  String get biometricAuthSuccessful => '\u092C\u093E\u092F\u094B\u092E\u0947\u091F\u094D\u0930\u093F\u0915 \u092A\u094D\u0930\u092E\u093E\u0923\u0940\u0915\u0930\u0923 \u0938\u092B\u0932';
+
+  @override
+  String get pleaseEnterPhone => '\u0915\u0943\u092A\u092F\u093E \u0905\u092A\u0928\u093E \u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+
+  @override
+  String get phoneDigitsOnly => '\u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u092E\u0947\u0902 \u0915\u0947\u0935\u0932 \u0905\u0902\u0915 \u0939\u094B\u0928\u0947 \u091A\u093E\u0939\u093F\u090F';
+
+  @override
+  String phoneMustBeExactDigits(int digitCount) => '\u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u0920\u0940\u0915 $digitCount \u0905\u0902\u0915\u094B\u0902 \u0915\u093E \u0939\u094B\u0928\u093E \u091A\u093E\u0939\u093F\u090F';
+
+  @override
+  String get phoneMustBeDigits => '\u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u092E\u0947\u0902 \u0915\u0947\u0935\u0932 \u0905\u0902\u0915 \u0939\u094B\u0928\u0947 \u091A\u093E\u0939\u093F\u090F';
+
+  @override
+  String get verificationFailed => '\u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0905\u0938\u092B\u0932\u0964 \u0915\u0943\u092A\u092F\u093E \u092A\u0941\u0928\u093E\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902\u0964';
+
+  @override
+  String get phoneVerificationFailed => '\u092B\u093C\u094B\u0928 \u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0905\u0938\u092B\u0932\u0964 \u0915\u0943\u092A\u092F\u093E \u092A\u0941\u0928\u093E\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902\u0964';
+
+  @override
+  String get autoVerificationFailed => '\u0938\u094D\u0935\u091A\u093E\u0932\u093F\u0924 \u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0905\u0938\u092B\u0932\u0964 \u0915\u0943\u092A\u092F\u093E OTP \u092E\u0948\u0928\u094D\u092F\u0941\u0905\u0932 \u0930\u0942\u092A \u0938\u0947 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964';
+
+  @override
+  String get failedToSendOtp => 'OTP \u092D\u0947\u091C\u0928\u0947 \u092E\u0947\u0902 \u0905\u0938\u092B\u0932\u0964 \u0915\u0943\u092A\u092F\u093E \u092A\u0941\u0928\u093E\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902\u0964';
+
+  @override
+  String get enterOtp => 'OTP \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+
+  @override
+  String sentTo(String phoneNumber) => '$phoneNumber \u092A\u0930 \u092D\u0947\u091C\u093E \u0917\u092F\u093E';
+
+  @override
+  String get invalidOtp => '\u0905\u092E\u093E\u0928\u094D\u092F OTP\u0964 \u0915\u0943\u092A\u092F\u093E \u091C\u093E\u0902\u091A\u0947\u0902 \u0914\u0930 \u092A\u0941\u0928\u093E\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902\u0964';
+
+  @override
+  String get verificationSessionExpired => '\u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0938\u0924\u094D\u0930 \u0938\u092E\u093E\u092A\u094D\u0924 \u0939\u094B \u0917\u092F\u093E \u0939\u0948\u0964 \u0915\u0943\u092A\u092F\u093E \u0928\u092F\u093E OTP \u0905\u0928\u0941\u0930\u094B\u0927 \u0915\u0930\u0947\u0902\u0964';
+
+  @override
+  String get invalidVerificationCode => '\u0905\u092E\u093E\u0928\u094D\u092F \u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0915\u094B\u0921\u0964';
+
+  @override
+  String get otpExpired => 'OTP \u0915\u0940 \u0938\u092E\u092F \u0938\u0940\u092E\u093E \u0938\u092E\u093E\u092A\u094D\u0924 \u0939\u094B \u0917\u0908 \u0939\u0948\u0964 \u0915\u0943\u092A\u092F\u093E \u0928\u092F\u093E \u0905\u0928\u0941\u0930\u094B\u0927 \u0915\u0930\u0947\u0902\u0964';
+
+  @override
+  String get home => '\u0939\u094B\u092E';
+
+  @override
+  String get findTrucks => '\u091F\u094D\u0930\u0915 \u0916\u094B\u091C\u0947\u0902';
+
+  @override
+  String get orders => '\u0911\u0930\u094D\u0921\u0930';
+
+  @override
+  String get profile => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932';
+
+  @override
+  String get activeShipments => '\u0938\u0915\u094D\u0930\u093F\u092F \u0936\u093F\u092A\u092E\u0947\u0902\u091F';
+
+  @override
+  String get seeAll => '\u0938\u092D\u0940 \u0926\u0947\u0916\u0947\u0902';
+
+  @override
+  String get bookATruck => '\u091F\u094D\u0930\u0915 \u092C\u0941\u0915 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get active => '\u0938\u0915\u094D\u0930\u093F\u092F';
+
+  @override
+  String get moreStats => '\u0914\u0930 \u0906\u0902\u0915\u0921\u0947';
+
+  @override
+  String get savings => '\u092C\u091A\u0924';
+
+  @override
+  String get yourUsualRoutes => '\u0906\u092A\u0915\u0947 \u0928\u093F\u092F\u092E\u093F\u0924 \u092E\u093E\u0930\u094D\u0917';
+
+  @override
+  String get lastTruckLocation => '\u0905\u0902\u0924\u093F\u092E \u091F\u094D\u0930\u0915 \u0938\u094D\u0925\u093E\u0928';
+
+  @override
+  String get couldNotLoadData => '\u0921\u0947\u091F\u093E \u0932\u094B\u0921 \u0928\u0939\u0940\u0902 \u0939\u094B \u0938\u0915\u093E';
+
+  @override
+  String get mlPoweredMatching => 'ML-\u0938\u0902\u091A\u093E\u0932\u093F\u0924 \u092E\u0948\u091A\u093F\u0902\u0917';
+
+  @override
+  String get route => '\u092E\u093E\u0930\u094D\u0917';
+
+  @override
+  String get pickupLocation => '\u092A\u093F\u0915\u0905\u092A \u0938\u094D\u0925\u093E\u0928';
+
+  @override
+  String get dropLocation => '\u0921\u094D\u0930\u0949\u092A \u0938\u094D\u0925\u093E\u0928';
+
+  @override
+  String get date => '\u0924\u093E\u0930\u0940\u0916';
+
+  @override
+  String get time => '\u0938\u092E\u092F';
+
+  @override
+  String get goodsDetails => '\u092E\u093E\u0932 \u0935\u093F\u0935\u0930\u0923';
+
+  @override
+  String get goodsType => '\u092E\u093E\u0932 \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930';
+
+  @override
+  String get weightTonnes => '\u0935\u091C\u093C\u0928 (\u091F\u0928)';
+
+  @override
+  String get lengthFt => '\u0932\u0902\u092C\u093E\u0908 (\u092B\u093C\u0940\u091F)';
+
+  @override
+  String get widthFt => '\u091A\u094C\u0921\u093E\u0908 (\u092B\u093C\u0940\u091F)';
+
+  @override
+  String get heightFt => '\u090A\u0902\u091A\u093E\u0908 (\u092B\u093C\u0940\u091F)';
+
+  @override
+  String get stackable => '\u0938\u094D\u091F\u0948\u0915\u0947\u092C\u0932';
+
+  @override
+  String get fragile => '\u0928\u093E\u091C\u093C\u0941\u0915';
+
+  @override
+  String get specialRequirements => '\u0935\u093F\u0936\u0947\u0937 \u0906\u0935\u0936\u094D\u092F\u0915\u0924\u093E\u090F\u0902';
+
+  @override
+  String get estimatedPriceRange => '\u0905\u0928\u0941\u092E\u093E\u0928\u093F\u0924 \u092E\u0942\u0932\u094D\u092F \u0938\u0940\u092E\u093E';
+
+  @override
+  String get stableThisWeek => '\u0907\u0938 \u0938\u092A\u094D\u0924\u093E\u0939 \u0938\u094D\u0925\u093F\u0930';
+
+  @override
+  String get estimatingPrice => '\u092E\u0942\u0932\u094D\u092F \u0905\u0928\u0941\u092E\u093E\u0928 \u0932\u0917\u093E\u092F\u093E \u091C\u093E \u0930\u0939\u093E \u0939\u0948...';
+
+  @override
+  String get estimateUnavailable => '\u0905\u0928\u0941\u092E\u093E\u0928 \u0909\u092A\u0932\u092C\u094D\u0927 \u0928\u0939\u0940\u0902 \u0939\u0948';
+
+  @override
+  String get enterRouteDetails => '\u0936\u0941\u0930\u0942 \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093F\u092F\u0947 \u092E\u093E\u0930\u094D\u0917 \u0935\u093F\u0935\u0930\u0923 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+
+  @override
+  String get basedOnCurrentDemand => '\u0935\u0930\u094D\u0924\u092E\u093E\u0928 \u092E\u093E\u0902\u0917 \u0915\u0947 \u0906\u0927\u093E\u0930 \u092A\u0930';
+
+  @override
+  String get filterTrucks => '\u091F\u094D\u0930\u0915 \u092B\u093C\u093F\u0932\u094D\u091F\u0930 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get truckType => '\u091F\u094D\u0930\u0915 \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930';
+
+  @override
+  String get capacityTonnes => '\u0915\u094D\u0937\u092E\u0924\u093E (\u091F\u0928)';
+
+  @override
+  String get materialType => '\u0938\u093E\u092E\u0917\u094D\u0930\u0940 \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930';
+
+  @override
+  String get today => '\u0906\u091C';
+
+  @override
+  String get tomorrow => '\u0915\u0932';
+
+  @override
+  String get selectPickupOnMap => '\u092E\u093E\u0928\u091A\u093F\u0924\u094D\u0930 \u092A\u0930 \u092A\u093F\u0915\u0905\u092A \u091A\u0941\u0928\u0947\u0902';
+
+  @override
+  String get selectDropOnMap => '\u092E\u093E\u0928\u091A\u093F\u0924\u094D\u0930 \u092A\u0930 \u0921\u094D\u0930\u0949\u092A \u091A\u0941\u0928\u0947\u0902';
+
+  @override
+  String get temperatureControl => '\u0924\u093E\u092A\u092E\u093E\u0928 \u0928\u093F\u092F\u0902\u0924\u094D\u0930\u0923';
+
+  @override
+  String get waterproofCover => '\u091C\u0932\u0930\u094B\u0927\u0915 \u0915\u0935\u0930';
+
+  @override
+  String get loadingHelp => '\u0932\u094B\u0921\u093F\u0902\u0917 \u0938\u0939\u093E\u092F\u0924\u093E';
+
+  @override
+  String get loadingHelpNeeded => '\u0932\u094B\u0921\u093F\u0902\u0917 \u0938\u0939\u093E\u092F\u0924\u093E \u0906\u0935\u0936\u094D\u092F\u0915';
+
+  @override
+  String get other => '\u0905\u0928\u094D\u092F';
+
+  @override
+  String get describeYourGoods => '\u0905\u092A\u0928\u0947 \u092E\u093E\u0932 \u0915\u093E \u0935\u0930\u094D\u0923 \u0915\u0930\u0947\u0902...';
+
+  @override
+  String get activeTab => '\u0938\u0915\u094D\u0930\u093F\u092F';
+
+  @override
+  String get historyTab => '\u0907\u0924\u093F\u0939\u093E\u0938';
+
+  @override
+  String get searchOrdersHint => '\u0911\u0930\u094D\u0921\u0930 \u0916\u094B\u091C\u0947\u0902...';
+
+  @override
+  String get noActiveOrders => '\u0915\u094B\u0908 \u0938\u0915\u094D\u0930\u093F\u092F \u0911\u0930\u094D\u0921\u0930 \u0928\u0939\u0940\u0902';
+
+  @override
+  String get noHistoryOrders => '\u0915\u094B\u0908 \u0911\u0930\u094D\u0921\u0930 \u0907\u0924\u093F\u0939\u093E\u0938 \u0928\u0939\u0940\u0902';
+
+  @override
+  String get offlineMode => '\u0911\u092B\u093C\u0932\u093E\u0907\u0928 \u092E\u094B\u0921';
+
+  @override
+  String lastUpdated(String timeAgo) => '\u0905\u0902\u0924\u093F\u092E \u0905\u092A\u0921\u0947\u091F $timeAgo';
+
+  @override
+  String get driverAssigned => '\u0921\u094D\u0930\u093E\u0907\u0935\u0930 \u0928\u093F\u092F\u0941\u0915\u094D\u0924';
+
+  @override
+  String get inTransit => '\u0930\u093E\u0938\u094D\u0924\u0947 \u092E\u0947\u0902';
+
+  @override
+  String get paymentReleased => '\u092D\u0941\u0917\u0924\u093E\u0928 \u091C\u093E\u0930\u0940';
+
+  @override
+  String get delivered => '\u0935\u093F\u0924\u0930\u093F\u0924';
+
+  @override
+  String get cancelled => '\u0930\u0926\u094D\u0926';
+
+  @override
+  String get pending => '\u0932\u0902\u092C\u093F\u0924';
+
+  @override
+  String get account => '\u0916\u093E\u0924\u093E';
+
+  @override
+  String get preferences => '\u0935\u0930\u0940\u092F\u0924\u093E\u090F\u0902';
+
+  @override
+  String get paymentMethods => '\u092D\u0941\u0917\u0924\u093E\u0928 \u0915\u0947 \u0924\u0930\u0940\u0915\u0947';
+
+  @override
+  String get myDocuments => '\u092E\u0947\u0930\u0947 \u0926\u0938\u094D\u0924\u093E\u0935\u0947\u091C\u093C';
+
+  @override
+  String get savedAddresses => '\u0938\u0939\u0947\u091C\u0947 \u0917\u092F\u0947 \u092A\u0924\u0947';
+
+  @override
+  String get walletAddressLabel => '\u0935\u0949\u0932\u0947\u091F \u092A\u0924\u093E';
+
+  @override
+  String get notSet => '\u0938\u0947\u091F \u0928\u0939\u0940\u0902 \u0939\u0948';
+
+  @override
+  String get language => '\u092D\u093E\u0937\u093E';
+
+  @override
+  String get helpSupport => '\u0938\u0939\u093E\u092F\u0924\u093E \u0914\u0930 \u0938\u092E\u0930\u094D\u0925\u0928';
+
+  @override
+  String get aboutTruxify => '\u091F\u094D\u0930\u0915\u094D\u0938\u093F\u092B\u093E\u0908 \u0915\u0947 \u092C\u093E\u0930\u0947 \u092E\u0947\u0902';
+
+  @override
+  String get logout => '\u0932\u0949\u0917\u0906\u0909\u091F';
+
+  @override
+  String offlineModeLabel(String timeAgo) => '\u0911\u092B\u093C\u0932\u093E\u0908\u0928 \u092E\u094B\u0921 (\u0905\u0902\u0924\u093F\u092E \u0905\u092A\u0921\u0947\u091F $timeAgo)';
+
+  @override
+  String get ordersLabel => '\u0911\u0930\u094D\u0921\u0930';
+
+  @override
+  String get savedLabel => '\u0938\u0939\u0947\u091C\u093E \u0917\u092F\u093E';
+
+  @override
+  String get co2Label => 'CO\u2082 \u092C\u091A\u093E\u092F\u093E';
+
+  @override
+  String get editProfile => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932 \u0938\u0902\u092A\u093E\u0926\u093F\u0924 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get fullName => '\u092A\u0942\u0930\u093E \u0928\u093E\u092E';
+
+  @override
+  String get companyName => '\u0915\u0902\u092A\u0928\u0940 \u0915\u093E \u0928\u093E\u092E';
+
+  @override
+  String get phone => '\u092B\u093C\u094B\u0928';
+
+  @override
+  String get enterFullName => '\u0905\u092A\u0928\u093E \u092A\u0942\u0930\u093E \u0928\u093E\u092E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+
+  @override
+  String get enterCompanyName => '\u0905\u092A\u0928\u0940 \u0915\u0902\u092A\u0928\u0940 \u0915\u093E \u0928\u093E\u092E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+
+  @override
+  String get enterPhoneNumber => '\u0905\u092A\u0928\u093E \u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+
+  @override
+  String get nameIsRequired => '\u0928\u093E\u092E \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948';
+
+  @override
+  String get companyNameIsRequired => '\u0915\u0902\u092A\u0928\u0940 \u0915\u093E \u0928\u093E\u092E \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948';
+
+  @override
+  String get phoneNumberIsRequired => '\u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948';
+
+  @override
+  String get saving => '\u0938\u0939\u0947\u091C\u093E \u091C\u093E \u0930\u0939\u093E \u0939\u0948...';
+
+  @override
+  String get saveChanges => '\u092A\u0930\u093F\u0935\u0930\u094D\u0924\u093E\u0928 \u0938\u0939\u0947\u091C\u0947\u0902';
+
+  @override
+  String get profileUpdatedSuccessfully => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932 \u0938\u092B\u0932\u0924\u093E\u092A\u0942\u0930\u094D\u0935\u0915 \u0905\u092A\u0921\u0947\u091F \u0939\u094B \u0917\u0908';
+
+  @override
+  String get failedToLoadProfile => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932 \u0932\u094B\u0921 \u0915\u0930\u0928\u0947 \u092E\u0947\u0902 \u0905\u0938\u092B\u0932';
+
+  @override
+  String get failedToUpdateProfile => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932 \u0905\u092A\u0921\u0947\u091F \u0915\u0930\u0928\u0947 \u092E\u0947\u0902 \u0905\u0938\u092B\u0932';
+}

@@ -4,6 +4,15 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 class CacheManager {
+  static const Set<String> _cacheTables = {
+    'orders',
+    'profile',
+    'documents',
+    'settings',
+    'last_location',
+    'milestones',
+  };
+
   dynamic _safeDecode(String json) {
     try {
       return jsonDecode(json);
@@ -327,11 +336,14 @@ class CacheManager {
     final batch = db.batch();
     final updatedAt = DateTime.now().toUtc().toIso8601String();
 
-    for (final item in milestones) {
+    for (var index = 0; index < milestones.length; index++) {
+      final item = milestones[index];
+      final milestoneId = _stableId(item, const ['id', 'milestoneId', 'milestone_id']) ??
+          '${item['title'] ?? 'milestone'}_$index';
       batch.insert(
         'milestones',
         {
-          'id': '${orderId}_${item['title'] ?? 'milestone'}',
+          'id': '${orderId}_$milestoneId',
           'order_id': orderId,
           'title': item['title'] ?? 'Milestone',
           'completed': item['completed'] == true ? 1 : 0,
@@ -361,6 +373,9 @@ class CacheManager {
   }
 
   Future<int> clearTable(String tableName) async {
+    if (!_cacheTables.contains(tableName)) {
+      throw ArgumentError.value(tableName, 'tableName', 'unknown cache table');
+    }
     final db = await open();
     return db.delete(tableName);
   }
@@ -382,6 +397,9 @@ class CacheManager {
   }
 
   Future<int> getCacheSize(String tableName) async {
+    if (!_cacheTables.contains(tableName)) {
+      throw ArgumentError.value(tableName, 'tableName', 'unknown cache table');
+    }
     final db = await open();
     final result = await db.rawQuery('SELECT COUNT(*) as cnt FROM $tableName');
     if (result.isEmpty) return 0;

@@ -75,7 +75,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Could not load data';
+        _error = AppLocalizations.of(context)!.couldNotLoadData;
         _isLoading = false;
       });
     }
@@ -165,7 +165,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text(_error!, style: Theme.of(context).textTheme.bodyLarge),
                       const SizedBox(height: 12),
                       PrimaryButton(
-                        label: 'Retry',
+                        label: AppLocalizations.of(context)!.retry,
                         onPressed: () {
                           setState(() { _isLoading = true; _error = null; });
                           _loadData();
@@ -186,7 +186,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
                       ),
                       const SizedBox(height: 26),
-                      SectionHeader(title: 'Active Shipments', actionLabel: 'See all', onActionTap: () => _showComingSoon(context, 'All shipments')),
+                      SectionHeader(title: AppLocalizations.of(context)!.activeShipments, actionLabel: AppLocalizations.of(context)!.seeAll, onActionTap: () => _showComingSoon(context, 'All shipments')),
                       const SizedBox(height: 12),
                       _activeOrders.isEmpty
                           ? Padding(
@@ -220,20 +220,20 @@ class _HomeScreenState extends State<HomeScreen> {
                       Row(
                         children: [
                           Expanded(
-                            child: StatCard(title: 'Active', value: '${_activeOrders.length}', icon: Icons.local_shipping_rounded),
+                            child: StatCard(title: AppLocalizations.of(context)!.active, value: '${_activeOrders.length}', icon: Icons.local_shipping_rounded),
                           ),
                           const SizedBox(width: 10),
-                          const Expanded(
-                            child: StatCard(title: 'Coming soon', value: 'More stats', icon: Icons.inventory_2_rounded),
+                          Expanded(
+                            child: StatCard(title: AppLocalizations.of(context)!.moreStats, value: AppLocalizations.of(context)!.moreStats, icon: Icons.inventory_2_rounded),
                           ),
                           const SizedBox(width: 10),
-                          const Expanded(
-                            child: StatCard(title: 'Coming soon', value: 'Savings', icon: Icons.savings_rounded),
+                          Expanded(
+                            child: StatCard(title: AppLocalizations.of(context)!.moreStats, value: AppLocalizations.of(context)!.savings, icon: Icons.savings_rounded),
                           ),
                         ],
                       ),
                       const SizedBox(height: 24),
-                      SectionHeader(title: 'Your usual routes'),
+                      SectionHeader(title: AppLocalizations.of(context)!.yourUsualRoutes),
                       const SizedBox(height: 8),
                       Center(
                         child: Padding(
@@ -243,7 +243,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(height: 8),
                       PrimaryButton(
-                        label: 'Book a Truck \u{1f69b}',
+                        label: '${AppLocalizations.of(context)!.bookATruck} \u{1f69b}',
                         onPressed: () => controller.openFindTrucks(draft: mockDefaultRouteDraft),
                       ),
                     ],

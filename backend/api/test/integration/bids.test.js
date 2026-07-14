@@ -12,18 +12,21 @@ vi.mock('../../src/config/db.js', () => ({
   mongoDb: null,
 }));
 
-vi.mock('../../src/services/escrow.js', () => ({
-  buildDepositTx: vi.fn(),
-  recordDepositTx: vi.fn(),
-  escrowDeposit: vi.fn(),
-  escrowRelease: vi.fn(),
-  escrowRefund: vi.fn(),
-  submitEscrowRefund: vi.fn(),
-  confirmEscrowRefund: vi.fn(),
-  // Mirrors the real implementation's escrow:<id> booking id derivation
-  bookingIdFromUuid: vi.fn((orderId) => `escrow:${orderId}`),
-  ESCROW_MATIC_PER_PAISA: 0.01,
-}));
+vi.mock('../../src/services/escrow.js', async () => {
+  const actual = await vi.importActual('../../src/services/escrow.js');
+  return {
+    ...actual,
+    buildDepositTx: vi.fn(),
+    recordDepositTx: vi.fn(),
+    escrowDeposit: vi.fn(),
+    escrowRelease: vi.fn(),
+    escrowRefund: vi.fn(),
+    submitEscrowRefund: vi.fn(),
+    confirmEscrowRefund: vi.fn(),
+    // Mirrors the real implementation's escrow:<id> booking id derivation
+    bookingIdFromUuid: vi.fn((orderId) => `escrow:${orderId}`),
+  };
+});
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
 const { buildDepositTx: mockBuildDepositTx, recordDepositTx: mockRecordDepositTx, escrowDeposit: mockEscrowDeposit, escrowRefund: mockEscrowRefund } = await import('../../src/services/escrow.js');

@@ -19,27 +19,21 @@ export class LockAcquisitionError extends Error {
  * Acquires a distributed lock using Redis.
  * @param {string} resourceKey - The unique key identifying the resource to lock (e.g. `escrow_lock:123`)
  * @param {number} ttlMs - Time to live in milliseconds
-<<<<<<< fix/redis-lock-failure-handling
- * @returns {Promise<string|null>} lockValue if acquired, null if not acquired or Redis unavailable
+ * @returns {Promise<string|null>} lockValue if acquired, null if failed
+ * @throws {Error} if Redis is unavailable — callers MUST catch this and fail closed
+ * (e.g. respond with HTTP 503) rather than proceeding without a lock.
  */
 export async function acquireLock(resourceKey, ttlMs = 10000) {
   if (!redisClient) {
-    logger.warn('[RedisLock] redisClient not available, cannot acquire lock for', resourceKey);
-    return null;
+    logger.error('[RedisLock] redisClient not available — cannot acquire lock for', resourceKey);
+    throw new Error('Distributed lock unavailable: Redis is not connected');
   }
 
   const lockValue = crypto.randomUUID();
+  const acquired = await redisClient.set(resourceKey, lockValue, 'PX', ttlMs, 'NX');
 
-  try {
-    const acquired = await redisClient.set(resourceKey, lockValue, 'PX', ttlMs, 'NX');
-
-    if (acquired) {
-      return lockValue;
-    }
-    return null;
-  } catch (err) {
-    logger.error({ err }, '[RedisLock] Error acquiring lock for key', resourceKey);
-    return null;
+  if (acquired) {
+    return lockValue;
   }
 }
 
@@ -67,23 +61,6 @@ export async function renewLock(resourceKey, lockValue, ttlMs = 10000) {
   } catch (err) {
     logger.error({ err }, '[RedisLock] Error renewing lock for key', resourceKey);
     return false;
-=======
- * @returns {Promise<string|null>} lockValue if acquired, null if failed
- * @throws {Error} if Redis is unavailable — callers MUST catch this and fail closed
- * (e.g. respond with HTTP 503) rather than proceeding without a lock.
- */
-export async function acquireLock(resourceKey, ttlMs = 10000) {
-  if (!redisClient) {
-    logger.error('[RedisLock] redisClient not available — cannot acquire lock for', resourceKey);
-    throw new Error('Distributed lock unavailable: Redis is not connected');
-  }
-
-  const lockValue = crypto.randomUUID();
-  const acquired = await redisClient.set(resourceKey, lockValue, 'PX', ttlMs, 'NX');
-
-  if (acquired) {
-    return lockValue;
->>>>>>> main
   }
 }
 

@@ -35,7 +35,7 @@ dependencies:
   permission_handler: ^12.0.3
   sqflite: ^2.3.0
   path_provider: ^2.1.1
-  camera: ^0.10.5
+  camera: ^0.12.0+2
   signature: ^5.4.1
   connectivity_plus: ^5.0.2
 

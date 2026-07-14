@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import '../core/api_client.dart';
 import '../services/order_service.dart';
 import '../services/voice_ai_service.dart';
 import 'package:flutter/material.dart';
@@ -98,7 +99,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   }
 
   void _subscribeToTracking() {
-    final apiBaseUrl = OrderService.defaultApiBaseUrl;
+    final apiBaseUrl = ApiClient.defaultBaseUrl;
     final baseUri = Uri.parse(apiBaseUrl);
     final wsScheme = baseUri.scheme == 'https' ? 'wss' : 'ws';
     
@@ -109,17 +110,21 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     wsPath = '$wsPath/ws/tracking';
 
     String buildUrl() {
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken ?? '';
       final wsUri = Uri(
         scheme: wsScheme,
         host: baseUri.host,
         port: baseUri.hasPort ? baseUri.port : null,
         path: wsPath,
+        queryParameters: token.isNotEmpty ? {'token': token} : null,
       );
       return wsUri.toString();
     }
 
     final initialWsUrl = buildUrl();
-    debugPrint('Connecting to tracking WebSocket at: $initialWsUrl');
+    final redactedUrl = initialWsUrl.replaceAll(RegExp(r'token=[^&]+'), 'token=[REDACTED]');
+    debugPrint('Connecting to tracking WebSocket at: $redactedUrl');
 
     _trackingWebSocket = ResilientWebSocket(
       initialWsUrl,

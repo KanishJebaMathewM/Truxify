@@ -15,7 +15,6 @@ function generateOrderDisplayId() {
   return `${prefix}${dateStr}${random}`;
 }
 
-export async function createOrder({ orderData, userId, user, supabase = defaultSupabase }) {
 export async function createOrder({ orderData, userId, user }) {
   return measureExecution('OrderCreationService.createOrder', async () => {
   const {

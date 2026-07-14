@@ -336,11 +336,14 @@ class CacheManager {
     final batch = db.batch();
     final updatedAt = DateTime.now().toUtc().toIso8601String();
 
-    for (final item in milestones) {
+    for (var index = 0; index < milestones.length; index++) {
+      final item = milestones[index];
+      final milestoneId = _stableId(item, const ['id', 'milestoneId', 'milestone_id']) ??
+          '${item['title'] ?? 'milestone'}_$index';
       batch.insert(
         'milestones',
         {
-          'id': '${orderId}_${item['title'] ?? 'milestone'}',
+          'id': '${orderId}_$milestoneId',
           'order_id': orderId,
           'title': item['title'] ?? 'Milestone',
           'completed': item['completed'] == true ? 1 : 0,

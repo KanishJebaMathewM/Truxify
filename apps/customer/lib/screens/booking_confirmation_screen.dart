@@ -35,7 +35,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   List<SavedAddress> _addresses = [];
   PaymentMethod? _selectedPayment;
   SavedAddress? _selectedAddress;
-  bool _passengerMode = false;
+  bool _isPassengerMode = false;
 
   @override
   void initState() {
@@ -107,24 +107,9 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
       return;
     }
 
-    final weight = double.tryParse(widget.draft.weightTonnes);
-    if (weight == null || weight <= 0) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid weight. Please enter a valid weight.')),
-      );
-      return;
-    }
-
     setState(() => _isSubmitting = true);
 
     try {
-      final pickupDate = widget.draft.pickupDate;
-      final pickupTime = pickupDate != null
-          ? '${pickupDate.hour.toString().padLeft(2, '0')}:'
-              '${pickupDate.minute.toString().padLeft(2, '0')}'
-          : widget.draft.dateLabel;
-
       final orderId = await _orderService.createOrder(
         pickupAddress: widget.draft.pickup,
         dropAddress: _selectedAddress?.fullAddress ?? widget.draft.drop,
@@ -132,10 +117,9 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         pickupLng: widget.draft.pickupLng!,
         dropLat: finalDropLat,
         dropLng: finalDropLng,
-        pickupTime: pickupTime,
-        pickupDate: pickupDate,
-        goodsType: widget.draft.goodsType,
-        weightTonnes: weight,
+        pickupTime: widget.draft.dateLabel,
+        goodsType: widget.draft.goodsType + (_isPassengerMode ? ' + Passenger' : ''),
+        weightTonnes: double.tryParse(widget.draft.weightTonnes) ?? 0,
         paymentMethodId: _selectedPayment?.id,
       );
 
@@ -273,20 +257,31 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
           ),
           const SizedBox(height: 16),
           InfoCard(
-            child: SwitchListTile(
-              title: Text('Passenger Mode (Ride in Trailer)',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w800)),
-              subtitle: const Text('Ride along in the back of the freight truck for a fraction of the cost of a plane ticket. (Liability waiver applies)'),
-              value: _passengerMode,
-              activeColor: TruxifyColors.accent,
-              onChanged: (bool value) {
-                setState(() {
-                  _passengerMode = value;
-                });
-              },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text('Passenger Mode 🚌',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                    const Spacer(),
+                    Switch(
+                      value: _isPassengerMode,
+                      onChanged: (val) => setState(() => _isPassengerMode = val),
+                      activeColor: TruxifyColors.accent,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Book a space in the back of the trailer for cheap cross-country travel. (No seatbelts provided).',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),

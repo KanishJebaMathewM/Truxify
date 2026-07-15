@@ -286,8 +286,6 @@ async function verifyCustomerToken(socket, next) {
  */
 async function verifyDriverAssignment(driverId, bookingId) {
   try {
-    const { supabase } = await import("../config/db.js");
-
     const { data, error } = await supabase
       .from("bookings")
       .select("id")

@@ -19,9 +19,7 @@ export class LockAcquisitionError extends Error {
  * Acquires a distributed lock using Redis.
  * @param {string} resourceKey - The unique key identifying the resource to lock (e.g. `escrow_lock:123`)
  * @param {number} ttlMs - Time to live in milliseconds
- * @returns {Promise<string|null>} lockValue if acquired, null if failed
- * @throws {Error} if Redis is unavailable — callers MUST catch this and fail closed
- * (e.g. respond with HTTP 503) rather than proceeding without a lock.
+ * @returns {Promise<string|null>} lockValue if acquired, null if not acquired or Redis unavailable
  */
 export async function acquireLock(resourceKey, ttlMs = 10000) {
   if (!redisClient) {

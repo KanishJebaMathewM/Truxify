@@ -35,6 +35,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   List<SavedAddress> _addresses = [];
   PaymentMethod? _selectedPayment;
   SavedAddress? _selectedAddress;
+  bool _passengerMode = false;
 
   @override
   void initState() {
@@ -268,6 +269,24 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: TruxifyColors.adaptiveSecondaryText(context))),
               ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          InfoCard(
+            child: SwitchListTile(
+              title: Text('Passenger Mode (Ride in Trailer)',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.w800)),
+              subtitle: const Text('Ride along in the back of the freight truck for a fraction of the cost of a plane ticket. (Liability waiver applies)'),
+              value: _passengerMode,
+              activeColor: TruxifyColors.accent,
+              onChanged: (bool value) {
+                setState(() {
+                  _passengerMode = value;
+                });
+              },
             ),
           ),
           const SizedBox(height: 16),

@@ -1,0 +1,215 @@
+# Shard North
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-north
+  namespace: truxify
+  labels:
+    app: truxify
+    component: shard
+    shard: north
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: truxify
+      component: shard
+      shard: north
+  template:
+    metadata:
+      labels:
+        app: truxify
+        component: shard
+        shard: north
+    spec:
+      containers:
+      - name: postgres
+        image: postgis/postgis:15-3.3-alpine
+        env:
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: truxify-secrets
+              key: SHARD_PASSWORD
+        - name: POSTGRES_DB
+          value: truxify_north
+        ports:
+        - containerPort: 5432
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: shard-north-storage
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: shard-north-storage
+        persistentVolumeClaim:
+          claimName: shard-north-pvc
+---
+# Shard South
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-south
+  namespace: truxify
+  labels:
+    app: truxify
+    component: shard
+    shard: south
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: truxify
+      component: shard
+      shard: south
+  template:
+    metadata:
+      labels:
+        app: truxify
+        component: shard
+        shard: south
+    spec:
+      containers:
+      - name: postgres
+        image: postgis/postgis:15-3.3-alpine
+        env:
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: truxify-secrets
+              key: SHARD_PASSWORD
+        - name: POSTGRES_DB
+          value: truxify_south
+        ports:
+        - containerPort: 5432
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: shard-south-storage
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: shard-south-storage
+        persistentVolumeClaim:
+          claimName: shard-south-pvc
+---
+# Shard East
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-east
+  namespace: truxify
+  labels:
+    app: truxify
+    component: shard
+    shard: east
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: truxify
+      component: shard
+      shard: east
+  template:
+    metadata:
+      labels:
+        app: truxify
+        component: shard
+        shard: east
+    spec:
+      containers:
+      - name: postgres
+        image: postgis/postgis:15-3.3-alpine
+        env:
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: truxify-secrets
+              key: SHARD_PASSWORD
+        - name: POSTGRES_DB
+          value: truxify_east
+        ports:
+        - containerPort: 5432
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: shard-east-storage
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: shard-east-storage
+        persistentVolumeClaim:
+          claimName: shard-east-pvc
+---
+# Shard West
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shard-west
+  namespace: truxify
+  labels:
+    app: truxify
+    component: shard
+    shard: west
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: truxify
+      component: shard
+      shard: west
+  template:
+    metadata:
+      labels:
+        app: truxify
+        component: shard
+        shard: west
+    spec:
+      containers:
+      - name: postgres
+        image: postgis/postgis:15-3.3-alpine
+        env:
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: truxify-secrets
+              key: SHARD_PASSWORD
+        - name: POSTGRES_DB
+          value: truxify_west
+        ports:
+        - containerPort: 5432
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: shard-west-storage
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: shard-west-storage
+        persistentVolumeClaim:
+          claimName: shard-west-pvc

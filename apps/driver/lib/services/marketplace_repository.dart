@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:developer' as developer;
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_models.dart';
@@ -31,11 +32,30 @@ class MarketplaceRepository {
 
   String _encodePathSegment(String value) => Uri.encodeComponent(value);
 
+  void dispose() {
+    _apiClient.dispose();
+  Future<String?> _firebaseAccessToken() async {
+    try {
+      return await FirebaseAuth.instance.currentUser?.getIdToken();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _supabaseAccessToken() {
+    try {
+      return _client.auth.currentSession?.accessToken;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<Map<String, String>> _authHeaders() async {
-    final accessToken = await FirebaseAuth.instance.currentUser?.getIdToken();
+    final accessToken = await _firebaseAccessToken() ?? _supabaseAccessToken();
     return <String, String>{
       'Content-Type': 'application/json',
-      if (accessToken != null) 'Authorization': 'Bearer $accessToken',
+      if (accessToken != null && accessToken.isNotEmpty)
+        'Authorization': 'Bearer $accessToken',
     };
   }
 
@@ -178,8 +198,8 @@ class MarketplaceRepository {
             final newRecord = payload.newRecord;
             if (newRecord.isNotEmpty) {
               final offer = _mapLoadOffer(newRecord);
-              if (!controller.add(offer)) {
-                developer.log('No active subscribers, dropping load offer');
+              if (!controller.isClosed) {
+                controller.add(offer);
               }
             }
           } catch (e, st) {

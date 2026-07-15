@@ -6,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/intl.dart' as intl;
 
 import 'app_localizations_en.dart';
+import 'app_localizations_hi.dart';
 
 // ignore_for_file: type=lint
 
@@ -45,12 +46,12 @@ import 'app_localizations_en.dart';
 ///
 /// iOS applications define key application metadata, including supported
 /// locales, in an Info.plist file that is built into the application bundle.
-/// To configure the locales supported by your app, you’ll need to edit this
+/// To configure the locales supported by your app, you'll need to edit this
 /// file.
 ///
-/// First, open your project’s ios/Runner.xcworkspace Xcode workspace file.
+/// First, open your project's ios/Runner.xcworkspace Xcode workspace file.
 /// Then, in the Project Navigator, open the Info.plist file under the Runner
-/// project’s Runner folder.
+/// project's Runner folder.
 ///
 /// Next, select the Information Property List item, select Add Item from the
 /// Editor menu, then select Localizations from the pop-up menu.
@@ -92,31 +93,282 @@ abstract class AppLocalizations {
   ];
 
   /// A list of this localizations delegate's supported locales.
-  static const List<Locale> supportedLocales = <Locale>[Locale('en')];
+  static const List<Locale> supportedLocales = <Locale>[
+    Locale('en'),
+    Locale('hi'),
+  ];
 
-  /// The title of the application
-  ///
-  /// In en, this message translates to:
-  /// **'Truxify'**
   String get appTitle;
 
-  /// Greeting title on the login screen
-  ///
-  /// In en, this message translates to:
-  /// **'Welcome to Truxify'**
   String get loginTitle;
 
-  /// Text for the book a load button
-  ///
-  /// In en, this message translates to:
-  /// **'Book a Load'**
   String get bookLoadButton;
 
-  /// Generic loading indicator text
-  ///
-  /// In en, this message translates to:
-  /// **'Loading...'**
   String get loadingText;
+
+  String comingSoon(String title);
+
+  String greetingMessage(String greeting, String displayName);
+
+  String get noActiveShipments;
+
+  String get routeHistoryComingSoon;
+
+  String get walletAddressUpdated;
+
+  String get polygonWalletAddress;
+
+  String get saveWalletAddress;
+
+  String error(String errorMsg);
+
+  String get lightTheme;
+
+  String get darkTheme;
+
+  String get retry;
+
+  String get cancel;
+
+  String get save;
+
+  String get close;
+
+  String get apply;
+
+  String get reset;
+
+  String get search;
+
+  String get welcomeBack;
+
+  String get signInSubtitle;
+
+  String get phoneNumber;
+
+  String get sendOtp;
+
+  String get sendingOtp;
+
+  String get verifyingOtp;
+
+  String get verifyOtp;
+
+  String get loginWithBiometrics;
+
+  String get biometricsNotSupported;
+
+  String get biometricAuthSuccessful;
+
+  String get pleaseEnterPhone;
+
+  String get phoneDigitsOnly;
+
+  String phoneMustBeExactDigits(int digitCount);
+
+  String get phoneMustBeDigits;
+
+  String get verificationFailed;
+
+  String get phoneVerificationFailed;
+
+  String get autoVerificationFailed;
+
+  String get failedToSendOtp;
+
+  String get enterOtp;
+
+  String sentTo(String phoneNumber);
+
+  String get invalidOtp;
+
+  String get verificationSessionExpired;
+
+  String get invalidVerificationCode;
+
+  String get otpExpired;
+
+  String get home;
+
+  String get findTrucks;
+
+  String get orders;
+
+  String get profile;
+
+  String get activeShipments;
+
+  String get seeAll;
+
+  String get bookATruck;
+
+  String get active;
+
+  String get moreStats;
+
+  String get savings;
+
+  String get yourUsualRoutes;
+
+  String get lastTruckLocation;
+
+  String get couldNotLoadData;
+
+  String get mlPoweredMatching;
+
+  String get route;
+
+  String get pickupLocation;
+
+  String get dropLocation;
+
+  String get date;
+
+  String get time;
+
+  String get goodsDetails;
+
+  String get goodsType;
+
+  String get weightTonnes;
+
+  String get lengthFt;
+
+  String get widthFt;
+
+  String get heightFt;
+
+  String get stackable;
+
+  String get fragile;
+
+  String get specialRequirements;
+
+  String get estimatedPriceRange;
+
+  String get stableThisWeek;
+
+  String get estimatingPrice;
+
+  String get estimateUnavailable;
+
+  String get enterRouteDetails;
+
+  String get basedOnCurrentDemand;
+
+  String get filterTrucks;
+
+  String get truckType;
+
+  String get capacityTonnes;
+
+  String get materialType;
+
+  String get today;
+
+  String get tomorrow;
+
+  String get selectPickupOnMap;
+
+  String get selectDropOnMap;
+
+  String get temperatureControl;
+
+  String get waterproofCover;
+
+  String get loadingHelp;
+
+  String get loadingHelpNeeded;
+
+  String get other;
+
+  String get describeYourGoods;
+
+  String get activeTab;
+
+  String get historyTab;
+
+  String get searchOrdersHint;
+
+  String get noActiveOrders;
+
+  String get noHistoryOrders;
+
+  String get offlineMode;
+
+  String lastUpdated(String timeAgo);
+
+  String get driverAssigned;
+
+  String get inTransit;
+
+  String get paymentReleased;
+
+  String get delivered;
+
+  String get cancelled;
+
+  String get pending;
+
+  String get account;
+
+  String get preferences;
+
+  String get paymentMethods;
+
+  String get myDocuments;
+
+  String get savedAddresses;
+
+  String get walletAddressLabel;
+
+  String get notSet;
+
+  String get language;
+
+  String get helpSupport;
+
+  String get aboutTruxify;
+
+  String get logout;
+
+  String offlineModeLabel(String timeAgo);
+
+  String get ordersLabel;
+
+  String get savedLabel;
+
+  String get co2Label;
+
+  String get editProfile;
+
+  String get fullName;
+
+  String get companyName;
+
+  String get phone;
+
+  String get enterFullName;
+
+  String get enterCompanyName;
+
+  String get enterPhoneNumber;
+
+  String get nameIsRequired;
+
+  String get companyNameIsRequired;
+
+  String get phoneNumberIsRequired;
+
+  String get saving;
+
+  String get saveChanges;
+
+  String get profileUpdatedSuccessfully;
+
+  String get failedToLoadProfile;
+
+  String get failedToUpdateProfile;
 }
 
 class _AppLocalizationsDelegate
@@ -130,17 +382,18 @@ class _AppLocalizationsDelegate
 
   @override
   bool isSupported(Locale locale) =>
-      <String>['en'].contains(locale.languageCode);
+      <String>['en', 'hi'].contains(locale.languageCode);
 
   @override
   bool shouldReload(_AppLocalizationsDelegate old) => false;
 }
 
 AppLocalizations lookupAppLocalizations(Locale locale) {
-  // Lookup logic when only language code is specified.
   switch (locale.languageCode) {
     case 'en':
       return AppLocalizationsEn();
+    case 'hi':
+      return AppLocalizationsHi();
   }
 
   throw FlutterError(

@@ -1,6 +1,6 @@
 import crypto from 'crypto';
-import { redisClient, supabase } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
+import { supabase } from '../../config/db.js';
 import {
   sendDeliveryOtpNotification,
   storeDeliveryOtp,
@@ -19,6 +19,7 @@ import {
 import { escrowRelease } from '../escrow.js';
 import { DomainError } from './domainError.js';
 import { OrderTimelineService } from './orderTimelineService.js';
+import { measureExecution } from '../../core/performanceMetrics.js';
 
 const orderTimelineService = new OrderTimelineService({ supabase, logger });
 
@@ -26,9 +27,12 @@ export class OrderMilestoneService {
   constructor(args = {}) {
     if (args.orderRepository) this.orderRepository = args.orderRepository;
     if (args.orderValidationService) this.validation = args.orderValidationService;
+    if (args.orderTimelineService) this.orderTimelineService = args.orderTimelineService;
+    if (args.orderNotificationService) this.orderNotificationService = args.orderNotificationService;
   }
 
   async updateMilestone({ orderId, milestone, driverId }) {
+    return measureExecution('OrderMilestoneService.updateMilestone', async () => {
     const milestoneMap = {
       'Truck Assigned': 'truck_assigned',
       'En Route to Pickup': 'en_route_pickup',
@@ -46,9 +50,7 @@ export class OrderMilestoneService {
     if (orderErr || !order) throw new DomainError(404, { error: 'Order not found.' });
     if (order.driver_id !== driverId) throw new DomainError(403, { error: 'Access Denied: You are not assigned to this order.' });
 
-    const { data: timeline, error: tlErr } = await this.orderRepository.getTimelineWithSortCheck(order.order_display_id);
-    if (tlErr) throw new DomainError(500, { error: 'Failed to fetch order timeline.' });
-    const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
+    const timeline = await this.orderTimelineService.getOrderTimeline(order.order_display_id);
 
     const canonicalMilestones = new Set([...Object.keys(milestoneMap), 'Order Placed', 'Delivered']);
     const lastCompleted = [...timeline].reverse().find(t => t.completed && canonicalMilestones.has(t.milestone));
@@ -87,12 +89,12 @@ export class OrderMilestoneService {
 
     const { error: timelineErr } = await this.orderRepository.updateTimelineMilestone(order.order_display_id, milestone, { completed: true, milestone_time: new Date().toISOString() });
     if (timelineErr) throw new DomainError(500, { error: 'Failed to update order timeline.', details: timelineErr.message });
-    await orderTimelineService.completeMilestone(order.order_display_id, milestone);
+    await this.orderTimelineService.completeMilestone(order.order_display_id, milestone);
 
     const { data: updatedOrder, error: updateErr } = await this.orderRepository.updateOrder(orderId, updates);
     if (updateErr) {
       await this.orderRepository.updateTimelineMilestone(order.order_display_id, milestone, { completed: false, milestone_time: null });
-      await orderTimelineService.resetMilestone(order.order_display_id, milestone);
+      await this.orderTimelineService.resetMilestone(order.order_display_id, milestone);
       throw new DomainError(500, { error: 'Failed to update order.', details: updateErr.message });
     }
 
@@ -108,9 +110,11 @@ export class OrderMilestoneService {
     }
 
     return { order: updatedOrder, milestone, status };
+    });
   }
 
   async verifyDelivery({ orderId, otp, driverId }) {
+    return measureExecution('OrderMilestoneService.verifyDelivery', async () => {
     if (await checkOtpLockout(orderId)) {
       throw new DomainError(429, {
         error: `Too many failed OTP attempts. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes.`,
@@ -241,5 +245,6 @@ export class OrderMilestoneService {
     }
 
     return { status: 200, body: { message: 'Delivery verified successfully! Payment released to driver.' } };
+    });
   }
 }

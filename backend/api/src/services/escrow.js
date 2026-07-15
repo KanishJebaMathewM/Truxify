@@ -30,6 +30,7 @@
 import { ethers } from 'ethers'
 import * as Sentry from '@sentry/node'
 import logger from '../middleware/logger.js'
+import { measureExecution } from '../core/performanceMetrics.js'
 
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver) external payable',
@@ -38,20 +39,22 @@ const ESCROW_ABI = [
   'function bookings(bytes32 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, uint256 createdAt)'
 ]
 
-const rpcUrl = process.env.POLYGON_RPC_URL
-const contractAddress = process.env.ESCROW_CONTRACT_ADDRESS
-const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY
-export const ESCROW_MATIC_PER_PAISA = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0.01')
+const rpcUrl            = process.env.POLYGON_RPC_URL;
+const contractAddress   = process.env.ESCROW_CONTRACT_ADDRESS;
+const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
+export const ESCROW_MATIC_PER_PAISA = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0.01');
+const MAX_ESCROW_MATIC = parseFloat(process.env.MAX_ESCROW_MATIC || '5');
 
 /** @type {ethers.Contract | null} */
 let escrowContract = null
 
 if (rpcUrl && contractAddress && relayerPrivateKey) {
   try {
-    const provider = new ethers.JsonRpcProvider(rpcUrl)
-    const relayer = new ethers.Wallet(relayerPrivateKey, provider)
-    escrowContract = new ethers.Contract(contractAddress, ESCROW_ABI, relayer)
-    logger.info('✅ Polygon Escrow contract client initialised.')
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const relayer  = new ethers.Wallet(relayerPrivateKey, provider);
+    escrowContract = new ethers.Contract(contractAddress, ESCROW_ABI, relayer);
+    logger.info('✅ Polygon Escrow contract client initialised.');
+    logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
     logger.error('❌ Failed to initialise Escrow contract client:', err.message)
     Sentry.captureException(err)
@@ -78,6 +81,7 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
  * @returns {Promise<boolean>} — true if validation passed
  */
 export async function validateEscrowSetup () {
+  return measureExecution('EscrowService.validateEscrowSetup', async () => {
   if (!escrowContract) {
     logger.warn('[escrow] Setup validation skipped — contract not initialised (env vars missing).')
     return false
@@ -120,6 +124,27 @@ export async function validateEscrowSetup () {
   }
 
   return true
+  });
+}
+
+/**
+ * Convert an amount in paisa to its equivalent MATIC wei value
+ * using the configured ESCROW_MATIC_PER_PAISA rate.
+ *
+ * @param {number|string} paisa - Amount in paisa (e.g. 5000 = ₹50)
+ * @returns {bigint} Amount in wei
+ * @throws {RangeError} If paisa is negative, NaN, or exceeds safety cap
+ */
+export function paisaToMaticWei(paisa) {
+  const amount = Number(paisa);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new RangeError(`Invalid paisa amount: ${paisa}`);
+  }
+  const matic = amount * ESCROW_MATIC_PER_PAISA;
+  if (matic > MAX_ESCROW_MATIC) {
+    logger.warn(`[escrow] Deposit ${matic} MATIC exceeds safety cap of ${MAX_ESCROW_MATIC} MATIC (${paisa} paisa @ ${ESCROW_MATIC_PER_PAISA} MATIC/paisa)`);
+  }
+  return ethers.parseEther(matic.toFixed(18));
 }
 
 /**
@@ -138,6 +163,7 @@ export function isEscrowEnabled() {
  * @returns {Promise<{status: string, chainId?: number, error?: string}>}
  */
 export async function checkEscrowHealth() {
+  return measureExecution('EscrowService.checkEscrowHealth', async () => {
   if (!escrowContract) {
     return { status: 'not_configured' };
   }
@@ -153,6 +179,7 @@ export async function checkEscrowHealth() {
     logger.error('[escrow] Health check failed:', err.message);
     return { status: 'failed', error: err.message };
   }
+  });
 }
 
 /**
@@ -180,6 +207,7 @@ export function getEscrowBookingId (orderDisplayId) {
  * @returns {Promise<{txData: object|null, bookingId: string}>}
  */
 export async function buildDepositTx (orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
+  return measureExecution('EscrowService.buildDepositTx', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
   if (!escrowContract) {
     return { txData: null, bookingId }
@@ -207,9 +235,11 @@ export async function buildDepositTx (orderDisplayId, customerWalletAddress, dri
   }
   logger.info(`[escrow] Deposit tx built for booking ${orderDisplayId}`)
   return { txData, bookingId }
+  });
 }
 
 export async function recordDepositTx (bookingId, txHash, expectedSenderAddress = null) {
+  return measureExecution('EscrowService.recordDepositTx', async () => {
   if (!escrowContract) {
     return { error: 'Contract not initialised' }
   }
@@ -263,12 +293,17 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
   // We can still verify the on-chain sender (tx.from) is expected.
 
   // If an expected sender address was provided (from order record), verify it matches.
-  if (expectedSenderAddress && tx.from.toLowerCase() !== expectedSenderAddress.toLowerCase()) {
+  // Reject if no wallet is on file rather than silently skipping sender verification (fail closed).
+  if (!expectedSenderAddress) {
+    return { error: 'No registered customer wallet on file to verify transaction sender against' }
+  }
+  if (tx.from.toLowerCase() !== expectedSenderAddress.toLowerCase()) {
     return { error: 'Transaction sender does not match the registered customer wallet for this order' }
   }
 
   logger.info(`[escrow] deposit confirmed for booking ${bookingId} in block ${receipt.blockNumber}`)
   return { txHash: receipt.hash, bookingId }
+  });
 }
 
 /**
@@ -279,6 +314,7 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
  * @returns {Promise<{txHash: string|null, bookingId: string}>}
  */
 export async function escrowRelease (orderDisplayId) {
+  return measureExecution('EscrowService.escrowRelease', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
   if (!escrowContract) {
@@ -306,13 +342,14 @@ export async function escrowRelease (orderDisplayId) {
     logger.error(`[escrow] releaseFunds failed for booking ${orderDisplayId}: ${err.message}`)
     return { txHash: null, bookingId, error: err.message }
   }
+  });
 }
 
 /**
  * Submit an escrow refund and return its hash before confirmation.
- * Callers can persist the hash before waiting on the network.
  */
 export async function submitEscrowRefund (orderDisplayId) {
+  return measureExecution('EscrowService.submitEscrowRefund', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
   if (!escrowContract) {
@@ -340,12 +377,14 @@ export async function submitEscrowRefund (orderDisplayId) {
       return receipt
     }
   }
+  });
 }
 
 /**
  * Confirm a previously submitted refund transaction during a retry.
  */
 export async function confirmEscrowRefund (txHash) {
+  return measureExecution('EscrowService.confirmEscrowRefund', async () => {
   if (!escrowContract) {
     throw new Error('Escrow contract is not initialised.')
   }
@@ -358,6 +397,7 @@ export async function confirmEscrowRefund (txHash) {
     throw new Error('Escrow refund transaction reverted or was not found.')
   }
   return receipt
+  });
 }
 
 export function bookingIdFromUuid (orderId) {

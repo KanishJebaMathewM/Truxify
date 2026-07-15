@@ -1,14 +1,17 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { userLimiter, adminRateLimiter } from '../middleware/rateLimiter.js';
+import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
-import { startTimer, endTimer } from '../lib/routeTiming.js';
+
 
 const router = express.Router();
-const routeTimer = startTimer('supportRoutes');
+
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
 const TICKET_COLUMNS = 'id, subject, description, category, status, created_at, updated_at';
@@ -380,7 +383,8 @@ router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicke
 // ============================================================================
 // 7. LIST ALL TICKETS (ADMIN ONLY)
 // ============================================================================
-router.get('/admin/tickets', authenticate, userLimiter, requireRole(['admin']), async (req, res) => {
+router.get('/admin/tickets', authenticate, adminRateLimiter, requireRole(['admin']), async (req, res) => {
+router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:admin-view-all'), async (req, res) => {
   const { status, category, user_id, page = '1', limit = '20' } = req.query;
   const parsedPage = parsePositiveInteger(page, 1, 'page');
   if (parsedPage.error) {
@@ -562,7 +566,11 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
     }
 
     const limit = Math.min(100, parsedLimit.value);
-    const offset = typeof req.query.offset === 'string' ? Number.parseInt(req.query.offset, 10) : 0;
+    const parsedOffset = parseIntegerQuery(req.query.offset, 0, 'offset', { min: 0 });
+    if (parsedOffset.error) {
+      return res.status(400).json({ error: parsedOffset.error });
+    }
+    const offset = parsedOffset.value;
 
     const { data: comments, error: commentsError } = await supabase
       .from('support_ticket_comments')
@@ -584,7 +592,6 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
   }
 });
 
-endTimer(routeTimer);
 export default router;
 
 // Resolves #2055: Load-based ticket assignment

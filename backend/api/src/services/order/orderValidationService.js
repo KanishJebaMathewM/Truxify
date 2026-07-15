@@ -1,4 +1,5 @@
 import { DomainError } from './domainError.js';
+import { policy } from '../../security/policyEngine.js';
 
 export class OrderValidationService {
   constructor({ supabase, logger }) {
@@ -22,19 +23,25 @@ export class OrderValidationService {
   }
 
   assertCustomerOwnership(order, userId) {
-    if (order.customer_id !== userId) {
+    try {
+      policy.authorize({ id: userId, role: 'customer' }, 'order:view-bids', { order });
+    } catch (err) {
       throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
     }
   }
 
   assertDriverAssignment(order, driverId) {
-    if (order.driver_id !== driverId) {
+    try {
+      policy.authorize({ id: driverId, role: 'driver' }, 'milestone:update', { order });
+    } catch (err) {
       throw new DomainError(403, { error: 'Access Denied: You are not assigned to this order.' });
     }
   }
 
-  assertOrderAccess(order, userId) {
-    if (order.customer_id !== userId && order.driver_id !== userId) {
+  assertOrderAccess(order, user) {
+    try {
+      policy.authorize(user, 'order:view', { order });
+    } catch (err) {
       throw new DomainError(403, { error: 'Access Denied: You do not own or are not assigned to this order.' });
     }
   }
@@ -69,7 +76,10 @@ export class OrderValidationService {
   }
 
   assertNotOwnLoad(offerCustomerId, userId) {
-    if (offerCustomerId === userId) {
+    const offer = { customer_id: offerCustomerId };
+    try {
+      policy.authorize({ id: userId, role: 'driver' }, 'bid:submit', { offer });
+    } catch (err) {
       throw new DomainError(403, { error: 'You cannot bid on your own load offer' });
     }
   }

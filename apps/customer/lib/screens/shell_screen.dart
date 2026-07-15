@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../controllers/app_controller.dart';
+import '../l10n/app_localizations.dart';
 import '../services/fcm_service.dart';
 import '../theme/app_theme.dart';
 import 'find_trucks_screen.dart';
@@ -51,11 +52,11 @@ class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
           selectedIndex: controller.currentTab,
           onDestinationSelected: controller.setTab,
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.home_rounded), label: 'Home'),
-            NavigationDestination(icon: Icon(Icons.search_rounded), label: 'Find Trucks'),
-            NavigationDestination(icon: Icon(Icons.inventory_2_rounded), label: 'Orders'),
-            NavigationDestination(icon: Icon(Icons.person_rounded), label: 'Profile'),
+          destinations: [
+            NavigationDestination(icon: Icon(Icons.home_rounded), label: AppLocalizations.of(context)!.home),
+            NavigationDestination(icon: Icon(Icons.search_rounded), label: AppLocalizations.of(context)!.findTrucks),
+            NavigationDestination(icon: Icon(Icons.inventory_2_rounded), label: AppLocalizations.of(context)!.orders),
+            NavigationDestination(icon: Icon(Icons.person_rounded), label: AppLocalizations.of(context)!.profile),
           ],
         ),
       ),

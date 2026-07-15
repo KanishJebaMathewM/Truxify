@@ -62,6 +62,17 @@ class DriverEarningsService {
     return true;
   }
 
+  List<Map<String, dynamic>> _mapResponseRows(Object? response, String label) {
+    if (response is! List) {
+      throw StateError('Unexpected $label response type');
+    }
+    return response.map((item) {
+      if (item is Map<String, dynamic>) return item;
+      if (item is Map) return Map<String, dynamic>.from(item);
+      throw StateError('Unexpected $label item type');
+    }).toList(growable: false);
+  }
+
   String? get driverId => _client.auth.currentUser?.id;
 
   Future<List<Map<String, dynamic>>> fetchWalletTransactions({
@@ -172,7 +183,7 @@ class DriverEarningsService {
         .eq('trip_date', day)
         .order('created_at', ascending: false);
 
-    return List<Map<String, dynamic>>.from(response);
+    return _mapResponseRows(response, 'completed trips');
   }
 
   /// Fetches today's earnings summary (amount, hours driven, trip count).
@@ -187,10 +198,14 @@ class DriverEarningsService {
     try {
       final decoded = await _apiClient.get(path);
       
-      if (decoded is! List) return null;
+      if (decoded is! List) {
+        throw StateError('Unexpected earnings summary response type');
+      }
 
       for (final entry in decoded) {
-        if (entry is! Map) continue;
+        if (entry is! Map) {
+          throw StateError('Unexpected earnings summary item type');
+        }
         final dateStr = entry['day_date']?.toString();
         if (dateStr == dayStr) {
           return EarningsDailyModel.fromMap(Map<String, dynamic>.from(entry));
@@ -199,6 +214,9 @@ class DriverEarningsService {
 
       return null;
     } catch (e) {
+      if (e is StateError) {
+        throw Exception(e.message);
+      }
       if (e is ApiException) {
         throw Exception(e.message.isNotEmpty ? e.message : 'Failed to load today\'s earnings.');
       }

@@ -4,16 +4,22 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_shared/truxify_shared.dart';
+import 'package:truxify_shared/shimmer_widget.dart';
 import '../core/app_routes.dart';
+import '../core/driver_session.dart';
 import '../core/supabase_config.dart';
+import '../l10n/app_localizations.dart';
 import '../models/app_models.dart';
 import '../models/marketplace_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import '../services/bid_submission_guard.dart';
 import '../services/marketplace_repository.dart';
 import '../services/trip_cache.dart';
 import '../services/trip_service.dart';
-import 'package:truxify_shared/shimmer_widget.dart';
+import '../services/sync_service.dart';
+import 'pod_screen.dart';
 
 class TripsScreen extends StatefulWidget {
   const TripsScreen({super.key});
@@ -30,11 +36,13 @@ class _TripsScreenState extends State<TripsScreen> {
 
   RealtimeChannel? _bidChannel;
   final MarketplaceRepository _marketplaceRepository = MarketplaceRepository();
+  final BidSubmissionGuard _bidSubmissionGuard = BidSubmissionGuard();
   late final TripService _tripService;
 
   List<Map<String, dynamic>> _trips = [];
   Map<String, List<Map<String, dynamic>>> _tripStopsByTripId = {};
   Map<String, List<Map<String, dynamic>>> _routePointsByTripId = {};
+  Map<String, List<Map<String, dynamic>>> _itemsByTripId = {};
 
   bool _isLoadingTrips = true;
   bool _isLoadingMoreTrips = false;
@@ -51,7 +59,7 @@ class _TripsScreenState extends State<TripsScreen> {
   List<LoadOffer> _marketplaceLoads = const [];
   List<LoadOffer> _enRouteLoads = const [];
   Map<String, DriverBid> _bidsByLoadId = const {};
-
+  Set<String> _submittingLoadIds = const <String>{};
 
   final List<String> _statusFilters = [
     'All',
@@ -63,6 +71,7 @@ class _TripsScreenState extends State<TripsScreen> {
   @override
   void initState() {
     super.initState();
+    SyncService.instance.startListening();
     _tripService = TripService();
     _scrollController.addListener(_onScroll);
     _loadTrips();
@@ -87,19 +96,22 @@ class _TripsScreenState extends State<TripsScreen> {
       final result = await _tripService.fetchTripHistory(limit: 20);
       final trips = result['trips'] as List<Map<String, dynamic>>;
 
-      final stopsByTrip = <String, List<Map<String, dynamic>>>{};
-      final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
+    final stopsByTrip = <String, List<Map<String, dynamic>>>{};
+    final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
+    final itemsByTrip = <String, List<Map<String, dynamic>>>{};   // ← add this
 
-      await Future.wait(trips.map((trip) async {
-        final tripId = trip['trip_display_id']?.toString();
-        if (tripId == null || tripId.isEmpty) return;
+    await Future.wait(trips.map((trip) async {
+      final tripId = trip['trip_display_id']?.toString();
+      if (tripId == null || tripId.isEmpty) return;
 
-        final results = await Future.wait([
-          _tripService.fetchTripStops(tripId),
-          _tripService.fetchRouteMapPoints(tripId),
-        ]);
-        stopsByTrip[tripId] = results[0];
-        routePointsByTrip[tripId] = results[1];
+      final results = await Future.wait([
+        _tripService.fetchTripStops(tripId),
+        _tripService.fetchRouteMapPoints(tripId),
+        _tripService.fetchTripItems(tripId),   
+      ]);
+      stopsByTrip[tripId] = results[0];
+      routePointsByTrip[tripId]= results[1];
+      itemsByTrip[tripId] = results[2];   
       }));
 
       if (!mounted) return;
@@ -108,6 +120,7 @@ class _TripsScreenState extends State<TripsScreen> {
         _trips = trips;
         _tripStopsByTripId = stopsByTrip;
         _routePointsByTripId = routePointsByTrip;
+        _itemsByTripId = itemsByTrip;
         _nextTripsCursor = result['nextCursor'] as String?;
         _hasMoreTrips = result['hasMore'] as bool? ?? false;
         _isLoadingTrips = false;
@@ -121,6 +134,7 @@ class _TripsScreenState extends State<TripsScreen> {
         trips: trips,
         stopsByTripId: stopsByTrip,
         routePointsByTripId: routePointsByTrip,
+        itemsByTripId: itemsByTrip,
       ));
     } catch (e) {
       debugPrint('Failed to load trips: $e');
@@ -133,6 +147,7 @@ class _TripsScreenState extends State<TripsScreen> {
           _trips = cached.trips;
           _tripStopsByTripId = cached.stopsByTripId;
           _routePointsByTripId = cached.routePointsByTripId;
+          _itemsByTripId = cached.itemsByTripId;
           _hasMoreTrips = false;
           _isLoadingTrips = false;
           _tripsError = null;
@@ -172,6 +187,7 @@ class _TripsScreenState extends State<TripsScreen> {
 
       final stopsByTrip = <String, List<Map<String, dynamic>>>{};
       final routePointsByTrip = <String, List<Map<String, dynamic>>>{};
+      final itemsByTrip = <String, List<Map<String, dynamic>>>{};
 
       await Future.wait(newTrips.map((trip) async {
         final tripId = trip['trip_display_id']?.toString();
@@ -180,9 +196,11 @@ class _TripsScreenState extends State<TripsScreen> {
         final results = await Future.wait([
           _tripService.fetchTripStops(tripId),
           _tripService.fetchRouteMapPoints(tripId),
+          _tripService.fetchTripItems(tripId),
         ]);
         stopsByTrip[tripId] = results[0];
         routePointsByTrip[tripId] = results[1];
+        itemsByTrip[tripId] = results[2];
       }));
 
       if (!mounted) return;
@@ -191,6 +209,7 @@ class _TripsScreenState extends State<TripsScreen> {
         _trips.addAll(newTrips);
         _tripStopsByTripId.addAll(stopsByTrip);
         _routePointsByTripId.addAll(routePointsByTrip);
+        _itemsByTripId.addAll(itemsByTrip);
         _nextTripsCursor = result['nextCursor'] as String?;
         _hasMoreTrips = result['hasMore'] as bool? ?? false;
         _isLoadingMoreTrips = false;
@@ -213,10 +232,22 @@ class _TripsScreenState extends State<TripsScreen> {
 
     if (currentStop.isEmpty) return;
 
-    await _tripService.markStopCompleted(
-      currentStop['id'].toString(),
-      currentStop['trip_display_id'].toString(),
-    );
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (context) => ProofOfDeliveryScreen(
+        tripDisplayId: currentStop['trip_display_id'].toString(),
+        stopId: currentStop['id'].toString(),
+        onComplete: (photoPath, signPath) async {
+          await SyncService.instance.queueOrSyncPoD(
+            tripDisplayId: currentStop['trip_display_id'].toString(),
+            stopId: currentStop['id'].toString(),
+            photoPath: photoPath,
+            signaturePath: signPath,
+          );
+        },
+      ),
+    ));
+    
     await _loadTrips();
   }
 
@@ -231,34 +262,49 @@ class _TripsScreenState extends State<TripsScreen> {
         return TripStatusType.active;
     }
   }
-
   List<Trip> _mapSupabaseTripsToUiTrips() {
-    return _trips.map((row) {
-      return Trip(
-        route: row['route_label']?.toString() ?? 'Unknown route',
-        date: row['trip_date']?.toString() ?? '',
-        items: const [],
-        itemCount: row['distance']?.toString() ?? '',
-        distance: row['distance']?.toString() ?? '',
-        earnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
-        status: _mapStatus(row['status']?.toString()),
-        tripId: row['trip_display_id']?.toString() ?? '',
-        hash: '',
-        duration: row['duration']?.toString() ?? '',
-        endTime: '',
-        paymentBreakdown: PaymentBreakdown(
-          baseFreight:
-              '₹${((row['total_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
-          fuelDeducted: '₹0',
-          tollDeducted: '₹0',
-          platformFee: '₹0',
-          netEarnings:
-              '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
-        ),
-        tripItems: const [],
+  return _trips.map((row) {
+    final tripId = row['trip_display_id']?.toString() ?? '';
+    final rawItems = _itemsByTripId[tripId] ?? [];
+
+    final tripItems = rawItems.map((item) {
+      return TripItem(
+        customerName: item['customer_name']?.toString() ?? 'Unknown',
+        goods: item['goods']?.toString() ?? '',
+        destination: item['destination']?.toString() ?? '',
+        earnings: '₹${((item['earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+        delivered: item['is_delivered'] as bool? ?? false,
+        isFragile: item['is_fragile'] as bool? ?? false,
+        isStackable: item['is_stackable'] as bool? ?? true,
+        specialRequirements:
+          item['special_requirements']?.toString(),
       );
+      debugPrint(item.toString());
     }).toList();
-  }
+
+    return Trip(
+      route: row['route_label']?.toString() ?? 'Unknown route',
+      date: row['trip_date']?.toString() ?? '',
+      items: tripItems.map((i) => i.goods).toList(),
+      itemCount: row['distance']?.toString() ?? '',
+      distance: row['distance']?.toString() ?? '',
+      earnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+      status: _mapStatus(row['status']?.toString()),
+      tripId: tripId,
+      hash: '',
+      duration: row['duration']?.toString() ?? '',
+      endTime: '',
+      paymentBreakdown: PaymentBreakdown(
+        baseFreight: '₹${((row['total_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+        fuelDeducted: '₹0',
+        tollDeducted: '₹0',
+        platformFee: '₹0',
+        netEarnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+      ),
+      tripItems: tripItems,
+    );
+  }).toList();
+}
 
   List<Trip> _getFilteredAndSortedTrips() {
     List<Trip> trips = _mapSupabaseTripsToUiTrips();
@@ -321,6 +367,22 @@ class _TripsScreenState extends State<TripsScreen> {
     final total = _trips.length;
     if (total == 0) return 0;
     return (_completedCount() / total) * 100;
+  }
+
+  String _localizedFilterLabel(BuildContext context, int index) {
+    final l10n = AppLocalizations.of(context)!;
+    switch (index) {
+      case 0:
+        return l10n.all;
+      case 1:
+        return l10n.active2;
+      case 2:
+        return l10n.completed2;
+      case 3:
+        return l10n.cancelled2;
+      default:
+        return _statusFilters[index];
+    }
   }
 
   String _formatEarnings(int paise) {
@@ -395,7 +457,9 @@ class _TripsScreenState extends State<TripsScreen> {
 
   @override
   void dispose() {
+    SyncService.instance.stopListening();
     _scrollController.dispose();
+    _marketScrollController.dispose();
     if (SupabaseConfig.isConfigured && _bidChannel != null) {
       Supabase.instance.client.removeChannel(_bidChannel!);
     }
@@ -427,7 +491,7 @@ class _TripsScreenState extends State<TripsScreen> {
                   const BottomSheetHandle(),
                   const SizedBox(height: 16),
                   Text(
-                    'Sort Trips',
+                    AppLocalizations.of(context)!.sortTrips,
                     style: GoogleFonts.dmSans(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -435,23 +499,23 @@ class _TripsScreenState extends State<TripsScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  _buildSortOption(context, 'Newest first', 0, tempSortIndex,
+                  _buildSortOption(context, AppLocalizations.of(context)!.newestFirst, 0, tempSortIndex,
                       (idx) {
                     setBottomSheetState(() => tempSortIndex = idx);
                   }),
-                  _buildSortOption(context, 'Oldest first', 1, tempSortIndex,
+                  _buildSortOption(context, AppLocalizations.of(context)!.oldestFirst, 1, tempSortIndex,
                       (idx) {
                     setBottomSheetState(() => tempSortIndex = idx);
                   }),
                   _buildSortOption(
-                      context, 'Highest earnings', 2, tempSortIndex, (idx) {
+                      context, AppLocalizations.of(context)!.highestEarnings, 2, tempSortIndex, (idx) {
                     setBottomSheetState(() => tempSortIndex = idx);
                   }),
-                  _buildSortOption(context, 'Lowest earnings', 3, tempSortIndex,
+                  _buildSortOption(context, AppLocalizations.of(context)!.lowestEarnings, 3, tempSortIndex,
                       (idx) {
                     setBottomSheetState(() => tempSortIndex = idx);
                   }),
-                  _buildSortOption(context, 'By status', 4, tempSortIndex,
+                  _buildSortOption(context, AppLocalizations.of(context)!.byStatus, 4, tempSortIndex,
                       (idx) {
                     setBottomSheetState(() => tempSortIndex = idx);
                   }),
@@ -472,7 +536,7 @@ class _TripsScreenState extends State<TripsScreen> {
                         elevation: 0,
                       ),
                       child: Text(
-                        'Apply',
+                        AppLocalizations.of(context)!.apply,
                         style: GoogleFonts.dmSans(
                           color: Theme.of(context).colorScheme.surface,
                           fontWeight: FontWeight.w600,
@@ -574,7 +638,7 @@ class _TripsScreenState extends State<TripsScreen> {
                   Row(
                     children: [
                       Text(
-                        _topTabIndex == 0 ? 'My Trips' : 'Marketplace',
+                        _topTabIndex == 0 ? AppLocalizations.of(context)!.myTrips : AppLocalizations.of(context)!.marketplace,
                         style: GoogleFonts.dmSans(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
@@ -631,21 +695,35 @@ class _TripsScreenState extends State<TripsScreen> {
                     standardLoads: _marketplaceLoads,
                     enRouteLoads: _enRouteLoads,
                     bidsByLoadId: _bidsByLoadId,
+                    submittingLoadIds: _submittingLoadIds,
                     onOpenLoad: (load) => Navigator.of(context)
                         .pushNamed(AppRoutes.loadDetail, arguments: load),
                     onSubmitBid: (load, amount) async {
                       final loadId = load.id;
                       if (loadId.isEmpty) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('This load is missing an id.')),
+                          SnackBar(
+                              content: Text(AppLocalizations.of(context)!.thisLoadIsMissingId)),
                         );
                         return;
                       }
+                      if (_submittingLoadIds.contains(loadId)) {
+                        return;
+                      }
+
+                      if (!mounted) return;
+                      setState(() {
+                        _submittingLoadIds = <String>{..._submittingLoadIds, loadId};
+                      });
+
                       try {
-                        final bid = await _marketplaceRepository.submitBid(
+                        final bid = await _bidSubmissionGuard.run<DriverBid>(
                           loadId: loadId,
-                          amount: amount,
+                          action: () async => _marketplaceRepository.submitBid(
+                            loadId: loadId,
+                            driverId: DriverSession.driverId,
+                            amount: amount,
+                          ),
                         );
                         if (!context.mounted) return;
                         setState(() {
@@ -655,14 +733,21 @@ class _TripsScreenState extends State<TripsScreen> {
                           };
                         });
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Bid submitted (Pending).')),
+                          SnackBar(
+                              content: Text(AppLocalizations.of(context)!.bidSubmitted)),
                         );
                       } catch (e) {
                         if (!context.mounted) return;
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Failed to submit bid: $e')),
+                          SnackBar(content: Text(AppLocalizations.of(context)!.failedToSubmitBid)),
                         );
+                      } finally {
+                        if (!mounted) return;
+                        setState(() {
+                          _submittingLoadIds = <String>{
+                            ..._submittingLoadIds.where((id) => id != loadId),
+                          };
+                        });
                       }
                     },
                   ),
@@ -688,7 +773,7 @@ class _TripsScreenState extends State<TripsScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Total trips',
+                            AppLocalizations.of(context)!.totalTrips,
                             style: GoogleFonts.dmSans(
                               fontSize: 10,
                               color:
@@ -713,7 +798,7 @@ class _TripsScreenState extends State<TripsScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Total earned',
+                            AppLocalizations.of(context)!.totalEarned,
                             style: GoogleFonts.dmSans(
                               fontSize: 10,
                               color:
@@ -738,7 +823,7 @@ class _TripsScreenState extends State<TripsScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Completion',
+                            AppLocalizations.of(context)!.completion,
                             style: GoogleFonts.dmSans(
                               fontSize: 10,
                               color:
@@ -787,7 +872,7 @@ class _TripsScreenState extends State<TripsScreen> {
                         ),
                         child: Center(
                           child: Text(
-                            _statusFilters[index],
+                            _localizedFilterLabel(context, index),
                             style: GoogleFonts.dmSans(
                               fontSize: 12,
                               fontWeight: isSelected
@@ -830,7 +915,7 @@ class _TripsScreenState extends State<TripsScreen> {
                                 const SizedBox(height: 40),
                                 Center(
                                   child: Text(
-                                    'Failed to load trips.\nPull down to retry.',
+                                    AppLocalizations.of(context)!.failedToLoadTrips,
                                     textAlign: TextAlign.center,
                                     style: GoogleFonts.dmSans(
                                       color:
@@ -850,7 +935,7 @@ class _TripsScreenState extends State<TripsScreen> {
                                     const SizedBox(height: 80),
                                     Center(
                                       child: Text(
-                                        'No trips found',
+                                        AppLocalizations.of(context)!.noTripsFound,
                                         style: GoogleFonts.dmSans(
                                           color: TruxifyColors
                                               .adaptiveSecondaryText(context),
@@ -901,12 +986,12 @@ class _TripsScreenState extends State<TripsScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: TruxifyColors.accent,
               ),
-              child: const Text('Mark Current Stop Completed'),
+              child: Text(AppLocalizations.of(context)!.markCurrentStopCompleted),
             ),
           ),
         const SizedBox(height: 10),
-        Text(
-          'Delivery Stops',
+          Text(
+          AppLocalizations.of(context)!.deliveryStops,
           style: GoogleFonts.dmSans(
             fontSize: 12,
             fontWeight: FontWeight.bold,
@@ -944,17 +1029,17 @@ class _TripsScreenState extends State<TripsScreen> {
       case TripStatusType.active:
         statusColor = TruxifyColors.accent;
         statusBgColor = TruxifyColors.accentLight;
-        statusLabel = 'Active';
+        statusLabel = AppLocalizations.of(context)!.activeStatus;
         break;
       case TripStatusType.completed:
         statusColor = TruxifyColors.success;
         statusBgColor = TruxifyColors.successLight;
-        statusLabel = 'Completed';
+        statusLabel = AppLocalizations.of(context)!.completedStatus;
         break;
       case TripStatusType.cancelled:
         statusColor = TruxifyColors.errorRed;
         statusBgColor = TruxifyColors.errorLight;
-        statusLabel = 'Cancelled';
+        statusLabel = AppLocalizations.of(context)!.cancelledStatus;
         break;
     }
 
@@ -1247,9 +1332,9 @@ class _TopTabToggle extends StatelessWidget {
 
     return Row(
       children: [
-        chip('Trips', 0),
+        chip(AppLocalizations.of(context)!.trips, 0),
         const SizedBox(width: 8),
-        chip('Loads', 1),
+        chip(AppLocalizations.of(context)!.marketplace, 1),
       ],
     );
   }
@@ -1262,6 +1347,7 @@ class _MarketplaceBody extends StatelessWidget {
     required this.standardLoads,
     required this.enRouteLoads,
     required this.bidsByLoadId,
+    required this.submittingLoadIds,
     required this.onOpenLoad,
     required this.onSubmitBid,
   });
@@ -1271,6 +1357,7 @@ class _MarketplaceBody extends StatelessWidget {
   final List<LoadOffer> standardLoads;
   final List<LoadOffer> enRouteLoads;
   final Map<String, DriverBid> bidsByLoadId;
+  final Set<String> submittingLoadIds;
   final ValueChanged<LoadOffer> onOpenLoad;
   final Future<void> Function(LoadOffer load, num amount) onSubmitBid;
 
@@ -1294,12 +1381,12 @@ class _MarketplaceBody extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Could not load marketplace',
+                Text(AppLocalizations.of(context)!.couldNotLoadMarketplace,
                     style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 Text(error!, style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 14),
-                Text('Could not load marketplace. Pull down to retry.',
+                Text(AppLocalizations.of(context)!.couldNotLoadMarketplace,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
                     )),
@@ -1316,7 +1403,7 @@ class _MarketplaceBody extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: const [
           SizedBox(height: 80),
-          Center(child: Text('No loads available right now. Pull to refresh.')),
+          Center(child: Text(AppLocalizations.of(context)!.noLoadsAvailable)),
         ],
       );
     }
@@ -1326,15 +1413,16 @@ class _MarketplaceBody extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
       children: [
         if (enRouteLoads.isNotEmpty) ...[
-          const SectionHeader(
-            title: 'En-route opportunities',
-            subtitle: 'Pick up nearby loads with minimal detours',
+          SectionHeader(
+            title: AppLocalizations.of(context)!.enRouteOpportunities,
+            subtitle: AppLocalizations.of(context)!.pickupNearbyLoads,
           ),
           const SizedBox(height: 10),
           ...enRouteLoads.map(
             (load) => _LoadOfferCard(
               load: load,
               bid: bidsByLoadId[load.id],
+              isSubmitting: submittingLoadIds.contains(load.id),
               onOpen: () => onOpenLoad(load),
               onBid: (amount) => onSubmitBid(load, amount),
             ),
@@ -1342,15 +1430,16 @@ class _MarketplaceBody extends StatelessWidget {
           const SizedBox(height: 16),
         ],
         if (standardLoads.isNotEmpty) ...[
-          const SectionHeader(
-            title: 'Marketplace loads',
-            subtitle: 'Available loads you can bid for',
+          SectionHeader(
+            title: AppLocalizations.of(context)!.marketplaceLoads,
+            subtitle: AppLocalizations.of(context)!.availableLoadsYouCanBidFor,
           ),
           const SizedBox(height: 10),
           ...standardLoads.map(
             (load) => _LoadOfferCard(
               load: load,
               bid: bidsByLoadId[load.id],
+              isSubmitting: submittingLoadIds.contains(load.id),
               onOpen: () => onOpenLoad(load),
               onBid: (amount) => onSubmitBid(load, amount),
             ),
@@ -1375,12 +1464,14 @@ class _LoadOfferCard extends StatelessWidget {
   const _LoadOfferCard({
     required this.load,
     required this.bid,
+    required this.isSubmitting,
     required this.onOpen,
     required this.onBid,
   });
 
   final LoadOffer load;
   final DriverBid? bid;
+  final bool isSubmitting;
   final VoidCallback onOpen;
   final Future<void> Function(num amount) onBid;
 
@@ -1465,23 +1556,27 @@ class _LoadOfferCard extends StatelessWidget {
                 ),
               ),
               TextButton(
-                onPressed: () async {
-                  final result = await showModalBottomSheet<num>(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: TruxifyColors.cardBackground,
-                    shape: const RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.vertical(top: Radius.circular(24)),
-                    ),
-                    builder: (_) =>
-                        _BidBottomSheet(load: load, existingBid: bid),
-                  );
-                  if (result != null) await onBid(result);
-                },
+                onPressed: isSubmitting
+                    ? null
+                    : () async {
+                        final result = await showModalBottomSheet<num>(
+                          context: context,
+                          isScrollControlled: true,
+                          backgroundColor: TruxifyColors.cardBackground,
+                          shape: const RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.vertical(top: Radius.circular(24)),
+                          ),
+                          builder: (_) =>
+                              _BidBottomSheet(load: load, existingBid: bid),
+                        );
+                        if (result != null) await onBid(result);
+                      },
                 style:
                     TextButton.styleFrom(foregroundColor: TruxifyColors.accent),
-                child: Text(bid == null ? 'Bid' : 'Update bid'),
+                child: Text(isSubmitting
+                    ? 'Submitting...'
+                    : (bid == null ? 'Bid' : 'Update bid')),
               ),
             ],
           ),

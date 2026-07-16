@@ -34,6 +34,8 @@ class MarketplaceRepository {
 
   void dispose() {
     _apiClient.dispose();
+  }
+
   Future<String?> _firebaseAccessToken() async {
     try {
       return await FirebaseAuth.instance.currentUser?.getIdToken();

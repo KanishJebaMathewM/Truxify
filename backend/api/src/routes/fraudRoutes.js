@@ -6,7 +6,7 @@ import { authenticate } from '../middleware/auth.js';
 const router = express.Router();
 
 // Get fraud stats
-router.get('/fraud/stats', async (req, res) => {
+router.get('/fraud/stats', authenticate, async (req, res) => {
   try {
     const stats = await fraudDetection.getFraudStats();
     res.json({
@@ -22,7 +22,7 @@ router.get('/fraud/stats', async (req, res) => {
 });
 
 // Get user risk score
-router.get('/fraud/risk/:userId', async (req, res) => {
+router.get('/fraud/risk/:userId', authenticate, async (req, res) => {
   try {
     const { userId } = req.params;
     const profile = await fraudDetection.getOrCreateProfile(userId);
@@ -47,7 +47,7 @@ router.get('/fraud/risk/:userId', async (req, res) => {
 });
 
 // Get review queue
-router.get('/fraud/review-queue', async (req, res) => {
+router.get('/fraud/review-queue', authenticate, async (req, res) => {
   try {
     const queue = await fraudDetection.getReviewQueue(50);
     res.json({
@@ -64,7 +64,7 @@ router.get('/fraud/review-queue', async (req, res) => {
 });
 
 // Resolve review
-router.post('/fraud/review/:reviewId/resolve', async (req, res) => {
+router.post('/fraud/review/:reviewId/resolve', authenticate, async (req, res) => {
   try {
     const { reviewId } = req.params;
     const { action, notes } = req.body;
@@ -113,7 +113,7 @@ router.post('/fraud/track', authenticate, fraudDetectionMiddleware, async (req, 
 });
 
 // Analyze network (for manual trigger)
-router.post('/fraud/analyze-network/:userId', async (req, res) => {
+router.post('/fraud/analyze-network/:userId', authenticate, async (req, res) => {
   try {
     const { userId } = req.params;
     const result = await fraudDetection.analyzeNetwork(userId);

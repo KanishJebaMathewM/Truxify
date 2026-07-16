@@ -385,6 +385,11 @@ export class OrderLifecycleService {
     }
 
     const status = milestoneMap[milestone];
+    if (status === undefined) {
+      throw new DomainError(400, {
+        error: `Milestone "${milestone}" does not map to an order status. Use the delivery verification endpoint instead.`,
+      });
+    }
     const updates = { status, updated_at: new Date().toISOString() };
     let generatedOtp = null;
 

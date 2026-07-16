@@ -17,7 +17,7 @@ export class BidAcceptanceService {
 
   async acceptBid({ orderId, bidId, customerId }) {
     return measureExecution('BidAcceptanceService.acceptBid', async () => {
-    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'order_display_id, customer_id');
+    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'order_display_id, customer_id, version');
     if (orderErr) {
       throw new DomainError(500, { error: 'Failed to retrieve order.', details: orderErr.message });
     }
@@ -103,6 +103,13 @@ export class BidAcceptanceService {
     }
 
     // Execute RPC to accept bid
+    if (order.version == null) {
+      throw new DomainError(500, {
+        error: 'Order version is missing. Cannot safely accept bid.',
+        recovery: 'Please retry the request.',
+      });
+    }
+
     const { error: rpcErr } = await this.orderRepository.executeRpc('accept_bid_tx', {
       p_bid_id: bidId,
       p_order_id: orderId,

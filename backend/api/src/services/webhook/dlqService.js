@@ -37,20 +37,28 @@ export const dlqService = {
   async processQueue(processFnMap) {
     try {
       const now = new Date().toISOString();
-      const { data: pendingEvents, error: fetchErr } = await supabase
+
+      // Atomically claim pending events by updating status to 'processing'
+      // This prevents concurrent workers from processing the same events
+      const { data: claimedEvents, error: claimErr } = await supabase
         .from('webhook_failures')
-        .select('*')
+        .update({ status: 'processing', updated_at: now })
         .eq('status', 'pending')
         .lte('next_retry_at', now)
         .order('next_retry_at', { ascending: true })
-        .limit(50); // Process in batches
+        .limit(50)
+        .select();
 
-      if (fetchErr) {
-        logger.error(`[DLQ] Failed to fetch pending events: ${fetchErr.message}`);
+      if (claimErr) {
+        logger.error(`[DLQ] Failed to claim pending events: ${claimErr.message}`);
         return;
       }
 
-      for (const event of pendingEvents || []) {
+      if (!claimedEvents || claimedEvents.length === 0) {
+        return;
+      }
+
+      for (const event of claimedEvents) {
         try {
           const handler = processFnMap[event.provider];
           if (!handler) {

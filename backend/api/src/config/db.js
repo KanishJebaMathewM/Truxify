@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { createClient } from '@supabase/supabase-js';
 import { MongoClient } from 'mongodb';
 import Redis from 'ioredis';
+import pg from 'pg';
 import * as admin from 'firebase-admin';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -58,6 +59,30 @@ if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseAnonKey)
   } catch (error) {
     logger.error({ err: error }, 'Failed to initialize Supabase admin client');
   }
+}
+
+// ============================================================================
+// 1.5 DIRECT POSTGRESQL POOL (PgBouncer)
+// ============================================================================
+const databaseUrl = process.env.DATABASE_URL;
+export let pgPool = null;
+
+if (databaseUrl) {
+  try {
+    const { Pool } = pg;
+    pgPool = new Pool({
+      connectionString: databaseUrl,
+      // For PgBouncer in transaction mode, use a moderate pool size
+      max: 20, 
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+    });
+    logger.info('PostgreSQL Pool initialized successfully (PgBouncer port 6543).');
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to initialize PostgreSQL pool');
+  }
+} else {
+  logger.warn('DATABASE_URL not found in .env. Direct PostgreSQL pool disabled.');
 }
 
 // ============================================================================
@@ -194,6 +219,15 @@ export async function closeDbConnections() {
       logger.info('[shutdown] Supabase Admin channels removed.');
     } catch (err) {
       logger.error({ err }, '[shutdown] Supabase Admin close error');
+    }
+  }
+
+  if (pgPool) {
+    try {
+      await pgPool.end();
+      logger.info('[shutdown] PostgreSQL pool closed.');
+    } catch (err) {
+      logger.error({ err }, '[shutdown] PostgreSQL pool close error');
     }
   }
 

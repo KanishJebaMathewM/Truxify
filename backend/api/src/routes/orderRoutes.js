@@ -53,6 +53,7 @@ import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
+import { DomainError } from '../services/order/domainError.js';
 
 import { LoadOfferCacheService } from '../services/order/loadOfferCacheService.js';
 const router = express.Router();

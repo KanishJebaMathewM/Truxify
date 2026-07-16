@@ -8,89 +8,18 @@ import {
   getActiveDeliveryOtp,
   verifyDeliveryOtp,
 } from '../notificationService.js';
+import {
+  OTP_TTL_MINUTES,
+  OTP_MAX_FAILED_ATTEMPTS,
+  OTP_LOCKOUT_MINUTES,
+  checkOtpLockout,
+  recordOtpFailure,
+  clearOtpState,
+} from './orderNotificationService.js';
 import { escrowRelease as defaultEscrowRelease } from '../escrow.js';
 import logger from '../../middleware/logger.js';
 
-const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
-const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
-const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
-const IN_MEMORY_OTP_MAP_MAX_SIZE = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || '10000', 10);
 const DELIVERY_OTP_READY_STATUSES = new Set(['arriving']);
-
-const inMemoryOtpFailedAttempts = new Map();
-
-function isOtpExpired(otpGeneratedAt) {
-  if (!otpGeneratedAt) return true;
-  const elapsed = Date.now() - new Date(otpGeneratedAt).getTime();
-  return elapsed > OTP_TTL_MINUTES * 60 * 1000;
-}
-
-async function checkOtpLockout(orderId) {
-  if (redisClient) {
-    try {
-      const lockKey = `otp_lockout:${orderId}`;
-      const isLocked = await redisClient.get(lockKey);
-      return !!isLocked;
-    } catch (err) {
-      logger.error('[OTP] Redis error in checkOtpLockout, falling back to memory:', err.message);
-    }
-  }
-  const record = inMemoryOtpFailedAttempts.get(orderId);
-  if (!record || !record.lockedUntil) return false;
-  if (Date.now() >= record.lockedUntil) {
-    inMemoryOtpFailedAttempts.delete(orderId);
-    return false;
-  }
-  return true;
-}
-
-async function recordOtpFailure(orderId) {
-  if (redisClient) {
-    try {
-      const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-
-      const count = await redisClient.incr(countKey);
-      if (count === 1) await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
-      if (count >= OTP_MAX_FAILED_ATTEMPTS) {
-        await redisClient.set(lockKey, '1', 'EX', OTP_LOCKOUT_MINUTES * 60);
-      }
-      return count;
-    } catch (err) {
-      logger.error('[OTP] Redis error in recordOtpFailure, falling back to memory:', err.message);
-    }
-  }
-
-  if (inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
-    const oldestKey = inMemoryOtpFailedAttempts.keys().next().value;
-    inMemoryOtpFailedAttempts.delete(oldestKey);
-  }
-
-  let record = inMemoryOtpFailedAttempts.get(orderId);
-  if (!record) {
-    record = { count: 0, lockedUntil: null };
-    inMemoryOtpFailedAttempts.set(orderId, record);
-  }
-  record.count += 1;
-  if (record.count >= OTP_MAX_FAILED_ATTEMPTS) {
-    record.lockedUntil = Date.now() + OTP_LOCKOUT_MINUTES * 60 * 1000;
-  }
-  return record.count;
-}
-
-async function clearOtpState(orderId) {
-  if (redisClient) {
-    try {
-      const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-      await redisClient.del(countKey, lockKey);
-      return;
-    } catch (err) {
-      logger.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);
-    }
-  }
-  inMemoryOtpFailedAttempts.delete(orderId);
-}
 
 export class DeliveryVerificationService {
   constructor(orderRepository, deps = {}) {
@@ -112,7 +41,7 @@ export class DeliveryVerificationService {
       });
     }
 
-    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status');
+    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status, toll_estimate, base_freight, platform_fee, total_amount');
 
     if (orderErr || !order) {
       throw new DomainError(404, { error: 'Order not found.' });
@@ -230,6 +159,37 @@ export class DeliveryVerificationService {
     const result = await this.ensureDeliveryOtp({ orderId });
     return { generated: result.generated, otp: result.otp };
     });
+  }
+
+  async calculateDynamicToll(orderId, currentEstimate) {
+    try {
+      const mongoDb = getMongoDb();
+      if (!mongoDb) return currentEstimate;
+      
+      const trace = await mongoDb.collection('telemetry')
+        .find({ order_id: orderId })
+        .sort({ timestamp: 1 })
+        .toArray();
+      
+      if (!trace || trace.length < 2) return currentEstimate;
+      
+      let actualDistanceKm = 0;
+      for (let i = 1; i < trace.length; i++) {
+        const prev = trace[i-1];
+        const curr = trace[i];
+        if (prev.lat && prev.lng && curr.lat && curr.lng) {
+          actualDistanceKm += haversineKm(prev.lat, prev.lng, curr.lat, curr.lng);
+        }
+      }
+      
+      const rateCard = readRateCard();
+      const dynamicToll = Math.round(rateCard.tollPerKm * actualDistanceKm);
+      logger.info(`[Toll] Dynamic toll for order ${orderId} calculated as ${dynamicToll} (distance: ${actualDistanceKm.toFixed(2)}km)`);
+      return dynamicToll;
+    } catch (err) {
+      logger.error(`[Toll] Failed to calculate dynamic toll: ${err.message}`);
+      return currentEstimate;
+    }
   }
 
   async verifyDelivery({ orderId, driverId, otp }) {

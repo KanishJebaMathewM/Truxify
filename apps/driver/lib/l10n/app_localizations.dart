@@ -375,6 +375,26 @@ abstract class AppLocalizations {
   String get failedToSubmitBid;
 
   String get thisLoadIsMissingId;
+
+  String get withdraw;
+
+  String get withdrawFunds;
+
+  String get availableBalance;
+
+  String get enterAmount;
+
+  String get amountRequired;
+
+  String get enterValidAmount;
+
+  String get amountMustBePositive;
+
+  String get insufficientBalance;
+
+  String get max;
+
+  String get withdrawalSuccessful;
 }
 
 class _AppLocalizationsDelegate

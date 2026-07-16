@@ -718,5 +718,55 @@
   "thisLoadIsMissingId": "This load is missing an ID",
   "@thisLoadIsMissingId": {
     "description": "Error message when a load record has no valid identifier"
+  },
+
+  "withdraw": "Withdraw",
+  "@withdraw": {
+    "description": "Button label to withdraw funds from wallet"
+  },
+
+  "withdrawFunds": "Withdraw Funds",
+  "@withdrawFunds": {
+    "description": "Title of the withdrawal bottom sheet"
+  },
+
+  "availableBalance": "Available Balance",
+  "@availableBalance": {
+    "description": "Label for the confirmed wallet balance in the withdrawal sheet"
+  },
+
+  "enterAmount": "Enter Amount",
+  "@enterAmount": {
+    "description": "Label for the amount input field in the withdrawal sheet"
+  },
+
+  "amountRequired": "Amount is required",
+  "@amountRequired": {
+    "description": "Validation error when amount field is empty"
+  },
+
+  "enterValidAmount": "Please enter a valid amount",
+  "@enterValidAmount": {
+    "description": "Validation error when amount is not a valid number"
+  },
+
+  "amountMustBePositive": "Amount must be greater than zero",
+  "@amountMustBePositive": {
+    "description": "Validation error when amount is zero or negative"
+  },
+
+  "insufficientBalance": "Insufficient balance",
+  "@insufficientBalance": {
+    "description": "Validation error when amount exceeds confirmed balance"
+  },
+
+  "max": "Max",
+  "@max": {
+    "description": "Label for the quick-fill button that sets the maximum withdrawal amount"
+  },
+
+  "withdrawalSuccessful": "Withdrawal successful",
+  "@withdrawalSuccessful": {
+    "description": "Success message after a successful withdrawal"
   }
 }

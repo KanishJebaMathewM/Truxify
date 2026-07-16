@@ -58,7 +58,7 @@ contract TruxifyUpgradeable is
     mapping(uint256 => Escrow) public escrows;
     mapping(uint256 => Proposal) public proposals;
     mapping(uint256 => UpgradeRecord) public upgradeHistory;
-    mapping(address => bool) public hasVoted;
+    mapping(uint256 => mapping(address => bool)) public hasVoted;
 
     uint256 public daoVotingPeriod;
     uint256 public daoQuorum;
@@ -189,9 +189,9 @@ contract TruxifyUpgradeable is
         Proposal storage proposal = proposals[proposalId];
         require(proposal.proposer != address(0), "Proposal not found");
         require(block.timestamp < proposal.votingEndsAt, "Voting ended");
-        require(!hasVoted[msg.sender], "Already voted");
+        require(!hasVoted[proposalId][msg.sender], "Already voted");
 
-        hasVoted[msg.sender] = true;
+        hasVoted[proposalId][msg.sender] = true;
 
         if (support) {
             proposal.votesFor++;

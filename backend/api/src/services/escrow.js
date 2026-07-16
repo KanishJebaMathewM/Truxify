@@ -36,7 +36,7 @@ const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver) external payable',
   'function releasePayment(uint256 bookingId) external',
   'function cancelBooking(uint256 bookingId) external',
-  'function bookings(bytes32 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, uint256 createdAt)'
+  'function bookings(uint256 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, uint256 createdAt)'
 ]
 
 const rpcUrl            = process.env.POLYGON_RPC_URL;

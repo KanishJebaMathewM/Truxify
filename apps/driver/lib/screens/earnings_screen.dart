@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:truxify_driver/l10n/app_localizations.dart';
 import 'package:truxify_driver/models/earnings_daily_model.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/earnings/withdraw_bottom_sheet.dart';
 import '../widgets/earnings_shimmer.dart';
 
 class EarningsScreen extends StatefulWidget {
@@ -228,6 +230,25 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return (double.tryParse(value.toString()) ?? 0.0) / 100.0;
   }
 
+  Future<void> _showWithdrawSheet() async {
+    final didWithdraw = await showWithdrawBottomSheet(
+      context,
+      confirmedBalanceRupees: _confirmedEarnings,
+    );
+
+    if (!mounted) return;
+
+    if (didWithdraw) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.withdrawalSuccessful),
+          backgroundColor: TruxifyColors.success,
+        ),
+      );
+      await _loadAllData();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -271,6 +292,10 @@ class _EarningsScreenState extends State<EarningsScreen> {
                             ? const SummaryCardsShimmer(key: ValueKey('summary_shimmer'))
                             : _buildOverallSummaryCards(key: const ValueKey('summary_content')),
                       ),
+                      if (!_isLoading && _confirmedEarnings > 0) ...[
+                        const SizedBox(height: 16),
+                        _buildWithdrawButton(),
+                      ],
                       const SizedBox(height: 24),
                       AnimatedSwitcher(
                         duration: const Duration(milliseconds: 300),
@@ -392,6 +417,35 @@ class _EarningsScreenState extends State<EarningsScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWithdrawButton() {
+    final l10n = AppLocalizations.of(context)!;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _showWithdrawSheet,
+          icon: const Icon(Icons.account_balance_rounded, size: 18),
+          label: Text(
+            l10n.withdraw,
+            style: GoogleFonts.dmSans(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: TruxifyColors.accent,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
         ),
       ),
     );

@@ -22,6 +22,10 @@ python-dotenv==1.0.0
 
 
 requests==2.31.0
+python-dotenv==1.0.0
+
+
+requests==2.31.0
 python-dotenv==1.2.2
 
 tensorflow==2.13.0
@@ -30,12 +34,34 @@ cryptography==39.0.0
 numpy==1.26.2
 fastapi==0.104.1
 uvicorn==0.24.0
+tensorflow==2.13.0
+redis==5.0.0
+numpy==1.26.2
+fastapi==0.104.1
+uvicorn==0.24.0
+opencv-python==4.8.0
+mediapipe==0.10.3
+dlib==19.24.2
+scipy==1.11.3
+librosa==0.10.0
+sounddevice==0.4.6
+soundfile==0.12.1
+noisereduce==3.0.0
+tensorflow==2.13.0
+redis==5.0.0
+numpy==1.26.2
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+
 requests==2.33.0
 python-dotenv==1.0.0
 
 
+
 requests==2.33.0
 python-dotenv==1.0.0
+
 
 requests==2.33.0
 python-dotenv==1.2.2

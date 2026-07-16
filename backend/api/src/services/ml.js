@@ -151,6 +151,28 @@ export async function predictPrice({
   };
   priceCache.set(cacheKey, result);
   return result;
+  const result = validatePricePrediction(raw);
+  if (!result.ok) {
+      logger.warn({
+          reason: result.reason,
+          detail: result.detail,
+          response_keys: raw && typeof raw === 'object' ? Object.keys(raw) : typeof raw,
+      }, '[ML] Price prediction rejected by validator');
+      throw new Error(`[ML] Invalid prediction: ${result.reason} — ${result.detail}`);
+  }
+
+  logger.debug({
+      estimated_price_inr: result.validated.estimated_price,
+      confidence: result.validated.confidence,
+  }, '[ML] Price prediction validated successfully');
+
+  const validated = {
+      ...result.validated,
+      estimatedPricePaisa: convertToPaisa(result.validated.estimated_price),
+      estimatedPriceInr: result.validated.estimated_price,
+  };
+  priceCache.set(cacheKey, validated);
+  return validated;
 }
 
 /**

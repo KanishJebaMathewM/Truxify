@@ -15,13 +15,15 @@ class OracleService {
   initializeProviders() {
     // Provider 1: Chainlink
     if (process.env.CHAINLINK_ENABLED === 'true') {
+      const chainlinkUrl = process.env.CHAINLINK_API_URL || 'http://localhost:8545';
+      const chainlinkApiKey = process.env.CHAINLINK_API_KEY;
       this.providers.push({
         name: 'Chainlink',
-        url: process.env.CHAINLINK_API_URL || 'http://localhost:8545',
-        apiKey: process.env.CHAINLINK_API_KEY,
+        url: chainlinkUrl,
+        apiKey: chainlinkApiKey,
         confirmDelivery: async (data) => {
-          const response = await axios.post(`${this.url}/verify-delivery`, data, {
-            headers: { 'X-API-Key': this.apiKey }
+          const response = await axios.post(`${chainlinkUrl}/verify-delivery`, data, {
+            headers: { 'X-API-Key': chainlinkApiKey }
           });
           return response.data;
         }
@@ -46,11 +48,12 @@ class OracleService {
 
     // Provider 3: Backup/Third Party
     if (process.env.BACKUP_ORACLE_ENABLED === 'true') {
+      const backupUrl = process.env.BACKUP_ORACLE_URL;
       this.providers.push({
         name: 'BackupOracle',
-        url: process.env.BACKUP_ORACLE_URL,
+        url: backupUrl,
         confirmDelivery: async (data) => {
-          const response = await axios.post(`${this.url}/confirm`, data);
+          const response = await axios.post(`${backupUrl}/confirm`, data);
           return response.data;
         }
       });

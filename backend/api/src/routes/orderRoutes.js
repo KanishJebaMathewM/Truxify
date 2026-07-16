@@ -2,8 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 
 import { bidLimiter, userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
-import { redisClient, mongoDb } from '../config/db.js';
-import { supabase } from '../config/db.js';
+import { redisClient, mongoDb, supabase } from '../config/db.js';
 import { OrderRepository } from '../repositories/orderRepository.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -54,12 +53,18 @@ import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
+import { DomainError } from '../services/order/domainError.js';
 
+import { LoadOfferCacheService } from '../services/order/loadOfferCacheService.js';
 const router = express.Router();
 const orderRepository = new OrderRepository(supabase);
 
 const orderValidationService = new OrderValidationService({ supabase, logger });
-const orderMilestoneService = new OrderMilestoneService({ orderValidationService });
+const orderTimelineService = new OrderTimelineService({
+  supabase,
+  logger,
+});
+const orderMilestoneService = new OrderMilestoneService({ orderValidationService, orderRepository, orderTimelineService });
 
 const bidAcceptanceService = new BidAcceptanceService({
   orderRepository,
@@ -69,10 +74,7 @@ const bidAcceptanceService = new BidAcceptanceService({
   logger,
 });
 const deliveryVerificationService = new DeliveryVerificationService(orderRepository);
-const orderTimelineService = new OrderTimelineService({
-  supabase,
-  logger,
-});
+
 
 const orderLifecycleService = new OrderLifecycleService({
 
@@ -275,21 +277,17 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requi
       return res.status(500).json({ error: 'Failed to create order timeline.', details: timelineErr.message });
     }
 
-    const { error: offerErr } = await orderRepository
-      .createLoadOffer({
     try {
       await orderTimelineService.createOrderTimeline(orderDisplayId);
     } catch (timelineErr) {
-      await supabase.from('orders').delete().eq('id', order.id);
+      await orderRepository.deleteOrder(order.id);
       if (timelineErr instanceof DomainError) {
         return res.status(timelineErr.status).json(timelineErr.payload);
       }
       return res.status(500).json({ error: 'Failed to create order timeline.', details: timelineErr.message });
     }
 
-    const { error: offerErr } = await supabase
-      .from('load_offers')
-      .insert({
+    const { error: offerErr } = await orderRepository.createLoadOffer({
         order_display_id: orderDisplayId,
         customer_id: req.user.id,
         customer_name: req.user.fullName || 'Customer',
@@ -314,17 +312,6 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requi
       return res.status(500).json({ error: 'Failed to create load offer.', details: offerErr.message });
     }
 
-      await orderTimelineService.deleteOrderTimeline(orderDisplayId);
-      await supabase.from('orders').delete().eq('id', order.id);
-      return res.status(500).json({ error: 'Failed to create load offer.', details: offerErr.message });
-    }
-
-    const result = await createOrder({
-      orderData: req.body,
-      userId: req.user.id,
-      user: req.user,
-    });
-    return res.status(201).json(result);
     const { order } = await orderLifecycleService.createOrder(req.user.id, req.user.fullName || 'Customer', req.body);
     return res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
   } catch (err) {
@@ -365,6 +352,11 @@ router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
     );
 
     if (error) return res.status(500).json({ error: 'Failed to fetch load offers.', details: error.message });
+
+    if (redisClient) {
+      await redisClient.set(cacheKey, JSON.stringify(offers), 'EX', 120).catch(() => {});
+    }
+
     res.json(offers);
   } catch (err) {
     logger.error("[orderRoutes] Failed to fetch load offers:", err.message);
@@ -385,6 +377,11 @@ router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) 
     );
 
     if (error) return res.status(500).json({ error: 'Failed to fetch en-route loads.', details: error.message });
+
+    if (redisClient) {
+      await redisClient.set(cacheKey, JSON.stringify(offers), 'EX', 120).catch(() => {});
+    }
+
     res.json(offers);
   } catch (err) {
     logger.error("[orderRoutes] Failed to fetch en-route loads:", err.message);
@@ -683,13 +680,6 @@ router.get('/:id/bids', authenticate, userLimiter, requirePolicy('order:view-bid
 // ============================================================================
 // 11. ACCEPT BID (CUSTOMER)
 // ============================================================================
-const bidAcceptanceService = new BidAcceptanceService({
-  supabase,
-  buildDepositTxFn: buildDepositTx,
-  recordDepositTxFn: recordDepositTx,
-  escrowRefundFn: escrowRefund,
-  logger
-});
 
 router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requirePolicy('order:accept-bid'), requireIdempotency(86400), validateParams(acceptBidParamsSchema), async (req, res) => {
 
@@ -757,7 +747,7 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('de
 // 14. RESEND DELIVERY OTP (DRIVER)
 // ============================================================================
 router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requirePolicy('delivery:resend-otp'), validateParams(paramIdSchema), async (req, res) => {
-
+  const { id: orderId } = req.params;
   try {
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, driver_id, customer_id, status');
     orderValidationService.assertOrderFound(order);
@@ -784,7 +774,7 @@ router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requ
 // 15. CHANGE DROP (CUSTOMER)
 // ============================================================================
 router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, requirePolicy('order:change-drop'), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
-
+  const { id: orderId } = req.params;
   try {
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
@@ -878,7 +868,7 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
 // 16. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
 // ============================================================================
 router.post('/:id/cancel', authenticate, userLimiter, requirePolicy('order:cancel'), requireIdempotency(86400), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
-
+  const { id: orderId } = req.params;
   try {
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);

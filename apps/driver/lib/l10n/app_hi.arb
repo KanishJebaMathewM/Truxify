@@ -718,5 +718,55 @@
   "thisLoadIsMissingId": "इस लोड में ID गायब है",
   "@thisLoadIsMissingId": {
     "description": "Error message when a load record has no valid identifier"
+  },
+
+  "withdraw": "निकालें",
+  "@withdraw": {
+    "description": "Button label to withdraw funds from wallet"
+  },
+
+  "withdrawFunds": "फंड निकालें",
+  "@withdrawFunds": {
+    "description": "Title of the withdrawal bottom sheet"
+  },
+
+  "availableBalance": "उपलब्ध शेष",
+  "@availableBalance": {
+    "description": "Label for the confirmed wallet balance in the withdrawal sheet"
+  },
+
+  "enterAmount": "राशि दर्ज करें",
+  "@enterAmount": {
+    "description": "Label for the amount input field in the withdrawal sheet"
+  },
+
+  "amountRequired": "राशि आवश्यक है",
+  "@amountRequired": {
+    "description": "Validation error when amount field is empty"
+  },
+
+  "enterValidAmount": "कृपया एक वैध राशि दर्ज करें",
+  "@enterValidAmount": {
+    "description": "Validation error when amount is not a valid number"
+  },
+
+  "amountMustBePositive": "राशि शून्य से अधिक होनी चाहिए",
+  "@amountMustBePositive": {
+    "description": "Validation error when amount is zero or negative"
+  },
+
+  "insufficientBalance": "अपर्याप्त शेष",
+  "@insufficientBalance": {
+    "description": "Validation error when amount exceeds confirmed balance"
+  },
+
+  "max": "अधिकतम",
+  "@max": {
+    "description": "Label for the quick-fill button that sets the maximum withdrawal amount"
+  },
+
+  "withdrawalSuccessful": "निकासी सफल",
+  "@withdrawalSuccessful": {
+    "description": "Success message after a successful withdrawal"
   }
 }

@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { supabase as defaultSupabase } from '../../config/db.js';
+import { supabase } from '../../config/db.js';
 import { getRouteEstimate } from '../osrm.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { predictPrice } from '../ml.js';

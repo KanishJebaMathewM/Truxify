@@ -5,6 +5,7 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
+      logger.warn('[Fraud] Skipping fraud check — no userId on request');
       return next();
     }
 
@@ -68,6 +69,7 @@ export const networkAnalysisMiddleware = async (req, res, next) => {
   try {
     const userId = req.user?.id;
     if (!userId) {
+      logger.warn('[Fraud] Skipping network analysis — no userId on request');
       return next();
     }
 

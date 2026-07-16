@@ -17,21 +17,31 @@ class GeocodeService {
   GeocodeService._();
 
   static const int _maxCacheSize = 100;
-  static final Map<String, LatLng?> _cache = <String, LatLng?>{};
-  static final Map<String, String> _reverseCache = <String, String>{};
+  static const Duration _cacheTtl = Duration(minutes: 30);
+  static final Map<String, _CacheEntry<LatLng?>> _cache = <String, _CacheEntry<LatLng?>>{};
+  static final Map<String, _CacheEntry<String>> _reverseCache = <String, _CacheEntry<String>>{};
+
+  static void _evictExpired() {
+    final now = DateTime.now();
+    _cache.removeWhere((_, entry) => now.difference(entry.cachedAt) > _cacheTtl);
+    _reverseCache.removeWhere((_, entry) => now.difference(entry.cachedAt) > _cacheTtl);
+  }
 
   static void _addToCache(String key, LatLng? value) {
+    _evictExpired();
     if (_cache.length >= _maxCacheSize) {
       _cache.remove(_cache.keys.first);
     }
-    _cache[key] = value;
+    _cache[key] = _CacheEntry(value, DateTime.now());
   }
 
   /// Resolve a place name to a LatLng. Returns null if resolution failed.
   static Future<LatLng?> resolvePlace(String query) async {
     final key = query.trim().toLowerCase();
     if (key.isEmpty) return null;
-    if (_cache.containsKey(key)) return _cache[key];
+    final cached = _cache[key];
+    if (cached != null) return cached.value;
+    _evictExpired();
 
     final uri = Uri.https(
       'nominatim.openstreetmap.org',
@@ -47,36 +57,31 @@ class GeocodeService {
           })
           .timeout(AppConfig.geocodeTimeout);
       if (resp.statusCode != 200) {
-        _addToCache(key, null);
         return null;
       }
 
       final decoded = jsonDecode(resp.body) as List<dynamic>?;
       if (decoded == null || decoded.isEmpty) {
-        _addToCache(key, null);
         return null;
       }
 
       final first = decoded.first;
       if (first is! Map<String, dynamic>) {
-        _addToCache(key, null);
         return null;
       }
       final item = first;
       final lat = double.tryParse('${item['lat']}');
       final lon = double.tryParse('${item['lon']}');
       if (lat == null || lon == null) {
-        _addToCache(key, null);
         return null;
       }
 
       final displayName = item['display_name'] as String? ?? query;
       final ll = LatLng(lat, lon);
       _addToCache(key, ll);
-      _reverseCache['$lat,$lon'] = displayName;
+      _reverseCache['$lat,$lon'] = _CacheEntry(displayName, DateTime.now());
       return ll;
     } catch (_) {
-      _addToCache(key, null);
       return null;
     }
   }
@@ -84,7 +89,9 @@ class GeocodeService {
   /// Reverse geocode coordinates to an address string.
   static Future<String?> reverseGeocode(LatLng point) async {
     final key = '${point.latitude},${point.longitude}';
-    if (_reverseCache.containsKey(key)) return _reverseCache[key];
+    final cached = _reverseCache[key];
+    if (cached != null) return cached.value;
+    _evictExpired();
 
     final uri = Uri.https(
       'nominatim.openstreetmap.org',
@@ -108,7 +115,7 @@ class GeocodeService {
       final decoded = jsonDecode(resp.body) as Map<String, dynamic>?;
       final displayName = decoded?['display_name'] as String?;
       if (displayName != null && displayName.isNotEmpty) {
-        _reverseCache[key] = displayName;
+        _reverseCache[key] = _CacheEntry(displayName, DateTime.now());
       }
       return displayName;
     } catch (_) {
@@ -203,4 +210,11 @@ class GeocodeService {
     _cache.clear();
     _reverseCache.clear();
   }
+}
+
+class _CacheEntry<T> {
+  _CacheEntry(this.value, this.cachedAt);
+
+  final T value;
+  final DateTime cachedAt;
 }

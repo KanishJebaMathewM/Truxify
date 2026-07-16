@@ -146,7 +146,7 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
       query = query.lte('freight_value', Math.round(filters.max_price * 100));
     }
     if (filters.distance !== undefined) {
-      query = query.lte('extra_distance_km', filters.distance);
+      query = query.or(`extra_distance_km.is.null,extra_distance_km.lte.${filters.distance}`);
     }
 
     // Sorting

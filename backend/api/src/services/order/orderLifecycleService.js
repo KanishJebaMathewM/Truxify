@@ -27,7 +27,7 @@ function generateOrderDisplayId() {
 }
 
 export class OrderLifecycleService {
-  constructor({ orderRepository, orderTimelineService, bidAcceptanceService }) {
+  constructor({ orderRepository, orderTimelineService, bidAcceptanceService, deliveryVerificationService }) {
     this.orderRepository = orderRepository;
     this.orderTimelineService = orderTimelineService;
     this.bidAcceptanceService = bidAcceptanceService;

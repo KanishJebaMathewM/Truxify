@@ -258,6 +258,30 @@ class DriverEarningsService {
     return {};
   }
 
+  /// Withdraws funds from the driver's confirmed wallet balance.
+  ///
+  /// [amountPaisa] must be a positive integer representing the amount in paisa.
+  ///
+  /// Throws [ApiException] on non-2xx responses with the server error message.
+  /// Throws a generic [Exception] on network errors.
+  Future<void> withdrawFunds(int amountPaisa) async {
+    if (driverId == null) {
+      throw Exception('You must be logged in to withdraw funds.');
+    }
+
+    final path = '/api/driver/wallet/withdraw';
+
+    try {
+      await _apiClient.post(path, body: {
+        'amount': amountPaisa,
+      });
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw Exception('Network error: Failed to withdraw funds.');
+    }
+  }
+
   void dispose() {
     _apiClient.dispose();
   }

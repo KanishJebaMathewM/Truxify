@@ -161,37 +161,6 @@ export class DeliveryVerificationService {
     });
   }
 
-  async calculateDynamicToll(orderId, currentEstimate) {
-    try {
-      const mongoDb = getMongoDb();
-      if (!mongoDb) return currentEstimate;
-      
-      const trace = await mongoDb.collection('telemetry')
-        .find({ order_id: orderId })
-        .sort({ timestamp: 1 })
-        .toArray();
-      
-      if (!trace || trace.length < 2) return currentEstimate;
-      
-      let actualDistanceKm = 0;
-      for (let i = 1; i < trace.length; i++) {
-        const prev = trace[i-1];
-        const curr = trace[i];
-        if (prev.lat && prev.lng && curr.lat && curr.lng) {
-          actualDistanceKm += haversineKm(prev.lat, prev.lng, curr.lat, curr.lng);
-        }
-      }
-      
-      const rateCard = readRateCard();
-      const dynamicToll = Math.round(rateCard.tollPerKm * actualDistanceKm);
-      logger.info(`[Toll] Dynamic toll for order ${orderId} calculated as ${dynamicToll} (distance: ${actualDistanceKm.toFixed(2)}km)`);
-      return dynamicToll;
-    } catch (err) {
-      logger.error(`[Toll] Failed to calculate dynamic toll: ${err.message}`);
-      return currentEstimate;
-    }
-  }
-
   async verifyDelivery({ orderId, driverId, otp }) {
     return measureExecution('DeliveryVerificationService.verifyDelivery', async () => {
     const { order, otpRecord } = await this.validateDeliveryOtp({ orderId, driverId, otp });

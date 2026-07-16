@@ -569,16 +569,18 @@ class FraudDetectionService {
       .order('created_at', { ascending: false })
       .limit(1000);
 
-    const highRisk = scores.filter(s => s.risk_score > 0.7).length;
-    const mediumRisk = scores.filter(s => s.risk_score > 0.4 && s.risk_score <= 0.7).length;
-    const lowRisk = scores.filter(s => s.risk_score <= 0.4).length;
+    const safe = scores || [];
+
+    const highRisk = safe.filter(s => s.risk_score > 0.7).length;
+    const mediumRisk = safe.filter(s => s.risk_score > 0.4 && s.risk_score <= 0.7).length;
+    const lowRisk = safe.filter(s => s.risk_score <= 0.4).length;
 
     return {
-      total: scores.length,
+      total: safe.length,
       highRisk,
       mediumRisk,
       lowRisk,
-      avgScore: scores.reduce((sum, s) => sum + s.risk_score, 0) / scores.length || 0
+      avgScore: safe.reduce((sum, s) => sum + s.risk_score, 0) / safe.length || 0
     };
   }
 

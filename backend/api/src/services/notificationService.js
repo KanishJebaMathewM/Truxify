@@ -17,7 +17,6 @@ const INVALID_TOKEN_CODES = new Set([
 ]);
 
 const MAX_RETRIES = 3;
-const RETRY_DELAYS = [1000, 2000, 4000];
 const RETRY_BASE_DELAY = 500;
 const RETRY_MAX_DELAY = 5000;
 
@@ -102,9 +101,14 @@ export async function sendFcmNotification(userId, notification, data = {}) {
         return { success: false, error: err.message, errorCode: err.code };
       }
 
-      if (isTransientError(err.code) && attempt < MAX_RETRIES - 1) {
-        logger.info(`[FCM] Retrying after ${RETRY_DELAYS[attempt]}ms for user ${userId}`);
-        const delay = calculateRetryBackoff(attempt); await new Promise(resolve => setTimeout(resolve, delay));
+      if (!isTransientError(err.code)) {
+        return { success: false, error: err.message, errorCode: err.code };
+      }
+
+      if (attempt < MAX_RETRIES - 1) {
+        const delay = calculateRetryBackoff(attempt);
+        logger.info(`[FCM] Retrying after ${delay}ms for user ${userId}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
   }

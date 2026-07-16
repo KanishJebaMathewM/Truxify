@@ -103,8 +103,9 @@ export async function sendFcmNotification(userId, notification, data = {}) {
       }
 
       if (isTransientError(err.code) && attempt < MAX_RETRIES - 1) {
-        logger.info(`[FCM] Retrying after ${RETRY_DELAYS[attempt]}ms for user ${userId}`);
-        const delay = calculateRetryBackoff(attempt); await new Promise(resolve => setTimeout(resolve, delay));
+        const delay = calculateRetryBackoff(attempt);
+        logger.info(`[FCM] Retrying after ${delay}ms for user ${userId}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
   }

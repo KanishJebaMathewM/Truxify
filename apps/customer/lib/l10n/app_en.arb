@@ -725,5 +725,20 @@
   "failedToUpdateProfile": "Failed to update profile",
   "@failedToUpdateProfile": {
     "description": "Error message when profile update fails"
+  },
+
+  "orderNotFound": "Order not found",
+  "@orderNotFound": {
+    "description": "Error message when an order referenced by a notification cannot be found"
+  },
+
+  "notification": "Notification",
+  "@notification": {
+    "description": "Title for notification-related UI elements"
+  },
+
+  "unableToOpen": "Unable to open notification",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
   }
 }

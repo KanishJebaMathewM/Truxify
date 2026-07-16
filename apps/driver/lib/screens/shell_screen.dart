@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:truxify_shared/truxify_shared.dart';
+
 import '../core/app_routes.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_models.dart';
@@ -71,16 +73,51 @@ class _ShellScreenState extends State<ShellScreen> {
       ),
     ];
     FcmService.initializeAndRegister();
+    ForegroundNotificationHandler.setup(
+      context: context,
+      onTap: _handleNotificationNavigation,
+    );
+    ForegroundNotificationHandler.handleInitialMessage(
+      onTap: _handleNotificationNavigation,
+    );
+    ForegroundNotificationHandler.handleBackgroundTap(
+      onTap: _handleNotificationNavigation,
+    );
   }
 
   @override
   void dispose() {
+    ForegroundNotificationHandler.dispose();
     _currentIndex.dispose();
     super.dispose();
   }
 
   void _openTab(int index) {
     _currentIndex.value = index;
+  }
+
+  Future<void> _handleNotificationNavigation(
+    NotificationTarget target,
+    Map<String, dynamic> data,
+  ) async {
+    if (!mounted) return;
+
+    switch (target) {
+      case NotificationTarget.tripDetail:
+        _openTab(1); // Trips tab
+        break;
+      case NotificationTarget.earnings:
+        _openTab(2); // Earnings tab
+        break;
+      case NotificationTarget.loadDetail:
+        _openTab(0); // Home tab
+        break;
+      case NotificationTarget.notifications:
+      case NotificationTarget.orderDetail:
+      case NotificationTarget.unknown:
+        _openTab(3); // Profile tab (notifications accessed from here)
+        break;
+    }
   }
 
   Route<dynamic> _errorRoute() {

@@ -369,6 +369,12 @@ abstract class AppLocalizations {
   String get failedToLoadProfile;
 
   String get failedToUpdateProfile;
+
+  String get orderNotFound;
+
+  String get notification;
+
+  String get unableToOpen;
 }
 
 class _AppLocalizationsDelegate

@@ -26,7 +26,7 @@ class TruxifyController extends ChangeNotifier {
   }
 
   bool _validateTabIndex(int index) {
-    return index >= 0 && index <= 2;
+    return index >= 0 && index <= 3;
   }
 
   Future<void> loadThemeMode() async {

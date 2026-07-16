@@ -4,7 +4,10 @@ import 'package:truxify_shared/truxify_shared.dart';
 import 'package:truxify_shared/truxify_shared.dart' as shared;
 
 class NotificationsScreen extends StatelessWidget {
-  const NotificationsScreen({super.key});
+  const NotificationsScreen({super.key, this.onItemTap});
+
+  /// Called when a notification tile is tapped.
+  final ValueChanged<NotificationItem>? onItemTap;
 
   @override
   Widget build(BuildContext context) {
@@ -17,6 +20,7 @@ class NotificationsScreen extends StatelessWidget {
       userId: userId,
       repository: NotificationRepository(client),
       title: 'Notifications',
+      onItemTap: onItemTap,
     );
   }
 }

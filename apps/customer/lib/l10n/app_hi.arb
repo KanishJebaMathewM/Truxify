@@ -725,5 +725,20 @@
   "failedToUpdateProfile": "प्रोफ़ाइल अपडेट करने में असफल",
   "@failedToUpdateProfile": {
     "description": "Error message when profile update fails"
+  },
+
+  "orderNotFound": "ऑर्डर नहीं मिला",
+  "@orderNotFound": {
+    "description": "Error message when an order referenced by a notification cannot be found"
+  },
+
+  "notification": "सूचना",
+  "@notification": {
+    "description": "Title for notification-related UI elements"
+  },
+
+  "unableToOpen": "सूचना खोलने में असमर्थ",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
   }
 }

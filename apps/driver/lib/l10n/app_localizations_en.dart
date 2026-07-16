@@ -432,4 +432,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get thisLoadIsMissingId => 'This load is missing an ID';
+
+  @override
+  String get unableToOpen => 'Unable to open notification';
 }

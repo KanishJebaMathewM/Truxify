@@ -718,5 +718,10 @@
   "thisLoadIsMissingId": "इस लोड में ID गायब है",
   "@thisLoadIsMissingId": {
     "description": "Error message when a load record has no valid identifier"
+  },
+
+  "unableToOpen": "सूचना खोलने में असमर्थ",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
   }
 }

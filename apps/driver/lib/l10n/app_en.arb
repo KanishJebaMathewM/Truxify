@@ -718,5 +718,10 @@
   "thisLoadIsMissingId": "This load is missing an ID",
   "@thisLoadIsMissingId": {
     "description": "Error message when a load record has no valid identifier"
+  },
+
+  "unableToOpen": "Unable to open notification",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
   }
 }

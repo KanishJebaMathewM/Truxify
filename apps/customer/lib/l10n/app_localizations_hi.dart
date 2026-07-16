@@ -415,4 +415,13 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get failedToUpdateProfile => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932 \u0905\u092A\u0921\u0947\u091F \u0915\u0930\u0928\u0947 \u092E\u0947\u0902 \u0905\u0938\u092B\u0932';
+
+  @override
+  String get orderNotFound => '\u0911\u0930\u094D\u0921\u0930 \u0928\u0939\u0940\u0902 \u092E\u093F\u0932\u093E';
+
+  @override
+  String get notification => '\u0938\u0942\u091A\u0928\u093E';
+
+  @override
+  String get unableToOpen => '\u0938\u0942\u091A\u0928\u093E \u0916\u094B\u0932\u0928\u0947 \u092E\u0947\u0902 \u0905\u0938\u092E\u0930\u094D\u0925';
 }

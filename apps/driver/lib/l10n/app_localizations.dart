@@ -375,6 +375,8 @@ abstract class AppLocalizations {
   String get failedToSubmitBid;
 
   String get thisLoadIsMissingId;
+
+  String get unableToOpen;
 }
 
 class _AppLocalizationsDelegate

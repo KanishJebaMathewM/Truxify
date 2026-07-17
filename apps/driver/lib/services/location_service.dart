@@ -34,6 +34,7 @@ class LocationService {
   String? _activeOrderId;
   String? _activeOrderDisplayId;
   int _reconnectAttempts = 0;
+  int? _lastCloseCode;
   Position? _lastSentPosition;
   DateTime? _lastSentTime;
 
@@ -257,6 +258,7 @@ class LocationService {
       debugPrint('[LocationService] Connecting to WebSocket at: ${wsUri.toString()}');
       _channel = WebSocketChannel.connect(wsUri);
       _reconnectAttempts = 0;
+      _lastCloseCode = null;
       
       _startHeartbeat();
 
@@ -264,9 +266,20 @@ class LocationService {
         (message) {
           if (message == 'pong') return;
           debugPrint('[LocationService] Received WebSocket message: $message');
+          try {
+            final parsed = jsonDecode(message.toString());
+            if (parsed is Map && parsed['code'] != null) {
+              _lastCloseCode = parsed['code'] as int;
+            }
+          } catch (_) {}
         },
         onDone: () {
-          debugPrint('[LocationService] WebSocket closed');
+          debugPrint('[LocationService] WebSocket closed (code: $_lastCloseCode)');
+          if (_lastCloseCode == 4001 || _lastCloseCode == 4003) {
+            debugPrint('[LocationService] Auth rejected (code $_lastCloseCode) — not reconnecting');
+            _isTracking = false;
+            return;
+          }
           _scheduleReconnect();
         },
         onError: (error) {

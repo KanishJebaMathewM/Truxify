@@ -135,7 +135,14 @@ class DriverEarningsService {
           .gte('day_date', start.toIso8601String().split('T').first)
           .lt('day_date', end.toIso8601String().split('T').first)
           .order('day_date');
-      return List<Map<String, dynamic>>.from(response);
+      if (response is! List) {
+        throw StateError('Unexpected monthly earnings response type');
+      }
+      return response.map((item) {
+        if (item is Map<String, dynamic>) return item;
+        if (item is Map) return Map<String, dynamic>.from(item);
+        throw StateError('Unexpected monthly earnings item type');
+      }).toList(growable: false);
     }
 
     final days = daysSinceMonthStart.clamp(1, 365);

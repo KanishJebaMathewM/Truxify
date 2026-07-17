@@ -1,4 +1,7 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:truxify_shared/truxify_shared.dart';
+
 import '../core/app_routes.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_models.dart';
@@ -11,6 +14,7 @@ import 'destination_picker_screen.dart';
 import 'earnings_screen.dart';
 import 'load_detail_screen.dart';
 import 'load_point_detail_screen.dart';
+import 'notifications_screen.dart';
 import 'profile_screen.dart';
 import 'trip_detail_screen.dart';
 import 'trips_screen.dart';
@@ -70,7 +74,106 @@ class _ShellScreenState extends State<ShellScreen> {
         ),
       ),
     ];
+    _initNotifications();
+  }
+
+  void _initNotifications() {
+    NotificationRouter.setAppType(NotificationAppType.driver);
+
+    if (!NotificationRouter.isCallbackRegistered) {
+      NotificationRouter.registerNavigateCallback(_onNavigate);
+    }
+
+    FcmService.setForegroundCallback(_onForegroundMessage);
+
+    FcmService.setTapCallback((payload) {
+      if (!mounted) return;
+      final route = NotificationRouter.resolve(payload);
+      _onNavigate(context, route);
+    });
+
     FcmService.initializeAndRegister();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      FcmService.handleInitialMessage().then((handled) {
+        if (handled) debugPrint('[Shell] Cold-start notification handled.');
+      });
+    });
+  }
+
+  void _onForegroundMessage(RemoteMessage message, NotificationPayload payload) {
+    if (!mounted) return;
+    final title = payload.title ?? message.notification?.title ?? '';
+    final body = payload.body ?? message.notification?.body ?? '';
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (title.isNotEmpty)
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+            if (body.isNotEmpty) Text(body),
+          ],
+        ),
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'View',
+          onPressed: () {
+            final route = NotificationRouter.resolve(payload);
+            _onNavigate(context, route);
+          },
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  void _onNavigate(BuildContext context, NotificationRoute route) {
+    switch (route) {
+      case NavigateToOrderDetail():
+      case NavigateToLiveTracking():
+        _openTab(1);
+
+      case NavigateToLoadDetail():
+        _openTab(0);
+
+      case NavigateToEarnings():
+        _openTab(2);
+
+      case NavigateToWallet():
+        _openTab(2);
+
+      case NavigateToSupportTicket():
+        _openInHomeTab(() {
+          Navigator.of(context).push(
+            truxifyPageRoute((_) => const NotificationsScreen()),
+          );
+        });
+
+      case NavigateToNotificationsList():
+        _openInHomeTab(() {
+          Navigator.of(context).push(
+            truxifyPageRoute((_) => const NotificationsScreen()),
+          );
+        });
+    }
+  }
+
+  void _openInHomeTab(VoidCallback navigate) {
+    _openTab(0);
+    navigate();
+  }
+
+  void _openInTripsTab(VoidCallback navigate) {
+    _openTab(1);
+    navigate();
   }
 
   @override

@@ -78,21 +78,6 @@ const bidAcceptanceService = new BidAcceptanceService({
 const deliveryVerificationService = new DeliveryVerificationService(orderRepository);
 
 
-const orderLifecycleService = new OrderLifecycleService({
-
-  orderRepository,
-  orderValidationService,
-  orderMilestoneService,
-  orderTimelineService,
-  orderLifecycleService,
-  deliveryVerificationService,
-  buildDepositTx,
-  recordDepositTx,
-  submitEscrowRefund,
-  confirmEscrowRefund,
-  escrowRefund,
-} from '../core/container.js';
-
 const router = express.Router();
 
 const verifyDeliveryLimiter = rateLimit({

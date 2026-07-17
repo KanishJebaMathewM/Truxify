@@ -1349,7 +1349,7 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
           updated_at: attemptAt,
         })
         .eq('id', order.id)
-        .not('status', 'in', '("delivered","payment_released")')
+        .not('status', 'in', '("delivered","payment_released","cancelled")')
         .select('*')
         .single();
 

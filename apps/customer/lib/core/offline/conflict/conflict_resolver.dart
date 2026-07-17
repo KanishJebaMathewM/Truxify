@@ -76,10 +76,11 @@ class ConflictResolver {
     if (incomingPayload['attachments'] is List && mergedPayload['attachments'] is List) {
       final merged = <Map<String, dynamic>>[];
       final seen = <String>{};
-      for (final item in <Map<String, dynamic>>[
-        ...List<Map<String, dynamic>>.from(mergedPayload['attachments']),
-        ...List<Map<String, dynamic>>.from(incomingPayload['attachments']),
+      for (final item in [
+        ...mergedPayload['attachments'],
+        ...incomingPayload['attachments'],
       ]) {
+        if (item is! Map<String, dynamic>) continue;
         final hash = '${item['name'] ?? ''}:${item['hash'] ?? ''}';
         if (!seen.contains(hash)) {
           seen.add(hash);

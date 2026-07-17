@@ -8,6 +8,7 @@ class ResilientWebSocket {
     this.url, {
     this.initialDelay = const Duration(seconds: 2),
     this.maxDelay = const Duration(seconds: 60),
+    this.maxAttempts = 10,
     this.onConnect,
     this.urlFactory,
   });
@@ -15,6 +16,7 @@ class ResilientWebSocket {
   final String url;
   final Duration initialDelay;
   final Duration maxDelay;
+  final int maxAttempts;
   final void Function()? onConnect;
   final String Function()? urlFactory;
 
@@ -70,8 +72,16 @@ class ResilientWebSocket {
     }
 
     _heartbeatTimer?.cancel();
-    final delay = Duration(seconds: _attempt == 0 ? 2 : 2 * _attempt);
-    final capped = delay > maxDelay ? maxDelay : delay;
+
+    if (_attempt >= maxAttempts) {
+      _controller.addError(Exception('Max reconnect attempts reached ($maxAttempts)'));
+      return;
+    }
+
+    final delayMs = initialDelay.inMilliseconds * (1 << _attempt.clamp(0, 5));
+    final capped = Duration(
+      milliseconds: delayMs > maxDelay.inMilliseconds ? maxDelay.inMilliseconds : delayMs,
+    );
     _attempt += 1;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(capped, () async {
@@ -107,22 +117,4 @@ class ResilientWebSocket {
     _subscription = null;
     _channel = null;
   }
-}
-
-class ConnectionStats {
-  int reconnectCount = 0;
-  bool isConnected = false;
-  bool forceClosed = false;
-  static const int maxReconnects = 10;
-  static const int baseDelayMs = 1000;
-  static const int maxDelayMs = 30000;
-
-  bool get shouldReconnect => !forceClosed && reconnectCount < maxReconnects;
-  int get backoffMs {
-    final exponential = baseDelayMs * (1 << reconnectCount.clamp(0, 5));
-    return exponential > maxDelayMs ? maxDelayMs : exponential;
-  }
-  void reset() { reconnectCount = 0; forceClosed = false; }
-  void recordFailure() { reconnectCount++; isConnected = false; }
-  void recordSuccess() { reconnectCount = 0; isConnected = true; }
 }

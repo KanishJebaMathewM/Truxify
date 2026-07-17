@@ -12,6 +12,11 @@ class FraudDetectionService {
     this.riskScores = new Map();
     this._maxRiskScores = 10000;
     this._maxBehavioralProfiles = 5000;
+    this._evictionFraction = 0.25;
+    this._lastRiskScoresEviction = null;
+    this._lastBehavioralProfilesEviction = null;
+    this._totalRiskScoresEvicted = 0;
+    this._totalBehavioralProfilesEvicted = 0;
     this._cleanupInterval = setInterval(() => this._evictStale(), 300_000); // every 5 min
     
     // Initialize ML models (in production, load from FastAPI)
@@ -56,6 +61,10 @@ class FraudDetectionService {
       // Calculate risk score
       const riskScore = await this.calculateBehavioralRisk(profile);
       this.riskScores.set(userId, riskScore);
+
+      if (this.riskScores.size > this._maxRiskScores) {
+        this._evictStale();
+      }
 
       return {
         userId,
@@ -590,23 +599,47 @@ class FraudDetectionService {
     };
   }
 
+  _evictFromMap(map, maxSize, label) {
+    if (map.size <= maxSize) return 0;
+
+    const keys = [...map.keys()];
+    const toDelete = keys.slice(0, Math.floor(keys.length * this._evictionFraction));
+    toDelete.forEach(k => map.delete(k));
+
+    logger.info(`[FraudDetection] Evicted ${toDelete.length} stale ${label} (remaining: ${map.size})`);
+    return toDelete.length;
+  }
+
   _evictStale() {
     if (this.riskScores.size > this._maxRiskScores) {
-      const excess = this.riskScores.size - this._maxRiskScores;
-      const keys = [...this.riskScores.keys()];
-      for (let i = 0; i < excess; i++) {
-        this.riskScores.delete(keys[i]);
-      }
+      const evicted = this._evictFromMap(this.riskScores, this._maxRiskScores, 'risk scores');
+      this._totalRiskScoresEvicted += evicted;
+      this._lastRiskScoresEviction = Date.now();
     }
     if (this.behavioralProfiles.size > this._maxBehavioralProfiles) {
-      const excess = this.behavioralProfiles.size - this._maxBehavioralProfiles;
-      let deleted = 0;
-      for (const key of this.behavioralProfiles.keys()) {
-        if (deleted >= excess) break;
-        this.behavioralProfiles.delete(key);
-        deleted++;
-      }
+      const evicted = this._evictFromMap(this.behavioralProfiles, this._maxBehavioralProfiles, 'behavioral profiles');
+      this._totalBehavioralProfilesEvicted += evicted;
+      this._lastBehavioralProfilesEviction = Date.now();
     }
+  }
+
+  getCacheStats() {
+    return {
+      riskScores: {
+        size: this.riskScores.size,
+        maxSize: this._maxRiskScores,
+        utilization: (this.riskScores.size / this._maxRiskScores * 100).toFixed(1) + '%',
+        totalEvicted: this._totalRiskScoresEvicted,
+        lastEviction: this._lastRiskScoresEviction ? new Date(this._lastRiskScoresEviction).toISOString() : null,
+      },
+      behavioralProfiles: {
+        size: this.behavioralProfiles.size,
+        maxSize: this._maxBehavioralProfiles,
+        utilization: (this.behavioralProfiles.size / this._maxBehavioralProfiles * 100).toFixed(1) + '%',
+        totalEvicted: this._totalBehavioralProfilesEvicted,
+        lastEviction: this._lastBehavioralProfilesEviction ? new Date(this._lastBehavioralProfilesEviction).toISOString() : null,
+      },
+    };
   }
 
   destroy() {
@@ -616,6 +649,10 @@ class FraudDetectionService {
     }
     this.riskScores.clear();
     this.behavioralProfiles.clear();
+    this._totalRiskScoresEvicted = 0;
+    this._totalBehavioralProfilesEvicted = 0;
+    this._lastRiskScoresEviction = null;
+    this._lastBehavioralProfilesEviction = null;
   }
 }
 

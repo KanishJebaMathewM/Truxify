@@ -1,0 +1,23 @@
+﻿apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: truxify-api
+  namespace: truxify
+spec:
+  hosts:
+  - api-service
+  http:
+  - match:
+    - uri:
+        prefix: /api/orders
+    route:
+    - destination:
+        host: api-service
+        port:
+          number: 5000
+      weight: 90
+    - destination:
+        host: api-service-v2
+        port:
+          number: 5000
+      weight: 10

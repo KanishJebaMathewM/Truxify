@@ -1,0 +1,19 @@
+﻿apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: truxify-auth-policy
+  namespace: truxify
+spec:
+  selector:
+    matchLabels:
+      app: truxify
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/truxify/sa/api-service-account
+    to:
+    - operation:
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        paths: ["/api/*"]

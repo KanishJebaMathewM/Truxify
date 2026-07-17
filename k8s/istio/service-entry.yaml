@@ -1,0 +1,14 @@
+﻿apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-database
+  namespace: truxify
+spec:
+  hosts:
+  - postgres-external.com
+  ports:
+  - number: 5432
+    name: tcp
+    protocol: TCP
+  resolution: DNS
+  location: MESH_EXTERNAL

@@ -62,10 +62,7 @@ const router = express.Router();
 const orderRepository = new OrderRepository(supabase);
 
 const orderValidationService = new OrderValidationService({ supabase, logger });
-const orderTimelineService = new OrderTimelineService({
-  supabase,
-  logger,
-});
+const orderTimelineService = new OrderTimelineService(orderRepository);
 const orderMilestoneService = new OrderMilestoneService({ orderValidationService, orderRepository, orderTimelineService });
 
 const bidAcceptanceService = new BidAcceptanceService({

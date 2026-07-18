@@ -94,8 +94,6 @@ router.get('/', authenticate, requireRole(['driver']), userLimiter, async (req, 
       if (cleanName) {
         query = query.ilike('name', `%${cleanName}%`);
       }
-    if (name) {
-      query = query.ilike('name', `%${name.trim()}%`);
     }
     const parsedMin = Number(min_capacity);
     const parsedMax = Number(max_capacity);

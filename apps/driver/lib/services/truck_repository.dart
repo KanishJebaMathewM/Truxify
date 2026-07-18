@@ -1,10 +1,12 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/truck_models.dart';
+import 'api_client.dart';
 
 class TruckRepository {
-  TruckRepository({SupabaseClient? client})
-      : _client = client ?? Supabase.instance.client;
+  TruckRepository({SupabaseClient? client, ApiClient? apiClient})
+      : _client = client ?? Supabase.instance.client,
+        _apiClient = apiClient ?? ApiClient();
 
   static const Set<String> _allowedTicketStatuses = {
     'open',
@@ -14,6 +16,7 @@ class TruckRepository {
   };
 
   final SupabaseClient _client;
+  final ApiClient _apiClient;
 
   Future<Truck?> fetchTruckForDriver(String driverId) async {
     final response = await _client
@@ -125,5 +128,22 @@ class TruckRepository {
       if (item is Map) return Map<String, dynamic>.from(item);
       throw StateError('Unexpected truck document item type');
     }).toList(growable: false);
+  }
+
+  Future<List<String>> uploadMaintenancePhotos({
+    required String ticketId,
+    required List<MultipartFileInfo> files,
+  }) async {
+    final result = await _apiClient.postMultipart(
+      '/api/maintenance/$ticketId/photos',
+      fields: const {},
+      files: files,
+    );
+
+    if (result is Map<String, dynamic> && result['photo_urls'] is List) {
+      return List<String>.from(result['photo_urls'] as List);
+    }
+
+    throw StateError('Unexpected response from photo upload');
   }
 }

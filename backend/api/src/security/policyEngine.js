@@ -66,6 +66,8 @@ const POLICIES = {
   'truck:register':            { roles: [ROLES.DRIVER] },
   'truck:list-own':            { roles: [ROLES.DRIVER] },
 
+  'maintenance:upload-photos':  { roles: [ROLES.DRIVER] },
+
   'ticket:create':             {},
   'ticket:view-own':           {},
   'ticket:view':               { ownership: (u, r) => r?.ticket && (r.ticket.user_id === u.id || u.role === ROLES.ADMIN) },

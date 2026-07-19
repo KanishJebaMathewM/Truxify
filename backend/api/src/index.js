@@ -92,6 +92,10 @@ import {
   startReputationReconciliation,
   stopReputationReconciliation,
 } from './services/reputationReconciliation.js'
+import {
+  startDocumentExpiryWorker,
+  stopDocumentExpiryWorker,
+} from './services/documentExpiryService.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -554,6 +558,7 @@ server.listen(PORT, () => {
   startEscrowRefundReconciliation(orderRepository)
   startReputationReconciliation(orderRepository)
   startDlqWorker()
+  startDocumentExpiryWorker()
 })
 
 // ============================================================================
@@ -580,6 +585,7 @@ async function shutdown (signal) {
   stopEscrowRefundReconciliation()
   stopReputationReconciliation()
   stopDlqWorker()
+  stopDocumentExpiryWorker()
   fraudDetection.destroy()
 
   const forceExit = setTimeout(() => {

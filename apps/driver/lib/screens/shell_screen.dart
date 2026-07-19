@@ -218,6 +218,10 @@ class _ShellScreenState extends State<ShellScreen> {
       case NotificationTarget.unknown:
         _openTab(3); // Profile tab (notifications accessed from here)
         break;
+      case NotificationTarget.documents:
+        _openTab(3); // Profile tab
+        _profileNavigatorKey.currentState?.pushNamed(AppRoutes.documents);
+        break;
     }
   }
 

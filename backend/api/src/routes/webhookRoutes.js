@@ -32,7 +32,7 @@ function verifyWebhookSignature(req, res, next) {
     .update(rawBody)
     .digest('hex');
 
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+  if (Buffer.byteLength(signature) !== Buffer.byteLength(expectedSignature) || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
     logger.warn('[Webhook] Invalid webhook signature — rejecting request');
     return res.status(401).json({ error: 'Invalid webhook signature' });
   }

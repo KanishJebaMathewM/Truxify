@@ -25,6 +25,17 @@
 import { ethers } from 'ethers';
 import logger from '../middleware/logger.js';
 
+const RPC_TIMEOUT_MS = 30_000;
+
+function withTimeout(promise, ms = RPC_TIMEOUT_MS) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Blockchain RPC timeout')), ms)
+    ),
+  ]);
+}
+
 const ESCROW_ABI = [
   'function deposit(bytes32 bookingId, address payable customer, address payable driver) external payable',
   'function releaseFunds(bytes32 bookingId) external',
@@ -125,7 +136,7 @@ export async function recordDepositTx(bookingId, txHash, expectedSenderAddress =
   }
 
   const provider = escrowContract.runner.provider;
-  const receipt = await provider.waitForTransaction(txHash, 1);
+  const receipt = await withTimeout(provider.waitForTransaction(txHash, 1));
   if (!receipt || receipt.status === 0) {
     return { error: 'Transaction reverted or not found on chain' };
   }
@@ -194,9 +205,9 @@ export async function escrowRelease(orderDisplayId) {
     logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with release.`);
   }
 
-  const tx = await escrowContract.releaseFunds(bookingId);
+  const tx = await withTimeout(escrowContract.releaseFunds(bookingId));
   logger.info(`[escrow] releaseFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
-  const receipt = await tx.wait(1);
+  const receipt = await withTimeout(tx.wait(1));
   logger.info(`[escrow] releaseFunds confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
   return { txHash: receipt.hash, bookingId };
 }
@@ -213,13 +224,13 @@ export async function submitEscrowRefund(orderDisplayId) {
     return { txHash: null, bookingId };
   }
 
-  const tx = await escrowContract.refundFunds(bookingId);
+  const tx = await withTimeout(escrowContract.refundFunds(bookingId));
   logger.info(`[escrow] refundFunds tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
   return {
     txHash: tx.hash,
     bookingId,
     waitForConfirmation: async () => {
-      const receipt = await tx.wait(1);
+      const receipt = await withTimeout(tx.wait(1));
       if (!receipt || receipt.status === 0) {
         throw new Error('Escrow refund transaction reverted or was not found.');
       }
@@ -240,7 +251,7 @@ export async function confirmEscrowRefund(txHash) {
     throw new Error('Invalid escrow refund transaction hash.');
   }
 
-  const receipt = await escrowContract.runner.provider.waitForTransaction(txHash, 1);
+  const receipt = await withTimeout(escrowContract.runner.provider.waitForTransaction(txHash, 1));
   if (!receipt || receipt.status === 0) {
     throw new Error('Escrow refund transaction reverted or was not found.');
   }

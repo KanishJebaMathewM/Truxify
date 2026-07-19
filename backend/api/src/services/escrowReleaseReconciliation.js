@@ -10,6 +10,11 @@ let reconciliationTimer = null;
 let reconciliationRunning = false;
 
 export async function reconcilePendingEscrowReleases() {
+  if (!supabaseAdmin) {
+    logger.warn('[escrow-release-reconciliation] supabaseAdmin not available — skipping cycle');
+    return;
+  }
+
   let lockAcquired = false;
 
   if (redisClient) {

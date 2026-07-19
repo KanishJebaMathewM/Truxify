@@ -12,11 +12,13 @@ let reconciliationRunning = false;
 
 export async function reconcilePendingEscrowRefunds() {
   let lockAcquired = false;
+  let lockValue = null;
   let leaseExtender = null;
 
   if (redisClient) {
     try {
-      const acquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
+      lockValue = process.pid.toString();
+      const acquired = await redisClient.set(LOCK_KEY, lockValue, 'NX', 'EX', LOCK_TTL_SECONDS);
       if (!acquired) {
         logger.info('[escrow-reconciliation] Lock held by another instance, skipping.');
         return;
@@ -111,7 +113,17 @@ export async function reconcilePendingEscrowRefunds() {
       clearInterval(leaseExtender);
     }
     if (lockAcquired && redisClient) {
-      await redisClient.del(LOCK_KEY).catch(() => {});
+      try {
+        const luaScript = `
+          if redis.call('GET', KEYS[1]) == ARGV[1] then
+            redis.call('DEL', KEYS[1])
+            return 1
+          end
+          return 0`;
+        await redisClient.eval(luaScript, 1, LOCK_KEY, lockValue);
+      } catch (err) {
+        logger.warn('[escrow-reconciliation] Failed to release Redis lock:', err.message);
+      }
     }
     if (!lockAcquired) {
       reconciliationRunning = false;

@@ -982,7 +982,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
 
   const lockKey = `deposit_lock:${orderId}`;
   let lockValue = null;
-  lockValue = await acquireLock(lockKey, 10000);
+  lockValue = await acquireLock(lockKey, 120000);
   if (!lockValue) {
     return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
   }

@@ -27,7 +27,19 @@ import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
-import { DomainError } from '../services/order/domainError.js';
+import { OrderRepository } from '../repositories/orderRepository.js';
+import { OrderValidationService } from '../services/order/orderValidationService.js';
+import { OrderTimelineService } from '../services/order/orderTimelineService.js';
+import { OrderMilestoneService } from '../services/order/orderMilestoneService.js';
+import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
+import {
+  deliveryVerificationService,
+  buildDepositTx,
+  recordDepositTx,
+  submitEscrowRefund,
+  confirmEscrowRefund,
+  escrowRefund,
+} from '../core/container.js';
 
 import { LoadOfferCacheService } from '../services/order/loadOfferCacheService.js';
 const router = express.Router();
@@ -36,6 +48,11 @@ const orderRepository = new OrderRepository(supabase);
 const orderValidationService = new OrderValidationService({ supabase, logger });
 const orderTimelineService = new OrderTimelineService(orderRepository);
 const orderMilestoneService = new OrderMilestoneService({ orderValidationService, orderRepository, orderTimelineService });
+
+const orderLifecycleService = new OrderLifecycleService({
+  orderRepository,
+  orderTimelineService,
+});
 
 const bidAcceptanceService = new BidAcceptanceService({
   orderRepository,
@@ -49,9 +66,7 @@ const bidAcceptanceService = new BidAcceptanceService({
   submitEscrowRefund,
   confirmEscrowRefund,
   escrowRefund,
-} from '../core/container.js';
-
-const router = express.Router();
+});
 
 const verifyDeliveryLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

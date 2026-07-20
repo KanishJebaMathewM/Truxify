@@ -43,15 +43,20 @@ class EventRepository {
   }
 
   async getEventsByType(eventType, limit = 100) {
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .eq('event_type', eventType)
-      .order('timestamp', { ascending: false })
-      .limit(limit);
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .eq('event_type', eventType)
+        .order('timestamp', { ascending: false })
+        .limit(limit);
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      logger.error('Failed to get events by type:', error);
+      throw error;
+    }
   }
 
   async getEventById(eventId) {

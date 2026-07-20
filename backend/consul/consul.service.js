@@ -153,13 +153,13 @@ class ConsulService {
 
         for (const service of services) {
             try {
-                const health = await this.consul.health.node(service.id);
-                const isHealthy = health.CheckID !== 'serfHealth' && health.Status === 'passing';
+                const health = await this.consul.health.checks(service.id);
+                const isHealthy = health.length > 0 && health.some(c => c.Status === 'passing');
 
                 results[service.id] = {
                     healthy: isHealthy,
                     lastCheck: new Date().toISOString(),
-                    status: health.Status || 'unknown'
+                    status: isHealthy ? 'passing' : 'critical'
                 };
             } catch (error) {
                 results[service.id] = {
@@ -176,11 +176,12 @@ class ConsulService {
 
     async getServiceHealth(serviceId) {
         try {
-            const health = await this.consul.health.node(serviceId);
+            const health = await this.consul.health.checks(serviceId);
+            const isHealthy = health.length > 0 && health.some(c => c.Status === 'passing');
             return {
                 id: serviceId,
-                healthy: health.Status === 'passing',
-                status: health.Status,
+                healthy: isHealthy,
+                status: isHealthy ? 'passing' : 'critical',
                 lastCheck: new Date().toISOString()
             };
         } catch (error) {

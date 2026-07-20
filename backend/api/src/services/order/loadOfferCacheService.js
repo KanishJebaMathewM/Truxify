@@ -9,18 +9,21 @@ export class LoadOfferCacheService {
   }
 
   static async getVersion(region) {
-    if (!redisClient) return 1;
+    if (!redisClient) return null;
     try {
       const version = await redisClient.get(`version:load_offers:region:${region}`);
-      return version || 1;
+      return version || null;
     } catch (err) {
       logger.warn('[LoadOfferCache] Redis error getting version:', err.message);
-      return 1;
+      return null;
     }
   }
 
   static async invalidateRegion(lat, lng) {
-    if (!redisClient) return;
+    if (!redisClient) {
+      logger.warn('[LoadOfferCache] Redis unavailable, skipping cache invalidation');
+      return;
+    }
     try {
       const region = this.getRegion(lat, lng);
       await redisClient.incr(`version:load_offers:region:${region}`);

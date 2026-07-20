@@ -6,6 +6,24 @@ class OrderReadModel {
   constructor() {
     this.cache = new Map();
     this.cacheTTL = 300000; // 5 minutes
+    this.maxLimit = 100;
+    this.maxOffset = 10000;
+  }
+
+  parsePaginationValue(value, { field, min, max }) {
+    if (value === undefined || value === null || value === '') return null;
+    if (typeof value !== 'number' && typeof value !== 'string') {
+      throw new Error(`${field} must be an integer`);
+    }
+    const text = String(value);
+    if (!/^\d+$/.test(text)) {
+      throw new Error(`${field} must be an integer`);
+    }
+    const parsed = Number(text);
+    if (!Number.isSafeInteger(parsed) || parsed < min) {
+      throw new Error(`${field} must be at least ${min}`);
+    }
+    return Math.min(parsed, max);
   }
 
   async buildReadModel(orderId) {
@@ -121,13 +139,22 @@ class OrderReadModel {
       
       query = query.order('updated_at', { ascending: false });
       
-      if (filters.limit) {
-        const safeLimit = Math.min(Math.max(1, Math.floor(Number(filters.limit))), 1000);
-        query = query.limit(safeLimit);
+      const limit = this.parsePaginationValue(filters.limit, {
+        field: 'limit',
+        min: 1,
+        max: this.maxLimit,
+      });
+      const offset = this.parsePaginationValue(filters.offset, {
+        field: 'offset',
+        min: 0,
+        max: this.maxOffset,
+      });
+
+      if (limit !== null) {
+        query = query.limit(limit);
       }
-      if (filters.offset) {
-        const safeOffset = Math.max(0, Math.floor(Number(filters.offset)));
-        query = query.offset(safeOffset);
+      if (offset !== null) {
+        query = query.offset(offset);
       }
       
       const { data, error } = await query;

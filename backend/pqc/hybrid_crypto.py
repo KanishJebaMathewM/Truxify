@@ -61,7 +61,7 @@ class HybridCrypto:
             )
             
             # Classical RSA encryption of data + quantum secret
-            encrypted_data = self.classical_key.public_key().encrypt(
+            encrypted_data = hybrid_key['classical']['public'].encrypt(
                 data + quantum_secret,
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),

@@ -564,7 +564,7 @@ server.listen(PORT, () => {
 // ============================================================================
 // GRACEFUL SHUTDOWN
 // ============================================================================
-const SHUTDOWN_TIMEOUT_MS = 10_000
+const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS || "10000", 10)
 
 /** @type {boolean} */
 let shuttingDown = false

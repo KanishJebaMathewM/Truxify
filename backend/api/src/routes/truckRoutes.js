@@ -34,7 +34,7 @@ const router = express.Router();
 // GET /api/trucks/types
 router.get('/types', authenticate, userLimiter, (req, res) => {
   return res.json({
-    types: ['mini-truck', 'flatbed', 'box-truck', 'refrigerated', 'container']
+    types: ['Open Body', 'Closed Body', 'Container', 'Refrigerated']
   });
 });
 function parseCapacityFilter(value, field) {

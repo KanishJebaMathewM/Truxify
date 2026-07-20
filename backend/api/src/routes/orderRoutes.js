@@ -263,7 +263,6 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requi
       return res.status(500).json({ error: 'Failed to create load offer.', details: offerErr.message });
     }
 
-    const { order } = await orderLifecycleService.createOrder(req.user.id, req.user.fullName || 'Customer', req.body);
     return res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
   } catch (err) {
     if (err instanceof DomainError) {

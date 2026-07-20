@@ -1,4 +1,7 @@
+import { supabase } from '../../config/db.js';
 import OracleService from '../oracle/OracleService.js';
+
+const REQUIRED_DOCUMENT_TYPES = ['RC', 'License', 'Insurance'];
 
 class VerificationService {
   constructor() {
@@ -7,26 +10,22 @@ class VerificationService {
 
   async verifyOrder(orderId) {
     try {
-      // 1. Get order details from DB
       const order = await this.getOrderFromDB(orderId);
       if (!order) {
         return { verified: false, error: 'Order not found' };
       }
 
-      // 2. Check delivery confirmation with oracle
       const oracleResult = await this.oracleService.confirmDelivery({
         orderId,
         otp: order.deliveryOTP,
         gpsCoordinates: order.deliveryLocation
       });
 
-      // 3. Cross-chain verification
       const crossChainResult = await this.oracleService.verifyCrossChain(
         orderId,
         order.blockchainTransactionHash
       );
 
-      // 4. Document integrity check
       const documentIntegrity = await this.checkDocumentIntegrity(order.driverId);
 
       return {
@@ -47,22 +46,42 @@ class VerificationService {
   }
 
   async getOrderFromDB(orderId) {
-    // In real implementation: fetch from PostgreSQL
-    return {
-      orderId,
-      deliveryOTP: '123456',
-      deliveryLocation: { lat: 28.6139, lng: 77.2090 },
-      driverId: 'driver_123',
-      blockchainTransactionHash: '0x123abc...'
-    };
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('id', orderId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data;
   }
 
   async checkDocumentIntegrity(driverId) {
-    // Check if driver's documents are tampered
-    // Compare stored hash with current document hash
+    const { data: documents, error } = await supabase
+      .from('driver_documents')
+      .select('document_type, status, created_at')
+      .eq('driver_id', driverId);
+
+    if (error) throw error;
+
+    const uploadedTypes = new Set(
+      (documents || []).map(d => d.document_type)
+    );
+
+    const checkedTypes = REQUIRED_DOCUMENT_TYPES.map(type => ({
+      type,
+      uploaded: uploadedTypes.has(type),
+      status: uploadedTypes.has(type)
+        ? (documents.find(d => d.document_type === type)?.status || 'unknown')
+        : 'missing'
+    }));
+
+    const allPresent = checkedTypes.every(t => t.uploaded);
+    const anyRejected = checkedTypes.some(t => t.status === 'rejected');
+
     return {
-      verified: true,
-      documentsChecked: ['RC', 'License', 'Insurance'],
+      verified: allPresent && !anyRejected,
+      documentsChecked: checkedTypes,
       lastCheck: new Date().toISOString()
     };
   }

@@ -298,8 +298,11 @@ class SMPCProtocol:
     
     def _secure_compare(self, shares1: Dict[str, bytes], shares2: Dict[str, bytes]) -> Dict[str, bytes]:
         """Secure comparison of two shared values"""
-        # In production: implement proper secure comparison
-        return shares1 if len(shares1) > len(shares2) else shares2
+        vals1 = [pickle.loads(self.cipher.decrypt(v)) for v in shares1.values()]
+        vals2 = [pickle.loads(self.cipher.decrypt(v)) for v in shares2.values()]
+        sum1 = sum(v[1] for v in vals1) % self.secret_sharing.prime
+        sum2 = sum(v[1] for v in vals2) % self.secret_sharing.prime
+        return shares1 if sum1 > sum2 else shares2
     
     def get_party_stats(self) -> Dict:
         """Get party statistics"""

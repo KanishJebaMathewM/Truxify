@@ -52,7 +52,7 @@ function isNonRetryableSupabaseError(error) {
 
   if (error.status != null) {
     const s = Number(error.status);
-    if (s >= 200 && s < 500 && s !== 429) return true;
+    if (s >= 200 && s < 500 && s !== 429 && s !== 408) return true;
   }
 
   return false;

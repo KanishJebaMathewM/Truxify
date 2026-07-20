@@ -217,13 +217,6 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
   if (!isLatitude(numPickupLat) || !isLatitude(numDropLat) || !isLongitude(numPickupLng) || !isLongitude(numDropLng)) {
     return res.status(400).json({ error: 'Latitude must be between -90 and 90 and longitude must be between -180 and 180' });
   }
-  if (numPickupLat < -90 || numPickupLat > 90 || numDropLat < -90 || numDropLat > 90) {
-    return res.status(400).json({ error: 'Latitude must be between -90 and 90' });
-  }
-  if (numPickupLng < -180 || numPickupLng > 180 || numDropLng < -180 || numDropLng > 180) {
-    return res.status(400).json({ error: 'Longitude must be between -180 and 180' });
-  }
-
   if (numWeightTonnes <= 0 || numWeightTonnes > 50) {
     return res.status(400).json({ error: 'Weight must be between 0 and 50 tonnes' });
   }

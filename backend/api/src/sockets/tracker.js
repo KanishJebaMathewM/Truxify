@@ -76,13 +76,12 @@ class TelemetryRingBuffer {
     if (!items || items.length === 0) return 0;
     let dropped = 0;
     for (let i = items.length - 1; i >= 0; i--) {
-      this.head = (this.head - 1 + this.capacity) % this.capacity;
-      this.buffer[this.head] = items[i];
       if (this.size < this.capacity) {
+        this.head = (this.head - 1 + this.capacity) % this.capacity;
+        this.buffer[this.head] = items[i];
         this.size++;
       } else {
         dropped++;
-        this.tail = this.head;
       }
     }
     return dropped;
@@ -732,7 +731,6 @@ async function flushTelemetryBuffer() {
           telemetryOverflowDropped += overflowDrop;
           logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
         }
-      }
       }
     } finally {
       currentFlushPromise = null;

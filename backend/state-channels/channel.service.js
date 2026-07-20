@@ -58,6 +58,7 @@ class StateChannelService {
     }
 
     async fundChannel(channelId, amount, participant) {
+        this.channelCache.delete(channelId);
         try {
             const tx = await this.channel.fundChannel(channelId, {
                 value: ethers.parseEther(amount.toString()),
@@ -79,6 +80,7 @@ class StateChannelService {
     }
 
     async updateState(channelId, balances, nonce, signatures) {
+        this.channelCache.delete(channelId);
         try {
             const { balanceA, balanceB } = balances;
             
@@ -116,6 +118,7 @@ class StateChannelService {
     }
 
     async closeChannel(channelId) {
+        this.channelCache.delete(channelId);
         try {
             const tx = await this.channel.closeChannel(channelId, {
                 gasLimit: 100000
@@ -142,6 +145,7 @@ class StateChannelService {
     // ============ Dispute Resolution ============
 
     async raiseDispute(channelId, stateHash) {
+        this.channelCache.delete(channelId);
         try {
             const tx = await this.channel.raiseDispute(channelId, stateHash, {
                 gasLimit: 100000
@@ -164,6 +168,7 @@ class StateChannelService {
     // ============ Batch Settlement ============
 
     async batchSettle(channelIds) {
+        channelIds.forEach(id => this.channelCache.delete(id));
         try {
             const tx = await this.channel.batchSettle(channelIds, {
                 gasLimit: 300000

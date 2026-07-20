@@ -148,26 +148,35 @@ class ConsulService {
     }
 
     async checkAllServices() {
-        const services = await this.discoverService('*', false);
         const results = {};
 
-        for (const service of services) {
-            try {
-                const health = await this.consul.health.node(service.id);
-                const isHealthy = health.CheckID !== 'serfHealth' && health.Status === 'passing';
+        try {
+            const catalogServices = await this.consul.catalog.services();
+            const serviceNames = Object.keys(catalogServices);
 
-                results[service.id] = {
-                    healthy: isHealthy,
-                    lastCheck: new Date().toISOString(),
-                    status: health.Status || 'unknown'
-                };
-            } catch (error) {
-                results[service.id] = {
-                    healthy: false,
-                    lastCheck: new Date().toISOString(),
-                    error: error.message
-                };
+            for (const name of serviceNames) {
+                const services = await this.discoverService(name, false);
+                for (const service of services) {
+                    try {
+                        const health = await this.consul.health.node(service.id);
+                        const isHealthy = health.CheckID !== 'serfHealth' && health.Status === 'passing';
+
+                        results[service.id] = {
+                            healthy: isHealthy,
+                            lastCheck: new Date().toISOString(),
+                            status: health.Status || 'unknown'
+                        };
+                    } catch (error) {
+                        results[service.id] = {
+                            healthy: false,
+                            lastCheck: new Date().toISOString(),
+                            error: error.message
+                        };
+                    }
+                }
             }
+        } catch (error) {
+            logger.error('checkAllServices failed:', error);
         }
 
         this.healthChecks = results;

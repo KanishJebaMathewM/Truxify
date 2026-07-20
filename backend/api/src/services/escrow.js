@@ -42,8 +42,17 @@ const ESCROW_ABI = [
 const rpcUrl            = process.env.POLYGON_RPC_URL;
 const contractAddress   = process.env.ESCROW_CONTRACT_ADDRESS;
 const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
-export const ESCROW_MATIC_PER_PAISA = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0.01');
-const MAX_ESCROW_MATIC = parseFloat(process.env.MAX_ESCROW_MATIC || '5');
+const rawEscrowRate = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0.01');
+if (Number.isNaN(rawEscrowRate) || rawEscrowRate <= 0) {
+  throw new Error(`Invalid ESCROW_MATIC_PER_PAISA: "${process.env.ESCROW_MATIC_PER_PAISA}" — must be a positive number`);
+}
+export const ESCROW_MATIC_PER_PAISA = rawEscrowRate;
+
+const rawMaxEscrow = parseFloat(process.env.MAX_ESCROW_MATIC || '5');
+if (Number.isNaN(rawMaxEscrow) || rawMaxEscrow <= 0) {
+  throw new Error(`Invalid MAX_ESCROW_MATIC: "${process.env.MAX_ESCROW_MATIC}" — must be a positive number`);
+}
+const MAX_ESCROW_MATIC = rawMaxEscrow;
 
 /** @type {ethers.Contract | null} */
 let escrowContract = null

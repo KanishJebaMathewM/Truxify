@@ -108,11 +108,13 @@ class DIDService {
             const proof = this.generateProof(subject, credentialType, schema);
             const proofHash = ethers.keccak256(ethers.toUtf8Bytes(proof));
 
+            const validUntilTimestamp = validUntil || Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+
             const tx = await this.didRegistry.issueCredential(
                 subject,
                 credentialType,
                 schemaHash,
-                validUntil || Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
+                validUntilTimestamp,
                 proofHash
             );
             const receipt = await tx.wait();
@@ -129,7 +131,7 @@ class DIDService {
                 credentialType,
                 schema,
                 issuedAt: new Date().toISOString(),
-                validUntil: new Date(validUntil * 1000).toISOString(),
+                validUntil: new Date(validUntilTimestamp * 1000).toISOString(),
                 txHash: receipt.hash,
                 proof
             });
@@ -262,14 +264,21 @@ class DIDService {
     }
 
     async getDIDStats() {
-        const { data: dids } = await supabase.from('dids').select('*').order('created_at', { ascending: false }).limit(100);
-        const { data: credentials } = await supabase.from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
+        const { data: dids, error: didsErr } = await supabase.from('dids').select('*').order('created_at', { ascending: false }).limit(100);
+        const { data: credentials, error: credsErr } = await supabase.from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
+
+        if (didsErr || credsErr) {
+            logger.error('Failed to fetch DID stats', { didsErr, credsErr });
+        }
+
+        const safeDids = dids || [];
+        const safeCreds = credentials || [];
 
         return {
-            totalDIDs: dids.length,
-            activeDIDs: dids.filter(d => d.is_active !== false).length,
-            totalCredentials: credentials.length,
-            revokedCredentials: credentials.filter(c => c.revoked === true).length
+            totalDIDs: safeDids.length,
+            activeDIDs: safeDids.filter(d => d.is_active !== false).length,
+            totalCredentials: safeCreds.length,
+            revokedCredentials: safeCreds.filter(c => c.revoked === true).length
         };
     }
 }

@@ -266,6 +266,16 @@ app.use(helmet({
   dnsPrefetchControl: { allow: false },
   hidePoweredBy: true, // Removes X-Powered-By: Express
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  permissionsPolicy: {
+    features: {
+      camera: [],
+      microphone: [],
+      geolocation: [],
+      payment: [],
+      usb: [],
+      fullscreen: ['self']
+    }
+  },
   xssFilter: true
 }))
 

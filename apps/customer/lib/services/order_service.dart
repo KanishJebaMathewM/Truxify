@@ -27,6 +27,13 @@ class OrderService {
     }).toList(growable: false);
   }
 
+  List<Map<String, dynamic>> _timelineFromResponse(dynamic body) {
+    if (body is Map<String, dynamic>) {
+      return _mapList(body['timeline'], 'order timeline');
+    }
+    return _mapList(body, 'order timeline');
+  }
+
   List<Map<String, dynamic>> _historyFromResponse(dynamic body) {
     if (body is Map<String, dynamic>) {
       final history = body['history'];
@@ -154,7 +161,7 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/${_encodePathSegment(orderDisplayId)}/timeline',
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      return _timelineFromResponse(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {

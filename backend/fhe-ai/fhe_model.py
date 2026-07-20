@@ -125,13 +125,20 @@ class FHEModel:
         # sigmoid(x) ≈ 0.5 + 0.197 * x - 0.004 * x^3
         x_sq = x * x
         x_cu = x_sq * x
-        result = ts.ckks_vector(self.context, [0.5]) + 0.197 * x - 0.004 * x_cu
+        result = 0.5 + 0.197 * x - 0.004 * x_cu
         return result
     
     def _encrypted_softmax(self, x: ts.ckks_vector) -> ts.ckks_vector:
         """Encrypted Softmax (approximated)"""
-        # For simplicity, return normalized output
-        return x / (x + 1e-7)
+        # Use Newton-Raphson reciprocal approximation: r_{n+1} = r * (2 - denom * r)
+        # Avoids CKKS vector/vector division which TenSEAL does not support
+        epsilon = 1e-7
+        denom = x + epsilon
+        y = 0.5  # initial guess for reciprocal of denom
+        y = y * (2 - denom * y)  # iteration 1
+        y = y * (2 - denom * y)  # iteration 2
+        y = y * (2 - denom * y)  # iteration 3
+        return x * y
 
 class FHETrainer:
     """Trainer for FHE-encrypted models"""

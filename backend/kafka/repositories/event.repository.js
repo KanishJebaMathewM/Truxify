@@ -26,41 +26,53 @@ class EventRepository {
   }
 
   async getEventsByOrderId(orderId, limit = 100) {
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .eq('order_id', orderId)
-      .order('timestamp', { ascending: false })
-      .limit(limit);
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .eq('order_id', orderId)
+        .order('timestamp', { ascending: false })
+        .limit(limit);
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      logger.error('Failed to get events:', error);
+      throw error;
+    }
   }
 
   async getEventsByType(eventType, limit = 100) {
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .eq('event_type', eventType)
-      .order('timestamp', { ascending: false })
-      .limit(limit);
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .eq('event_type', eventType)
+        .order('timestamp', { ascending: false })
+        .limit(limit);
 
-    if (error) throw error;
-    return data;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      logger.error('Failed to get events by type:', error);
+      throw error;
+    }
   }
 
   async getEventById(eventId) {
-    const { data, error } = await supabase
-      .from('events')
-      .select('*')
-      .eq('event_id', eventId)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .eq('event_id', eventId)
+        .maybeSingle();
 
-    if (error) {
-      if (error.code === 'PGRST116') return null;
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      logger.error('Failed to get event:', error);
       throw error;
     }
-    return data;
   }
 
   async replayEvents(orderId) {

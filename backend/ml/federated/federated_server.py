@@ -139,12 +139,17 @@ class FederatedServer:
         
         # Apply Differential Privacy
         for client_id in self.client_weights:
-            weights = self.client_weights[client_id]
-            # Clip gradients
-            clipped = [np.clip(w, -self.dp_clip_norm, self.dp_clip_norm) for w in weights]
-            # Add noise
-            noise = [np.random.normal(0, self.dp_noise_scale, w.shape) for w in clipped]
-            self.client_weights[client_id] = [c + n for c, n in zip(clipped, noise)]
+            client_w = self.client_weights[client_id]
+            # Compute gradients from global weights
+            grads = [cw - gw for cw, gw in zip(client_w, self.global_weights)]
+            # Clip gradient L2 norm
+            total_norm = np.sqrt(sum(np.sum(g**2) for g in grads))
+            clip_factor = min(1.0, self.dp_clip_norm / (total_norm + 1e-8))
+            clipped_grads = [g * clip_factor for g in grads]
+            # Add noise to clipped gradients
+            noisy_grads = [g + np.random.normal(0, self.dp_noise_scale, g.shape) for g in clipped_grads]
+            # Apply noisy gradients back to weights
+            self.client_weights[client_id] = [gw + ng for gw, ng in zip(self.global_weights, noisy_grads)]
         
         # Federated Averaging
         num_clients = len(self.client_weights)

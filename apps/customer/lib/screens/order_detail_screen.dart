@@ -137,7 +137,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
           _currentOrder = HistoryOrderData(
             orderId: orderMap['order_display_id']?.toString() ?? _currentOrder.orderId,
-            route: '${orderMap['pickup_address']} → ${orderMap['drop_address']}',
+            route: '${orderMap['pickup_address'] ?? 'Unknown'} → ${orderMap['drop_address'] ?? 'Unknown'}',
             date: orderMap['pickup_date']?.toString() ?? _currentOrder.date,
             amount: '₹$amountInRupees',
             status: _formatStatus(orderMap['status']?.toString() ?? 'pending'),

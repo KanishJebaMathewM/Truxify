@@ -1712,7 +1712,7 @@ class _MarketplaceBody extends StatelessWidget {
       return ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
-        children: const [
+        children: [
           SizedBox(height: 80),
           Center(child: Text(AppLocalizations.of(context)!.noLoadsAvailable)),
         ],

@@ -32,7 +32,15 @@ function verifyWebhookSignature(req, res, next) {
     .update(rawBody)
     .digest('hex');
 
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+  const sigBuf = Buffer.from(signature);
+  const expectedBuf = Buffer.from(expectedSignature);
+
+  if (sigBuf.length !== expectedBuf.length) {
+    logger.warn('[Webhook] Invalid webhook signature length — rejecting request');
+    return res.status(401).json({ error: 'Invalid webhook signature' });
+  }
+
+  if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) {
     logger.warn('[Webhook] Invalid webhook signature — rejecting request');
     return res.status(401).json({ error: 'Invalid webhook signature' });
   }

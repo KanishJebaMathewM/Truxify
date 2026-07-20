@@ -319,3 +319,13 @@ export function validateConfig() {
 }
 
 // Resolves #2050: Handle SIGINT and SIGTERM for graceful DB shutdown
+
+async function shutdown(signal) {
+  logger.info({ signal }, 'Received signal, starting graceful shutdown...');
+  await closeDbConnections();
+  logger.info('Graceful shutdown complete.');
+  process.exit(0);
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

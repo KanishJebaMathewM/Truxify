@@ -34,7 +34,7 @@ const router = express.Router();
 // GET /api/trucks/types
 router.get('/types', authenticate, userLimiter, (req, res) => {
   return res.json({
-    types: ['mini-truck', 'flatbed', 'box-truck', 'refrigerated', 'container']
+    types: ['Open Body', 'Closed Body', 'Container', 'Refrigerated']
   });
 });
 function parseCapacityFilter(value, field) {
@@ -197,7 +197,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     drop_lat, drop_lng,
     weight_tonnes,
     is_fragile, is_stackable,
-    truck_type, min_capacity, max_capacity
+    truck_type, min_capacity, max_capacity, material_type
   } = req.query;
 
   if (pickup_lat == null || pickup_lng == null || drop_lat == null || drop_lng == null || weight_tonnes == null) {

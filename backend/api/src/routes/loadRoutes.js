@@ -150,13 +150,14 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
     }
 
     // Sorting
-    const validSortFields = ['estimated_price', 'created_at'];
-    const sortByParam = validSortFields.includes(req.query.sort_by) ? req.query.sort_by : 'created_at';
+    const sortByParam = filters.sort_by || 'created_at';
     
     // Map sort fields to database columns
     let sortBy = 'created_at';
     if (sortByParam === 'estimated_price') {
       sortBy = 'freight_value';
+    } else if (sortByParam === 'distance') {
+      sortBy = 'extra_distance_km';
     }
 
     const ascending = filters.order === 'asc';

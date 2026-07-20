@@ -477,6 +477,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       return;
     }
 
+    if (!mounted) return;
     setState(() {
       if (isPickup) {
         _pickupController.text = result.address;
@@ -532,28 +533,25 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
 
   String? _validateWeight(String? value) {
     final text = value?.trim() ?? '';
-    String? error;
 
     if (text.isEmpty) {
-      error = 'Weight must be greater than 0.';
-    } else {
-      final weight = double.tryParse(text);
-      if (weight == null) {
-        error = 'Please enter a valid numeric weight.';
-      } else if (weight <= 0) {
-        error = 'Weight must be greater than 0.';
-      } else if (weight < 0.1 || weight > 50) {
-        error = 'Weight must be between 0.1 and 50 tonnes.';
-      }
+      return 'Weight must be greater than 0.';
     }
+    final weight = double.tryParse(text);
+    if (weight == null) {
+      return 'Please enter a valid numeric weight.';
+    }
+    if (weight <= 0) {
+      return 'Weight must be greater than 0.';
+    }
+    if (weight < 0.1 || weight > 50) {
+      return 'Weight must be between 0.1 and 50 tonnes.';
+    }
+    return null;
+  }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        setState(() => _weightErrorText = error);
-      }
-    });
-
-    return error;
+  void _onWeightChanged(String value) {
+    setState(() => _weightErrorText = _validateWeight(value));
   }
 
   void _onFindTrucks() {
@@ -1158,6 +1156,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                             controller: _weightController,
                             keyboardType: TextInputType.number,
                             validator: _validateWeight,
+                            onChanged: _onWeightChanged,
                             decoration: const InputDecoration(
                               labelText: 'Weight (t)',
                               hintText: '3',

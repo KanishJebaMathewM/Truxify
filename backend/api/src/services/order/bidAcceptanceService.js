@@ -99,7 +99,7 @@ export class BidAcceptanceService {
     // Update order with escrow booking info
     const { error: escrowUpdateErr } = await this.orderRepository.updateEscrowBooking(orderId, bookingId, 'funding');
     if (escrowUpdateErr) {
-      this.logger?.warn?.('[escrow] Failed to update escrow booking reference:', escrowUpdateErr.message);
+      throw new DomainError(500, { error: 'Failed to store escrow booking reference.', details: escrowUpdateErr.message });
     }
 
     // Execute RPC to accept bid

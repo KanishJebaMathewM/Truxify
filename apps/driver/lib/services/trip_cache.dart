@@ -39,6 +39,16 @@ class TripCache {
     }
   }
 
+  static Future<void> _clear(SharedPreferences prefs) async {
+    await Future.wait([
+      prefs.remove(_tripsKey),
+      prefs.remove(_stopsKey),
+      prefs.remove(_routePointsKey),
+      prefs.remove(_itemsKey),
+      prefs.remove(_savedAtKey),
+    ]);
+  }
+
   static Future<void> save({
     required List<Map<String, dynamic>> trips,
     required Map<String, List<Map<String, dynamic>>> stopsByTripId,
@@ -76,6 +86,7 @@ class TripCache {
       final savedAt = savedAtRaw != null ? DateTime.tryParse(savedAtRaw) : null;
 
       if (savedAt != null && DateTime.now().difference(savedAt) > _ttl) {
+        await _clear(prefs);
         return null;
       }
 

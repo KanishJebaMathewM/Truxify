@@ -209,7 +209,7 @@ export class DeliveryVerificationService {
 
     let releaseTxHash = null;
     let escrowAlreadyReleased = false;
-    if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
+    if (verifiedOrder.escrow_status === 'funded' || verifiedOrder.escrow_status === 'release_failed') {
       try {
         const releaseResult = await this.escrowReleaseFn(order.order_display_id);
         if (releaseResult.txHash) {
@@ -227,7 +227,7 @@ export class DeliveryVerificationService {
         });
       }
     } else {
-      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
+      logger.info(`[escrow] Escrow not funded (status: ${verifiedOrder.escrow_status}) — skipping on-chain release.`);
     }
 
     let escrowUpdateFailed = false;

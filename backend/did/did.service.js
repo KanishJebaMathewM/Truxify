@@ -108,11 +108,13 @@ class DIDService {
             const proof = this.generateProof(subject, credentialType, schema);
             const proofHash = ethers.keccak256(ethers.toUtf8Bytes(proof));
 
+            const validUntilTimestamp = validUntil || Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+
             const tx = await this.didRegistry.issueCredential(
                 subject,
                 credentialType,
                 schemaHash,
-                validUntil || Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
+                validUntilTimestamp,
                 proofHash
             );
             const receipt = await tx.wait();
@@ -129,7 +131,7 @@ class DIDService {
                 credentialType,
                 schema,
                 issuedAt: new Date().toISOString(),
-                validUntil: new Date(validUntil * 1000).toISOString(),
+                validUntil: new Date(validUntilTimestamp * 1000).toISOString(),
                 txHash: receipt.hash,
                 proof
             });

@@ -1,6 +1,7 @@
 import numpy as np
 from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
 from qiskit.circuit.library import QAOAAnsatz
+from qiskit.quantum_info import SparsePauliOp
 from qiskit_aer import AerSimulator
 from qiskit.optimization import QuadraticProgram
 from qiskit.optimization.algorithms import MinimumEigenOptimizer
@@ -53,10 +54,11 @@ class QuantumCircuitDesigner:
         self.circuit = qaoa
         return qaoa
     
-    def _create_cost_hamiltonian(self):
+    def _create_cost_hamiltonian(self) -> SparsePauliOp:
         """Create cost Hamiltonian for route optimization"""
+        # Default 2-qubit ZZ Hamiltonian
         # In production: create from QUBO formulation
-        return None
+        return SparsePauliOp.from_list([('ZZ', 1.0)])
     
     def run_circuit(self, circuit: QuantumCircuit, shots: int = 1024) -> Dict:
         """Run quantum circuit on simulator"""

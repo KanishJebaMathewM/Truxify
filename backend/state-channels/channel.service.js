@@ -42,8 +42,18 @@ class StateChannelService {
             });
             const receipt = await tx.wait();
 
-            // Get channel ID from logs
-            const channelId = await this.getUserChannels(participantA).then(channels => channels[0]);
+            // Parse channel ID from ChannelOpened event
+            const eventLog = receipt.logs.find(log => {
+                try {
+                    const parsed = this.channel.interface.parseLog(log);
+                    return parsed.name === 'ChannelOpened';
+                } catch {
+                    return false;
+                }
+            });
+            const channelId = eventLog
+                ? this.channel.interface.parseLog(eventLog).args[0].toString()
+                : (await this.getUserChannels(participantA).then(ch => ch[ch.length - 1]));
 
             logger.info(`✅ Channel opened: ${channelId}`);
             return {

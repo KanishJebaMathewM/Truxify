@@ -93,6 +93,7 @@ class NeRFNetwork(nn.Module):
                 x = layer(x)
             elif i == 4:  # Skip connection
                 x = torch.cat([x, encoded_pos], dim=-1)
+                x = layer(x)
             else:
                 x = layer(x)
         

@@ -1,0 +1,7 @@
+{
+  "name": "truxify-eventsourcing",
+  "version": "1.0.0",
+  "dependencies": {
+    "uuid": "^14.0.1"
+  }
+}

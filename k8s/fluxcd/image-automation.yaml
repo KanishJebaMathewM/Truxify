@@ -1,0 +1,50 @@
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageRepository
+metadata:
+  name: api-image
+  namespace: flux-system
+spec:
+  interval: 5m
+  image: truxify/api
+  secretRef:
+    name: docker-hub
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImagePolicy
+metadata:
+  name: api-image-policy
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: api-image
+  filterTags:
+    pattern: '^v(?P<version>.*)$'
+    extract: '$version'
+  policy:
+    alphabetical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1beta2
+kind: ImageUpdateAutomation
+metadata:
+  name: api-image-update
+  namespace: flux-system
+spec:
+  interval: 5m
+  sourceRef:
+    kind: GitRepository
+    name: truxify
+  git:
+    checkout:
+      ref:
+        branch: main
+    commit:
+      author:
+        email: fluxcd@truxify.com
+        name: fluxcd
+      messageTemplate: 'Auto-update api image to {{ .NewTag }}'
+    push:
+      branch: main
+  update:
+    path: ./k8s/fluxcd
+    strategy: Setters

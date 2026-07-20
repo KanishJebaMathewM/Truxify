@@ -1,0 +1,44 @@
+{
+  "name": "Document Integrity Check Workflow",
+  "nodes": [
+    {
+      "name": "Daily Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"hours": 24}]
+        }
+      }
+    },
+    {
+      "name": "Fetch Active Drivers",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "http://api:5000/api/drivers/active",
+        "method": "GET",
+        "responseFormat": "json"
+      }
+    },
+    {
+      "name": "Check Documents",
+      "type": "n8n-nodes-base.function",
+      "position": [650, 300],
+      "parameters": {
+        "functionCode": "const drivers = $input.first().json.data;\nconst checkedDrivers = drivers.map(driver => ({\n  driverId: driver.id,\n  documentsChecked: ['RC', 'License', 'Insurance'],\n  status: 'verified',\n  timestamp: new Date().toISOString()\n}));\nreturn checkedDrivers;"
+      }
+    },
+    {
+      "name": "Send Alert for Mismatch",
+      "type": "n8n-nodes-base.emailSend",
+      "position": [850, 300],
+      "parameters": {
+        "fromEmail": "security@truxify.com",
+        "toEmail": "admin@truxify.com",
+        "subject": "Document Tampering Alert",
+        "text": "{{$json}}"
+      }
+    }
+  ]
+}

@@ -1,8 +1,7 @@
-import { supabase, redisClient } from '../config/db.js';
+import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { confirmEscrowRefund, submitEscrowRefund } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
-import { OrderRepository } from '../repositories/orderRepository.js';
 import os from 'os';
 
 const RECONCILIATION_EVENTS = {
@@ -35,17 +34,22 @@ const MAX_RETRIES = 10;
 let reconciliationTimer = null;
 let reconciliationRunning = false;
 
-export async function reconcilePendingEscrowRefunds(passedOrderRepository) {
+export async function reconcilePendingEscrowRefunds(orderRepository) {
+  if (!orderRepository) {
+    throw new Error('reconcilePendingEscrowRefunds requires an OrderRepository instance');
+  }
   if (reconciliationRunning) return;
   reconciliationRunning = true;
 
-  const orderRepository = passedOrderRepository || new OrderRepository(supabase);
-
   try {
-    // Acquire a global lock just to prevent multiple instances from pulling the exact same batch unnecessarily
     let globalLockAcquired = false;
     if (redisClient) {
-      globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
+      try {
+        globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
+      } catch (err) {
+        logger.error('[escrow-reconciliation] Failed to acquire Redis global lock, skipping batch:', err.message);
+        return;
+      }
       if (!globalLockAcquired) {
         logger.info('[escrow-reconciliation] Global lock held by another instance, skipping batch pull.');
         return;
@@ -62,7 +66,7 @@ export async function reconcilePendingEscrowRefunds(passedOrderRepository) {
 
     for (const order of pendingOrders ?? []) {
       const lockKey = `escrow_lock:${order.id}`;
-      const lockValue = await acquireLock(lockKey, 30000); // 30 seconds for blockchain confirmation
+      const lockValue = await acquireLock(lockKey, 30000);
       if (!lockValue) {
         logger.info(`[escrow-reconciliation] Order ${order.order_display_id} locked by another process (API or Job), skipping.`);
         continue;
@@ -91,13 +95,16 @@ export async function reconcilePendingEscrowRefunds(passedOrderRepository) {
         }
 
         let refundTxHash = order.refund_tx_hash;
+        let receipt;
+
         if (!refundTxHash) {
           const submitted = await submitEscrowRefund(order.order_display_id);
-          await submitted.waitForConfirmation();
-          refundTxHash = submitted.txHash;
+          receipt = await submitted.waitForConfirmation();
+          refundTxHash = receipt.hash ?? submitted.txHash;
+        } else {
+          receipt = await confirmEscrowRefund(refundTxHash);
         }
 
-        const receipt = await confirmEscrowRefund(refundTxHash);
         const refundedAt = new Date().toISOString();
         const { error: updateError } = await orderRepository.updateOrderWithFilter(order.id, {
           status: 'cancelled',

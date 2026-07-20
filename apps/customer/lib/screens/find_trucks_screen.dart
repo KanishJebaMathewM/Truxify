@@ -4,6 +4,8 @@ import 'package:latlong2/latlong.dart';
 
 import '../controllers/app_controller.dart';
 import '../models/app_models.dart';
+import '../models/saved_address.dart';
+import '../repositories/address_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
 import '../widgets/common_widgets.dart';
@@ -13,7 +15,10 @@ import 'package:truxify_shared/shimmer_widget.dart';
 import '../services/order_service.dart';
 
 class FindTrucksScreen extends StatefulWidget {
-  const FindTrucksScreen({super.key});
+  const FindTrucksScreen({super.key, AddressRepository? addressRepository})
+      : _addressRepository = addressRepository;
+
+  final AddressRepository? _addressRepository;
 
   @override
   State<FindTrucksScreen> createState() => _FindTrucksScreenState();
@@ -58,6 +63,12 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   int? _estimateMinPrice;
   int? _estimateMaxPrice;
 
+  // Saved addresses state
+  late final AddressRepository _addressRepo;
+  List<SavedAddress> _savedAddresses = [];
+  bool _addressesLoading = false;
+  String? _addressesError;
+
   static const _goodsTypes = <String>[
     'Textile',
     'Electronics',
@@ -82,6 +93,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   @override
   void initState() {
     super.initState();
+    _addressRepo = widget._addressRepository ?? AddressRepository();
     _pickupController = TextEditingController();
     _dropController = TextEditingController();
     _weightController = TextEditingController();
@@ -93,6 +105,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     _dateController = TextEditingController(text: _formatDateLabel(_selectedDate!));
     _timeController = TextEditingController(text: _formatTimeLabel(_selectedTime!));
     _customGoodsTypeController = TextEditingController();
+    _loadSavedAddresses();
   }
 
   @override
@@ -263,6 +276,17 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   }
 
   RouteDraft _buildDraft() {
+    DateTime? pickupDate;
+    final parsed = _parseDateTimeLabel(_composeDateTimeLabel());
+    if (parsed != null) {
+      pickupDate = DateTime(
+        parsed.date.year,
+        parsed.date.month,
+        parsed.date.day,
+        parsed.time.hour,
+        parsed.time.minute,
+      );
+    }
     return RouteDraft(
       pickup: _pickupController.text,
       drop: _dropController.text,
@@ -273,10 +297,15 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       stacked: _stacked,
       fragile: _fragile,
       requirements: _requirements.toList(),
+      pickupDate: pickupDate,
       pickupLat: _pickupPoint?.latitude,
       pickupLng: _pickupPoint?.longitude,
       dropLat: _dropPoint?.latitude,
       dropLng: _dropPoint?.longitude,
+      truckType: _filterTruckType != 'Any' ? _filterTruckType : null,
+      minCapacity: _filterMinCapacity > 0 ? _filterMinCapacity : null,
+      maxCapacity: _filterMaxCapacity < 25 ? _filterMaxCapacity : null,
+      materialType: _filterMaterialType != 'Any' ? _filterMaterialType : null,
     );
   }
 
@@ -288,6 +317,149 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     _dropController.text = pickup;
     _dropPoint = pickupPoint;
     setState(() {});
+  }
+
+  // ── Saved addresses ────────────────────────────────────────────────────
+
+  Future<void> _loadSavedAddresses() async {
+    setState(() {
+      _addressesLoading = true;
+      _addressesError = null;
+    });
+    try {
+      final addresses = await _addressRepo.fetchAll();
+      if (mounted) setState(() => _savedAddresses = addresses);
+    } catch (e) {
+      if (mounted) setState(() => _addressesError = e.toString());
+    } finally {
+      if (mounted) setState(() => _addressesLoading = false);
+    }
+  }
+
+  void _applySavedAddress(SavedAddress address, {required bool isPickup}) {
+    final fullAddr = address.fullAddress;
+    setState(() {
+      if (isPickup) {
+        _pickupController.text = fullAddr;
+        if (address.latitude != null && address.longitude != null) {
+          _pickupPoint = LatLng(address.latitude!, address.longitude!);
+        }
+      } else {
+        _dropController.text = fullAddr;
+        if (address.latitude != null && address.longitude != null) {
+          _dropPoint = LatLng(address.latitude!, address.longitude!);
+        }
+      }
+    });
+    _formKey.currentState?.validate();
+    _estimatePrice();
+  }
+
+  void _showSavedAddressSheet({required bool isPickup}) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AddressPickerSheet(
+        addresses: _savedAddresses,
+        isLoading: _addressesLoading,
+        error: _addressesError,
+        isPickup: isPickup,
+        onRetry: _loadSavedAddresses,
+        onSelect: (address) {
+          Navigator.of(context).pop();
+          _applySavedAddress(address, isPickup: isPickup);
+        },
+      ),
+    );
+  }
+
+  IconData _iconForLabel(String label) {
+    final l = label.toLowerCase();
+    if (l.contains('home')) return Icons.home_rounded;
+    if (l.contains('office') || l.contains('work')) return Icons.business_rounded;
+    if (l.contains('warehouse')) return Icons.warehouse_rounded;
+    return Icons.location_on_rounded;
+  }
+
+  Future<void> _promptSaveNewAddress(String address, LatLng point) async {
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Save this address?'),
+        content: const Text('Would you like to save this location for future bookings?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Not now'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldSave != true || !mounted) return;
+
+    final label = await showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        final ctrl = TextEditingController();
+        return AlertDialog(
+          title: const Text('Label this address'),
+          content: TextField(
+            controller: ctrl,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              hintText: 'e.g. Home, Office, Warehouse',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (label == null || label.isEmpty || !mounted) return;
+
+    try {
+      final newAddress = SavedAddress(
+        id: '',
+        userId: '',
+        label: label,
+        addressLine: address,
+        city: '',
+        state: '',
+        pincode: '',
+        latitude: point.latitude,
+        longitude: point.longitude,
+        isDefault: _savedAddresses.isEmpty,
+      );
+      await _addressRepo.add(newAddress);
+      await _loadSavedAddresses();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Address saved')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save address'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Future<void> _openLocationPicker({required bool isPickup}) async {
@@ -305,6 +477,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       return;
     }
 
+    if (!mounted) return;
     setState(() {
       if (isPickup) {
         _pickupController.text = result.address;
@@ -317,6 +490,10 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
 
     _formKey.currentState?.validate();
     _estimatePrice();
+
+    if (mounted) {
+      _promptSaveNewAddress(result.address, result.point);
+    }
   }
 
   String? _validatePickup(String? value) {
@@ -356,28 +533,25 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
 
   String? _validateWeight(String? value) {
     final text = value?.trim() ?? '';
-    String? error;
 
     if (text.isEmpty) {
-      error = 'Weight must be greater than 0.';
-    } else {
-      final weight = double.tryParse(text);
-      if (weight == null) {
-        error = 'Please enter a valid numeric weight.';
-      } else if (weight <= 0) {
-        error = 'Weight must be greater than 0.';
-      } else if (weight < 0.1 || weight > 50) {
-        error = 'Weight must be between 0.1 and 50 tonnes.';
-      }
+      return 'Weight must be greater than 0.';
     }
+    final weight = double.tryParse(text);
+    if (weight == null) {
+      return 'Please enter a valid numeric weight.';
+    }
+    if (weight <= 0) {
+      return 'Weight must be greater than 0.';
+    }
+    if (weight < 0.1 || weight > 50) {
+      return 'Weight must be between 0.1 and 50 tonnes.';
+    }
+    return null;
+  }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        setState(() => _weightErrorText = error);
-      }
-    });
-
-    return error;
+  void _onWeightChanged(String value) {
+    setState(() => _weightErrorText = _validateWeight(value));
   }
 
   void _onFindTrucks() {
@@ -693,6 +867,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
               const SizedBox(height: 12),
               InfoCard(
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     TextFormField(
                       controller: _pickupController,
@@ -704,13 +879,86 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                         prefixIcon: const Icon(Icons.location_on_rounded,
                             color: TruxifyColors.accentDark),
                         prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                        suffixIcon: IconButton(
-                          onPressed: () => _openLocationPicker(isPickup: true),
-                          icon: const Icon(Icons.map_rounded,
-                              color: TruxifyColors.accentDark),
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              onPressed: () => _showSavedAddressSheet(isPickup: true),
+                              icon: const Icon(Icons.bookmark_rounded,
+                                  color: TruxifyColors.accentDark),
+                              tooltip: 'Saved addresses',
+                            ),
+                            IconButton(
+                              onPressed: () => _openLocationPicker(isPickup: true),
+                              icon: const Icon(Icons.map_rounded,
+                                  color: TruxifyColors.accentDark),
+                            ),
+                          ],
                         ),
                       ),
                     ),
+                    if (_savedAddresses.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 36,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _savedAddresses.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          itemBuilder: (context, index) {
+                            final addr = _savedAddresses[index];
+                            final selected = _pickupController.text == addr.fullAddress;
+                            return Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () => _applySavedAddress(addr, isPickup: true),
+                                borderRadius: BorderRadius.circular(999),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? (Theme.of(context).brightness == Brightness.dark
+                                            ? TruxifyColors.darkAccentLight
+                                            : TruxifyColors.accentLight)
+                                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: selected
+                                          ? TruxifyColors.accent
+                                          : (Theme.of(context).brightness == Brightness.dark
+                                              ? TruxifyColors.darkBorder
+                                              : TruxifyColors.border),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _iconForLabel(addr.label),
+                                        size: 14,
+                                        color: selected
+                                            ? TruxifyColors.accentDark
+                                            : TruxifyColors.adaptiveSecondaryText(context),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        addr.label,
+                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                              color: selected
+                                                  ? TruxifyColors.accentDark
+                                                  : TruxifyColors.adaptiveSecondaryText(context),
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -726,10 +974,21 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                               prefixIcon: const Icon(Icons.location_on_rounded,
                                   color: Color(0xFFD32F2F)),
                               prefixIconConstraints: const BoxConstraints(minWidth: 40, minHeight: 40),
-                              suffixIcon: IconButton(
-                                onPressed: () => _openLocationPicker(isPickup: false),
-                                icon: const Icon(Icons.map_rounded,
-                                    color: TruxifyColors.accentDark),
+                              suffixIcon: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    onPressed: () => _showSavedAddressSheet(isPickup: false),
+                                    icon: const Icon(Icons.bookmark_rounded,
+                                        color: TruxifyColors.accentDark),
+                                    tooltip: 'Saved addresses',
+                                  ),
+                                  IconButton(
+                                    onPressed: () => _openLocationPicker(isPickup: false),
+                                    icon: const Icon(Icons.map_rounded,
+                                        color: TruxifyColors.accentDark),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -754,6 +1013,68 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                         ),
                       ],
                     ),
+                    if (_savedAddresses.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 36,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _savedAddresses.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          itemBuilder: (context, index) {
+                            final addr = _savedAddresses[index];
+                            final selected = _dropController.text == addr.fullAddress;
+                            return Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () => _applySavedAddress(addr, isPickup: false),
+                                borderRadius: BorderRadius.circular(999),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? (Theme.of(context).brightness == Brightness.dark
+                                            ? TruxifyColors.darkAccentLight
+                                            : TruxifyColors.accentLight)
+                                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: selected
+                                          ? TruxifyColors.accent
+                                          : (Theme.of(context).brightness == Brightness.dark
+                                              ? TruxifyColors.darkBorder
+                                              : TruxifyColors.border),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _iconForLabel(addr.label),
+                                        size: 14,
+                                        color: selected
+                                            ? TruxifyColors.accentDark
+                                            : TruxifyColors.adaptiveSecondaryText(context),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        addr.label,
+                                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                              color: selected
+                                                  ? TruxifyColors.accentDark
+                                                  : TruxifyColors.adaptiveSecondaryText(context),
+                                            ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Row(
                       children: [
@@ -835,6 +1156,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                             controller: _weightController,
                             keyboardType: TextInputType.number,
                             validator: _validateWeight,
+                            onChanged: _onWeightChanged,
                             decoration: const InputDecoration(
                               labelText: 'Weight (t)',
                               hintText: '3',
@@ -1198,6 +1520,210 @@ class _ColorToggleButton extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ── Saved address picker bottom sheet ─────────────────────────────────────
+
+class _AddressPickerSheet extends StatelessWidget {
+  const _AddressPickerSheet({
+    required this.addresses,
+    required this.isLoading,
+    required this.error,
+    required this.isPickup,
+    required this.onRetry,
+    required this.onSelect,
+  });
+
+  final List<SavedAddress> addresses;
+  final bool isLoading;
+  final String? error;
+  final bool isPickup;
+  final VoidCallback onRetry;
+  final ValueChanged<SavedAddress> onSelect;
+
+  IconData _iconForLabel(String label) {
+    final l = label.toLowerCase();
+    if (l.contains('home')) return Icons.home_rounded;
+    if (l.contains('office') || l.contains('work')) return Icons.business_rounded;
+    if (l.contains('warehouse')) return Icons.warehouse_rounded;
+    return Icons.location_on_rounded;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+          20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              decoration: BoxDecoration(
+                color: TruxifyColors.hintText,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              Icon(
+                isPickup ? Icons.location_on_rounded : Icons.location_off_rounded,
+                color: TruxifyColors.accentDark,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                isPickup ? 'Select Pickup Address' : 'Select Drop Address',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.close_rounded),
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (isLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (error != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Column(
+                  children: [
+                    const Icon(Icons.error_outline_rounded,
+                        size: 36, color: Colors.red),
+                    const SizedBox(height: 8),
+                    Text('Failed to load addresses',
+                        style: Theme.of(context).textTheme.bodyMedium),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: onRetry,
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (addresses.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(Icons.location_off_rounded,
+                        size: 36,
+                        color: TruxifyColors.adaptiveSecondaryText(context)),
+                    const SizedBox(height: 8),
+                    Text('No saved addresses',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: TruxifyColors.adaptiveSecondaryText(context),
+                            )),
+                  ],
+                ),
+              ),
+            )
+          else
+            ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.4,
+              ),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: addresses.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final addr = addresses[index];
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => onSelect(addr),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? TruxifyColors.darkBorder
+                                : TruxifyColors.border,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: TruxifyColors.accentLight,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(
+                                _iconForLabel(addr.label),
+                                color: TruxifyColors.accent,
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    addr.label,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelMedium
+                                        ?.copyWith(fontWeight: FontWeight.w600),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    addr.fullAddress,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: TruxifyColors.adaptiveSecondaryText(context),
+                                        ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(Icons.chevron_right_rounded,
+                                color: TruxifyColors.adaptiveSecondaryText(context)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          const SizedBox(height: 8),
+        ],
       ),
     );
   }

@@ -267,6 +267,10 @@ def optimise_packing(
             "utilization_pct": 0.0,
         }
 
+    if not delivery_addresses and packages:
+        raise ValueError(
+            "delivery_addresses must contain at least one address when packages are provided"
+        )
     if len(delivery_addresses) < len(packages):
         logger.warning(
             "Fewer delivery addresses (%d) than packages (%d); "

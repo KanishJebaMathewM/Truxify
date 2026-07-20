@@ -1,0 +1,9 @@
+{
+  "Invalid load ID": "ID de carga no válido",
+  "Load is no longer available": "La carga ya no está disponible",
+  "Internal Server Error": "Error de servidor interno",
+  "Authentication required for driver access": "Se requiere autenticación para el acceso del conductor",
+  "Forbidden: Driver role required": "Prohibido: Se requiere rol de conductor",
+  "Failed to fetch trips.": "Error al obtener los viajes.",
+  "Access Denied: Trip does not belong to you.": "Acceso denegado: El viaje no le pertenece."
+}

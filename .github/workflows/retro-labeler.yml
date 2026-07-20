@@ -1,0 +1,38 @@
+name: Retrospective PR Labeler
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry Run (only log modifications, do not apply changes)'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  retro-label:
+    name: Retro-label Closed PRs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Run retrospective PR labeler
+        uses: actions/github-script@v9
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        with:
+          script: |
+            const labeler = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/retro-labeler.js`);
+            await labeler.run({
+              github,
+              context,
+              core,
+              dryRun: process.env.DRY_RUN === 'true'
+            });

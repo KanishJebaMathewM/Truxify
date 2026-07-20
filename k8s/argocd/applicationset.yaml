@@ -1,0 +1,34 @@
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: truxify-appset
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - cluster: dev-cluster
+        url: https://dev-cluster.example.com
+        namespace: truxify-dev
+      - cluster: staging-cluster
+        url: https://staging-cluster.example.com
+        namespace: truxify-staging
+      - cluster: prod-cluster
+        url: https://prod-cluster.example.com
+        namespace: truxify
+  template:
+    metadata:
+      name: '{{cluster}}-truxify'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/BhakktiGautam/Truxify
+        targetRevision: main
+        path: k8s
+      destination:
+        server: '{{url}}'
+        namespace: '{{namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true

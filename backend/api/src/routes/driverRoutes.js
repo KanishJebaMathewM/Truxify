@@ -1,16 +1,16 @@
 import express from 'express';
-import { supabase, redisClient } from '../config/db.js';
+import { supabase, redisClient, createUserClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { predictDriverProfit } from '../services/ml.js';
+import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter, createStore } from '../middleware/rateLimiter.js';
 
 import { validateBody, validateParams } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, otpSendSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
-import { generateAndStoreOtp, verifyOtp } from '../services/otpService.js';
-
 const router = express.Router();
 
 // Driver role authorization guard middleware
@@ -24,58 +24,17 @@ function requireDriverRole(req, res, next) {
   next();
 }
 
-const loginOtpSchema = z.object({
-  phone: z.string().trim().min(10).max(20),
-  otp: z.string().regex(/^\d{4}$/, { message: 'OTP must be 4 digits' }),
-});
-
-export function otpPhoneKey(phone) {
-  if (typeof phone !== 'string') {
-    return 'phone:unknown';
-  }
-
-  const digits = phone.replace(/\D/g, '');
-  if (!digits) {
-    return 'phone:unknown';
-  }
-
-  const nationalDigits = digits.length === 12 && digits.startsWith('91')
-    ? digits.slice(2)
-    : digits;
-
-  return `phone:${nationalDigits}`;
+function parseIntegerQuery(value) {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(String(value))) return NaN;
+  return Number.parseInt(value, 10);
 }
-
-function perPhoneLimiter(opts) {
-  return rateLimit({
-    ...opts,
-    keyGenerator: (req) => otpPhoneKey(req.body.phone),
-  });
-}
-
-const sendOtpLimiter = perPhoneLimiter({
-  windowMs: 60 * 1000,
-  max: 1,
-  standardHeaders: true,
-  legacyHeaders: false,
-  store: createStore('rl:otp-send:'),
-  message: { error: 'Too many OTP requests. Please wait before requesting again.' },
-});
-
-const verifyOtpLimiter = perPhoneLimiter({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  store: createStore('rl:otp-verify:'),
-  message: { error: 'Too many OTP verification attempts. Please try again later.' },
-});
 
 
 // ============================================================================
 // 1. GET DRIVER STATS (DRIVER)
 // ============================================================================
-router.get('/stats', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/stats', authenticate, userLimiter, requirePolicy('driver:view-stats'), async (req, res) => {
   try {
     const { data: details, error } = await supabase
       .from('driver_details')
@@ -116,7 +75,7 @@ router.get('/stats', authenticate, userLimiter, requireRole(['driver']), async (
 // ============================================================================
 // 2. TOGGLE ONLINE / OFFLINE STATUS (DRIVER)
 // ============================================================================
-router.put('/online', authenticate, userLimiter, requireRole(['driver']), validateBody(driverOnlineSchema), async (req, res) => {
+router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-online'), validateBody(driverOnlineSchema), async (req, res) => {
   const { is_online } = req.body;
 
   try {
@@ -125,10 +84,13 @@ router.put('/online', authenticate, userLimiter, requireRole(['driver']), valida
       .update({ is_online, updated_at: new Date().toISOString() })
       .eq('user_id', req.user.id)
       .select('is_online')
-      .single();
+      .maybeSingle();
 
     if (error) {
       return res.status(500).json({ error: 'Failed to update online state.', details: error.message });
+    }
+    if (!details) {
+      return res.status(404).json({ error: 'Driver profile not found.' });
     }
 
     res.json({
@@ -145,10 +107,10 @@ router.put('/online', authenticate, userLimiter, requireRole(['driver']), valida
 // ============================================================================
 // 3. FETCH WALLET TRANSACTION HISTORY (DRIVER)
 // ============================================================================
-router.get('/wallet/history', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:view-wallet'), async (req, res) => {
   try {
-    const page = parseInt(req.query.page || '1', 10);
-    const limit = parseInt(req.query.limit || '20', 10);
+    const page = parseIntegerQuery(req.query.page) ?? 1;
+    const limit = parseIntegerQuery(req.query.limit) ?? 20;
 
     // Validation
     if (isNaN(page) || page < 1) {
@@ -204,7 +166,7 @@ router.get('/wallet/history', authenticate, userLimiter, requireRole(['driver'])
 // ============================================================================
 // 4. FETCH Aggregated daily/weekly earnings summaries for chart (DRIVER)
 // ============================================================================
-router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/earnings/summary', authenticate, userLimiter, requirePolicy('driver:view-earnings'), async (req, res) => {
   const daysParam = req.query.days ?? '30';
   const limitDays = typeof daysParam === 'string' ? Number(daysParam) : NaN;
 
@@ -240,12 +202,12 @@ router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 // 5. FETCH DRIVER TRIPS (DRIVER)
 // ============================================================================
-router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips'), async (req, res) => {
   const { status } = req.query;
   const rawPage = req.query.page;
   const rawLimit = req.query.limit;
-  const parsedPage = parseInt(rawPage, 10);
-  const parsedLimit = parseInt(rawLimit, 10);
+  const parsedPage = parseIntegerQuery(rawPage);
+  const parsedLimit = parseIntegerQuery(rawLimit);
   if (rawPage !== undefined && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
     return res.status(400).json({ error: 'page must be a positive integer' });
   }
@@ -287,7 +249,7 @@ router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (
 // ============================================================================
 // 6. FETCH TRIP ITEMS (DRIVER)
 // ============================================================================
-router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requirePolicy('driver:view-trip-items'), async (req, res) => {
   const { tripDisplayId } = req.params;
 
   try {
@@ -307,7 +269,7 @@ router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requireRole
 // ============================================================================
 // 7. FETCH TRIP STOPS (DRIVER)
 // ============================================================================
-router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requirePolicy('driver:view-trip-stops'), async (req, res) => {
   const { tripDisplayId } = req.params;
 
   try {
@@ -327,7 +289,7 @@ router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requireRole
 // ============================================================================
 // 8. FETCH ROUTE MAP POINTS (DRIVER)
 // ============================================================================
-router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requirePolicy('driver:view-route-points'), async (req, res) => {
   const { tripDisplayId } = req.params;
 
   try {
@@ -345,22 +307,84 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
 });
 
 // ============================================================================
+// 8b. TOGGLE ROUTE MAP POINT CLAIMED (DRIVER)
+// ============================================================================
+router.patch(
+  '/route-points/:id/claim',
+  authenticate,
+  userLimiter,
+  requirePolicy('driver:claim-route-point'),
+  validateParams(paramIdSchema),
+  async (req, res) => {
+    const { id } = req.params;
+    const claimed = req.body?.claimed;
+
+    if (typeof claimed !== 'boolean') {
+      return res.status(400).json({ error: 'claimed must be a boolean' });
+    }
+
+    try {
+      const { data: point, error: pointError } = await supabase
+        .from('route_map_points')
+        .select('id, trip_display_id')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (pointError) {
+        return res.status(500).json({ error: 'Failed to fetch route point.', details: pointError.message });
+      }
+      if (!point) {
+        return res.status(404).json({ error: 'Route map point not found.' });
+      }
+
+      const { data: trip } = await supabase
+        .from('trips')
+        .select('id')
+        .eq('trip_display_id', point.trip_display_id)
+        .eq('driver_id', req.user.id)
+        .maybeSingle();
+
+      if (!trip) {
+        return res.status(403).json({ error: 'Access Denied: Route point does not belong to your trip.' });
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from('route_map_points')
+        .update({ claimed })
+        .eq('id', id)
+        .select('*')
+        .maybeSingle();
+
+      if (updateError) {
+        return res.status(500).json({ error: 'Failed to update route point.', details: updateError.message });
+      }
+
+      res.json({ point: updated });
+    } catch (err) {
+      logger.error('Driver route point claim error:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  },
+);
+
+// ============================================================================
 // 9. FETCH DRIVER BIDS (DRIVER)
 // ============================================================================
-router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/bids', authenticate, userLimiter, requirePolicy('driver:view-bids'), async (req, res) => {
   try {
-    const rawPage = req.query.page;
-    const rawLimit = req.query.limit;
-    const parsedPage = parseInt(rawPage, 10);
-    const parsedLimit = parseInt(rawLimit, 10);
-    if (rawPage !== undefined && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
-      return res.status(400).json({ error: 'page must be a positive integer' });
+    const pageParam = req.query.page ?? '1';
+    const limitParam = req.query.limit ?? '10';
+    const page = typeof pageParam === 'string' ? Number(pageParam) : NaN;
+    const limit = typeof limitParam === 'string' ? Number(limitParam) : NaN;
+
+    if (!Number.isInteger(page) || page < 1) {
+      return res.status(400).json({ error: 'page must be greater than or equal to 1' });
     }
-    if (rawLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) {
-      return res.status(400).json({ error: 'limit must be a positive integer' });
+
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      return res.status(400).json({ error: 'limit must be between 1 and 100' });
     }
-    const page = parsedPage || 1;
-    const limit = Math.min(100, Math.max(1, parsedLimit || 10));
+
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
@@ -388,7 +412,7 @@ router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (r
 // ============================================================================
 // 10. WITHDRAW FUNDS FROM WALLET (DRIVER)
 // ============================================================================
-router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver']), validateBody(withdrawSchema), async (req, res) => {
+router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver:withdraw'), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa
 
   try {
@@ -412,7 +436,8 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver'
     }
 
     // 5.2 Execute atomically via Supabase RPC
-    const { error: rpcErr } = await supabase.rpc('withdraw_funds_tx', {
+    const userClient = req.token ? createUserClient(req.token) : supabase;
+    const { error: rpcErr } = await userClient.rpc('withdraw_funds_tx', {
       p_driver_id: req.user.id,
       p_amount:    amount
     });
@@ -437,9 +462,58 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver'
 });
 
 // ============================================================================
+// 10b. ML-POWERED PROFIT PREDICTION (DRIVER)
+// ============================================================================
+const predictProfitLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { error: 'Too many prediction requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post(
+  '/predict-profit',
+  authenticate,
+  predictProfitLimiter,
+  requirePolicy('driver:view-stats'),
+  validateBody(predictDriverProfitSchema),
+  async (req, res) => {
+    try {
+      const {
+        route_distance_km,
+        fuel_price_per_litre,
+        toll_estimate_inr,
+        truck_mileage_kml,
+        cargo_weight_kg,
+        trip_duration_hours,
+      } = req.body;
+
+      const result = await predictDriverProfit({
+        routeDistanceKm: route_distance_km,
+        fuelPricePerLitre: fuel_price_per_litre,
+        tollEstimateInr: toll_estimate_inr,
+        truckMileageKmL: truck_mileage_kml,
+        cargoWeightKg: cargo_weight_kg,
+        tripDurationHours: trip_duration_hours,
+      });
+
+      res.json({ prediction: result });
+    } catch (err) {
+      if (err.message?.includes('[ML]')) {
+        logger.warn({ err: err.message }, 'ML engine unavailable for profit prediction');
+        return res.status(503).json({ error: 'Profit prediction service is temporarily unavailable.' });
+      }
+      logger.error({ err }, 'Profit prediction failed');
+      res.status(500).json({ error: 'Profit prediction failed.' });
+    }
+  },
+);
+
+// ============================================================================
 // 11. GET DRIVER REPUTATION (DRIVER)
 // ============================================================================
-router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['driver']), validateParams(uuidParamSchema), async (req, res) => {
+router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('driver:view-reputation'), validateParams(z.object({ driverId: uuidSchema })), async (req, res) => {
   const { driverId } = req.params;
 
   if (driverId !== req.user.id) {

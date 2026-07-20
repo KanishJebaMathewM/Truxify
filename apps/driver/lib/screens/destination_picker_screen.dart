@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' as ll;
 
+import '../services/geocode_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 
@@ -55,7 +55,7 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
   late final http.Client _httpClient;
 
   Timer? _debounce;
-  List<_SearchSuggestion> _suggestions = const <_SearchSuggestion>[];
+  List<SearchResult> _suggestions = const <SearchResult>[];
   bool _isSearching = false;
   bool _isResolvingAddress = false;
   ll.LatLng? _selectedPoint;
@@ -86,7 +86,7 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
     if (trimmed.length < 3) {
       if (mounted) {
         setState(() {
-          _suggestions = const <_SearchSuggestion>[];
+          _suggestions = const <SearchResult>[];
           _isSearching = false;
         });
       }
@@ -97,53 +97,18 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
       _isSearching = true;
     });
 
-    final uri = Uri.https(
-      'nominatim.openstreetmap.org',
-      '/search',
-      <String, String>{
-        'q': trimmed,
-        'format': 'jsonv2',
-        'addressdetails': '1',
-        'limit': '6',
-      },
-    );
-
     try {
-      final response = await _httpClient.get(
-        uri,
-        headers: const <String, String>{
-          'Accept': 'application/json',
-          'User-Agent': 'Truxify Driver App',
-        },
+      final results = await GeocodeService.searchPlaces(
+        trimmed,
+        client: _httpClient,
       );
-      if (response.statusCode != 200) {
-        throw Exception('Search failed');
-      }
-
-      final decoded = jsonDecode(response.body) as List<dynamic>;
-      final suggestions = decoded
-          .map((item) {
-            final json = item as Map<String, dynamic>;
-            final lat = double.tryParse('${json['lat']}');
-            final lon = double.tryParse('${json['lon']}');
-            final displayName = (json['display_name'] as String?)?.trim() ?? '';
-            if (lat == null || lon == null || displayName.isEmpty) {
-              return null;
-            }
-            return _SearchSuggestion(
-              address: displayName,
-              point: ll.LatLng(lat, lon),
-            );
-          })
-          .whereType<_SearchSuggestion>()
-          .toList();
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _suggestions = suggestions;
+        _suggestions = results;
       });
     } catch (e) {
       if (!mounted) {
@@ -151,7 +116,7 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
       }
 
       setState(() {
-        _suggestions = const <_SearchSuggestion>[];
+        _suggestions = const <SearchResult>[];
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Search error: $e')),
@@ -177,30 +142,8 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
       _isResolvingAddress = true;
     });
 
-    final uri = Uri.https(
-      'nominatim.openstreetmap.org',
-      '/reverse',
-      <String, String>{
-        'lat': point.latitude.toStringAsFixed(6),
-        'lon': point.longitude.toStringAsFixed(6),
-        'format': 'jsonv2',
-      },
-    );
-
     try {
-      final response = await _httpClient.get(
-        uri,
-        headers: const <String, String>{
-          'Accept': 'application/json',
-          'User-Agent': 'Truxify Driver App',
-        },
-      );
-      if (response.statusCode != 200) {
-        throw Exception('Reverse lookup failed');
-      }
-
-      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
-      final displayName = decoded['display_name'] as String?;
+      final displayName = await GeocodeService.reverseGeocode(point);
 
       if (!mounted) {
         return;
@@ -234,7 +177,7 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
     setState(() {
       _selectedPoint = point;
       _selectedAddress = address;
-      _suggestions = const <_SearchSuggestion>[];
+      _suggestions = const <SearchResult>[];
     });
 
     _mapController.move(point, 13);
@@ -403,12 +346,5 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
       ),
     );
   }
-}
-
-class _SearchSuggestion {
-  const _SearchSuggestion({required this.address, required this.point});
-
-  final String address;
-  final ll.LatLng point;
 }
 

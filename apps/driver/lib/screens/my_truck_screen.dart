@@ -107,7 +107,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                   ),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
-                    initialValue: selectedCategory,
+                    value: selectedCategory,
                     decoration: InputDecoration(
                       contentPadding: const EdgeInsets.symmetric(
                           horizontal: 14, vertical: 12),

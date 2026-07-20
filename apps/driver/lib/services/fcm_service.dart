@@ -1,10 +1,14 @@
+import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 
 import 'api_client.dart';
 
 class FcmService {
+  static final String _apiBaseUrl = 'http://localhost:5000';
+  static final ApiClient apiClient = ApiClient();
   static Future<void> initializeAndRegister() async {
     try {
       final messaging = FirebaseMessaging.instance;
@@ -60,20 +64,15 @@ class FcmService {
       debugPrint('[FCM] No authenticated user, skipping token unregister.');
       return;
     }
-    final accessToken = await firebaseUser.getIdToken();
 
-    final response = await http.post(
-      Uri.parse('$_apiBaseUrl/api/devices/unregister'),
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        if (accessToken != null && accessToken.isNotEmpty) 'Authorization': 'Bearer $accessToken',
-      },
-      body: jsonEncode(<String, dynamic>{
-        'fcmToken': token,
-      }),
-    );
-
-    if (response.statusCode >= 200 && response.statusCode < 300) {
+    final apiClient = ApiClient();
+    try {
+      await apiClient.post(
+        '/api/devices/unregister',
+        body: <String, dynamic>{
+          'fcmToken': token,
+        },
+      );
       debugPrint('[FCM] Device token unregistered successfully.');
     } catch (e) {
       debugPrint('[FCM] Failed to unregister device token: $e');
@@ -97,19 +96,6 @@ class FcmService {
       debugPrint('[FCM] No authenticated user, skipping token upload.');
       return;
     }
-    final accessToken = await firebaseUser?.getIdToken();
-
-    final response = await http.put(
-      Uri.parse('$_apiBaseUrl/api/profile/fcm-token'),
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        if (accessToken != null && accessToken.isNotEmpty) 'Authorization': 'Bearer $accessToken',
-      },
-      body: jsonEncode(<String, dynamic>{
-        'fcmToken': token,
-      }),
-    );
-
     final apiClient = ApiClient();
     try {
       await apiClient.put(
@@ -126,3 +112,4 @@ class FcmService {
     }
   }
 }
+export 'package:truxify_shared/src/services/fcm_service.dart';

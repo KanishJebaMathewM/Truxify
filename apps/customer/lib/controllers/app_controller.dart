@@ -8,32 +8,59 @@ class TruxifyController extends ChangeNotifier {
   int ordersTabIndex = 0;
   RouteDraft? pendingRouteDraft;
   ThemeMode _themeMode = ThemeMode.system;
+  String? _globalError;
+  bool _isInitialized = false;
 
   ThemeMode get themeMode => _themeMode;
+  String? get globalError => _globalError;
+  bool get isInitialized => _isInitialized;
+
+  void setGlobalError(String? error) {
+    _globalError = error;
+    notifyListeners();
+  }
+
+  void clearGlobalError() {
+    _globalError = null;
+    notifyListeners();
+  }
+
+  bool _validateTabIndex(int index) {
+    return index >= 0 && index <= 3;
+  }
 
   Future<void> loadThemeMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    final savedTheme = prefs.getString(_themeModeKey);
-
-    _themeMode = ThemeMode.values.firstWhere(
-      (mode) => mode.name == savedTheme,
-      orElse: () => ThemeMode.system,
-    );
-
-    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedTheme = prefs.getString(_themeModeKey);
+      _themeMode = ThemeMode.values.firstWhere(
+        (mode) => mode.name == savedTheme,
+        orElse: () => ThemeMode.system,
+      );
+      _isInitialized = true;
+      notifyListeners();
+    } catch (e) {
+      _globalError = 'Failed to load theme: $e';
+      _isInitialized = true;
+      notifyListeners();
+    }
   }
 
   Future<void> setThemeMode(ThemeMode mode) async {
     if (_themeMode == mode) return;
-
     _themeMode = mode;
     notifyListeners();
-
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_themeModeKey, mode.name);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_themeModeKey, mode.name);
+    } catch (e) {
+      _globalError = 'Failed to save theme: $e';
+      notifyListeners();
+    }
   }
 
   void setTab(int index) {
+    if (!_validateTabIndex(index)) return;
     if (currentTab == index) return;
     currentTab = index;
     notifyListeners();

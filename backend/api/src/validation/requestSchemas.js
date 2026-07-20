@@ -1,20 +1,9 @@
 import { z } from 'zod';
+import { VALID_LANGUAGES } from '../schemas/profile.js';
 
 // Generic field validation helpers
-function isValidEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-}
-
 function isValidPhone(phone) {
   return /^\+?[\d\s\-()]{7,15}$/.test(phone);
-}
-
-function isValidUuid(str) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
-}
-
-function isValidNumberPlate(str) {
-  return /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/.test(str);
 }
 
 const coerceNumber = (schema) => z.preprocess(
@@ -46,7 +35,7 @@ const isoDateStringSchema = z
     message: 'Must be a valid ISO date string',
   });
 
-const uuidSchema = z.string().uuid("Invalid ID format");
+export const uuidSchema = z.string().uuid("Invalid ID format");
 const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/; // HH:MM or HH:MM:SS
 const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
 
@@ -229,7 +218,9 @@ export const driverStatementSchema = z.object({
 const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
 
 export const otpSendSchema = z.object({
-  phone: z.string().trim().min(10).max(20),
+  phone: z.string().trim().min(10).max(20).refine(isValidPhone, {
+    message: 'Phone must be a valid number (digits, optional +, spaces/dashes/parens)',
+  }),
 }).strict();
 
 export const registerTruckSchema = z.object({
@@ -248,8 +239,106 @@ export const registerTruckSchema = z.object({
 
 export const updateProfileSchema = z.object({
   full_name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name must be 100 characters or fewer').optional(),
-  language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').optional(),
+  language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').refine((v) => VALID_LANGUAGES.includes(v), { message: 'Unsupported language code' }).optional(),
   dark_mode: z.boolean().optional(),
   is_online: z.boolean().optional(),
   verification_status: z.enum(['pending', 'verified', 'rejected']).optional(),
 }).strict();
+
+// ── Oracle & Verification schemas ───────────────────────────────────────
+
+export const oracleConfirmSchema = z.object({
+  orderId: uuidSchema,
+  otp: z.string().regex(/^\d{6}$/, { message: 'OTP must be exactly 6 digits' }),
+  gpsCoordinates: z.object({
+    lat: latitudeSchema,
+    lng: longitudeSchema,
+  }),
+}).strict();
+
+export const oracleVerifyCrosschainSchema = z.object({
+  orderId: uuidSchema,
+  blockchainHash: z
+    .string()
+    .min(1, 'blockchainHash is required')
+    .regex(/^0x[a-fA-F0-9]+$/, { message: 'blockchainHash must be a 0x-prefixed hex string' }),
+}).strict();
+
+export const verifyOrderParamsSchema = z.object({
+  orderId: uuidSchema,
+});
+
+export const documentCheckSchema = z.object({
+  driverId: uuidSchema,
+}).strict();
+
+// ── Deadhead matching schemas ──────────────────────────────────────────
+
+const locationPointSchema = z.object({
+  lat: latitudeSchema,
+  lng: longitudeSchema,
+});
+
+const truckSpecsSchema = z.object({
+  max_weight_kg: z.number().positive({ message: 'max_weight_kg must be > 0' }),
+  max_length_m: z.number().positive({ message: 'max_length_m must be > 0' }),
+  max_width_m: z.number().positive({ message: 'max_width_m must be > 0' }),
+  max_height_m: z.number().positive({ message: 'max_height_m must be > 0' }),
+});
+
+const availableLoadSchema = z.object({
+  load_id: z.string().min(1),
+  origin_lat: latitudeSchema,
+  origin_lng: longitudeSchema,
+  dest_lat: latitudeSchema,
+  dest_lng: longitudeSchema,
+  weight_kg: z.number().positive(),
+  length_m: z.number().positive(),
+  width_m: z.number().positive(),
+  height_m: z.number().positive(),
+  pickup_deadline: isoDateStringSchema,
+  payment_inr: z.number().positive(),
+});
+
+export const matchDeadheadSchema = z.object({
+  driver_destination: locationPointSchema,
+  truck_specs: truckSpecsSchema,
+  arrival_time: isoDateStringSchema,
+  available_loads: z.array(availableLoadSchema).min(1, 'At least one available load is required').max(50, 'Too many loads'),
+}).strict();
+// ── Public Order Tracking schemas ─────────────────────────────────────────
+
+// ── Driver profit prediction schema ──────────────────────────────────────
+
+export const predictDriverProfitSchema = z.object({
+  route_distance_km: coerceNumber(
+    z.number({ invalid_type_error: 'route_distance_km must be a number' })
+      .positive({ message: 'route_distance_km must be greater than 0' })
+  ),
+  fuel_price_per_litre: coerceNumber(
+    z.number({ invalid_type_error: 'fuel_price_per_litre must be a number' })
+      .positive({ message: 'fuel_price_per_litre must be greater than 0' })
+  ),
+  toll_estimate_inr: coerceNumber(
+    z.number({ invalid_type_error: 'toll_estimate_inr must be a number' })
+      .nonnegative({ message: 'toll_estimate_inr must be >= 0' })
+  ),
+  truck_mileage_kml: coerceNumber(
+    z.number({ invalid_type_error: 'truck_mileage_kml must be a number' })
+      .positive({ message: 'truck_mileage_kml must be greater than 0' })
+  ),
+  cargo_weight_kg: coerceNumber(
+    z.number({ invalid_type_error: 'cargo_weight_kg must be a number' })
+      .positive({ message: 'cargo_weight_kg must be greater than 0' })
+  ),
+  trip_duration_hours: coerceNumber(
+    z.number({ invalid_type_error: 'trip_duration_hours must be a number' })
+      .positive({ message: 'trip_duration_hours must be greater than 0' })
+  ),
+}).strict();
+
+export const shareTrackingSchema = z.object({}).strict();
+
+export const publicTrackingTokenSchema = z.object({
+  token: z.string().min(1, 'Tracking token is required').max(512),
+});

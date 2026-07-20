@@ -1,13 +1,10 @@
-import 'dart:convert';
-
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/widgets/menu_card.dart';
 import 'package:truxify/widgets/menu_item.dart';
 
 import '../controllers/app_controller.dart';
+import '../core/api_client.dart';
 import '../core/offline/cache/cache_manager.dart';
 import '../repositories/address_repository.dart';
 import '../repositories/payment_repository.dart';
@@ -243,20 +240,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     final address = walletController.text.trim();
                     if (address.isEmpty) return;
                     try {
-                      final client = Supabase.instance.client;
-                      final token = client.auth.currentSession?.accessToken;
-                      final userId = client.auth.currentUser?.id ?? '';
-                      final response = await http.put(
-                        Uri.parse('${ApiClient.defaultBaseUrl}/api/profile/wallet'),
-                        headers: <String, String>{
-                          'Content-Type': 'application/json',
-                          if (token != null) 'Authorization': 'Bearer $token',
-                        },
-                        body: jsonEncode(<String, String>{
-                          'wallet_address': address,
-                        }),
-                      );
-                      if (response.statusCode == 200) {
+                      final apiClient = ApiClient();
+                      try {
+                        await apiClient.put(
+                          '/api/profile/wallet',
+                          body: <String, String>{
+                            'wallet_address': address,
+                          },
+                        );
                         setState(() {
                           _walletAddress = address;
                         });
@@ -268,18 +259,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             backgroundColor: TruxifyColors.success,
                           ),
                         );
-                      } else {
-                        final body = jsonDecode(response.body)
-                            as Map<String, dynamic>;
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(body['error']?.toString() ??
-                                  'Failed to update wallet'),
-                              backgroundColor: TruxifyColors.errorRed,
-                            ),
-                          );
-                        }
+                      } finally {
+                        apiClient.dispose();
+                      }
+                    } on ApiException catch (e) {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(e.message),
+                            backgroundColor: TruxifyColors.errorRed,
+                          ),
+                        );
                       }
                     } catch (e) {
                       if (context.mounted) {
@@ -413,7 +403,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
                 child: Text(
-                  'Offline mode • Last updated ${_formatLastUpdated(_lastUpdatedLabel)}',
+                  AppLocalizations.of(context)!.offlineModeLabel(_formatLastUpdated(_lastUpdatedLabel)),
                   style: Theme.of(context)
                       .textTheme
                       .bodySmall
@@ -433,7 +423,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 10),
             _SectionLabel(
-                text: 'Account',
+                text: AppLocalizations.of(context)!.account,
                 padding: const EdgeInsets.symmetric(horizontal: 16)),
             const SizedBox(height: 8),
             Padding(
@@ -442,20 +432,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   MenuItem(
                     icon: Icons.credit_card_rounded,
-                    label: 'Payment Methods',
+                    label: AppLocalizations.of(context)!.paymentMethods,
                     trailing: _defaultPaymentLabel,
                     onTap: () => Navigator.of(context).push(AppPageRoute(
                         builder: (_) => const PaymentMethodsScreen())),
                   ),
                   MenuItem(
                     icon: Icons.description_rounded,
-                    label: 'My Documents',
+                    label: AppLocalizations.of(context)!.myDocuments,
                     onTap: () => Navigator.of(context).push(AppPageRoute(
                         builder: (_) => const MyDocumentsScreen())),
                   ),
                   MenuItem(
                     icon: Icons.location_on_rounded,
-                    label: 'Saved Addresses',
+                    label: AppLocalizations.of(context)!.savedAddresses,
                     trailing: _defaultAddressLabel,
                     showDivider: false,
                     onTap: () => Navigator.of(context).push(AppPageRoute(
@@ -463,10 +453,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   MenuItem(
                     icon: Icons.account_balance_wallet_rounded,
-                    label: 'Wallet Address',
-                    trailing: _walletAddress.isNotEmpty
+                    label: AppLocalizations.of(context)!.walletAddressLabel,
+                    trailing: _walletAddress.length >= 10
                         ? '${_walletAddress.substring(0, 6)}...${_walletAddress.substring(_walletAddress.length - 4)}'
-                        : 'Not set',
+                        : _walletAddress.isNotEmpty
+                            ? _walletAddress
+                            : AppLocalizations.of(context)!.notSet,
                     showDivider: false,
                     onTap: () => _showWalletSheet(context),
                   ),
@@ -475,7 +467,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 12),
             _SectionLabel(
-                text: 'Preferences',
+                text: AppLocalizations.of(context)!.preferences,
                 padding: const EdgeInsets.symmetric(horizontal: 16)),
             const SizedBox(height: 8),
             Padding(
@@ -485,20 +477,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const _ThemeModeTile(),
                   MenuItem(
                     icon: Icons.language_rounded,
-                    label: 'Language',
+                    label: AppLocalizations.of(context)!.language,
                     trailing: 'English',
                     onTap: () => Navigator.of(context).push(
                         AppPageRoute(builder: (_) => const LanguageScreen())),
                   ),
                   MenuItem(
                     icon: Icons.help_outline_rounded,
-                    label: 'Help & Support',
+                    label: AppLocalizations.of(context)!.helpSupport,
                     onTap: () => Navigator.of(context).push(AppPageRoute(
                         builder: (_) => const HelpSupportScreen())),
                   ),
                   MenuItem(
                     icon: Icons.info_outline_rounded,
-                    label: 'About Truxify',
+                    label: AppLocalizations.of(context)!.aboutTruxify,
                     showDivider: false,
                     onTap: () => Navigator.of(context).push(
                         AppPageRoute(builder: (_) => const AboutScreen())),
@@ -513,7 +505,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   MenuItem(
                     icon: Icons.logout_rounded,
-                    label: 'Logout',
+                    label: AppLocalizations.of(context)!.logout,
                     iconBackgroundColor:
                         TruxifyColors.error.withValues(alpha: 0.12),
                     iconColor: TruxifyColors.error,
@@ -588,7 +580,7 @@ class _StatsCard extends StatelessWidget {
           Expanded(
             child: _StatColumn(
               value: '$totalOrders',
-              label: 'Orders',
+              label: AppLocalizations.of(context)!.ordersLabel,
               valueSize: 20,
               addRightDivider: true,
               dividerColor: dividerColor,
@@ -598,7 +590,7 @@ class _StatsCard extends StatelessWidget {
             child: _StatColumn(
               value:
                   '₹${(totalSaved / 100).toStringAsFixed(totalSaved % 100 == 0 ? 0 : 2)}',
-              label: 'Saved',
+              label: AppLocalizations.of(context)!.savedLabel,
               valueSize: 16,
               addRightDivider: true,
               dividerColor: dividerColor,
@@ -607,7 +599,7 @@ class _StatsCard extends StatelessWidget {
           Expanded(
             child: _StatColumn(
               value: '$co2ReducedKg',
-              label: 'kg CO2',
+              label: AppLocalizations.of(context)!.co2Label,
               valueSize: 20,
               dividerColor: dividerColor,
             ),

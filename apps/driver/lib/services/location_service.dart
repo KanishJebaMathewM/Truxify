@@ -15,6 +15,15 @@ class LocationService {
     defaultValue: 'http://localhost:5000',
   );
 
+  static void _assertNotLocalhost() {
+    if (defaultApiBaseUrl.contains('localhost') && kReleaseMode) {
+      throw AssertionError(
+        'TRUXIFY_API_BASE_URL is still set to localhost in release mode. '
+        'Provide a production API URL via --dart-define=TRUXIFY_API_BASE_URL=...'
+      );
+    }
+  }
+
   WebSocketChannel? _channel;
   StreamSubscription<Position>? _positionSubscription;
   StreamSubscription? _socketSubscription;
@@ -25,6 +34,7 @@ class LocationService {
   String? _activeOrderId;
   String? _activeOrderDisplayId;
   int _reconnectAttempts = 0;
+  int? _lastCloseCode;
   Position? _lastSentPosition;
   DateTime? _lastSentTime;
 
@@ -43,6 +53,7 @@ class LocationService {
   bool get isTracking => _isTracking;
 
   Future<void> startTracking() async {
+    _assertNotLocalhost();
     if (_isTracking) return;
 
     // Check location permission before starting tracking (fixes #1491)
@@ -247,6 +258,7 @@ class LocationService {
       debugPrint('[LocationService] Connecting to WebSocket at: ${wsUri.toString()}');
       _channel = WebSocketChannel.connect(wsUri);
       _reconnectAttempts = 0;
+      _lastCloseCode = null;
       
       _startHeartbeat();
 
@@ -254,9 +266,20 @@ class LocationService {
         (message) {
           if (message == 'pong') return;
           debugPrint('[LocationService] Received WebSocket message: $message');
+          try {
+            final parsed = jsonDecode(message.toString());
+            if (parsed is Map && parsed['code'] != null) {
+              _lastCloseCode = parsed['code'] as int;
+            }
+          } catch (_) {}
         },
         onDone: () {
-          debugPrint('[LocationService] WebSocket closed');
+          debugPrint('[LocationService] WebSocket closed (code: $_lastCloseCode)');
+          if (_lastCloseCode == 4001 || _lastCloseCode == 4003) {
+            debugPrint('[LocationService] Auth rejected (code $_lastCloseCode) — not reconnecting');
+            _isTracking = false;
+            return;
+          }
           _scheduleReconnect();
         },
         onError: (error) {

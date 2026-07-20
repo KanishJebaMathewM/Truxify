@@ -1,0 +1,31 @@
+# Keyspace schema
+keyspace: truxify_main
+sharded: true
+
+# VSchema for order routing
+tables:
+  orders:
+    column_vindexes:
+    - column: order_id
+      name: hash_vindex
+    - column: customer_id
+      name: hash_vindex
+  drivers:
+    column_vindexes:
+    - column: driver_id
+      name: hash_vindex
+  payments:
+    column_vindexes:
+    - column: order_id
+      name: hash_vindex
+
+# Vindex definitions
+vindexes:
+  hash_vindex:
+    type: hash
+  lookup:
+    type: lookup
+    params:
+      table: lookup
+      from: id
+      to: keyspace_id

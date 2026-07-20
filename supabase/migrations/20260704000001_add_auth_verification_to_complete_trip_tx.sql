@@ -34,6 +34,10 @@ BEGIN
     RAISE EXCEPTION 'No driver assigned to this order';
   END IF;
 
+  IF v_order.status = 'cancelled' THEN
+    RAISE EXCEPTION 'Cannot complete a cancelled order';
+  END IF;
+
   IF v_order.status = 'payment_released' THEN
     RETURN;
   END IF;

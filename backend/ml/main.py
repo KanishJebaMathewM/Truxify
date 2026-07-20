@@ -25,6 +25,12 @@ from app.models.mid_trip_reoptimiser import find_mid_trip_loads
 from app.models.base import model_exists
 from app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
 from app.models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
+from routes import federated_routes
+
+# ============================================================================
+# 🆕 REAL-TIME TRAFFIC ETA IMPORTS
+# ============================================================================
+from services.traffic_pipeline import TrafficPipeline
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,12 +41,18 @@ logger = logging.getLogger(__name__)
 # Track loaded models for health reporting
 loaded_models: set[str] = set()
 
+# ============================================================================
+# 🆕 TRAFFIC PIPELINE INITIALIZATION
+# ============================================================================
+db_url = os.getenv('DATABASE_URL', 'sqlite:///./traffic.db')
+redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379')
+traffic_pipeline = TrafficPipeline(db_url, redis_url)
+
+
 async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     ml_api_key = os.environ.get("ML_API_KEY")
-    if ml_api_key == "test_key":
-        return
     if not ml_api_key:
-        logger.warning("ML_API_KEY not set - ML engine running without authentication")
+        logger.warning("ML_API_KEY not set - ML engine is unavailable (503)")
         raise HTTPException(status_code=503, detail="ML engine not configured: missing ML_API_KEY")
     if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -55,6 +67,9 @@ app = FastAPI(
 )
 
 
+
+# Add federated routes
+app.include_router(federated_routes.router)
 
 # CORS: restrict to known origins — no wildcard "*" to prevent unauthorized cross-origin access
 app.add_middleware(
@@ -75,12 +90,13 @@ app.add_middleware(
 async def startup_event():
     from .models.base import preload_all_models
     logger.info("ML Engine starting, pre-loading models...")
-    loaded_models.add("demand_forecast")
-    loaded_models.add("price_prediction")
-    loaded_models.add("eta_prediction")
-    loaded_models.add("driver_profit")
-    await preload_all_models()
-    logger.info("ML Engine startup complete")
+    persisted_models = await preload_all_models()
+    loaded_models.update(persisted_models)
+    if eta_predictor.model is not None:
+        loaded_models.add("eta_prediction")
+    if traffic_pipeline.model is not None:
+        loaded_models.add("traffic_eta")
+    logger.info("ML Engine startup complete — loaded: %s", sorted(loaded_models))
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +143,7 @@ class PricePredictOutput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Schemas — ETA Prediction
+# 🆕 Schemas — Real-Time Traffic ETA Prediction
 # ---------------------------------------------------------------------------
 
 class ETAPredictInput(BaseModel):
@@ -141,6 +157,25 @@ class ETAPredictInput(BaseModel):
 class ETAPredictOutput(BaseModel):
     eta_minutes: float
     confidence_interval: dict
+
+
+# 🆕 Enhanced ETA with Traffic
+class TrafficETARequest(BaseModel):
+    order_id: str
+    source_lat: float = Field(..., ge=-90, le=90)
+    source_lng: float = Field(..., ge=-180, le=180)
+    dest_lat: float = Field(..., ge=-90, le=90)
+    dest_lng: float = Field(..., ge=-180, le=180)
+
+
+class TrafficETAResponse(BaseModel):
+    order_id: str
+    eta_seconds: Optional[float] = None
+    eta_minutes: Optional[float] = None
+    eta_string: Optional[str] = None
+    traffic_speed: Optional[float] = None
+    congestion_level: Optional[float] = None
+    timestamp: str
 
 
 # ---------------------------------------------------------------------------
@@ -380,10 +415,13 @@ async def root(_auth=Depends(verify_api_key)):
 async def health():
     """Health check endpoint for Docker container orchestration."""
     models = {
-        "eta_predictor": eta_predictor.model is not None,
         "demand_forecast": model_exists(DEMAND_MODEL_NAME),
         "price_forecast": model_exists(PRICE_MODEL_NAME),
         "driver_profit": model_exists("driver_profit"),
+        "trust_scorer": model_exists("trust_scorer"),
+        "collaborative_filter": model_exists("collaborative_filter"),
+        "eta_predictor": eta_predictor.model is not None,
+        "traffic_eta": traffic_pipeline.model is not None,
     }
     all_ready = all(models.values())
     return {
@@ -447,7 +485,132 @@ async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_
 
 
 # ---------------------------------------------------------------------------
-# ETA Prediction
+# 🆕 Real-Time Traffic ETA Prediction
+# ---------------------------------------------------------------------------
+
+@app.post("/eta/predict", response_model=TrafficETAResponse)
+async def predict_traffic_eta(request: TrafficETARequest, _auth=Depends(verify_api_key)):
+    """Predict ETA with real-time traffic data"""
+    try:
+        # Ingest traffic data
+        traffic_data = await traffic_pipeline.ingest_traffic_data(
+            f"order_{request.order_id}",
+            {'lat': request.source_lat, 'lng': request.source_lng},
+            {'lat': request.dest_lat, 'lng': request.dest_lng}
+        )
+        
+        if traffic_data:
+            # Get prediction
+            features = np.array([[
+                traffic_data.traffic_speed,
+                traffic_data.free_flow_speed,
+                traffic_data.congestion_level,
+                datetime.now().hour,
+                datetime.now().weekday()
+            ]])
+            
+            eta_seconds = traffic_pipeline.predict_eta(features)
+            
+            if eta_seconds:
+                from datetime import timedelta
+                return TrafficETAResponse(
+                    order_id=request.order_id,
+                    eta_seconds=eta_seconds,
+                    eta_minutes=eta_seconds / 60,
+                    eta_string=str(timedelta(seconds=int(eta_seconds))),
+                    traffic_speed=traffic_data.traffic_speed,
+                    congestion_level=traffic_data.congestion_level,
+                    timestamp=datetime.now().isoformat()
+                )
+        
+        raise HTTPException(status_code=500, detail="ETA prediction failed")
+        
+    except Exception as e:
+        logger.error("ETA prediction failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/eta/update/{order_id}")
+async def update_eta_realtime(order_id: str, _auth=Depends(verify_api_key)):
+    """Update ETA in real-time during trip"""
+    try:
+        # Get current location from tracking (simulated)
+        current_location = {'lat': 28.6139, 'lng': 77.2090}
+        destination = {'lat': 28.7041, 'lng': 77.1025}
+        
+        result = await traffic_pipeline.update_eta_realtime(
+            order_id,
+            current_location,
+            destination
+        )
+        
+        if result:
+            return {
+                'order_id': order_id,
+                'data': result,
+                'timestamp': datetime.now().isoformat()
+            }
+        
+        raise HTTPException(status_code=404, detail="Order not found")
+        
+    except Exception as e:
+        logger.error("ETA update failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/eta/traffic/{route_id}")
+async def get_traffic_data(route_id: str, _auth=Depends(verify_api_key)):
+    """Get real-time traffic data for a route"""
+    try:
+        traffic = await traffic_pipeline.get_real_time_traffic(route_id)
+        if traffic:
+            return {
+                'route_id': route_id,
+                'data': traffic,
+                'timestamp': datetime.now().isoformat()
+            }
+        return {
+            'route_id': route_id,
+            'data': None,
+            'message': 'No traffic data available'
+        }
+    except Exception as e:
+        logger.error("Traffic data fetch failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/eta/forecast/{route_id}")
+async def get_traffic_forecast(route_id: str, hours: int = Field(1, ge=1, le=24), _auth=Depends(verify_api_key)):
+    """Get traffic forecast for next N hours"""
+    try:
+        forecast = await traffic_pipeline.get_traffic_forecast(route_id, hours)
+        return {
+            'route_id': route_id,
+            'data': forecast,
+            'timestamp': datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error("Traffic forecast failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/eta/train")
+async def train_traffic_model(_auth=Depends(verify_api_key)):
+    """Trigger model retraining"""
+    try:
+        traffic_pipeline.train_model(epochs=50)
+        return {
+            'status': 'success',
+            'message': 'Model trained successfully',
+            'timestamp': datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error("Model training failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# ETA Prediction (Legacy - Keep for backward compatibility)
 # ---------------------------------------------------------------------------
 
 @app.post("/predict/eta", response_model=ETAPredictOutput)

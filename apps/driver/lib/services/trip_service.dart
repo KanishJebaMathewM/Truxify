@@ -1,7 +1,3 @@
-import 'dart:convert';
-
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'api_client.dart';
@@ -95,6 +91,9 @@ class TripService {
     if (page == null || page < 1) {
       throw ArgumentError.value(cursor, 'cursor', 'must be a positive integer');
     }
+    if (limit < 1) {
+      throw ArgumentError.value(limit, 'limit', 'must be a positive integer');
+    }
     var path = '/api/driver/trips?page=$page&limit=$limit';
     if (status != null) {
       path += '&status=${Uri.encodeQueryComponent(status)}';
@@ -102,12 +101,18 @@ class TripService {
     
     try {
       final body = await _apiClient.get(path);
-      final mapBody = body as Map<String, dynamic>;
-      final responsePage = mapBody['page'] as int? ?? page;
-      final totalPages = mapBody['totalPages'] as int? ?? responsePage;
+      if (body is! Map<String, dynamic>) {
+        throw StateError('Unexpected trip history response type');
+      }
+      final trips = body['trips'];
+      if (trips is! List) {
+        throw StateError('Unexpected trip history trips type');
+      }
+      final responsePage = body['page'] as int? ?? page;
+      final totalPages = body['totalPages'] as int? ?? responsePage;
       final hasMore = responsePage < totalPages;
       return {
-        'trips': List<Map<String, dynamic>>.from(mapBody['trips'] as List? ?? []),
+        'trips': List<Map<String, dynamic>>.from(trips),
         'nextCursor': hasMore ? '${responsePage + 1}' : null,
         'hasMore': hasMore,
       };
@@ -123,7 +128,9 @@ class TripService {
     final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/items';
     try {
       final body = await _apiClient.get(path);
-      if (body is! List) return [];
+      if (body is! List) {
+        throw StateError('Unexpected trip items response type');
+      }
       return List<Map<String, dynamic>>.from(body);
     } catch (e) {
       if (e is ApiException) throw StateError(e.message);
@@ -137,7 +144,9 @@ class TripService {
     final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops';
     try {
       final body = await _apiClient.get(path);
-      if (body is! List) return [];
+      if (body is! List) {
+        throw StateError('Unexpected trip stops response type');
+      }
       return List<Map<String, dynamic>>.from(body);
     } catch (e) {
       if (e is ApiException) throw StateError(e.message);
@@ -151,7 +160,9 @@ class TripService {
     final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/route-points';
     try {
       final body = await _apiClient.get(path);
-      if (body is! List) return [];
+      if (body is! List) {
+        throw StateError('Unexpected route points response type');
+      }
       return List<Map<String, dynamic>>.from(body);
     } catch (e) {
       if (e is ApiException) throw StateError(e.message);
@@ -164,7 +175,7 @@ class TripService {
     String tripDisplayId,
   ) async {
     await verifyTripOwnership(tripDisplayId);
-    final path = '/api/trips/$tripDisplayId/stops/$stopId/complete';
+    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
     try {
       await _apiClient.put(path);
     } catch (e) {
@@ -188,9 +199,22 @@ class TripService {
 
   Future<void> startTrip(String tripDisplayId) async {
     await verifyTripOwnership(tripDisplayId);
-    final path = '/api/trips/$tripDisplayId/start';
+    final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/start';
     try {
       await _apiClient.put(path);
+    } catch (e) {
+      if (e is ApiException) throw Exception(e.message);
+      rethrow;
+    }
+  }
+
+  Future<void> setRoutePointClaimed(String pointId, bool claimed) async {
+    final path = '/api/driver/route-points/${_encodePathSegment(pointId)}/claim';
+    try {
+      await _apiClient.patch(
+        path,
+        body: <String, dynamic>{'claimed': claimed},
+      );
     } catch (e) {
       if (e is ApiException) throw Exception(e.message);
       rethrow;

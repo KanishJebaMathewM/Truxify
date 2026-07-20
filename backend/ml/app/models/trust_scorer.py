@@ -111,6 +111,9 @@ def _compute_trust_score(
         + (5.0 if is_verified else 0.0)
         - dispute_count * 1.5
     )
+    # The raw weights above sum to a maximum of 80 for a flawless driver.
+    # Rescale so a perfect driver reaches the documented 100 ceiling.
+    score = score * (100.0 / 80.0)
     return float(np.clip(score, 0.0, 100.0))
 
 

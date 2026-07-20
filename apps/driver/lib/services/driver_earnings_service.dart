@@ -1,3 +1,4 @@
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/earnings_daily_model.dart';
@@ -8,8 +9,9 @@ class DriverEarningsService {
     SupabaseClient? client,
     ApiClient? apiClient,
     String? apiBaseUrl,
+    http.Client? httpClient,
   })  : _providedClient = client,
-        _apiClient = apiClient ?? ApiClient(baseUrl: apiBaseUrl),
+        _apiClient = apiClient ?? ApiClient(baseUrl: apiBaseUrl, httpClient: httpClient),
         _apiBaseUrl = (apiBaseUrl ?? defaultApiBaseUrl).replaceFirst(RegExp(r'/$'), '',);
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
@@ -21,6 +23,57 @@ class DriverEarningsService {
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
   final ApiClient _apiClient;
   final String _apiBaseUrl;
+
+  final Map<String, dynamic> _cache = {};
+  static const Duration _cacheTtl = Duration(minutes: 5);
+  DateTime? _lastCacheTime;
+
+  bool _isCacheValid() {
+    if (_cache.isEmpty) return false;
+    if (_lastCacheTime == null) return false;
+    return DateTime.now().difference(_lastCacheTime!) < _cacheTtl;
+  }
+
+  void _clearCache() {
+    _cache.clear();
+    _lastCacheTime = null;
+  }
+
+  void _updateCache(Map<String, dynamic> data) {
+    _cache.clear();
+    _cache.addAll(data);
+    _lastCacheTime = DateTime.now();
+  }
+
+  Future<Map<String, dynamic>?> _getCached(String key) async {
+    if (!_isCacheValid()) return null;
+    return _cache[key] as Map<String, dynamic>?;
+  }
+
+  DateTime? _parseDate(String dateStr) {
+    try {
+      return DateTime.parse(dateStr);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _isWithinRange(DateTime target, DateTime? start, DateTime? end) {
+    if (start != null && target.isBefore(start)) return false;
+    if (end != null && target.isAfter(end)) return false;
+    return true;
+  }
+
+  List<Map<String, dynamic>> _mapResponseRows(Object? response, String label) {
+    if (response is! List) {
+      throw StateError('Unexpected $label response type');
+    }
+    return response.map((item) {
+      if (item is Map<String, dynamic>) return item;
+      if (item is Map) return Map<String, dynamic>.from(item);
+      throw StateError('Unexpected $label item type');
+    }).toList(growable: false);
+  }
 
   String? get driverId => _client.auth.currentUser?.id;
 
@@ -41,7 +94,7 @@ class DriverEarningsService {
 
       final transactions = decoded['transactions'];
       if (transactions is! List) {
-        return [];
+        throw StateError('Unexpected wallet transactions response type');
       }
 
       return transactions
@@ -52,6 +105,9 @@ class DriverEarningsService {
           .whereType<Map<String, dynamic>>()
           .toList();
     } catch (e) {
+      if (e is StateError) {
+        throw Exception(e.message);
+      }
       if (e is ApiException) {
         throw Exception(e.message.isNotEmpty ? e.message : 'Failed to load wallet history.');
       }
@@ -81,7 +137,14 @@ class DriverEarningsService {
           .gte('day_date', start.toIso8601String().split('T').first)
           .lt('day_date', end.toIso8601String().split('T').first)
           .order('day_date');
-      return List<Map<String, dynamic>>.from(response);
+      if (response is! List) {
+        throw StateError('Unexpected monthly earnings response type');
+      }
+      return response.map((item) {
+        if (item is Map<String, dynamic>) return item;
+        if (item is Map) return Map<String, dynamic>.from(item);
+        throw StateError('Unexpected monthly earnings item type');
+      }).toList(growable: false);
     }
 
     final days = daysSinceMonthStart.clamp(1, 365);
@@ -132,7 +195,7 @@ class DriverEarningsService {
         .eq('trip_date', day)
         .order('created_at', ascending: false);
 
-    return List<Map<String, dynamic>>.from(response);
+    return _mapResponseRows(response, 'completed trips');
   }
 
   /// Fetches today's earnings summary (amount, hours driven, trip count).
@@ -147,10 +210,14 @@ class DriverEarningsService {
     try {
       final decoded = await _apiClient.get(path);
       
-      if (decoded is! List) return null;
+      if (decoded is! List) {
+        throw StateError('Unexpected earnings summary response type');
+      }
 
       for (final entry in decoded) {
-        if (entry is! Map) continue;
+        if (entry is! Map) {
+          throw StateError('Unexpected earnings summary item type');
+        }
         final dateStr = entry['day_date']?.toString();
         if (dateStr == dayStr) {
           return EarningsDailyModel.fromMap(Map<String, dynamic>.from(entry));
@@ -159,6 +226,9 @@ class DriverEarningsService {
 
       return null;
     } catch (e) {
+      if (e is StateError) {
+        throw Exception(e.message);
+      }
       if (e is ApiException) {
         throw Exception(e.message.isNotEmpty ? e.message : 'Failed to load today\'s earnings.');
       }
@@ -175,10 +245,19 @@ class DriverEarningsService {
     try {
       final decoded = await _apiClient.get(path);
       
-      if (decoded is! Map) return {};
+      if (decoded is! Map) {
+        throw StateError('Unexpected driver stats response type');
+      }
 
-      return Map<String, dynamic>.from(decoded['stats'] ?? {});
+      final stats = decoded['stats'];
+      if (stats == null) return {};
+      if (stats is Map<String, dynamic>) return stats;
+      if (stats is Map) return Map<String, dynamic>.from(stats);
+      throw StateError('Unexpected driver stats payload type');
     } catch (e) {
+      if (e is StateError) {
+        throw Exception(e.message);
+      }
       if (e is ApiException) {
         throw Exception(e.message.isNotEmpty ? e.message : 'Failed to load driver stats.');
       }
@@ -194,10 +273,78 @@ class DriverEarningsService {
         .select('wallet_confirmed, wallet_pending, wallet_total')
         .eq('user_id', driverId!);
 
+    if (response is! List) {
+      throw StateError('Unexpected wallet summary response type');
+    }
     if (response.isNotEmpty) {
-      return Map<String, dynamic>.from(response.first as Map);
+      final first = response.first;
+      if (first is Map<String, dynamic>) return first;
+      if (first is Map) return Map<String, dynamic>.from(first);
+      throw StateError('Unexpected wallet summary item type');
     }
     return {};
+  }
+
+  /// Withdraws funds from the driver's confirmed wallet balance.
+  ///
+  /// [amountPaisa] must be a positive integer representing the amount in paisa.
+  ///
+  /// Throws [ApiException] on non-2xx responses with the server error message.
+  /// Throws a generic [Exception] on network errors.
+  Future<void> withdrawFunds(int amountPaisa) async {
+    if (driverId == null) {
+      throw Exception('You must be logged in to withdraw funds.');
+    }
+
+    final path = '/api/driver/wallet/withdraw';
+
+    try {
+      await _apiClient.post(path, body: {
+        'amount': amountPaisa,
+      });
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw Exception('Network error: Failed to withdraw funds.');
+    }
+  }
+
+  /// Fetches the driver's earnings statement for a date range.
+  ///
+  /// When [format] is `"json"`, returns parsed JSON data.
+  /// When [format] is `"csv"`, returns the raw CSV as a [String].
+  Future<dynamic> fetchStatement({
+    required DateTime startDate,
+    required DateTime endDate,
+    String format = "json",
+  }) async {
+    final startStr =
+        '${startDate.year}-${startDate.month.toString().padLeft(2, '0')}-${startDate.day.toString().padLeft(2, '0')}';
+    final endStr =
+        '${endDate.year}-${endDate.month.toString().padLeft(2, '0')}-${endDate.day.toString().padLeft(2, '0')}';
+
+    final path =
+        '/api/profile/driver/statement?start_date=$startStr&end_date=$endStr&format=$format';
+
+    if (format == 'csv') {
+      try {
+        final raw = await _apiClient.getRaw(path);
+        return raw;
+      } on ApiException {
+        rethrow;
+      } catch (e) {
+        throw Exception('Network error: Failed to fetch statement CSV.');
+      }
+    }
+
+    try {
+      final decoded = await _apiClient.get(path);
+      return decoded;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw Exception('Network error: Failed to fetch earnings statement.');
+    }
   }
 
   void dispose() {

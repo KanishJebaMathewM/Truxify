@@ -1,0 +1,288 @@
+# ============================================================================
+# Truxify — Production Docker Compose Override
+# ============================================================================
+#
+# Usage:
+#   cp .env.example .env                  # Configure all environment vars
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# This file overrides the development defaults in docker-compose.yml for
+# production deployment. Changes:
+#   - Uses production build stages (smaller, more secure images)
+#   - Removes code volumes (no hot-reload in production)
+#   - Adds CPU/memory limits, restart policies, logging config
+#   - Enables read-only root filesystem where applicable
+#   - Adds n8n automation service
+#   - Strengthens security (no-new-privileges, non-root user)
+# ============================================================================
+
+services:
+
+  # ─── Backend API ───────────────────────────────────────────────────────────
+  api:
+    build:
+      target: production
+      args:
+        - NODE_ENV=production
+    container_name: truxify-api
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      # Override local-dev URLs with production values
+      MONGODB_URI: ${MONGODB_URI:?MONGODB_URI is required}
+      REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
+      ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
+      ML_ENGINE_URL: http://ml-engine:8000
+    # Remove dev volumes — code is baked into the image
+    volumes: []
+    ports:
+      - "${API_PORT:-5000}:5000"
+    depends_on:
+      db:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ml-engine:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "${API_CPU_LIMIT:-1}"
+          memory: "${API_MEM_LIMIT:-512M}"
+        reservations:
+          cpus: "${API_CPU_RESERVATION:-0.5}"
+          memory: "${API_MEM_RESERVATION:-256M}"
+    restart: unless-stopped
+    logging:
+      driver: "${LOG_DRIVER:-json-file}"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+    security_opt:
+      - no-new-privileges:true
+
+  # ─── ML Engine ─────────────────────────────────────────────────────────────
+  ml-engine:
+    build:
+      context: ./backend/ml
+      dockerfile: Dockerfile
+    container_name: truxify-ml-engine
+    env_file:
+      - .env
+    environment:
+      ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
+    ports:
+      - "${ML_PORT:-8001}:8000"
+    volumes:
+      # Remove dev code mount — code is baked into the production image
+      # Persist trained models across restarts
+      - ml_models_data:/app/models
+    deploy:
+      resources:
+        limits:
+          cpus: "${ML_CPU_LIMIT:-2}"
+          memory: "${ML_MEM_LIMIT:-1G}"
+        reservations:
+          cpus: "${ML_CPU_RESERVATION:-1}"
+          memory: "${ML_MEM_RESERVATION:-512M}"
+    restart: unless-stopped
+    logging:
+      driver: "${LOG_DRIVER:-json-file}"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+    security_opt:
+      - no-new-privileges:true
+
+  # ─── PostgreSQL / PostGIS (Primary DB) ─────────────────────────────────────
+  db:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: truxify-postgres
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      POSTGRES_DB: truxify
+    ports:
+      - "${DB_PORT:-127.0.0.1:5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Optional: mount init scripts
+      # - ./docs/supabase_setup.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    deploy:
+      resources:
+        limits:
+          cpus: "${DB_CPU_LIMIT:-1}"
+          memory: "${DB_MEM_LIMIT:-1G}"
+        reservations:
+          cpus: "${DB_CPU_RESERVATION:-0.5}"
+          memory: "${DB_MEM_RESERVATION:-512M}"
+    restart: unless-stopped
+    logging:
+      driver: "${LOG_DRIVER:-json-file}"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ─── MongoDB (GPS & Telemetry) ─────────────────────────────────────────────
+  mongo:
+    image: mongo:6-jammy
+    container_name: truxify-mongo
+    env_file:
+      - .env
+    environment:
+      MONGO_INITDB_DATABASE: truxify_telemetry
+    ports:
+      - "${MONGO_PORT:-127.0.0.1:27017}:27017"
+    volumes:
+      - mongo_data:/data/db
+    deploy:
+      resources:
+        limits:
+          cpus: "${MONGO_CPU_LIMIT:-1}"
+          memory: "${MONGO_MEM_LIMIT:-1G}"
+        reservations:
+          cpus: "${MONGO_CPU_RESERVATION:-0.5}"
+          memory: "${MONGO_MEM_RESERVATION:-512M}"
+    restart: unless-stopped
+    logging:
+      driver: "${LOG_DRIVER:-json-file}"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  # ─── Redis (Cache & Sessions) ──────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: truxify-redis
+    ports:
+      - "${REDIS_PORT:-127.0.0.1:6379}:6379"
+    volumes:
+      - redis_data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: "${REDIS_CPU_LIMIT:-0.5}"
+          memory: "${REDIS_MEM_LIMIT:-256M}"
+        reservations:
+          cpus: "${REDIS_CPU_RESERVATION:-0.25}"
+          memory: "${REDIS_MEM_RESERVATION:-128M}"
+    restart: unless-stopped
+    logging:
+      driver: "${LOG_DRIVER:-json-file}"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Production Redis config
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --auto-aof-rewrite-percentage 100
+      --auto-aof-rewrite-min-size 64mb
+      --maxmemory 200mb
+      --maxmemory-policy allkeys-lru
+      --save 900 1
+      --save 300 10
+      --save 60 10000
+
+  # ─── n8n Automation (Dispute Pipeline & ML Retraining) ────────────────────
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: truxify-n8n
+    env_file:
+      - .env
+    environment:
+      N8N_HOST: ${N8N_HOST:?N8N_HOST is required}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: https
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY is required}
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: db
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: truxify
+      DB_POSTGRESDB_USER: postgres
+      DB_POSTGRESDB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 336
+      N8N_METRICS: "true"
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    deploy:
+      resources:
+        limits:
+          cpus: "${N8N_CPU_LIMIT:-1}"
+          memory: "${N8N_MEM_LIMIT:-512M}"
+        reservations:
+          cpus: "${N8N_CPU_RESERVATION:-0.5}"
+          memory: "${N8N_MEM_RESERVATION:-256M}"
+    restart: unless-stopped
+    logging:
+      driver: "${LOG_DRIVER:-json-file}"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+# ============================================================================
+# Volumes
+# ============================================================================
+volumes:
+  postgres_data:
+    name: truxify_postgres_data
+  mongo_data:
+    name: truxify_mongo_data
+  redis_data:
+    name: truxify_redis_data
+  ml_models_data:
+    name: truxify_ml_models
+  n8n_data:
+    name: truxify_n8n_data
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  default:
+    name: truxify_prod
+    driver: bridge

@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import '../core/api_client.dart';
 import '../services/order_service.dart';
+import '../services/tracking_service.dart';
 import '../services/voice_ai_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_cancellable_tile_provider/flutter_map_cancellable_tile_provider.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/offline/websocket/resilient_websocket.dart';
@@ -28,10 +31,11 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _movementController;
   late final OrderService _orderService;
+  late final TrackingService _trackingService;
   List<Map<String, dynamic>> _timeline = [];
   Map<String, dynamic>? _order;
   RealtimeChannel? _ordersChannel;
-  List<LatLng> _routePoints = const [_fallbackPickupPoint, _fallbackDropPoint];
+  List<LatLng> _routePoints = const [];
 
   static const String _loadingDriverText = 'Loading driver...';
   static const String _loadingTruckText = 'Loading truck...';
@@ -60,6 +64,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     super.initState();
 
     _orderService = OrderService();
+    _trackingService = TrackingService();
     _movementController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1500),
@@ -98,7 +103,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   }
 
   void _subscribeToTracking() {
-    final apiBaseUrl = OrderService.defaultApiBaseUrl;
+    final apiBaseUrl = ApiClient.defaultBaseUrl;
     final baseUri = Uri.parse(apiBaseUrl);
     final wsScheme = baseUri.scheme == 'https' ? 'wss' : 'ws';
     
@@ -109,17 +114,21 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     wsPath = '$wsPath/ws/tracking';
 
     String buildUrl() {
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken ?? '';
       final wsUri = Uri(
         scheme: wsScheme,
         host: baseUri.host,
         port: baseUri.hasPort ? baseUri.port : null,
         path: wsPath,
+        queryParameters: token.isNotEmpty ? {'token': token} : null,
       );
       return wsUri.toString();
     }
 
     final initialWsUrl = buildUrl();
-    debugPrint('Connecting to tracking WebSocket at: $initialWsUrl');
+    final redactedUrl = initialWsUrl.replaceAll(RegExp(r'token=[^&]+'), 'token=[REDACTED]');
+    debugPrint('Connecting to tracking WebSocket at: $redactedUrl');
 
     _trackingWebSocket = ResilientWebSocket(
       initialWsUrl,
@@ -137,9 +146,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
     _trackingSubscription = _trackingWebSocket!.stream.listen((message) {
       debugPrint('Tracking WebSocket message received: $message');
+      if (message is! String) return;
       try {
         if (message == 'pong') return;
-        final payload = jsonDecode(message as String) as Map<String, dynamic>;
+        final payload = jsonDecode(message) as Map<String, dynamic>;
 
         if (payload['event'] == 'location_update') {
           final data = payload['data'] as Map<String, dynamic>?;
@@ -687,6 +697,36 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     );
   }
 
+  Future<void> _shareTracking() async {
+    if (_order == null) return;
+
+    try {
+      final result = await _trackingService.shareTrackingLink(
+        orderDisplayId: widget.orderId,
+      );
+
+      final trackingUrl = result['trackingUrl'] as String?;
+      if (trackingUrl == null || trackingUrl.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to generate tracking link')),
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      await Share.share(
+        'Track your shipment on Truxify:\n$trackingUrl',
+        subject: 'Shipment Tracking - ${widget.orderId}',
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to share: $e')),
+      );
+    }
+  }
+
   static const LatLng _fallbackPickupPoint = LatLng(21.1702, 72.8311);
   static const LatLng _fallbackDropPoint = LatLng(26.9124, 75.7873);
 
@@ -836,22 +876,25 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                     AnimatedBuilder(
                       animation: _movementController,
                       builder: (context, _) {
+                        if (_routePoints.isEmpty) return const SizedBox.shrink();
                         return MarkerLayer(
                           markers: [
-                            Marker(
-                              point: _routePoints.first,
-                              width: 30,
-                              height: 30,
-                              child: const Icon(Icons.trip_origin_rounded,
-                                  color: Colors.blue, size: 22),
-                            ),
-                            Marker(
-                              point: _routePoints.last,
-                              width: 34,
-                              height: 34,
-                              child: const Icon(Icons.place_rounded,
-                                  color: Colors.redAccent, size: 26),
-                            ),
+                            if (_routePoints.isNotEmpty) ...[
+                              Marker(
+                                point: _routePoints.first,
+                                width: 30,
+                                height: 30,
+                                child: const Icon(Icons.trip_origin_rounded,
+                                    color: Colors.blue, size: 22),
+                              ),
+                              Marker(
+                                point: _routePoints.last,
+                                width: 34,
+                                height: 34,
+                                child: const Icon(Icons.place_rounded,
+                                    color: Colors.redAccent, size: 26),
+                              ),
+                            ],
                             ..._buildTruckMarkers(),
                           ],
                         );
@@ -968,9 +1011,9 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                               ),
                             ),
                             IconButton(
-                              onPressed: () {},
+                              onPressed: _order == null ? null : _shareTracking,
                               icon: Icon(
-                                Icons.more_vert_rounded,
+                                Icons.share_rounded,
                                 color: Theme.of(context).brightness ==
                                         Brightness.dark
                                     ? TruxifyColors.darkPrimaryText

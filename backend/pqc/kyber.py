@@ -204,7 +204,7 @@ class DilithiumSignature:
         # Simplified verification
         # In production: implement full Dilithium verification
         expected = hashlib.sha256(
-            message + self.private_key['seed'] + b'signature'
-        ).digest() if self.private_key else b''
+            message + str(self.public_key['t']).encode() + b'signature'
+        ).digest()
         
         return signature == expected

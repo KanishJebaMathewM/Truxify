@@ -26,22 +26,11 @@ import { predictDemand, predictPrice } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
-import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
-import { DomainError } from '../services/order/domainError.js';
-
-import { LoadOfferCacheService } from '../services/order/loadOfferCacheService.js';
-const router = express.Router();
-const orderRepository = new OrderRepository(supabase);
-
-const orderValidationService = new OrderValidationService({ supabase, logger });
-const orderTimelineService = new OrderTimelineService(orderRepository);
-const orderMilestoneService = new OrderMilestoneService({ orderValidationService, orderRepository, orderTimelineService });
-
-const bidAcceptanceService = new BidAcceptanceService({
+import {
   orderRepository,
   orderValidationService,
-  orderMilestoneService,
   orderTimelineService,
+  orderMilestoneService,
   orderLifecycleService,
   deliveryVerificationService,
   buildDepositTx,
@@ -50,6 +39,8 @@ const bidAcceptanceService = new BidAcceptanceService({
   confirmEscrowRefund,
   escrowRefund,
 } from '../core/container.js';
+import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
+import { computeOrderPricing } from '../lib/pricing.js';
 
 const router = express.Router();
 

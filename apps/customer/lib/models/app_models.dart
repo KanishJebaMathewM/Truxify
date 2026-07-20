@@ -11,13 +11,15 @@ class RouteDraft {
     required this.stacked,
     required this.fragile,
     required this.requirements,
+    this.pickupDate,
     this.pickupLat,
     this.pickupLng,
     this.dropLat,
     this.dropLng,
-    this.requiresRefrigeration = false,
-    this.targetTemperatureMin,
-    this.targetTemperatureMax,
+    this.truckType,
+    this.minCapacity,
+    this.maxCapacity,
+    this.materialType,
   });
 
   final String pickup;
@@ -29,13 +31,15 @@ class RouteDraft {
   final bool stacked;
   final bool fragile;
   final List<String> requirements;
+  final DateTime? pickupDate;
   final double? pickupLat;
   final double? pickupLng;
   final double? dropLat;
   final double? dropLng;
-  final bool requiresRefrigeration;
-  final double? targetTemperatureMin;
-  final double? targetTemperatureMax;
+  final String? truckType;
+  final double? minCapacity;
+  final double? maxCapacity;
+  final String? materialType;
 }
 
 class ShipmentCardData {
@@ -193,9 +197,13 @@ class HistoryOrderData {
     this.distanceCharge,
     this.tollCharge,
     this.platformFee,
-    this.requiresRefrigeration = false,
-    this.targetTemperatureMin,
-    this.targetTemperatureMax,
+    this.driverPhone,
+    this.goodsType,
+    this.weightTonnes,
+    this.dimensions,
+    this.isStackable,
+    this.isFragile,
+    this.specialRequirements,
   });
 
   final String orderId;
@@ -211,9 +219,13 @@ class HistoryOrderData {
   final String? distanceCharge;
   final String? tollCharge;
   final String? platformFee;
-  final bool requiresRefrigeration;
-  final double? targetTemperatureMin;
-  final double? targetTemperatureMax;
+  final String? driverPhone;
+  final String? goodsType;
+  final String? weightTonnes;
+  final String? dimensions;
+  final bool? isStackable;
+  final bool? isFragile;
+  final String? specialRequirements;
 }
 
 class TimelineStepData {

@@ -17,8 +17,10 @@ Freight networks involve parties with low mutual trust: manufacturers, fleet man
 
 Truxify's contracts are located in the `/blockchain/contracts` folder and developed using **Hardhat**.
 
-### 1. Payment Escrow (`Escrow.sol`)
-The `Escrow` contract acts as a digital container for trip funds. It manages payments throughout the booking lifecycle:
+### 1. Payment Escrow (`TruxifyEscrow.sol`)
+The `TruxifyEscrow` contract acts as a digital container for trip funds. It manages payments throughout the booking lifecycle:
+
+> ⚠️ **Note**: The codebase previously contained two incompatible escrow contracts (`Escrow.sol` and `TruxifyEscrow.sol`). The old `Escrow.sol` has been **deprecated** and moved to `contracts/deprecated/Escrow.sol`. The backend exclusively targets `TruxifyEscrow.sol`. Do not deploy or reference the old `Escrow.sol`.
 
 ```
 [Customer Books Order]

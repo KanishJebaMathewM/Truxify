@@ -1,3 +1,24 @@
+class WalletTransactionFilter {
+  final DateTime? startDate;
+  final DateTime? endDate;
+  final String? txnType;
+  final String? status;
+  final double? minAmount;
+  final double? maxAmount;
+
+  const WalletTransactionFilter({this.startDate, this.endDate, this.txnType, this.status, this.minAmount, this.maxAmount});
+
+  bool matches(WalletTransactionModel txn) {
+    if (startDate != null && txn.createdAt.isBefore(startDate!)) return false;
+    if (endDate != null && txn.createdAt.isAfter(endDate!)) return false;
+    if (txnType != null && txn.txnType != txnType) return false;
+    if (status != null && txn.status != status) return false;
+    if (minAmount != null && txn.amount < minAmount!) return false;
+    if (maxAmount != null && txn.amount > maxAmount!) return false;
+    return true;
+  }
+}
+
 class WalletTransactionModel {
   final String id;
   final String? tripDisplayId;

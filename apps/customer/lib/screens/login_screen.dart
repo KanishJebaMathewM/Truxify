@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter/services.dart';
 
+import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
@@ -84,7 +85,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!canCheckBiometrics || !isDeviceSupported) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Biometrics not supported on this device')),
+          SnackBar(content: Text(AppLocalizations.of(context)!.biometricsNotSupported)),
         );
         return;
       }
@@ -100,8 +101,8 @@ class _LoginScreenState extends State<LoginScreen> {
       if (authenticated) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Biometric authentication successful. Please login with OTP to link your account.'),
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.biometricAuthSuccessful),
             duration: Duration(seconds: 4),
           ),
         );
@@ -109,7 +110,7 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Biometric error: $e')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.error(e.toString()))),
       );
     }
   }
@@ -120,24 +121,25 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter phone number')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.pleaseEnterPhone)),
       );
       return;
     }
 
     if (int.tryParse(phone) == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Phone number can only contain digits'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.phoneDigitsOnly),
         ),
       );
       return;
     }
 
     if (phone.length != _expectedDigits) {
+      final l10n = AppLocalizations.of(context)!;
       final msg = _expectedDigits == 10
-          ? 'Phone number must be exactly $_expectedDigits digits for $_selectedCode'
-          : 'Phone number must be $_expectedDigits digits for $_selectedCode';
+          ? l10n.phoneMustBeExactDigits(_expectedDigits)
+          : l10n.phoneMustBeDigits;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
       );
@@ -165,7 +167,7 @@ class _LoginScreenState extends State<LoginScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                e.message ?? 'Phone verification failed. Please try again.',
+                e.message ?? AppLocalizations.of(context)!.phoneVerificationFailed,
               ),
             ),
           );
@@ -182,7 +184,7 @@ class _LoginScreenState extends State<LoginScreen> {
             if (!mounted) return;
             setState(() => _sendingOtp = false);
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Auto-verification failed: $e')),
+              SnackBar(content: Text(AppLocalizations.of(context)!.autoVerificationFailed)),
             );
           }
         },
@@ -191,7 +193,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       setState(() => _sendingOtp = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to send OTP: $e')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.failedToSendOtp)),
       );
     }
   }
@@ -201,15 +203,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
     if (otp.length != 6 || !RegExp(r'^\d{6}$').hasMatch(otp)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid 6-digit OTP')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.invalidOtp)),
       );
       return;
     }
 
     if (_verificationId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Verification session expired. Please resend OTP.'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.verificationSessionExpired),
         ),
       );
       return;
@@ -226,9 +228,9 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       setState(() => _verifyingOtp = false);
       final message = switch (e.code) {
-        'invalid-verification-code' => 'Invalid OTP. Please try again.',
-        'session-expired' => 'OTP has expired. Please request a new one.',
-        _ => e.message ?? 'Verification failed. Please try again.',
+        'invalid-verification-code' => AppLocalizations.of(context)!.invalidVerificationCode,
+        'session-expired' => AppLocalizations.of(context)!.otpExpired,
+        _ => e.message ?? AppLocalizations.of(context)!.verificationFailed,
       };
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
@@ -237,7 +239,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (!mounted) return;
       setState(() => _verifyingOtp = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Verification failed: $e')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.verificationFailed)),
       );
     }
   }
@@ -257,7 +259,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const AppLogo(iconSize: 24),
               const SizedBox(height: 28),
               Text(
-                'Welcome back',
+                AppLocalizations.of(context)!.welcomeBack,
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       color: colorScheme.onSurface,
                       fontWeight: FontWeight.w800,
@@ -265,7 +267,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Sign in to manage your freight bookings.',
+                AppLocalizations.of(context)!.signInSubtitle,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
@@ -295,7 +297,7 @@ class _LoginScreenState extends State<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Phone number',
+          AppLocalizations.of(context)!.phoneNumber,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 color: colorScheme.onSurface,
                 fontWeight: FontWeight.w800,
@@ -353,7 +355,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 18),
         PrimaryButton(
-          label: _sendingOtp ? 'Sending OTP...' : 'Send OTP',
+          label: _sendingOtp ? AppLocalizations.of(context)!.sendingOtp : AppLocalizations.of(context)!.sendOtp,
           onPressed: _sendingOtp ? null : _sendOtp,
         ),
         const SizedBox(height: 18),
@@ -361,7 +363,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: TextButton.icon(
             onPressed: _authenticateWithBiometrics,
             icon: const Icon(Icons.fingerprint, size: 28),
-            label: const Text('Login with Biometrics'),
+            label: Text(AppLocalizations.of(context)!.loginWithBiometrics),
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),
@@ -395,7 +397,7 @@ class _LoginScreenState extends State<LoginScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Enter OTP',
+          AppLocalizations.of(context)!.enterOtp,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 color: colorScheme.onSurface,
                 fontWeight: FontWeight.w800,
@@ -403,7 +405,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          'Sent to +91 ${_phoneController.text}',
+          AppLocalizations.of(context)!.sentTo('${_selectedCode} ${_phoneController.text}'),
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: TruxifyColors.adaptiveSecondaryText(context),
               ),
@@ -440,7 +442,7 @@ class _LoginScreenState extends State<LoginScreen> {
         ),
         const SizedBox(height: 18),
         PrimaryButton(
-          label: _verifyingOtp ? 'Verifying...' : 'Verify OTP',
+          label: _verifyingOtp ? AppLocalizations.of(context)!.verifyingOtp : AppLocalizations.of(context)!.verifyOtp,
           onPressed: _verifyingOtp ? null : _verifyOtp,
         ),
         const SizedBox(height: 14),
@@ -458,7 +460,7 @@ class _LoginScreenState extends State<LoginScreen> {
             const Spacer(),
             TextButton(
               onPressed: _sendingOtp ? null : _sendOtp,
-              child: Text(_sendingOtp ? 'Sending...' : 'Resend OTP'),
+              child: Text(_sendingOtp ? AppLocalizations.of(context)!.sendingOtp : AppLocalizations.of(context)!.sendOtp),
             ),
           ],
         ),

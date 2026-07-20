@@ -1,16 +1,17 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
 import { validateParams } from '../middleware/validate.js';
 import { paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
-import { startTimer, endTimer } from '../lib/routeTiming.js';
+
 
 const router = express.Router();
-const routeTimer = startTimer('loadRoutes');
+
 
 // Sanitize load filter query params to prevent injection attacks
 function sanitizeLoadFilters(query) {
@@ -28,7 +29,7 @@ function sanitizeLoadFilters(query) {
 // 1. GET ALL AVAILABLE LOAD OFFERS (DRIVER)
 // GET /api/loads
 // ============================================================================
-router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), async (req, res) => {
   try {
     const filterResult = loadFilterQuerySchema.safeParse(req.query);
     if (!filterResult.success) {
@@ -145,12 +146,11 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
       query = query.lte('freight_value', Math.round(filters.max_price * 100));
     }
     if (filters.distance !== undefined) {
-      query = query.lte('extra_distance_km', filters.distance);
+      query = query.or(`extra_distance_km.is.null,extra_distance_km.lte.${filters.distance}`);
     }
 
     // Sorting
-    const validSortFields = ['estimated_price', 'created_at', 'distance'];
-    const sortByParam = validSortFields.includes(req.query.sort_by) ? req.query.sort_by : 'created_at';
+    const sortByParam = filters.sort_by || 'created_at';
     
     // Map sort fields to database columns
     let sortBy = 'created_at';
@@ -198,7 +198,7 @@ router.get('/', authenticate, userLimiter, requireRole(['driver']), async (req, 
 // 2. GET SINGLE LOAD OFFER BY ID (DRIVER)
 // GET /api/loads/:id
 // ============================================================================
-router.get('/:id', authenticate, userLimiter, requireRole(['driver']), validateParams(paramIdSchema), async (req, res) => {
+router.get('/:id', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateParams(paramIdSchema), async (req, res) => {
   try {
     const { data: load, error } = await supabase
       .from('load_offers')
@@ -232,6 +232,5 @@ router.get('/:id', authenticate, userLimiter, requireRole(['driver']), validateP
   }
 });
 
-endTimer(routeTimer);
 export default router;
 

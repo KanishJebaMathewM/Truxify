@@ -73,9 +73,9 @@ class TruckMaintenanceTicket {
 
   factory TruckMaintenanceTicket.fromJson(Map<String, dynamic> json) {
     return TruckMaintenanceTicket(
-      id: json['id'] as String,
-      truckId: json['truck_id'] as String,
-      driverId: json['driver_id'] as String,
+      id: json['id'].toString(),
+      truckId: json['truck_id'].toString(),
+      driverId: json['driver_id'].toString(),
       category: json['category'] as String,
       description: json['description'] as String,
       status: json['status'] as String,

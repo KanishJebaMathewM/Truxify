@@ -1,21 +1,26 @@
 {
   "@@locale": "en",
+
   "appTitle": "Truxify",
   "@appTitle": {
     "description": "The title of the application"
   },
+
   "loginTitle": "Welcome to Truxify",
   "@loginTitle": {
     "description": "Greeting title on the login screen"
   },
+
   "bookLoadButton": "Book a Load",
   "@bookLoadButton": {
     "description": "Text for the book a load button"
   },
+
   "loadingText": "Loading...",
   "@loadingText": {
     "description": "Generic loading indicator text"
   },
+
   "comingSoon": "{title} coming soon",
   "@comingSoon": {
     "description": "Coming soon message",
@@ -26,6 +31,7 @@
       }
     }
   },
+
   "greetingMessage": "{greeting}, {displayName} 👋",
   "@greetingMessage": {
     "description": "Greeting message with name",
@@ -40,22 +46,32 @@
       }
     }
   },
+
   "noActiveShipments": "No active shipments",
   "@noActiveShipments": {
     "description": "Text shown when there are no active shipments"
   },
+
   "routeHistoryComingSoon": "Route history coming soon",
   "@routeHistoryComingSoon": {
     "description": "Text shown for route history placeholder"
   },
+
   "walletAddressUpdated": "Wallet address updated",
   "@walletAddressUpdated": {
     "description": "Success message when wallet address is updated"
   },
-  "polygonWalletAddress": "Polygon Wallet Address", "saveWalletAddress": "Save Wallet Address",
+
+  "polygonWalletAddress": "Polygon Wallet Address",
+  "@polygonWalletAddress": {
+    "description": "Label for the Polygon wallet address field"
+  },
+
+  "saveWalletAddress": "Save Wallet Address",
   "@saveWalletAddress": {
     "description": "Button text to save wallet address"
   },
+
   "error": "Error: {errorMsg}",
   "@error": {
     "description": "Error message format",
@@ -66,14 +82,726 @@
       }
     }
   },
+
   "lightTheme": "Light",
   "@lightTheme": {
     "description": "Light theme option"
   },
+
   "darkTheme": "Dark",
   "@darkTheme": {
     "description": "Dark theme option"
+  },
+
+  "retry": "Retry",
+  "@retry": {
+    "description": "Button text to retry a failed action"
+  },
+
+  "cancel": "Cancel",
+  "@cancel": {
+    "description": "Button text to cancel an action"
+  },
+
+  "save": "Save",
+  "@save": {
+    "description": "Generic save button text"
+  },
+
+  "close": "Close",
+  "@close": {
+    "description": "Button text to close a dialog or sheet"
+  },
+
+  "apply": "Apply",
+  "@apply": {
+    "description": "Button text to apply filters or settings"
+  },
+
+  "reset": "Reset",
+  "@reset": {
+    "description": "Button text to reset filters or form fields"
+  },
+
+  "search": "Search",
+  "@search": {
+    "description": "Placeholder text for search input"
+  },
+
+  "welcomeBack": "Welcome Back",
+  "@welcomeBack": {
+    "description": "Subtitle greeting on login screen for returning users"
+  },
+
+  "signInSubtitle": "Sign in to continue",
+  "@signInSubtitle": {
+    "description": "Subtitle text below the login title"
+  },
+
+  "phoneNumber": "Phone Number",
+  "@phoneNumber": {
+    "description": "Label for phone number input field"
+  },
+
+  "sendOtp": "Send OTP",
+  "@sendOtp": {
+    "description": "Button text to send a one-time password"
+  },
+
+  "sendingOtp": "Sending OTP...",
+  "@sendingOtp": {
+    "description": "Loading text while OTP is being sent"
+  },
+
+  "verifyingOtp": "Verifying...",
+  "@verifyingOtp": {
+    "description": "Loading text while OTP is being verified"
+  },
+
+  "verifyOtp": "Verify OTP",
+  "@verifyOtp": {
+    "description": "Button text to verify the entered OTP"
+  },
+
+  "loginWithBiometrics": "Login with Biometrics",
+  "@loginWithBiometrics": {
+    "description": "Button text to login using biometric authentication"
+  },
+
+  "biometricsNotSupported": "Biometrics not supported on this device",
+  "@biometricsNotSupported": {
+    "description": "Message shown when device does not support biometric auth"
+  },
+
+  "biometricAuthSuccessful": "Biometric authentication successful",
+  "@biometricAuthSuccessful": {
+    "description": "Success message after biometric authentication"
+  },
+
+  "pleaseEnterPhone": "Please enter your phone number",
+  "@pleaseEnterPhone": {
+    "description": "Validation message when phone number field is empty"
+  },
+
+  "phoneDigitsOnly": "Phone number must contain digits only",
+  "@phoneDigitsOnly": {
+    "description": "Validation message when phone number contains non-digit characters"
+  },
+
+  "phoneMustBeExactDigits": "Phone number must be exactly {digitCount} digits",
+  "@phoneMustBeExactDigits": {
+    "description": "Validation message when phone number does not have the exact required digit count",
+    "placeholders": {
+      "digitCount": {
+        "type": "int",
+        "example": "10"
+      }
+    }
+  },
+
+  "phoneMustBeDigits": "Phone number must contain only digits",
+  "@phoneMustBeDigits": {
+    "description": "Validation message when phone number contains non-digit characters"
+  },
+
+  "verificationFailed": "Verification failed. Please try again.",
+  "@verificationFailed": {
+    "description": "Generic verification failure message"
+  },
+
+  "phoneVerificationFailed": "Phone verification failed. Please try again.",
+  "@phoneVerificationFailed": {
+    "description": "Message shown when phone OTP verification fails"
+  },
+
+  "autoVerificationFailed": "Auto-verification failed. Please enter the OTP manually.",
+  "@autoVerificationFailed": {
+    "description": "Message shown when automatic OTP detection fails"
+  },
+
+  "failedToSendOtp": "Failed to send OTP. Please try again.",
+  "@failedToSendOtp": {
+    "description": "Error message when OTP sending fails"
+  },
+
+  "enterOtp": "Enter OTP",
+  "@enterOtp": {
+    "description": "Label for OTP input field"
+  },
+
+  "sentTo": "Sent to {phoneNumber}",
+  "@sentTo": {
+    "description": "Text indicating where the OTP was sent",
+    "placeholders": {
+      "phoneNumber": {
+        "type": "String",
+        "example": "+91 98765 43210"
+      }
+    }
+  },
+
+  "invalidOtp": "Invalid OTP. Please check and try again.",
+  "@invalidOtp": {
+    "description": "Error message when entered OTP is invalid"
+  },
+
+  "verificationSessionExpired": "Verification session has expired. Please request a new OTP.",
+  "@verificationSessionExpired": {
+    "description": "Message shown when the verification session times out"
+  },
+
+  "invalidVerificationCode": "Invalid verification code.",
+  "@invalidVerificationCode": {
+    "description": "Error message for an invalid verification code"
+  },
+
+  "otpExpired": "OTP has expired. Please request a new one.",
+  "@otpExpired": {
+    "description": "Message shown when the OTP has expired"
+  },
+
+  "home": "Home",
+  "@home": {
+    "description": "Bottom navigation tab label for home"
+  },
+
+  "findTrucks": "Find Trucks",
+  "@findTrucks": {
+    "description": "Bottom navigation tab label and screen title for finding trucks"
+  },
+
+  "orders": "Orders",
+  "@orders": {
+    "description": "Bottom navigation tab label for orders"
+  },
+
+  "profile": "Profile",
+  "@profile": {
+    "description": "Bottom navigation tab label for profile"
+  },
+
+  "activeShipments": "Active Shipments",
+  "@activeShipments": {
+    "description": "Section title for active shipments on home screen"
+  },
+
+  "seeAll": "See All",
+  "@seeAll": {
+    "description": "Link text to view all items in a list"
+  },
+
+  "bookATruck": "Book a Truck",
+  "@bookATruck": {
+    "description": "Button or card text to book a truck"
+  },
+
+  "active": "Active",
+  "@active": {
+    "description": "Badge or status label for active items"
+  },
+
+  "moreStats": "More Stats",
+  "@moreStats": {
+    "description": "Button text to view more statistics"
+  },
+
+  "savings": "Savings",
+  "@savings": {
+    "description": "Label for savings summary on home screen"
+  },
+
+  "yourUsualRoutes": "Your Usual Routes",
+  "@yourUsualRoutes": {
+    "description": "Section title for frequently used routes"
+  },
+
+  "lastTruckLocation": "Last Truck Location",
+  "@lastTruckLocation": {
+    "description": "Label for the last known truck location"
+  },
+
+  "couldNotLoadData": "Could not load data",
+  "@couldNotLoadData": {
+    "description": "Error message when data loading fails"
+  },
+
+  "mlPoweredMatching": "ML-Powered Matching",
+  "@mlPoweredMatching": {
+    "description": "Subtitle indicating AI-based truck matching"
+  },
+
+  "route": "Route",
+  "@route": {
+    "description": "Label for route section"
+  },
+
+  "pickupLocation": "Pickup Location",
+  "@pickupLocation": {
+    "description": "Label for pickup location input"
+  },
+
+  "dropLocation": "Drop Location",
+  "@dropLocation": {
+    "description": "Label for drop location input"
+  },
+
+  "date": "Date",
+  "@date": {
+    "description": "Label for date picker"
+  },
+
+  "time": "Time",
+  "@time": {
+    "description": "Label for time picker"
+  },
+
+  "goodsDetails": "Goods Details",
+  "@goodsDetails": {
+    "description": "Section title for goods information"
+  },
+
+  "goodsType": "Goods Type",
+  "@goodsType": {
+    "description": "Label for goods type selector"
+  },
+
+  "weightTonnes": "Weight (Tonnes)",
+  "@weightTonnes": {
+    "description": "Label for weight input in tonnes"
+  },
+
+  "lengthFt": "Length (ft)",
+  "@lengthFt": {
+    "description": "Label for length input in feet"
+  },
+
+  "widthFt": "Width (ft)",
+  "@widthFt": {
+    "description": "Label for width input in feet"
+  },
+
+  "heightFt": "Height (ft)",
+  "@heightFt": {
+    "description": "Label for height input in feet"
+  },
+
+  "stackable": "Stackable",
+  "@stackable": {
+    "description": "Label for stackable goods option"
+  },
+
+  "fragile": "Fragile",
+  "@fragile": {
+    "description": "Label for fragile goods option"
+  },
+
+  "specialRequirements": "Special Requirements",
+  "@specialRequirements": {
+    "description": "Label for special requirements text field"
+  },
+
+  "estimatedPriceRange": "Estimated Price Range",
+  "@estimatedPriceRange": {
+    "description": "Label for the estimated price display"
+  },
+
+  "stableThisWeek": "Stable this week",
+  "@stableThisWeek": {
+    "description": "Indicator that the price has been stable this week"
+  },
+
+  "estimatingPrice": "Estimating price...",
+  "@estimatingPrice": {
+    "description": "Loading text while price is being estimated"
+  },
+
+  "estimateUnavailable": "Estimate unavailable",
+  "@estimateUnavailable": {
+    "description": "Text shown when a price estimate cannot be generated"
+  },
+
+  "enterRouteDetails": "Enter route details to get started",
+  "@enterRouteDetails": {
+    "description": "Prompt text to encourage user to fill in route details"
+  },
+
+  "basedOnCurrentDemand": "Based on current demand",
+  "@basedOnCurrentDemand": {
+    "description": "Subtext indicating price estimate is based on demand"
+  },
+
+  "filterTrucks": "Filter Trucks",
+  "@filterTrucks": {
+    "description": "Button text to open truck filter options"
+  },
+
+  "truckType": "Truck Type",
+  "@truckType": {
+    "description": "Label for truck type filter"
+  },
+
+  "capacityTonnes": "Capacity (Tonnes)",
+  "@capacityTonnes": {
+    "description": "Label for truck capacity filter in tonnes"
+  },
+
+  "materialType": "Material Type",
+  "@materialType": {
+    "description": "Label for material type filter"
+  },
+
+  "today": "Today",
+  "@today": {
+    "description": "Date selection option for today"
+  },
+
+  "tomorrow": "Tomorrow",
+  "@tomorrow": {
+    "description": "Date selection option for tomorrow"
+  },
+
+  "selectPickupOnMap": "Select Pickup on Map",
+  "@selectPickupOnMap": {
+    "description": "Button text to select pickup location on map"
+  },
+
+  "selectDropOnMap": "Select Drop on Map",
+  "@selectDropOnMap": {
+    "description": "Button text to select drop location on map"
+  },
+
+  "temperatureControl": "Temperature Control",
+  "@temperatureControl": {
+    "description": "Label for temperature controlled truck option"
+  },
+
+  "waterproofCover": "Waterproof Cover",
+  "@waterproofCover": {
+    "description": "Label for waterproof cover truck option"
+  },
+
+  "loadingHelp": "Loading Help",
+  "@loadingHelp": {
+    "description": "Label for loading assistance option"
+  },
+
+  "loadingHelpNeeded": "Loading help needed",
+  "@loadingHelpNeeded": {
+    "description": "Indicator that loading assistance is required"
+  },
+
+  "other": "Other",
+  "@other": {
+    "description": "Generic option for other/miscellaneous selection"
+  },
+
+  "describeYourGoods": "Describe your goods...",
+  "@describeYourGoods": {
+    "description": "Placeholder text for goods description input"
+  },
+
+  "activeTab": "Active",
+  "@activeTab": {
+    "description": "Tab label for active orders"
+  },
+
+  "historyTab": "History",
+  "@historyTab": {
+    "description": "Tab label for order history"
+  },
+
+  "searchOrdersHint": "Search orders...",
+  "@searchOrdersHint": {
+    "description": "Placeholder text for order search input"
+  },
+
+  "noActiveOrders": "No active orders",
+  "@noActiveOrders": {
+    "description": "Text shown when there are no active orders"
+  },
+
+  "noHistoryOrders": "No order history",
+  "@noHistoryOrders": {
+    "description": "Text shown when there is no order history"
+  },
+
+  "offlineMode": "Offline Mode",
+  "@offlineMode": {
+    "description": "Label indicating the app is in offline mode"
+  },
+
+  "lastUpdated": "Last updated {timeAgo}",
+  "@lastUpdated": {
+    "description": "Text showing when data was last updated",
+    "placeholders": {
+      "timeAgo": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+
+  "driverAssigned": "Driver Assigned",
+  "@driverAssigned": {
+    "description": "Order status label when a driver has been assigned"
+  },
+
+  "inTransit": "In Transit",
+  "@inTransit": {
+    "description": "Order status label when shipment is in transit"
+  },
+
+  "paymentReleased": "Payment Released",
+  "@paymentReleased": {
+    "description": "Order status label when payment has been released"
+  },
+
+  "delivered": "Delivered",
+  "@delivered": {
+    "description": "Order status label for completed delivery"
+  },
+
+  "cancelled": "Cancelled",
+  "@cancelled": {
+    "description": "Order status label for cancelled orders"
+  },
+
+  "pending": "Pending",
+  "@pending": {
+    "description": "Order status label for pending orders"
+  },
+
+  "account": "Account",
+  "@account": {
+    "description": "Profile section title for account settings"
+  },
+
+  "preferences": "Preferences",
+  "@preferences": {
+    "description": "Profile section title for app preferences"
+  },
+
+  "paymentMethods": "Payment Methods",
+  "@paymentMethods": {
+    "description": "Profile menu item for payment methods"
+  },
+
+  "myDocuments": "My Documents",
+  "@myDocuments": {
+    "description": "Profile menu item for documents"
+  },
+
+  "savedAddresses": "Saved Addresses",
+  "@savedAddresses": {
+    "description": "Profile menu item for saved addresses"
+  },
+
+  "walletAddressLabel": "Wallet Address",
+  "@walletAddressLabel": {
+    "description": "Label for wallet address in profile"
+  },
+
+  "notSet": "Not Set",
+  "@notSet": {
+    "description": "Text shown when a field has not been configured"
+  },
+
+  "language": "Language",
+  "@language": {
+    "description": "Profile menu item for language settings"
+  },
+
+  "helpSupport": "Help & Support",
+  "@helpSupport": {
+    "description": "Profile menu item for help and support"
+  },
+
+  "aboutTruxify": "About Truxify",
+  "@aboutTruxify": {
+    "description": "Profile menu item for about page"
+  },
+
+  "logout": "Logout",
+  "@logout": {
+    "description": "Button text to log out of the app"
+  },
+
+  "offlineModeLabel": "Offline Mode (last updated {timeAgo})",
+  "@offlineModeLabel": {
+    "description": "Label indicating offline mode with last updated time",
+    "placeholders": {
+      "timeAgo": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+
+  "ordersLabel": "Orders",
+  "@ordersLabel": {
+    "description": "Label for orders count or section in profile"
+  },
+
+  "savedLabel": "Saved",
+  "@savedLabel": {
+    "description": "Label for saved items count in profile"
+  },
+
+  "co2Label": "CO₂ Saved",
+  "@co2Label": {
+    "description": "Label for CO2 emissions saved metric"
+  },
+
+  "editProfile": "Edit Profile",
+  "@editProfile": {
+    "description": "Button text to edit profile information"
+  },
+
+  "fullName": "Full Name",
+  "@fullName": {
+    "description": "Label for full name input field"
+  },
+
+  "companyName": "Company Name",
+  "@companyName": {
+    "description": "Label for company name input field"
+  },
+
+  "phone": "Phone",
+  "@phone": {
+    "description": "Label for phone number display or input"
+  },
+
+  "enterFullName": "Enter your full name",
+  "@enterFullName": {
+    "description": "Placeholder text for full name input"
+  },
+
+  "enterCompanyName": "Enter your company name",
+  "@enterCompanyName": {
+    "description": "Placeholder text for company name input"
+  },
+
+  "enterPhoneNumber": "Enter your phone number",
+  "@enterPhoneNumber": {
+    "description": "Placeholder text for phone number input"
+  },
+
+  "nameIsRequired": "Name is required",
+  "@nameIsRequired": {
+    "description": "Validation error when name field is empty"
+  },
+
+  "companyNameIsRequired": "Company name is required",
+  "@companyNameIsRequired": {
+    "description": "Validation error when company name field is empty"
+  },
+
+  "phoneNumberIsRequired": "Phone number is required",
+  "@phoneNumberIsRequired": {
+    "description": "Validation error when phone number field is empty"
+  },
+
+  "saving": "Saving...",
+  "@saving": {
+    "description": "Loading text while profile changes are being saved"
+  },
+
+  "saveChanges": "Save Changes",
+  "@saveChanges": {
+    "description": "Button text to save profile changes"
+  },
+
+  "profileUpdatedSuccessfully": "Profile updated successfully",
+  "@profileUpdatedSuccessfully": {
+    "description": "Success message after profile is updated"
+  },
+
+  "failedToLoadProfile": "Failed to load profile",
+  "@failedToLoadProfile": {
+    "description": "Error message when profile data fails to load"
+  },
+
+  "failedToUpdateProfile": "Failed to update profile",
+  "@failedToUpdateProfile": {
+    "description": "Error message when profile update fails"
+  },
+
+  "shareTracking": "Share Tracking",
+  "@shareTracking": {
+    "description": "Button text to share order tracking link"
+  },
+
+  "trackingLinkGenerated": "Tracking link generated",
+  "@trackingLinkGenerated": {
+    "description": "Success message when tracking link is generated"
+  },
+
+  "unableToShare": "Unable to share",
+  "@unableToShare": {
+    "description": "Error message when sharing fails"
+  },
+
+  "linkExpired": "This tracking link has expired or is no longer valid.",
+  "@linkExpired": {
+    "description": "Message shown when a tracking link has expired"
+  },
+
+  "trackingRevoked": "All tracking links have been revoked.",
+  "@trackingRevoked": {
+    "description": "Message shown when tracking links are revoked"
+  },
+
+  "copyLink": "Copy Link",
+  "@copyLink": {
+    "description": "Button text to copy tracking link to clipboard"
+  },
+
+  "shareMessage": "Track your shipment on Truxify",
+  "@shareMessage": {
+    "description": "Default message included when sharing tracking link"
+  },
+  "orderNotFound": "Order not found",
+  "@orderNotFound": {
+    "description": "Error message when an order referenced by a notification cannot be found"
+  },
+
+  "notification": "Notification",
+  "@notification": {
+    "description": "Title for notification-related UI elements"
+  },
+
+  "unableToOpen": "Unable to open notification",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
+  },
+  "downloadInvoice": "Download Invoice",
+  "@downloadInvoice": {
+    "description": "Button text to download the order invoice as PDF"
+  },
+
+  "generatingInvoice": "Generating Invoice...",
+  "@generatingInvoice": {
+    "description": "Status text while the PDF invoice is being generated"
+  },
+
+  "invoiceReady": "Invoice ready",
+  "@invoiceReady": {
+    "description": "Success message after invoice PDF is generated"
+  },
+
+  "shareInvoice": "Share Invoice",
+  "@shareInvoice": {
+    "description": "Button text to share the generated invoice"
+  },
+
+  "printInvoice": "Print Invoice",
+  "@printInvoice": {
+    "description": "Button text to print the generated invoice"
+  },
+
+  "downloadFailed": "Download failed",
+  "@downloadFailed": {
+    "description": "Error message when invoice download or generation fails"
   }
 }
-
-

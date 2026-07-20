@@ -1,16 +1,807 @@
 {
   "@@locale": "hi",
+
   "appTitle": "ट्रक्सिफाई",
+  "@appTitle": {
+    "description": "The title of the application"
+  },
+
   "loginTitle": "ट्रक्सिफाई में आपका स्वागत है",
+  "@loginTitle": {
+    "description": "Greeting title on the login screen"
+  },
+
   "bookLoadButton": "लोड बुक करें",
+  "@bookLoadButton": {
+    "description": "Text for the book a load button"
+  },
+
   "loadingText": "लोड हो रहा है...",
+  "@loadingText": {
+    "description": "Generic loading indicator text"
+  },
+
   "comingSoon": "{title} जल्द आ रहा है",
+  "@comingSoon": {
+    "description": "Coming soon message",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Feature"
+      }
+    }
+  },
+
   "greetingMessage": "{greeting}, {displayName} 👋",
+  "@greetingMessage": {
+    "description": "Greeting message with name",
+    "placeholders": {
+      "greeting": {
+        "type": "String",
+        "example": "Good morning"
+      },
+      "displayName": {
+        "type": "String",
+        "example": "John"
+      }
+    }
+  },
+
   "noActiveShipments": "कोई सक्रिय शिपमेंट नहीं",
+  "@noActiveShipments": {
+    "description": "Text shown when there are no active shipments"
+  },
+
   "routeHistoryComingSoon": "रूट इतिहास जल्द आ रहा है",
+  "@routeHistoryComingSoon": {
+    "description": "Text shown for route history placeholder"
+  },
+
   "walletAddressUpdated": "वॉलेट पता अपडेट किया गया",
+  "@walletAddressUpdated": {
+    "description": "Success message when wallet address is updated"
+  },
+
+  "polygonWalletAddress": "पॉलीगॉन वॉलेट पता",
+  "@polygonWalletAddress": {
+    "description": "Label for the Polygon wallet address field"
+  },
+
   "saveWalletAddress": "वॉलेट पता सहेजें",
+  "@saveWalletAddress": {
+    "description": "Button text to save wallet address"
+  },
+
   "error": "त्रुटि: {errorMsg}",
+  "@error": {
+    "description": "Error message format",
+    "placeholders": {
+      "errorMsg": {
+        "type": "String",
+        "example": "Something went wrong"
+      }
+    }
+  },
+
   "lightTheme": "हल्का",
-  "darkTheme": "गहरा"
+  "@lightTheme": {
+    "description": "Light theme option"
+  },
+
+  "darkTheme": "गहरा",
+  "@darkTheme": {
+    "description": "Dark theme option"
+  },
+
+  "retry": "पुनः प्रयास करें",
+  "@retry": {
+    "description": "Button text to retry a failed action"
+  },
+
+  "cancel": "रद्द करें",
+  "@cancel": {
+    "description": "Button text to cancel an action"
+  },
+
+  "save": "सहेजें",
+  "@save": {
+    "description": "Generic save button text"
+  },
+
+  "close": "बंद करें",
+  "@close": {
+    "description": "Button text to close a dialog or sheet"
+  },
+
+  "apply": "लागू करें",
+  "@apply": {
+    "description": "Button text to apply filters or settings"
+  },
+
+  "reset": "रीसेट करें",
+  "@reset": {
+    "description": "Button text to reset filters or form fields"
+  },
+
+  "search": "खोजें",
+  "@search": {
+    "description": "Placeholder text for search input"
+  },
+
+  "welcomeBack": "वापसी पर स्वागत है",
+  "@welcomeBack": {
+    "description": "Subtitle greeting on login screen for returning users"
+  },
+
+  "signInSubtitle": "जारी रखने के लिए साइन इन करें",
+  "@signInSubtitle": {
+    "description": "Subtitle text below the login title"
+  },
+
+  "phoneNumber": "फ़ोन नंबर",
+  "@phoneNumber": {
+    "description": "Label for phone number input field"
+  },
+
+  "sendOtp": "OTP भेजें",
+  "@sendOtp": {
+    "description": "Button text to send a one-time password"
+  },
+
+  "sendingOtp": "OTP भेजा जा रहा है...",
+  "@sendingOtp": {
+    "description": "Loading text while OTP is being sent"
+  },
+
+  "verifyingOtp": "सत्यापन हो रहा है...",
+  "@verifyingOtp": {
+    "description": "Loading text while OTP is being verified"
+  },
+
+  "verifyOtp": "OTP सत्यापित करें",
+  "@verifyOtp": {
+    "description": "Button text to verify the entered OTP"
+  },
+
+  "loginWithBiometrics": "बायोमेट्रिक्स से लॉगिन करें",
+  "@loginWithBiometrics": {
+    "description": "Button text to login using biometric authentication"
+  },
+
+  "biometricsNotSupported": "इस डिवाइस पर बायोमेट्रिक्स समर्थित नहीं है",
+  "@biometricsNotSupported": {
+    "description": "Message shown when device does not support biometric auth"
+  },
+
+  "biometricAuthSuccessful": "बायोमेट्रिक प्रमाणीकरण सफल",
+  "@biometricAuthSuccessful": {
+    "description": "Success message after biometric authentication"
+  },
+
+  "pleaseEnterPhone": "कृपया अपना फ़ोन नंबर दर्ज करें",
+  "@pleaseEnterPhone": {
+    "description": "Validation message when phone number field is empty"
+  },
+
+  "phoneDigitsOnly": "फ़ोन नंबर में केवल अंक होने चाहिए",
+  "@phoneDigitsOnly": {
+    "description": "Validation message when phone number contains non-digit characters"
+  },
+
+  "phoneMustBeExactDigits": "फ़ोन नंबर ठीक {digitCount} अंकों का होना चाहिए",
+  "@phoneMustBeExactDigits": {
+    "description": "Validation message when phone number does not have the exact required digit count",
+    "placeholders": {
+      "digitCount": {
+        "type": "int",
+        "example": "10"
+      }
+    }
+  },
+
+  "phoneMustBeDigits": "फ़ोन नंबर में केवल अंक होने चाहिए",
+  "@phoneMustBeDigits": {
+    "description": "Validation message when phone number contains non-digit characters"
+  },
+
+  "verificationFailed": "सत्यापन असफल। कृपया पुनः प्रयास करें।",
+  "@verificationFailed": {
+    "description": "Generic verification failure message"
+  },
+
+  "phoneVerificationFailed": "फ़ोन सत्यापन असफल। कृपया पुनः प्रयास करें।",
+  "@phoneVerificationFailed": {
+    "description": "Message shown when phone OTP verification fails"
+  },
+
+  "autoVerificationFailed": "स्वचालित सत्यापन असफल। कृपया OTP मैन्युअल रूप से दर्ज करें।",
+  "@autoVerificationFailed": {
+    "description": "Message shown when automatic OTP detection fails"
+  },
+
+  "failedToSendOtp": "OTP भेजने में असफल। कृपया पुनः प्रयास करें।",
+  "@failedToSendOtp": {
+    "description": "Error message when OTP sending fails"
+  },
+
+  "enterOtp": "OTP दर्ज करें",
+  "@enterOtp": {
+    "description": "Label for OTP input field"
+  },
+
+  "sentTo": "{phoneNumber} पर भेजा गया",
+  "@sentTo": {
+    "description": "Text indicating where the OTP was sent",
+    "placeholders": {
+      "phoneNumber": {
+        "type": "String",
+        "example": "+91 98765 43210"
+      }
+    }
+  },
+
+  "invalidOtp": "अमान्य OTP। कृपया जांचें और पुनः प्रयास करें।",
+  "@invalidOtp": {
+    "description": "Error message when entered OTP is invalid"
+  },
+
+  "verificationSessionExpired": "सत्यापन सत्र समाप्त हो गया है। कृपया नया OTP अनुरोध करें।",
+  "@verificationSessionExpired": {
+    "description": "Message shown when the verification session times out"
+  },
+
+  "invalidVerificationCode": "अमान्य सत्यापन कोड।",
+  "@invalidVerificationCode": {
+    "description": "Error message for an invalid verification code"
+  },
+
+  "otpExpired": "OTP की समय सीमा समाप्त हो गई है। कृपया नया अनुरोध करें।",
+  "@otpExpired": {
+    "description": "Message shown when the OTP has expired"
+  },
+
+  "home": "होम",
+  "@home": {
+    "description": "Bottom navigation tab label for home"
+  },
+
+  "findTrucks": "ट्रक खोजें",
+  "@findTrucks": {
+    "description": "Bottom navigation tab label and screen title for finding trucks"
+  },
+
+  "orders": "ऑर्डर",
+  "@orders": {
+    "description": "Bottom navigation tab label for orders"
+  },
+
+  "profile": "प्रोफ़ाइल",
+  "@profile": {
+    "description": "Bottom navigation tab label for profile"
+  },
+
+  "activeShipments": "सक्रिय शिपमेंट",
+  "@activeShipments": {
+    "description": "Section title for active shipments on home screen"
+  },
+
+  "seeAll": "सभी देखें",
+  "@seeAll": {
+    "description": "Link text to view all items in a list"
+  },
+
+  "bookATruck": "ट्रक बुक करें",
+  "@bookATruck": {
+    "description": "Button or card text to book a truck"
+  },
+
+  "active": "सक्रिय",
+  "@active": {
+    "description": "Badge or status label for active items"
+  },
+
+  "moreStats": "और आंकड़े",
+  "@moreStats": {
+    "description": "Button text to view more statistics"
+  },
+
+  "savings": "बचत",
+  "@savings": {
+    "description": "Label for savings summary on home screen"
+  },
+
+  "yourUsualRoutes": "आपके नियमित मार्ग",
+  "@yourUsualRoutes": {
+    "description": "Section title for frequently used routes"
+  },
+
+  "lastTruckLocation": "अंतिम ट्रक स्थान",
+  "@lastTruckLocation": {
+    "description": "Label for the last known truck location"
+  },
+
+  "couldNotLoadData": "डेटा लोड नहीं हो सका",
+  "@couldNotLoadData": {
+    "description": "Error message when data loading fails"
+  },
+
+  "mlPoweredMatching": "ML-संचालित मैचिंग",
+  "@mlPoweredMatching": {
+    "description": "Subtitle indicating AI-based truck matching"
+  },
+
+  "route": "मार्ग",
+  "@route": {
+    "description": "Label for route section"
+  },
+
+  "pickupLocation": "पिकअप स्थान",
+  "@pickupLocation": {
+    "description": "Label for pickup location input"
+  },
+
+  "dropLocation": "ड्रॉप स्थान",
+  "@dropLocation": {
+    "description": "Label for drop location input"
+  },
+
+  "date": "तारीख",
+  "@date": {
+    "description": "Label for date picker"
+  },
+
+  "time": "समय",
+  "@time": {
+    "description": "Label for time picker"
+  },
+
+  "goodsDetails": "माल विवरण",
+  "@goodsDetails": {
+    "description": "Section title for goods information"
+  },
+
+  "goodsType": "माल का प्रकार",
+  "@goodsType": {
+    "description": "Label for goods type selector"
+  },
+
+  "weightTonnes": "वज़न (टन)",
+  "@weightTonnes": {
+    "description": "Label for weight input in tonnes"
+  },
+
+  "lengthFt": "लंबाई (फ़ीट)",
+  "@lengthFt": {
+    "description": "Label for length input in feet"
+  },
+
+  "widthFt": "चौड़ाई (फ़ीट)",
+  "@widthFt": {
+    "description": "Label for width input in feet"
+  },
+
+  "heightFt": "ऊंचाई (फ़ीट)",
+  "@heightFt": {
+    "description": "Label for height input in feet"
+  },
+
+  "stackable": "स्टैकेबल",
+  "@stackable": {
+    "description": "Label for stackable goods option"
+  },
+
+  "fragile": "नाज़ुक",
+  "@fragile": {
+    "description": "Label for fragile goods option"
+  },
+
+  "specialRequirements": "विशेष आवश्यकताएं",
+  "@specialRequirements": {
+    "description": "Label for special requirements text field"
+  },
+
+  "estimatedPriceRange": "अनुमानित मूल्य सीमा",
+  "@estimatedPriceRange": {
+    "description": "Label for the estimated price display"
+  },
+
+  "stableThisWeek": "इस सप्ताह स्थिर",
+  "@stableThisWeek": {
+    "description": "Indicator that the price has been stable this week"
+  },
+
+  "estimatingPrice": "मूल्य अनुमान लगाया जा रहा है...",
+  "@estimatingPrice": {
+    "description": "Loading text while price is being estimated"
+  },
+
+  "estimateUnavailable": "अनुमान उपलब्ध नहीं है",
+  "@estimateUnavailable": {
+    "description": "Text shown when a price estimate cannot be generated"
+  },
+
+  "enterRouteDetails": "शुरू करने के लिए मार्ग विवरण दर्ज करें",
+  "@enterRouteDetails": {
+    "description": "Prompt text to encourage user to fill in route details"
+  },
+
+  "basedOnCurrentDemand": "वर्तमान मांग के आधार पर",
+  "@basedOnCurrentDemand": {
+    "description": "Subtext indicating price estimate is based on demand"
+  },
+
+  "filterTrucks": "ट्रक फ़िल्टर करें",
+  "@filterTrucks": {
+    "description": "Button text to open truck filter options"
+  },
+
+  "truckType": "ट्रक का प्रकार",
+  "@truckType": {
+    "description": "Label for truck type filter"
+  },
+
+  "capacityTonnes": "क्षमता (टन)",
+  "@capacityTonnes": {
+    "description": "Label for truck capacity filter in tonnes"
+  },
+
+  "materialType": "सामग्री का प्रकार",
+  "@materialType": {
+    "description": "Label for material type filter"
+  },
+
+  "today": "आज",
+  "@today": {
+    "description": "Date selection option for today"
+  },
+
+  "tomorrow": "कल",
+  "@tomorrow": {
+    "description": "Date selection option for tomorrow"
+  },
+
+  "selectPickupOnMap": "मानचित्र पर पिकअप चुनें",
+  "@selectPickupOnMap": {
+    "description": "Button text to select pickup location on map"
+  },
+
+  "selectDropOnMap": "मानचित्र पर ड्रॉप चुनें",
+  "@selectDropOnMap": {
+    "description": "Button text to select drop location on map"
+  },
+
+  "temperatureControl": "तापमान नियंत्रण",
+  "@temperatureControl": {
+    "description": "Label for temperature controlled truck option"
+  },
+
+  "waterproofCover": "जलरोधक कवर",
+  "@waterproofCover": {
+    "description": "Label for waterproof cover truck option"
+  },
+
+  "loadingHelp": "लोडिंग सहायता",
+  "@loadingHelp": {
+    "description": "Label for loading assistance option"
+  },
+
+  "loadingHelpNeeded": "लोडिंग सहायता आवश्यक",
+  "@loadingHelpNeeded": {
+    "description": "Indicator that loading assistance is required"
+  },
+
+  "other": "अन्य",
+  "@other": {
+    "description": "Generic option for other/miscellaneous selection"
+  },
+
+  "describeYourGoods": "अपने माल का वर्णन करें...",
+  "@describeYourGoods": {
+    "description": "Placeholder text for goods description input"
+  },
+
+  "activeTab": "सक्रिय",
+  "@activeTab": {
+    "description": "Tab label for active orders"
+  },
+
+  "historyTab": "इतिहास",
+  "@historyTab": {
+    "description": "Tab label for order history"
+  },
+
+  "searchOrdersHint": "ऑर्डर खोजें...",
+  "@searchOrdersHint": {
+    "description": "Placeholder text for order search input"
+  },
+
+  "noActiveOrders": "कोई सक्रिय ऑर्डर नहीं",
+  "@noActiveOrders": {
+    "description": "Text shown when there are no active orders"
+  },
+
+  "noHistoryOrders": "कोई ऑर्डर इतिहास नहीं",
+  "@noHistoryOrders": {
+    "description": "Text shown when there is no order history"
+  },
+
+  "offlineMode": "ऑफ़लाइन मोड",
+  "@offlineMode": {
+    "description": "Label indicating the app is in offline mode"
+  },
+
+  "lastUpdated": "अंतिम अपडेट {timeAgo}",
+  "@lastUpdated": {
+    "description": "Text showing when data was last updated",
+    "placeholders": {
+      "timeAgo": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+
+  "driverAssigned": "ड्राइवर नियुक्त",
+  "@driverAssigned": {
+    "description": "Order status label when a driver has been assigned"
+  },
+
+  "inTransit": "रास्ते में",
+  "@inTransit": {
+    "description": "Order status label when shipment is in transit"
+  },
+
+  "paymentReleased": "भुगतान जारी",
+  "@paymentReleased": {
+    "description": "Order status label when payment has been released"
+  },
+
+  "delivered": "वितरित",
+  "@delivered": {
+    "description": "Order status label for completed delivery"
+  },
+
+  "cancelled": "रद्द",
+  "@cancelled": {
+    "description": "Order status label for cancelled orders"
+  },
+
+  "pending": "लंबित",
+  "@pending": {
+    "description": "Order status label for pending orders"
+  },
+
+  "account": "खाता",
+  "@account": {
+    "description": "Profile section title for account settings"
+  },
+
+  "preferences": "वरीयताएं",
+  "@preferences": {
+    "description": "Profile section title for app preferences"
+  },
+
+  "paymentMethods": "भुगतान के तरीके",
+  "@paymentMethods": {
+    "description": "Profile menu item for payment methods"
+  },
+
+  "myDocuments": "मेरे दस्तावेज़",
+  "@myDocuments": {
+    "description": "Profile menu item for documents"
+  },
+
+  "savedAddresses": "सहेजे गए पते",
+  "@savedAddresses": {
+    "description": "Profile menu item for saved addresses"
+  },
+
+  "walletAddressLabel": "वॉलेट पता",
+  "@walletAddressLabel": {
+    "description": "Label for wallet address in profile"
+  },
+
+  "notSet": "सेट नहीं है",
+  "@notSet": {
+    "description": "Text shown when a field has not been configured"
+  },
+
+  "language": "भाषा",
+  "@language": {
+    "description": "Profile menu item for language settings"
+  },
+
+  "helpSupport": "सहायता और समर्थन",
+  "@helpSupport": {
+    "description": "Profile menu item for help and support"
+  },
+
+  "aboutTruxify": "ट्रक्सिफाई के बारे में",
+  "@aboutTruxify": {
+    "description": "Profile menu item for about page"
+  },
+
+  "logout": "लॉगआउट",
+  "@logout": {
+    "description": "Button text to log out of the app"
+  },
+
+  "offlineModeLabel": "ऑफ़लाइन मोड (अंतिम अपडेट {timeAgo})",
+  "@offlineModeLabel": {
+    "description": "Label indicating offline mode with last updated time",
+    "placeholders": {
+      "timeAgo": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+
+  "ordersLabel": "ऑर्डर",
+  "@ordersLabel": {
+    "description": "Label for orders count or section in profile"
+  },
+
+  "savedLabel": "सहेजा गया",
+  "@savedLabel": {
+    "description": "Label for saved items count in profile"
+  },
+
+  "co2Label": "CO₂ बचाया",
+  "@co2Label": {
+    "description": "Label for CO2 emissions saved metric"
+  },
+
+  "editProfile": "प्रोफ़ाइल संपादित करें",
+  "@editProfile": {
+    "description": "Button text to edit profile information"
+  },
+
+  "fullName": "पूरा नाम",
+  "@fullName": {
+    "description": "Label for full name input field"
+  },
+
+  "companyName": "कंपनी का नाम",
+  "@companyName": {
+    "description": "Label for company name input field"
+  },
+
+  "phone": "फ़ोन",
+  "@phone": {
+    "description": "Label for phone number display or input"
+  },
+
+  "enterFullName": "अपना पूरा नाम दर्ज करें",
+  "@enterFullName": {
+    "description": "Placeholder text for full name input"
+  },
+
+  "enterCompanyName": "अपनी कंपनी का नाम दर्ज करें",
+  "@enterCompanyName": {
+    "description": "Placeholder text for company name input"
+  },
+
+  "enterPhoneNumber": "अपना फ़ोन नंबर दर्ज करें",
+  "@enterPhoneNumber": {
+    "description": "Placeholder text for phone number input"
+  },
+
+  "nameIsRequired": "नाम आवश्यक है",
+  "@nameIsRequired": {
+    "description": "Validation error when name field is empty"
+  },
+
+  "companyNameIsRequired": "कंपनी का नाम आवश्यक है",
+  "@companyNameIsRequired": {
+    "description": "Validation error when company name field is empty"
+  },
+
+  "phoneNumberIsRequired": "फ़ोन नंबर आवश्यक है",
+  "@phoneNumberIsRequired": {
+    "description": "Validation error when phone number field is empty"
+  },
+
+  "saving": "सहेजा जा रहा है...",
+  "@saving": {
+    "description": "Loading text while profile changes are being saved"
+  },
+
+  "saveChanges": "परिवर्तन सहेजें",
+  "@saveChanges": {
+    "description": "Button text to save profile changes"
+  },
+
+  "profileUpdatedSuccessfully": "प्रोफ़ाइल सफलतापूर्वक अपडेट हो गई",
+  "@profileUpdatedSuccessfully": {
+    "description": "Success message after profile is updated"
+  },
+
+  "failedToLoadProfile": "प्रोफ़ाइल लोड करने में असफल",
+  "@failedToLoadProfile": {
+    "description": "Error message when profile data fails to load"
+  },
+
+  "failedToUpdateProfile": "प्रोफ़ाइल अपडेट करने में असफल",
+  "@failedToUpdateProfile": {
+    "description": "Error message when profile update fails"
+  },
+
+  "shareTracking": "ट्रैकिंग शेयर करें",
+  "@shareTracking": {
+    "description": "Button text to share order tracking link"
+  },
+
+  "trackingLinkGenerated": "ट्रैकिंग लिंक बनाया गया",
+  "@trackingLinkGenerated": {
+    "description": "Success message when tracking link is generated"
+  },
+
+  "unableToShare": "शेयर करने में असमर्थ",
+  "@unableToShare": {
+    "description": "Error message when sharing fails"
+  },
+
+  "linkExpired": "यह ट्रैकिंग लिंक समाप्त हो गया है या अब मान्य नहीं है।",
+  "@linkExpired": {
+    "description": "Message shown when a tracking link has expired"
+  },
+
+  "trackingRevoked": "सभी ट्रैकिंग लिंक रद्द कर दिए गए हैं।",
+  "@trackingRevoked": {
+    "description": "Message shown when tracking links are revoked"
+  },
+
+  "copyLink": "लिंक कॉपी करें",
+  "@copyLink": {
+    "description": "Button text to copy tracking link to clipboard"
+  },
+
+  "shareMessage": "Truxify पर अपनी शिपमेंट ट्रैक करें",
+  "@shareMessage": {
+    "description": "Default message included when sharing tracking link"
+  },
+  "orderNotFound": "ऑर्डर नहीं मिला",
+  "@orderNotFound": {
+    "description": "Error message when an order referenced by a notification cannot be found"
+  },
+
+  "notification": "सूचना",
+  "@notification": {
+    "description": "Title for notification-related UI elements"
+  },
+
+  "unableToOpen": "सूचना खोलने में असमर्थ",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
+  },
+  "downloadInvoice": "इनवॉइस डाउनलोड करें",
+  "@downloadInvoice": {
+    "description": "Button text to download the order invoice as PDF"
+  },
+
+  "generatingInvoice": "इनवॉइस बना रहे हैं...",
+  "@generatingInvoice": {
+    "description": "Status text while the PDF invoice is being generated"
+  },
+
+  "invoiceReady": "इनवॉइस तैयार है",
+  "@invoiceReady": {
+    "description": "Success message after invoice PDF is generated"
+  },
+
+  "shareInvoice": "इनवॉइस साझा करें",
+  "@shareInvoice": {
+    "description": "Button text to share the generated invoice"
+  },
+
+  "printInvoice": "इनवॉइस प्रिंट करें",
+  "@printInvoice": {
+    "description": "Button text to print the generated invoice"
+  },
+
+  "downloadFailed": "डाउनलोड असफल",
+  "@downloadFailed": {
+    "description": "Error message when invoice download or generation fails"
+  }
 }

@@ -39,7 +39,7 @@ When a driver marks a trip as delivered but the customer reports an OTP mismatch
                            [Create Portal Ticket]
 ```
 
-1. **Locking Funds**: The workflow triggers a call to `Escrow.sol` to freeze the transaction's payment.
+1. **Locking Funds**: The workflow triggers a call to `TruxifyEscrow.sol` to freeze the transaction's payment.
 2. **Evidence Gathering**: The workflow compiles trip metadata, including MongoDB GPS breadcrumbs, driver speed logs, and message records, into a PDF package.
 3. **Notification**: Both parties receive SMS and email notifications containing the evidence package.
 4. **Resolution Check**: If unresolved after 24 hours, the dispute is escalated to a human arbitrator portal. The arbitrator's final decision releases the escrowed funds to either the driver or customer.

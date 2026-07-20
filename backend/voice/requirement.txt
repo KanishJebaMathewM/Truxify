@@ -1,0 +1,13 @@
+whisper==1.1.10
+torch==2.1.0
+transformers==4.35.0
+speech-recognition==3.10.0
+google-trans==3.0.0
+elevenlabs==0.2.0
+redis==5.0.0
+gTTS==2.3.2
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.6
+soundfile==0.12.1
+numpy==1.26.2

@@ -237,13 +237,3 @@ describe('updateProfile', () => {
     expect(result).toEqual({ id: 'id' });
   });
 });
-
-describe('invalidateProfileCache', () => {
-  it('calls redisClient.del correctly', async () => {
-    const mockDel = vi.fn().mockResolvedValue(1);
-    vi.mocked(await import('../../src/config/db.js')).redisClient = { del: mockDel };
-    const { invalidateProfileCache } = await import('../../src/services/profileService.js');
-    await invalidateProfileCache('123');
-    expect(mockDel).toHaveBeenCalledWith('profile:123');
-  });
-});

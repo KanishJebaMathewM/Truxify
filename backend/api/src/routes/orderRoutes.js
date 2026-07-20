@@ -1,7 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 
-import { bidLimiter, userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
+import { bidLimiter, userLimiter, userKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { mongoDb, supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -77,12 +77,7 @@ const predictDemandLimiter = rateLimit({
 const telemetryLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 30,
-  keyGenerator: (req) => {
-    if (!req.user || !req.user.id) {
-      return req.ip ? safeIpKeyGenerator(req) : 'unknown-ip';
-    }
-    return req.user.id;
-  },
+  keyGenerator: userKeyGenerator,
   store: createStore('rl:telemetry:'),
   standardHeaders: true,
   legacyHeaders: false,

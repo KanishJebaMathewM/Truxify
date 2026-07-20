@@ -214,19 +214,22 @@ class ZKPService {
     async getZKPStats() {
         try {
             const merkleRoot = await this.getMerkleRoot();
-            const txCount = await this.zkp.getTransactionCount();
 
-            const { data, error } = await supabase
+            const { data, error, count } = await supabase
                 .from('zkp_transactions')
-                .select('*');
+                .select('*', { count: 'exact', head: true });
 
             if (error) throw error;
 
+            const { data: fullData } = await supabase
+                .from('zkp_transactions')
+                .select('nullifier');
+
             return {
                 merkleRoot,
-                totalTransactions: txCount.toString(),
-                totalRecords: data?.length || 0,
-                nullifiers: data?.filter(t => t.nullifier).length || 0,
+                totalTransactions: count?.toString() || '0',
+                totalRecords: count || 0,
+                nullifiers: fullData?.filter(t => t.nullifier).length || 0,
                 timestamp: new Date().toISOString()
             };
         } catch (error) {

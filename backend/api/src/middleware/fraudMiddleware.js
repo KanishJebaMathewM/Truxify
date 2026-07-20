@@ -30,7 +30,7 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
 
     if (criticalEndpoints.some(endpoint => req.path.startsWith(endpoint))) {
       const risk = await fraudDetection.getRealTimeRisk(userId, {
-        amount: req.body.amount || 0,
+        amount: req.body?.amount || 0,
         frequency: 1,
         deviceChanged: req.deviceChanged || false
       });

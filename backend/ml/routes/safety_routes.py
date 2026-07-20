@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
@@ -9,6 +10,7 @@ import soundfile as sf
 import io
 from datetime import datetime
 import logging
+import redis
 
 from multimodal.vision_monitor import VisionMonitor
 from multimodal.audio_monitor import AudioMonitor
@@ -16,6 +18,10 @@ from multimodal.sensor_fusion import SensorFusion
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/safety", tags=["Driver Safety"])
+
+# Shared Redis client initialized once at module level
+_redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379')
+redis_client = redis.Redis.from_url(_redis_url, decode_responses=True)
 
 # Initialize monitors
 vision_monitor = VisionMonitor()
@@ -198,10 +204,8 @@ async def trigger_alert(level: str = "WARNING"):
             'timestamp': datetime.now().isoformat()
         }
         
-        # Store alert
-        import redis
-        r = redis.Redis.from_url('redis://localhost:6379')
-        r.setex('safety:alert:latest', 300, json.dumps(alert))
+        # Store alert using shared Redis client
+        redis_client.setex('safety:alert:latest', 300, json.dumps(alert))
         
         return {
             'success': True,

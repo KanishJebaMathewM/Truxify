@@ -215,10 +215,11 @@ class SensorFusion:
     
     def get_stats(self) -> Dict:
         """Get fusion statistics"""
+        raw = self.redis.get('fusion:latest')
         stats = {
-            'last_fusion': self.redis.get('fusion:latest'),
-            'vision_count': self.redis.keys('vision:*'),
-            'audio_count': self.redis.keys('audio:*'),
+            'last_fusion': json.loads(raw) if raw else None,
+            'vision_count': len(self.redis.keys('vision:*')),
+            'audio_count': len(self.redis.keys('audio:*')),
             'timestamp': datetime.now().isoformat()
         }
         

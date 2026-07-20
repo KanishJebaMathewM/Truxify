@@ -131,8 +131,8 @@ export class OrderLifecycleService {
       order_display_id: orderDisplayId,
       customer_id: customerId,
       customer_name: customerName || 'Customer',
-      route_label: `${pickup_address.split(',')[0]} → ${drop_address.split(',')[0]}`,
-      route_subtitle: `${weight_tonnes} tonnes • ${goods_type}`,
+      route_label: `${pickup_address.split(',')[0]} \u2192 ${drop_address.split(',')[0]}`,
+      route_subtitle: `${weight_tonnes} tonnes \u2022 ${goods_type}`,
       pickup_address, pickup_lat, pickup_lng,
       drop_address, drop_lat, drop_lng,
       goods_type,
@@ -503,7 +503,7 @@ export class OrderLifecycleService {
       drop_address,
       drop_lat: Number(drop_lat),
       drop_lng: Number(drop_lng),
-      route_label: `${(order.pickup_address || '').split(',')[0]} → ${drop_address.split(',')[0]}`,
+      route_label: `${(order.pickup_address || '').split(',')[0]} \u2192 ${drop_address.split(',')[0]}`,
       freight_value: pricing.totalAmount,
       fuel_cost: pricing.fuelCost,
       toll_cost: pricing.tollEstimate,
@@ -512,7 +512,10 @@ export class OrderLifecycleService {
     });
 
     if (offerUpdateErr) {
-      logger.error('Load offer update failed for change-drop:', offerUpdateErr.message);
+      throw new DomainError(500, {
+        error: 'Failed to update load offer after drop change.',
+        details: offerUpdateErr.message,
+      });
     }
 
     try {
@@ -526,10 +529,10 @@ export class OrderLifecycleService {
     return {
       message: 'Drop location updated successfully.',
       pricing: {
-        base_freight: pricing.baseFreight,
-        toll_estimate: pricing.tollEstimate,
-        platform_fee: pricing.platformFee,
-        total_amount: pricing.totalAmount,
+        base_freight: updatedOrder.base_freight ?? pricing.baseFreight,
+        toll_estimate: updatedOrder.toll_estimate ?? pricing.tollEstimate,
+        platform_fee: updatedOrder.platform_fee ?? pricing.platformFee,
+        total_amount: updatedOrder.total_amount ?? pricing.totalAmount,
       },
       order: updatedOrder,
     };
@@ -557,9 +560,12 @@ export class OrderLifecycleService {
 
       if (order.status === 'cancelled' && order.escrow_status === 'refunded') {
         return {
-          message: 'Order was already cancelled and refunded.',
-          cancellation_fee: order.cancellation_fee ?? 0,
-          order,
+          status: 200,
+          body: {
+            message: 'Order was already cancelled and refunded.',
+            cancellation_fee: order.cancellation_fee ?? 0,
+            order,
+          },
         };
       }
 

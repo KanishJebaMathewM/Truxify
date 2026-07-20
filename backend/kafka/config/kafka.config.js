@@ -222,6 +222,17 @@ class KafkaConfig {
     return offsets;
   }
 
+  parsePartitionId(partition) {
+    if (!/^\d+$/.test(String(partition))) {
+      throw new Error(`Invalid Kafka partition id: ${partition}`);
+    }
+    const parsed = Number(partition);
+    if (!Number.isSafeInteger(parsed)) {
+      throw new Error(`Invalid Kafka partition id: ${partition}`);
+    }
+    return parsed;
+  }
+
   async resetConsumerOffsets(groupId, topic) {
     const admin = kafka.admin();
     await admin.connect();
@@ -230,11 +241,7 @@ class KafkaConfig {
       const partitions = Object.keys(offsets[topic] || {});
       
       for (const partition of partitions) {
-        const parsed = parseInt(partition, 10);
-        if (Number.isNaN(parsed) || parsed < 0) {
-          logger.warn(`Skipping invalid partition key: ${partition}`);
-          continue;
-        }
+        const parsed = this.parsePartitionId(partition);
         await admin.setConsumerGroupOffset(
           groupId,
           { topic, partition: parsed },

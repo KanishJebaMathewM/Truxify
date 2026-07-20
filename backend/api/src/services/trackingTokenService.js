@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import logger from '../middleware/logger.js';
 
-const TOKEN_BYTE_LENGTH = 32; // 256-bit tokens
+const TOKEN_BYTE_LENGTH = 32;
 const TOKEN_EXPIRY_DAYS = 7;
 
 export class TrackingTokenService {
@@ -94,6 +94,25 @@ export class TrackingTokenService {
     if (error) {
       this._logger.error({ error, orderDisplayId }, 'Failed to revoke tracking tokens for order');
     }
+  }
+
+  async purgeExpiredTokens() {
+    const { data, error } = await this._supabase
+      .from('tracking_tokens')
+      .delete()
+      .lt('expires_at', new Date().toISOString())
+      .select('id');
+
+    if (error) {
+      this._logger.error({ error }, 'Failed to purge expired tracking tokens');
+      return 0;
+    }
+
+    const count = data?.length ?? 0;
+    if (count > 0) {
+      this._logger.info({ purgedCount: count }, 'Purged expired tracking tokens');
+    }
+    return count;
   }
 
   async getActiveTokensForOrder(orderDisplayId) {

@@ -14,6 +14,7 @@ const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
 const TICKET_COLUMNS = 'id, subject, description, category, status, created_at, updated_at';
 const TICKET_DETAIL_COLUMNS = 'id, user_id, subject, description, category, status, created_at, updated_at';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const VALID_TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
 
 // Canonical map of all accepted category aliases -> database values.
 // Shared by ticket creation, ticket update, and the categories endpoint.
@@ -65,6 +66,18 @@ function parseUuidQuery(value, field) {
     return { error: `${field} must be a valid UUID` };
   }
   return { value };
+}
+
+function parseTicketStatus(value) {
+  if (value === undefined) return { value: undefined };
+  if (typeof value !== 'string') {
+    return { error: 'status must be a single value' };
+  }
+  const normalized = value.toLowerCase().trim();
+  if (!VALID_TICKET_STATUSES.includes(normalized)) {
+    return { error: 'Unsupported support ticket status.' };
+  }
+  return { value: normalized };
 }
 
 // ============================================================================
@@ -215,18 +228,19 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Unsupported support ticket category.' });
   }
 
+  const statusResult = parseTicketStatus(status);
+  if (statusResult.error) {
+    return res.status(400).json({ error: statusResult.error });
+  }
+
   try {
     let query = supabase
       .from('support_tickets')
       .select(TICKET_COLUMNS, { count: 'exact' })
       .eq('user_id', req.user.id);
 
-    if (status) {
-      const ALLOWED_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
-      if (!ALLOWED_STATUSES.includes(status)) {
-        return res.status(400).json({ error: 'Unsupported support ticket status.' });
-      }
-      query = query.eq('status', status);
+    if (statusResult.value) {
+      query = query.eq('status', statusResult.value);
     }
 
     if (dbCategory) {
@@ -411,17 +425,18 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
     return res.status(400).json({ error: userIdResult.error });
   }
 
+  const statusResult = parseTicketStatus(status);
+  if (statusResult.error) {
+    return res.status(400).json({ error: statusResult.error });
+  }
+
   try {
     let query = supabase
       .from('support_tickets')
       .select(TICKET_DETAIL_COLUMNS, { count: 'exact' });
 
-    if (status) {
-      const ADMIN_ALLOWED_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
-      if (!ADMIN_ALLOWED_STATUSES.includes(status)) {
-        return res.status(400).json({ error: 'Unsupported support ticket status.' });
-      }
-      query = query.eq('status', status);
+    if (statusResult.value) {
+      query = query.eq('status', statusResult.value);
     }
 
     if (dbCategory) {
@@ -531,7 +546,7 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, validateParams(u
 // ============================================================================
 // 8. GET ALL COMMENTS/REPLIES FOR A TICKET (CUSTOMER OR DRIVER OWNER OR ADMIN)
 // ============================================================================
-router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
+router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { sort } = req.query;
   if (sort !== undefined && sort !== 'asc' && sort !== 'desc') {

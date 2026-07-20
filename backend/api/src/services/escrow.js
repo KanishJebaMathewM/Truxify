@@ -142,7 +142,7 @@ export function paisaToMaticWei(paisa) {
   }
   const matic = amount * ESCROW_MATIC_PER_PAISA;
   if (matic > MAX_ESCROW_MATIC) {
-    logger.warn(`[escrow] Deposit ${matic} MATIC exceeds safety cap of ${MAX_ESCROW_MATIC} MATIC (${paisa} paisa @ ${ESCROW_MATIC_PER_PAISA} MATIC/paisa)`);
+    throw new RangeError(`Deposit ${matic} MATIC exceeds safety cap of ${MAX_ESCROW_MATIC} MATIC (${paisa} paisa @ ${ESCROW_MATIC_PER_PAISA} MATIC/paisa)`);
   }
   return ethers.parseEther(matic.toFixed(18));
 }

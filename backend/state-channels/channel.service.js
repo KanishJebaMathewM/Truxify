@@ -42,8 +42,18 @@ class StateChannelService {
             });
             const receipt = await tx.wait();
 
-            // Get channel ID from logs
-            const channelId = await this.getUserChannels(participantA).then(channels => channels[0]);
+            // Parse channel ID from ChannelOpened event
+            const eventLog = receipt.logs.find(log => {
+                try {
+                    const parsed = this.channel.interface.parseLog(log);
+                    return parsed.name === 'ChannelOpened';
+                } catch {
+                    return false;
+                }
+            });
+            const channelId = eventLog
+                ? this.channel.interface.parseLog(eventLog).args[0].toString()
+                : (await this.getUserChannels(participantA).then(ch => ch[ch.length - 1]));
 
             logger.info(`✅ Channel opened: ${channelId}`);
             return {
@@ -58,6 +68,7 @@ class StateChannelService {
     }
 
     async fundChannel(channelId, amount, participant) {
+        this.channelCache.delete(channelId);
         try {
             const tx = await this.channel.fundChannel(channelId, {
                 value: ethers.parseEther(amount.toString()),
@@ -79,6 +90,7 @@ class StateChannelService {
     }
 
     async updateState(channelId, balances, nonce, signatures) {
+        this.channelCache.delete(channelId);
         try {
             const { balanceA, balanceB } = balances;
             
@@ -116,6 +128,7 @@ class StateChannelService {
     }
 
     async closeChannel(channelId) {
+        this.channelCache.delete(channelId);
         try {
             const tx = await this.channel.closeChannel(channelId, {
                 gasLimit: 100000
@@ -142,6 +155,7 @@ class StateChannelService {
     // ============ Dispute Resolution ============
 
     async raiseDispute(channelId, stateHash) {
+        this.channelCache.delete(channelId);
         try {
             const tx = await this.channel.raiseDispute(channelId, stateHash, {
                 gasLimit: 100000
@@ -164,6 +178,7 @@ class StateChannelService {
     // ============ Batch Settlement ============
 
     async batchSettle(channelIds) {
+        channelIds.forEach(id => this.channelCache.delete(id));
         try {
             const tx = await this.channel.batchSettle(channelIds, {
                 gasLimit: 300000

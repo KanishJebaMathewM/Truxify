@@ -227,17 +227,13 @@ class KafkaConfig {
     await admin.connect();
     try {
       const offsets = await admin.listConsumerGroupOffsets(groupId);
-      const partitions = Object.keys(offsets[topic] || {});
+      const topicOffsets = (offsets.topics || []).find(t => t.topic === topic);
+      const partitions = topicOffsets?.partitions || [];
       
-      for (const partition of partitions) {
-        const parsed = parseInt(partition, 10);
-        if (Number.isNaN(parsed) || parsed < 0) {
-          logger.warn(`Skipping invalid partition key: ${partition}`);
-          continue;
-        }
+      for (const p of partitions) {
         await admin.setConsumerGroupOffset(
           groupId,
-          { topic, partition: parsed },
+          { topic, partition: p.partition },
           'latest'
         );
       }

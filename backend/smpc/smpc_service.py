@@ -17,11 +17,13 @@ class SecretSharing:
     def __init__(self):
         self.prime = 2**127 - 1  # Large prime for field operations
         self.parties = []
+        self.threshold = None
         
     def generate_shares(self, secret: int, n: int, k: int) -> List[Tuple[int, int]]:
         """Generate n shares with threshold k"""
         if k > n:
             raise ValueError("Threshold cannot be greater than number of shares")
+        self.threshold = k
         
         # Generate random coefficients
         coeffs = [secret] + [secrets.randbelow(self.prime) for _ in range(k-1)]
@@ -44,6 +46,8 @@ class SecretSharing:
     
     def reconstruct_secret(self, shares: List[Tuple[int, int]]) -> int:
         """Reconstruct secret from shares"""
+        if self.threshold and len(shares) < self.threshold:
+            raise ValueError(f"Need at least {self.threshold} shares to reconstruct, got {len(shares)}")
         if len(shares) < 2:
             raise ValueError("Need at least 2 shares to reconstruct")
         

@@ -398,13 +398,10 @@ class FraudDetectionService {
       );
 
       // 2. Network risk
-      const networkRisk = await this.calculateNetworkRisk(
-        userId, 
-        await this.buildGraph(userId, await this.getUserConnections(userId)),
-        await this.detectFraudRings(
-          await this.buildGraph(userId, await this.getUserConnections(userId))
-        )
-      );
+      const connections = await this.getUserConnections(userId);
+      const graph = await this.buildGraph(userId, connections);
+      const fraudRings = await this.detectFraudRings(graph);
+      const networkRisk = await this.calculateNetworkRisk(userId, graph, fraudRings);
 
       // 3. Transaction risk
       const transactionRisk = this.calculateTransactionRisk(transactionData);

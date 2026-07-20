@@ -7,6 +7,14 @@
  *                   default truckType when not provided
  *   - predictPrice validation: rejects NaN, Infinity, negative, missing fields,
  *                              above-max, below-min; accepts valid with paisa conversion
+ *   - predictEta: correct payload shape, response validation
+ *   - matchBilateral: correct payload shape (loads + drivers)
+ *   - predictDriverProfit: correct payload shape, response validation
+ *   - optimisePacking: correct payload shape (packages + truck + deliveryAddresses)
+ *   - recommendLoads: correct payload shape (userId + history)
+ *   - recommendTrucks: correct payload shape (userId + history)
+ *   - scoreTrust: correct payload shape (behavioral metrics)
+ *   - matchDeadhead: correct payload shape (passthrough)
  *
  * Run with:  npm run test:unit -- test/unit/ml.test.js
  */
@@ -26,7 +34,19 @@ vi.mock('../../src/middleware/logger.js', () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-import { predictDemand, predictPrice, __testing } from '../../src/services/ml.js';
+import {
+  predictDemand,
+  predictPrice,
+  predictEta,
+  matchBilateral,
+  predictDriverProfit,
+  optimisePacking,
+  recommendLoads,
+  recommendTrucks,
+  scoreTrust,
+  matchDeadhead,
+  __testing,
+} from '../../src/services/ml.js';
 
 describe('ml service — predictDemand', () => {
   beforeEach(() => {
@@ -339,5 +359,477 @@ describe('ml service — predictPrice', () => {
     expect(result.estimatedPriceInr).toBe(3000);
     expect(result.estimated_price).toBe(3000);
     expect(result.currency).toBe('INR');
+  });
+});
+
+describe('ml service — predictEta', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.ML_ENGINE_URL;
+    process.env.ML_API_KEY = 'test_key';
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends correct payload shape matching ETAPredictInput schema', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ eta_minutes: 45, confidence_interval: { lower: 40, upper: 50 } })),
+    });
+
+    const result = await predictEta({
+      routeDistance: 250,
+      timeOfDay: 14,
+      dayOfWeek: 3,
+      routeType: 'highway',
+      historicalSpeed: 65,
+    });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body).toEqual({
+      route_distance: 250,
+      time_of_day: 14,
+      day_of_week: 3,
+      route_type: 'highway',
+      historical_speed: 65,
+    });
+    expect(result.eta_minutes).toBe(45);
+    expect(result.confidence_interval.lower).toBe(40);
+  });
+
+  it('throws on missing ML_API_KEY', async () => {
+    delete process.env.ML_API_KEY;
+    await expect(predictEta({
+      routeDistance: 100, timeOfDay: 10, dayOfWeek: 1, routeType: 'city', historicalSpeed: 30,
+    })).rejects.toThrow('[ML] ML_API_KEY is not configured');
+  });
+
+  it('throws on invalid response — missing eta_minutes', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ confidence_interval: {} })),
+    });
+
+    await expect(predictEta({
+      routeDistance: 100, timeOfDay: 10, dayOfWeek: 1, routeType: 'city', historicalSpeed: 30,
+    })).rejects.toThrow('[ML] Invalid ETA prediction');
+  });
+
+  it('throws on non-finite eta_minutes', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ eta_minutes: null, confidence_interval: {} })),
+    });
+
+    await expect(predictEta({
+      routeDistance: 100, timeOfDay: 10, dayOfWeek: 1, routeType: 'city', historicalSpeed: 30,
+    })).rejects.toThrow('[ML] Invalid ETA prediction');
+  });
+
+  it('provides default confidence_interval when missing from response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ eta_minutes: 30 })),
+    });
+
+    const result = await predictEta({
+      routeDistance: 100, timeOfDay: 10, dayOfWeek: 1, routeType: 'city', historicalSpeed: 30,
+    });
+    expect(result.eta_minutes).toBe(30);
+    expect(result.confidence_interval).toEqual({ lower: 0, upper: 0 });
+  });
+
+  it('throws with descriptive message on 401 auth failure', async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 401, ok: false, text: () => Promise.resolve('Invalid API key'),
+    });
+
+    await expect(predictEta({
+      routeDistance: 100, timeOfDay: 10, dayOfWeek: 1, routeType: 'city', historicalSpeed: 30,
+    })).rejects.toThrow('[ML] Authentication failed (401)');
+  });
+});
+
+describe('ml service — matchBilateral', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.ML_ENGINE_URL;
+    process.env.ML_API_KEY = 'test_key';
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends loads and drivers arrays matching BilateralMatchInput schema', async () => {
+    const loads = [
+      {
+        origin_lat: 28.61, origin_lng: 77.23,
+        dest_lat: 19.08, dest_lng: 72.88,
+        weight_kg: 5000, length_m: 6, width_m: 2.5, height_m: 2,
+        deadline_hours: 48,
+      },
+    ];
+    const drivers = [
+      {
+        current_lat: 28.61, current_lng: 77.23,
+        max_weight_kg: 10000, max_length_m: 7, max_width_m: 2.5, max_height_m: 2.5,
+        preferred_dest_lat: 19.08, preferred_dest_lng: 72.88,
+        rating: 4.5,
+      },
+    ];
+
+    const mockResponse = { assignments: [{ load_index: 0, driver_index: 0, match_score: 0.92 }], unmatched_loads: [], unmatched_drivers: [] };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(mockResponse)),
+    });
+
+    const result = await matchBilateral({ loads, drivers });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(JSON.parse(opts.body)).toEqual({ loads, drivers });
+    expect(result.assignments).toHaveLength(1);
+    expect(result.assignments[0].match_score).toBe(0.92);
+  });
+
+  it('throws on missing ML_API_KEY', async () => {
+    delete process.env.ML_API_KEY;
+    await expect(matchBilateral({ loads: [], drivers: [] })).rejects.toThrow('[ML] ML_API_KEY is not configured');
+  });
+
+  it('throws with descriptive message on 500 response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 500, ok: false, text: () => Promise.resolve('Model not loaded'),
+    });
+
+    await expect(matchBilateral({
+      loads: [{ origin_lat: 1, origin_lng: 1, dest_lat: 2, dest_lng: 2, weight_kg: 100, length_m: 1, width_m: 1, height_m: 1, deadline_hours: 24 }],
+      drivers: [{ current_lat: 1, current_lng: 1, max_weight_kg: 500, max_length_m: 2, max_width_m: 2, max_height_m: 2, rating: 4 }],
+    })).rejects.toThrow('[ML] Request failed (500)');
+  });
+});
+
+describe('ml service — predictDriverProfit', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.ML_ENGINE_URL;
+    process.env.ML_API_KEY = 'test_key';
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends correct payload matching DriverProfitInput schema', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ predicted_profit: 12500.5, confidence_interval: { lower: 10000, upper: 15000 } })),
+    });
+
+    const result = await predictDriverProfit({
+      routeDistanceKm: 500,
+      fuelPricePerLitre: 105,
+      tollEstimateInr: 1200,
+      truckMileageKmL: 4,
+      cargoWeightKg: 8000,
+      tripDurationHours: 10,
+    });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body).toEqual({
+      route_distance: 500,
+      fuel_price: 105,
+      toll_estimate: 1200,
+      truck_mileage: 4,
+      cargo_weight: 8000,
+      trip_duration: 10,
+    });
+    expect(result.predicted_profit).toBe(12500.5);
+    expect(result.confidence_interval.lower).toBe(10000);
+    expect(result.currency).toBe('INR');
+  });
+
+  it('throws on missing predicted_profit in response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ confidence_interval: {} })),
+    });
+
+    await expect(predictDriverProfit({
+      routeDistanceKm: 100, fuelPricePerLitre: 100, tollEstimateInr: 0, truckMileageKmL: 5, cargoWeightKg: 1000, tripDurationHours: 2,
+    })).rejects.toThrow('[ML] Invalid driver profit prediction');
+  });
+
+  it('throws on missing ML_API_KEY', async () => {
+    delete process.env.ML_API_KEY;
+    await expect(predictDriverProfit({
+      routeDistanceKm: 100, fuelPricePerLitre: 100, tollEstimateInr: 0, truckMileageKmL: 5, cargoWeightKg: 1000, tripDurationHours: 2,
+    })).rejects.toThrow('[ML] ML_API_KEY is not configured');
+  });
+});
+
+describe('ml service — optimisePacking', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.ML_ENGINE_URL;
+    process.env.ML_API_KEY = 'test_key';
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends packages, truck, and delivery_addresses matching PackingInput schema', async () => {
+    const packages = [
+      { length: 1.2, width: 0.8, height: 0.6, weight: 50 },
+      { length: 0.5, width: 0.5, height: 0.5, weight: 20 },
+    ];
+    const truck = { length: 6, width: 2.5, height: 2.5, max_weight: 10000 };
+    const deliveryAddresses = [
+      { lat: 28.61, lng: 77.23 },
+      { lat: 19.08, lng: 72.88 },
+    ];
+
+    const mockResponse = {
+      packing_arrangement: [{ package_index: 0, position: { x: 0, y: 0, z: 0 } }],
+      unpacked_packages: [],
+      stop_sequence: [0, 1],
+      utilization_pct: 85.5,
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(mockResponse)),
+    });
+
+    const result = await optimisePacking({ packages, truck, deliveryAddresses });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.packages).toEqual(packages);
+    expect(body.truck).toEqual(truck);
+    expect(body.delivery_addresses).toEqual(deliveryAddresses);
+    expect(result.utilization_pct).toBe(85.5);
+    expect(result.stop_sequence).toEqual([0, 1]);
+  });
+
+  it('throws on missing ML_API_KEY', async () => {
+    delete process.env.ML_API_KEY;
+    await expect(optimisePacking({ packages: [], truck: { length: 1, width: 1, height: 1, max_weight: 1 }, deliveryAddresses: [] }))
+      .rejects.toThrow('[ML] ML_API_KEY is not configured');
+  });
+});
+
+describe('ml service — recommendLoads', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.ML_ENGINE_URL;
+    process.env.ML_API_KEY = 'test_key';
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends userId, booking_history, rated_drivers, top_n matching RecommendLoadsInput schema', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ recommendations: [{ load_id: 'L001', score: 0.95 }] })),
+    });
+
+    const result = await recommendLoads({
+      userId: 'user-123',
+      bookingHistory: [{ load_id: 'L001', rating: 5 }],
+      ratedDrivers: [{ driver_id: 'D001', rating: 4 }],
+      topN: 3,
+    });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.user_id).toBe('user-123');
+    expect(body.booking_history).toEqual([{ load_id: 'L001', rating: 5 }]);
+    expect(body.rated_drivers).toEqual([{ driver_id: 'D001', rating: 4 }]);
+    expect(body.top_n).toBe(3);
+    expect(result.recommendations).toHaveLength(1);
+  });
+
+  it('uses defaults for optional parameters', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ recommendations: [] })),
+    });
+
+    await recommendLoads({ userId: 'user-123' });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.booking_history).toEqual([]);
+    expect(body.rated_drivers).toEqual([]);
+    expect(body.top_n).toBe(5);
+  });
+
+  it('throws on missing ML_API_KEY', async () => {
+    delete process.env.ML_API_KEY;
+    await expect(recommendLoads({ userId: 'user-123' })).rejects.toThrow('[ML] ML_API_KEY is not configured');
+  });
+});
+
+describe('ml service — recommendTrucks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.ML_ENGINE_URL;
+    process.env.ML_API_KEY = 'test_key';
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends userId, booking_history, rated_loads, top_n matching RecommendTrucksInput schema', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ recommendations: [{ truck_id: 'T001', score: 0.88 }] })),
+    });
+
+    const result = await recommendTrucks({
+      userId: 'user-456',
+      bookingHistory: [{ load_id: 'L002', rating: 4 }],
+      ratedLoads: [{ load_id: 'L002', rating: 4 }],
+      topN: 10,
+    });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.user_id).toBe('user-456');
+    expect(body.booking_history).toEqual([{ load_id: 'L002', rating: 4 }]);
+    expect(body.rated_loads).toEqual([{ load_id: 'L002', rating: 4 }]);
+    expect(body.top_n).toBe(10);
+    expect(result.recommendations).toHaveLength(1);
+  });
+
+  it('uses defaults for optional parameters', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ recommendations: [] })),
+    });
+
+    await recommendTrucks({ userId: 'user-456' });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.booking_history).toEqual([]);
+    expect(body.rated_loads).toEqual([]);
+    expect(body.top_n).toBe(5);
+  });
+
+  it('throws on missing ML_API_KEY', async () => {
+    delete process.env.ML_API_KEY;
+    await expect(recommendTrucks({ userId: 'user-456' })).rejects.toThrow('[ML] ML_API_KEY is not configured');
+  });
+});
+
+describe('ml service — scoreTrust', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.ML_ENGINE_URL;
+    process.env.ML_API_KEY = 'test_key';
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends behavioral metrics matching TrustScoreInput schema', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ trust_score: 0.85, risk_category: 'low' })),
+    });
+
+    const result = await scoreTrust({
+      cancellationRate: 0.05,
+      onTimePct: 95,
+      avgRating: 4.5,
+      disputeCount: 1,
+      isVerified: true,
+    });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body).toEqual({
+      cancellation_rate: 0.05,
+      on_time_pct: 95,
+      avg_rating: 4.5,
+      dispute_count: 1,
+      is_verified: true,
+    });
+    expect(result.trust_score).toBe(0.85);
+    expect(result.risk_category).toBe('low');
+  });
+
+  it('throws on missing ML_API_KEY', async () => {
+    delete process.env.ML_API_KEY;
+    await expect(scoreTrust({
+      cancellationRate: 0, onTimePct: 100, avgRating: 5, disputeCount: 0, isVerified: true,
+    })).rejects.toThrow('[ML] ML_API_KEY is not configured');
+  });
+});
+
+describe('ml service — matchDeadhead', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    delete process.env.ML_ENGINE_URL;
+    process.env.ML_API_KEY = 'test_key';
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('sends driver_destination, truck_specs, arrival_time, available_loads matching DeadheadInput schema', async () => {
+    const params = {
+      driverDestination: { lat: 28.61, lng: 77.23 },
+      truckSpecs: { max_weight_kg: 10000, max_length_m: 7, max_width_m: 2.5, max_height_m: 2.5 },
+      arrivalTime: '2026-07-20T14:00:00Z',
+      availableLoads: [
+        {
+          load_id: 'L001',
+          origin_lat: 19.08, origin_lng: 72.88,
+          dest_lat: 28.61, dest_lng: 77.23,
+          weight_kg: 5000, length_m: 6, width_m: 2.5, height_m: 2,
+          pickup_deadline: '2026-07-21T14:00:00Z',
+          payment_inr: 15000,
+        },
+      ],
+    };
+
+    const mockResponse = { recommendations: [{ load_id: 'L001', revenue: 15000, empty_km_saved: 1200 }] };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify(mockResponse)),
+    });
+
+    const result = await matchDeadhead(params);
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.driver_destination).toEqual(params.driverDestination);
+    expect(body.truck_specs).toEqual(params.truckSpecs);
+    expect(body.arrival_time).toBe(params.arrivalTime);
+    expect(body.available_loads).toEqual(params.availableLoads);
+    expect(result.recommendations).toHaveLength(1);
+  });
+
+  it('throws on missing ML_API_KEY', async () => {
+    delete process.env.ML_API_KEY;
+    await expect(matchDeadhead({
+      driverDestination: { lat: 0, lng: 0 },
+      truckSpecs: { max_weight_kg: 1, max_length_m: 1, max_width_m: 1, max_height_m: 1 },
+      arrivalTime: '2026-01-01T00:00:00Z',
+      availableLoads: [],
+    })).rejects.toThrow('[ML] ML_API_KEY is not configured');
   });
 });

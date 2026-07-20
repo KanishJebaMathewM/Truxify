@@ -1,13 +1,12 @@
 import { WebSocketServer } from 'ws';
 import jwt from 'jsonwebtoken';
 import logger from '../../middleware/logger.js';
-import Redis from 'ioredis';
-import { supabase } from '../../config/db.js';
+import { supabase, redisClient } from '../../config/db.js';
 
 class WebRTCSignalingServer {
   constructor(server) {
     this.wss = new WebSocketServer({ server, path: '/webrtc' });
-    this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+    this.redis = redisClient;
     this.peers = new Map(); // peerId -> { ws, location, meshId }
     this.meshes = new Map(); // meshId -> Set of peerIds
     
@@ -82,6 +81,11 @@ class WebRTCSignalingServer {
       // Handle disconnect
       ws.on('close', () => {
         this.handleDisconnect(peerId);
+      });
+
+      // Handle errors to prevent process crash
+      ws.on('error', (err) => {
+        logger.warn('WebSocket error for peer %s: %s', peerId, err.message);
       });
 
       // Send connected peers list
@@ -308,7 +312,6 @@ class WebRTCSignalingServer {
     this.peers.clear();
     this.meshes.clear();
     this.wss.close();
-    this.redis.disconnect();
   }
 
   async getPeersNearLocation(lat, lng, radius = 10) {

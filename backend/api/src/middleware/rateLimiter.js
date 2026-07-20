@@ -81,8 +81,9 @@ class DeferredRedisStore {
  * into one rate-limit bucket.
  */
 export function safeIpKeyGenerator(req) {
-  let ip = req.ip || req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
+  let ip = req.ip || req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown';
   if (typeof ip === 'string') {
+    if (ip.includes(',')) ip = ip.split(',')[0].trim();
     ip = ip.replace(/^::ffff:/, '');
     if (ip === '::1') ip = '127.0.0.1';
   }
@@ -105,9 +106,28 @@ export function userKeyGenerator(req) {
 // key by IP; kept generous so that legitimate users sharing a NAT'd IP are not
 // throttled by each other. Per-user fairness is enforced by userLimiter once
 // the request is authenticated.
+// Configurable rate limiter settings (defaults preserve existing behaviour)
+const GLOBAL_WINDOW_MS = Number(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const GLOBAL_MAX_REQUESTS = Number(process.env.GLOBAL_RATE_LIMIT_MAX_REQUESTS) || 1000;
+
+const USER_WINDOW_MS = Number(process.env.USER_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const USER_MAX_REQUESTS = Number(process.env.USER_RATE_LIMIT_MAX_REQUESTS) || 300;
+
+const HEALTH_WINDOW_MS = Number(process.env.HEALTH_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const HEALTH_MAX_REQUESTS = Number(process.env.HEALTH_RATE_LIMIT_MAX_REQUESTS) || 60;
+
+const AUTH_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000;
+const AUTH_MAX_REQUESTS = Number(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS) || 10;
+
+const BID_WINDOW_MS = Number(process.env.BID_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const BID_MAX_REQUESTS = Number(process.env.BID_RATE_LIMIT_MAX_REQUESTS) || 30;
+
+const DEVICE_WINDOW_MS = Number(process.env.DEVICE_RATE_LIMIT_WINDOW_MS) || 10 * 60 * 1000;
+const DEVICE_MAX_REQUESTS = Number(process.env.DEVICE_RATE_LIMIT_MAX_REQUESTS) || 10;
+
 export const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 1000,
+  windowMs: GLOBAL_WINDOW_MS,
+  max: GLOBAL_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
@@ -120,8 +140,8 @@ export const globalLimiter = rateLimit({
 // authenticate middleware so req.user is populated and each user gets an
 // independent bucket regardless of shared IPs.
 export const userLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
+  windowMs: USER_WINDOW_MS,
+  max: USER_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: userKeyGenerator,
@@ -130,8 +150,8 @@ export const userLimiter = rateLimit({
 });
 
 export const healthLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
+  windowMs: HEALTH_WINDOW_MS,
+  max: HEALTH_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
@@ -140,8 +160,8 @@ export const healthLimiter = rateLimit({
 });
 
 export const authLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 10,
+  windowMs: AUTH_WINDOW_MS,
+  max: AUTH_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
@@ -150,8 +170,8 @@ export const authLimiter = rateLimit({
 });
 
 export const bidLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
+  windowMs: BID_WINDOW_MS,
+  max: BID_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: userKeyGenerator,
@@ -160,8 +180,8 @@ export const bidLimiter = rateLimit({
 });
 
 export const deviceLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 10,
+  windowMs: DEVICE_WINDOW_MS,
+  max: DEVICE_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {

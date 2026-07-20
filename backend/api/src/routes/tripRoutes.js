@@ -34,7 +34,23 @@ function validateEventPayload(type, payload) {
   return { success: true, data: payload };
 }
 
-const SENSITIVE_FIELDS = ['otp', 'delivery_otp', 'token', 'secret', 'password'];
+const SENSITIVE_FIELDS = [
+  'otp', 'delivery_otp', 'token', 'secret', 'password',
+  'phone_number', 'driver_phone', 'customer_phone', 'email',
+  'current_location', 'driver_location',
+  'license_number', 'aadhaar_number', 'pan_number',
+];
+
+function deepSanitize(obj, keys) {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(item => deepSanitize(item, keys));
+  const clean = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (keys.includes(k)) continue;
+    clean[k] = deepSanitize(v, keys);
+  }
+  return clean;
+}
 
 // Schema for an individual Trip Event from the Flutter offline database
 const tripEventSchema = z.object({
@@ -123,10 +139,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
       const lat = event.payload?.lat !== undefined ? Number(event.payload.lat) : null;
       const lng = event.payload?.lng !== undefined ? Number(event.payload.lng) : null;
 
-      const safeMetadata = { ...event.payload };
-      for (const field of SENSITIVE_FIELDS) {
-        delete safeMetadata[field];
-      }
+      const safeMetadata = deepSanitize(event.payload, SENSITIVE_FIELDS);
 
       return {
         event_id: event.id,

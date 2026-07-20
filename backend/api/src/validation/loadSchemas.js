@@ -19,6 +19,7 @@ export const loadFilterQuerySchema = z.object({
     message: 'distance must be a positive number',
   }),
   order: z.enum(['asc', 'desc']).optional(),
+  sort_by: z.enum(['estimated_price', 'created_at', 'distance']).optional(),
 }).superRefine((filters, ctx) => {
   if (
     filters.min_price !== undefined

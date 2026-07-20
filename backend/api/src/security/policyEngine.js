@@ -80,6 +80,12 @@ const POLICIES = {
   'shard:view':                { roles: [ROLES.ADMIN] },
   'shard:query-orders':        { roles: [ROLES.ADMIN] },
 
+  'fraud:view-stats':          { roles: [ROLES.ADMIN] },
+  'fraud:view-risk':           { roles: [ROLES.ADMIN] },
+  'fraud:manage-review':       { roles: [ROLES.ADMIN] },
+  'fraud:track':               {},
+  'fraud:analyze-network':     { roles: [ROLES.ADMIN] },
+
   'trip:sync-events':          {},
   'trip:view-events':          { ownership: (u, r) => r?.trip && (u.role === ROLES.ADMIN || r.trip.driver_id === u.id || r.trip.customer_id === u.id) },
 

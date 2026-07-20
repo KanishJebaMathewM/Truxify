@@ -202,6 +202,10 @@ export async function unregisterDeviceToken(req, res) {
   }
 }
 
+export async function unregisterAllDeviceTokens(userId) {
+  // delete all rows for this user from user_devices
+}
+
 /**
  * Get list of unique registered device platforms
  */

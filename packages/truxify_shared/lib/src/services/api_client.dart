@@ -104,8 +104,14 @@ class ApiClient {
     return _supabase.auth.currentSession?.accessToken;
   }
 
-  String? get _accessToken =>
-      _cachedFirebaseToken ?? _supabase.auth.currentSession?.accessToken;
+  String? get _accessToken {
+    if (_cachedFirebaseToken != null) return _cachedFirebaseToken;
+    try {
+      return _supabase.auth.currentSession?.accessToken;
+    } catch (_) {
+      return null;
+    }
+  }
 
   Map<String, String> _headers({String? token, Map<String, String>? additionalHeaders}) {
     final t = token ?? _accessToken;
@@ -119,13 +125,22 @@ class ApiClient {
 
   Future<String?> _refreshedToken() async {
     try {
-      // Prefer Firebase token refresh.
       final firebaseUser = FirebaseAuth.instance.currentUser;
       if (firebaseUser != null) {
         final token = await firebaseUser.getIdToken(true);
         _cachedFirebaseToken = token;
         return token;
       }
+    } catch (e) {
+      if (kDebugMode) {
+        developer.log(
+          '[ApiClient] Firebase token refresh failed: $e',
+          name: 'ApiClient',
+        );
+      }
+    }
+
+    try {
       // Fall back to Supabase session refresh.
       final res = await _supabase.auth.refreshSession();
       return res.session?.accessToken;
@@ -180,8 +195,23 @@ class ApiClient {
   // ── URI building and path normalization ───────────────────────────
 
   Uri _buildUri(String path) {
-    final cleanPath = path.startsWith('/') ? path : '/$path';
-    return Uri.parse('$_baseUrl$cleanPath');
+    final baseUri = Uri.parse(_baseUrl);
+    final cleanPath = path.startsWith('/') ? path.substring(1) : path;
+    final queryStart = cleanPath.indexOf('?');
+    final rawPath = queryStart == -1
+        ? cleanPath
+        : cleanPath.substring(0, queryStart);
+    final rawQuery =
+        queryStart == -1 ? null : cleanPath.substring(queryStart + 1);
+    final baseSegments =
+        baseUri.pathSegments.where((segment) => segment.isNotEmpty);
+    final requestSegments =
+        rawPath.split('/').where((segment) => segment.isNotEmpty);
+
+    return baseUri.replace(
+      pathSegments: <String>[...baseSegments, ...requestSegments],
+      query: rawQuery?.isEmpty == true ? null : rawQuery,
+    );
   }
 
   // ── HTTP methods ──────────────────────────────────────────────────

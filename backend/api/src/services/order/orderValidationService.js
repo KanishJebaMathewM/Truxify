@@ -80,7 +80,11 @@ export class OrderValidationService {
     try {
       policy.authorize({ id: userId, role: 'driver' }, 'bid:submit', { offer });
     } catch (err) {
-      throw new DomainError(403, { error: 'You cannot bid on your own load offer' });
+      if (err.code === 'OWN_LOAD_VIOLATION' || err.message?.includes('own load')) {
+        throw new DomainError(403, { error: 'You cannot bid on your own load offer' });
+      }
+      this.logger.error({ err, userId, offerCustomerId }, 'Policy authorization failed in assertNotOwnLoad');
+      throw new DomainError(500, { error: 'Authorization check failed. Please try again.' });
     }
   }
 

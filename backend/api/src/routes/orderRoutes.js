@@ -1,7 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 
-import { bidLimiter, userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
+import { bidLimiter, userLimiter, userKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { mongoDb, supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -26,22 +26,11 @@ import { predictDemand, predictPrice } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
-import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
-import { DomainError } from '../services/order/domainError.js';
-
-import { LoadOfferCacheService } from '../services/order/loadOfferCacheService.js';
-const router = express.Router();
-const orderRepository = new OrderRepository(supabase);
-
-const orderValidationService = new OrderValidationService({ supabase, logger });
-const orderTimelineService = new OrderTimelineService(orderRepository);
-const orderMilestoneService = new OrderMilestoneService({ orderValidationService, orderRepository, orderTimelineService });
-
-const bidAcceptanceService = new BidAcceptanceService({
+import {
   orderRepository,
   orderValidationService,
-  orderMilestoneService,
   orderTimelineService,
+  orderMilestoneService,
   orderLifecycleService,
   deliveryVerificationService,
   buildDepositTx,
@@ -50,6 +39,8 @@ const bidAcceptanceService = new BidAcceptanceService({
   confirmEscrowRefund,
   escrowRefund,
 } from '../core/container.js';
+import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
+import { computeOrderPricing } from '../lib/pricing.js';
 
 const router = express.Router();
 
@@ -86,12 +77,7 @@ const predictDemandLimiter = rateLimit({
 const telemetryLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 30,
-  keyGenerator: (req) => {
-    if (!req.user || !req.user.id) {
-      return req.ip ? safeIpKeyGenerator(req) : 'unknown-ip';
-    }
-    return req.user.id;
-  },
+  keyGenerator: userKeyGenerator,
   store: createStore('rl:telemetry:'),
   standardHeaders: true,
   legacyHeaders: false,
@@ -143,6 +129,7 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requi
     return res.status(400).json({ error: 'Missing required routing or cargo specification fields.' });
   }
 
+  let pricing;
   try {
     const routeEstimate = await getRouteEstimate({
       pickupLat: Number(pickup_lat),
@@ -150,7 +137,6 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requi
       dropLat: Number(drop_lat),
       dropLng: Number(drop_lng),
     });
-    let pricing;
     pricing = computeOrderPricing({
       pickupLat:  Number(pickup_lat),
       pickupLng:  Number(pickup_lng),
@@ -277,7 +263,6 @@ router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requi
       return res.status(500).json({ error: 'Failed to create load offer.', details: offerErr.message });
     }
 
-    const { order } = await orderLifecycleService.createOrder(req.user.id, req.user.fullName || 'Customer', req.body);
     return res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
   } catch (err) {
     if (err instanceof DomainError) {
@@ -344,7 +329,7 @@ router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) 
 
     if (error) return res.status(500).json({ error: 'Failed to fetch en-route loads.', details: error.message });
 
-    const cacheKey = `load-offers:${page}:${limit}`;
+    const cacheKey = `load-offers:en-route:${page}:${limit}`;
     if (redisClient) {
       await redisClient.set(cacheKey, JSON.stringify(offers), 'EX', 120).catch(() => {});
     }
@@ -982,7 +967,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
 
   const lockKey = `deposit_lock:${orderId}`;
   let lockValue = null;
-  lockValue = await acquireLock(lockKey, 10000);
+  lockValue = await acquireLock(lockKey, 120000);
   if (!lockValue) {
     return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
   }
@@ -992,6 +977,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
     orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
+    if (order.status === 'cancelled') return res.status(409).json({ error: 'Order is already cancelled. Cannot confirm deposit.' });
 
     const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
     const customerWallet = customerProfile?.polygon_wallet_address ?? null;
@@ -1009,6 +995,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
         if (!updateErr) {
           return res.json({ message: 'Escrow deposit confirmed (recovered).', txHash: result.txHash });
         }
+        return res.status(202).json({ message: 'Escrow deposit confirmed on-chain. Database sync pending.', txHash: result.txHash });
       }
       return res.status(422).json({ error: result.error });
     }

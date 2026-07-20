@@ -2,7 +2,6 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -125,7 +124,7 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
         Escrow storage escrow = escrows[escrowId];
         require(escrow.customer != address(0), "Escrow not found");
         require(!escrow.released, "Already released");
-        require(msg.sender == escrow.driver || msg.sender == escrow.customer, "Not authorized");
+        require(msg.sender == owner(), "Only owner can release");
         require(!escrow.disputed, "Escrow disputed");
 
         // Verify commit-reveal
@@ -183,9 +182,17 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
     }
 
     function _verifyDisputeProof(bytes memory proof, uint256 escrowId) internal view returns (bool) {
-        // Verify dispute proof
-        // In production: verify signatures from validators
-        return true;
+        require(proof.length > 0, "Empty proof");
+        // Verify validator signature on the dispute
+        bytes32 messageHash = keccak256(abi.encodePacked(escrowId, escrows[escrowId].customer, escrows[escrowId].driver));
+        bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));
+        address validator = ecrecover(
+            ethSignedMessageHash,
+            uint8(proof[0]),
+            bytes32(proof[1:33]),
+            bytes32(proof[33:65])
+        );
+        return validator == owner();
     }
 
     // ============ Flashbots Integration ============

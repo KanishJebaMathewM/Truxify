@@ -277,9 +277,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final results = await Future.wait([
-        _earningsService.fetchTodayEarningsSummary().catchError((_) => null),
-        _earningsService.fetchDriverStats().catchError((_) => <String, dynamic>{}),
-        _tripService.fetchTripHistory(limit: 50).catchError((_) => <String, dynamic>{'trips': []}),
+        _earningsService.fetchTodayEarningsSummary().catchError((e) {
+          debugPrint('Failed to fetch earnings summary: $e');
+          return null;
+        }),
+        _earningsService.fetchDriverStats().catchError((e) {
+          debugPrint('Failed to fetch driver stats: $e');
+          return <String, dynamic>{};
+        }),
+        _tripService.fetchTripHistory(limit: 50).catchError((e) {
+          debugPrint('Failed to fetch trip history: $e');
+          return <String, dynamic>{'trips': []};
+        }),
       ]);
 
       if (!mounted) return;

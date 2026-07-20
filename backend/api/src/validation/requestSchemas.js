@@ -35,7 +35,7 @@ const isoDateStringSchema = z
     message: 'Must be a valid ISO date string',
   });
 
-const uuidSchema = z.string().uuid("Invalid ID format");
+export const uuidSchema = z.string().uuid("Invalid ID format");
 const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/; // HH:MM or HH:MM:SS
 const upiRegex = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$/;
 

@@ -87,6 +87,8 @@ contract KYCVerifier is Verifier {
     
     // Set regulator address
     function setRegulator(address newRegulator) public onlyAdmin {
+        require(newRegulator != address(0), "KYCVerifier: Invalid regulator address");
+        require(newRegulator != regulator, "KYCVerifier: Regulator already set");
         regulator = newRegulator;
     }
 }

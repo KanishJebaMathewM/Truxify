@@ -56,6 +56,23 @@ class FraudDetectionService {
           3600,
           JSON.stringify(profile)
         );
+      } else {
+        this.behavioralProfiles.set(userId, profile);
+      }
+
+      // Persist to Supabase to prevent data loss across Redis expirations
+      const { error: dbErr } = await supabase
+        .from('behavioral_profiles')
+        .upsert({
+          user_id: userId,
+          events: profile.events,
+          patterns: profile.patterns,
+          last_activity: new Date(profile.lastActivity).toISOString(),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+
+      if (dbErr) {
+        logger.error('[FraudDetection] Failed to persist behavioral profile to DB:', dbErr.message);
       }
 
       // Calculate risk score

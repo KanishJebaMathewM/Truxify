@@ -1,4 +1,5 @@
 import express from 'express';
+import { checkBypassEligibility } from '../services/weighStationService.js';
 import { supabase, redisClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
@@ -509,6 +510,20 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['dri
 
   } catch (err) {
     logger.error(`[reputation] Unexpected error retrieving reputation for driver ${driverId}: ${err.message}`);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+
+router.get('/weigh-stations/bypass-status', requireAuth, requireDriver, async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const lat = parseFloat(req.query.lat);
+    const lng = parseFloat(req.query.lng);
+    const status = await checkBypassEligibility(driverId, lat, lng);
+    return res.status(200).json(status);
+  } catch (err) {
+    logger.error(`[weigh-station] Error getting bypass status for driver ${req.user.id}: ${err.message}`);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });

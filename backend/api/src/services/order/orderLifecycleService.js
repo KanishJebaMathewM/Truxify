@@ -16,6 +16,7 @@ import {
 } from '../escrow.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { getRouteEstimate } from '../osrm.js';
+import { optimizeWaypoints } from '../routingService.js';
 import { predictPrice } from '../ml.js';
 import { awardReputationPoints } from '../reputation.js';
 import logger from '../../middleware/logger.js';
@@ -45,7 +46,17 @@ export class OrderLifecycleService {
       goods_type, weight_tonnes, length_ft, width_ft, height_ft,
       is_stackable, is_fragile, special_requirements,
       payment_method_id, upi_id,
+      waypoints = [],
     } = body;
+
+    let optimizedWaypoints = waypoints;
+    if (waypoints && waypoints.length > 0) {
+      optimizedWaypoints = await optimizeWaypoints(
+        { lat: Number(pickup_lat), lng: Number(pickup_lng), address: pickup_address },
+        { lat: Number(drop_lat), lng: Number(drop_lng), address: drop_address },
+        waypoints
+      );
+    }
 
     let pricing;
     try {
@@ -110,6 +121,7 @@ export class OrderLifecycleService {
         total_amount: pricing.totalAmount,
         estimated_price: estimatedPrice,
         payment_method_id, upi_id,
+        waypoints: optimizedWaypoints,
       });
 
       order = result.data;
@@ -148,6 +160,7 @@ export class OrderLifecycleService {
       net_profit: pricing.netProfit,
       extra_distance_km: pricing.distanceKm,
       status: 'available',
+      waypoints: optimizedWaypoints,
     });
 
     if (offerErr) {

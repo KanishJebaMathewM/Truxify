@@ -89,6 +89,7 @@ import { uuidParamSchema, registerTruckSchema } from '../validation/requestSchem
 import { getRouteEstimate } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { predictPrice } from '../services/ml.js';
+import { escapeLike } from '../lib/escapeLike.js';
 import logger from '../middleware/logger.js';
 
 function sanitizeNumberPlate(plate) {
@@ -291,7 +292,7 @@ router.get('/', authenticate, requirePolicy('truck:list-own'), userLimiter, asyn
     if (name && typeof name === 'string') {
       const cleanName = name.trim();
       if (cleanName) {
-        query = query.ilike('name', `%${cleanName}%`);
+        query = query.ilike('name', `%${escapeLike(cleanName)}%`);
       }
     }
 

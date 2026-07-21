@@ -97,6 +97,10 @@ import {
   startDocumentExpiryWorker,
   stopDocumentExpiryWorker,
 } from './services/documentExpiryService.js'
+import {
+  startDlqWorker,
+  stopDlqWorker,
+} from './workers/dlqWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js

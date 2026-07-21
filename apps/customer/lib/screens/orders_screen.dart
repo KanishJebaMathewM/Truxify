@@ -53,11 +53,11 @@ class _OrdersScreenState extends State<OrdersScreen>
   String _formatStatus(String status) {
     switch (status) {
       case 'driver_assigned':
-        return 'Driver Assigned';
+      case 'accepted':
+        return 'Accepted';
       case 'in_transit':
         return 'In Transit';
       case 'payment_released':
-        return 'Payment Released';
       case 'completed':
       case 'delivered':
         return 'Delivered';

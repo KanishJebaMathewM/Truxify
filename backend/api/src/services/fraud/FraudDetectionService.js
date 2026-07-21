@@ -491,26 +491,34 @@ class FraudDetectionService {
   }
 
   async storeRiskScore(userId, score, components) {
-    await supabase
-      .from('fraud_risk_scores')
-      .insert([{
-        user_id: userId,
-        risk_score: score,
-        components: components,
-        created_at: new Date().toISOString()
-      }]);
+    try {
+      await supabase
+        .from('fraud_risk_scores')
+        .insert([{
+          user_id: userId,
+          risk_score: score,
+          components: components,
+          created_at: new Date().toISOString()
+        }]);
+    } catch (err) {
+      logger.error(`[FraudDetection] Failed to store risk score for user ${userId}: ${err.message}`);
+    }
 
     // Cache in Redis
     if (this.redis) {
-      await this.redis.setex(
-        `risk:${userId}`,
-        3600,
-        JSON.stringify({
-          score,
-          components,
-          timestamp: Date.now()
-        })
-      );
+      try {
+        await this.redis.setex(
+          `risk:${userId}`,
+          3600,
+          JSON.stringify({
+            score,
+            components,
+            timestamp: Date.now()
+          })
+        );
+      } catch (err) {
+        logger.warn(`[FraudDetection] Failed to cache risk score for user ${userId}: ${err.message}`);
+      }
     }
   }
 

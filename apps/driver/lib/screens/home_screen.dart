@@ -154,7 +154,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _sanitizeCoordinate(dynamic coord) {
     if (coord == null) return '0.0';
     if (coord is double) return coord.toStringAsFixed(6);
-    if (coord is int) return coord.toStringAsFixed(6);
+    if (coord is int) return coord.toDouble().toStringAsFixed(6);
     return (double.tryParse(coord.toString()) ?? 0.0).toStringAsFixed(6);
   }
 

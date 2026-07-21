@@ -39,6 +39,14 @@ export const dlqService = {
     try {
       const now = new Date().toISOString();
 
+      // Recover events stuck in 'processing' for more than 5 minutes (e.g., after process crash)
+      const staleThreshold = new Date(Date.now() - 5 * 60000).toISOString();
+      await supabase
+        .from('webhook_failures')
+        .update({ status: 'pending', updated_at: now })
+        .eq('status', 'processing')
+        .lt('updated_at', staleThreshold);
+
       // Atomically claim pending events by updating status to 'processing'
       // This prevents concurrent workers from processing the same events
       const { data: claimedEvents, error: claimErr } = await supabase

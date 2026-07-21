@@ -394,6 +394,12 @@ abstract class AppLocalizations {
   String get viewAllOrders;
 
   String get recentRoutes;
+
+  String get allTrips;
+
+  String get filterStatus;
+
+  String get noMatchingTrips;
 }
 
 class _AppLocalizationsDelegate

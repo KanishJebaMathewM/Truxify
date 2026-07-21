@@ -1,3 +1,54 @@
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     LoadOffer:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *           format: uuid
+ *         pickup_address:
+ *           type: string
+ *         drop_address:
+ *           type: string
+ *         freight_value:
+ *           type: number
+ *         goods_type:
+ *           type: string
+ *         status:
+ *           type: string
+ *           enum: [available, claimed, expired, cancelled]
+ *         pickup:
+ *           type: string
+ *         destination:
+ *           type: string
+ *         estimated_price:
+ *           type: number
+ *         vehicle_type:
+ *           type: string
+ *     LoadListResponse:
+ *       type: object
+ *       properties:
+ *         page:
+ *           type: integer
+ *         limit:
+ *           type: integer
+ *         total:
+ *           type: integer
+ *         totalPages:
+ *           type: integer
+ *         loads:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/LoadOffer'
+ *     LoadSingleResponse:
+ *       type: object
+ *       properties:
+ *         load:
+ *           $ref: '#/components/schemas/LoadOffer'
+ */
+
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
@@ -29,6 +80,75 @@ function sanitizeLoadFilters(query) {
 // 1. GET ALL AVAILABLE LOAD OFFERS (DRIVER)
 // GET /api/loads
 // ============================================================================
+/**
+ * @openapi
+ * /api/loads:
+ *   get:
+ *     tags: [Loads]
+ *     summary: List available load offers
+ *     description: Returns paginated load offers for drivers. Supports filtering by status, location, price range, goods type, and distance. Results sorted by specified field.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *           maximum: 100
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [open, available, claimed, expired, cancelled]
+ *       - in: query
+ *         name: pickup_location
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: destination
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: goods_type
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: min_price
+ *         schema:
+ *           type: number
+ *         description: Minimum price in Rupees
+ *       - in: query
+ *         name: max_price
+ *         schema:
+ *           type: number
+ *         description: Maximum price in Rupees
+ *       - in: query
+ *         name: sort_by
+ *         schema:
+ *           type: string
+ *           enum: [estimated_price, created_at, distance]
+ *       - in: query
+ *         name: order
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *     responses:
+ *       200:
+ *         description: Paginated load offers
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LoadListResponse'
+ *       400:
+ *         description: Validation error
+ */
 router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), async (req, res) => {
   try {
     const filterResult = loadFilterQuerySchema.safeParse(req.query);
@@ -198,6 +318,33 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
 // 2. GET SINGLE LOAD OFFER BY ID (DRIVER)
 // GET /api/loads/:id
 // ============================================================================
+/**
+ * @openapi
+ * /api/loads/{id}:
+ *   get:
+ *     tags: [Loads]
+ *     summary: Get single load offer
+ *     description: Returns details for a specific available load offer by ID.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Load offer UUID
+ *     responses:
+ *       200:
+ *         description: Load offer details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LoadSingleResponse'
+ *       404:
+ *         description: Load offer not found or no longer available
+ */
 router.get('/:id', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateParams(paramIdSchema), async (req, res) => {
   try {
     const { data: load, error } = await supabase

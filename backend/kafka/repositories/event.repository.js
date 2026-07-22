@@ -80,7 +80,7 @@ class EventRepository {
       const events = await this.getEventsByOrderId(orderId);
       
       // Replay events in order
-      for (const event of events.reverse()) {
+      for (const event of [...events].reverse()) {
         // Emit event again
         await this.reemitEvent(event);
       }
@@ -123,7 +123,7 @@ class EventRepository {
         timeline: [],
       };
       
-      for (const event of events.reverse()) {
+      for (const event of [...events].reverse()) {
         snapshot.timeline.push({
           eventId: event.event_id,
           type: event.event_type,
@@ -171,11 +171,15 @@ class EventRepository {
     try {
       const { data, error } = await supabase
         .from('events')
-        .select('event_type, count')
-        .groupBy('event_type');
+        .select('event_type');
 
       if (error) throw error;
-      return data;
+
+      const stats = {};
+      for (const row of data ?? []) {
+        stats[row.event_type] = (stats[row.event_type] || 0) + 1;
+      }
+      return Object.entries(stats).map(([event_type, count]) => ({ event_type, count }));
     } catch (error) {
       logger.error('Failed to get event stats:', error);
       return [];

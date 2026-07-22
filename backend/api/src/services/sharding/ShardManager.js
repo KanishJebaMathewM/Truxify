@@ -1,4 +1,5 @@
-import { createPool } from 'mysql2/promise';
+import pkg from 'pg';
+const { Pool } = pkg;
 import Redis from 'ioredis';
 import logger from '../../middleware/logger.js';
 
@@ -68,15 +69,13 @@ class ShardManager {
   async initializePools() {
     for (const [name, config] of this.shards) {
       try {
-        config.pool = createPool({
+        config.pool = new Pool({
           host: config.host,
           port: config.port,
           database: config.database,
           user: config.user,
           password: config.password,
-          waitForConnections: true,
-          connectionLimit: 10,
-          queueLimit: 0
+          max: 10,
         });
         logger.info(`✅ Shard ${name} initialized`);
       } catch (error) {

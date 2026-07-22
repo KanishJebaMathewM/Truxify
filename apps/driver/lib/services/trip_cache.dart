@@ -34,7 +34,8 @@ class TripCache {
             .toList(growable: false);
       });
       return sections;
-    } catch (_) {
+    } catch (e) {
+      print('Error: $e');
       return <String, List<Map<String, dynamic>>>{};
     }
   }
@@ -97,8 +98,8 @@ class TripCache {
         itemsByTripId: itemsByTripId,
         savedAt: savedAt,
       );
-    } catch (_) {
-      // Corrupt or incompatible cache entry; treat as no cache available.
+    } catch (e) {
+      print('Error: $e');
       return null;
     }
   }

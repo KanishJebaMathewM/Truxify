@@ -169,6 +169,27 @@ router.get('/', authenticate, userLimiter, async (req, res) => {
   }
 });
 
+// GET CUSTOMER STATS
+router.get('/customer-stats', authenticate, userLimiter, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const role = req.user.role;
+
+    if (role !== 'customer') {
+      return res.status(403).json({ error: 'Customer stats are only available for customer accounts.' });
+    }
+
+    const stats = await getCustomerStats(userId);
+    return res.json({ stats: ProfileModel.fromCustomerStats(stats) });
+  } catch (err) {
+    return res.status(500).json({
+      error: 'Failed to fetch customer stats',
+      details: err.message
+    });
+  }
+});
+
+// GET PROFILE NAME BY ID
 /**
  * @openapi
  * /api/profile/{id}/name:

@@ -209,19 +209,18 @@ export function getEscrowBookingId (orderDisplayId) {
  * backend can confirm the on-chain deposit.
  *
  * @param {string} orderDisplayId
- * @param {string} customerWalletAddress — 0x-prefixed Polygon address of the customer
  * @param {string} driverWalletAddress   — 0x-prefixed Polygon address of the driver
  * @param {string} amountWei             — amount in wei (string or bigint)
  * @returns {Promise<{txData: object|null, bookingId: string}>}
  */
-export async function buildDepositTx (orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
+export async function buildDepositTx (orderDisplayId, driverWalletAddress, amountWei) {
   return measureExecution('EscrowService.buildDepositTx', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
   if (!escrowContract) {
     return { txData: null, bookingId }
   }
 
-  if (!ethers.isAddress(customerWalletAddress) || !ethers.isAddress(driverWalletAddress)) {
+  if (!ethers.isAddress(driverWalletAddress)) {
     return { txData: null, bookingId }
   }
   if (!amountWei || BigInt(amountWei) <= 0n) {

@@ -178,6 +178,68 @@ describe('Profile Routes', () => {
     });
   });
 
+  describe('GET /api/profile/customer-stats', () => {
+    it('returns 403 for non-customer role', async () => {
+      m.store.profiles.push({
+        id: 'driver-uuid-456',
+        firebase_uid: 'firebase-driver-uid',
+        role: 'driver',
+        full_name: 'Test Driver',
+      });
+
+      const res = await request(buildApp())
+        .get('/api/profile/customer-stats')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toContain('Customer stats are only available');
+    });
+
+    it('returns customer stats for customer role', async () => {
+      m.store.profiles.push({
+        id: 'customer-uuid-123',
+        firebase_uid: 'firebase-cust-uid',
+        role: 'customer',
+        full_name: 'Jane Doe',
+      });
+
+      m.store.customer_stats.push({
+        id: 'stats-1',
+        user_id: 'customer-uuid-123',
+        total_orders: 42,
+        total_saved: 12500,
+        co2_reduced_kg: 15.6,
+      });
+
+      const res = await request(buildApp())
+        .get('/api/profile/customer-stats')
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.stats).toEqual({
+        totalOrders: 42,
+        totalSaved: 12500,
+        co2ReducedKg: 15.6,
+      });
+    });
+
+    it('returns null stats when no customer_stats row exists', async () => {
+      m.store.profiles.push({
+        id: 'customer-uuid-123',
+        firebase_uid: 'firebase-cust-uid',
+        role: 'customer',
+        full_name: 'New Customer',
+      });
+
+      const res = await request(buildApp())
+        .get('/api/profile/customer-stats')
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.stats).toBeNull();
+    });
+  });
+
   describe('PUT /api/profile', () => {
     it('updates profiles fields for customer role', async () => {
       // Seed profile

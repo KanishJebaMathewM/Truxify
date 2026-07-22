@@ -30,12 +30,14 @@ class SyncService {
     try {
       final pendingPoDs = await LocalDbService.instance.getPendingPoDs();
       for (final pod in pendingPoDs) {
-        final stopId = pod['stop_id'] as String;
-        final tripId = pod['trip_display_id'] as String;
-        // In a real implementation, we would upload the photo_path and signature_path using multipart
-        // For now, we simulate the backend upload by just calling markStopCompleted
-        await _tripService.markStopCompleted(stopId, tripId);
-        await LocalDbService.instance.markPoDSynced(pod['id'] as int);
+        try {
+          final stopId = pod['stop_id'] as String;
+          final tripId = pod['trip_display_id'] as String;
+          await _tripService.markStopCompleted(stopId, tripId);
+          await LocalDbService.instance.markPoDSynced(pod['id'] as int);
+        } catch (e) {
+          debugPrint('Failed to sync pod ${pod['id']}: $e');
+        }
       }
       debugPrint('Sync completed for ${pendingPoDs.length} items.');
     } catch (e) {

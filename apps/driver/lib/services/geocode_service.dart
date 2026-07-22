@@ -81,7 +81,8 @@ class GeocodeService {
       _addToCache(key, ll);
       _reverseCache['$lat,$lon'] = _CacheEntry(displayName, DateTime.now());
       return ll;
-    } catch (_) {
+    } catch (e) {
+      print('Error: $e');
       return null;
     }
   }
@@ -118,7 +119,8 @@ class GeocodeService {
         _reverseCache[key] = _CacheEntry(displayName, DateTime.now());
       }
       return displayName;
-    } catch (_) {
+    } catch (e) {
+      print('Error: $e');
       return null;
     }
   }
@@ -145,7 +147,8 @@ class GeocodeService {
           .map((e) => (e as Map<String, dynamic>)['display_name'] as String? ?? '')
           .where((s) => s.isNotEmpty)
           .toList();
-    } catch (_) {
+    } catch (e) {
+      print('Error: $e');
       return [];
     }
   }

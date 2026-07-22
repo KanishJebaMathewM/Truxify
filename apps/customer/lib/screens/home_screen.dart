@@ -35,6 +35,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _locationLabel = 'Surat, Gujarat';
   String _customerName = '';
   List<Map<String, dynamic>> _activeOrders = [];
+  Map<String, dynamic>? _customerStats;
   List<RouteCardData> _usualRoutes = [];
 
   @override
@@ -61,11 +62,17 @@ class _HomeScreenState extends State<HomeScreen> {
       final results = await Future.wait([
         _profileService.fetchProfile(),
         _orderService.fetchActiveOrders(),
+        _profileService.fetchCustomerStats(),
         _orderService.fetchHistoryOrders(),
       ]);
       if (!mounted) return;
       final profile = results[0] is Map<String, dynamic> ? results[0] as Map<String, dynamic> : <String, dynamic>{};
       final orders = results[1] is List ? List<Map<String, dynamic>>.from(results[1] as List) : <Map<String, dynamic>>[];
+      final stats = results[2] is Map<String, dynamic> ? results[2] as Map<String, dynamic> : null;
+      setState(() {
+        _customerName = (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '').trim();
+        _activeOrders = orders;
+        _customerStats = stats;
       final history = results[2] is List ? List<Map<String, dynamic>>.from(results[2] as List) : <Map<String, dynamic>>[];
       setState(() {
         _customerName = (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '').trim();
@@ -285,11 +292,19 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: StatCard(title: AppLocalizations.of(context)!.moreStats, value: AppLocalizations.of(context)!.moreStats, icon: Icons.inventory_2_rounded),
+                            child: StatCard(
+                              title: AppLocalizations.of(context)!.totalShipments,
+                              value: '${_customerStats?['totalOrders'] ?? 0}',
+                              icon: Icons.inventory_2_rounded,
+                            ),
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: StatCard(title: AppLocalizations.of(context)!.moreStats, value: AppLocalizations.of(context)!.savings, icon: Icons.savings_rounded),
+                            child: StatCard(
+                              title: AppLocalizations.of(context)!.savings,
+                              value: '${_customerStats?['totalSaved'] ?? 0}',
+                              icon: Icons.savings_rounded,
+                            ),
                           ),
                         ],
                       ),
@@ -345,9 +360,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 8),
                       PrimaryButton(
                         label: '${AppLocalizations.of(context)!.bookATruck} \u{1f69b}',
-                        onPressed: () => controller.openFindTrucks(draft: mockDefaultRouteDraft),
+                        onPressed: () => controller.openFindTrucks(),
                       ),
                     ],
+                    ),
                   ),
                 ),
               ),

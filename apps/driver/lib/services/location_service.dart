@@ -7,13 +7,14 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:http/http.dart' as http;
 
+import 'battery_service.dart';
+
 class LocationService {
   LocationService._privateConstructor();
   static final LocationService instance = LocationService._privateConstructor();
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
   );
 
   static void _assertNotLocalhost() {
@@ -87,6 +88,8 @@ class LocationService {
     _maxIntervalTimer = null;
     _lastSentPosition = null;
     _lastTriggeredMilestone = null;
+    _activeOrderId = null;
+    _activeOrderDisplayId = null;
     _closeWebSocket();
   }
 
@@ -207,6 +210,7 @@ class LocationService {
       }
 
       if (_channel != null) {
+        final batteryInfo = BatteryService.instance.currentInfo;
         final payload = {
           'event': 'location_ping',
           'data': {
@@ -222,6 +226,8 @@ class LocationService {
             'bearing': position.heading,
             'device_timestamp': DateTime.now().toIso8601String(),
             'timestamp': DateTime.now().toIso8601String(),
+            'battery_level': batteryInfo.level,
+            'charging_status': batteryInfo.isCharging ? 'charging' : 'discharging',
           }
         };
         _channel!.sink.add(jsonEncode(payload));
@@ -399,7 +405,5 @@ class LocationService {
     }
     _channel?.sink.close();
     _channel = null;
-    _activeOrderId = null;
-    _activeOrderDisplayId = null;
   }
 }

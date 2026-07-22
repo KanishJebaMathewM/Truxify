@@ -2,8 +2,8 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
 contract StateChannel is Ownable, ReentrancyGuard, Pausable {
@@ -253,6 +253,7 @@ contract StateChannel is Ownable, ReentrancyGuard, Pausable {
         Dispute storage dispute = disputes[channelId];
         require(dispute.challenger != address(0), "No dispute");
         require(!dispute.resolved, "Already resolved");
+        require(block.timestamp >= dispute.startedAt + SETTLEMENT_PERIOD, "Settlement period not elapsed");
 
         // Verify proof and resolve
         // In production: verify state proof

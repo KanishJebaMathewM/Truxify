@@ -1010,7 +1010,7 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('dr
 });
 
 
-router.get('/weigh-stations/bypass-status', requireAuth, requireDriver, async (req, res) => {
+router.get('/weigh-stations/bypass-status', requireAuth, requireDriverRole, async (req, res) => {
   try {
     const driverId = req.user.id;
     const lat = parseFloat(req.query.lat);

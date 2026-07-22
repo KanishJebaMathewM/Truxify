@@ -1,5 +1,6 @@
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
 
@@ -18,25 +19,23 @@ function validatePlatform(platform) {
 /**
  * Register / update FCM token for a user device
  */
-export async function registerDeviceToken(req, res) {
+export async function registerDeviceToken(req, res, next) {
   try {
     const userId = req.user?.id;
     const { fcmToken, platform, metadata } = req.body;
 
     if (!userId) {
-      return res.status(401).json({
-        error: 'User not authenticated'
-      });
+      return next(new UnauthorizedError('User not authenticated'));
     }
 
     const tokenErr = validateFcmToken(fcmToken);
     if (tokenErr) {
-      return res.status(400).json({ error: tokenErr });
+      return next(new ValidationError(tokenErr));
     }
 
     const platErr = validatePlatform(platform);
     if (platErr) {
-      return res.status(400).json({ error: platErr });
+      return next(new ValidationError(platErr));
     }
 
     const tokenUpdatedAt = new Date().toISOString();
@@ -48,9 +47,7 @@ export async function registerDeviceToken(req, res) {
 
     if (lookupError) {
       logger.error('[DeviceController] Failed to look up existing device token owner:', lookupError.message);
-      return res.status(500).json({
-        error: 'Failed to register device'
-      });
+      return next(new AppError('Failed to register device', 500));
     }
 
     const previousUserId = existingDevice?.user_id;
@@ -67,9 +64,7 @@ export async function registerDeviceToken(req, res) {
 
     if (error) {
       logger.error('[DeviceController] Failed to register device token in database:', error.message);
-      return res.status(500).json({
-        error: 'Failed to register device'
-      });
+      return next(new AppError('Failed to register device', 500));
     }
 
     if (previousUserId && previousUserId !== userId) {
@@ -103,9 +98,7 @@ export async function registerDeviceToken(req, res) {
         '[DeviceController] Device token saved but failed to sync profiles.fcm_token:',
         profileSyncError.message
       );
-      return res.status(500).json({
-        error: 'Failed to sync device token to profile'
-      });
+      return next(new AppError('Failed to sync device token to profile', 500));
     }
 
     return res.json({
@@ -114,33 +107,24 @@ export async function registerDeviceToken(req, res) {
     });
   } catch (err) {
     logger.error('[DeviceController] Unexpected error in registerDeviceToken:', err.message);
-    return res.status(500).json({
-      error: 'An unexpected error occurred'
-    });
+    return next(err);
   }
 }
 
 /**
  * Unregister an FCM token for a user device, e.g. on logout.
- * Removes the token from user_devices so the signed-out device stops
- * receiving push notifications, and clears profiles.fcm_token when it
- * still points at the same token.
  */
-export async function unregisterDeviceToken(req, res) {
+export async function unregisterDeviceToken(req, res, next) {
   try {
     const userId = req.user?.id;
     const { fcmToken } = req.body;
 
     if (!userId) {
-      return res.status(401).json({
-        error: 'User not authenticated'
-      });
+      return next(new UnauthorizedError('User not authenticated'));
     }
 
     if (!fcmToken) {
-      return res.status(400).json({
-        error: 'fcmToken is required'
-      });
+      return next(new ValidationError('fcmToken is required'));
     }
 
     const { error: deleteError } = await supabase
@@ -151,9 +135,7 @@ export async function unregisterDeviceToken(req, res) {
 
     if (deleteError) {
       logger.error('[DeviceController] Failed to remove device token from database:', deleteError.message);
-      return res.status(500).json({
-        error: 'Failed to unregister device'
-      });
+      return next(new AppError('Failed to unregister device', 500));
     }
 
     const { error: profileClearError } = await supabase
@@ -178,16 +160,14 @@ export async function unregisterDeviceToken(req, res) {
     });
   } catch (err) {
     logger.error('[DeviceController] Unexpected error in unregisterDeviceToken:', err.message);
-    return res.status(500).json({
-      error: 'An unexpected error occurred'
-    });
+    return next(err);
   }
 }
 
 /**
  * Get list of unique registered device platforms
  */
-export async function getDevicePlatforms(req, res) {
+export async function getDevicePlatforms(req, res, next) {
   try {
     const { data, error } = await supabase
       .from('user_devices')
@@ -195,13 +175,13 @@ export async function getDevicePlatforms(req, res) {
 
     if (error) {
       logger.error('[DeviceController] Failed to query device platforms:', error.message);
-      return res.status(500).json({ error: 'Failed to retrieve platforms' });
+      return next(new AppError('Failed to retrieve platforms', 500));
     }
 
     const platforms = [...new Set((data || []).map((d) => d.platform).filter(Boolean))];
     return res.json({ platforms });
   } catch (err) {
     logger.error('[DeviceController] Unexpected error in getDevicePlatforms:', err.message);
-    return res.status(500).json({ error: 'An unexpected error occurred' });
+    return next(err);
   }
 }

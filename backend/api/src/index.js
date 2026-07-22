@@ -30,6 +30,7 @@ import adminRoutes from './routes/adminRoutes.js'
 import lookupRoutes from './routes/lookupRoutes.js'
 
 import logger from './middleware/logger.js'
+import { errorHandler } from './middleware/errorHandler.js'
 import { setupSwagger } from './config/swagger.js'
 import { requestIdMiddleware, requestLogger } from './middleware/requestId.js'
 import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js'
@@ -189,17 +190,7 @@ app.use((req, res) => {
 app.use(sentryErrorHandler())
 
 // Error handling middleware
-app.use((err, req, res, next) => {
-  if (err && err.name === 'MulterError') {
-    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400
-    return res.status(status).json({
-      error: `File upload error: ${err.message}`,
-      code: err.code
-    })
-  }
-  logger.error({ requestId: req.requestId, err }, 'Unhandled express exception')
-  res.status(500).json({ error: 'Critical Internal Server Error.' })
-})
+app.use(errorHandler)
 
 // ============================================================================
 // WEBSOCKET SERVER INIT (wait for MongoDB before accepting WebSocket connections)

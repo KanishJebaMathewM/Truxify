@@ -6,7 +6,7 @@ async function main() {
     console.log("⚡ Deploying zkEVM Rollup...");
 
     // Deploy Verifier (placeholder)
-    const MockVerifier = await ethers.getContractFactory("ZKVerifier");
+    const MockVerifier = await ethers.getContractFactory("Verifier");
     const verifier = await MockVerifier.deploy();
     await verifier.waitForDeployment();
     console.log(`✅ Verifier deployed: ${await verifier.getAddress()}`);

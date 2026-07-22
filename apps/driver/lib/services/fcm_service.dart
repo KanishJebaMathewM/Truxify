@@ -112,4 +112,4 @@ class FcmService {
     }
   }
 }
-export 'package:truxify_shared/src/services/fcm_service.dart';
+export 'package:truxify_shared/src/services/fcm_service.dart' hide FcmService;

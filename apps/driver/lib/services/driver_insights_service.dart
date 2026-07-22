@@ -14,13 +14,19 @@ class ProfitPrediction {
   final String currency;
 
   factory ProfitPrediction.fromJson(Map<String, dynamic> json) {
-    final prediction = json['prediction'] as Map<String, dynamic>;
-    final ci = prediction['confidence_interval'] as Map<String, dynamic>;
+    final prediction = json['prediction'];
+    if (prediction is! Map<String, dynamic>) {
+      throw FormatException('Missing or invalid "prediction" field');
+    }
+    final ci = prediction['confidence_interval'];
+    if (ci is! Map<String, dynamic>) {
+      throw FormatException('Missing or invalid "confidence_interval" field');
+    }
 
     return ProfitPrediction(
-      predictedProfit: (prediction['predicted_profit'] as num).toDouble(),
-      lowerBound: (ci['lower'] as num).toDouble(),
-      upperBound: (ci['upper'] as num).toDouble(),
+      predictedProfit: (prediction['predicted_profit'] as num?)?.toDouble() ?? 0.0,
+      lowerBound: (ci['lower'] as num?)?.toDouble() ?? 0.0,
+      upperBound: (ci['upper'] as num?)?.toDouble() ?? 0.0,
       currency: (prediction['currency'] as String?) ?? 'INR',
     );
   }

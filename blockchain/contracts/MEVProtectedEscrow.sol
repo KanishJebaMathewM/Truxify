@@ -87,7 +87,6 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
 
     function createEscrow(
         address driver,
-        bytes32 commitHash,
         bytes32 secretHash
     ) external payable nonReentrant whenNotPaused {
         require(msg.value > 0, "Amount must be > 0");
@@ -106,7 +105,7 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
             disputed: false,
             createdAt: block.timestamp,
             releasedAt: 0,
-            commitHash: commitHash,
+            commitHash: secretHash,
             revealDeadline: block.number + commitRevealPeriod,
             revealed: false,
             secret: 0

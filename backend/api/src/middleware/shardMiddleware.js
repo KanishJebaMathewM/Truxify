@@ -46,12 +46,16 @@ export const shardMiddleware = async (req, res, next) => {
       req.shard = shardName;
       req.shardConnection = await shardManager.getShardConnection(shardName);
       
-      // Cache shard info for this request
-      await shardManager.redis.setex(
-        `request:${req.requestId}:shard`,
-        300,
-        shardName
-      );
+      // Cache shard info for this request (non-critical — don't crash if Redis is down)
+      try {
+        await shardManager.redis.setex(
+          `request:${req.requestId}:shard`,
+          300,
+          shardName
+        );
+      } catch (redisErr) {
+        logger.warn('Failed to cache shard info:', redisErr.message);
+      }
       
       logger.info(`Request ${req.requestId} routed to shard: ${shardName}`);
     } else {

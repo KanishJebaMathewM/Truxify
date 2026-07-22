@@ -323,8 +323,10 @@ export function validateConfig() {
 async function shutdown(signal) {
   logger.info({ signal }, 'Received signal, starting graceful shutdown...');
   await closeDbConnections();
-  logger.info('Graceful shutdown complete.');
-  process.exit(0);
+  logger.info('Graceful shutdown complete. Exiting...');
+  // Allow the event loop to drain so other shutdown handlers (WebSocket tracker,
+  // reconciliation timers, FraudDetectionService cleanup) can finish their work.
+  // unref'd timers will not prevent exit; the process will exit naturally.
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'));

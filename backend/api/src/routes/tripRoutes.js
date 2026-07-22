@@ -1,3 +1,76 @@
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     BatchSyncRequest:
+ *       type: object
+ *       required:
+ *         - events
+ *         - idempotencyKey
+ *       properties:
+ *         events:
+ *           type: array
+ *           maxItems: 100
+ *           items:
+ *             type: object
+ *             properties:
+ *               id:
+ *                 type: string
+ *               trip_id:
+ *                 type: string
+ *                 nullable: true
+ *               type:
+ *                 type: string
+ *               occurred_at:
+ *                 type: string
+ *                 format: date-time
+ *               payload:
+ *                 type: object
+ *               retry_count:
+ *                 type: integer
+ *         idempotencyKey:
+ *           type: string
+ *     BatchSyncResponse:
+ *       type: object
+ *       properties:
+ *         message:
+ *           type: string
+ *         processed_count:
+ *           type: integer
+ *     TripEventsResponse:
+ *       type: object
+ *       properties:
+ *         trip_id:
+ *           type: string
+ *         events:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               event_id:
+ *                 type: string
+ *               user_id:
+ *                 type: string
+ *               trip_id:
+ *                 type: string
+ *               event_type:
+ *                 type: string
+ *               event_timestamp:
+ *                 type: string
+ *                 format: date-time
+ *               latitude:
+ *                 type: number
+ *                 nullable: true
+ *               longitude:
+ *                 type: number
+ *                 nullable: true
+ *               metadata:
+ *                 type: object
+ *               created_at:
+ *                 type: string
+ *                 format: date-time
+ */
+
 import express from 'express';
 import { z } from 'zod';
 import { supabase } from '../config/db.js';
@@ -93,6 +166,35 @@ const validateBatchPayload = (schema) => (req, res, next) => {
 // 📡 OFFLINE SYNC ENDPOINT: BATCH EVENT INGESTION
 // ============================================================================
 
+/**
+ * @openapi
+ * /api/v1/trips/events/batch:
+ *   post:
+ *     tags: [Trips]
+ *     summary: Batch ingest offline trip events
+ *     description: Handles batched telemetry and trip events uploaded by mobile clients after recovering from network loss. Supports idempotency to prevent duplicate processing.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/BatchSyncRequest'
+ *     responses:
+ *       200:
+ *         description: Empty batch acknowledged
+ *       202:
+ *         description: Batch processed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/BatchSyncResponse'
+ *       422:
+ *         description: Malformed batch payload
+ *       500:
+ *         description: Database processing error
+ */
 /**
  * POST /api/v1/trips/events/batch
  * Handles batched telemetry and trip events uploaded by the mobile client
@@ -204,6 +306,61 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
 // GET TRIP EVENTS (DRIVER, CUSTOMER, OR ADMIN)
 // ============================================================================
 /**
+ * @openapi
+ * /api/trips/{id}/events:
+ *   get:
+ *     tags: [Trips]
+ *     summary: Get trip events
+ *     description: Returns all telemetry/milestone events for a given trip, ordered chronologically. Accessible by trip driver, order customer, or admin.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *         description: Filter by event type (e.g., gpsUpdate)
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *       - in: query
+ *         name: min_lat
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: max_lat
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: min_lng
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: max_lng
+ *         schema:
+ *           type: number
+ *     responses:
+ *       200:
+ *         description: Trip events with metadata
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TripEventsResponse'
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Trip not found
+ */
+/**
  * GET /api/trips/:id/events
  *
  * Returns all telemetry/milestone events for a given trip, ordered
@@ -249,6 +406,7 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
 
       if (existingEventErr) {
         logger.error('[TripRoutes] Failed to check existing trip events:', existingEventErr.message);
+        return res.status(500).json({ error: 'Internal Server Error' });
       }
 
       // If no events found at all, check via orders whether this trip/order exists
@@ -260,6 +418,7 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
 
       if (orderErr) {
         logger.error('[TripRoutes] Failed to check order for trip:', orderErr.message);
+        return res.status(500).json({ error: 'Internal Server Error' });
       }
 
       if (!order && !existingEvent) {

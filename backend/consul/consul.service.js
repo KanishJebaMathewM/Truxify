@@ -14,6 +14,7 @@ class ConsulService {
         this.services = {};
         this.serviceCache = new Map();
         this.healthChecks = {};
+        this._healthInterval = null;
 
         // Start health checks
         this.startHealthChecks();
@@ -142,32 +143,48 @@ class ConsulService {
     // ============ Health Checks ============
 
     startHealthChecks() {
-        setInterval(async () => {
+        this._healthInterval = setInterval(async () => {
             await this.checkAllServices();
         }, 30000); // Every 30 seconds
     }
 
+    stopHealthChecks() {
+        if (this._healthInterval) {
+            clearInterval(this._healthInterval);
+            this._healthInterval = null;
+        }
+    }
+
     async checkAllServices() {
-        const services = await this.discoverService('*', false);
         const results = {};
 
-        for (const service of services) {
-            try {
-                const health = await this.consul.health.checks(service.id);
-                const isHealthy = health.length > 0 && health.some(c => c.Status === 'passing');
+        try {
+            const catalogServices = await this.consul.catalog.services();
+            const serviceNames = Object.keys(catalogServices);
 
-                results[service.id] = {
-                    healthy: isHealthy,
-                    lastCheck: new Date().toISOString(),
-                    status: isHealthy ? 'passing' : 'critical'
-                };
-            } catch (error) {
-                results[service.id] = {
-                    healthy: false,
-                    lastCheck: new Date().toISOString(),
-                    error: error.message
-                };
+            for (const name of serviceNames) {
+                const services = await this.discoverService(name, false);
+                for (const service of services) {
+                    try {
+                        const health = await this.consul.health.checks(service.id);
+                        const isHealthy = health.length > 0 && health.some(c => c.Status === 'passing');
+
+                        results[service.id] = {
+                            healthy: isHealthy,
+                            lastCheck: new Date().toISOString(),
+                            status: isHealthy ? 'passing' : 'critical'
+                        };
+                    } catch (error) {
+                        results[service.id] = {
+                            healthy: false,
+                            lastCheck: new Date().toISOString(),
+                            error: error.message
+                        };
+                    }
+                }
             }
+        } catch (error) {
+            logger.error('checkAllServices failed:', error);
         }
 
         this.healthChecks = results;

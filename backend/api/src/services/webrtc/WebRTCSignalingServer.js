@@ -100,11 +100,13 @@ class WebRTCSignalingServer {
     switch (message.type) {
       case 'location-update':
         peer.location = message.location;
-        await this.redis.setex(
-          `peer:${peerId}:location`,
-          60,
-          JSON.stringify(message.location)
-        );
+        if (this.redis) {
+          await this.redis.setex(
+            `peer:${peerId}:location`,
+            60,
+            JSON.stringify(message.location)
+          );
+        }
         // Relay location to nearby peers
         this.relayLocation(peerId, message.location);
         break;
@@ -221,11 +223,13 @@ class WebRTCSignalingServer {
     await supabase.from('gps_offline_data').insert([gpsEntry]);
 
     // Store locally in Redis for quick access
-    await this.redis.setex(
-      `gps:${peerId}:latest`,
-      300,
-      JSON.stringify(normalizedData)
-    );
+    if (this.redis) {
+      await this.redis.setex(
+        `gps:${peerId}:latest`,
+        300,
+        JSON.stringify(normalizedData)
+      );
+    }
 
     // Relayed to peers in mesh
     await this.relayLocation(peerId, normalizedData.location);

@@ -2,6 +2,7 @@ import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { buildSubgraphSchema } from '@apollo/federation';
 import { gql } from 'graphql-tag';
+import { supabase } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
 
 const typeDefs = gql`

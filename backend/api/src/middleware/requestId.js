@@ -17,7 +17,7 @@ export function requestLogger(req, res, next) {
   const requestedLogLevel = req.headers?.['x-log-level'];
   let reqLogger = logger;
   
-  if (requestedLogLevel && ['info', 'warn', 'error', 'debug', 'trace'].includes(requestedLogLevel.toLowerCase())) {
+  if (process.env.NODE_ENV !== 'production' && requestedLogLevel && ['info', 'warn', 'error', 'debug', 'trace'].includes(requestedLogLevel.toLowerCase())) {
     reqLogger = logger.child({});
     reqLogger.level = requestedLogLevel.toLowerCase();
   }

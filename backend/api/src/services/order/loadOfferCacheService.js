@@ -20,7 +20,10 @@ export class LoadOfferCacheService {
   }
 
   static async invalidateRegion(lat, lng) {
-    if (!redisClient) return;
+    if (!redisClient) {
+      logger.warn('[LoadOfferCache] Redis unavailable, skipping cache invalidation');
+      return;
+    }
     try {
       const region = this.getRegion(lat, lng);
       await redisClient.incr(`version:load_offers:region:${region}`);

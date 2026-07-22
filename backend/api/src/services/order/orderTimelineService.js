@@ -144,4 +144,8 @@ export class OrderTimelineService {
   async deleteTimeline(orderDisplayId) {
     return this.orderRepository.deleteTimeline(orderDisplayId);
   }
+
+  async insertCancelEvent(orderDisplayId) {
+    return this.insertEntry(orderDisplayId, 'Cancelled', 70);
+  }
 }

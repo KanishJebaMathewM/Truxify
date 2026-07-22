@@ -97,7 +97,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   String? _formatRupeesFromPaise(dynamic value) {
     if (value is! num) return null;
-    return 'Rs ${(value / 100).toStringAsFixed(0)}';
+    return '₹ ${(value / 100).toStringAsFixed(0)}';
   }
 
   Future<void> _loadOrderAndTimeline() async {
@@ -456,6 +456,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final isSuccess = _currentOrder.status == 'Delivered' || _currentOrder.status == 'Payment Released';
+    final isCancelled = _currentOrder.status == 'Cancelled';
 
     return Scaffold(
       appBar: AppBar(
@@ -493,8 +494,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 Text('Date: ${_currentOrder.date}', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 8),
                 StatusBadge(
-                  label: isSuccess ? '✅ ${_currentOrder.status}' : '❌ Cancelled',
-                  color: isSuccess ? TruxifyColors.accentDark : TruxifyColors.error,
+                  label: isSuccess ? '✅ ${_currentOrder.status}' : isCancelled ? '❌ Cancelled' : '🔄 ${_currentOrder.status}',
+                  color: isSuccess ? TruxifyColors.accentDark : isCancelled ? TruxifyColors.error : TruxifyColors.warning,
                   filled: true,
                 ),
               ],

@@ -5,6 +5,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'package:http/http.dart' as http;
 
 class LocationService {
   LocationService._privateConstructor();
@@ -37,6 +38,7 @@ class LocationService {
   int? _lastCloseCode;
   Position? _lastSentPosition;
   DateTime? _lastSentTime;
+  String? _lastTriggeredMilestone;
 
   // Throttling configuration: send ping if moved 15m+ OR 30 seconds passed
   static const double _minDistanceMeters = 15.0;
@@ -84,6 +86,7 @@ class LocationService {
     _maxIntervalTimer?.cancel();
     _maxIntervalTimer = null;
     _lastSentPosition = null;
+    _lastTriggeredMilestone = null;
     _closeWebSocket();
   }
 
@@ -160,7 +163,7 @@ class LocationService {
       if (_activeOrderId != null) {
         final cachedOrder = await Supabase.instance.client
             .from('orders')
-            .select('id')
+            .select('id, status, pickup_lat, pickup_lng, drop_lat, drop_lng')
             .eq('id', _activeOrderId!)
             .eq('driver_id', driverId)
             .inFilter('status', _activeOrderStatuses)
@@ -169,6 +172,9 @@ class LocationService {
         if (cachedOrder == null) {
           _activeOrderId = null;
           _activeOrderDisplayId = null;
+          _lastTriggeredMilestone = null;
+        } else {
+          unawaited(_checkGeofence(cachedOrder, position));
         }
       }
 
@@ -176,7 +182,7 @@ class LocationService {
       if (_activeOrderId == null) {
         final activeOrder = await Supabase.instance.client
             .from('orders')
-            .select('id, order_display_id')
+            .select('id, order_display_id, status, pickup_lat, pickup_lng, drop_lat, drop_lng')
             .eq('driver_id', driverId)
             .inFilter('status', _activeOrderStatuses)
             .maybeSingle();
@@ -184,6 +190,7 @@ class LocationService {
         if (activeOrder != null) {
           _activeOrderId = activeOrder['id']?.toString();
           _activeOrderDisplayId = activeOrder['order_display_id']?.toString();
+          unawaited(_checkGeofence(activeOrder, position));
         }
       }
 
@@ -225,6 +232,63 @@ class LocationService {
     } catch (e) {
       debugPrint('[LocationService] Error sending location ping: $e');
       return false;
+    }
+  }
+
+  Future<void> _checkGeofence(Map<String, dynamic> order, Position position) async {
+    final status = order['status']?.toString();
+    final orderId = order['id']?.toString();
+    if (status == null || orderId == null) return;
+
+    if (status == 'en_route_pickup' && _lastTriggeredMilestone != 'Arrived at Pickup') {
+      final pickupLat = double.tryParse(order['pickup_lat']?.toString() ?? '');
+      final pickupLng = double.tryParse(order['pickup_lng']?.toString() ?? '');
+      if (pickupLat != null && pickupLng != null) {
+        final distance = Geolocator.distanceBetween(
+          position.latitude, position.longitude, pickupLat, pickupLng,
+        );
+        if (distance < 500) {
+          await _updateOrderMilestone(orderId, 'Arrived at Pickup');
+        }
+      }
+    } else if (status == 'in_transit' && _lastTriggeredMilestone != 'Arriving') {
+      final dropLat = double.tryParse(order['drop_lat']?.toString() ?? '');
+      final dropLng = double.tryParse(order['drop_lng']?.toString() ?? '');
+      if (dropLat != null && dropLng != null) {
+        final distance = Geolocator.distanceBetween(
+          position.latitude, position.longitude, dropLat, dropLng,
+        );
+        if (distance < 500) {
+          await _updateOrderMilestone(orderId, 'Arriving');
+        }
+      }
+    }
+  }
+
+  Future<void> _updateOrderMilestone(String orderId, String milestone) async {
+    try {
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken;
+      if (token == null) return;
+      
+      final url = Uri.parse('$defaultApiBaseUrl/api/orders/$orderId/milestones');
+      final response = await http.put(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'milestone': milestone}),
+      );
+      
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        _lastTriggeredMilestone = milestone;
+        debugPrint('[LocationService] Successfully auto-triggered milestone: $milestone');
+      } else {
+        debugPrint('[LocationService] Failed to auto-trigger milestone $milestone. Status: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('[LocationService] Exception triggering milestone $milestone: $e');
     }
   }
 

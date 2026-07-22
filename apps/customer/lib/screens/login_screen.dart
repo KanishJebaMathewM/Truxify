@@ -2,7 +2,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
+import '../constants/ui_constants.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
@@ -257,7 +259,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const AppLogo(iconSize: 24),
               const SizedBox(height: 28),
               Text(
-                'Welcome back',
+                AppLocalizations.of(context)?.loginTitle ?? 'Welcome to Truxify',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                       color: colorScheme.onSurface,
                       fontWeight: FontWeight.w800,

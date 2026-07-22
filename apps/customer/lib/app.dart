@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'controllers/app_controller.dart';
 import 'screens/splash_screen.dart';
 import 'theme/app_theme.dart';
@@ -44,6 +45,7 @@ class _TruxifyAppState extends State<TruxifyApp> {
         darkTheme: TruxifyTheme.dark(),
         themeMode: _controller.themeMode,
         localizationsDelegates: const [
+          AppLocalizations.delegate,
           GlobalMaterialLocalizations.delegate,
           GlobalWidgetsLocalizations.delegate,
           GlobalCupertinoLocalizations.delegate,

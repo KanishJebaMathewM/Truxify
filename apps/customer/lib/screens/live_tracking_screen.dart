@@ -98,7 +98,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       }
     }
     _trackingSubscription?.cancel();
-    _trackingWebSocket?.close();
+    unawaited(_trackingWebSocket?.close());
     super.dispose();
   }
 

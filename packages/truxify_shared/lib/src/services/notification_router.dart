@@ -1,5 +1,8 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../models/notification_item.dart';
 import '../models/notification_payload.dart';
 
 /// Defines which app is using the router so it navigates to the correct
@@ -43,7 +46,32 @@ class NavigateToNotificationsList extends NotificationRoute {
   const NavigateToNotificationsList();
 }
 
-/// Resolves a [NotificationPayload] into a [NotificationRoute] action.
+/// The screen target determined from a notification payload.
+enum NotificationTarget {
+  orderDetail,
+  tripDetail,
+  earnings,
+  loadDetail,
+  notifications,
+  documents,
+  unknown,
+}
+
+/// Signature for the app-specific navigation callback.
+///
+/// The callback receives the resolved [target] and the raw [data] map so it
+/// can look up any required IDs (orderDisplayId, tripId, etc.) and perform
+/// the actual navigation using the app's own navigation framework.
+typedef NotificationNavigationCallback = Future<void> Function(
+  NotificationTarget target,
+  Map<String, dynamic> data,
+);
+
+/// Resolves notification payloads into navigation actions.
+///
+/// This class is intentionally stateless and has only static methods so it
+/// can be used from any context without coupling to a specific navigation
+/// package or widget tree.
 class NotificationRouter {
   NotificationRouter({required this.appType});
 
@@ -56,7 +84,8 @@ class NotificationRouter {
     _appType = type;
   }
 
-  /// Resolves a payload to a route based on the globally configured app type.
+  /// Resolves a [NotificationPayload] to a route based on the globally
+  /// configured app type.
   static NotificationRoute resolve(NotificationPayload payload) {
     return _resolveForAppType(payload, _appType);
   }
@@ -136,38 +165,10 @@ class NotificationRouter {
     } else {
       debugPrint('[NotificationRouter] No navigation callback registered.');
     }
-import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
+  }
 
-import '../models/notification_item.dart';
+  // ── FCM / raw data map navigation ──────────────────────────────────────
 
-/// The screen target determined from a notification payload.
-enum NotificationTarget {
-  orderDetail,
-  tripDetail,
-  earnings,
-  loadDetail,
-  notifications,
-  documents,
-  unknown,
-}
-
-/// Signature for the app-specific navigation callback.
-///
-/// The callback receives the resolved [target] and the raw [data] map so it
-/// can look up any required IDs (orderDisplayId, tripId, etc.) and perform
-/// the actual navigation using the app's own navigation framework.
-typedef NotificationNavigationCallback = Future<void> Function(
-  NotificationTarget target,
-  Map<String, dynamic> data,
-);
-
-/// Parses notification payloads and dispatches navigation via a callback.
-///
-/// This class is intentionally stateless and has only static methods so it
-/// can be used from any context without coupling to a specific navigation
-/// package or widget tree.
-class NotificationRouter {
   /// Resolves the [NotificationTarget] from a raw data map (FCM data payload
   /// or [NotificationItem.metadata]).
   static NotificationTarget resolveTarget(Map<String, dynamic> data) {
@@ -228,7 +229,7 @@ class NotificationRouter {
     }
   }
 
-  /// Convenience: navigate from an [NotificationItem].
+  /// Convenience: navigate from a [NotificationItem].
   static Future<void> navigateFromItem(
     NotificationItem item,
     NotificationNavigationCallback callback,
@@ -240,7 +241,7 @@ class NotificationRouter {
     await navigate(data, callback);
   }
 
-  /// Navigates from an [RemoteMessage]'s data payload.
+  /// Navigates from a [RemoteMessage]'s data payload.
   static Future<void> navigateFromRemoteMessage(
     RemoteMessage message,
     NotificationNavigationCallback callback,

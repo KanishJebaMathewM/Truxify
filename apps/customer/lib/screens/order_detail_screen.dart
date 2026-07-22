@@ -493,6 +493,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 const SizedBox(height: 8),
                 Text('Date: ${_currentOrder.date}', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 8),
+                if (_currentOrder.requiresRefrigeration) ...[
+                  Row(
+                    children: [
+                      const Icon(Icons.ac_unit_rounded, size: 16, color: Colors.blue),
+                      const SizedBox(width: 4),
+                      Text('Temperature: ${_currentOrder.targetTemperatureMin ?? '?'}°C to ${_currentOrder.targetTemperatureMax ?? '?'}°C', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.blue)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 StatusBadge(
                   label: isSuccess ? '✅ ${_currentOrder.status}' : isCancelled ? '❌ Cancelled' : '🔄 ${_currentOrder.status}',
                   color: isSuccess ? TruxifyColors.accentDark : isCancelled ? TruxifyColors.error : TruxifyColors.warning,

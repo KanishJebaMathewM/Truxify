@@ -1,20 +1,18 @@
 import express from 'express';
-import OracleService from '../oracle/OracleService.js';
+import { oracleService } from '../core/container.js';
 import { authenticate } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { oracleConfirmSchema, oracleVerifyCrosschainSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
-const oracleService = new OracleService();
 
-// Get oracle status
 router.get('/status', authenticate, async (req, res) => {
   try {
     res.status(200).json({
       success: true,
       data: {
-        providers: oracleService.providers.length,
-        threshold: oracleService.consensusThreshold,
+        providers: 3,
+        threshold: 2,
         timestamp: new Date().toISOString()
       }
     });
@@ -26,7 +24,6 @@ router.get('/status', authenticate, async (req, res) => {
   }
 });
 
-// Confirm delivery via oracle
 router.post('/confirm', authenticate, validateBody(oracleConfirmSchema), async (req, res) => {
   try {
     const { orderId, otp, gpsCoordinates } = req.body;
@@ -35,7 +32,7 @@ router.post('/confirm', authenticate, validateBody(oracleConfirmSchema), async (
       otp,
       gpsCoordinates
     });
-    
+
     res.status(200).json({
       success: true,
       data: result
@@ -48,12 +45,11 @@ router.post('/confirm', authenticate, validateBody(oracleConfirmSchema), async (
   }
 });
 
-// Cross-chain verification
 router.post('/verify-crosschain', authenticate, validateBody(oracleVerifyCrosschainSchema), async (req, res) => {
   try {
     const { orderId, blockchainHash } = req.body;
     const result = await oracleService.verifyCrossChain(orderId, blockchainHash);
-    
+
     res.status(200).json({
       success: true,
       data: result

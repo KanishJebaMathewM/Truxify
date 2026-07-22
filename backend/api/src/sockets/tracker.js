@@ -309,6 +309,7 @@ export function initWebSocketServer(server, orderRepository) {
   });
 
   wss.on('connection', async (ws, req) => {
+    ws._request = req;
     const reqUrl = new URL(req.url, 'http://localhost');
     const token    = reqUrl.searchParams.get('token');
     const bypassAuth = process.env.BYPASS_AUTH === 'true';

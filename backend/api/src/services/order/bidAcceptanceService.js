@@ -91,7 +91,7 @@ export class BidAcceptanceService {
     let bookingId = null;
     const amountWei = paisaToMaticWei(bid.bid_amount);
     try {
-      const buildResult = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
+      const buildResult = await this.buildDepositTxFn(order.order_display_id, driverWallet, amountWei);
       depositTx = buildResult;
       bookingId = buildResult?.bookingId || `escrow:${order.order_display_id}`;
     } catch (buildErr) {

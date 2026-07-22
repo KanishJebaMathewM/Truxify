@@ -136,6 +136,9 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         goodsType: widget.draft.goodsType,
         weightTonnes: weight,
         paymentMethodId: _selectedPayment?.id,
+        requiresRefrigeration: widget.draft.requiresRefrigeration,
+        targetTemperatureMin: widget.draft.targetTemperatureMin,
+        targetTemperatureMax: widget.draft.targetTemperatureMax,
       );
 
       _createdOrderId = orderId;

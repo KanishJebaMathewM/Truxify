@@ -253,6 +253,7 @@ contract StateChannel is Ownable, ReentrancyGuard, Pausable {
         Dispute storage dispute = disputes[channelId];
         require(dispute.challenger != address(0), "No dispute");
         require(!dispute.resolved, "Already resolved");
+        require(block.timestamp >= dispute.startedAt + SETTLEMENT_PERIOD, "Settlement period not elapsed");
 
         // Verify proof and resolve
         // In production: verify state proof

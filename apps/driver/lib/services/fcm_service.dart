@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 import 'api_client.dart';
 
 class FcmService {
-  static final String _apiBaseUrl = 'http://localhost:5000';
+  static const String defaultApiBaseUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL', defaultValue: '');
   static final ApiClient apiClient = ApiClient();
   static Future<void> initializeAndRegister() async {
     try {

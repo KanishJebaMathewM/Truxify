@@ -276,7 +276,7 @@ contract DAO is Ownable, ReentrancyGuard, Pausable {
             reason,
             callData,
             address(this),
-            0,
+            amount,
             ProposalType.TREASURY
         );
     }

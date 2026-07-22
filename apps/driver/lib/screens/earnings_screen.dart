@@ -157,6 +157,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   void _nextMonth() {
+    final now = DateTime.now();
+    if (_currentYear >= now.year && _currentMonth >= now.month) return;
+
     setState(() {
       _currentMonth++;
 

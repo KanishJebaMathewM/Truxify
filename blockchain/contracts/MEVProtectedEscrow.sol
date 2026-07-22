@@ -181,7 +181,7 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
     }
 
     function _verifyDisputeProof(bytes memory proof, uint256 escrowId) internal view returns (bool) {
-        require(proof.length > 0, "Empty proof");
+        require(proof.length == 65, "Invalid proof length — must be 65 bytes for ECDSA signature");
         // Verify validator signature on the dispute
         bytes32 messageHash = keccak256(abi.encodePacked(escrowId, escrows[escrowId].customer, escrows[escrowId].driver));
         bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));

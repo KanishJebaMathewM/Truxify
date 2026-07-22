@@ -423,7 +423,8 @@ async def health():
         "eta_predictor": eta_predictor.model is not None,
         "traffic_eta": traffic_pipeline.model is not None,
     }
-    all_ready = all(models.values())
+    non_optional = {k: v for k, v in models.items() if k != 'eta_predictor'}
+    all_ready = all(non_optional.values())
     return {
         "status": "healthy" if all_ready else "degraded",
         "service": "ml-engine",

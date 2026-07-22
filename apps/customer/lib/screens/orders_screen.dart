@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/widgets/order_card.dart';
 import '../constants/supabase_config.dart';
+import '../l10n/app_localizations.dart';
 import '../services/order_service.dart';
 import '../services/supabase_service.dart';
 import '../controllers/app_controller.dart';
@@ -38,14 +39,25 @@ class _OrdersScreenState extends State<OrdersScreen>
   List<HistoryOrderData> _historyOrders = [];
   bool _isLoading = true;
 
+  // Status filter state
+  String _selectedStatusFilter = 'All Trips';
+  final List<String> _statusFilterOptions = [
+    'All Trips',
+    'Pending',
+    'Accepted',
+    'In Transit',
+    'Delivered',
+    'Cancelled',
+  ];
+
   String _formatStatus(String status) {
     switch (status) {
       case 'driver_assigned':
-        return 'Driver Assigned';
+      case 'accepted':
+        return 'Accepted';
       case 'in_transit':
         return 'In Transit';
       case 'payment_released':
-        return 'Payment Released';
       case 'completed':
       case 'delivered':
         return 'Delivered';
@@ -177,6 +189,14 @@ class _OrdersScreenState extends State<OrdersScreen>
                   ? order['truck_number'].toString().trim()
                   : '—',
               timeline: const [],
+              goodsType: order['goods_type']?.toString(),
+              weightTonnes: order['weight_tonnes']?.toString(),
+              dimensions: (order['length_ft'] != null && order['width_ft'] != null && order['height_ft'] != null)
+                  ? '${order['length_ft']} × ${order['width_ft']} × ${order['height_ft']}'
+                  : null,
+              isStackable: order['is_stackable'] as bool?,
+              isFragile: order['is_fragile'] as bool?,
+              specialRequirements: order['special_requirements']?.toString(),
             );
           }).toList();
         });
@@ -188,14 +208,72 @@ class _OrdersScreenState extends State<OrdersScreen>
 
           if (!mounted) return;
 
+          const activeStatuses = {
+            'pending',
+            'active',
+            'driver_assigned',
+            'truck_assigned',
+            'en_route_pickup',
+            'arrived_pickup',
+            'picked_up',
+            'in_transit',
+            'arriving',
+          };
+
+          final activeRaw = cachedOrders
+              .where((o) => activeStatuses.contains(o['status']?.toString()))
+              .toList();
+          final historyRaw = cachedOrders
+              .where((o) => !activeStatuses.contains(o['status']?.toString()))
+              .toList();
+
           setState(() {
             _isOffline = true;
             _isLoading = false;
             _lastUpdatedLabel = updatedAt;
 
-            debugPrint(
-              'Loaded ${cachedOrders.length} cached orders in offline mode',
-            );
+            _activeOrders = activeRaw.map((order) {
+              return ActiveOrderData(
+                orderId: order['order_display_id']?.toString() ?? '',
+                route:
+                    '${order['pickup_address']} → ${order['drop_address']}',
+                driver: _resolveDriverName(order),
+                milestone:
+                    _formatStatus(order['status']?.toString() ?? 'pending'),
+                eta: order['eta']?.toString() ?? '',
+                status:
+                    _formatStatus(order['status']?.toString() ?? 'pending'),
+              );
+            }).toList();
+
+            _historyOrders = historyRaw.map((order) {
+              final rawAmount = order['total_amount'] ?? 0;
+              final amountInRupees = (rawAmount is num)
+                  ? (rawAmount / 100).toStringAsFixed(0)
+                  : rawAmount.toString();
+              return HistoryOrderData(
+                orderId: order['order_display_id']?.toString() ?? '',
+                route:
+                    '${order['pickup_address']} → ${order['drop_address']}',
+                date: order['pickup_date']?.toString() ?? '',
+                amount: '₹$amountInRupees',
+                status: _formatStatus(
+                    order['status']?.toString() ?? 'completed'),
+                driver: _resolveDriverName(order),
+                truckNumber: order['truck_number']?.toString().trim().isNotEmpty == true
+                    ? order['truck_number'].toString().trim()
+                    : '—',
+                timeline: const [],
+                goodsType: order['goods_type']?.toString(),
+                weightTonnes: order['weight_tonnes']?.toString(),
+                dimensions: (order['length_ft'] != null && order['width_ft'] != null && order['height_ft'] != null)
+                    ? '${order['length_ft']} × ${order['width_ft']} × ${order['height_ft']}'
+                    : null,
+                isStackable: order['is_stackable'] as bool?,
+                isFragile: order['is_fragile'] as bool?,
+                specialRequirements: order['special_requirements']?.toString(),
+              );
+            }).toList();
           });
         } else {
           if (!mounted) return;
@@ -226,7 +304,6 @@ class _OrdersScreenState extends State<OrdersScreen>
         !_tabController.indexIsChanging) {
       _tabController.animateTo(controller.ordersTabIndex);
     }
-    _loadOrders();
   }
 
   RealtimeChannel? _ordersChannel;
@@ -301,20 +378,31 @@ class _OrdersScreenState extends State<OrdersScreen>
 
   List<HistoryOrderData> get _filteredHistoryOrders {
     final query = _searchQuery.trim().toLowerCase();
-    if (query.isEmpty) {
-      return _historyOrders;
+    var filtered = _historyOrders;
+
+    // Apply status filter
+    if (_selectedStatusFilter != 'All Trips') {
+      filtered = filtered
+          .where((order) => order.status == _selectedStatusFilter)
+          .toList();
     }
-    return _historyOrders.where((order) {
-      return _orderMatches(query, [
-        order.orderId,
-        order.route,
-        order.driver,
-        order.date,
-        order.amount,
-        order.status,
-        order.truckNumber,
-      ]);
-    }).toList();
+
+    // Apply search query filter
+    if (query.isNotEmpty) {
+      filtered = filtered
+          .where((order) => _orderMatches(query, [
+                order.orderId,
+                order.route,
+                order.driver,
+                order.date,
+                order.amount,
+                order.status,
+                order.truckNumber,
+              ]))
+          .toList();
+    }
+
+    return filtered;
   }
 
   bool _orderMatches(String query, List<String> fields) {
@@ -327,26 +415,26 @@ class _OrdersScreenState extends State<OrdersScreen>
       child: Column(
         children: [
           OrderSearchBar(
-            title: 'Orders',
+            title: AppLocalizations.of(context)!.orders,
             isSearching: _isSearching,
             onToggle: _toggleSearch,
             controller: _searchController,
             onChanged: _onSearchChanged,
             searchQuery: _searchQuery,
-            hintText: 'Search by order ID, route, driver or status',
+            hintText: AppLocalizations.of(context)!.searchOrdersHint,
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
             child: TabBar(
               controller: _tabController,
-              tabs: const [Tab(text: 'Active'), Tab(text: 'History')],
+              tabs: [Tab(text: AppLocalizations.of(context)!.activeTab), Tab(text: AppLocalizations.of(context)!.historyTab)],
             ),
           ),
           if (_isOffline)
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
               child: Text(
-                'Offline mode • Last updated ${_formatLastUpdated(_lastUpdatedLabel)}',
+                '${AppLocalizations.of(context)!.offlineMode} \u2022 ${AppLocalizations.of(context)!.lastUpdated(_formatLastUpdated(_lastUpdatedLabel))}',
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
@@ -367,7 +455,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                           itemBuilder: (context, index) => const ShimmerOrderCard(),
                         )
                       : _filteredActiveOrders.isEmpty
-                          ? const Center(child: Text('No active orders'))
+                          ? Center(child: Text(AppLocalizations.of(context)!.noActiveOrders))
                           : ListView.separated(
                               padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                               itemCount: _filteredActiveOrders.length,
@@ -395,25 +483,124 @@ class _OrdersScreenState extends State<OrdersScreen>
                           separatorBuilder: (_, __) => const SizedBox(height: 14),
                           itemBuilder: (context, index) => const ShimmerOrderCard(),
                         )
-                      : _filteredHistoryOrders.isEmpty
-                          ? const Center(child: Text('No history orders'))
-                          : ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                              itemCount: _filteredHistoryOrders.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 14),
-                              itemBuilder: (context, index) {
-                                final order = _filteredHistoryOrders[index];
-                                return HistoryOrderCard(
-                                  order: order,
-                                  onTap: () => Navigator.of(context).push(
-                                    AppPageRoute(
-                                      builder: (_) =>
-                                          OrderDetailScreen(order: order),
+                      : Column(
+                          children: [
+                            // Status filter dropdown
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    AppLocalizations.of(context)!.filterStatus,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                          color: TruxifyColors
+                                              .adaptiveSecondaryText(context),
+                                        ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12),
+                                      decoration: BoxDecoration(
+                                        borderRadius:
+                                            BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: Theme.of(context)
+                                              .dividerColor,
+                                        ),
+                                      ),
+                                      child: DropdownButtonHideUnderline(
+                                        child: DropdownButton<String>(
+                                          value: _selectedStatusFilter,
+                                          isExpanded: true,
+                                          isDense: true,
+                                          items: _statusFilterOptions
+                                              .map(
+                                                (option) =>
+                                                    DropdownMenuItem(
+                                                  value: option,
+                                                  child: Text(
+                                                    option,
+                                                    style: const TextStyle(
+                                                        fontSize: 14),
+                                                  ),
+                                                ),
+                                              )
+                                              .toList(),
+                                          onChanged: (value) {
+                                            if (value != null) {
+                                              setState(() {
+                                                _selectedStatusFilter =
+                                                    value;
+                                              });
+                                            }
+                                          },
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                );
-                              },
+                                ],
+                              ),
                             ),
+                            // Orders list
+                            Expanded(
+                              child: _filteredHistoryOrders.isEmpty
+                                  ? Center(
+                                      child: Padding(
+                                        padding:
+                                            const EdgeInsets.symmetric(
+                                                horizontal: 24),
+                                        child: Text(
+                                          _historyOrders.isEmpty
+                                              ? AppLocalizations.of(
+                                                      context)!
+                                                  .noHistoryOrders
+                                              : AppLocalizations.of(
+                                                      context)!
+                                                  .noMatchingTrips,
+                                          textAlign: TextAlign.center,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                color: TruxifyColors
+                                                    .adaptiveSecondaryText(
+                                                        context),
+                                              ),
+                                        ),
+                                      ),
+                                    )
+                                  : ListView.separated(
+                                      padding: const EdgeInsets.fromLTRB(
+                                          20, 12, 20, 24),
+                                      itemCount:
+                                          _filteredHistoryOrders.length,
+                                      separatorBuilder: (_, __) =>
+                                          const SizedBox(height: 14),
+                                      itemBuilder: (context, index) {
+                                        final order =
+                                            _filteredHistoryOrders[index];
+                                        return HistoryOrderCard(
+                                          order: order,
+                                          onTap: () =>
+                                              Navigator.of(context).push(
+                                            AppPageRoute(
+                                              builder: (_) =>
+                                                  OrderDetailScreen(
+                                                      order: order),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                            ),
+                          ],
+                        ),
                 ),
               ],
             ),

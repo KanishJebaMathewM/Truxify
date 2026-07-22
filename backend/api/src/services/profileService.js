@@ -1,7 +1,8 @@
-import { supabase, redisClient } from '../config/db.js';
-import logger from '../middleware/logger.js';
+import { supabase } from '../config/db.js';
+import { measureExecution } from '../core/performanceMetrics.js';
 
 export async function getProfile(userId) {
+  return measureExecution('ProfileService.getProfile', async () => {
   if (!supabase) {
     throw new Error('Supabase client not configured — check SUPABASE_URL and SUPABASE_ANON_KEY');
   }
@@ -14,9 +15,11 @@ export async function getProfile(userId) {
 
   if (error) throw error;
   return data;
+  });
 }
 
 export async function getCustomerStats(userId) {
+  return measureExecution('ProfileService.getCustomerStats', async () => {
   if (!supabase) {
     throw new Error('Supabase client not configured — check SUPABASE_URL and SUPABASE_ANON_KEY');
   }
@@ -29,9 +32,11 @@ export async function getCustomerStats(userId) {
 
   if (error) throw error;
   return data;
+  });
 }
 
 export async function getDriverDetails(userId) {
+  return measureExecution('ProfileService.getDriverDetails', async () => {
   if (!supabase) {
     throw new Error('Supabase client not configured — check SUPABASE_URL and SUPABASE_ANON_KEY');
   }
@@ -44,28 +49,23 @@ export async function getDriverDetails(userId) {
 
   if (error) throw error;
   return data;
+  });
 }
 
 export async function createProfile(profileData) {
+  return measureExecution('ProfileService.createProfile', async () => {
   if (!supabase) throw new Error('Supabase client not configured');
   const { data, error } = await supabase.from('profiles').insert(profileData).select().single();
   if (error) throw error;
   return data;
+  });
 }
 
 export async function updateProfile(userId, updateData) {
+  return measureExecution('ProfileService.updateProfile', async () => {
   if (!supabase) throw new Error('Supabase client not configured');
   const { data, error } = await supabase.from('profiles').update(updateData).eq('id', userId).select().single();
   if (error) throw error;
   return data;
-}
-
-export async function invalidateProfileCache(userId) {
-  if (redisClient) {
-    try {
-      await redisClient.del(`profile:${userId}`);
-    } catch (err) {
-      logger.error({ err }, 'Redis cache invalidation error');
-    }
-  }
+  });
 }

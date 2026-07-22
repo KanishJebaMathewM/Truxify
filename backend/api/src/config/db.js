@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { createClient } from '@supabase/supabase-js';
 import { MongoClient } from 'mongodb';
 import Redis from 'ioredis';
+import pg from 'pg';
 import * as admin from 'firebase-admin';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -46,6 +47,31 @@ if (supabaseUrl && supabaseAnonKey) {
   );
 }
 
+/**
+ * Creates a per-request Supabase client authenticated with the given JWT.
+ * The resulting client carries the user's identity so that
+ * SECURITY DEFINER RPCs that call auth.uid() receive the correct user.
+ *
+ * @param {string} accessToken — a valid Supabase or Firebase access token
+ * @returns {import('@supabase/supabase-js').SupabaseClient}
+ */
+export function createUserClient(accessToken) {
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Cannot create user client: SUPABASE_URL or SUPABASE_ANON_KEY is not configured.');
+  }
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  });
+}
+
 if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseAnonKey) {
   try {
     supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
@@ -58,6 +84,30 @@ if (supabaseUrl && supabaseServiceKey && supabaseServiceKey !== supabaseAnonKey)
   } catch (error) {
     logger.error({ err: error }, 'Failed to initialize Supabase admin client');
   }
+}
+
+// ============================================================================
+// 1.5 DIRECT POSTGRESQL POOL (PgBouncer)
+// ============================================================================
+const databaseUrl = process.env.DATABASE_URL;
+export let pgPool = null;
+
+if (databaseUrl) {
+  try {
+    const { Pool } = pg;
+    pgPool = new Pool({
+      connectionString: databaseUrl,
+      // For PgBouncer in transaction mode, use a moderate pool size
+      max: 20, 
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+    });
+    logger.info('PostgreSQL Pool initialized successfully (PgBouncer port 6543).');
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to initialize PostgreSQL pool');
+  }
+} else {
+  logger.warn('DATABASE_URL not found in .env. Direct PostgreSQL pool disabled.');
 }
 
 // ============================================================================
@@ -197,6 +247,15 @@ export async function closeDbConnections() {
     }
   }
 
+  if (pgPool) {
+    try {
+      await pgPool.end();
+      logger.info('[shutdown] PostgreSQL pool closed.');
+    } catch (err) {
+      logger.error({ err }, '[shutdown] PostgreSQL pool close error');
+    }
+  }
+
   try {
     if (mongoose.connection.readyState !== 0) {
       await mongoose.disconnect();
@@ -260,3 +319,15 @@ export function validateConfig() {
 }
 
 // Resolves #2050: Handle SIGINT and SIGTERM for graceful DB shutdown
+
+async function shutdown(signal) {
+  logger.info({ signal }, 'Received signal, starting graceful shutdown...');
+  await closeDbConnections();
+  logger.info('Graceful shutdown complete. Exiting...');
+  // Allow the event loop to drain so other shutdown handlers (WebSocket tracker,
+  // reconciliation timers, FraudDetectionService cleanup) can finish their work.
+  // unref'd timers will not prevent exit; the process will exit naturally.
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

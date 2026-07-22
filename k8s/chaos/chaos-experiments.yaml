@@ -1,0 +1,64 @@
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-kill-experiment
+  namespace: truxify
+spec:
+  action: pod-kill
+  mode: one
+  selector:
+    labelSelectors:
+      app: api
+  scheduler:
+    cron: "@every 30m"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: NetworkChaos
+metadata:
+  name: network-latency-experiment
+  namespace: truxify
+spec:
+  action: delay
+  mode: all
+  selector:
+    labelSelectors:
+      app: api
+  delay:
+    latency: "300ms"
+    jitter: "100ms"
+  duration: "5m"
+  scheduler:
+    cron: "@every 1h"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: StressChaos
+metadata:
+  name: cpu-stress-experiment
+  namespace: truxify
+spec:
+  mode: one
+  selector:
+    labelSelectors:
+      app: ml-engine
+  stressors:
+    cpu:
+      workers: 2
+      load: 80
+  duration: "10m"
+  scheduler:
+    cron: "@every 2h"
+---
+apiVersion: chaos-mesh.org/v1alpha1
+kind: PodChaos
+metadata:
+  name: pod-failure-experiment
+  namespace: truxify
+spec:
+  action: pod-failure
+  mode: all
+  selector:
+    labelSelectors:
+      app: api
+  duration: "2m"
+  scheduler:
+    cron: "@every 45m"

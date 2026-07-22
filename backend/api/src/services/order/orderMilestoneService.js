@@ -1,102 +1,35 @@
 import crypto from 'crypto';
-import { redisClient } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
+import { supabase } from '../../config/db.js';
 import {
   sendDeliveryOtpNotification,
   storeDeliveryOtp,
   getActiveDeliveryOtp,
   verifyDeliveryOtp,
 } from '../notificationService.js';
+import {
+  checkOtpLockout,
+  recordOtpFailure,
+  clearOtpState,
+  OTP_TTL_MINUTES,
+  OTP_MAX_FAILED_ATTEMPTS,
+  OTP_LOCKOUT_MINUTES,
+  DELIVERY_OTP_READY_STATUSES,
+} from './orderNotificationService.js';
 import { escrowRelease } from '../escrow.js';
-import { DomainError } from './bidAcceptanceService.js';
-import { OrderTimelineService } from './orderTimelineService.js';
-
-const orderTimelineService = new OrderTimelineService({ supabase, logger });
 import { DomainError } from './domainError.js';
-
-export const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
-const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
-export const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
-const IN_MEMORY_OTP_MAP_MAX_SIZE = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || '10000', 10);
-export const DELIVERY_OTP_READY_STATUSES = new Set(['arriving']);
-
-const inMemoryOtpFailedAttempts = new Map();
-
-export async function checkOtpLockout(orderId) {
-  if (redisClient) {
-    try {
-      const lockKey = `otp_lockout:${orderId}`;
-      const isLocked = await redisClient.get(lockKey);
-      return !!isLocked;
-    } catch (err) {
-      logger.error('[OTP] Redis error in checkOtpLockout, falling back to memory:', err.message);
-    }
-  }
-  const record = inMemoryOtpFailedAttempts.get(orderId);
-  if (!record || !record.lockedUntil) return false;
-  if (Date.now() >= record.lockedUntil) {
-    inMemoryOtpFailedAttempts.delete(orderId);
-    return false;
-  }
-  return true;
-}
-
-export async function recordOtpFailure(orderId) {
-  if (redisClient) {
-    try {
-      const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-
-      const count = await redisClient.incr(countKey);
-      if (count === 1) await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
-      if (count >= OTP_MAX_FAILED_ATTEMPTS) {
-        await redisClient.set(lockKey, '1', 'EX', OTP_LOCKOUT_MINUTES * 60);
-      }
-      return count;
-    } catch (err) {
-      logger.error('[OTP] Redis error in recordOtpFailure, falling back to memory:', err.message);
-    }
-  }
-
-  if (inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
-    const oldestKey = inMemoryOtpFailedAttempts.keys().next().value;
-    inMemoryOtpFailedAttempts.delete(oldestKey);
-  }
-
-  let record = inMemoryOtpFailedAttempts.get(orderId);
-  if (!record) {
-    record = { count: 0, lockedUntil: null };
-    inMemoryOtpFailedAttempts.set(orderId, record);
-  }
-  record.count += 1;
-  if (record.count >= OTP_MAX_FAILED_ATTEMPTS) {
-    record.lockedUntil = Date.now() + OTP_LOCKOUT_MINUTES * 60 * 1000;
-  }
-  return record.count;
-}
-
-export async function clearOtpState(orderId) {
-  if (redisClient) {
-    try {
-      const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-      await redisClient.del(countKey, lockKey);
-      return;
-    } catch (err) {
-      logger.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);
-    }
-  }
-  inMemoryOtpFailedAttempts.delete(orderId);
-}
+import { measureExecution } from '../../core/performanceMetrics.js';
 
 export class OrderMilestoneService {
-  constructor(orderRepository) {
-    this.orderRepository = orderRepository;
-  constructor({ orderValidationService } = {}) {
-    this.validation = orderValidationService;
+  constructor(args = {}) {
+    if (args.orderRepository) this.orderRepository = args.orderRepository;
+    if (args.orderValidationService) this.validation = args.orderValidationService;
+    if (args.orderTimelineService) this.orderTimelineService = args.orderTimelineService;
+    if (args.orderNotificationService) this.orderNotificationService = args.orderNotificationService;
   }
 
   async updateMilestone({ orderId, milestone, driverId }) {
+    return measureExecution('OrderMilestoneService.updateMilestone', async () => {
     const milestoneMap = {
       'Truck Assigned': 'truck_assigned',
       'En Route to Pickup': 'en_route_pickup',
@@ -114,9 +47,7 @@ export class OrderMilestoneService {
     if (orderErr || !order) throw new DomainError(404, { error: 'Order not found.' });
     if (order.driver_id !== driverId) throw new DomainError(403, { error: 'Access Denied: You are not assigned to this order.' });
 
-    const { data: timeline, error: tlErr } = await this.orderRepository.getTimelineWithSortCheck(order.order_display_id);
-    if (tlErr) throw new DomainError(500, { error: 'Failed to fetch order timeline.' });
-    const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
+    const timeline = await this.orderTimelineService.getOrderTimeline(order.order_display_id);
 
     const canonicalMilestones = new Set([...Object.keys(milestoneMap), 'Order Placed', 'Delivered']);
     const lastCompleted = [...timeline].reverse().find(t => t.completed && canonicalMilestones.has(t.milestone));
@@ -153,14 +84,11 @@ export class OrderMilestoneService {
       }
     }
 
-    const { error: timelineErr } = await this.orderRepository.updateTimelineMilestone(order.order_display_id, milestone, { completed: true, milestone_time: new Date().toISOString() });
-    if (timelineErr) throw new DomainError(500, { error: 'Failed to update order timeline.', details: timelineErr.message });
-    await orderTimelineService.completeMilestone(order.order_display_id, milestone);
+    await this.orderTimelineService.completeMilestone(order.order_display_id, milestone);
 
     const { data: updatedOrder, error: updateErr } = await this.orderRepository.updateOrder(orderId, updates);
     if (updateErr) {
-      await this.orderRepository.updateTimelineMilestone(order.order_display_id, milestone, { completed: false, milestone_time: null });
-      await orderTimelineService.resetMilestone(order.order_display_id, milestone);
+      await this.orderTimelineService.resetMilestone(order.order_display_id, milestone);
       throw new DomainError(500, { error: 'Failed to update order.', details: updateErr.message });
     }
 
@@ -176,9 +104,11 @@ export class OrderMilestoneService {
     }
 
     return { order: updatedOrder, milestone, status };
+    });
   }
 
   async verifyDelivery({ orderId, otp, driverId }) {
+    return measureExecution('OrderMilestoneService.verifyDelivery', async () => {
     if (await checkOtpLockout(orderId)) {
       throw new DomainError(429, {
         error: `Too many failed OTP attempts. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes.`,
@@ -232,6 +162,7 @@ export class OrderMilestoneService {
 
     let releaseTxHash = null;
     let escrowAlreadyReleased = false;
+
     if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
       try {
         const releaseResult = await escrowRelease(order.order_display_id);
@@ -309,5 +240,6 @@ export class OrderMilestoneService {
     }
 
     return { status: 200, body: { message: 'Delivery verified successfully! Payment released to driver.' } };
+    });
   }
 }

@@ -1,0 +1,25 @@
+﻿apiVersion: security.istio.io/v1beta1
+
+apiVersion: security.istio.io/v1beta1
+
+kind: PeerAuthentication
+metadata:
+  name: truxify-peer-auth
+  namespace: truxify
+spec:
+  mtls:
+    mode: STRICT
+  selector:
+    matchLabels:
+      app: truxify
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default-peer-auth
+  namespace: istio-system
+spec:
+  mtls:
+    mode: PERMISSIVE
+

@@ -1,0 +1,56 @@
+﻿apiVersion: networking.istio.io/v1beta1
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: truxify-api
+  namespace: truxify
+spec:
+  hosts:
+  - api-service
+  http:
+  - match:
+    - uri:
+        prefix: /api/orders
+    route:
+    - destination:
+        host: api-service
+        port:
+          number: 5000
+      weight: 90
+    - destination:
+        host: api-service-v2
+        port:
+          number: 5000
+      weight: 10
+
+    retries:
+      attempts: 3
+      perTryTimeout: 2s
+    timeout: 5s
+    fault:
+      delay:
+        percentage:
+          value: 5
+        fixedDelay: 2s
+      abort:
+        percentage:
+          value: 1
+        httpStatus: 500
+  - match:
+    - uri:
+        prefix: /api/driver
+    route:
+    - destination:
+        host: api-service
+        port:
+          number: 5000
+      weight: 100
+  - match:
+    - uri:
+        prefix: /api
+    route:
+    - destination:
+        host: api-service
+        port:
+          number: 5000
+

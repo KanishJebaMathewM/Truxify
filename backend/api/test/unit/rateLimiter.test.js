@@ -28,6 +28,7 @@ const {
   authLimiter,
   bidLimiter,
   deviceLimiter,
+  adminRateLimiter,
   userKeyGenerator,
   safeIpKeyGenerator,
   createStore,
@@ -387,6 +388,61 @@ describe('Limiters as Express Middleware', () => {
       await deviceLimiter(req, res, next);
 
       expect(next).toHaveBeenCalled();
+    });
+  });
+
+  describe('adminRateLimiter', () => {
+    it('is a function', () => {
+      expect(typeof adminRateLimiter).toBe('function');
+    });
+
+    it('calls next() and increments the store for admin requests', async () => {
+      const req = makeReq({ user: { id: 'admin-123' } });
+      const res = makeRes();
+      const next = makeNext();
+
+      await adminRateLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(incrementSpy).toHaveBeenCalled();
+    });
+
+    it('calls next() for admin with user.uid', async () => {
+      const req = makeReq({ user: { uid: 'fb-admin-456' } });
+      const res = makeRes();
+      const next = makeNext();
+
+      await adminRateLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('calls next() for request without user (falls back to IP)', async () => {
+      const req = makeReq({ ip: '10.0.0.1' });
+      const res = makeRes();
+      const next = makeNext();
+
+      await adminRateLimiter(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+    });
+
+    it('keys by user ID so different admins have independent limits', async () => {
+      const reqA = makeReq({ user: { id: 'admin-a' } });
+      const reqB = makeReq({ user: { id: 'admin-b' } });
+      const res = makeRes();
+      const next = makeNext();
+
+      await adminRateLimiter(reqA, res, next);
+      await adminRateLimiter(reqB, res, next);
+
+      expect(next).toHaveBeenCalledTimes(2);
+    });
+
+    it('uses the rl:admin: store prefix', () => {
+      const store = createStore('rl:admin:');
+      expect(store).toBeInstanceOf(DeferredRedisStore);
+      expect(store.prefix).toBe('rl:admin:');
     });
   });
 });

@@ -4,6 +4,7 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/route_hero_card.dart';
 import '../widgets/accept_bottom_sheet.dart';
+import '../widgets/profit_estimate_card.dart';
 
 // ---------------------------------------------------------------------------
 // LoadDetailScreen — full details of a load offer for the driver
@@ -201,6 +202,10 @@ class LoadDetailScreen extends StatelessWidget {
                 ],
               ],
             ),
+            const SizedBox(height: 14),
+
+            // ── AI Profit Estimate ──────────────────────────────────────
+            ProfitEstimateCard(load: load),
             const SizedBox(height: 14),
 
             // ── Truck capacity ───────────────────────────────────────────

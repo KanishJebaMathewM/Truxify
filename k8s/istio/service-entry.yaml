@@ -1,0 +1,41 @@
+﻿apiVersion: networking.istio.io/v1beta1
+
+apiVersion: networking.istio.io/v1beta1
+
+kind: ServiceEntry
+metadata:
+  name: external-database
+  namespace: truxify
+spec:
+  hosts:
+  - postgres-external.com
+
+  - mongodb-external.com
+
+  ports:
+  - number: 5432
+    name: tcp
+    protocol: TCP
+  resolution: DNS
+  location: MESH_EXTERNAL
+  - number: 27017
+    name: mongo
+    protocol: TCP
+  resolution: DNS
+  location: MESH_EXTERNAL
+---
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: external-ml
+  namespace: truxify
+spec:
+  hosts:
+  - ml-api-external.com
+  ports:
+  - number: 443
+    name: https
+    protocol: HTTPS
+  resolution: DNS
+  location: MESH_EXTERNAL
+

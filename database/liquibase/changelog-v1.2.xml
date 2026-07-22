@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                      http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.1.xsd">
+
+    <changeSet id="8" author="truxify">
+        <comment>Add KYC fields to users</comment>
+        <addColumn tableName="users">
+            <column name="kyc_verified" type="BOOLEAN" defaultValueBoolean="false"/>
+            <column name="kyc_status" type="VARCHAR(50)" defaultValue="PENDING"/>
+            <column name="kyc_submitted_at" type="TIMESTAMP"/>
+            <column name="kyc_verified_at" type="TIMESTAMP"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="9" author="truxify">
+        <comment>Add driver location fields</comment>
+        <addColumn tableName="drivers">
+            <column name="current_lat" type="DECIMAL(10,8)"/>
+            <column name="current_lng" type="DECIMAL(11,8)"/>
+            <column name="last_location_update" type="TIMESTAMP"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="10" author="truxify">
+        <comment>Add blockchain fields</comment>
+        <addColumn tableName="orders">
+            <column name="blockchain_tx_hash" type="VARCHAR(255)"/>
+            <column name="blockchain_status" type="VARCHAR(50)"/>
+            <column name="escrow_address" type="VARCHAR(255)"/>
+        </addColumn>
+        <addColumn tableName="payments">
+            <column name="blockchain_tx_hash" type="VARCHAR(255)"/>
+            <column name="blockchain_status" type="VARCHAR(50)"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="11" author="truxify">
+        <comment>Create geospatial indexes</comment>
+        <sql>
+            CREATE INDEX idx_drivers_location ON drivers 
+            USING GIST (ST_SetSRID(ST_MakePoint(current_lng, current_lat), 4326))
+            WHERE current_lat IS NOT NULL AND current_lng IS NOT NULL;
+        </sql>
+        <sql>
+            CREATE INDEX idx_orders_pickup ON orders 
+            USING GIST (ST_SetSRID(ST_MakePoint(pickup_lng, pickup_lat), 4326));
+        </sql>
+        <sql>
+            CREATE INDEX idx_orders_drop ON orders 
+            USING GIST (ST_SetSRID(ST_MakePoint(drop_lng, drop_lat), 4326));
+        </sql>
+    </changeSet>
+
+</databaseChangeLog>

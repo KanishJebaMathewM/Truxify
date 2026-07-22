@@ -11,10 +11,15 @@ class RouteDraft {
     required this.stacked,
     required this.fragile,
     required this.requirements,
+    this.pickupDate,
     this.pickupLat,
     this.pickupLng,
     this.dropLat,
     this.dropLng,
+    this.truckType,
+    this.minCapacity,
+    this.maxCapacity,
+    this.materialType,
   });
 
   final String pickup;
@@ -26,10 +31,15 @@ class RouteDraft {
   final bool stacked;
   final bool fragile;
   final List<String> requirements;
+  final DateTime? pickupDate;
   final double? pickupLat;
   final double? pickupLng;
   final double? dropLat;
   final double? dropLng;
+  final String? truckType;
+  final double? minCapacity;
+  final double? maxCapacity;
+  final String? materialType;
 }
 
 class ShipmentCardData {
@@ -57,11 +67,23 @@ class RouteCardData {
     required this.route,
     required this.pickup,
     required this.drop,
+    this.tripCount,
+    this.lastUsedDate,
+    this.pickupLat,
+    this.pickupLng,
+    this.dropLat,
+    this.dropLng,
   });
 
   final String route;
   final String pickup;
   final String drop;
+  final int? tripCount;
+  final String? lastUsedDate;
+  final double? pickupLat;
+  final double? pickupLng;
+  final double? dropLat;
+  final double? dropLng;
 }
 
 class StatCardData {
@@ -187,6 +209,13 @@ class HistoryOrderData {
     this.distanceCharge,
     this.tollCharge,
     this.platformFee,
+    this.driverPhone,
+    this.goodsType,
+    this.weightTonnes,
+    this.dimensions,
+    this.isStackable,
+    this.isFragile,
+    this.specialRequirements,
   });
 
   final String orderId;
@@ -202,6 +231,13 @@ class HistoryOrderData {
   final String? distanceCharge;
   final String? tollCharge;
   final String? platformFee;
+  final String? driverPhone;
+  final String? goodsType;
+  final String? weightTonnes;
+  final String? dimensions;
+  final bool? isStackable;
+  final bool? isFragile;
+  final String? specialRequirements;
 }
 
 class TimelineStepData {

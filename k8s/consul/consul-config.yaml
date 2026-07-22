@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consul-config
+  namespace: consul
+data:
+  config.json: |
+    {
+      "bind_addr": "0.0.0.0",
+      "client_addr": "0.0.0.0",
+      "datacenter": "dc1",
+      "data_dir": "/consul/data",
+      "encrypt": "{{ .EncryptKey }}",
+      "log_level": "INFO",
+      "ports": {
+        "grpc": 8502,
+        "http": 8500,
+        "https": 8501,
+        "serf_lan": 8301,
+        "serf_wan": 8302,
+        "server": 8300
+      },
+      "primary_datacenter": "dc1",
+      "server": true,
+      "ui_config": {
+        "enabled": true
+      },
+      "connect": {
+        "enabled": true
+      },
+      "mesh_gateway": {
+        "enabled": true
+      }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: consul-multi-cloud
+  namespace: consul
+data:
+  multi-cloud.json: |
+    {
+      "services": [
+        {
+          "name": "api-service",
+          "address": "api.truxify.com",
+          "port": 5000,
+          "meta": {
+            "cloud": "aws",
+            "region": "us-east-1"
+          }
+        },
+        {
+          "name": "ml-service",
+          "address": "ml.truxify.com",
+          "port": 8000,
+          "meta": {
+            "cloud": "azure",
+            "region": "east-us"
+          }
+        },
+        {
+          "name": "db-service",
+          "address": "db.truxify.com",
+          "port": 5432,
+          "meta": {
+            "cloud": "gcp",
+            "region": "us-central1"
+          }
+        }
+      ]
+    }

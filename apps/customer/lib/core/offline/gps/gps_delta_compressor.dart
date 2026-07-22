@@ -97,3 +97,24 @@ class GpsDeltaCompressor {
 
   static double _toRadians(double degrees) => degrees * math.pi / 180.0;
 }
+
+class GpsCompressionStats {
+  int originalPoints = 0;
+  int compressedPoints = 0;
+  int totalOriginalBytes = 0;
+  int totalCompressedBytes = 0;
+
+  double get compressionRatio => totalOriginalBytes > 0 ? (1 - totalCompressedBytes / totalOriginalBytes) * 100 : 0;
+  int get pointsSaved => originalPoints - compressedPoints;
+
+  void record(int origBytes, int compBytes) {
+    originalPoints++;
+    compressedPoints++;
+    totalOriginalBytes += origBytes;
+    totalCompressedBytes += compBytes;
+  }
+
+  void recordSkip() { originalPoints++; }
+
+  String get summary => 'compressionRatio:F1 pointsSaved points saved';
+}

@@ -4,16 +4,23 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../core/app_routes.dart';
+import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
 import '../widgets/common_widgets.dart';
 
 class OtpScreen extends StatefulWidget {
-  const OtpScreen({super.key, required this.phone, required this.verificationId});
+  const OtpScreen({
+    super.key,
+    required this.phone,
+    required this.verificationId,
+    this.countryCode = '+91',
+  });
 
   final String phone;
   final String verificationId;
+  final String countryCode;
 
   @override
   State<OtpScreen> createState() => _OtpScreenState();
@@ -44,7 +51,7 @@ class _OtpScreenState extends State<OtpScreen> {
         _controllers.map((c) => c.text.replaceAll('\u200B', '')).join();
     if (!RegExp(r'^\d{6}$').hasMatch(code)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid 6-digit OTP')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.invalidOtp)),
       );
       return;
     }
@@ -59,15 +66,16 @@ class _OtpScreenState extends State<OtpScreen> {
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       String message;
+      final l10n = AppLocalizations.of(context)!;
       switch (e.code) {
         case 'invalid-verification-code':
-          message = 'Invalid OTP. Please check and try again.';
+          message = l10n.invalidOtp;
           break;
         case 'session-expired':
-          message = 'Code expired. Please request a new OTP.';
+          message = l10n.codeExpired;
           break;
         default:
-          message = e.message ?? 'Verification failed. Please try again.';
+          message = e.message ?? l10n.verificationFailedMsg;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),
@@ -75,7 +83,7 @@ class _OtpScreenState extends State<OtpScreen> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not verify OTP: $e')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.couldNotVerifyOtp)),
       );
     } finally {
       if (mounted) {
@@ -96,7 +104,7 @@ class _OtpScreenState extends State<OtpScreen> {
         elevation: 0,
         foregroundColor: TruxifyColors.primaryText,
         title: Text(
-          'Verify OTP',
+          AppLocalizations.of(context)!.verifyOtp,
           style: TextStyle(
             color: colorScheme.onSurface,
           ),
@@ -111,14 +119,14 @@ class _OtpScreenState extends State<OtpScreen> {
               const TruxifyLogo(size: 28),
               const SizedBox(height: 30),
               Text(
-                'Enter the 6-digit OTP',
+                AppLocalizations.of(context)!.enterOtp,
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                       color: colorScheme.onSurface,
                     ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Sent to +91 ${widget.phone}',
+                AppLocalizations.of(context)!.sentTo('${widget.countryCode} ${widget.phone}'),
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
@@ -127,7 +135,7 @@ class _OtpScreenState extends State<OtpScreen> {
               OtpInputRow(controllers: _controllers, focusNodes: _focusNodes),
               const SizedBox(height: 24),
               PrimaryButton(
-                label: _loading ? 'Verifying...' : 'Verify OTP',
+                label: _loading ? AppLocalizations.of(context)!.verifying : AppLocalizations.of(context)!.verifyOtp,
                 onPressed: _loading ? null : _verifyOtp,
               ),
             ],

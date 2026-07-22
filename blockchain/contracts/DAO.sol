@@ -259,7 +259,8 @@ contract DAO is Ownable, ReentrancyGuard, Pausable {
         require(recipient != address(0), "Invalid recipient");
         require(address(this).balance >= amount, "Insufficient balance");
 
-        payable(recipient).transfer(amount);
+        (bool sent, ) = recipient.call{value: amount}("");
+        require(sent, "Transfer failed");
         emit TreasuryWithdraw(msg.sender, amount);
     }
 

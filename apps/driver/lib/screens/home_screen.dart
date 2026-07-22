@@ -368,8 +368,13 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
 
       final historyData = results[2] as Map<String, dynamic>;
-      final historyList = (historyData['trips'] as List?)
-          ?.map((t) => TripRecord(
+      final historyRows = historyData['trips'] is List
+          ? (historyData['trips'] as List)
+              .whereType<Map>()
+              .map((t) => Map<String, dynamic>.from(t))
+          : const Iterable<Map<String, dynamic>>.empty();
+      final historyList = historyRows
+          .map((t) => TripRecord(
                 route: (t['route'] as String?) ?? (t['route_label'] as String?) ?? '',
                 date: (t['date'] as String?) ?? (t['trip_date'] as String?) ?? '',
                 earnings: (t['earnings'] as String?) ?? (t['payout'] as String?) ?? '',
@@ -379,7 +384,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 verifiedBadge: (t['verified_badge'] as String?) ?? '',
                 completed: (t['completed'] as bool?) ?? (t['is_completed'] as bool?) ?? false,
               ))
-          .toList() ?? [];
+          .toList();
 
       setState(() {
         _todayEarnings = results[0] as EarningsDailyModel?;

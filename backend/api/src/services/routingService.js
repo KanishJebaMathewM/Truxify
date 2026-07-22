@@ -20,9 +20,10 @@ export async function optimizeWaypoints(start, end, waypoints) {
       `${end.lng},${end.lat}`
     ].join(';');
 
-    // Use OSRM public trip API
+    // Use OSRM trip API with configurable URL
     // roundtrip=false, source=first, destination=last
-    const url = `http://router.project-osrm.org/trip/v1/driving/${coords}?roundtrip=false&source=first&destination=last`;
+    const OSRM_URL = process.env.OSRM_URL || 'http://localhost:5000';
+    const url = `${OSRM_URL}/trip/v1/driving/${coords}?roundtrip=false&source=first&destination=last`;
     
     const response = await axios.get(url, { timeout: 10000 });
     

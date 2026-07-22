@@ -12,7 +12,7 @@ class OfflineDbStats {
 
   static Future<OfflineDbStats> collect(Database db) async {
     final total = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM trip_events')) ?? 0;
-    final pending = Sqflite.firstIntValue(await db.rawQuery("SELECT COUNT(*) FROM trip_events WHERE synced = 0")) ?? 0;
+    final pending = Sqflite.firstIntValue(await db.rawQuery("SELECT COUNT(*) FROM trip_events WHERE sync_status = 'pending'")) ?? 0;
     return OfflineDbStats()
       ..totalEvents = total
       ..pendingEvents = pending

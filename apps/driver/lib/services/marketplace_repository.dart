@@ -24,7 +24,7 @@ class MarketplaceRepository {
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
-    defaultValue: '',
+
   );
 
   final SupabaseClient? _providedClient;

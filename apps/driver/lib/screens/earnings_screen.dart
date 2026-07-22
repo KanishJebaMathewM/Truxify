@@ -54,15 +54,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
 
-    await Future.wait([
-      _loadMonthlyEarnings(),
-      _loadSelectedDayTrips(),
-      _loadTransactions(),
-      _loadWalletSummary(),
-    ]);
-
-    if (mounted) {
-      setState(() => _isLoading = false);
+    try {
+      await Future.wait([
+        _loadMonthlyEarnings(),
+        _loadSelectedDayTrips(),
+        _loadTransactions(),
+        _loadWalletSummary(),
+      ]);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -155,6 +157,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   void _nextMonth() {
+    final now = DateTime.now();
+    if (_currentYear >= now.year && _currentMonth >= now.month) return;
+
     setState(() {
       _currentMonth++;
 

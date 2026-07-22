@@ -2,8 +2,8 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 interface IVerifier {
     function verifyProof(
@@ -218,9 +218,17 @@ contract ZKIdentity is Ownable, ReentrancyGuard, Pausable {
     }
 
     function _verifyZKProof(bytes memory proofData, bytes32 identityHash, bytes32 credentialHash) internal returns (bool) {
-        // In production: verify actual ZK proof
-        // For now: simulate verification
-        return true;
+        require(proofData.length > 0, "ZKIdentity: Empty proof");
+        require(verifierContract != address(0), "ZKIdentity: Verifier not set");
+        uint[] memory input = new uint[](2);
+        input[0] = uint(identityHash);
+        input[1] = uint(credentialHash);
+        return IVerifier(verifierContract).verifyProof(
+            [uint(0), uint(0)],
+            [[uint(0), uint(0)], [uint(0), uint(0)]],
+            [uint(0), uint(0)],
+            input
+        );
     }
 
     // ============ Selective Disclosure ============

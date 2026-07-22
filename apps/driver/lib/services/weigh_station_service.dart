@@ -17,10 +17,11 @@ class WeighStationEvent {
 }
 
 class WeighStationService {
-  WeighStationService._privateConstructor();
-  static final WeighStationService instance = WeighStationService._privateConstructor();
+  WeighStationService._({String? apiBaseUrl}) : _apiClient = ApiClient(baseUrl: apiBaseUrl);
 
-  final ApiClient _apiClient = ApiClient();
+  static final WeighStationService instance = WeighStationService._();
+
+  final ApiClient _apiClient;
   final _eventController = StreamController<WeighStationEvent>.broadcast();
   StreamSubscription<Position>? _locationSub;
 
@@ -31,10 +32,10 @@ class WeighStationService {
   static const double _alertThresholdMeters = 3218.0;
 
   final List<Map<String, double>> _mockStations = [
-    {'lat': 34.0522, 'lng': -118.2437}, // Los Angeles
-    {'lat': 40.7128, 'lng': -74.0060},  // NY
-    {'lat': 37.7749, 'lng': -122.4194}, // SF
-    {'lat': 29.7604, 'lng': -95.3698},  // Houston
+    {'lat': 28.6139, 'lng': 77.2090},   // Delhi
+    {'lat': 19.0760, 'lng': 72.8777},   // Mumbai
+    {'lat': 12.9716, 'lng': 77.5946},   // Bangalore
+    {'lat': 22.5726, 'lng': 88.3639},   // Kolkata
   ];
 
   final Set<String> _alertedStations = {};
@@ -114,6 +115,10 @@ class WeighStationService {
     } catch (e) {
       debugPrint('[WeighStationService] Error checking bypass status: $e');
     }
+  }
+
+  void resetAlertedStations() {
+    _alertedStations.clear();
   }
 
   void dispose() {

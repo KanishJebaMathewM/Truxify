@@ -5,6 +5,7 @@ class Truck {
     required this.name,
     required this.numberPlate,
     required this.maxCapacityTons,
+    required this.averageMpg,
     required this.insuranceExpiry,
     required this.pucExpiry,
     required this.permitExpiry,
@@ -15,6 +16,7 @@ class Truck {
   final String name;
   final String numberPlate;
   final double maxCapacityTons;
+  final double averageMpg;
   final DateTime? insuranceExpiry;
   final DateTime? pucExpiry;
   final DateTime? permitExpiry;
@@ -26,6 +28,7 @@ class Truck {
       name: json['name'] as String,
       numberPlate: json['number_plate'] as String,
       maxCapacityTons: (json['max_capacity_tons'] as num?)?.toDouble() ?? 0.0,
+      averageMpg: (json['average_mpg'] as num?)?.toDouble() ?? 6.0,
       insuranceExpiry: json['insurance_expiry'] != null
           ? DateTime.tryParse(json['insurance_expiry'] as String)
           : null,
@@ -45,6 +48,7 @@ class Truck {
       'name': name,
       'number_plate': numberPlate,
       'max_capacity_tons': maxCapacityTons,
+      'average_mpg': averageMpg,
       'insurance_expiry': insuranceExpiry?.toIso8601String(),
       'puc_expiry': pucExpiry?.toIso8601String(),
       'permit_expiry': permitExpiry?.toIso8601String(),

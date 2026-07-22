@@ -4,8 +4,17 @@ import logger from '../../middleware/logger.js';
 
 export class LoadOfferCacheService {
   static getRegion(lat, lng) {
-    if (!lat || !lng) return 'global';
-    return geohash.encode(Number(lat), Number(lng), 4);
+    if (lat === undefined || lat === null || lat === '') return 'global';
+    if (lng === undefined || lng === null || lng === '') return 'global';
+
+    const parsedLat = Number(lat);
+    const parsedLng = Number(lng);
+
+    if (!Number.isFinite(parsedLat) || !Number.isFinite(parsedLng)) {
+      return 'global';
+    }
+
+    return geohash.encode(parsedLat, parsedLng, 4);
   }
 
   static async getVersion(region) {

@@ -174,6 +174,9 @@ class AppLocalizationsHi extends AppLocalizations {
   String get savings => '\u092C\u091A\u0924';
 
   @override
+  String get totalShipments => '\u0915\u0941\u0932 \u0936\u093F\u092A\u092E\u0947\u0902\u091F';
+
+  @override
   String get yourUsualRoutes => '\u0906\u092A\u0915\u0947 \u0928\u093F\u092F\u092E\u093F\u0924 \u092E\u093E\u0930\u094D\u0917';
 
   @override
@@ -452,4 +455,13 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get recentRoutes => '\u0939\u093E\u0932 \u0915\u093E \u092E\u093E\u0930\u094D\u0917';
+
+  @override
+  String get allTrips => '\u0938\u092D\u0940 \u091F\u094D\u0930\u093F\u092A';
+
+  @override
+  String get filterStatus => '\u0938\u094D\u0925\u093F\u0924\u093F \u0915\u0947 \u0905\u0928\u0941\u0938\u093E\u0930 \u092B\u093C\u093F\u0932\u094D\u091F\u0930 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get noMatchingTrips => '\u091A\u092F\u0928\u093F\u0924 \u092B\u093C\u093F\u0932\u094D\u091F\u0930 \u0938\u0947 \u0915\u094B\u0908 \u091F\u094D\u0930\u093F\u092A \u092E\u0947\u0932 \u0928\u0939\u0940\u0902 \u0916\u093E\u0924\u0940';
 }

@@ -113,6 +113,10 @@ class FraudDetectionService {
       .single();
 
     if (data) {
+      // Normalize: DB returns user_id, code expects userId
+      if (data.user_id && !data.userId) {
+        data.userId = data.user_id;
+      }
       return data;
     }
 

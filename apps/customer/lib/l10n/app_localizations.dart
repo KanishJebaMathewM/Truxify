@@ -386,6 +386,14 @@ abstract class AppLocalizations {
   String get printInvoice;
 
   String get downloadFailed;
+
+  String get noRoutesFound;
+
+  String get bookAgain;
+
+  String get viewAllOrders;
+
+  String get recentRoutes;
 }
 
 class _AppLocalizationsDelegate

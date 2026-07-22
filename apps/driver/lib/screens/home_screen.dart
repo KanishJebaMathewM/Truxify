@@ -21,6 +21,7 @@ import '../services/marketplace_repository.dart';
 import '../services/route_service.dart';
 import '../services/trip_service.dart';
 import '../services/location_service.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../widgets/map_markers.dart';
 import '../widgets/home/offline_banner.dart';
@@ -61,6 +62,9 @@ class _HomeScreenState extends State<HomeScreen> {
   DestinationPickResult? _destination;
   bool _isSearchExpanded = false;
   Map<String, dynamic>? _heatmapData;
+
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _hasPendingPods = false;
 
   List<Marker>? _cachedMarkers;
   ll.LatLng? _lastDest;
@@ -214,6 +218,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _connectivitySubscription?.cancel();
     _loadSubscription?.cancel();
     _autoHideTimer?.cancel();
     _mapController.dispose();
@@ -779,6 +784,22 @@ class _HomeScreenState extends State<HomeScreen> {
               child: _buildMapBody(context),
             ),
 
+            if (_hasPendingPods)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: Container(
+                  color: Colors.orange,
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+                  child: const Text(
+                    'Offline Mode - Pending Sync',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                ),
+              ),
+
             // Top Bar
             Positioned(
               left: 12,
@@ -1081,8 +1102,51 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
+          IconButton(
+            icon: const Icon(Icons.qr_code_2, size: 28, color: TruxifyColors.accent),
+            onPressed: _showEbolQrCode,
+            tooltip: 'Show eBoL QR Code',
+          ),
         ],
       ),
+    );
+  }
+
+  void _showEbolQrCode() {
+    if (_activeTripId == null) return;
+    
+    final payload = jsonEncode({
+      "order_id": _activeTripId,
+      "type": "eBoL",
+    });
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Digital Bill of Lading (eBoL)'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Show this QR code to the warehouse clerk for instant verification.'),
+              const SizedBox(height: 20),
+              QrImageView(
+                data: payload,
+                version: QrVersions.auto,
+                size: 200.0,
+              ),
+              const SizedBox(height: 10),
+              Text('Order ID: $_activeTripId', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            )
+          ],
+        );
+      }
     );
   }
 
@@ -1774,8 +1838,20 @@ class _HomeScreenState extends State<HomeScreen> {
               _buildTripSpec(AppLocalizations.of(context)!.estPayout, _activeTripPayout.isNotEmpty ? _activeTripPayout : '--'),
             ],
           ),
-          const SizedBox(height: 16),
-          if (_isTripStarted) ...[
+            const SizedBox(height: 16),
+            if (_isTripStarted && _activeTripId != null) ...[
+              ElevatedButton.icon(
+                onPressed: () async {
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => PodCaptureScreen(orderId: _activeTripId!)));
+                  _checkPendingPods();
+                },
+                icon: const Icon(Icons.camera_alt),
+                label: const Text('Capture Proof of Delivery'),
+                style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_isTripStarted) ...[
             SlideToConfirmButton(
               label: AppLocalizations.of(context)!.slideToCompleteTrip,
               backgroundColor: TruxifyColors.success,

@@ -28,6 +28,18 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $message';
 }
 
+/// Describes a single file to include in a multipart request.
+class MultipartFileInfo {
+  const MultipartFileInfo({
+    required this.fieldName,
+    required this.bytes,
+    required this.fileName,
+  });
+  final String fieldName;
+  final List<int> bytes;
+  final String fileName;
+}
+
 /// Centralised API client for all Truxify backend requests.
 ///
 /// Responsibilities:
@@ -280,6 +292,61 @@ class ApiClient {
       (h) => _http.delete(uri, headers: h),
       additionalHeaders: headers,
     );
+    return _decode(response);
+  }
+
+  /// Sends a multipart/form-data POST request with file uploads.
+  ///
+  /// [fields] are non-file form fields. [files] are the files to upload,
+  /// each described by [MultipartFileInfo].
+  Future<dynamic> postMultipart(
+    String path, {
+    required Map<String, String> fields,
+    required List<MultipartFileInfo> files,
+    Map<String, String>? headers,
+  }) async {
+    final uri = _buildUri(path);
+
+    Future<http.Response> doSend(String? token) async {
+      final request = http.MultipartRequest('POST', uri);
+      final authHeaders = <String, String>{
+        'Accept-Language': ui.PlatformDispatcher.instance.locale.languageCode,
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        ...?headers,
+      };
+      request.headers.addAll(authHeaders);
+      fields.forEach(request.fields.add);
+      for (final f in files) {
+        request.files.add(http.MultipartFile.fromBytes(
+          f.fieldName,
+          f.bytes,
+          filename: f.fileName,
+        ));
+      }
+      final streamed = await _http.send(request).timeout(_timeout);
+      return http.Response.fromStream(streamed);
+    }
+
+    if (!kIsWeb) await _accessTokenAsync;
+    final token = _accessToken;
+    var response = await doSend(token).timeout(_timeout);
+
+    if (response.statusCode == 401) {
+      final newToken = await _refreshedToken();
+      if (newToken == null) {
+        throw const ApiAuthException(
+          'Session expired and token refresh failed. Please log in again.',
+        );
+      }
+      final retryResponse = await doSend(newToken).timeout(_timeout);
+      if (retryResponse.statusCode == 401) {
+        throw const ApiAuthException(
+          'Authentication failed after token refresh. Please log in again.',
+        );
+      }
+      response = retryResponse;
+    }
+
     return _decode(response);
   }
 

@@ -440,4 +440,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get downloadFailed => 'Download failed';
+
+  @override
+  String get noRoutesFound => 'No routes found';
+
+  @override
+  String get bookAgain => 'Book Again';
+
+  @override
+  String get viewAllOrders => 'View All Orders';
+
+  @override
+  String get recentRoutes => 'Recent Routes';
 }

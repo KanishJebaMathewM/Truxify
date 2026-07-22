@@ -440,4 +440,16 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get downloadFailed => '\u0921\u093E\u0909\u0928\u0932\u094B\u0921 \u0905\u0938\u092B\u0932';
+
+  @override
+  String get noRoutesFound => '\u0915\u094B\u0908 \u092E\u093E\u0930\u094D\u0917 \u0928\u0939\u0940\u0902 \u092E\u093F\u0932\u093E';
+
+  @override
+  String get bookAgain => '\u092B\u093C\u0930 \u0938\u0947 \u092C\u0941\u0915 \u0915\u0930\u0947\u0902';
+
+  @override
+  String get viewAllOrders => '\u0938\u092D\u0940 \u0911\u0930\u094D\u0921\u0930 \u0926\u0947\u0916\u0947\u0902';
+
+  @override
+  String get recentRoutes => '\u0939\u093E\u0932 \u0915\u093E \u092E\u093E\u0930\u094D\u0917';
 }

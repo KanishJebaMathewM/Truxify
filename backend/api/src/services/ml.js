@@ -347,13 +347,6 @@ export async function recommendLoads({ userId, bookingHistory = [], ratedDrivers
     top_n: topN,
   };
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(5000),
-  });
-
   return handleResponse(response);
 }
 
@@ -456,6 +449,7 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
  * @returns {Promise<{adjustments: Array, fuel_saving: number}>}
  */
 export async function optimiseMidTrip(routeData) {
+  guardMlApiKey();
   const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
   const url = `${baseUrl}/optimise/mid-trip`;
   const response = await fetch(url, {
@@ -473,6 +467,7 @@ export async function optimiseMidTrip(routeData) {
  * @returns {Promise<{status: string, model_version: string}>}
  */
 export async function trainDemandModel(force = false) {
+  guardMlApiKey();
   const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
   const url = `${baseUrl}/train/demand`;
   const response = await fetch(url, {
@@ -490,6 +485,7 @@ export async function trainDemandModel(force = false) {
  * @returns {Promise<{status: string, model_version: string}>}
  */
 export async function trainPriceModel(force = false) {
+  guardMlApiKey();
   const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
   const url = `${baseUrl}/train/price`;
   const response = await fetch(url, {
@@ -506,6 +502,7 @@ export async function trainPriceModel(force = false) {
  * @returns {Promise<{models: Array}>}
  */
 export async function listModels() {
+  guardMlApiKey();
   const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
   const url = `${baseUrl}/models`;
   const response = await fetch(url, {

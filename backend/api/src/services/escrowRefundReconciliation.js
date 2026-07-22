@@ -65,6 +65,14 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
     }
 
     for (const order of pendingOrders ?? []) {
+      if (globalLockAcquired && redisClient) {
+        try {
+          await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
+        } catch (err) {
+          logger.warn('[escrow-reconciliation] Failed to refresh lock:', err.message);
+        }
+      }
+
       const lockKey = `escrow_lock:${order.id}`;
       const lockValue = await acquireLock(lockKey, 30000);
       if (!lockValue) {
@@ -99,7 +107,12 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
 
         if (!refundTxHash) {
           const submitted = await submitEscrowRefund(order.order_display_id);
-          receipt = await submitted.waitForConfirmation();
+          if (submitted.waitForConfirmation) {
+            receipt = await submitted.waitForConfirmation();
+          } else {
+            logger.warn(`[escrow-reconciliation] waitForConfirmation unavailable for ${order.order_display_id} — escrow contract may not be initialized.`);
+            receipt = { hash: submitted.txHash };
+          }
           refundTxHash = receipt.hash ?? submitted.txHash;
         } else {
           receipt = await confirmEscrowRefund(refundTxHash);

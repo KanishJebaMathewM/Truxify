@@ -76,6 +76,20 @@ export function requireIdempotency(ttlSeconds = 3600) {
         return res.status(cached.statusCode).json(cached.body);
       }
 
+      if (redisClient) {
+        const lockKey = `${key}:lock`;
+        const lockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', 10000);
+        if (!lockAcquired) {
+          await new Promise(r => setTimeout(r, 200));
+          const retryRaw = await redisClient.get(key);
+          const retryCached = retryRaw ? readAndParse(retryRaw) : null;
+          if (retryCached) {
+            return res.status(retryCached.statusCode).json(retryCached.body);
+          }
+          return res.status(409).json({ error: 'Duplicate request being processed' });
+        }
+      }
+
       let responded = false;
 
       const originalJson = res.json.bind(res);
@@ -93,6 +107,11 @@ export function requireIdempotency(ttlSeconds = 3600) {
           } else {
             setInMemory(key, cacheData, ttlMs);
           }
+        }
+
+        if (redisClient) {
+          const lockKey = `${key}:lock`;
+          redisClient.del(lockKey).catch(() => {});
         }
 
         return originalJson(body);

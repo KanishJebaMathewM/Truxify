@@ -77,6 +77,18 @@ class _MLDashboardState extends State<MLDashboard> {
   }
 
   Widget _buildMetricsCard() {
+    final results = metrics?['results'] as Map<String, dynamic>? ?? {};
+    final rows = <Widget>[];
+    results.forEach((metric, values) {
+      final prod = values['production']?.toStringAsFixed(2) ?? 'N/A';
+      final shadow = values['shadow']?.toStringAsFixed(2) ?? 'N/A';
+      rows.add(_buildMetricRow(metric, prod, shadow, metric == 'rmse'));
+    });
+
+    if (rows.isEmpty) {
+      rows.add(Text('No metrics available'));
+    }
+
     return Card(
       child: Padding(
         padding: EdgeInsets.all(16),
@@ -85,9 +97,7 @@ class _MLDashboardState extends State<MLDashboard> {
           children: [
             Text('📈 Performance Metrics', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             SizedBox(height: 8),
-            _buildMetricRow('RMSE', '2.5', '2.1', true),
-            _buildMetricRow('MAE', '1.8', '1.5', true),
-            _buildMetricRow('Accuracy', '85%', '89%', false),
+            ...rows,
           ],
         ),
       ),

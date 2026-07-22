@@ -73,6 +73,19 @@ export class BidAcceptanceService {
       truckInfo = truck;
     }
 
+    // Re-validate wallets immediately before escrow deposit (close TOCTOU window)
+    const { data: freshDriverDetails } = await this.orderRepository.findDriverDetail(bid.driver_id);
+    const { data: freshCustomerProfile } = await this.orderRepository.findCustomerWallet(customerId);
+    const freshDriverWallet = freshDriverDetails?.polygon_wallet_address ?? null;
+    const freshCustomerWallet = freshCustomerProfile?.polygon_wallet_address ?? null;
+
+    if (!freshDriverWallet || !freshCustomerWallet) {
+      this.logger?.warn?.(`[escrow] Wallet disconnected between validation and deposit: driver=${!!freshDriverWallet}, customer=${!!freshCustomerWallet}`);
+      throw new DomainError(422, {
+        error: 'A wallet was disconnected before the escrow deposit could be initiated. Please reconnect your wallet and try again.'
+      });
+    }
+
     // Build the escrow deposit transaction
     let depositTx = null;
     let bookingId = null;

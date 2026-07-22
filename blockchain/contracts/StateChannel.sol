@@ -49,6 +49,7 @@ contract StateChannel is Ownable, ReentrancyGuard, Pausable {
     mapping(uint256 => State[]) public channelStates;
     mapping(uint256 => Dispute) public disputes;
     mapping(address => uint256[]) public userChannels;
+    mapping(uint256 => mapping(address => uint256)) public pendingWithdrawals;
 
     uint256 public channelCounter;
     uint256 public constant CHALLENGE_PERIOD = 1 days;
@@ -62,6 +63,7 @@ contract StateChannel is Ownable, ReentrancyGuard, Pausable {
     event DisputeRaised(uint256 indexed channelId, address indexed challenger);
     event DisputeResolved(uint256 indexed channelId, bool resolved);
     event BatchSettled(uint256 indexed channelId, uint256 count);
+    event Withdrawal(uint256 indexed channelId, address indexed participant, uint256 amount);
 
     // ============ Constructor ============
 
@@ -188,27 +190,40 @@ contract StateChannel is Ownable, ReentrancyGuard, Pausable {
         channel.isOpen = false;
         channel.lastUpdated = block.timestamp;
 
+        // Capture final balances before settlement
+        uint256 finalBalanceA = channel.balanceA;
+        uint256 finalBalanceB = channel.balanceB;
+
+        // Emit event before zeroing balances
+        emit ChannelClosed(channelId, finalBalanceA, finalBalanceB);
+
         // Settle balances
         _settleChannel(channelId);
-
-        emit ChannelClosed(channelId, channel.balanceA, channel.balanceB);
     }
 
     function _settleChannel(uint256 channelId) internal {
         Channel storage channel = channels[channelId];
         require(!channel.isSettled, "Already settled");
 
-        // Transfer balances
         if (channel.balanceA > 0) {
-            payable(channel.participantA).transfer(channel.balanceA);
+            pendingWithdrawals[channelId][channel.participantA] += channel.balanceA;
         }
         if (channel.balanceB > 0) {
-            payable(channel.participantB).transfer(channel.balanceB);
+            pendingWithdrawals[channelId][channel.participantB] += channel.balanceB;
         }
 
         channel.isSettled = true;
         channel.balanceA = 0;
         channel.balanceB = 0;
+    }
+
+    function withdraw(uint256 channelId) external nonReentrant {
+        uint256 amount = pendingWithdrawals[channelId][msg.sender];
+        require(amount > 0, "Nothing to withdraw");
+        pendingWithdrawals[channelId][msg.sender] = 0;
+        (bool success, ) = msg.sender.call{value: amount}("");
+        require(success, "Withdraw failed");
+        emit Withdrawal(channelId, msg.sender, amount);
     }
 
     // ============ Dispute Resolution ============

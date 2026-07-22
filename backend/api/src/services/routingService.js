@@ -22,7 +22,7 @@ export async function optimizeWaypoints(start, end, waypoints) {
 
     // Use OSRM public trip API
     // roundtrip=false, source=first, destination=last
-    const url = `http://router.project-osrm.org/trip/v1/driving/${coords}?roundtrip=false&source=first&destination=last`;
+    const url = `${process.env.OSRM_URL || 'http://localhost:5000'}/trip/v1/driving/${coords}?roundtrip=false&source=first&destination=last`;
     
     const response = await axios.get(url, { timeout: 10000 });
     

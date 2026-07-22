@@ -184,7 +184,10 @@ class DIDService {
     }
 
     generateProof(subject, credentialType, schema) {
-        return JSON.stringify({ subject, credentialType, schema, timestamp: Date.now() });
+        const secret = process.env.DID_PROOF_SECRET || 'default-proof-secret';
+        const payload = JSON.stringify({ subject, credentialType, schema, timestamp: Date.now() });
+        const proof = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+        return proof;
     }
 
     async getDID(did) {

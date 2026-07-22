@@ -50,7 +50,8 @@ class BackgroundSyncService {
 
     if (token == null) return; // Cannot sync without auth
 
-    const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL', defaultValue: 'http://localhost:5000');
+    const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
+    assert(envUrl.isNotEmpty, 'TRUXIFY_API_BASE_URL must be set for release builds');
     
     for (final pod in pendingPods) {
       try {

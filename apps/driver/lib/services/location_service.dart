@@ -13,7 +13,6 @@ class LocationService {
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
   );
 
   static void _assertNotLocalhost() {

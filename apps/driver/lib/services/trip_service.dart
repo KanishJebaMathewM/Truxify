@@ -13,7 +13,6 @@ class TripService {
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
   );
 
   final SupabaseClient? _providedClient;
@@ -222,6 +221,7 @@ class TripService {
   }
 
   void dispose() {
+    _isDisposed = true;
     _apiClient.dispose();
   }
 }

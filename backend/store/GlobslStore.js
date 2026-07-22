@@ -56,6 +56,12 @@ class StoreTransaction {
         if (!this.isActive) {
             throw new Error('Transaction not active');
         }
+
+        for (const operation of this.operations) {
+            if (typeof operation === 'function') {
+                await operation();
+            }
+        }
         
         this.endTime = Date.now();
         this.isActive = false;

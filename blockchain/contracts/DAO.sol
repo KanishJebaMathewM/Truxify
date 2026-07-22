@@ -193,9 +193,9 @@ contract DAO is Ownable, ReentrancyGuard, Pausable {
 
     function castVote(
         uint256 proposalId,
-        bool support,
-        uint256 votingPower
+        bool support
     ) external onlyMember onlyActiveProposal(proposalId) {
+        uint256 votingPower = members[msg.sender].votingPower;
         require(votingPower > 0, "No voting power");
         require(!hasVoted[proposalId][msg.sender], "Already voted");
         require(proposals[proposalId].state == ProposalState.ACTIVE, "Proposal not active");

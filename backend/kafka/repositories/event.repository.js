@@ -80,7 +80,7 @@ class EventRepository {
       const events = await this.getEventsByOrderId(orderId);
       
       // Replay events in order
-      for (const event of events.reverse()) {
+      for (const event of [...events].reverse()) {
         // Emit event again
         await this.reemitEvent(event);
       }
@@ -123,7 +123,7 @@ class EventRepository {
         timeline: [],
       };
       
-      for (const event of events.reverse()) {
+      for (const event of [...events].reverse()) {
         snapshot.timeline.push({
           eventId: event.event_id,
           type: event.event_type,

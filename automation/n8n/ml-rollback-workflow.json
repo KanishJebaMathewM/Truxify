@@ -1,0 +1,61 @@
+{
+  "name": "ML Model Auto-Rollback",
+  "nodes": [
+    {
+      "name": "Schedule Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"hours": 1}]
+        }
+      }
+    },
+    {
+      "name": "Check Active Tests",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [450, 300],
+      "parameters": {
+        "url": "http://ml-engine:8000/ab-testing/status",
+        "method": "GET"
+      }
+    },
+    {
+      "name": "Evaluate Test",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [650, 300],
+      "parameters": {
+        "url": "http://ml-engine:8000/ab-testing/evaluate/{{$json.active_test.test_id}}",
+        "method": "GET"
+      }
+    },
+    {
+      "name": "Decision",
+      "type": "n8n-nodes-base.function",
+      "position": [850, 300],
+      "parameters": {
+        "functionCode": "const data = $input.first().json;\nif (data.should_rollback) {\n  return [{ action: 'rollback', test_id: data.test_id }];\n}\nreturn [{ action: 'promote', test_id: data.test_id }];"
+      }
+    },
+    {
+      "name": "Execute Rollback",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [1050, 300],
+      "parameters": {
+        "url": "http://ml-engine:8000/ab-testing/rollback/{{$json.test_id}}",
+        "method": "POST"
+      }
+    },
+    {
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.emailSend",
+      "position": [1250, 300],
+      "parameters": {
+        "fromEmail": "ml-alerts@truxify.com",
+        "toEmail": "team@truxify.com",
+        "subject": "⚠️ ML Model Auto-Rollback Triggered",
+        "text": "Model rollback was executed for test {{$json.test_id}}. Previous version restored."
+      }
+    }
+  ]
+}

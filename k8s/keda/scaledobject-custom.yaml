@@ -1,0 +1,57 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: api-custom-scaledobject
+  namespace: truxify
+  labels:
+    app: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-deployment
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  cooldownPeriod: 300
+  pollingInterval: 30
+  triggers:
+  - type: cpu
+    metadata:
+      type: Utilization
+      value: "70"
+  - type: memory
+    metadata:
+      type: Utilization
+      value: "80"
+  - type: prometheus
+    metadata:
+      serverAddress: http://prometheus.istio-system:9090
+      metricName: api_latency
+      query: histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket{reporter="destination",destination_service=~"api-service.*"}[5m])) by (le))
+      threshold: "1000"
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: ml-custom-scaledobject
+  namespace: truxify
+  labels:
+    app: ml
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ml-deployment
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  cooldownPeriod: 300
+  pollingInterval: 30
+  triggers:
+  - type: cpu
+    metadata:
+      type: Utilization
+      value: "70"
+  - type: memory
+    metadata:
+      type: Utilization
+      value: "80"

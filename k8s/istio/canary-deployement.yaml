@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-service-v2
+  namespace: truxify
+  labels:
+    app: api
+    version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: api
+        version: v2
+    spec:
+      containers:
+      - name: api
+        image: truxify/api:canary
+        ports:
+        - containerPort: 5000
+        env:
+        - name: CANARY_DEPLOYMENT
+          value: "true"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-canary-hpa
+  namespace: truxify
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-service-v2
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70

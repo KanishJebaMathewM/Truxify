@@ -3,18 +3,38 @@ services:
     build:
       context: ./backend/api
       target: development
+    container_name: truxify-api
     env_file:
       - .env
     ports:
       - "5000:5000"
-    env_file:
-      - .env
     environment:
       MONGODB_URI: mongodb://mongo:27017
       MONGODB_DB_NAME: truxify_telemetry
       REDIS_URL: redis://redis:6379
       ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
       ML_ENGINE_URL: http://ml-engine:8000
+      # Shard Configuration
+      SHARD_NORTH_HOST: shard-north
+      SHARD_NORTH_PORT: 5432
+      SHARD_NORTH_DB: truxify_north
+      SHARD_NORTH_USER: postgres
+      SHARD_NORTH_PASSWORD: ${SHARD_PASSWORD:-password}
+      SHARD_SOUTH_HOST: shard-south
+      SHARD_SOUTH_PORT: 5432
+      SHARD_SOUTH_DB: truxify_south
+      SHARD_SOUTH_USER: postgres
+      SHARD_SOUTH_PASSWORD: ${SHARD_PASSWORD:-password}
+      SHARD_EAST_HOST: shard-east
+      SHARD_EAST_PORT: 5432
+      SHARD_EAST_DB: truxify_east
+      SHARD_EAST_USER: postgres
+      SHARD_EAST_PASSWORD: ${SHARD_PASSWORD:-password}
+      SHARD_WEST_HOST: shard-west
+      SHARD_WEST_PORT: 5432
+      SHARD_WEST_DB: truxify_west
+      SHARD_WEST_USER: postgres
+      SHARD_WEST_PASSWORD: ${SHARD_PASSWORD:-password}
     volumes:
       - ./backend/api:/app
       - /app/node_modules
@@ -25,13 +45,24 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      shard-north:
+        condition: service_healthy
+      shard-south:
+        condition: service_healthy
+      shard-east:
+        condition: service_healthy
+      shard-west:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:5000/api/health/live || curl -sf http://localhost:5000/api/health/live"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 15s
-  
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
   ml-engine:
     build:
       context: ./backend/ml
@@ -50,30 +81,152 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
   db:
-       image: postgis/postgis:15-3.3-alpine
-       healthcheck:
-         test: ["CMD-SHELL", "pg_isready -U postgres"]
-         interval: 10s
-         timeout: 5s
-         retries: 5
-         start_period: 10s
+    image: postgis/postgis:15-3.3-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+      POSTGRES_DB: truxify
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ============================================================================
+  # 🆕 GEOGRAPHIC SHARDING DATABASES
+  # ============================================================================
+  shard-north:
+    image: postgis/postgis:15-3.3-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SHARD_PASSWORD:-password}
+      POSTGRES_DB: truxify_north
+    ports:
+      - "5433:5432"
+    volumes:
+      - shard_north_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  shard-south:
+    image: postgis/postgis:15-3.3-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SHARD_PASSWORD:-password}
+      POSTGRES_DB: truxify_south
+    ports:
+      - "5434:5432"
+    volumes:
+      - shard_south_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  shard-east:
+    image: postgis/postgis:15-3.3-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SHARD_PASSWORD:-password}
+      POSTGRES_DB: truxify_east
+    ports:
+      - "5435:5432"
+    volumes:
+      - shard_east_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  shard-west:
+    image: postgis/postgis:15-3.3-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SHARD_PASSWORD:-password}
+      POSTGRES_DB: truxify_west
+    ports:
+      - "5436:5432"
+    volumes:
+      - shard_west_data:/var/lib/postgresql/data
+
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  db:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: truxify-postgres
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+
   mongo:
     image: mongo:6-jammy
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:6-jammy
+    container_name: truxify-mongo
+
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
   redis:
     image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: truxify-redis
+
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+
+    restart: unless-stopped
+
+
 volumes:
   mongo_data:
   postgres_data:
+  shard_north_data:
+  shard_south_data:
+  shard_east_data:
+  shard_west_data:
+  redis_data:

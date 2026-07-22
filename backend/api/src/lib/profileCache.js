@@ -1,5 +1,6 @@
 import * as db from '../config/db.js';
 import logger from '../middleware/logger.js';
+import { firebaseProfileKey, supabaseProfileKey } from '../cache/profileCacheKeys.js';
 
 export const TTL_SECONDS = 900; // 15 minutes
 export const TOMBSTONE_TTL_SECONDS = 30; // 30 seconds
@@ -24,8 +25,6 @@ export function resetCacheStats() {
   cacheMisses = 0;
   cacheSets = 0;
 }
-const cacheKey = (firebaseUid) => `user:profile:${firebaseUid}`;
-const supabaseCacheKey = (userId) => `user:profile:sb:${userId}`;
 
 const LAST_LOG_TIMES = {};
 const LOG_THROTTLE_INTERVAL_MS = 60000; // 60 seconds
@@ -129,7 +128,7 @@ export async function getCachedProfile(firebaseUid) {
     return null;
   }
   try {
-    const raw = await redisClient.get(cacheKey(firebaseUid));
+    const raw = await redisClient.get(firebaseProfileKey(firebaseUid));
     if (raw) {
       cacheHits++;
       return JSON.parse(raw);
@@ -140,7 +139,7 @@ export async function getCachedProfile(firebaseUid) {
     logCacheError('getCachedProfile', err);
     // On read or parsing failure, attempt a best-effort delete of the corrupted key
     try {
-      await redisClient.del(cacheKey(firebaseUid));
+      await redisClient.del(firebaseProfileKey(firebaseUid));
     } catch (delErr) {
       // Ignore failures on background cleanup deletion
     }
@@ -160,7 +159,7 @@ export async function setCachedProfile(firebaseUid, profile, ttlSeconds = TTL_SE
   const redisClient = getRedisClient();
   if (!redisClient || !firebaseUid || !profile) return;
   try {
-    await redisClient.set(cacheKey(firebaseUid), JSON.stringify(profile), 'EX', ttlSeconds);
+    await redisClient.set(firebaseProfileKey(firebaseUid), JSON.stringify(profile), 'EX', ttlSeconds);
   } catch (err) {
     logCacheError('setCachedProfile', err);
   }
@@ -177,7 +176,7 @@ export async function invalidateCachedProfile(firebaseUid) {
   const redisClient = getRedisClient();
   if (!redisClient || !firebaseUid) return;
   try {
-    await redisClient.del(cacheKey(firebaseUid));
+    await redisClient.del(firebaseProfileKey(firebaseUid));
   } catch (err) {
     logCacheError('invalidateCachedProfile', err);
   }
@@ -194,12 +193,12 @@ export async function getCachedSupabaseProfile(userId) {
   const redisClient = getRedisClient();
   if (!redisClient || !userId) return null;
   try {
-    const raw = await redisClient.get(supabaseCacheKey(userId));
+    const raw = await redisClient.get(supabaseProfileKey(userId));
     return raw ? JSON.parse(raw) : null;
   } catch (err) {
     logCacheError('getCachedSupabaseProfile', err);
     try {
-      await redisClient.del(supabaseCacheKey(userId));
+      await redisClient.del(supabaseProfileKey(userId));
     } catch (delErr) {
       // Ignore failures on background cleanup deletion
     }
@@ -223,7 +222,7 @@ export async function setCachedSupabaseProfile(userId, profile, ttlSeconds = TTL
   if (!redisClient || !userId || !profile) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
   try {
-    await redisClient.set(supabaseCacheKey(userId), JSON.stringify(profile), 'EX', ttlSeconds);
+    await redisClient.set(supabaseProfileKey(userId), JSON.stringify(profile), 'EX', ttlSeconds);
   } catch (err) {
     logCacheError('setCachedSupabaseProfile', err);
   }
@@ -240,7 +239,7 @@ export async function invalidateCachedSupabaseProfile(userId) {
   const redisClient = getRedisClient();
   if (!redisClient || !userId) return;
   try {
-    await redisClient.del(supabaseCacheKey(userId));
+    await redisClient.del(supabaseProfileKey(userId));
   } catch (err) {
     logCacheError('invalidateCachedSupabaseProfile', err);
   }

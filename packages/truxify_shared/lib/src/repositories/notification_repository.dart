@@ -13,9 +13,15 @@ class NotificationRepository {
         .select()
         .eq('user_id', userId)
         .order('created_at', ascending: false);
-    final List<Map<String, dynamic>> rows = response is List
-        ? List<Map<String, dynamic>>.from(response)
-        : <Map<String, dynamic>>[];
+    if (response is! List) {
+      throw StateError('Unexpected notifications response type');
+    }
+
+    final rows = response.map((item) {
+      if (item is Map<String, dynamic>) return item;
+      if (item is Map) return Map<String, dynamic>.from(item);
+      throw StateError('Unexpected notification item type');
+    }).toList(growable: false);
     return rows.map(NotificationItem.fromMap).toList();
   }
 

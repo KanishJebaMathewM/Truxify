@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/api_client.dart';
+import '../l10n/app_localizations.dart';
 import '../services/profile_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
@@ -69,19 +70,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     setState(() => _isSaving = true);
 
     try {
-      await ApiClient().put(
-        '/api/profile',
-        body: {
-          'full_name': _nameController.text.trim(),
-          'company_name': _companyController.text.trim(),
-          'phone': _phoneController.text.trim(),
-        },
+      await _profileService.updateProfile(
+        fullName: _nameController.text.trim(),
+        companyName: _companyController.text.trim(),
+        phone: _phoneController.text.trim(),
       );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Profile updated successfully'),
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.profileUpdatedSuccessfully),
           backgroundColor: TruxifyColors.success,
         ),
       );
@@ -90,7 +88,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to update profile: $e'),
+          content: Text(AppLocalizations.of(context)!.error(e.toString())),
           backgroundColor: TruxifyColors.errorRed,
         ),
       );
@@ -102,7 +100,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Edit Profile'),
+        title: Text(AppLocalizations.of(context)!.editProfile),
         centerTitle: true,
         elevation: 0,
       ),
@@ -115,7 +113,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Failed to load profile',
+                        Text(AppLocalizations.of(context)!.failedToLoadProfile,
                             style: Theme.of(context)
                                 .textTheme
                                 .bodyLarge
@@ -129,7 +127,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             });
                             _loadProfile();
                           },
-                          child: const Text('Retry'),
+                          child: Text(AppLocalizations.of(context)!.retry),
                         ),
                       ],
                     ),
@@ -191,7 +189,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         ),
                         const SizedBox(height: 28),
                         Text(
-                          'Full Name',
+                          AppLocalizations.of(context)!.fullName,
                           style: Theme.of(context)
                               .textTheme
                               .labelMedium
@@ -205,17 +203,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           controller: _nameController,
                           validator: (v) =>
                               (v == null || v.trim().isEmpty)
-                                  ? 'Name is required'
+                                  ? AppLocalizations.of(context)!.nameIsRequired
                                   : null,
                           decoration: InputDecoration(
-                            hintText: 'Enter your full name',
+                            hintText: AppLocalizations.of(context)!.enterFullName,
                             border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
                         const SizedBox(height: 18),
                         Text(
-                          'Company Name',
+                          AppLocalizations.of(context)!.companyName,
                           style: Theme.of(context)
                               .textTheme
                               .labelMedium
@@ -229,17 +227,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           controller: _companyController,
                           validator: (v) =>
                               (v == null || v.trim().isEmpty)
-                                  ? 'Company name is required'
+                                  ? AppLocalizations.of(context)!.companyNameIsRequired
                                   : null,
                           decoration: InputDecoration(
-                            hintText: 'Enter your company name',
+                            hintText: AppLocalizations.of(context)!.enterCompanyName,
                             border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
                         const SizedBox(height: 18),
                         Text(
-                          'Phone Number',
+                          AppLocalizations.of(context)!.phoneNumber,
                           style: Theme.of(context)
                               .textTheme
                               .labelMedium
@@ -254,17 +252,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           keyboardType: TextInputType.phone,
                           validator: (v) =>
                               (v == null || v.trim().isEmpty)
-                                  ? 'Phone number is required'
+                                  ? AppLocalizations.of(context)!.phoneNumberIsRequired
                                   : null,
                           decoration: InputDecoration(
-                            hintText: 'Enter your phone number',
+                            hintText: AppLocalizations.of(context)!.enterPhoneNumber,
                             border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
                         const SizedBox(height: 32),
                         PrimaryButton(
-                          label: _isSaving ? 'Saving...' : 'Save Changes',
+                          label: _isSaving ? AppLocalizations.of(context)!.saving : AppLocalizations.of(context)!.saveChanges,
                           onPressed: _isSaving ? null : _saveProfile,
                         ),
                       ],

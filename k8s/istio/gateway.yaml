@@ -1,0 +1,71 @@
+
+﻿apiVersion: networking.istio.io/v1beta1
+
+apiVersion: networking.istio.io/v1beta1
+
+kind: Gateway
+metadata:
+  name: truxify-gateway
+  namespace: truxify
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "truxify.com"
+    - "*.truxify.com"
+
+    tls:
+      httpsRedirect: true
+  - port:
+      number: 443
+      name: https
+      protocol: HTTPS
+    hosts:
+    - "truxify.com"
+    - "*.truxify.com"
+    tls:
+      mode: SIMPLE
+      credentialName: truxify-cert
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: truxify-ingress
+  namespace: truxify
+spec:
+  hosts:
+  - "truxify.com"
+  - "*.truxify.com"
+  gateways:
+  - truxify-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /api/
+    route:
+    - destination:
+        host: api-service
+        port:
+          number: 5000
+  - match:
+    - uri:
+        prefix: /graphql
+    route:
+    - destination:
+        host: graphql-service
+        port:
+          number: 4000
+  - match:
+    - uri:
+        prefix: /docs
+    route:
+    - destination:
+        host: api-service
+        port:
+          number: 5000
+

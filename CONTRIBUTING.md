@@ -50,6 +50,67 @@ Truxify is structured as a monorepo containing the following components:
 
 ---
 
+## Backend Architecture
+
+The backend API (`backend/api`) follows a layered service-oriented architecture. Understanding this structure is essential before contributing new features.
+
+### Service Layer
+
+Routes are thin — they parse the request, delegate to a service, and send the response. All business logic lives in services:
+
+```text
+┌─────────────────────────────────────────────┐
+│                  ROUTES                      │
+│   (thin: parse + delegate + respond)        │
+├─────────────────────────────────────────────┤
+│                 MIDDLEWARE                   │
+│  auth · correlation-id · idempotency · log  │
+├─────────────────────────────────────────────┤
+│                 SERVICES                     │
+│  OrderService · OrderLifecycleService        │
+│  OrderValidationService · TimelineService   │
+│  NotificationService · DriverService        │
+│  LoadService · TrackingService              │
+├─────────────────────────────────────────────┤
+│                REPOSITORIES                  │
+│  OrderRepository · DriverRepository         │
+│  BidRepository · LoadRepository             │
+│  TimelineRepository                         │
+├─────────────────────────────────────────────┤
+│            SUPABASE (PostgreSQL)             │
+│  via supabase-js (service_role key)         │
+│  + MongoDB (GPS logs) + Redis (cache/queue) │
+└─────────────────────────────────────────────┘
+```
+
+### Adding New Logic
+
+| If you need to… | Put it in… |
+|---|---|
+| Handle a new API request | A **route** in `src/routes/` |
+| Validate business rules | An **assertion** in the appropriate **service** |
+| Query or mutate the database | A **repository** method |
+| Orchestrate a multi-step workflow | A **service** that coordinates repositories |
+| Send a notification | The **NotificationService** |
+| Add cross-cutting behaviour | **Middleware** in `src/middleware/` |
+
+### Architecture Decision Records
+
+Detailed design decisions — including why each pattern was chosen, the alternatives considered, and the consequences — are documented as Architecture Decision Records (ADRs):
+
+| ADR | Topic |
+|-----|-------|
+| [ADR-0001](docs/architecture/adr/ADR-0001-service-layer.md) | Service Decomposition |
+| [ADR-0002](docs/architecture/adr/ADR-0002-repository-pattern.md) | Repository Pattern |
+| [ADR-0003](docs/architecture/adr/ADR-0003-order-lifecycle.md) | Order Lifecycle Orchestrator |
+| [ADR-0004](docs/architecture/adr/ADR-0004-validation-workflow.md) | Validation & Workflow |
+| [ADR-0005](docs/architecture/adr/ADR-0005-timeline-management.md) | Timeline Management |
+| [ADR-0006](docs/architecture/adr/ADR-0006-notification-workflow.md) | Notification & OTP Workflow |
+
+Read the full set at `docs/architecture/adr/`.
+
+---
+
 ## Development Setup
 
 ### 1. Fork and Clone the Repository

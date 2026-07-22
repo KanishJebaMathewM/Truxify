@@ -3,13 +3,26 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/notification_item.dart';
 import '../repositories/notification_repository.dart';
+import '../services/notification_router.dart';
 
 class NotificationsScreen extends StatefulWidget {
-  const NotificationsScreen({super.key, required this.userId, required this.repository, this.title = 'Notifications'});
+  const NotificationsScreen({super.key, required this.userId, required this.repository, this.title = 'Notifications', this.onNotificationTap});
+  const NotificationsScreen({
+    super.key,
+    required this.userId,
+    required this.repository,
+    this.title = 'Notifications',
+    this.onItemTap,
+  });
 
   final String userId;
   final String title;
   final NotificationRepository repository;
+  final void Function(NotificationItem item)? onNotificationTap;
+
+  /// Called when a notification [ListTile] is tapped.
+  /// Receives the tapped item and should perform navigation.
+  final ValueChanged<NotificationItem>? onItemTap;
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
@@ -91,17 +104,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
 
       setState(() {
         _items = _items.map((n) {
-          if (n.id == item.id) {
-            return NotificationItem(
-              id: n.id,
-              userId: n.userId,
-              title: n.title,
-              body: n.body,
-              notifType: n.notifType,
-              isRead: true,
-              createdAt: n.createdAt,
-            );
-          }
+          if (n.id == item.id) return n.copyWith(isRead: true);
           return n;
         }).toList();
       });
@@ -114,6 +117,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ),
       );
     }
+  }
+
+  void _onTileTap(NotificationItem item) async {
+    // Mark as read if unread.
+    if (!item.isRead) await _markRead(item);
+    // Delegate navigation to the parent.
+    widget.onItemTap?.call(item);
   }
 
   int get _unreadCount => _items.where((item) => !item.isRead).length;
@@ -204,6 +214,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           final item = _items[index];
                           final relativeTime = _formatRelativeTime(item.createdAt);
                           return ListTile(
+                            onTap: () => _onTileTap(item),
                             tileColor: item.isRead ? null : Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.25),
                             leading: Icon(Icons.notifications_rounded, color: item.isRead ? null : Theme.of(context).colorScheme.primary),
                             title: Text(item.title),
@@ -214,6 +225,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               ].join('\n'),
                             ),
                             isThreeLine: true,
+                            onTap: () {
+                              if (!item.isRead) _markRead(item);
+                              widget.onNotificationTap?.call(item);
+                            },
                             trailing: item.isRead
                                 ? const Icon(Icons.done_rounded)
                                 : TextButton(

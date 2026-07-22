@@ -1,111 +1,50 @@
 import crypto from 'crypto';
 import { redisClient } from '../../config/db.js';
-import { DomainError } from './bidAcceptanceService.js';
-import { supabase, redisClient } from '../../config/db.js';
 import { DomainError } from './domainError.js';
+import { measureExecution } from '../../core/performanceMetrics.js';
 import {
   sendDeliveryOtpNotification,
   storeDeliveryOtp,
   getActiveDeliveryOtp,
   verifyDeliveryOtp,
 } from '../notificationService.js';
-import { escrowRelease } from '../escrow.js';
+import {
+  OTP_TTL_MINUTES,
+  OTP_MAX_FAILED_ATTEMPTS,
+  OTP_LOCKOUT_MINUTES,
+  checkOtpLockout,
+  recordOtpFailure,
+  clearOtpState,
+} from './orderNotificationService.js';
+import { escrowRelease as defaultEscrowRelease } from '../escrow.js';
 import logger from '../../middleware/logger.js';
+import { OrderTimelineService } from './orderTimelineService.js';
 
-const OTP_TTL_MINUTES = parseInt(process.env.OTP_TTL_MINUTES || '15', 10);
-const OTP_MAX_FAILED_ATTEMPTS = parseInt(process.env.OTP_MAX_FAILED_ATTEMPTS || '5', 10);
-const OTP_LOCKOUT_MINUTES = parseInt(process.env.OTP_LOCKOUT_MINUTES || '30', 10);
-const IN_MEMORY_OTP_MAP_MAX_SIZE = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || '10000', 10);
+const orderTimelineService = new OrderTimelineService({ supabase, logger });
+
 const DELIVERY_OTP_READY_STATUSES = new Set(['arriving']);
 
-const inMemoryOtpFailedAttempts = new Map();
-
-function isOtpExpired(otpGeneratedAt) {
-  if (!otpGeneratedAt) return true;
-  const elapsed = Date.now() - new Date(otpGeneratedAt).getTime();
-  return elapsed > OTP_TTL_MINUTES * 60 * 1000;
-}
-
-async function checkOtpLockout(orderId) {
-  if (redisClient) {
-    try {
-      const lockKey = `otp_lockout:${orderId}`;
-      const isLocked = await redisClient.get(lockKey);
-      return !!isLocked;
-    } catch (err) {
-      logger.error('[OTP] Redis error in checkOtpLockout, falling back to memory:', err.message);
-    }
-  }
-  const record = inMemoryOtpFailedAttempts.get(orderId);
-  if (!record || !record.lockedUntil) return false;
-  if (Date.now() >= record.lockedUntil) {
-    inMemoryOtpFailedAttempts.delete(orderId);
-    return false;
-  }
-  return true;
-}
-
-async function recordOtpFailure(orderId) {
-  if (redisClient) {
-    try {
-      const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-
-      const count = await redisClient.incr(countKey);
-      if (count === 1) await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
-      if (count >= OTP_MAX_FAILED_ATTEMPTS) {
-        await redisClient.set(lockKey, '1', 'EX', OTP_LOCKOUT_MINUTES * 60);
-      }
-      return count;
-    } catch (err) {
-      logger.error('[OTP] Redis error in recordOtpFailure, falling back to memory:', err.message);
-    }
-  }
-
-  if (inMemoryOtpFailedAttempts.size >= IN_MEMORY_OTP_MAP_MAX_SIZE) {
-    const oldestKey = inMemoryOtpFailedAttempts.keys().next().value;
-    inMemoryOtpFailedAttempts.delete(oldestKey);
-  }
-
-  let record = inMemoryOtpFailedAttempts.get(orderId);
-  if (!record) {
-    record = { count: 0, lockedUntil: null };
-    inMemoryOtpFailedAttempts.set(orderId, record);
-  }
-  record.count += 1;
-  if (record.count >= OTP_MAX_FAILED_ATTEMPTS) {
-    record.lockedUntil = Date.now() + OTP_LOCKOUT_MINUTES * 60 * 1000;
-  }
-  return record.count;
-}
-
-async function clearOtpState(orderId) {
-  if (redisClient) {
-    try {
-      const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-      await redisClient.del(countKey, lockKey);
-      return;
-    } catch (err) {
-      logger.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);
-    }
-  }
-  inMemoryOtpFailedAttempts.delete(orderId);
-}
-
 export class DeliveryVerificationService {
-  constructor(orderRepository) {
+  constructor(orderRepository, deps = {}) {
     this.orderRepository = orderRepository;
+    this.notificationService = deps.notificationService || {
+      sendDeliveryOtpNotification,
+      storeDeliveryOtp,
+      getActiveDeliveryOtp,
+      verifyDeliveryOtp,
+    };
+    this.escrowReleaseFn = deps.escrowReleaseFn || defaultEscrowRelease;
   }
 
   async validateDeliveryOtp({ orderId, driverId, otp }) {
+    return measureExecution('DeliveryVerificationService.validateDeliveryOtp', async () => {
     if (await checkOtpLockout(orderId)) {
       throw new DomainError(429, {
         error: `Too many failed OTP attempts. Verification is locked for ${OTP_LOCKOUT_MINUTES} minutes.`,
       });
     }
 
-    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status');
+    const { data: order, error: orderErr } = await this.orderRepository.findOrderById(orderId, 'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status, toll_estimate, base_freight, platform_fee, total_amount');
 
     if (orderErr || !order) {
       throw new DomainError(404, { error: 'Order not found.' });
@@ -121,7 +60,7 @@ export class DeliveryVerificationService {
       });
     }
 
-    const otpRecord = await getActiveDeliveryOtp(orderId);
+    const otpRecord = await this.notificationService.getActiveDeliveryOtp(orderId);
     if (!otpRecord) {
       throw new DomainError(400, {
         error: 'OTP not available or has expired. Please request a new delivery OTP.',
@@ -148,30 +87,39 @@ export class DeliveryVerificationService {
     }
 
     return { order, otpRecord };
+    });
   }
 
   async completeDeliveryOtp({ otpRecordId, orderId }) {
-    await verifyDeliveryOtp(otpRecordId);
+    return measureExecution('DeliveryVerificationService.completeDeliveryOtp', async () => {
+    const verified = await this.notificationService.verifyDeliveryOtp(otpRecordId);
+    if (!verified) {
+      logger.warn('[DeliveryVerificationService] Failed to mark OTP as verified for order', orderId);
+    }
     await clearOtpState(orderId);
+    });
   }
 
   async ensureDeliveryOtp({ orderId }) {
-    const activeOtp = await getActiveDeliveryOtp(orderId);
+    return measureExecution('DeliveryVerificationService.ensureDeliveryOtp', async () => {
+    const activeOtp = await this.notificationService.getActiveDeliveryOtp(orderId);
     if (activeOtp) {
       logger.warn(`[DeliveryVerificationService] Driver attempted OTP regeneration for order ${orderId}`);
       return { generated: false, otp: null };
     }
 
     const otp = crypto.randomInt(100000, 1000000).toString();
-    const stored = await storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
+    const stored = await this.notificationService.storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
     if (!stored) {
       throw new Error('Failed to generate delivery OTP.');
     }
     await clearOtpState(orderId);
     return { generated: true, otp };
+    });
   }
 
   async resendDeliveryOtp({ orderId, customerId, orderDisplayId, orderStatus }) {
+    return measureExecution('DeliveryVerificationService.resendDeliveryOtp', async () => {
     const terminalStatuses = ['delivered', 'cancelled', 'payment_released'];
     if (terminalStatuses.includes(orderStatus)) {
       throw new DomainError(400, { error: 'Cannot resend OTP for a completed or cancelled order.' });
@@ -181,22 +129,24 @@ export class DeliveryVerificationService {
     }
 
     const otp = crypto.randomInt(100000, 1000000).toString();
-    const stored = await storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
+    const stored = await this.notificationService.storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
     if (!stored) {
       throw new Error('Failed to generate delivery OTP.');
     }
     await clearOtpState(orderId);
 
-    const notifResult = await sendDeliveryOtpNotification(customerId, orderDisplayId, otp);
+    const notifResult = await this.notificationService.sendDeliveryOtpNotification(customerId, orderDisplayId, otp);
     if (!notifResult.success) {
       logger.warn(`[DeliveryVerificationService] Resend OTP notification failed for order ${orderDisplayId} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
     }
 
     return { expiresInMinutes: OTP_TTL_MINUTES };
+    });
   }
 
   async sendOtpNotification({ orderId, customerId, orderDisplayId, otp }) {
-    const notifResult = await sendDeliveryOtpNotification(customerId, orderDisplayId, otp);
+    return measureExecution('DeliveryVerificationService.sendOtpNotification', async () => {
+    const notifResult = await this.notificationService.sendDeliveryOtpNotification(customerId, orderDisplayId, otp);
     if (!notifResult.success) {
       logger.warn(`[DeliveryVerificationService] Delivery OTP notification failed for order ${orderDisplayId} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
       await this.orderRepository.updateOrder(orderId, {
@@ -204,14 +154,18 @@ export class DeliveryVerificationService {
         updated_at: new Date().toISOString(),
       });
     }
+    });
   }
 
   async generateDeliveryOtp({ orderId }) {
+    return measureExecution('DeliveryVerificationService.generateDeliveryOtp', async () => {
     const result = await this.ensureDeliveryOtp({ orderId });
     return { generated: result.generated, otp: result.otp };
+    });
   }
 
   async verifyDelivery({ orderId, driverId, otp }) {
+    return measureExecution('DeliveryVerificationService.verifyDelivery', async () => {
     const { order, otpRecord } = await this.validateDeliveryOtp({ orderId, driverId, otp });
 
     const guardResult = await this.orderRepository.updateOrderGuardStatus(
@@ -221,47 +175,25 @@ export class DeliveryVerificationService {
     );
 
     if (guardResult.error) {
-      throw new DomainError(409, { error: 'Order was already cancelled or payment released.' });
+      const pgCode = guardResult.error.code;
+      if (pgCode === 'PGRST116') {
+        throw new DomainError(409, { error: 'Order was already cancelled or payment released.' });
+      }
+      throw new DomainError(500, { error: 'Failed to verify OTP.', details: guardResult.error.message });
     }
-  if (guardErr) {
-    if (guardErr.code === 'PGRST116') {
-      throw new DomainError(409, { error: 'Order was already cancelled or payment released.' });
-    }
-    throw new DomainError(500, { error: 'Failed to verify OTP.', details: guardErr.message });
-  }
 
     let releaseTxHash = null;
     let escrowAlreadyReleased = false;
-    if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
-      try {
-        const releaseResult = await escrowRelease(order.order_display_id);
-        if (releaseResult.txHash) {
-          releaseTxHash = releaseResult.txHash;
-        } else if (releaseResult.alreadyReleased) {
-          escrowAlreadyReleased = true;
-        } else {
-          throw new Error('Escrow release returned no transaction hash');
-        }
-      } catch (releaseErr) {
-        logger.error('[escrow] Blockchain release failed for order', orderId, ':', releaseErr.message);
-        throw new DomainError(503, {
-          error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
-          retryable: true,
-        });
-      }
-    } else {
-      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
-    }
 
     const { data: tripData, error: rpcErr } = await this.orderRepository.executeRpc('complete_trip_tx', {
       p_order_id: orderId,
       p_otp_id: otpRecord.id,
-      p_release_tx_hash: releaseTxHash,
+      p_release_tx_hash: null,
     });
 
     if (rpcErr) {
       logger.error('complete_trip_tx RPC failed:', rpcErr.message);
-      throw new DomainError(500, { error: 'Failed to complete trip and release payment.', details: rpcErr.message });
+      throw new DomainError(500, { error: 'Failed to complete trip.', details: rpcErr.message });
     }
 
     const { data: verifiedOrder, error: verifyErr } = await this.orderRepository.findOrderById(orderId, 'status, escrow_status, escrow_release_attempts');
@@ -279,6 +211,27 @@ export class DeliveryVerificationService {
     }
 
     await this.completeDeliveryOtp({ otpRecordId: otpRecord.id, orderId });
+
+    if (verifiedOrder.escrow_status === 'funded' || verifiedOrder.escrow_status === 'release_failed') {
+      try {
+        const releaseResult = await this.escrowReleaseFn(order.order_display_id);
+        if (releaseResult.txHash) {
+          releaseTxHash = releaseResult.txHash;
+        } else if (releaseResult.alreadyReleased) {
+          escrowAlreadyReleased = true;
+        } else {
+          throw new Error('Escrow release returned no transaction hash');
+        }
+      } catch (releaseErr) {
+        logger.error('[escrow] Blockchain release failed for order', orderId, ':', releaseErr.message);
+        throw new DomainError(503, {
+          error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
+          retryable: true,
+        });
+      }
+    } else {
+      logger.info(`[escrow] Escrow not funded (status: ${verifiedOrder.escrow_status}) — skipping on-chain release.`);
+    }
 
     let escrowUpdateFailed = false;
     if (releaseTxHash || escrowAlreadyReleased) {
@@ -310,5 +263,6 @@ export class DeliveryVerificationService {
     }
 
     return { escrowUpdateFailed };
+    });
   }
 }

@@ -1,5 +1,5 @@
 name: truxify_shared
-description: Shared Supabase models, repositories, and screens for Truxify apps.
+description: Shared services, models, repositories, and screens for Truxify apps.
 publish_to: none
 
 version: 1.0.0
@@ -11,6 +11,10 @@ dependencies:
   flutter:
     sdk: flutter
   intl: ^0.20.2
-  supabase_flutter: ^2.8.3
+  supabase_flutter: ^2.9.1
   google_fonts: ^8.1.0
   shimmer: ^3.0.0
+  firebase_core: ^4.11.0
+  firebase_auth: ^6.5.4
+  firebase_messaging: ^16.4.1
+  http: ^1.6.0

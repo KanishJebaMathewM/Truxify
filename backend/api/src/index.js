@@ -284,8 +284,25 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Payload parsers
-app.use(express.json({ limit: '1mb' })) // Added payload limit for security
-app.use(express.urlencoded({ extended: true, limit: '1mb' }))
+const jsonBodyLimit =
+  process.env.JSON_BODY_LIMIT || '1mb';
+
+const urlEncodedBodyLimit =
+  process.env.URLENCODED_BODY_LIMIT || '1mb';
+
+app.use(
+  express.json({
+    limit: jsonBodyLimit,
+    strict: true,
+  })
+);
+
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: urlEncodedBodyLimit,
+  })
+);
 
 // ============================================================================
 // 🆕 OPENTELEMETRY TRACING MIDDLEWARE

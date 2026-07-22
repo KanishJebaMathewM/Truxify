@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { DomainError } from './bidAcceptanceService.js';
+import { DomainError } from './domainError.js';
 import { DeliveryVerificationService } from './deliveryVerificationService.js';
 import { expireDeliveryOtps } from '../notificationService.js';
 import { acquireLock, releaseLock } from '../../lib/redisLock.js';

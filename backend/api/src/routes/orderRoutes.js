@@ -145,7 +145,7 @@ import rateLimit from 'express-rate-limit';
 
 import { bidLimiter, userLimiter, userKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { mongoDb, supabase, redisClient, createUserClient } from '../config/db.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { z } from 'zod';

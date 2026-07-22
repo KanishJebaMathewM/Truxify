@@ -147,7 +147,7 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
     function disputeEscrowWithProof(
         uint256 escrowId,
         bytes calldata proof
-    ) external whenNotPaused {
+    ) external nonReentrant whenNotPaused {
         Escrow storage escrow = escrows[escrowId];
         require(escrow.customer != address(0), "Escrow not found");
         require(msg.sender == escrow.customer, "Only customer can dispute");

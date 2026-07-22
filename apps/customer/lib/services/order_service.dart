@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../core/api_client.dart';
 
@@ -57,6 +56,9 @@ class OrderService {
     String? paymentMethodId,
     String? upiId,
     DateTime? pickupDate,
+    bool requiresRefrigeration = false,
+    double? targetTemperatureMin,
+    double? targetTemperatureMax,
   }) async {
     try {
       final body = await _apiClient.post(
@@ -74,6 +76,9 @@ class OrderService {
           'weight_tonnes': weightTonnes,
           'payment_method_id': paymentMethodId,
           'upi_id': upiId,
+          if (requiresRefrigeration) 'requires_refrigeration': true,
+          if (targetTemperatureMin != null) 'target_temperature_min': targetTemperatureMin,
+          if (targetTemperatureMax != null) 'target_temperature_max': targetTemperatureMax,
         },
       ) as Map<String, dynamic>?;
 

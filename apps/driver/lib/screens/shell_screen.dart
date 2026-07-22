@@ -195,6 +195,7 @@ class _ShellScreenState extends State<ShellScreen> {
 
   @override
   void dispose() {
+    _weighStationSub?.cancel();
     ForegroundNotificationHandler.dispose();
     _currentIndex.dispose();
     super.dispose();
@@ -297,13 +298,7 @@ class _ShellScreenState extends State<ShellScreen> {
     );
   }
 
-  @override
-  
-  @override
-  void dispose() {
-    _weighStationSub?.cancel();
-    super.dispose();
-  }
+
 
   void _showBypassAlert(WeighStationEvent event) {
     if (!mounted) return;

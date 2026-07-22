@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:truxify_shared/truxify_shared.dart';
+import 'package:truxify_shared/src/models/notification_item.dart';
+import 'package:truxify_shared/src/services/notification_router.dart';
 
 void main() {
   group('NotificationRouter (customer)', () {
@@ -181,11 +183,9 @@ void main() {
       );
 
       expect(route, isA<NavigateToEarnings>());
-import 'package:flutter_test/flutter_test.dart';
-import 'package:truxify_shared/src/models/notification_item.dart';
-import 'package:truxify_shared/src/services/notification_router.dart';
+    });
+  });
 
-void main() {
   group('NotificationRouter.resolveTarget', () {
     test('resolves order_update to orderDetail', () {
       final data = {'notifType': 'order_update', 'order_display_id': 'ORD-1'};
@@ -349,7 +349,6 @@ void main() {
       await NotificationRouter.navigate(data, (target, d) async {
         throw Exception('Navigation failed');
       });
-      // Should not throw — the router catches the exception.
     });
   });
 

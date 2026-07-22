@@ -11,18 +11,15 @@ class DriverEarningsService {
     String? apiBaseUrl,
     http.Client? httpClient,
   })  : _providedClient = client,
-        _apiClient = apiClient ?? ApiClient(baseUrl: apiBaseUrl, httpClient: httpClient),
-        _apiBaseUrl = (apiBaseUrl ?? defaultApiBaseUrl).replaceFirst(RegExp(r'/$'), '',);
+        _apiClient = apiClient ?? ApiClient(baseUrl: apiBaseUrl, httpClient: httpClient);
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
   );
 
   final SupabaseClient? _providedClient;
   SupabaseClient get _client => _providedClient ?? Supabase.instance.client;
   final ApiClient _apiClient;
-  final String _apiBaseUrl;
 
   final Map<String, dynamic> _cache = {};
   static const Duration _cacheTtl = Duration(minutes: 5);

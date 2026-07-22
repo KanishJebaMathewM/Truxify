@@ -145,7 +145,7 @@ import rateLimit from 'express-rate-limit';
 
 import { bidLimiter, userLimiter, userKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { mongoDb, supabase, redisClient, createUserClient } from '../config/db.js';
-import { authenticate } from '../middleware/auth.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
@@ -576,6 +576,7 @@ router.post('/:id/bids', authenticate, userLimiter, requirePolicy('bid:submit'),
     const offer = await orderValidationService.assertLoadOfferAvailable(loadOfferId);
     orderValidationService.assertNotOwnLoad(offer.customer_id, req.user.id);
     await orderValidationService.assertTruckAssigned(req.user.id);
+    await orderValidationService.assertHosCompliant(req.user.id);
     await orderValidationService.assertNoDuplicateBid(loadOfferId, req.user.id);
 
     const { data: bid, error: bidErr } = await orderRepository.createBid({ load_id: loadOfferId, driver_id: req.user.id, bid_amount, status: 'pending' });

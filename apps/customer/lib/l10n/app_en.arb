@@ -310,6 +310,11 @@
     "description": "Label for savings summary on home screen"
   },
 
+  "totalShipments": "Total Shipments",
+  "@totalShipments": {
+    "description": "Label for total shipments count on home screen"
+  },
+
   "yourUsualRoutes": "Your Usual Routes",
   "@yourUsualRoutes": {
     "description": "Section title for frequently used routes"

@@ -3,7 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../theme/app_theme.dart';
 
-class MaintenancePhotoGallery extends StatelessWidget {
+class MaintenancePhotoGallery extends StatefulWidget {
   const MaintenancePhotoGallery({
     super.key,
     required this.imageUrls,
@@ -27,6 +27,27 @@ class MaintenancePhotoGallery extends StatelessWidget {
   }
 
   @override
+  State<MaintenancePhotoGallery> createState() => _MaintenancePhotoGalleryState();
+}
+
+class _MaintenancePhotoGalleryState extends State<MaintenancePhotoGallery> {
+  late final PageController _pageController;
+  late int _currentPage;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentPage = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
@@ -35,7 +56,7 @@ class MaintenancePhotoGallery extends StatelessWidget {
         foregroundColor: Colors.white,
         elevation: 0,
         title: Text(
-          '${initialIndex + 1} / ${imageUrls.length}',
+          '${_currentPage + 1} / ${widget.imageUrls.length}',
           style: GoogleFonts.dmSans(fontSize: 14, color: Colors.white70),
         ),
         actions: [
@@ -46,10 +67,12 @@ class MaintenancePhotoGallery extends StatelessWidget {
         ],
       ),
       body: PageView.builder(
-        controller: PageController(initialPage: initialIndex),
-        itemCount: imageUrls.length,
+        controller: _pageController,
+        itemCount: widget.imageUrls.length,
         onPageChanged: (index) {
-          // Page indicator handled by PageView automatically
+          setState(() {
+            _currentPage = index;
+          });
         },
         itemBuilder: (context, index) {
           return InteractiveViewer(
@@ -57,7 +80,7 @@ class MaintenancePhotoGallery extends StatelessWidget {
             maxScale: 4.0,
             child: Center(
               child: Image.network(
-                imageUrls[index],
+                widget.imageUrls[index],
                 fit: BoxFit.contain,
                 loadingBuilder: (child, progress) {
                   if (progress == null) return child;

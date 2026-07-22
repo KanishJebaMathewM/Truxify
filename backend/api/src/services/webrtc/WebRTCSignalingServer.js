@@ -219,16 +219,26 @@ class WebRTCSignalingServer {
       synced: false
     };
 
-    // Store in MongoDB
-    await supabase.from('gps_offline_data').insert([gpsEntry]);
+    try {
+      const { error } = await supabase.from('gps_offline_data').insert([gpsEntry]);
+      if (error) {
+        logger.warn(`Failed to persist WebRTC GPS payload for peer ${peerId}: ${error.message}`);
+      }
+    } catch (err) {
+      logger.warn(`Failed to persist WebRTC GPS payload for peer ${peerId}: ${err.message}`);
+    }
 
     // Store locally in Redis for quick access
-    if (this.redis) {
-      await this.redis.setex(
-        `gps:${peerId}:latest`,
-        300,
-        JSON.stringify(normalizedData)
-      );
+    try {
+      if (this.redis) {
+        await this.redis.setex(
+          `gps:${peerId}:latest`,
+          300,
+          JSON.stringify(normalizedData)
+        );
+      }
+    } catch (err) {
+      logger.warn(`Failed to cache WebRTC GPS payload for peer ${peerId}: ${err.message}`);
     }
 
     // Relayed to peers in mesh

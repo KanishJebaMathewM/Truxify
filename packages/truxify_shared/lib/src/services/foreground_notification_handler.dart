@@ -13,6 +13,7 @@ class ForegroundNotificationHandler {
   ForegroundNotificationHandler._();
 
   static StreamSubscription<RemoteMessage>? _subscription;
+  static StreamSubscription<RemoteMessage>? _bgTapSubscription;
 
   /// Begins listening for foreground messages.
   ///
@@ -33,6 +34,8 @@ class ForegroundNotificationHandler {
   static void dispose() {
     _subscription?.cancel();
     _subscription = null;
+    _bgTapSubscription?.cancel();
+    _bgTapSubscription = null;
   }
 
   /// Handles a cold-start (app terminated) notification tap.
@@ -48,7 +51,8 @@ class ForegroundNotificationHandler {
   static void handleBackgroundTap({
     required NotificationNavigationCallback onTap,
   }) {
-    FirebaseMessaging.onMessageOpenedApp.listen((message) {
+    _bgTapSubscription?.cancel();
+    _bgTapSubscription = FirebaseMessaging.onMessageOpenedApp.listen((message) {
       NotificationRouter.navigateFromRemoteMessage(message, onTap);
     });
   }

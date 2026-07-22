@@ -24,7 +24,6 @@ class MarketplaceRepository {
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
   );
 
   final SupabaseClient? _providedClient;
@@ -41,7 +40,8 @@ class MarketplaceRepository {
   Future<String?> _firebaseAccessToken() async {
     try {
       return await FirebaseAuth.instance.currentUser?.getIdToken();
-    } catch (_) {
+    } catch (e) {
+      print('Error: $e');
       return null;
     }
   }
@@ -49,7 +49,8 @@ class MarketplaceRepository {
   String? _supabaseAccessToken() {
     try {
       return _client.auth.currentSession?.accessToken;
-    } catch (_) {
+    } catch (e) {
+      print('Error: $e');
       return null;
     }
   }

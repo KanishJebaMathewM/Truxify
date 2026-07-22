@@ -506,18 +506,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           backgroundColor: TruxifyColors.success,
                         ),
                       );
-                    } else {
-                      final body = jsonDecode(response.body)
-                          as Map<String, dynamic>;
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(body['error']?.toString() ??
-                                AppLocalizations.of(context)!.failedToUpdateWallet),
-                            backgroundColor: TruxifyColors.errorRed,
-                          ),
-                        );
-                      }
                     } finally {
                       apiClient.dispose();
                     }

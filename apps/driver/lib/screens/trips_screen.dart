@@ -295,7 +295,7 @@ class _TripsScreenState extends State<TripsScreen> {
       route: row['route_label']?.toString() ?? 'Unknown route',
       date: row['trip_date']?.toString() ?? '',
       items: tripItems.map((i) => i.goods).toList(),
-      itemCount: row['distance']?.toString() ?? '',
+      itemCount: '${tripItems.length} item${tripItems.length == 1 ? '' : 's'} · ${row['distance']?.toString() ?? ''}',
       distance: row['distance']?.toString() ?? '',
       earnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
       status: _mapStatus(row['status']?.toString()),
@@ -498,24 +498,19 @@ class _TripsScreenState extends State<TripsScreen> {
         return;
       }
 
-      final availableLoadMaps = loads.map((load) {
-        return <String, dynamic>{
-          'load_id': load.id,
-          'origin_lat': 0.0,
-          'origin_lng': 0.0,
-          'dest_lat': 0.0,
-          'dest_lng': 0.0,
-          'weight_kg': 0.0,
-          'length_m': 0.0,
-          'width_m': 0.0,
-          'height_m': 0.0,
-          'pickup_deadline':
-              DateTime.now().add(const Duration(days: 7)).toIso8601String(),
-          'payment_inr': 0.0,
-        };
-      }).toList();
-
       final now = DateTime.now();
+      final payload = _marketplaceRepository.buildDeadheadPayload(
+        loads: loads,
+        driverLat: destLat,
+        driverLng: destLng,
+        truckMaxWeightKg: 25000,
+        truckMaxLengthM: 12,
+        truckMaxWidthM: 2.5,
+        truckMaxHeightM: 4,
+        arrivalTime: now.add(const Duration(hours: 6)).toIso8601String(),
+      );
+      final availableLoadMaps = payload['available_loads'] as List<Map<String, dynamic>>;
+
       final recommendations = await _marketplaceRepository
           .fetchDeadheadRecommendations(
         destLat: destLat,

@@ -36,6 +36,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
   late final TextEditingController _dateController;
   late final TextEditingController _timeController;
   late final TextEditingController _customGoodsTypeController;
+  late final TextEditingController _tempMinController;
+  late final TextEditingController _tempMaxController;
   DateTime? _selectedDate;
   TimeOfDay? _selectedTime;
   String _goodsType = 'Textile';
@@ -144,6 +146,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       _requirements
         ..clear()
         ..addAll(draft.requirements);
+      _tempMinController.text = draft.targetTemperatureMin?.toString() ?? '';
+      _tempMaxController.text = draft.targetTemperatureMax?.toString() ?? '';
       setState(() {});
     }
   }
@@ -159,6 +163,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     _dateController.dispose();
     _timeController.dispose();
     _customGoodsTypeController.dispose();
+    _tempMinController.dispose();
+    _tempMaxController.dispose();
     super.dispose();
   }
 
@@ -1321,6 +1327,38 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                         );
                       }).toList(),
                     ),
+                    if (_requirements.contains('Temperature control')) ...[
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _tempMinController,
+                              keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
+                              decoration: const InputDecoration(
+                                labelText: 'Min Temp (°C)',
+                                hintText: '-18',
+                                floatingLabelBehavior: FloatingLabelBehavior.always,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: TextField(
+                              controller: _tempMaxController,
+                              keyboardType: const TextInputType.numberWithOptions(signed: true, decimal: true),
+                              decoration: const InputDecoration(
+                                labelText: 'Max Temp (°C)',
+                                hintText: '-10',
+                                floatingLabelBehavior: FloatingLabelBehavior.always,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 14),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),

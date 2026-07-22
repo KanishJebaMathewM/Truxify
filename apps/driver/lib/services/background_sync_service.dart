@@ -41,16 +41,22 @@ class BackgroundSyncService {
     if (pendingPods.isEmpty) return;
 
     String? token;
-    final firebaseUser = FirebaseAuth.instance.currentUser;
-    if (firebaseUser != null) {
-      token = await firebaseUser.getIdToken();
-    } else {
-      token = Supabase.instance.client.auth.currentSession?.accessToken;
+    try {
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      if (firebaseUser != null) {
+        token = await firebaseUser.getIdToken();
+      } else {
+        token = Supabase.instance.client.auth.currentSession?.accessToken;
+      }
+    } catch (_) {
+      // Firebase/Supabase not initialized in background isolate.
+      // Token should be persisted to SharedPreferences for background sync.
     }
 
     if (token == null) return; // Cannot sync without auth
 
-    const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL', defaultValue: 'http://localhost:5000');
+    const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
+    assert(envUrl.isNotEmpty, 'TRUXIFY_API_BASE_URL must be set for release builds');
     
     for (final pod in pendingPods) {
       try {

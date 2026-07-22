@@ -4,6 +4,7 @@ import {
   validateDocumentBuffer,
   DocumentValidationError,
 } from '../lib/documentValidation.js';
+import { scanDocument } from '../lib/malwareScanner.js';
 
 const ALLOWED_DOCUMENT_TYPES = Object.freeze([
   'aadhaar_card',

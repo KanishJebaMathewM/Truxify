@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
@@ -147,7 +147,7 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
     function disputeEscrowWithProof(
         uint256 escrowId,
         bytes calldata proof
-    ) external whenNotPaused {
+    ) external nonReentrant whenNotPaused {
         Escrow storage escrow = escrows[escrowId];
         require(escrow.customer != address(0), "Escrow not found");
         require(msg.sender == escrow.customer, "Only customer can dispute");
@@ -181,7 +181,7 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
     }
 
     function _verifyDisputeProof(bytes memory proof, uint256 escrowId) internal view returns (bool) {
-        require(proof.length > 0, "Empty proof");
+        require(proof.length == 65, "Invalid proof length");
         // Verify validator signature on the dispute
         bytes32 messageHash = keccak256(abi.encodePacked(escrowId, escrows[escrowId].customer, escrows[escrowId].driver));
         bytes32 ethSignedMessageHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", messageHash));

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
+import 'package:truxify_driver/services/api_client.dart';
 
 import 'setup.dart';
 
@@ -137,7 +138,7 @@ void main() {
       final supabaseClient = FakeSupabaseClient(auth: mockAuth);
       final service = DriverEarningsService(
         client: supabaseClient,
-        httpClient: httpClient,
+        apiClient: ApiClient(httpClient: httpClient),
       );
 
       final result = await service.fetchWalletTransactions(page: 1, limit: 10);
@@ -156,7 +157,7 @@ void main() {
       final supabaseClient = FakeSupabaseClient(auth: mockAuth);
       final service = DriverEarningsService(
         client: supabaseClient,
-        httpClient: httpClient,
+        apiClient: ApiClient(httpClient: httpClient),
       );
 
       expect(
@@ -182,7 +183,7 @@ void main() {
       final supabaseClient = FakeSupabaseClient(auth: mockAuth);
       final service = DriverEarningsService(
         client: supabaseClient,
-        httpClient: httpClient,
+        apiClient: ApiClient(httpClient: httpClient),
       );
 
       // Querying June 2026
@@ -215,7 +216,7 @@ void main() {
 
       final service = DriverEarningsService(
         client: supabaseClient,
-        httpClient: httpClient,
+        apiClient: ApiClient(httpClient: httpClient),
       );
 
       // Querying January 2020 (way older than 365 days)

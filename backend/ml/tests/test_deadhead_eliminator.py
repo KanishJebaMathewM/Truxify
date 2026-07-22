@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from main import app
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-API-Key": "test_key"})
 
 
 def _valid_payload():

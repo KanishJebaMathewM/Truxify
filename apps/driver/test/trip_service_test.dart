@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/services/trip_service.dart';
+import 'package:truxify_driver/services/api_client.dart';
 
 http.Client createUnusedHttpClient() => http.Client();
 
@@ -179,7 +180,7 @@ void main() {
         return http.Response('{}', 200);
       });
 
-      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
+      final service = TripService(client: ownedTripClient(), apiClient: ApiClient(httpClient: mockHttp));
 
       await service.markStopCompleted(stopId, tripDisplayId);
 
@@ -198,7 +199,7 @@ void main() {
         return http.Response('{"message": "Trip completed"}', 200);
       });
 
-      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
+      final service = TripService(client: ownedTripClient(), apiClient: ApiClient(httpClient: mockHttp));
 
       await expectLater(
         service.markStopCompleted(stopId, tripDisplayId),
@@ -214,7 +215,7 @@ void main() {
         );
       });
 
-      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
+      final service = TripService(client: ownedTripClient(), apiClient: ApiClient(httpClient: mockHttp));
 
       expect(
         () => service.markStopCompleted(stopId, tripDisplayId),
@@ -228,7 +229,7 @@ void main() {
         return http.Response('Bad gateway', 502);
       });
 
-      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
+      final service = TripService(client: ownedTripClient(), apiClient: ApiClient(httpClient: mockHttp));
 
       expect(
         () => service.markStopCompleted(stopId, tripDisplayId),
@@ -252,7 +253,7 @@ void main() {
         },
       );
 
-      final service = TripService(client: client, httpClient: createUnusedHttpClient());
+      final service = TripService(client: client, apiClient: ApiClient(httpClient: createUnusedHttpClient()));
 
       expect(
         () => service.markStopCompleted(stopId, tripDisplayId),
@@ -274,7 +275,7 @@ void main() {
         throw UnimplementedError('No Supabase access expected');
       });
 
-      final service = TripService(client: client, httpClient: mockHttp);
+      final service = TripService(client: client, apiClient: ApiClient(httpClient: mockHttp));
       await service.updateOnlineStatus(true);
 
       expect(requests, hasLength(1));
@@ -295,7 +296,7 @@ void main() {
         throw UnimplementedError('No Supabase access expected');
       });
 
-      final service = TripService(client: client, httpClient: mockHttp);
+      final service = TripService(client: client, apiClient: ApiClient(httpClient: mockHttp));
       expect(
         () => service.updateOnlineStatus(true),
         throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('Driver profile not found or update failed'))),
@@ -323,7 +324,7 @@ void main() {
         return http.Response('{}', 200);
       });
 
-      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
+      final service = TripService(client: ownedTripClient(), apiClient: ApiClient(httpClient: mockHttp));
       await service.startTrip(tripDisplayId);
 
       expect(requests, hasLength(1));
@@ -339,7 +340,7 @@ void main() {
         );
       });
 
-      final service = TripService(client: ownedTripClient(), httpClient: mockHttp);
+      final service = TripService(client: ownedTripClient(), apiClient: ApiClient(httpClient: mockHttp));
       expect(
         () => service.startTrip(tripDisplayId),
         throwsA(isA<Exception>().having((e) => e.toString(), 'message', contains('No active stops found for this trip'))),

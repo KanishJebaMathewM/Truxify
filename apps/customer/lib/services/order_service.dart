@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../core/api_client.dart';
 
@@ -281,19 +280,6 @@ class OrderService {
     } catch (e) {
       debugPrint('Failed to estimate price: $e');
       return null;
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> fetchHistoryOrders() async {
-    try {
-      final body = await _apiClient.get(
-        '/api/orders/history',
-      );
-      return _historyFromResponse(body);
-    } on ApiException catch (e) {
-      throw StateError(e.message);
-    } catch (e) {
-      throw StateError('Failed to fetch history orders: $e');
     }
   }
 

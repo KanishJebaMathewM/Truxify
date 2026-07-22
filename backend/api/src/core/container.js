@@ -2,6 +2,8 @@ import { supabase, redisClient, mongoDb, firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 import { OrderRepository } from '../repositories/orderRepository.js';
+import OracleService from '../oracle/OracleService.js';
+import VerificationService from '../services/verification/VerificationService.js';
 
 import { OrderTimelineService } from '../services/order/orderTimelineService.js';
 import { OrderValidationService } from '../services/order/orderValidationService.js';
@@ -20,6 +22,9 @@ import {
 } from '../services/escrow.js';
 
 const orderRepository = new OrderRepository(supabase);
+
+const oracleService = new OracleService({ orderRepository });
+const verificationService = new VerificationService({ orderRepository, oracleService });
 
 const orderTimelineService = new OrderTimelineService(orderRepository);
 const orderValidationService = new OrderValidationService({ supabase, logger });
@@ -56,6 +61,8 @@ export {
   logger,
 
   orderRepository,
+  oracleService,
+  verificationService,
 
   orderTimelineService,
   orderValidationService,

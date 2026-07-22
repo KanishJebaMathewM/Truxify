@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { DomainError } from './bidAcceptanceService.js';
+import { DomainError } from './domainError.js';
 import { DeliveryVerificationService } from './deliveryVerificationService.js';
 import { expireDeliveryOtps } from '../notificationService.js';
 import { acquireLock, releaseLock } from '../../lib/redisLock.js';
@@ -844,15 +844,11 @@ export class OrderLifecycleService {
     const polygonAddress = driverDetails?.polygon_wallet_address ?? null;
 
     if (polygonAddress) {
-      try {
-        eventBus.emitSafe('rating:submitted', { 
-          driverWallet: polygonAddress, 
-          stars, 
-          orderDisplayId: order.order_display_id 
-        });
-      } catch (err) {
-        logger.error(`[OrderLifecycle] Failed to emit rating:submitted event: ${err.message}`);
-      }
+      eventBus.emitSafe('rating:submitted', { 
+        driverWallet: polygonAddress, 
+        stars, 
+        orderDisplayId: order.order_display_id 
+      });
     } else {
       logger.warn(`[reputation] Driver ${order.driver_id} has no polygon_wallet_address - skipping on-chain update.`);
     }

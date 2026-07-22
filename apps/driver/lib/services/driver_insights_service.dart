@@ -14,15 +14,36 @@ class ProfitPrediction {
   final String currency;
 
   factory ProfitPrediction.fromJson(Map<String, dynamic> json) {
-    final prediction = json['prediction'] as Map<String, dynamic>;
-    final ci = prediction['confidence_interval'] as Map<String, dynamic>;
+    final prediction = _requiredMap(json['prediction'], 'prediction');
+    final ci = _requiredMap(
+      prediction['confidence_interval'],
+      'confidence_interval',
+    );
 
     return ProfitPrediction(
-      predictedProfit: (prediction['predicted_profit'] as num).toDouble(),
-      lowerBound: (ci['lower'] as num).toDouble(),
-      upperBound: (ci['upper'] as num).toDouble(),
+      predictedProfit: _requiredDouble(
+        prediction['predicted_profit'],
+        'predicted_profit',
+      ),
+      lowerBound: _requiredDouble(ci['lower'], 'confidence_interval.lower'),
+      upperBound: _requiredDouble(ci['upper'], 'confidence_interval.upper'),
       currency: (prediction['currency'] as String?) ?? 'INR',
     );
+  }
+
+  static Map<String, dynamic> _requiredMap(dynamic value, String field) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) return Map<String, dynamic>.from(value);
+    throw StateError('Missing or invalid profit prediction field: $field');
+  }
+
+  static double _requiredDouble(dynamic value, String field) {
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      final parsed = double.tryParse(value);
+      if (parsed != null) return parsed;
+    }
+    throw StateError('Missing or invalid profit prediction field: $field');
   }
 
   String get formattedProfit {
@@ -40,19 +61,13 @@ class DriverInsightsService {
     ApiClient? apiClient,
     String? apiBaseUrl,
   })  : _apiClient = apiClient ?? ApiClient(baseUrl: apiBaseUrl),
-        _apiBaseUrl = _normalizeBaseUrl(apiBaseUrl ?? defaultApiBaseUrl);
+
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
   );
 
   final ApiClient _apiClient;
-  final String _apiBaseUrl;
-
-  static String _normalizeBaseUrl(String value) {
-    return value.endsWith('/') ? value.substring(0, value.length - 1) : value;
-  }
 
   void dispose() {
     _apiClient.dispose();

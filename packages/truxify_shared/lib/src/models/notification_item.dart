@@ -29,6 +29,8 @@ class NotificationItem {
   String? get bidId => metadata?['bid_id']?.toString();
 
   factory NotificationItem.fromMap(Map<String, dynamic> map) {
+    final metadata = map['metadata'];
+
     return NotificationItem(
       id: map['id']?.toString() ?? '',
       userId: map['user_id']?.toString(),
@@ -37,9 +39,7 @@ class NotificationItem {
       notifType: map['notif_type']?.toString() ?? 'general',
       isRead: map['is_read'] as bool? ?? false,
       createdAt: DateTime.tryParse(map['created_at']?.toString() ?? ''),
-      metadata: map['metadata'] is Map<String, dynamic>
-          ? map['metadata'] as Map<String, dynamic>
-          : null,
+      metadata: metadata is Map ? Map<String, dynamic>.from(metadata) : null,
     );
   }
 

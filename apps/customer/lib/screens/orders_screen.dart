@@ -39,14 +39,25 @@ class _OrdersScreenState extends State<OrdersScreen>
   List<HistoryOrderData> _historyOrders = [];
   bool _isLoading = true;
 
+  // Status filter state
+  String _selectedStatusFilter = 'All Trips';
+  final List<String> _statusFilterOptions = [
+    'All Trips',
+    'Pending',
+    'Accepted',
+    'In Transit',
+    'Delivered',
+    'Cancelled',
+  ];
+
   String _formatStatus(String status) {
     switch (status) {
       case 'driver_assigned':
-        return 'Driver Assigned';
+      case 'accepted':
+        return 'Accepted';
       case 'in_transit':
         return 'In Transit';
       case 'payment_released':
-        return 'Payment Released';
       case 'completed':
       case 'delivered':
         return 'Delivered';
@@ -293,7 +304,6 @@ class _OrdersScreenState extends State<OrdersScreen>
         !_tabController.indexIsChanging) {
       _tabController.animateTo(controller.ordersTabIndex);
     }
-    _loadOrders();
   }
 
   RealtimeChannel? _ordersChannel;
@@ -368,20 +378,31 @@ class _OrdersScreenState extends State<OrdersScreen>
 
   List<HistoryOrderData> get _filteredHistoryOrders {
     final query = _searchQuery.trim().toLowerCase();
-    if (query.isEmpty) {
-      return _historyOrders;
+    var filtered = _historyOrders;
+
+    // Apply status filter
+    if (_selectedStatusFilter != 'All Trips') {
+      filtered = filtered
+          .where((order) => order.status == _selectedStatusFilter)
+          .toList();
     }
-    return _historyOrders.where((order) {
-      return _orderMatches(query, [
-        order.orderId,
-        order.route,
-        order.driver,
-        order.date,
-        order.amount,
-        order.status,
-        order.truckNumber,
-      ]);
-    }).toList();
+
+    // Apply search query filter
+    if (query.isNotEmpty) {
+      filtered = filtered
+          .where((order) => _orderMatches(query, [
+                order.orderId,
+                order.route,
+                order.driver,
+                order.date,
+                order.amount,
+                order.status,
+                order.truckNumber,
+              ]))
+          .toList();
+    }
+
+    return filtered;
   }
 
   bool _orderMatches(String query, List<String> fields) {
@@ -462,25 +483,124 @@ class _OrdersScreenState extends State<OrdersScreen>
                           separatorBuilder: (_, __) => const SizedBox(height: 14),
                           itemBuilder: (context, index) => const ShimmerOrderCard(),
                         )
-                      : _filteredHistoryOrders.isEmpty
-                          ? Center(child: Text(AppLocalizations.of(context)!.noHistoryOrders))
-                          : ListView.separated(
-                              padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-                              itemCount: _filteredHistoryOrders.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 14),
-                              itemBuilder: (context, index) {
-                                final order = _filteredHistoryOrders[index];
-                                return HistoryOrderCard(
-                                  order: order,
-                                  onTap: () => Navigator.of(context).push(
-                                    AppPageRoute(
-                                      builder: (_) =>
-                                          OrderDetailScreen(order: order),
+                      : Column(
+                          children: [
+                            // Status filter dropdown
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    AppLocalizations.of(context)!.filterStatus,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                          color: TruxifyColors
+                                              .adaptiveSecondaryText(context),
+                                        ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12),
+                                      decoration: BoxDecoration(
+                                        borderRadius:
+                                            BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: Theme.of(context)
+                                              .dividerColor,
+                                        ),
+                                      ),
+                                      child: DropdownButtonHideUnderline(
+                                        child: DropdownButton<String>(
+                                          value: _selectedStatusFilter,
+                                          isExpanded: true,
+                                          isDense: true,
+                                          items: _statusFilterOptions
+                                              .map(
+                                                (option) =>
+                                                    DropdownMenuItem(
+                                                  value: option,
+                                                  child: Text(
+                                                    option,
+                                                    style: const TextStyle(
+                                                        fontSize: 14),
+                                                  ),
+                                                ),
+                                              )
+                                              .toList(),
+                                          onChanged: (value) {
+                                            if (value != null) {
+                                              setState(() {
+                                                _selectedStatusFilter =
+                                                    value;
+                                              });
+                                            }
+                                          },
+                                        ),
+                                      ),
                                     ),
                                   ),
-                                );
-                              },
+                                ],
+                              ),
                             ),
+                            // Orders list
+                            Expanded(
+                              child: _filteredHistoryOrders.isEmpty
+                                  ? Center(
+                                      child: Padding(
+                                        padding:
+                                            const EdgeInsets.symmetric(
+                                                horizontal: 24),
+                                        child: Text(
+                                          _historyOrders.isEmpty
+                                              ? AppLocalizations.of(
+                                                      context)!
+                                                  .noHistoryOrders
+                                              : AppLocalizations.of(
+                                                      context)!
+                                                  .noMatchingTrips,
+                                          textAlign: TextAlign.center,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodyMedium
+                                              ?.copyWith(
+                                                color: TruxifyColors
+                                                    .adaptiveSecondaryText(
+                                                        context),
+                                              ),
+                                        ),
+                                      ),
+                                    )
+                                  : ListView.separated(
+                                      padding: const EdgeInsets.fromLTRB(
+                                          20, 12, 20, 24),
+                                      itemCount:
+                                          _filteredHistoryOrders.length,
+                                      separatorBuilder: (_, __) =>
+                                          const SizedBox(height: 14),
+                                      itemBuilder: (context, index) {
+                                        final order =
+                                            _filteredHistoryOrders[index];
+                                        return HistoryOrderCard(
+                                          order: order,
+                                          onTap: () =>
+                                              Navigator.of(context).push(
+                                            AppPageRoute(
+                                              builder: (_) =>
+                                                  OrderDetailScreen(
+                                                      order: order),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                            ),
+                          ],
+                        ),
                 ),
               ],
             ),

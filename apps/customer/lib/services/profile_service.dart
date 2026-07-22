@@ -58,6 +58,22 @@ class ProfileService {
   }
 
 
+  Future<Map<String, dynamic>?> fetchCustomerStats() async {
+    try {
+      final result = await _apiClient.get('/api/profile/customer-stats');
+      if (result is Map<String, dynamic>) {
+        return result['stats'] as Map<String, dynamic>?;
+      }
+      return null;
+    } on ApiException catch (e) {
+      developer.log('Failed to fetch customer stats: ${e.message}');
+      return null;
+    } catch (e) {
+      developer.log('Unexpected error fetching customer stats: $e');
+      return null;
+    }
+  }
+
   Future<void> updateProfile({
     required String fullName,
     required String companyName,

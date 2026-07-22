@@ -2,13 +2,11 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
-    using Counters for Counters.Counter;
-
+    
     // ============ Structs ============
 
     struct Product {
@@ -67,10 +65,10 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
     mapping(uint256 => Verification[]) public productVerifications;
     mapping(uint256 => uint256[]) public productShipments;
 
-    Counters.Counter private _productCounter;
-    Counters.Counter private _shipmentCounter;
-    Counters.Counter private _eventCounter;
-    Counters.Counter private _verificationCounter;
+    uint256 private _productCounter;
+    uint256 private _shipmentCounter;
+    uint256 private _eventCounter;
+    uint256 private _verificationCounter;
 
     uint256 public constant MAX_PRODUCTS = 1000000;
 
@@ -96,10 +94,10 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         bytes32 productHash
     ) external whenNotPaused returns (uint256) {
         require(bytes(name).length > 0, "Name required");
-        require(_productCounter.current() < MAX_PRODUCTS, "Max products reached");
+        require(_productCounter < MAX_PRODUCTS, "Max products reached");
 
-        _productCounter.increment();
-        uint256 productId = _productCounter.current();
+        _productCounter++;
+        uint256 productId = _productCounter;
 
         products[productId] = Product({
             id: productId,
@@ -149,8 +147,8 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         require(products[productId].isActive, "Product not active");
         require(receiver != address(0), "Invalid receiver");
 
-        _shipmentCounter.increment();
-        uint256 shipmentId = _shipmentCounter.current();
+        _shipmentCounter++;
+        uint256 shipmentId = _shipmentCounter;
 
         shipments[shipmentId] = Shipment({
             id: shipmentId,
@@ -208,8 +206,8 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         string memory description,
         address actor
     ) internal {
-        _eventCounter.increment();
-        uint256 eventId = _eventCounter.current();
+        _eventCounter++;
+        uint256 eventId = _eventCounter;
 
         TraceEvent memory event = TraceEvent({
             id: eventId,
@@ -249,8 +247,8 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
     ) external whenNotPaused {
         require(products[productId].isActive, "Product not active");
 
-        _verificationCounter.increment();
-        uint256 verificationId = _verificationCounter.current();
+        _verificationCounter++;
+        uint256 verificationId = _verificationCounter;
 
         Verification memory verification = Verification({
             id: verificationId,
@@ -325,19 +323,19 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
     }
 
     function getTotalProducts() external view returns (uint256) {
-        return _productCounter.current();
+        return _productCounter;
     }
 
     function getTotalShipments() external view returns (uint256) {
-        return _shipmentCounter.current();
+        return _shipmentCounter;
     }
 
     function getTotalEvents() external view returns (uint256) {
-        return _eventCounter.current();
+        return _eventCounter;
     }
 
     function getTotalVerifications() external view returns (uint256) {
-        return _verificationCounter.current();
+        return _verificationCounter;
     }
 
     // ============ Admin Functions ============

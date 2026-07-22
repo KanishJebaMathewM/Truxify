@@ -173,4 +173,27 @@ export class OrderValidationService {
       throw new DomainError(500, { error: 'Data inconsistency: Order is missing weight_tonnes.' });
     }
   }
+
+  async assertHosCompliant(driverId) {
+    const { data: driver, error } = await this.supabase
+      .from('driver_details')
+      .select('accumulated_driving_minutes, accumulated_on_duty_minutes, hos_status')
+      .eq('driver_id', driverId)
+      .maybeSingle();
+
+    if (error) {
+      throw new DomainError(500, { error: 'Failed to verify driver HoS status.', details: error.message });
+    }
+
+    if (driver) {
+      const drivingHours = (driver.accumulated_driving_minutes || 0) / 60;
+      const onDutyHours = (driver.accumulated_on_duty_minutes || 0) / 60;
+
+      if (drivingHours >= 11 || onDutyHours >= 14) {
+        throw new DomainError(403, { 
+          error: 'HoS Limit Exceeded: You have reached your maximum legal driving or on-duty hours for this shift. You must take a mandatory rest break before bidding on new loads.'
+        });
+      }
+    }
+  }
 }

@@ -55,6 +55,9 @@ export const createOrderSchema = z.object({
   height_ft: coerceNumber(z.number().positive().max(15)).optional(),
   is_stackable: z.boolean().default(false).optional(),
   is_fragile: z.boolean().default(false).optional(),
+  requires_refrigeration: z.boolean().default(false).optional(),
+  target_temperature_min: coerceNumber(z.number()).optional(),
+  target_temperature_max: coerceNumber(z.number()).optional(),
   special_requirements: z.string().max(500).optional().nullable(),
   payment_method_id: z.string().optional(),
   upi_id: z.string().regex(upiRegex, "Invalid UPI ID format").optional().or(z.literal('')).nullable(),
@@ -65,6 +68,7 @@ export const createOrderSchema = z.object({
   })).optional(),
   // Server-computed fields — reject any client-supplied value to prevent price manipulation.
   base_freight: z.never().optional(),
+
   toll_estimate: z.never().optional(),
   platform_fee: z.never().optional(),
   total_amount: z.never().optional(),

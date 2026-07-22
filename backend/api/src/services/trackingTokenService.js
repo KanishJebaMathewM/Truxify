@@ -125,7 +125,11 @@ export class TrackingTokenService {
       .order('created_at', { ascending: false });
 
     if (error) {
-      return [];
+      this._logger.error(
+        { error, orderDisplayId },
+        'Failed to fetch active tracking tokens'
+      );
+      throw new Error('Failed to fetch active tracking tokens');
     }
 
     return data || [];
@@ -188,7 +192,7 @@ export class TrackingTokenService {
       return null;
     }
 
-    const { data: location } = await this._supabase
+    const { data: location, error: locationError } = await this._supabase
       .from('driver_locations')
       .select('latitude, longitude, last_updated_at')
       .eq('driver_id', order.driver_id)
@@ -196,6 +200,14 @@ export class TrackingTokenService {
       .order('last_updated_at', { ascending: false })
       .limit(1)
       .single();
+
+    if (locationError) {
+      this._logger.error(
+        { error: locationError, orderDisplayId, driverId: order.driver_id },
+        'Failed to fetch public tracking driver location'
+      );
+      return null;
+    }
 
     return location || null;
   }

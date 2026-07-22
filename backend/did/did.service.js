@@ -45,12 +45,6 @@ class DIDService {
             this.wallet
         );
 
-        this.keyPair = crypto.generateKeyPairSync('rsa', {
-            modulusLength: 2048,
-            publicKeyEncoding: { type: 'spki', format: 'pem' },
-            privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-        });
-
         logger.info('✅ DID Service initialized');
     }
 
@@ -64,8 +58,12 @@ class DIDService {
             await this.addServiceEndpoint(did, 'identity', 'IdentityService', `${process.env.API_URL}/api/did/identity`, 'Main identity service');
             await this.addServiceEndpoint(did, 'credentials', 'CredentialService', `${process.env.API_URL}/api/did/credentials`, 'Credential management service');
 
-            const publicKey = this.keyPair.publicKey;
-            const publicKeyMultibase = Buffer.from(publicKey).toString('base64');
+            const keyPair = crypto.generateKeyPairSync('rsa', {
+                modulusLength: 2048,
+                publicKeyEncoding: { type: 'spki', format: 'pem' },
+                privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+            });
+            const publicKeyMultibase = Buffer.from(keyPair.publicKey).toString('base64');
             await this.addVerificationMethod(did, 'key-1', 'RsaVerificationKey2018', did, publicKeyMultibase);
 
             await this.identityWallet.createWallet(did);
@@ -184,7 +182,10 @@ class DIDService {
     }
 
     generateProof(subject, credentialType, schema) {
-        return JSON.stringify({ subject, credentialType, schema, timestamp: Date.now() });
+        const secret = process.env.DID_PROOF_SECRET || 'default-proof-secret';
+        const payload = JSON.stringify({ subject, credentialType, schema, timestamp: Date.now() });
+        const proof = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+        return proof;
     }
 
     async getDID(did) {

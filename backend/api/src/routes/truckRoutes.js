@@ -1,3 +1,84 @@
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     Truck:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *           format: uuid
+ *         name:
+ *           type: string
+ *         number_plate:
+ *           type: string
+ *         max_capacity_tons:
+ *           type: number
+ *         created_at:
+ *           type: string
+ *           format: date-time
+ *     TruckTypesResponse:
+ *       type: object
+ *       properties:
+ *         types:
+ *           type: array
+ *           items:
+ *             type: string
+ *     RegisterTruckRequest:
+ *       type: object
+ *       required:
+ *         - name
+ *         - number_plate
+ *         - max_capacity_tons
+ *       properties:
+ *         name:
+ *           type: string
+ *         number_plate:
+ *           type: string
+ *         max_capacity_tons:
+ *           type: number
+ *     TruckListResponse:
+ *       type: object
+ *       properties:
+ *         trucks:
+ *           type: array
+ *           items:
+ *             $ref: '#/components/schemas/Truck'
+ *     TruckSearchResult:
+ *       type: object
+ *       properties:
+ *         driver:
+ *           type: string
+ *         driverId:
+ *           type: string
+ *         rating:
+ *           type: number
+ *         truck:
+ *           type: string
+ *         truckNumber:
+ *           type: string
+ *         capacity:
+ *           type: string
+ *         price:
+ *           type: number
+ *         baseFreight:
+ *           type: number
+ *         tollEstimate:
+ *           type: number
+ *         platformFee:
+ *           type: number
+ *         isAiEstimate:
+ *           type: boolean
+ *         etaMinutes:
+ *           type: number
+ *           nullable: true
+ *     TruckNumberPlateResponse:
+ *       type: object
+ *       properties:
+ *         number_plate:
+ *           type: string
+ */
+
 import express from 'express';
 import { supabase, mongoDb } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
@@ -8,6 +89,7 @@ import { uuidParamSchema, registerTruckSchema } from '../validation/requestSchem
 import { getRouteEstimate } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { predictPrice } from '../services/ml.js';
+import { escapeLike } from '../lib/escapeLike.js';
 import logger from '../middleware/logger.js';
 
 function sanitizeNumberPlate(plate) {
@@ -31,10 +113,26 @@ function validateCapacity(capacity) {
 
 const router = express.Router();
 
-// GET /api/trucks/types
+/**
+ * @openapi
+ * /api/trucks/types:
+ *   get:
+ *     tags: [Trucks]
+ *     summary: List available truck types
+ *     description: Returns the list of supported truck types for load matching.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Truck types array
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TruckTypesResponse'
+ */
 router.get('/types', authenticate, userLimiter, (req, res) => {
   return res.json({
-    types: ['mini-truck', 'flatbed', 'box-truck', 'refrigerated', 'container']
+    types: ['Open Body', 'Closed Body', 'Container', 'Refrigerated']
   });
 });
 function parseCapacityFilter(value, field) {
@@ -55,17 +153,38 @@ function parseCapacityFilter(value, field) {
 // REGISTER A TRUCK (DRIVER ONLY)
 // ============================================================================
 /**
- * @route POST /api/trucks
- * @desc Allows authenticated drivers to register a truck they own.
- * @access Driver
- * @param {string} req.body.name - Name of the truck
- * @param {string} req.body.number_plate - Number plate of the truck (normalised to uppercase)
- * @param {number} req.body.max_capacity_tons - Maximum capacity of the truck in tons
- * @returns {object} 201 - Successfully registered truck details
- * @returns {object} 400 - Validation errors
- * @returns {object} 403 - Forbidden for non-drivers
- * @returns {object} 409 - Truck with number plate already registered
- * @returns {object} 500 - Internal server error
+ * @openapi
+ * /api/trucks:
+ *   post:
+ *     tags: [Trucks]
+ *     summary: Register a truck
+ *     description: Allows authenticated drivers to register a truck they own. Number plate is normalised to uppercase.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/RegisterTruckRequest'
+ *     responses:
+ *       201:
+ *         description: Truck registered
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message:
+ *                   type: string
+ *                 truck:
+ *                   $ref: '#/components/schemas/Truck'
+ *       400:
+ *         description: Validation error
+ *       403:
+ *         description: Forbidden for non-drivers
+ *       409:
+ *         description: Number plate already registered
  */
 router.post('/', authenticate, requirePolicy('truck:register'), userLimiter, validateBody(registerTruckSchema), async (req, res) => {
   const { name, number_plate, max_capacity_tons } = req.body;
@@ -109,15 +228,39 @@ router.post('/', authenticate, requirePolicy('truck:register'), userLimiter, val
 // LIST DRIVER'S TRUCKS
 // ============================================================================
 /**
- * @route GET /api/trucks
- * @desc Returns all trucks owned by the authenticated driver.
- * @access Driver
- * @param {string} [req.query.name] - Filter trucks by name (case-insensitive substring)
- * @param {number} [req.query.min_capacity] - Minimum capacity filter in tons
- * @param {number} [req.query.max_capacity] - Maximum capacity filter in tons
- * @returns {object} 200 - Array of trucks
- * @returns {object} 403 - Forbidden for non-drivers
- * @returns {object} 500 - Internal server error
+ * @openapi
+ * /api/trucks:
+ *   get:
+ *     tags: [Trucks]
+ *     summary: List driver's trucks
+ *     description: Returns all trucks owned by the authenticated driver. Supports optional name and capacity filters.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *         description: Filter by name (case-insensitive substring)
+ *       - in: query
+ *         name: min_capacity
+ *         schema:
+ *           type: number
+ *         description: Minimum capacity filter in tons
+ *       - in: query
+ *         name: max_capacity
+ *         schema:
+ *           type: number
+ *         description: Maximum capacity filter in tons
+ *     responses:
+ *       200:
+ *         description: List of trucks
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TruckListResponse'
+ *       403:
+ *         description: Forbidden for non-drivers
  */
 router.get('/', authenticate, requirePolicy('truck:list-own'), userLimiter, async (req, res) => {
   const { name, min_capacity, max_capacity } = req.query;
@@ -149,7 +292,7 @@ router.get('/', authenticate, requirePolicy('truck:list-own'), userLimiter, asyn
     if (name && typeof name === 'string') {
       const cleanName = name.trim();
       if (cleanName) {
-        query = query.ilike('name', `%${cleanName}%`);
+        query = query.ilike('name', `%${escapeLike(cleanName)}%`);
       }
     }
 
@@ -191,13 +334,68 @@ function isLongitude(value) {
   return Number.isFinite(value) && value >= -180 && value <= 180;
 }
 
+/**
+ * @openapi
+ * /api/trucks/search:
+ *   get:
+ *     tags: [Trucks]
+ *     summary: Search available trucks with pricing
+ *     description: Searches for available drivers and trucks based on route coordinates and cargo weight. Returns pricing estimates with optional ML-enhanced AI pricing.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: pickup_lat
+ *         required: true
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: pickup_lng
+ *         required: true
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: drop_lat
+ *         required: true
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: drop_lng
+ *         required: true
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: weight_tonnes
+ *         required: true
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: is_fragile
+ *         schema:
+ *           type: boolean
+ *       - in: query
+ *         name: is_stackable
+ *         schema:
+ *           type: boolean
+ *     responses:
+ *       200:
+ *         description: Array of available drivers with pricing
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/TruckSearchResult'
+ *       400:
+ *         description: Missing or invalid parameters
+ */
 router.get('/search', authenticate, userLimiter, async (req, res) => {
   const {
     pickup_lat, pickup_lng,
     drop_lat, drop_lng,
     weight_tonnes,
     is_fragile, is_stackable,
-    truck_type, min_capacity, max_capacity
+    truck_type, min_capacity, max_capacity, material_type
   } = req.query;
 
   if (pickup_lat == null || pickup_lng == null || drop_lat == null || drop_lng == null || weight_tonnes == null) {
@@ -216,12 +414,6 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
 
   if (!isLatitude(numPickupLat) || !isLatitude(numDropLat) || !isLongitude(numPickupLng) || !isLongitude(numDropLng)) {
     return res.status(400).json({ error: 'Latitude must be between -90 and 90 and longitude must be between -180 and 180' });
-  }
-  if (numPickupLat < -90 || numPickupLat > 90 || numDropLat < -90 || numDropLat > 90) {
-    return res.status(400).json({ error: 'Latitude must be between -90 and 90' });
-  }
-  if (numPickupLng < -180 || numPickupLng > 180 || numDropLng < -180 || numDropLng > 180) {
-    return res.status(400).json({ error: 'Longitude must be between -180 and 180' });
   }
 
   if (numWeightTonnes <= 0 || numWeightTonnes > 50) {
@@ -414,14 +606,30 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
 });
 
 /**
- * @route GET /api/trucks/:id/number
- * @desc Retrieve the number plate of a truck by its UUID
- * @access Authenticated
- * @param {string} req.params.id - The UUID of the truck
- * @returns {object} 200 - Truck number plate
- * @returns {object} 400 - Invalid UUID format
- * @returns {object} 404 - Truck not found
- * @returns {object} 500 - Internal server error
+ * @openapi
+ * /api/trucks/{id}/number:
+ *   get:
+ *     tags: [Trucks]
+ *     summary: Get truck number plate
+ *     description: Retrieve the number plate of a truck by its UUID.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Truck number plate
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TruckNumberPlateResponse'
+ *       404:
+ *         description: Truck not found
  */
 router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {

@@ -21,9 +21,8 @@ function setL1(key, data, expiresAt) {
 }
 
 async function getCachedOrFetch(key, fetchFn) {
-  if (inflight.has(key)) {
-    return inflight.get(key);
-  }
+  const existing = inflight.get(key);
+  if (existing) return existing;
 
   const fetchPromise = (async () => {
     const now = Date.now();
@@ -77,9 +76,10 @@ async function getCachedOrFetch(key, fetchFn) {
     return data;
   })();
 
-  inflight.set(key, fetchPromise);
+  // Atomic check-and-set: only first caller wins
+  const actual = inflight.get(key) || inflight.set(key, fetchPromise).get(key);
   try {
-    return await fetchPromise;
+    return await actual;
   } finally {
     inflight.delete(key);
   }

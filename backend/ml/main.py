@@ -3,6 +3,8 @@ import hmac
 import logging
 import os
 import time
+import numpy as np
+from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -423,7 +425,8 @@ async def health():
         "eta_predictor": eta_predictor.model is not None,
         "traffic_eta": traffic_pipeline.model is not None,
     }
-    all_ready = all(models.values())
+    non_optional = {k: v for k, v in models.items() if k != 'eta_predictor'}
+    all_ready = all(non_optional.values())
     return {
         "status": "healthy" if all_ready else "degraded",
         "service": "ml-engine",
@@ -512,7 +515,6 @@ async def predict_traffic_eta(request: TrafficETARequest, _auth=Depends(verify_a
             eta_seconds = traffic_pipeline.predict_eta(features)
             
             if eta_seconds:
-                from datetime import timedelta
                 return TrafficETAResponse(
                     order_id=request.order_id,
                     eta_seconds=eta_seconds,

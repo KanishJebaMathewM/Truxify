@@ -46,7 +46,7 @@ async function handleResponse(response) {
     try {
         return JSON.parse(text);
     } catch (err) {
-        throw new Error(`[ML] Invalid JSON response from ML engine: ${err.message}`);
+        throw new Error(`[ML] Invalid JSON response from ML engine: ${err.message}`, { cause: err });
     }
 }
 
@@ -155,38 +155,79 @@ export async function predictPrice({
 
 /**
  * Predicts estimated time of arrival for a route.
- * @param {string} origin - Origin coordinates or address
- * @param {string} destination - Destination coordinates or address
- * @param {object} [traffic] - Traffic factor data
- * @param {object} [weather] - Weather condition data
- * @returns {Promise<{estimated_minutes: number, confidence: number}>}
+ *
+ * @param {object} params
+ * @param {number} params.routeDistance  - Route distance in km (must be > 0)
+ * @param {number} params.timeOfDay      - Hour of the day (0-23)
+ * @param {number} params.dayOfWeek      - Day of week (0=Sunday, 6=Saturday)
+ * @param {string} params.routeType      - Route type ("highway" or "city")
+ * @param {number} params.historicalSpeed - Historical average speed in km/h (must be > 0)
+ * @returns {Promise<{eta_minutes: number, confidence_interval: {lower: number, upper: number}}>}
+ * @throws {Error} if ML_API_KEY is missing, HTTP fails, or response is invalid
  */
-export async function predictEta(origin, destination, traffic = {}, weather = {}) {
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
-  const url = `${baseUrl}/predict/eta`;
+export async function predictEta({
+  routeDistance,
+  timeOfDay,
+  dayOfWeek,
+  routeType,
+  historicalSpeed,
+}) {
+  guardMlApiKey();
+  const url = `${getBaseUrl()}/predict/eta`;
+
+  const payload = {
+    route_distance: routeDistance,
+    time_of_day: timeOfDay,
+    day_of_week: dayOfWeek,
+    route_type: routeType,
+    historical_speed: historicalSpeed,
+  };
+
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ origin, destination, traffic, weather }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(5000),
   });
-  return handleResponse(response);
+
+  const result = await handleResponse(response);
+
+  if (
+    result == null ||
+    typeof result.eta_minutes !== 'number' ||
+    !isFinite(result.eta_minutes)
+  ) {
+    throw new Error('[ML] Invalid ETA prediction: missing or non-finite eta_minutes');
+  }
+
+  return {
+    eta_minutes: result.eta_minutes,
+    confidence_interval: result.confidence_interval ?? { lower: 0, upper: 0 },
+  };
 }
 
 /**
  * Matches shipments for bilateral load consolidation.
- * @param {object} shipmentData - { weight, volume, origin, destination, pickup_time, delivery_time }
- * @returns {Promise<{matches: Array}>}
+ *
+ * @param {object} params
+ * @param {Array}  params.loads   - Array of load objects with origin/dest lat/lng, dimensions, deadline
+ * @param {Array}  params.drivers - Array of driver objects with current location, capacity, rating
+ * @returns {Promise<{assignments: Array, unmatched_loads: Array, unmatched_drivers: Array}>}
+ * @throws {Error} if ML_API_KEY is missing or HTTP fails
  */
-export async function matchBilateral(shipmentData) {
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
-  const url = `${baseUrl}/match/bilateral`;
+export async function matchBilateral({ loads, drivers }) {
+  guardMlApiKey();
+  const url = `${getBaseUrl()}/match/bilateral`;
+
+  const payload = { loads, drivers };
+
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify(shipmentData),
-    signal: AbortSignal.timeout(5000),
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(10000),
   });
+
   return handleResponse(response);
 }
 
@@ -255,71 +296,123 @@ export async function predictDriverProfit({
 }
 
 /**
- * Optimises packing of items into bins.
- * @param {Array<{id: string, w: number, h: number, d: number, weight: number}>} items
- * @returns {Promise<{bins: Array, efficiency: number}>}
+ * Optimises packing of packages into a truck with delivery routing.
+ *
+ * @param {object} params
+ * @param {Array<{length: number, width: number, height: number, weight: number}>} params.packages - Packages to pack
+ * @param {{length: number, width: number, height: number, max_weight: number}} params.truck - Truck dimensions
+ * @param {Array<{lat: number, lng: number}>} params.deliveryAddresses - Delivery stop coordinates
+ * @returns {Promise<{packing_arrangement: Array, unpacked_packages: Array, stop_sequence: Array, utilization_pct: number}>}
+ * @throws {Error} if ML_API_KEY is missing or HTTP fails
  */
-export async function optimisePacking(items) {
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
-  const url = `${baseUrl}/optimise/packing`;
+export async function optimisePacking({ packages, truck, deliveryAddresses }) {
+  guardMlApiKey();
+  const url = `${getBaseUrl()}/optimise/packing`;
+
+  const payload = {
+    packages,
+    truck,
+    delivery_addresses: deliveryAddresses,
+  };
+
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ items }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(10000),
   });
+
   return handleResponse(response);
 }
 
 /**
- * Recommends available loads for a truck in a region.
- * @param {string} truckId
- * @param {string} region
- * @returns {Promise<{loads: Array, total_revenue: number}>}
+ * Recommends available loads for a user based on collaborative filtering.
+ *
+ * @param {object} params
+ * @param {string}   params.userId         - User ID
+ * @param {Array}    [params.bookingHistory] - Past booking history entries
+ * @param {Array}    [params.ratedDrivers]   - Previously rated drivers
+ * @param {number}   [params.topN=5]         - Number of recommendations (1-50)
+ * @returns {Promise<{recommendations: Array}>}
+ * @throws {Error} if ML_API_KEY is missing or HTTP fails
  */
-export async function recommendLoads(truckId, region) {
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
-  const url = `${baseUrl}/recommend/loads`;
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: getHeaders(),
-    body: JSON.stringify({ truck_id: truckId, region }),
-    signal: AbortSignal.timeout(5000),
-  });
+export async function recommendLoads({ userId, bookingHistory = [], ratedDrivers = [], topN = 5 }) {
+  guardMlApiKey();
+  const url = `${getBaseUrl()}/recommend/loads`;
+
+  const payload = {
+    user_id: userId,
+    booking_history: bookingHistory,
+    rated_drivers: ratedDrivers,
+    top_n: topN,
+  };
+
   return handleResponse(response);
 }
 
 /**
- * Recommends suitable trucks for a given load.
- * @param {string} loadId
- * @returns {Promise<{trucks: Array, average_price: number}>}
+ * Recommends suitable trucks for a user based on collaborative filtering.
+ *
+ * @param {object} params
+ * @param {string}   params.userId         - User ID
+ * @param {Array}    [params.bookingHistory] - Past booking history entries
+ * @param {Array}    [params.ratedLoads]     - Previously rated loads
+ * @param {number}   [params.topN=5]         - Number of recommendations (1-50)
+ * @returns {Promise<{recommendations: Array}>}
+ * @throws {Error} if ML_API_KEY is missing or HTTP fails
  */
-export async function recommendTrucks(loadId) {
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
-  const url = `${baseUrl}/recommend/trucks`;
+export async function recommendTrucks({ userId, bookingHistory = [], ratedLoads = [], topN = 5 }) {
+  guardMlApiKey();
+  const url = `${getBaseUrl()}/recommend/trucks`;
+
+  const payload = {
+    user_id: userId,
+    booking_history: bookingHistory,
+    rated_loads: ratedLoads,
+    top_n: topN,
+  };
+
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ load_id: loadId }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(5000),
   });
+
   return handleResponse(response);
 }
 
 /**
- * Computes a trust score for a driver or customer entity.
- * @param {string} entityId
- * @returns {Promise<{trust_score: number, factors: object}>}
+ * Computes a trust score for a driver or customer based on behavioral metrics.
+ *
+ * @param {object} params
+ * @param {number} params.cancellationRate - Cancellation rate (0-1)
+ * @param {number} params.onTimePct        - On-time delivery percentage (0-100)
+ * @param {number} params.avgRating        - Average rating (1-5)
+ * @param {number} params.disputeCount     - Number of disputes (>= 0)
+ * @param {boolean} params.isVerified      - Whether the user is verified
+ * @returns {Promise<{trust_score: number, risk_category: string}>}
+ * @throws {Error} if ML_API_KEY is missing or HTTP fails
  */
-export async function scoreTrust(entityId) {
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
-  const url = `${baseUrl}/score/trust`;
+export async function scoreTrust({ cancellationRate, onTimePct, avgRating, disputeCount, isVerified }) {
+  guardMlApiKey();
+  const url = `${getBaseUrl()}/score/trust`;
+
+  const payload = {
+    cancellation_rate: cancellationRate,
+    on_time_pct: onTimePct,
+    avg_rating: avgRating,
+    dispute_count: disputeCount,
+    is_verified: isVerified,
+  };
+
   const response = await fetch(url, {
     method: 'POST',
     headers: getHeaders(),
-    body: JSON.stringify({ entity_id: entityId }),
+    body: JSON.stringify(payload),
     signal: AbortSignal.timeout(5000),
   });
+
   return handleResponse(response);
 }
 
@@ -356,6 +449,7 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
  * @returns {Promise<{adjustments: Array, fuel_saving: number}>}
  */
 export async function optimiseMidTrip(routeData) {
+  guardMlApiKey();
   const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
   const url = `${baseUrl}/optimise/mid-trip`;
   const response = await fetch(url, {
@@ -373,6 +467,7 @@ export async function optimiseMidTrip(routeData) {
  * @returns {Promise<{status: string, model_version: string}>}
  */
 export async function trainDemandModel(force = false) {
+  guardMlApiKey();
   const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
   const url = `${baseUrl}/train/demand`;
   const response = await fetch(url, {
@@ -390,6 +485,7 @@ export async function trainDemandModel(force = false) {
  * @returns {Promise<{status: string, model_version: string}>}
  */
 export async function trainPriceModel(force = false) {
+  guardMlApiKey();
   const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
   const url = `${baseUrl}/train/price`;
   const response = await fetch(url, {
@@ -406,6 +502,7 @@ export async function trainPriceModel(force = false) {
  * @returns {Promise<{models: Array}>}
  */
 export async function listModels() {
+  guardMlApiKey();
   const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
   const url = `${baseUrl}/models`;
   const response = await fetch(url, {

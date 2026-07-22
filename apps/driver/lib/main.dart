@@ -4,12 +4,13 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/firebase_config.dart';
-// Remove the import of 'core/supabase_config.dart' – we now use Env
-import 'package:truxify_driver/config/env.dart';  // Adjust package name to match your pubspec
+import 'package:truxify_driver/config/env.dart';
+import 'services/background_sync_service.dart';
 
 Future<void> main() async {
   // Ensure Flutter engine is initialized.
   WidgetsFlutterBinding.ensureInitialized();
+  BackgroundSyncService.initialize();
 
   // ── Validate all required environment variables before app starts ────────
   Env.validate();  // Throws an error if SUPABASE_URL or SUPABASE_ANON_KEY are missing

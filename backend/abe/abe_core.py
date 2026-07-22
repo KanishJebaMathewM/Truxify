@@ -1,6 +1,7 @@
 import hashlib
 import json
 import base64
+import os
 from typing import Dict, List, Tuple, Any, Optional
 from dataclasses import dataclass
 import numpy as np
@@ -9,6 +10,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import serialization
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +122,7 @@ class CPABE:
     
     def _generate_symmetric_key(self) -> bytes:
         """Generate symmetric encryption key"""
-        return base64.b64encode(np.random.bytes(32))
+        return base64.b64encode(os.urandom(32))
     
     def _symmetric_encrypt(self, plaintext: str, key: bytes) -> str:
         """Symmetric encryption of data"""
@@ -211,7 +213,7 @@ class KPABE:
         """Encrypt data with attribute set"""
         try:
             # Generate symmetric key
-            symmetric_key = base64.b64encode(np.random.bytes(32))
+            symmetric_key = base64.b64encode(os.urandom(32))
             
             # Encrypt data
             encrypted_data = self._symmetric_encrypt(plaintext, symmetric_key)
@@ -345,7 +347,7 @@ class DecentralizedABE:
                     return {'success': False, 'error': f'Authority {auth} not found'}
             
             # Generate symmetric key
-            symmetric_key = base64.b64encode(np.random.bytes(32))
+            symmetric_key = base64.b64encode(os.urandom(32))
             
             # Encrypt data
             encrypted_data = self._symmetric_encrypt(plaintext, symmetric_key)

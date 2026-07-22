@@ -77,6 +77,38 @@ void main() {
     expect(order404, isNull);
   });
 
+  test('fetchOrderTimeline accepts wrapped and bare timeline lists', () async {
+    when(() => apiClient.get('/api/orders/ORD-123/timeline'))
+        .thenAnswer((_) async => {'timeline': [{'title': 'Booked'}]});
+
+    expect(await orderService.fetchOrderTimeline('ORD-123'), [
+      {'title': 'Booked'},
+    ]);
+
+    when(() => apiClient.get('/api/orders/ORD-456/timeline'))
+        .thenAnswer((_) async => [{'title': 'Assigned'}]);
+
+    expect(await orderService.fetchOrderTimeline('ORD-456'), [
+      {'title': 'Assigned'},
+    ]);
+  });
+
+  test('fetchOrderTimeline rejects malformed timeline payloads', () async {
+    when(() => apiClient.get('/api/orders/ORD-123/timeline'))
+        .thenAnswer((_) async => {'timeline': 'not-a-list'});
+
+    await expectLater(
+      () => orderService.fetchOrderTimeline('ORD-123'),
+      throwsA(
+        isA<StateError>().having(
+          (error) => error.message,
+          'message',
+          contains('Failed to fetch order timeline'),
+        ),
+      ),
+    );
+  });
+
   test('fetchOrders accepts wrapped and bare history lists', () async {
     when(() => apiClient.get('/api/orders/history'))
         .thenAnswer((_) async => {'history': [{'id': 'ORD-1'}]});

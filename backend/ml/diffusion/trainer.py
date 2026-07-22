@@ -80,10 +80,16 @@ class DiffusionTrainer:
         epoch_loss = 0.0
         num_batches = 0
         
+        condition_iter = iter(condition_loader) if condition_loader is not None else None
+
         for batch_idx, x in enumerate(tqdm(dataloader, desc="Training")):
             condition = None
-            if condition_loader is not None:
-                condition = next(iter(condition_loader))[0]
+            if condition_iter is not None:
+                try:
+                    condition = next(condition_iter)[0]
+                except StopIteration:
+                    condition_iter = iter(condition_loader)
+                    condition = next(condition_iter)[0]
             
             loss = self.train_step(x, condition)
             epoch_loss += loss

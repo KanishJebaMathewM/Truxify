@@ -1,11 +1,69 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 
-// ── Mocks ───────────────────────────────────────────────────────────────
-// The oracle and verification services are simple stub implementations.
-// We mock them to avoid hitting external providers and to isolate route
-// security testing from business logic.
+const VALID_ORDER_ID = '550e8400-e29b-41d4-a716-446655440000';
+const VALID_DRIVER_ID = '660e8400-e29b-41d4-a716-446655440001';
+
+const mockOracleService = {
+  confirmDelivery: vi.fn().mockResolvedValue({
+    confirmed: true,
+    consensusCount: 3,
+    threshold: 2,
+    totalProviders: 3,
+    providerResults: [
+      { confirmed: true, provider: 'OTPVerifier' },
+      { confirmed: true, provider: 'GPSVerifier' },
+      { confirmed: true, provider: 'StatusVerifier' },
+    ],
+    timestamp: new Date().toISOString(),
+  }),
+  verifyCrossChain: vi.fn().mockResolvedValue({
+    verified: true,
+    ipfsHash: '0xabc123',
+    blockchainHash: '0xabc123',
+    verificationUrl: 'https://polygonscan.com/tx/0xabc123',
+  }),
+};
+
+const mockVerificationService = {
+  verifyOrder: vi.fn().mockResolvedValue({
+    orderId: VALID_ORDER_ID,
+    deliveryVerified: true,
+    oracleDetails: {
+      confirmed: true,
+      consensusCount: 3,
+      threshold: 2,
+      totalProviders: 3,
+      providerResults: [],
+      timestamp: new Date().toISOString(),
+    },
+    crossChainVerified: true,
+    ipfsHash: '0xabc123',
+    documentIntegrity: {
+      verified: true,
+      documentsChecked: [
+        { type: 'rc_book', uploaded: true, status: 'approved' },
+        { type: 'driving_licence', uploaded: true, status: 'approved' },
+      ],
+      lastCheck: new Date().toISOString(),
+    },
+    timestamp: new Date().toISOString(),
+  }),
+  checkDocumentIntegrity: vi.fn().mockResolvedValue({
+    verified: true,
+    documentsChecked: [
+      { type: 'rc_book', uploaded: true, status: 'approved' },
+      { type: 'driving_licence', uploaded: true, status: 'approved' },
+    ],
+    lastCheck: new Date().toISOString(),
+  }),
+};
+
+vi.mock('../../src/core/container.js', () => ({
+  oracleService: mockOracleService,
+  verificationService: mockVerificationService,
+}));
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: null,
@@ -14,53 +72,9 @@ vi.mock('../../src/config/db.js', () => ({
   mongoDb: null,
 }));
 
-vi.mock('../../src/oracle/OracleService.js', () => {
-  return {
-    default: class MockOracleService {
-      constructor() {
-        this.providers = [{ name: 'TestProvider' }];
-        this.consensusThreshold = 1;
-      }
-      confirmDelivery = vi.fn().mockResolvedValue({
-        confirmed: true,
-        consensusCount: 1,
-        threshold: 1,
-        totalProviders: 1,
-        providerResults: [{ status: 'fulfilled', value: { confirmed: true } }],
-        timestamp: new Date().toISOString(),
-      });
-      verifyCrossChain = vi.fn().mockResolvedValue({
-        verified: true,
-        ipfsHash: 'QmTestHash123',
-        blockchainHash: '0xabc123',
-        verificationUrl: 'https://ipfs.io/ipfs/QmTestHash123',
-      });
-    },
-  };
-});
-
-vi.mock('../../src/services/verification/VerificationService.js', () => {
-  return {
-    default: class MockVerificationService {
-      verifyOrder = vi.fn().mockResolvedValue({
-        orderId: '550e8400-e29b-41d4-a716-446655440000',
-        deliveryVerified: true,
-        timestamp: new Date().toISOString(),
-      });
-      checkDocumentIntegrity = vi.fn().mockResolvedValue({
-        verified: true,
-        documentsChecked: ['RC', 'License', 'Insurance'],
-        lastCheck: new Date().toISOString(),
-      });
-    },
-  };
-});
-
-// ── Import routes AFTER mocks ──────────────────────────────────────────
 const { default: oracleRouter } = await import('../../src/routes/oracleRoutes.js');
 const { default: verificationRouter } = await import('../../src/routes/verificationRoutes.js');
 
-// ── Test apps ──────────────────────────────────────────────────────────
 function buildOracleApp() {
   const app = express();
   app.use(express.json());
@@ -85,10 +99,6 @@ const DRIVER_HEADERS = {
   'x-user-role': 'driver',
 };
 
-// ── Helper: valid request bodies ───────────────────────────────────────
-const VALID_ORDER_ID = '550e8400-e29b-41d4-a716-446655440000';
-const VALID_DRIVER_ID = '660e8400-e29b-41d4-a716-446655440001';
-
 const validConfirmBody = {
   orderId: VALID_ORDER_ID,
   otp: '123456',
@@ -100,11 +110,11 @@ const validCrosschainBody = {
   blockchainHash: '0xabc123def456',
 };
 
-// ════════════════════════════════════════════════════════════════════════
-// Oracle Routes
-// ════════════════════════════════════════════════════════════════════════
-
 describe('Oracle Routes — Authentication', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('GET /status returns 401 without auth headers', async () => {
     const app = buildOracleApp();
     const res = await request(app).get('/api/oracle/status');
@@ -158,6 +168,10 @@ describe('Oracle Routes — Authentication', () => {
 });
 
 describe('Oracle Routes — Request Validation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('POST /confirm returns 400 when body is empty', async () => {
     const app = buildOracleApp();
     const res = await request(app)
@@ -192,7 +206,7 @@ describe('Oracle Routes — Request Validation', () => {
     const res = await request(app)
       .post('/api/oracle/confirm')
       .set(USER_HEADERS)
-      .send({ ...validConfirmBody, otp: '12345' }); // 5 digits
+      .send({ ...validConfirmBody, otp: '12345' });
     expect(res.status).toBe(400);
     expect(res.body.details).toEqual(
       expect.arrayContaining([
@@ -294,11 +308,11 @@ describe('Oracle Routes — Request Validation', () => {
   });
 });
 
-// ════════════════════════════════════════════════════════════════════════
-// Verification Routes
-// ════════════════════════════════════════════════════════════════════════
-
 describe('Verification Routes — Authentication', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('GET /order/:orderId returns 401 without auth headers', async () => {
     const app = buildVerifyApp();
     const res = await request(app).get(`/api/verify/order/${VALID_ORDER_ID}`);
@@ -334,6 +348,10 @@ describe('Verification Routes — Authentication', () => {
 });
 
 describe('Verification Routes — Request Validation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('GET /order/:orderId returns 400 for invalid UUID param', async () => {
     const app = buildVerifyApp();
     const res = await request(app)
@@ -384,5 +402,98 @@ describe('Verification Routes — Request Validation', () => {
       .set(DRIVER_HEADERS)
       .send({ driverId: VALID_DRIVER_ID, extra: 'nope' });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('Verification Routes — Response Contract', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('GET /order/:orderId returns correct contract', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .get(`/api/verify/order/${VALID_ORDER_ID}`)
+      .set(USER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('success', true);
+    expect(res.body).toHaveProperty('data');
+    expect(res.body.data).toHaveProperty('orderId');
+    expect(res.body.data).toHaveProperty('deliveryVerified');
+    expect(typeof res.body.data.deliveryVerified).toBe('boolean');
+    expect(res.body.data).toHaveProperty('oracleDetails');
+    expect(res.body.data).toHaveProperty('crossChainVerified');
+    expect(typeof res.body.data.crossChainVerified).toBe('boolean');
+    expect(res.body.data).toHaveProperty('documentIntegrity');
+    expect(res.body.data).toHaveProperty('timestamp');
+  });
+
+  it('POST /documents/check returns correct contract', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/documents/check')
+      .set(DRIVER_HEADERS)
+      .send({ driverId: VALID_DRIVER_ID });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('success', true);
+    expect(res.body).toHaveProperty('data');
+    expect(res.body.data).toHaveProperty('verified');
+    expect(typeof res.body.data.verified).toBe('boolean');
+    expect(res.body.data).toHaveProperty('documentsChecked');
+    expect(Array.isArray(res.body.data.documentsChecked)).toBe(true);
+    expect(res.body.data).toHaveProperty('lastCheck');
+  });
+
+  it('POST /oracle/confirm returns correct contract', async () => {
+    const app = buildOracleApp();
+    const res = await request(app)
+      .post('/api/oracle/confirm')
+      .set(USER_HEADERS)
+      .send(validConfirmBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('success', true);
+    expect(res.body).toHaveProperty('data');
+    expect(res.body.data).toHaveProperty('confirmed');
+    expect(typeof res.body.data.confirmed).toBe('boolean');
+    expect(res.body.data).toHaveProperty('consensusCount');
+    expect(res.body.data).toHaveProperty('threshold');
+    expect(res.body.data).toHaveProperty('totalProviders');
+    expect(res.body.data).toHaveProperty('providerResults');
+    expect(res.body.data).toHaveProperty('timestamp');
+  });
+
+  it('POST /oracle/verify-crosschain returns correct contract', async () => {
+    const app = buildOracleApp();
+    const res = await request(app)
+      .post('/api/oracle/verify-crosschain')
+      .set(USER_HEADERS)
+      .send(validCrosschainBody);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('success', true);
+    expect(res.body).toHaveProperty('data');
+    expect(res.body.data).toHaveProperty('verified');
+    expect(typeof res.body.data.verified).toBe('boolean');
+    expect(res.body.data).toHaveProperty('ipfsHash');
+    expect(res.body.data).toHaveProperty('blockchainHash');
+    expect(res.body.data).toHaveProperty('verificationUrl');
+  });
+
+  it('GET /oracle/status returns correct contract', async () => {
+    const app = buildOracleApp();
+    const res = await request(app)
+      .get('/api/oracle/status')
+      .set(USER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('success', true);
+    expect(res.body).toHaveProperty('data');
+    expect(res.body.data).toHaveProperty('providers');
+    expect(typeof res.body.data.providers).toBe('number');
+    expect(res.body.data).toHaveProperty('threshold');
+    expect(res.body.data).toHaveProperty('timestamp');
   });
 });

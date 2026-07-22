@@ -58,7 +58,7 @@ class TrafficPipeline:
     def _create_lstm_model(self):
         """Create LSTM model for ETA prediction"""
         model = models.Sequential([
-            layers.LSTM(64, input_shape=(60, 10), return_sequences=True),
+            layers.LSTM(64, input_shape=(60, 5), return_sequences=True),
             layers.Dropout(0.2),
             layers.LSTM(32, return_sequences=True),
             layers.Dropout(0.2),

@@ -8,6 +8,7 @@ import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimi
 import tripRoutes from './routes/tripRoutes.js'
 import deviceRoutes from './routes/deviceRoutes.js'
 import documentRoutes from './routes/documentRoutes.js'
+import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js'
 import { orderRepository } from './core/container.js'
@@ -96,6 +97,10 @@ import {
   startDocumentExpiryWorker,
   stopDocumentExpiryWorker,
 } from './services/documentExpiryService.js'
+import {
+  startDlqWorker,
+  stopDlqWorker,
+} from './workers/dlqWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -266,6 +271,16 @@ app.use(helmet({
   dnsPrefetchControl: { allow: false },
   hidePoweredBy: true, // Removes X-Powered-By: Express
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  permissionsPolicy: {
+    features: {
+      camera: [],
+      microphone: [],
+      geolocation: [],
+      payment: [],
+      usb: [],
+      fullscreen: ['self']
+    }
+  },
   xssFilter: true
 }))
 
@@ -348,6 +363,7 @@ app.use('/api/support', supportRoutes)
 app.use('/api/profile', profileRoutes)
 app.use('/api/devices', deviceRoutes)
 app.use('/api/driver/documents', documentRoutes)
+app.use('/api/maintenance', maintenancePhotoRoutes)
 app.use('/api/trucks', truckRoutes)
 app.use('/api/v1', lookupRoutes)
 app.use('/api/public', publicTrackingRoutes)
@@ -550,10 +566,6 @@ server.listen(PORT, () => {
 
   logger.info(`🆕 ZK-Proof KYC Verification enabled with contract: ${process.env.KYC_VERIFIER_CONTRACT || 'not-deployed'}`)
 
-  logger.info(`☁️ Multi-Cloud Disaster Recovery enabled (Active: ${process.env.ACTIVE_CLOUD || 'aws'})`)
-
-
-  logger.info(`☁️ Multi-Cloud Disaster Recovery enabled (Active: ${process.env.ACTIVE_CLOUD || 'aws'})`)
 
   startEscrowRefundReconciliation(orderRepository)
   startReputationReconciliation(orderRepository)
@@ -612,16 +624,9 @@ async function shutdown (signal) {
     await shardManager.closeAllConnections()
     logger.info('[shutdown] Shard connections closed.')
 
-    // 4. Close database/cache connections
-
-    // 3. Close WebRTC signaling server
+    // 4. Close WebRTC signaling server
     await closeWebRTCSignaling()
     logger.info('[shutdown] WebRTC signaling server closed.')
-
-    // 4. Close shard connections
-    await shardManager.closeAllConnections()
-    logger.info('[shutdown] Shard connections closed.')
-
 
     // 5. Close database/cache connections
 

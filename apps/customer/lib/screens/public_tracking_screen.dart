@@ -29,6 +29,20 @@ class _PublicTrackingScreenState extends State<PublicTrackingScreen> {
 
   static const Duration _refreshInterval = Duration(seconds: 15);
 
+  Map<String, dynamic>? _mapFrom(dynamic value) {
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) return Map<String, dynamic>.from(value);
+    return null;
+  }
+
+  List<Map<String, dynamic>> _timelineFrom(dynamic value) {
+    if (value is! List) return const [];
+    return value
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -58,12 +72,9 @@ class _PublicTrackingScreenState extends State<PublicTrackingScreen> {
       }
 
       setState(() {
-        _order = data['order'] as Map<String, dynamic>?;
-        _timeline = (data['timeline'] as List<dynamic>?)
-                ?.map((t) => Map<String, dynamic>.from(t as Map))
-                .toList() ??
-            [];
-        _driverLocation = data['driver_location'] as Map<String, dynamic>?;
+        _order = _mapFrom(data['order']);
+        _timeline = _timelineFrom(data['timeline']);
+        _driverLocation = _mapFrom(data['driver_location']);
         _isLoading = false;
       });
     } catch (e) {

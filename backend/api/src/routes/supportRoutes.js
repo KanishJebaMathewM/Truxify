@@ -1,3 +1,98 @@
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     FAQ:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: string
+ *         question:
+ *           type: string
+ *         answer:
+ *           type: string
+ *         app_type:
+ *           type: string
+ *         sort_order:
+ *           type: integer
+ *     SupportCategoriesResponse:
+ *       type: object
+ *       properties:
+ *         categories:
+ *           type: array
+ *           items:
+ *             type: string
+ *         labels:
+ *           type: object
+ *         sla_hours:
+ *           type: object
+ *         descriptions:
+ *           type: object
+ *     CreateTicketRequest:
+ *       type: object
+ *       required:
+ *         - subject
+ *         - category
+ *       properties:
+ *         subject:
+ *           type: string
+ *         category:
+ *           type: string
+ *           enum: [billing, booking, payment, order, technical, general, account]
+ *         description:
+ *           type: string
+ *     TicketResponse:
+ *       type: object
+ *       properties:
+ *         message:
+ *           type: string
+ *         ticket:
+ *           type: object
+ *     TicketListResponse:
+ *       type: object
+ *       properties:
+ *         tickets:
+ *           type: array
+ *           items:
+ *             type: object
+ *         pagination:
+ *           type: object
+ *           properties:
+ *             page:
+ *               type: integer
+ *             limit:
+ *               type: integer
+ *             total:
+ *               type: integer
+ *             totalPages:
+ *               type: integer
+ *     UpdateTicketRequest:
+ *       type: object
+ *       properties:
+ *         subject:
+ *           type: string
+ *         description:
+ *           type: string
+ *         category:
+ *           type: string
+ *         status:
+ *           type: string
+ *     CreateCommentRequest:
+ *       type: object
+ *       required:
+ *         - message
+ *       properties:
+ *         message:
+ *           type: string
+ *     CommentResponse:
+ *       type: object
+ *       properties:
+ *         message:
+ *           type: string
+ *         comment:
+ *           type: object
+ */
+
 import express from 'express';
 import { supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
@@ -14,6 +109,7 @@ const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
 const TICKET_COLUMNS = 'id, subject, description, category, status, created_at, updated_at';
 const TICKET_DETAIL_COLUMNS = 'id, user_id, subject, description, category, status, created_at, updated_at';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const VALID_TICKET_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
 
 // Canonical map of all accepted category aliases -> database values.
 // Shared by ticket creation, ticket update, and the categories endpoint.
@@ -67,9 +163,45 @@ function parseUuidQuery(value, field) {
   return { value };
 }
 
+function parseTicketStatus(value) {
+  if (value === undefined) return { value: undefined };
+  if (typeof value !== 'string') {
+    return { error: 'status must be a single value' };
+  }
+  const normalized = value.toLowerCase().trim();
+  if (!VALID_TICKET_STATUSES.includes(normalized)) {
+    return { error: 'Unsupported support ticket status.' };
+  }
+  return { value: normalized };
+}
+
 // ============================================================================
 // 1. LIST ACTIVE FAQS (PUBLIC)
 // ============================================================================
+/**
+ * @openapi
+ * /api/support/faqs:
+ *   get:
+ *     tags: [Support]
+ *     summary: List active FAQs
+ *     description: Returns active FAQs optionally filtered by app type. Public endpoint - no authentication required.
+ *     security: []
+ *     parameters:
+ *       - in: query
+ *         name: app_type
+ *         schema:
+ *           type: string
+ *         description: Filter by app type (customer, driver, both)
+ *     responses:
+ *       200:
+ *         description: Array of FAQs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/FAQ'
+ */
 router.get('/faqs', async (req, res) => {
   const appType = normalizeRequiredText(req.query.app_type);
 
@@ -102,6 +234,22 @@ router.get('/faqs', async (req, res) => {
 // ============================================================================
 // 2. LIST VALID TICKET CATEGORIES (PUBLIC)
 // ============================================================================
+/**
+ * @openapi
+ * /api/support/categories:
+ *   get:
+ *     tags: [Support]
+ *     summary: List support ticket categories
+ *     description: Returns valid support ticket categories with human-readable labels, SLA response times in hours, and descriptions. Public endpoint - no authentication required. Cached for 24 hours.
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Categories with metadata
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SupportCategoriesResponse'
+ */
 const VALID_CATEGORIES = [...new Set(Object.values(CATEGORY_MAP))];
 
 const CATEGORY_LABELS = {
@@ -148,6 +296,31 @@ router.get('/categories', (_req, res) => {
 // ============================================================================
 // 3. CREATE SUPPORT TICKET (AUTHENTICATED USER)
 // ============================================================================
+/**
+ * @openapi
+ * /api/support/tickets:
+ *   post:
+ *     tags: [Support]
+ *     summary: Create a support ticket
+ *     description: Creates a new support ticket for the authenticated user. Category is normalized via alias map.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateTicketRequest'
+ *     responses:
+ *       201:
+ *         description: Ticket created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TicketResponse'
+ *       400:
+ *         description: Validation error
+ */
 router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSchema), async (req, res) => {
   const subject = normalizeRequiredText(req.body.subject);
   const category = normalizeRequiredText(req.body.category);
@@ -194,6 +367,42 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
 // ============================================================================
 // 4. LIST CURRENT USER'S SUPPORT TICKETS (AUTHENTICATED USER)
 // ============================================================================
+/**
+ * @openapi
+ * /api/support/tickets:
+ *   get:
+ *     tags: [Support]
+ *     summary: List user's support tickets
+ *     description: Returns paginated support tickets for the authenticated user. Optional filters by status and category.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: Paginated ticket list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TicketListResponse'
+ */
 router.get('/tickets', authenticate, userLimiter, async (req, res) => {
   const { status, category, page = '1', limit = '20' } = req.query;
   const parsedPage = parsePositiveInteger(page, 1, 'page');
@@ -215,18 +424,19 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
     return res.status(400).json({ error: 'Unsupported support ticket category.' });
   }
 
+  const statusResult = parseTicketStatus(status);
+  if (statusResult.error) {
+    return res.status(400).json({ error: statusResult.error });
+  }
+
   try {
     let query = supabase
       .from('support_tickets')
       .select(TICKET_COLUMNS, { count: 'exact' })
       .eq('user_id', req.user.id);
 
-    if (status) {
-      const ALLOWED_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
-      if (!ALLOWED_STATUSES.includes(status)) {
-        return res.status(400).json({ error: 'Unsupported support ticket status.' });
-      }
-      query = query.eq('status', status);
+    if (statusResult.value) {
+      query = query.eq('status', statusResult.value);
     }
 
     if (dbCategory) {
@@ -261,6 +471,34 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
 // ============================================================================
 // 5. GET SINGLE SUPPORT TICKET (AUTHENTICATED USER - OWNER)
 // ============================================================================
+/**
+ * @openapi
+ * /api/support/tickets/{id}:
+ *   get:
+ *     tags: [Support]
+ *     summary: Get a single support ticket
+ *     description: Returns details of a specific support ticket. Only the ticket owner or admin can access.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Ticket details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Ticket not found
+ */
 router.get('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   const ticketId = req.params.id;
 
@@ -295,6 +533,42 @@ router.get('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSc
 // ============================================================================
 // 6. UPDATE SUPPORT TICKET (AUTHENTICATED USER - OWNER OR ADMIN)
 // ============================================================================
+/**
+ * @openapi
+ * /api/support/tickets/{id}:
+ *   patch:
+ *     tags: [Support]
+ *     summary: Update a support ticket
+ *     description: Updates a support ticket's subject, description, category, or status. Only ticket owner or admin can update. Non-admin users can only change status to 'closed'.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateTicketRequest'
+ *     responses:
+ *       200:
+ *         description: Ticket updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TicketResponse'
+ *       400:
+ *         description: Cannot update closed ticket
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Ticket not found
+ */
 router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicketSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { subject, description, category, status } = req.body;
@@ -385,6 +659,49 @@ router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicke
 // ============================================================================
 // 7. LIST ALL TICKETS (ADMIN ONLY)
 // ============================================================================
+/**
+ * @openapi
+ * /api/support/admin/tickets:
+ *   get:
+ *     tags: [Support]
+ *     summary: List all tickets (Admin)
+ *     description: Returns all support tickets with optional filters by status, category, and user. Admin role required.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: category
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: user_id
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *     responses:
+ *       200:
+ *         description: Paginated admin ticket list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/TicketListResponse'
+ *       403:
+ *         description: Admin role required
+ */
 router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:admin-view-all'), async (req, res) => {
   const { status, category, user_id, page = '1', limit = '20' } = req.query;
   const parsedPage = parsePositiveInteger(page, 1, 'page');
@@ -411,17 +728,18 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
     return res.status(400).json({ error: userIdResult.error });
   }
 
+  const statusResult = parseTicketStatus(status);
+  if (statusResult.error) {
+    return res.status(400).json({ error: statusResult.error });
+  }
+
   try {
     let query = supabase
       .from('support_tickets')
       .select(TICKET_DETAIL_COLUMNS, { count: 'exact' });
 
-    if (status) {
-      const ADMIN_ALLOWED_STATUSES = ['open', 'in_progress', 'resolved', 'closed'];
-      if (!ADMIN_ALLOWED_STATUSES.includes(status)) {
-        return res.status(400).json({ error: 'Unsupported support ticket status.' });
-      }
-      query = query.eq('status', status);
+    if (statusResult.value) {
+      query = query.eq('status', statusResult.value);
     }
 
     if (dbCategory) {
@@ -457,6 +775,42 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
   }
 });
 
+/**
+ * @openapi
+ * /api/support/tickets/{id}/comments:
+ *   post:
+ *     tags: [Support]
+ *     summary: Add a comment to a support ticket
+ *     description: Adds a comment/reply to an existing support ticket. Only the ticket owner or admin can comment. Cannot comment on closed tickets.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateCommentRequest'
+ *     responses:
+ *       201:
+ *         description: Comment added
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/CommentResponse'
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Ticket not found
+ *       409:
+ *         description: Cannot comment on closed ticket
+ */
 /**
  * @route POST /api/support/tickets/:id/comments
  * @desc Create a comment/reply on a support ticket
@@ -531,6 +885,46 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, validateParams(u
 // ============================================================================
 // 8. GET ALL COMMENTS/REPLIES FOR A TICKET (CUSTOMER OR DRIVER OWNER OR ADMIN)
 // ============================================================================
+/**
+ * @openapi
+ * /api/support/tickets/{id}/comments:
+ *   get:
+ *     tags: [Support]
+ *     summary: Get ticket comments
+ *     description: Returns all comments for a support ticket. Only the ticket owner or admin can view.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [asc, desc]
+ *           default: desc
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Array of comments
+ *       403:
+ *         description: Access denied
+ *       404:
+ *         description: Ticket not found
+ */
 router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { sort } = req.query;

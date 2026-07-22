@@ -18,6 +18,9 @@ import {
 } from './orderNotificationService.js';
 import { escrowRelease as defaultEscrowRelease } from '../escrow.js';
 import logger from '../../middleware/logger.js';
+import { OrderTimelineService } from './orderTimelineService.js';
+
+const orderTimelineService = new OrderTimelineService({ supabase, logger });
 
 const DELIVERY_OTP_READY_STATUSES = new Set(['arriving']);
 
@@ -179,6 +182,8 @@ export class DeliveryVerificationService {
       throw new DomainError(500, { error: 'Failed to verify OTP.', details: guardResult.error.message });
     }
 
+    let releaseTxHash = null;
+    let escrowAlreadyReleased = false;
 
     const { data: tripData, error: rpcErr } = await this.orderRepository.executeRpc('complete_trip_tx', {
       p_order_id: orderId,
@@ -207,9 +212,7 @@ export class DeliveryVerificationService {
 
     await this.completeDeliveryOtp({ otpRecordId: otpRecord.id, orderId });
 
-    let releaseTxHash = null;
-    let escrowAlreadyReleased = false;
-    if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
+    if (verifiedOrder.escrow_status === 'funded' || verifiedOrder.escrow_status === 'release_failed') {
       try {
         const releaseResult = await this.escrowReleaseFn(order.order_display_id);
         if (releaseResult.txHash) {
@@ -227,7 +230,7 @@ export class DeliveryVerificationService {
         });
       }
     } else {
-      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
+      logger.info(`[escrow] Escrow not funded (status: ${verifiedOrder.escrow_status}) — skipping on-chain release.`);
     }
 
     let escrowUpdateFailed = false;

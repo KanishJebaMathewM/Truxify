@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -16,11 +17,11 @@ class EarningsExportService {
     await Share.shareXFiles([XFile(file.path)], text: 'Earnings Statement');
   }
 
-  Future<void> saveCsv(String csvContent, String filename) async {
-    final tempDir = Directory.systemTemp;
-    final file = File('${tempDir.path}/$filename');
+  Future<String> saveCsv(String csvContent, String filename) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/$filename');
     await file.writeAsString(csvContent);
-    await Share.shareXFiles([XFile(file.path)], text: 'Earnings Statement');
+    return file.path;
   }
 
   Future<Uint8List> generatePdf(EarningsStatementModel statement) async {

@@ -208,6 +208,8 @@ abstract class AppLocalizations {
 
   String get savings;
 
+  String get totalShipments;
+
   String get yourUsualRoutes;
 
   String get lastTruckLocation;
@@ -386,6 +388,20 @@ abstract class AppLocalizations {
   String get printInvoice;
 
   String get downloadFailed;
+
+  String get noRoutesFound;
+
+  String get bookAgain;
+
+  String get viewAllOrders;
+
+  String get recentRoutes;
+
+  String get allTrips;
+
+  String get filterStatus;
+
+  String get noMatchingTrips;
 }
 
 class _AppLocalizationsDelegate

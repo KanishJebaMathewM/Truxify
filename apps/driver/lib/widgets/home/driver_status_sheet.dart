@@ -17,6 +17,8 @@ class DriverStatusSheet extends StatelessWidget {
     required this.todayEarnings,
     required this.driverRating,
     required this.onToggleOnline,
+    this.batteryLevel,
+    this.isCharging = false,
   });
 
   final bool isOnline;
@@ -27,6 +29,8 @@ class DriverStatusSheet extends StatelessWidget {
   final EarningsDailyModel? todayEarnings;
   final double? driverRating;
   final VoidCallback onToggleOnline;
+  final int? batteryLevel;
+  final bool isCharging;
 
   @override
   Widget build(BuildContext context) {
@@ -113,6 +117,27 @@ class DriverStatusSheet extends StatelessWidget {
               color: TruxifyColors.adaptiveSecondaryText(context),
             ),
           ),
+          if (batteryLevel != null) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  _batteryIcon(batteryLevel!, isCharging),
+                  size: 14,
+                  color: _batteryColor(batteryLevel!),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '$batteryLevel%${isCharging ? ' · Charging' : ''}',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: _batteryColor(batteryLevel!),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 16),
           if (isLoadingMetrics)
             const SummaryCardsShimmer()
@@ -127,5 +152,20 @@ class DriverStatusSheet extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  IconData _batteryIcon(int level, bool charging) {
+    if (charging) return Icons.battery_charging_full_rounded;
+    if (level > 80) return Icons.battery_full_rounded;
+    if (level > 50) return Icons.battery_5_bar_rounded;
+    if (level > 20) return Icons.battery_3_bar_rounded;
+    if (level > 10) return Icons.battery_2_bar_rounded;
+    return Icons.battery_1_bar_rounded;
+  }
+
+  Color _batteryColor(int level) {
+    if (level <= 10) return TruxifyColors.errorRed;
+    if (level <= 20) return TruxifyColors.warning;
+    return TruxifyColors.success;
   }
 }

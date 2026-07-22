@@ -202,6 +202,17 @@ export async function unregisterDeviceToken(req, res) {
   }
 }
 
+export async function unregisterAllDeviceTokens(userId) {
+  const { error } = await supabase
+    .from('user_devices')
+    .delete()
+    .eq('user_id', userId);
+  if (error) {
+    logger.error('[DeviceController] Failed to unregister device tokens:', error.message);
+    throw error;
+  }
+}
+
 /**
  * Get list of unique registered device platforms
  */

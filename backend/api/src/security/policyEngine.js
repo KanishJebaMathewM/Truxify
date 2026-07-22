@@ -66,6 +66,8 @@ const POLICIES = {
   'truck:register':            { roles: [ROLES.DRIVER] },
   'truck:list-own':            { roles: [ROLES.DRIVER] },
 
+  'maintenance:upload-photos':  { roles: [ROLES.DRIVER] },
+
   'ticket:create':             {},
   'ticket:view-own':           {},
   'ticket:view':               { ownership: (u, r) => r?.ticket && (r.ticket.user_id === u.id || u.role === ROLES.ADMIN) },
@@ -79,6 +81,12 @@ const POLICIES = {
 
   'shard:view':                { roles: [ROLES.ADMIN] },
   'shard:query-orders':        { roles: [ROLES.ADMIN] },
+
+  'fraud:view-stats':          { roles: [ROLES.ADMIN] },
+  'fraud:view-risk':           { roles: [ROLES.ADMIN] },
+  'fraud:manage-review':       { roles: [ROLES.ADMIN] },
+  'fraud:track':               {},
+  'fraud:analyze-network':     { roles: [ROLES.ADMIN] },
 
   'trip:sync-events':          {},
   'trip:view-events':          { ownership: (u, r) => r?.trip && (u.role === ROLES.ADMIN || r.trip.driver_id === u.id || r.trip.customer_id === u.id) },

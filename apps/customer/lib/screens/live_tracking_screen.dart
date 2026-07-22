@@ -98,7 +98,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
       }
     }
     _trackingSubscription?.cancel();
-    _trackingWebSocket?.close();
+    unawaited(_trackingWebSocket?.close());
     super.dispose();
   }
 
@@ -146,9 +146,10 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
     _trackingSubscription = _trackingWebSocket!.stream.listen((message) {
       debugPrint('Tracking WebSocket message received: $message');
+      if (message is! String) return;
       try {
         if (message == 'pong') return;
-        final payload = jsonDecode(message as String) as Map<String, dynamic>;
+        final payload = jsonDecode(message) as Map<String, dynamic>;
 
         if (payload['event'] == 'location_update') {
           final data = payload['data'] as Map<String, dynamic>?;
@@ -901,7 +902,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                     ),
                   ],
                 );
-              },
             ),
           ),
           Positioned(

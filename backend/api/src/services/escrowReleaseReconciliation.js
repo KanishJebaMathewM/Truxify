@@ -32,10 +32,10 @@ export async function reconcilePendingEscrowReleases() {
   } else {
     // Redis not configured — single-instance mode, use in-process guard only
     if (reconciliationRunning) return;
-    reconciliationRunning = true;
   }
 
   try {
+    if (!lockAcquired) reconciliationRunning = true;
     const instanceId = process.env.HOSTNAME || os.hostname();
     const { data: failedOrders, error } = await supabaseAdmin
       .from('orders')

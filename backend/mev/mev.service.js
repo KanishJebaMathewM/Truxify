@@ -50,7 +50,6 @@ class MEVService {
             await this.storeCommitment({
                 userId,
                 secretHash,
-                secret,
                 txHash: receipt.hash
             });
             
@@ -256,7 +255,6 @@ class MEVService {
             .insert([{
                 user_id: data.userId,
                 secret_hash: data.secretHash,
-                secret: data.secret,
                 tx_hash: data.txHash,
                 created_at: new Date().toISOString()
             }]);

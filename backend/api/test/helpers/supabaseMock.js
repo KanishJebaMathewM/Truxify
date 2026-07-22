@@ -356,6 +356,20 @@ export function createSupabaseMock(initialStore = {}) {
             store.__storageObjects.push({ bucket, path, buffer, options });
             return { data: { path }, error: null };
           },
+          async createSignedUrl(path, expiresIn) {
+            calls.push({ storageSignedUrl: { bucket, path, expiresIn } });
+            const signedUrl = `https://mock-storage.supabase.co/storage/v1/object/sign/${bucket}/${path}?token=mock-token`;
+            return { data: { signedUrl }, error: null };
+          },
+          async remove(paths) {
+            calls.push({ storageRemove: { bucket, paths } });
+            if (!store.__storageObjects) store.__storageObjects = [];
+            const pathList = Array.isArray(paths) ? paths : [paths];
+            store.__storageObjects = store.__storageObjects.filter(
+              (o) => !(o.bucket === bucket && pathList.includes(o.path))
+            );
+            return { data: null, error: null };
+          },
         };
       },
     },

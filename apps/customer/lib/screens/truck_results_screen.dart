@@ -380,7 +380,7 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
                 padding: const EdgeInsets.only(bottom: 14),
                 child: TruckCard(
                   truck: entry.value,
-                  draft: widget.draft,
+                  draft: _activeDraft,
                   isHighlighted: entry.key == 0,
                 ),
               );

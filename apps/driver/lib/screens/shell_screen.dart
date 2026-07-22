@@ -11,6 +11,7 @@ import '../services/fcm_service.dart';
 import 'home_screen.dart';
 import 'documents_screen.dart';
 import 'destination_picker_screen.dart';
+import 'weight_calculator_screen.dart';
 import 'earnings_screen.dart';
 import 'load_detail_screen.dart';
 import 'load_point_detail_screen.dart';
@@ -48,12 +49,18 @@ class _ShellScreenState extends State<ShellScreen> {
       GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _profileNavigatorKey =
       GlobalKey<NavigatorState>();
-  final ValueNotifier<int> _currentIndex = ValueNotifier<int>(0);
+  StreamSubscription? _weighStationSub;
+    final ValueNotifier<int> _currentIndex = ValueNotifier<int>(0);
   late final List<Widget> _tabs;
 
   @override
   void initState() {
     super.initState();
+    WeighStationService.instance.initialize();
+    _weighStationSub = WeighStationService.instance.eventStream.listen((event) {
+      _showBypassAlert(event);
+    });
+
     _tabs = [
       _buildTabNavigator(
         _homeNavigatorKey,
@@ -188,6 +195,7 @@ class _ShellScreenState extends State<ShellScreen> {
 
   @override
   void dispose() {
+    _weighStationSub?.cancel();
     ForegroundNotificationHandler.dispose();
     _currentIndex.dispose();
     super.dispose();
@@ -261,6 +269,8 @@ class _ShellScreenState extends State<ShellScreen> {
         }
         return truxifyPageRoute(
             (context) => LoadPointDetailScreen(point: args));
+      case AppRoutes.weightCalculator:
+        return truxifyPageRoute((context) => const WeightCalculatorScreen());
       case AppRoutes.destinationPicker:
         final args = settings.arguments as DestinationPickerArgs?;
         return truxifyPageRoute(
@@ -288,7 +298,69 @@ class _ShellScreenState extends State<ShellScreen> {
     );
   }
 
-  @override
+
+
+  void _showBypassAlert(WeighStationEvent event) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        final isBypass = event.action == 'BYPASS';
+        return Dialog(
+          backgroundColor: isBypass ? const Color(0xFF1E4620) : const Color(0xFF5C1A1A),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          child: Padding(
+            padding: const EdgeInsets.all(32.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isBypass ? Icons.check_circle_outline : Icons.warning_amber_rounded,
+                  size: 80,
+                  color: Colors.white,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  isBypass ? 'BYPASS CLEARED' : 'PULL IN REQUIRED',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Station ID: ${event.stationId}\n${event.reason}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Colors.white70,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: isBypass ? const Color(0xFF1E4620) : const Color(0xFF5C1A1A),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('ACKNOWLEDGE', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+    );
+  }
+
   Widget build(BuildContext context) {
     return Scaffold(
       body: ValueListenableBuilder<int>(

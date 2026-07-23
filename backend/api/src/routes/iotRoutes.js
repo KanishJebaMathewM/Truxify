@@ -2,6 +2,7 @@ import express from 'express';
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
+import { authenticate } from '../middleware/auth.js';
 import { validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 
@@ -15,7 +16,7 @@ const telemetrySchema = z.object({
 // 1. POST TELEMETRY DATA (IoT)
 // POST /api/iot/telemetry/:id
 // ============================================================================
-router.post('/telemetry/:id', validateParams(paramIdSchema), async (req, res) => {
+router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
   try {
     const parseResult = telemetrySchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -45,6 +46,10 @@ router.post('/telemetry/:id', validateParams(paramIdSchema), async (req, res) =>
       return res.status(400).json({ error: 'Load does not require refrigeration' });
     }
 
+    if (req.user.role !== 'admin' && load.customer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied for this load' });
+    }
+
     // Insert telemetry
     const { error: insertErr } = await supabase
       .from('temperature_telemetry')
@@ -72,8 +77,14 @@ router.post('/telemetry/:id', validateParams(paramIdSchema), async (req, res) =>
       await supabase.from('notifications').insert({
         user_id: load.customer_id,
         title: 'Temperature Alert',
-        message: `Your cargo (Load ${loadId}) is out of the safe temperature range. Current temp: ${temperature}°C.`,
-        type: 'alert'
+        body: `Your cargo (Load ${loadId}) is out of the safe temperature range. Current temp: ${temperature}°C.`,
+        notif_type: 'cold_chain_alert',
+        metadata: {
+          load_id: loadId,
+          temperature,
+          target_temperature_min: load.target_temperature_min,
+          target_temperature_max: load.target_temperature_max
+        }
       }).catch(err => logger.error('Failed to send notification:', err));
     }
 

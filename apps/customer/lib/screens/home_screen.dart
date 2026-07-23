@@ -1,6 +1,7 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 
 import '../controllers/app_controller.dart';
 import '../core/offline/cache/cache_manager.dart';
@@ -69,14 +70,12 @@ class _HomeScreenState extends State<HomeScreen> {
       final profile = results[0] is Map<String, dynamic> ? results[0] as Map<String, dynamic> : <String, dynamic>{};
       final orders = results[1] is List ? List<Map<String, dynamic>>.from(results[1] as List) : <Map<String, dynamic>>[];
       final stats = results[2] is Map<String, dynamic> ? results[2] as Map<String, dynamic> : null;
+      final history = results[3] is List ? List<Map<String, dynamic>>.from(results[3] as List) : <Map<String, dynamic>>[];
+
       setState(() {
         _customerName = (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '').trim();
         _activeOrders = orders;
         _customerStats = stats;
-      final history = results[2] is List ? List<Map<String, dynamic>>.from(results[2] as List) : <Map<String, dynamic>>[];
-      setState(() {
-        _customerName = (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '').trim();
-        _activeOrders = orders;
         _usualRoutes = _computeUsualRoutes(history);
         _isLoading = false;
       });
@@ -250,7 +249,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text(AppLocalizations.of(context)!.greetingMessage(greeting, displayName), style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
                       const SizedBox(height: 6),
                       Text(
-                        DateFormat('EEEE, d MMMM yyyy').format(now),
+                        DateFormatter.formatFullDate(now),
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
                       ),
                       const SizedBox(height: 26),

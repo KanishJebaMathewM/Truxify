@@ -74,9 +74,10 @@ class RenderScheduler extends EventEmitter {
             cancelledTasks: 0,
             averageWaitTime: 0,
             averageExecutionTime: 0,
-            totalExecutionTime: 0
+            totalExecutionTime: 0,
+            startTime: Date.now()
         };
-        
+
         // Start processing loop
         this.startProcessing();
         
@@ -164,10 +165,11 @@ class RenderScheduler extends EventEmitter {
         oldQueue.splice(index, 1);
         
         // Add to new queue
+        const oldPriority = task.priority;
         task.priority = newPriority;
         this.queues[newPriority].push(task);
-        
-        this.emit('priorityChanged', { taskId, oldPriority: PriorityNames[task.priority], newPriority: PriorityNames[newPriority] });
+
+        this.emit('priorityChanged', { taskId, oldPriority: PriorityNames[oldPriority], newPriority: PriorityNames[newPriority] });
         logger.debug(`Task ${taskId} priority changed to ${PriorityNames[newPriority]}`);
         
         return true;
@@ -448,7 +450,8 @@ class RenderScheduler extends EventEmitter {
             cancelledTasks: 0,
             averageWaitTime: 0,
             averageExecutionTime: 0,
-            totalExecutionTime: 0
+            totalExecutionTime: 0,
+            startTime: Date.now()
         };
         this.emit('reset');
         logger.info('Scheduler reset');

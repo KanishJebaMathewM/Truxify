@@ -11,6 +11,11 @@ class _MLDashboardState extends State<MLDashboard> {
   Map<String, dynamic>? metrics;
   bool isLoading = true;
 
+  static const String _baseUrl = String.fromEnvironment(
+    'ML_ENGINE_URL',
+    defaultValue: 'http://localhost:8000',
+  );
+
   @override
   void initState() {
     super.initState();
@@ -20,7 +25,7 @@ class _MLDashboardState extends State<MLDashboard> {
   Future<void> fetchMetrics() async {
     try {
       final response = await http.get(
-        Uri.parse('http://ml-engine:8000/ab-testing/status'),
+        Uri.parse('$_baseUrl/ab-testing/status'),
       );
       if (response.statusCode == 200) {
         setState(() {

@@ -4,6 +4,7 @@ import { fraudDetectionMiddleware } from '../middleware/fraudMiddleware.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import { auditLog } from '../middleware/auditLog.js';
 
 const router = express.Router();
 
@@ -66,7 +67,7 @@ router.get('/fraud/review-queue', authenticate, userLimiter, requirePolicy('frau
 });
 
 // Resolve review
-router.post('/fraud/review/:reviewId/resolve', authenticate, userLimiter, requirePolicy('fraud:manage-review'), async (req, res) => {
+router.post('/fraud/review/:reviewId/resolve', authenticate, userLimiter, requirePolicy('fraud:manage-review'), auditLog({ action: 'fraud:manage-review', resourceType: 'fraud_review' }), async (req, res) => {
   try {
     const { reviewId } = req.params;
     const { action, notes } = req.body;

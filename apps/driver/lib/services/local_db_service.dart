@@ -19,7 +19,12 @@ class LocalDbService {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    return await openDatabase(path, version: 1, onCreate: _createDB);
+    return await openDatabase(
+      path,
+      version: 2,
+      onCreate: _createDB,
+      onUpgrade: _upgradeDB,
+    );
   }
 
   Future _createDB(Database db, int version) async {
@@ -31,6 +36,7 @@ class LocalDbService {
     await db.execute('''
 CREATE TABLE pending_pods (
   id $idType,
+  order_id $textTypeNull,
   trip_display_id $textType,
   stop_id $textType,
   photo_path $textTypeNull,
@@ -39,6 +45,12 @@ CREATE TABLE pending_pods (
   sync_status $intType
 )
 ''');
+  }
+
+  Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE pending_pods ADD COLUMN order_id TEXT');
+    }
   }
 
   Future<void> insertPendingPoD(Map<String, dynamic> podData) async {
@@ -64,5 +76,10 @@ CREATE TABLE pending_pods (
   Future<void> clearSyncedPoDs() async {
     final db = await instance.database;
     await db.delete('pending_pods', where: 'sync_status = ?', whereArgs: [1]);
+  }
+
+  Future<void> deletePendingPoD(int id) async {
+    final db = await instance.database;
+    await db.delete('pending_pods', where: 'id = ?', whereArgs: [id]);
   }
 }

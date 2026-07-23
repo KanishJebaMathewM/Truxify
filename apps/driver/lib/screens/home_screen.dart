@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
+import 'package:truxify_shared/truxify_shared.dart';
 
 import '../core/app_routes.dart';
 import '../l10n/app_localizations.dart';
@@ -20,6 +21,7 @@ import '../services/geocode_service.dart';
 import '../services/marketplace_repository.dart';
 import '../services/route_service.dart';
 import '../services/trip_service.dart';
+import '../services/sync_service.dart';
 import '../services/battery_service.dart';
 import '../services/location_service.dart';
 import '../services/weigh_station_service.dart';
@@ -34,6 +36,7 @@ import '../widgets/home/new_load_notification_banner.dart';
 import '../widgets/home/driver_status_sheet.dart';
 import '../widgets/home/active_trip_sheet.dart';
 import 'destination_picker_screen.dart';
+import 'pod_capture_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -836,6 +839,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     _loadDashboardMetrics();
   }
+
+  Future<void> _checkPendingPods() async {
+    try {
+      final hasPending = await SyncService.instance.isStopPendingSync(_activeTripId ?? '');
+      if (hasPending && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Some deliveries are pending sync.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error checking pending PoDs: $e');
+    }
+  }
 }
 
   /// Short readable label for the current location.
@@ -1294,7 +1310,7 @@ class _HomeScreenState extends State<HomeScreen> {
     DateTime? latest;
     for (final record in _tripHistory) {
       if (!record.completed) continue;
-      final parsed = _parseTripHistoryDate(record.date);
+      final parsed = DateFormatter._parseDate(record.date);
       if (parsed == null) continue;
       if (latest == null || parsed.isAfter(latest)) {
         latest = parsed;
@@ -1302,34 +1318,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (latest == null) return '-';
-
-    final now = DateTime.now();
-    var diff = now.difference(latest);
-    if (diff.isNegative) diff = diff * -1;
-
-    if (diff.inDays >= 1) return '${diff.inDays}d ago';
-    if (diff.inHours >= 1) return '${diff.inHours}h ago';
-    if (diff.inMinutes >= 1) return '${diff.inMinutes}m ago';
-    return 'Just now';
-  }
-
-  DateTime? _parseTripHistoryDate(String raw) {
-    final parts = raw.trim().split(RegExp(r'\s+'));
-    if (parts.length < 3) return null;
-
-    final day = int.tryParse(parts[0]);
-    final year = int.tryParse(parts[2]);
-    if (day == null || year == null) return null;
-
-    final monthMap = <String, int>{
-      'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4,
-      'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
-      'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
-    };
-    final month = monthMap[parts[1].toLowerCase()];
-    if (month == null) return null;
-
-    return DateTime(year, month, day);
+    return DateFormatter.formatRelativeTime(latest);
   }
 
   Widget _buildMapBody(BuildContext context) {
@@ -1580,11 +1569,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           _isRefreshingLocation || _isLoadingLocation
                               ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 1.5,
-                                    color: TruxifyColors.accent,
+                                  width: 24,
+                                  height: 24,
+                                  child: Padding(
+                                    padding: EdgeInsets.all(4.0),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.0,
+                                      color: TruxifyColors.accent,
+                                    ),
                                   ),
                                 )
                               : Icon(

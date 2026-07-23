@@ -23,7 +23,6 @@ export async function reconcileFailedReputationUpdates() {
         return;
       }
       lockAcquired = true;
-      reconciliationRunning = true;
       leaseExtender = setInterval(async () => {
         try {
           await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);

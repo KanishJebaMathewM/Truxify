@@ -133,13 +133,19 @@ import { predictDriverProfit } from '../services/ml.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter, createStore } from '../middleware/rateLimiter.js';
+import { checkBypassEligibility } from '../services/weighStationService.js';
 
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
+import { auditLog } from '../middleware/auditLog.js';
 const router = express.Router();
+router.use(userLimiter);
+const hosStatusSchema = z.object({
+  status: z.enum(['off_duty', 'on_duty', 'driving', 'resting'])
+});
 
 // Driver role authorization guard middleware
 function requireDriverRole(req, res, next) {
@@ -272,6 +278,43 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
 
   } catch (err) {
     logger.error('Driver online status update error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 2b. UPDATE HOURS-OF-SERVICE STATUS (DRIVER)
+// ============================================================================
+router.put('/hos/status', authenticate, userLimiter, requirePolicy('driver:update-hos'), validateBody(hosStatusSchema), async (req, res) => {
+  const { status } = req.body;
+
+  try {
+    const { data: details, error } = await supabase
+      .from('driver_details')
+      .update({
+        hos_status: status,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', req.user.id)
+      .select('hos_status, accumulated_driving_minutes, accumulated_on_duty_minutes, shift_start_time')
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to update HoS status.', details: error.message });
+    }
+    if (!details) {
+      return res.status(404).json({ error: 'Driver profile not found.' });
+    }
+
+    res.json({
+      message: `HoS status marked as ${details.hos_status}.`,
+      status: details.hos_status,
+      accumulated_driving_minutes: details.accumulated_driving_minutes,
+      accumulated_on_duty_minutes: details.accumulated_on_duty_minutes,
+      shift_start_time: details.shift_start_time
+    });
+  } catch (err) {
+    logger.error('Driver HoS status update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -805,7 +848,7 @@ router.get('/bids', authenticate, userLimiter, requirePolicy('driver:view-bids')
  *       400:
  *         description: Insufficient balance or validation error
  */
-router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver:withdraw'), validateBody(withdrawSchema), async (req, res) => {
+router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver:withdraw'), auditLog({ action: 'driver:withdraw', resourceType: 'wallet_withdrawal' }), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa
 
   try {
@@ -1010,7 +1053,7 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('dr
 });
 
 
-router.get('/weigh-stations/bypass-status', requireAuth, requireDriverRole, async (req, res) => {
+router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, async (req, res) => {
   try {
     const driverId = req.user.id;
     const lat = parseFloat(req.query.lat);

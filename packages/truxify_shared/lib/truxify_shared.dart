@@ -1,3 +1,6 @@
+// ── Utils ───────────────────────────────────────────────────────────
+export 'src/utils/date_formatter.dart';
+
 // ── Config ──────────────────────────────────────────────────────────
 export 'src/config/app_config.dart';
 export 'src/config/env.dart';
@@ -7,9 +10,13 @@ export 'src/config/supabase_config.dart';
 // ── Services ────────────────────────────────────────────────────────
 export 'src/services/api_client.dart';
 export 'src/services/auth_service.dart';
+export 'src/services/crash_reporting_service.dart';
 export 'src/services/fcm_service.dart';
 export 'src/services/notification_router.dart';
 export 'src/services/foreground_notification_handler.dart';
+
+// ── Widgets ─────────────────────────────────────────────────────────
+export 'src/widgets/truxify_error_widget.dart';
 
 // ── Models ──────────────────────────────────────────────────────────
 export 'src/models/faq.dart';

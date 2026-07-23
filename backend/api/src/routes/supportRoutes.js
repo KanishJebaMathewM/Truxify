@@ -100,9 +100,11 @@ import { userLimiter } from '../middleware/rateLimiter.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
+import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
+router.use(userLimiter);
 
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
@@ -702,7 +704,7 @@ router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicke
  *       403:
  *         description: Admin role required
  */
-router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:admin-view-all'), async (req, res) => {
+router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:admin-view-all'), auditLog({ action: 'ticket:admin-view-all' }), async (req, res) => {
   const { status, category, user_id, page = '1', limit = '20' } = req.query;
   const parsedPage = parsePositiveInteger(page, 1, 'page');
   if (parsedPage.error) {

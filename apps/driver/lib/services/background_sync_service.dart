@@ -53,7 +53,7 @@ class BackgroundSyncService {
       // Token should be persisted to SharedPreferences for background sync.
     }
 
-    if (token == null) return; // Cannot sync without auth
+    if (token == null) return;
 
     const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
     assert(envUrl.isNotEmpty, 'TRUXIFY_API_BASE_URL must be set for release builds');
@@ -91,7 +91,7 @@ class BackgroundSyncService {
           await podStorageService.markAsSynced(pod.id!);
         }
       } catch (e) {
-        // Will retry next time
+        // Will retry on next background sync
       }
     }
   }

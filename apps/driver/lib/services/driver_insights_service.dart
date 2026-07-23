@@ -60,12 +60,7 @@ class DriverInsightsService {
   DriverInsightsService({
     ApiClient? apiClient,
     String? apiBaseUrl,
-  })  : _apiClient = apiClient ?? ApiClient(baseUrl: apiBaseUrl),
-
-
-  static const String defaultApiBaseUrl = String.fromEnvironment(
-    'TRUXIFY_API_BASE_URL',
-  );
+  }) : _apiClient = apiClient ?? ApiClient(baseUrl: apiBaseUrl);
 
   final ApiClient _apiClient;
 

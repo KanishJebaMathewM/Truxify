@@ -204,14 +204,14 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      */
     function cancelBooking(uint256 bookingId)
         external
-        onlyBookingParticipant(bookingId)
+        onlyOwner
         nonReentrant
         whenNotPaused
     {
         Booking storage booking = bookings[bookingId];
 
         require(
-            booking.status == BookingStatus.Active,
+            booking.customer != address(0) && booking.status == BookingStatus.Active,
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
@@ -246,11 +246,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      *
      * @param bookingId The booking to flag
      */
-    function raiseDispute(uint256 bookingId) external onlyBookingParticipant(bookingId) whenNotPaused {
+    function raiseDispute(uint256 bookingId) external onlyOwner whenNotPaused {
         Booking storage booking = bookings[bookingId];
 
         require(
-            booking.status == BookingStatus.Active,
+            booking.customer != address(0) && booking.status == BookingStatus.Active,
             "TruxifyEscrow: Cannot dispute - booking not active"
         );
 

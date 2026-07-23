@@ -591,35 +591,40 @@ export class OrderLifecycleService {
     }
 
     try {
-      const { data: otpCheck } = await this.orderRepository.findVerifiedDeliveryOtp(order.id);
+      // Re-fetch order state after acquiring lock to prevent TOCTOU race conditions
+      const { data: currentOrder, error: currentOrderErr } = await this.orderRepository.findOrderByAnyId(orderId, '*');
+      if (currentOrderErr) throw new DomainError(500, { error: 'Failed to fetch order.', details: currentOrderErr.message });
+      if (!currentOrder) throw new DomainError(404, { error: 'Order not found.' });
+
+      const { data: otpCheck } = await this.orderRepository.findVerifiedDeliveryOtp(currentOrder.id);
       if (otpCheck) {
         throw new DomainError(409, { error: 'Cannot cancel: delivery OTP has already been verified.' });
       }
 
-      if (order.status === 'cancelled' && order.escrow_status === 'refunded') {
+      if (currentOrder.status === 'cancelled' && currentOrder.escrow_status === 'refunded') {
         return {
           status: 200,
           body: {
             message: 'Order was already cancelled and refunded.',
-            cancellation_fee: order.cancellation_fee ?? 0,
-            order,
+            cancellation_fee: currentOrder.cancellation_fee ?? 0,
+            order: currentOrder,
           },
         };
       }
 
-      const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(order.escrow_status);
-      let workingOrder = order;
+      const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(currentOrder.escrow_status);
+      let workingOrder = currentOrder;
 
-      if (requiresRefund && (order.status !== 'cancelled' || order.escrow_status !== 'refund_pending')) {
+      if (requiresRefund && (currentOrder.status !== 'cancelled' || currentOrder.escrow_status !== 'refund_pending')) {
         const attemptAt = new Date().toISOString();
         const { data: pendingOrder, error: pendingErr } = await this.orderRepository.updateOrderGuardStatus(
-          order.id,
+          currentOrder.id,
           {
             status: 'cancelled',
-            cancellation_reason: reason ?? order.cancellation_reason,
+            cancellation_reason: reason ?? currentOrder.cancellation_reason,
             escrow_status: 'refund_pending',
             escrow_refund_error: null,
-            escrow_refund_attempts: (order.escrow_refund_attempts ?? 0) + 1,
+            escrow_refund_attempts: (currentOrder.escrow_refund_attempts ?? 0) + 1,
             escrow_refund_last_attempt_at: attemptAt,
             updated_at: attemptAt,
           },

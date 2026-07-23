@@ -26,7 +26,6 @@ class VerificationService {
       const [oracleResult, crossChainResult, documentIntegrity, driverVerification] = await Promise.all([
         this.oracleService.confirmDelivery({
           orderId,
-          otp: order.delivery_otp,
           gpsCoordinates: null,
         }),
         order.blockchain_tx_hash
@@ -72,7 +71,7 @@ class VerificationService {
     if (this.orderRepository) {
       const { data, error } = await this.orderRepository.findOrderById(
         orderId,
-        'id, order_display_id, status, customer_id, driver_id, truck_id, delivery_otp, otp_verified, blockchain_tx_hash, escrow_status'
+        'id, order_display_id, status, customer_id, driver_id, truck_id, otp_verified, blockchain_tx_hash, escrow_status'
       );
       if (error) throw error;
       return data;
@@ -80,7 +79,7 @@ class VerificationService {
 
     const { data, error } = await this.supabase
       .from('orders')
-      .select('id, order_display_id, status, customer_id, driver_id, truck_id, delivery_otp, otp_verified, blockchain_tx_hash, escrow_status')
+      .select('id, order_display_id, status, customer_id, driver_id, truck_id, otp_verified, blockchain_tx_hash, escrow_status')
       .eq('id', orderId)
       .maybeSingle();
 

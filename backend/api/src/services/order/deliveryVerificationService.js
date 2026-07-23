@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { redisClient } from '../../config/db.js';
+import { supabase, redisClient } from '../../config/db.js';
 import { DomainError } from './domainError.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 import {

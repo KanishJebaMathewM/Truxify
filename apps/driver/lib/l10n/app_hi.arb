@@ -788,9 +788,11 @@
   "enterValidBid": "एक मान्य बोली राशि दर्ज करें",
   "@enterValidBid": {
     "description": "Validation message for invalid bid input"
+  },
   "unableToOpen": "सूचना खोलने में असमर्थ",
   "@unableToOpen": {
     "description": "Error message when a notification cannot be navigated to"
+  },
   "withdraw": "निकालें",
   "@withdraw": {
     "description": "Button label to withdraw funds from wallet"

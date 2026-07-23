@@ -155,6 +155,32 @@ export async function createOrder({ orderData, userId, user }) {
     throw new DomainError(500, { error: 'Failed to create load offer.', details: offerErr.message });
   }
 
+  try {
+    const { sendFcmNotification } = await import('../notificationService.js');
+    const { data: drivers } = await supabase
+      .from('profiles')
+      .select('id, fcm_token')
+      .eq('role', 'driver')
+      .not('fcm_token', 'is', null);
+
+    if (drivers && drivers.length > 0) {
+      const notification = {
+        title: 'New Trip Available',
+        body: `A new trip from ${pickup_address.split(',')[0]} to ${drop_address.split(',')[0]} is available.`,
+      };
+      const payload = {
+        type: 'new_trip',
+        orderId: orderDisplayId,
+      };
+      // Fire and forget notifications
+      Promise.all(drivers.map(driver => sendFcmNotification(driver.id, notification, payload))).catch(e => {
+        logger.error('Error in batch push notification:', e.message);
+      });
+    }
+  } catch (pushErr) {
+    logger.error('Failed to send push notifications to drivers:', pushErr.message);
+  }
+
   return { message: 'Order created successfully and broadcasted to loads board.', order };
   });
 }

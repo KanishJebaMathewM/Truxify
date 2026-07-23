@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../services/pod_storage_service.dart';
 import '../services/background_sync_service.dart';
+import '../services/sync_service.dart';
 
 class PodCaptureScreen extends StatefulWidget {
   final String orderId;
@@ -26,6 +27,7 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
   final ImagePicker _picker = ImagePicker();
   String? _photoPath;
   bool _saving = false;
+  String _uploadStatus = '';
 
   Future<void> _takePhoto() async {
     final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
@@ -46,6 +48,7 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
 
     setState(() {
       _saving = true;
+      _uploadStatus = 'Saving proof of delivery...';
     });
 
     try {
@@ -79,21 +82,41 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
 
       await podStorageService.insertPod(pod);
 
-      // Check connectivity
       final List<ConnectivityResult> connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult.contains(ConnectivityResult.none)) {
+        setState(() => _uploadStatus = 'Saved offline. Will sync when online.');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Saved offline. Will sync when online.')),
           );
         }
       } else {
-        // Trigger sync immediately if online
-        BackgroundSyncService.syncPods();
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('PoD saved and syncing in background.')),
+        setState(() => _uploadStatus = 'Uploading...');
+        try {
+          await SyncService.instance.uploadPodFiles(
+            orderId: widget.orderId,
+            photoPath: savedPhotoPath,
+            signaturePath: savedSignaturePath,
           );
+          await podStorageService.markAsSynced(pod.id!);
+          setState(() => _uploadStatus = 'Upload complete!');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Proof of Delivery uploaded successfully'),
+                backgroundColor: Colors.green,
+              ),
+            );
+          }
+        } catch (e) {
+          debugPrint('Immediate upload failed, will retry in background: $e');
+          BackgroundSyncService.syncPods();
+          setState(() => _uploadStatus = 'Upload pending, will retry in background.');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Upload pending. Will retry in background.')),
+            );
+          }
         }
       }
 
@@ -127,63 +150,81 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
       appBar: AppBar(
         title: const Text('Capture Proof of Delivery'),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Driver / Receiver Signature',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey),
-              ),
-              child: Signature(
-                controller: _signatureController,
-                height: 200,
-                backgroundColor: Colors.white,
-              ),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () => _signatureController.clear(),
-                  child: const Text('Clear Signature'),
+      body: _saving
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 24),
+                    Text(
+                      _uploadStatus.isNotEmpty ? _uploadStatus : 'Processing...',
+                      style: const TextStyle(fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Delivery Photo (Optional)',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            if (_photoPath != null)
-              Image.file(File(_photoPath!), height: 200, fit: BoxFit.cover),
-            ElevatedButton.icon(
-              onPressed: _takePhoto,
-              icon: const Icon(Icons.camera_alt),
-              label: Text(_photoPath == null ? 'Take Photo' : 'Retake Photo'),
-            ),
-            const SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: _saving ? null : _savePod,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                backgroundColor: Theme.of(context).primaryColor,
-                foregroundColor: Colors.white,
               ),
-              child: _saving 
-                ? const CircularProgressIndicator(color: Colors.white)
-                : const Text('Save Proof of Delivery', style: TextStyle(fontSize: 16)),
+            )
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Driver / Receiver Signature',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey),
+                    ),
+                    child: Signature(
+                      controller: _signatureController,
+                      height: 200,
+                      backgroundColor: Colors.white,
+                    ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => _signatureController.clear(),
+                        child: const Text('Clear Signature'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Delivery Photo (Optional)',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  if (_photoPath != null)
+                    Image.file(File(_photoPath!), height: 200, fit: BoxFit.cover),
+                  ElevatedButton.icon(
+                    onPressed: _takePhoto,
+                    icon: const Icon(Icons.camera_alt),
+                    label: Text(_photoPath == null ? 'Take Photo' : 'Retake Photo'),
+                  ),
+                  const SizedBox(height: 32),
+                  ElevatedButton(
+                    onPressed: _saving ? null : _savePod,
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      backgroundColor: Theme.of(context).primaryColor,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: _saving 
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text('Save Proof of Delivery', style: TextStyle(fontSize: 16)),
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
-      ),
     );
   }
 }

@@ -3,6 +3,7 @@ import { corsMiddleware } from './middleware/cors.js'
 import helmet from 'helmet' // 🔒 ADDED HELMET IMPORT FOR ISSUES #361 & #944
 import http from 'http'
 import dotenv from 'dotenv'
+import hppProtection from './middleware/hppProtection.js';
 
 import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimiter.js'
 import tripRoutes from './routes/tripRoutes.js'
@@ -16,6 +17,12 @@ import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
 import { validateEscrowSetup } from './services/escrow.js'
+import { startDlqWorker } from './workers/dlqWorker.js'
+
+import {
+  requestIdMiddleware,
+  securityHeaders,
+} from "./middleware/index.js";
 
 // Load REST routes
 import orderRoutes from './routes/orderRoutes.js'
@@ -30,6 +37,7 @@ import healthRoutes from './routes/healthRoutes.js'
 import adminRoutes from './routes/adminRoutes.js'
 import lookupRoutes from './routes/lookupRoutes.js'
 import webhookRoutes from './routes/webhookRoutes.js'
+import auditRoutes from './routes/auditRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -79,6 +87,7 @@ import { tracingMiddleware } from './middleware/tracingMiddleware.js'
 
 
 import logger from './middleware/logger.js'
+import { errorHandler } from './middleware/errorHandler.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
 import { requestIdMiddleware, requestLogger } from './middleware/requestId.js'
@@ -299,8 +308,20 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Payload parsers
-app.use(express.json({ limit: '1mb' })) // Added payload limit for security
-app.use(express.urlencoded({ extended: true, limit: '1mb' }))
+const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
+
+app.use(
+  express.json({
+    limit: jsonBodyLimit,
+    strict: true,
+  })
+);
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: jsonBodyLimit,
+  })
+);
 
 // ============================================================================
 // 🆕 OPENTELEMETRY TRACING MIDDLEWARE
@@ -342,6 +363,8 @@ app.use(networkAnalysisMiddleware)
 // ============================================================================
 app.use('/api/health', healthLimiter)
 app.use('/api/health', healthRoutes)
+app.use('/api/v1/health', healthLimiter)
+app.use('/api/v1/health', healthRoutes)
 app.use('/api/', globalLimiter)
 app.use('/api/v1/trips', tripRoutes)
 
@@ -369,6 +392,7 @@ app.use('/api/v1', lookupRoutes)
 app.use('/api/public', publicTrackingRoutes)
 app.use('/api/auth', authLimiter, authRoutes)
 app.use('/api/v1/admin', adminRoutes)
+app.use('/api/v1/admin/audit-logs', auditRoutes)
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -524,17 +548,7 @@ app.use((req, res) => {
 app.use(sentryErrorHandler())
 
 // Error handling middleware
-app.use((err, req, res, next) => {
-  if (err && err.name === 'MulterError') {
-    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400
-    return res.status(status).json({
-      error: `File upload error: ${err.message}`,
-      code: err.code
-    })
-  }
-  logger.error({ requestId: req.requestId, err }, 'Unhandled express exception')
-  res.status(500).json({ error: 'Critical Internal Server Error.' })
-})
+app.use(errorHandler)
 
 // ============================================================================
 // WEBSOCKET SERVER INIT (wait for MongoDB before accepting WebSocket connections)
@@ -628,15 +642,11 @@ async function shutdown (signal) {
     await closeWebRTCSignaling()
     logger.info('[shutdown] WebRTC signaling server closed.')
 
-    // 5. Close database/cache connections
-
-
     // 5. Close OpenTelemetry tracing
     await tracing.shutdown()
     logger.info('[shutdown] OpenTelemetry tracing shut down.')
 
     // 6. Close database/cache connections
-
     await closeDbConnections()
 
     logger.info('[shutdown] Clean exit.')
@@ -665,3 +675,43 @@ process.on('unhandledRejection', async (reason) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM')) // Docker / Kubernetes stop
 process.on('SIGINT', () => shutdown('SIGINT')) // Ctrl+C in dev
+
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        ip: req.ip,
+        method: req.method,
+        path: req.originalUrl,
+      },
+      'Request payload exceeded configured limit'
+    );
+
+    return res.status(413).json({
+      error: 'Payload too large',
+    });
+  }
+
+  if (
+    err instanceof SyntaxError &&
+    err.status === 400 &&
+    'body' in err
+  ) {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        ip: req.ip,
+        method: req.method,
+        path: req.originalUrl,
+      },
+      'Malformed JSON payload received'
+    );
+
+    return res.status(400).json({
+      error: 'Malformed JSON payload',
+    });
+  }
+
+  next(err);
+});

@@ -52,6 +52,7 @@ const POLICIES = {
   'driver:view-stats':         { roles: [ROLES.DRIVER] },
   'document:upload':           { roles: [ROLES.DRIVER] },
   'driver:toggle-online':      { roles: [ROLES.DRIVER] },
+  'driver:update-hos':         { roles: [ROLES.DRIVER] },
   'driver:view-wallet':        { roles: [ROLES.DRIVER] },
   'driver:view-earnings':      { roles: [ROLES.DRIVER] },
   'driver:view-trips':         { roles: [ROLES.DRIVER] },
@@ -78,6 +79,7 @@ const POLICIES = {
 
   'admin:view-dashboard':      { roles: [ROLES.ADMIN] },
   'admin:invalidate-cache':    { roles: [ROLES.ADMIN] },
+  'admin:view-audit-logs':     { roles: [ROLES.ADMIN] },
 
   'shard:view':                { roles: [ROLES.ADMIN] },
   'shard:query-orders':        { roles: [ROLES.ADMIN] },

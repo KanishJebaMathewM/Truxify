@@ -22,6 +22,4 @@ const checkBypassEligibility = async (driverId, lat, lng) => {
   };
 };
 
-module.exports = {
-  checkBypassEligibility
-};
+export { checkBypassEligibility };

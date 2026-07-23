@@ -116,21 +116,6 @@ export class OrderRepository {
       .eq('id', id)
       .maybeSingle(), 'findOrderForTimeline');
   } 
-  async findOrderById(id, columns = '*') {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .select(columns)
-      .eq('id', id)
-      .maybeSingle(), 'findOrderById');
-  }
-
-  async findOrderByDisplayId(displayId, columns = '*') {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .select(columns)
-      .eq('order_display_id', displayId)
-      .maybeSingle(), 'findOrderByDisplayId');
-  }
 
   async updateOrder(id, updates) {
     return this._retryableQuery(() => this.supabase

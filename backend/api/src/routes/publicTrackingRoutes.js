@@ -132,11 +132,16 @@ router.get(
 
       const { orderDisplayId } = validation;
 
-      const { data: order } = await supabase
+      const { data: order, error: orderError } = await supabase
         .from('orders')
         .select('pickup_lat, pickup_lng, drop_lat, drop_lng, driver_id')
         .eq('order_display_id', orderDisplayId)
-        .single();
+        .maybeSingle();
+
+      if (orderError) {
+        logger.error({ err: orderError, orderDisplayId }, 'Failed to fetch public route order');
+        return res.status(500).json({ error: 'Failed to load route information' });
+      }
 
       if (!order) {
         return res.status(404).json({ error: 'Order not found' });

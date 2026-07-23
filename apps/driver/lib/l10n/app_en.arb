@@ -788,9 +788,11 @@
   "enterValidBid": "Enter a valid bid amount",
   "@enterValidBid": {
     "description": "Validation message for invalid bid input"
+  },
   "unableToOpen": "Unable to open notification",
   "@unableToOpen": {
     "description": "Error message when a notification cannot be navigated to"
+  },
   "withdraw": "Withdraw",
   "@withdraw": {
     "description": "Button label to withdraw funds from wallet"
@@ -839,5 +841,21 @@
   "withdrawalSuccessful": "Withdrawal successful",
   "@withdrawalSuccessful": {
     "description": "Success message after a successful withdrawal"
+  },
+  "theme": "Theme",
+  "@theme": {
+    "description": "Label for the theme selection setting"
+  },
+  "system": "System",
+  "@system": {
+    "description": "System theme option label"
+  },
+  "light": "Light",
+  "@light": {
+    "description": "Light theme option label"
+  },
+  "dark": "Dark",
+  "@dark": {
+    "description": "Dark theme option label"
   }
 }

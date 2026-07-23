@@ -642,15 +642,11 @@ async function shutdown (signal) {
     await closeWebRTCSignaling()
     logger.info('[shutdown] WebRTC signaling server closed.')
 
-    // 5. Close database/cache connections
-
-
     // 5. Close OpenTelemetry tracing
     await tracing.shutdown()
     logger.info('[shutdown] OpenTelemetry tracing shut down.')
 
     // 6. Close database/cache connections
-
     await closeDbConnections()
 
     logger.info('[shutdown] Clean exit.')

@@ -77,8 +77,14 @@ router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async
       await supabase.from('notifications').insert({
         user_id: load.customer_id,
         title: 'Temperature Alert',
-        message: `Your cargo (Load ${loadId}) is out of the safe temperature range. Current temp: ${temperature}°C.`,
-        type: 'alert'
+        body: `Your cargo (Load ${loadId}) is out of the safe temperature range. Current temp: ${temperature}°C.`,
+        notif_type: 'cold_chain_alert',
+        metadata: {
+          load_id: loadId,
+          temperature,
+          target_temperature_min: load.target_temperature_min,
+          target_temperature_max: load.target_temperature_max
+        }
       }).catch(err => logger.error('Failed to send notification:', err));
     }
 

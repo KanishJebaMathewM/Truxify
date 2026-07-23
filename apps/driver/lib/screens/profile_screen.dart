@@ -1191,19 +1191,14 @@ class _ThemeModeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = TruxifyScope.of(context);
-    final currentTheme = controller.themeMode;
-    final selectedTheme = currentTheme == ThemeMode.system
-        ? (Theme.of(context).brightness == Brightness.dark
-            ? ThemeMode.dark
-            : ThemeMode.light)
-        : currentTheme;
+    final selectedTheme = controller.themeMode;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
         children: [
           Text(
-            'Theme',
+            AppLocalizations.of(context)!.theme,
             style: GoogleFonts.dmSans(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -1219,14 +1214,18 @@ class _ThemeModeTile extends StatelessWidget {
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
             ),
-            segments: const [
+            segments: [
+              ButtonSegment<ThemeMode>(
+                value: ThemeMode.system,
+                label: Text(AppLocalizations.of(context)!.system),
+              ),
               ButtonSegment<ThemeMode>(
                 value: ThemeMode.light,
-                label: Text('Light'),
+                label: Text(AppLocalizations.of(context)!.light),
               ),
               ButtonSegment<ThemeMode>(
                 value: ThemeMode.dark,
-                label: Text('Dark'),
+                label: Text(AppLocalizations.of(context)!.dark),
               ),
             ],
             selected: {selectedTheme},

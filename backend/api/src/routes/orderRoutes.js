@@ -1149,7 +1149,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   const orderId = req.params.id;
   const { txHash } = req.body;
 
-  const lockKey = `deposit_lock:${orderId}`;
+  const lockKey = `escrow_lock:${orderId}`;
   let lockValue = null;
   lockValue = await acquireLock(lockKey, 120000);
   if (!lockValue) {

@@ -114,10 +114,14 @@ class FrameBuffer {
     }
     
     mergeRects(a, b) {
-        a.x = Math.min(a.x, b.x);
-        a.y = Math.min(a.y, b.y);
-        a.width = Math.max(a.x + a.width, b.x + b.width) - a.x;
-        a.height = Math.max(a.y + a.height, b.y + b.height) - a.y;
+        const x = Math.min(a.x, b.x);
+        const y = Math.min(a.y, b.y);
+        const width = Math.max(a.x + a.width, b.x + b.width) - x;
+        const height = Math.max(a.y + a.height, b.y + b.height) - y;
+        a.x = x;
+        a.y = y;
+        a.width = width;
+        a.height = height;
     }
     
     getDirtyRects() {

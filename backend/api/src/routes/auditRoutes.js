@@ -8,6 +8,7 @@ import { validateQuery } from '../middleware/validate.js';
 import { z } from 'zod';
 
 const router = express.Router();
+router.use(userLimiter);
 
 const auditQuerySchema = z.object({
   actor_id: z.string().uuid().optional(),

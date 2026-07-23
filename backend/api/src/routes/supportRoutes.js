@@ -104,6 +104,7 @@ import { auditLog } from '../middleware/auditLog.js';
 import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
+router.use(userLimiter);
 
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';

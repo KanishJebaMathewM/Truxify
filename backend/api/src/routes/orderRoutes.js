@@ -188,6 +188,7 @@ import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '.
 import { computeOrderPricing } from '../lib/pricing.js';
 
 const router = express.Router();
+router.use(userLimiter);
 
 const verifyDeliveryLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

@@ -45,6 +45,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
 
       final truck = await _truckRepository.fetchTruckForDriver(driverId);
       if (truck == null) {
+        if (!mounted) return;
         setState(() {
           _errorMessage = 'No truck assigned to this driver';
           _isLoading = false;

@@ -76,83 +76,57 @@ export async function createOrder({ orderData, userId, user }) {
 
   for (let attempt = 0; attempt < MAX_ID_RETRIES; attempt++) {
     orderDisplayId = generateOrderDisplayId();
-    const result = await supabase
-      .from('orders')
-      .insert({
-        order_display_id: orderDisplayId,
-        customer_id: userId,
-        status: 'pending',
-        pickup_address, pickup_lat, pickup_lng,
-        drop_address, drop_lat, drop_lng,
-        pickup_date, pickup_time,
-        goods_type, weight_tonnes, length_ft, width_ft, height_ft,
-        is_stackable, is_fragile, special_requirements,
-        base_freight: pricing.baseFreight,
-        toll_estimate: pricing.tollEstimate,
-        platform_fee: pricing.platformFee,
-        total_amount: pricing.totalAmount,
-        estimated_price: estimatedPrice,
-        payment_method_id, upi_id
-      })
-      .select('id, order_display_id, status, created_at')
-      .single();
-
-    order = result.data;
-    orderErr = result.error;
-
-    if (!orderErr || orderErr.code !== '23505') break;
-    logger.warn(`[Orders] display ID collision on ${orderDisplayId}, retrying (attempt ${attempt + 1}/${MAX_ID_RETRIES})`);
-  }
-
-  if (orderErr) {
-    logger.error('Order Insertion Error:', orderErr.message);
-    throw new DomainError(500, { error: 'Failed to create order record.', details: orderErr.message });
-  }
-
-  const milestones = [
-    { order_display_id: orderDisplayId, milestone: 'Order Placed', milestone_time: new Date().toISOString(), completed: true, sort_order: 10 },
-    { order_display_id: orderDisplayId, milestone: 'Truck Assigned', milestone_time: null, completed: false, sort_order: 20 },
-    { order_display_id: orderDisplayId, milestone: 'En Route to Pickup', milestone_time: null, completed: false, sort_order: 30 },
-    { order_display_id: orderDisplayId, milestone: 'Arrived at Pickup', milestone_time: null, completed: false, sort_order: 35 },
-    { order_display_id: orderDisplayId, milestone: 'Goods Loaded', milestone_time: null, completed: false, sort_order: 40 },
-    { order_display_id: orderDisplayId, milestone: 'In Transit', milestone_time: null, completed: false, sort_order: 50 },
-    { order_display_id: orderDisplayId, milestone: 'Arriving', milestone_time: null, completed: false, sort_order: 55 },
-    { order_display_id: orderDisplayId, milestone: 'Delivered', milestone_time: null, completed: false, sort_order: 60 }
-  ];
-
-  const { error: timelineErr } = await supabase.from('order_timeline').insert(milestones);
-
-  if (timelineErr) {
-    logger.error('Timeline Insertion Error:', timelineErr.message);
-    await supabase.from('orders').delete().eq('id', order.id);
-    throw new DomainError(500, { error: 'Failed to create order timeline.', details: timelineErr.message });
-  }
-
-  const { error: offerErr } = await supabase
-    .from('load_offers')
-    .insert({
-      order_display_id: orderDisplayId,
-      customer_id: userId,
-      customer_name: user?.fullName || 'Customer',
-      route_label: `${pickup_address.split(',')[0]} → ${drop_address.split(',')[0]}`,
-      route_subtitle: `${weight_tonnes} tonnes • ${goods_type}`,
-      pickup_address, pickup_lat, pickup_lng,
-      drop_address, drop_lat, drop_lng,
-      goods_type,
-      weight: `${weight_tonnes} tonnes`,
-      freight_value: pricing.totalAmount,
-      fuel_cost: pricing.fuelCost,
-      toll_cost: pricing.tollEstimate,
-      net_profit: pricing.netProfit,
-      extra_distance_km: pricing.distanceKm,
-      status: 'available'
+    const { data: rpcData, error: rpcErr } = await supabase.rpc('create_order_tx', {
+      p_order_display_id: orderDisplayId,
+      p_customer_id: userId,
+      p_customer_name: user?.fullName || 'Customer',
+      p_pickup_address: pickup_address,
+      p_pickup_lat: pickup_lat,
+      p_pickup_lng: pickup_lng,
+      p_drop_address: drop_address,
+      p_drop_lat: drop_lat,
+      p_drop_lng: drop_lng,
+      p_pickup_date: pickup_date,
+      p_pickup_time: pickup_time,
+      p_goods_type: goods_type,
+      p_weight_tonnes: weight_tonnes,
+      p_length_ft: length_ft || null,
+      p_width_ft: width_ft || null,
+      p_height_ft: height_ft || null,
+      p_is_stackable: is_stackable,
+      p_is_fragile: is_fragile,
+      p_special_requirements: special_requirements || null,
+      p_base_freight: pricing.baseFreight,
+      p_toll_estimate: pricing.tollEstimate,
+      p_platform_fee: pricing.platformFee,
+      p_total_amount: pricing.totalAmount,
+      p_estimated_price: estimatedPrice,
+      p_payment_method_id: payment_method_id || null,
+      p_upi_id: upi_id || null,
+      p_route_label: `${pickup_address.split(',')[0]} → ${drop_address.split(',')[0]}`,
+      p_route_subtitle: `${weight_tonnes} tonnes • ${goods_type}`,
+      p_weight_text: `${weight_tonnes} tonnes`,
+      p_fuel_cost: pricing.fuelCost,
+      p_net_profit: pricing.netProfit,
+      p_extra_distance_km: pricing.distanceKm
     });
 
-  if (offerErr) {
-    logger.error('Load Offer Insertion Error:', offerErr.message);
-    await supabase.from('order_timeline').delete().eq('order_display_id', orderDisplayId);
-    await supabase.from('orders').delete().eq('id', order.id);
-    throw new DomainError(500, { error: 'Failed to create load offer.', details: offerErr.message });
+    if (rpcErr) {
+      if (rpcErr.code === '23505') {
+        logger.warn(`[Orders] display ID collision on ${orderDisplayId}, retrying (attempt ${attempt + 1}/${MAX_ID_RETRIES})`);
+        continue;
+      }
+      logger.error('Order RPC Insertion Error:', rpcErr.message);
+      throw new DomainError(500, { error: 'Failed to create order record via transaction.', details: rpcErr.message });
+    }
+
+    order = rpcData;
+    orderErr = null;
+    break;
+  }
+
+  if (!order) {
+    throw new DomainError(500, { error: 'Failed to generate a unique order display ID after max retries.' });
   }
 
   return { message: 'Order created successfully and broadcasted to loads board.', order };

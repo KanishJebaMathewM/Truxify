@@ -9,6 +9,8 @@ import tripRoutes from './routes/tripRoutes.js'
 import deviceRoutes from './routes/deviceRoutes.js'
 import documentRoutes from './routes/documentRoutes.js'
 import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
+import iotRoutes from './routes/iotRoutes.js'
+import demandRoutes from './routes/demandRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js'
 import { orderRepository } from './core/container.js'
@@ -364,6 +366,9 @@ app.use('/api/profile', profileRoutes)
 app.use('/api/devices', deviceRoutes)
 app.use('/api/driver/documents', documentRoutes)
 app.use('/api/maintenance', maintenancePhotoRoutes)
+app.use('/api/iot', iotRoutes)
+app.use('/api/demand-heatmap', demandRoutes)
+app.use('/api/webhooks', webhookRoutes)
 app.use('/api/trucks', truckRoutes)
 app.use('/api/v1', lookupRoutes)
 app.use('/api/public', publicTrackingRoutes)

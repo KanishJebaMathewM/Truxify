@@ -8,7 +8,8 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard {
-    
+
+
     // ============ Structs ============
 
     struct Asset {
@@ -244,7 +245,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     function executeTradeOrder(
         uint256 assetId,
         uint256 orderIndex
-    ) external nonReentrant whenNotPaused {
+    ) external payable nonReentrant whenNotPaused {
         require(assetExists[assetId], "Asset not found");
         require(orderIndex < tradeOrders[assetId].length, "Order not found");
 
@@ -356,11 +357,11 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     }
 
     function _removeUserAsset(address user, uint256 assetId) internal {
-        uint256[] storage assets = userAssets[user];
-        for (uint256 i = 0; i < assets.length; i++) {
-            if (assets[i] == assetId) {
-                assets[i] = assets[assets.length - 1];
-                assets.pop();
+        uint256[] storage userAssetList = userAssets[user];
+        for (uint256 i = 0; i < userAssetList.length; i++) {
+            if (userAssetList[i] == assetId) {
+                userAssetList[i] = userAssetList[userAssetList.length - 1];
+                userAssetList.pop();
                 break;
             }
         }

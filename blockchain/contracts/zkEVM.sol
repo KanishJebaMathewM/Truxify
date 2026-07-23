@@ -4,7 +4,6 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
-
 interface IVerifier {
     function verifyProof(
         uint[2] memory a,
@@ -45,7 +44,7 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         bytes32 root;
         mapping(address => uint256) balances;
         mapping(address => uint256) nonces;
-        mapping(bytes32 => bool) storage;
+        mapping(bytes32 => bool) processedNullifiers;
     }
 
     // ============ State Variables ============

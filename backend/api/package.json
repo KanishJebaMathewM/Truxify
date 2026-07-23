@@ -21,7 +21,7 @@
     "@sentry/node": "^10.62.0",
     "@supabase/supabase-js": "^2.109.0",
     "axios": "^1.6.0",
-    "circuit-breaker-js": "^1.0.0",
+    "circuit-breaker-js": "0.0.1",
     "cors": "^2.8.5",
     "dotenv": "^17.4.2",
     "ethers": "6.17.0",

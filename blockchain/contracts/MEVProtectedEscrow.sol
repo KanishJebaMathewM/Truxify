@@ -163,7 +163,7 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
 
     // ============ MEV Protection Functions ============
 
-    function _verifyMEVProof(bytes memory proof, uint256 escrowId) internal view returns (bool) {
+    function _verifyMEVProof(bytes calldata proof, uint256 escrowId) internal view returns (bool) {
         // In production: verify Flashbots bundle signature
         // Check if transaction is front-run protected
         
@@ -180,7 +180,7 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
         return true;
     }
 
-    function _verifyDisputeProof(bytes memory proof, uint256 escrowId) internal view returns (bool) {
+    function _verifyDisputeProof(bytes calldata proof, uint256 escrowId) internal view returns (bool) {
         require(proof.length == 65, "Invalid proof length");
         // Verify validator signature on the dispute
         bytes32 messageHash = keccak256(abi.encodePacked(escrowId, escrows[escrowId].customer, escrows[escrowId].driver));

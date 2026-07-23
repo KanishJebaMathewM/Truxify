@@ -3,21 +3,23 @@ pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/CountersUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+
+
 
 contract TruxifyUpgradeable is 
     UUPSUpgradeable, 
     AccessControlUpgradeable, 
-    PausableUpgradeable,
-    ReentrancyGuardUpgradeable
+    PausableUpgradeable
 {
-    using CountersUpgradeable for CountersUpgradeable.Counter;
 
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant DAO_ROLE = keccak256("DAO_ROLE");
+
+    /// @notice Minimum delay before an emergency upgrade can be executed (2 days).
+    ///         Gives the DAO time to detect and potentially block malicious upgrades.
+    uint256 public constant EMERGENCY_UPGRADE_TIMELOCK = 2 days;
 
     // Escrow struct
     struct Escrow {
@@ -51,14 +53,35 @@ contract TruxifyUpgradeable is
         address proposer;
     }
 
-    CountersUpgradeable.Counter private _escrowIdCounter;
-    CountersUpgradeable.Counter private _proposalIdCounter;
-    CountersUpgradeable.Counter private _upgradeHistoryCounter;
+    uint256 private _escrowIdCounter;
+    uint256 private _proposalIdCounter;
+    uint256 private _upgradeHistoryCounter;
+
+    // Manual reentrancy guard (ReentrancyGuardUpgradeable removed in OZ v5)
+    uint256 private _guardStatus;
+    uint256 private constant _NOT_ENTERED = 1;
+    uint256 private constant _ENTERED = 2;
+
+    modifier nonReentrant() {
+        require(_guardStatus != _ENTERED, "ReentrancyGuard: reentrant call");
+        _guardStatus = _ENTERED;
+        _;
+        _guardStatus = _NOT_ENTERED;
+    }
 
     mapping(uint256 => Escrow) public escrows;
     mapping(uint256 => Proposal) public proposals;
     mapping(uint256 => UpgradeRecord) public upgradeHistory;
     mapping(uint256 => mapping(address => bool)) public hasVoted;
+
+    /// @notice Tracks implementation addresses approved by passed DAO proposals.
+    ///         Set in executeProposal() and consumed/cleared in _authorizeUpgrade().
+    mapping(address => bool) public daoApprovedUpgrades;
+
+    /// @notice Timestamps for pending emergency upgrade requests.
+    ///         Maps implementation address → block.timestamp when requested.
+    ///         Zero means no pending request.
+    mapping(address => uint256) public emergencyUpgradeRequests;
 
     uint256 public daoVotingPeriod;
     uint256 public daoQuorum;
@@ -78,12 +101,19 @@ contract TruxifyUpgradeable is
     event ContractUnpaused(address indexed unpauser);
     event EmergencyPauseTriggered(address indexed triggerer);
 
+    /// @notice Emitted when a passed DAO proposal approves an upgrade.
+    event UpgradeApproved(address indexed implementation, uint256 indexed proposalId);
+
+    /// @notice Emitted when an emergency upgrade is requested (timelock starts).
+    event EmergencyUpgradeRequested(address indexed implementation, uint256 timestamp, string reason);
+
+    /// @notice Emitted when a pending emergency upgrade request is cancelled.
+    event EmergencyUpgradeCancelled(address indexed implementation);
+
     // ============ Initializer ============
     function initialize() public initializer {
-        __UUPSUpgradeable_init();
         __AccessControl_init();
         __Pausable_init();
-        __ReentrancyGuard_init();
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(UPGRADER_ROLE, msg.sender);
@@ -97,13 +127,57 @@ contract TruxifyUpgradeable is
     }
 
     // ============ UUPS Upgrade ============
+    /**
+     * @dev Authorizes an upgrade only if:
+     *       1. The implementation has been approved by a passed DAO proposal, OR
+     *       2. A valid emergency upgrade request exists and the timelock has elapsed.
+     *
+     *      The DAO approval flag is consumed (deleted) after this check to prevent
+     *      replay attacks (re-using the same approved upgrade twice).
+     *
+     *      The caller must have UPGRADER_ROLE to execute the actual upgradeTo()
+     *      transaction.
+     */
     function _authorizeUpgrade(address newImplementation) 
         internal 
         override 
-        onlyRole(UPGRADER_ROLE) 
     {
-        // Only DAO can upgrade through governance
-        // Emergency upgrades bypass DAO
+        // Check 1: DAO-approved upgrade (standard governance path)
+        // The flag is set by executeProposal after a successful DAO vote.
+        // No additional role check is needed - the DAO vote itself is the authorization.
+        if (daoApprovedUpgrades[newImplementation]) {
+            delete daoApprovedUpgrades[newImplementation];
+            return;
+        }
+
+        // Check 2: Emergency upgrade with timelock (emergency path)
+        uint256 requestTimestamp = emergencyUpgradeRequests[newImplementation];
+        if (requestTimestamp != 0) {
+            require(
+                block.timestamp >= requestTimestamp + EMERGENCY_UPGRADE_TIMELOCK,
+                "Emergency timelock not yet elapsed"
+            );
+            require(
+                hasRole(UPGRADER_ROLE, msg.sender),
+                "Must have UPGRADER_ROLE to execute upgrade"
+            );
+            delete emergencyUpgradeRequests[newImplementation];
+
+            // Record upgrade history for emergency upgrades
+            _upgradeHistoryCounter += 1;
+            uint256 historyId = _upgradeHistoryCounter;
+            upgradeHistory[historyId] = UpgradeRecord({
+                implementation: newImplementation,
+                timestamp: block.timestamp,
+                reason: "Emergency upgrade",
+                proposer: msg.sender
+            });
+
+            return;
+        }
+
+        // Neither condition met — reject the upgrade
+        revert("Upgrade not approved by DAO");
     }
 
     // ============ Escrow Functions ============
@@ -115,8 +189,8 @@ contract TruxifyUpgradeable is
         require(driver != address(0), "Invalid driver");
         require(amount > 0, "Amount must be > 0");
 
-        _escrowIdCounter.increment();
-        uint256 escrowId = _escrowIdCounter.current();
+        _escrowIdCounter += 1;
+        uint256 escrowId = _escrowIdCounter;
 
         escrows[escrowId] = Escrow({
             customer: msg.sender,
@@ -166,8 +240,8 @@ contract TruxifyUpgradeable is
         require(newImplementation != address(0), "Invalid implementation");
         require(bytes(reason).length > 0, "Reason required");
 
-        _proposalIdCounter.increment();
-        uint256 proposalId = _proposalIdCounter.current();
+        _proposalIdCounter += 1;
+        uint256 proposalId = _proposalIdCounter;
 
         proposals[proposalId] = Proposal({
             proposer: msg.sender,
@@ -216,10 +290,19 @@ contract TruxifyUpgradeable is
         proposal.executed = true;
 
         if (passed) {
-            _upgradeTo(proposal.newImplementation);
-            
-            _upgradeHistoryCounter.increment();
-            uint256 historyId = _upgradeHistoryCounter.current();
+            // Set the DAO approval flag before calling upgradeToAndCall. The _authorizeUpgrade
+            // hook will find this flag, consume it, and allow the upgrade to proceed.
+            daoApprovedUpgrades[proposal.newImplementation] = true;
+            emit UpgradeApproved(proposal.newImplementation, proposalId);
+
+            // Triggers _authorizeUpgrade which checks daoApprovedUpgrades flag (+ emergency timelock)
+            upgradeToAndCall(proposal.newImplementation, "");
+
+            // Ensure the flag is cleaned up (should already be consumed by _authorizeUpgrade)
+            delete daoApprovedUpgrades[proposal.newImplementation];
+
+            _upgradeHistoryCounter += 1;
+            uint256 historyId = _upgradeHistoryCounter;
             
             upgradeHistory[historyId] = UpgradeRecord({
                 implementation: proposal.newImplementation,
@@ -266,26 +349,49 @@ contract TruxifyUpgradeable is
         _unpause();
     }
 
-    function emergencyUpgrade(address newImplementation, string memory reason) 
+    /**
+     * @dev Register an emergency upgrade request. The upgrade is NOT executed
+     *      immediately — it sets a timelock (EMERGENCY_UPGRADE_TIMELOCK).
+     *      After the timelock elapses, anyone with UPGRADER_ROLE can call
+     *      upgradeTo() which will route through _authorizeUpgrade() and check
+     *      the pending request.
+     *
+     *      This delay gives the DAO time to detect and block malicious upgrades
+     *      (e.g., by pausing the contract or cancelling via DEFAULT_ADMIN_ROLE).
+     */
+    function requestEmergencyUpgrade(address newImplementation, string memory reason) 
         external 
         onlyRole(UPGRADER_ROLE) 
     {
         require(newImplementation != address(0), "Invalid implementation");
         require(bytes(reason).length > 0, "Reason required");
+        require(
+            emergencyUpgradeRequests[newImplementation] == 0,
+            "Emergency upgrade already requested for this implementation"
+        );
 
-        _upgradeTo(newImplementation);
+        emergencyUpgradeRequests[newImplementation] = block.timestamp;
 
-        _upgradeHistoryCounter.increment();
-        uint256 historyId = _upgradeHistoryCounter.current();
+        emit EmergencyUpgradeRequested(newImplementation, block.timestamp, reason);
+    }
 
-        upgradeHistory[historyId] = UpgradeRecord({
-            implementation: newImplementation,
-            timestamp: block.timestamp,
-            reason: string(abi.encodePacked("EMERGENCY: ", reason)),
-            proposer: msg.sender
-        });
+    /**
+     * @dev Cancel a pending emergency upgrade request. Only DEFAULT_ADMIN_ROLE
+     *      can cancel, allowing the DAO admin to abort an emergency upgrade
+     *      during the timelock window.
+     */
+    function cancelEmergencyUpgrade(address newImplementation) 
+        external 
+        onlyRole(DEFAULT_ADMIN_ROLE) 
+    {
+        require(
+            emergencyUpgradeRequests[newImplementation] != 0,
+            "No pending emergency upgrade for this implementation"
+        );
 
-        emit ContractUpgraded(newImplementation, block.timestamp);
+        delete emergencyUpgradeRequests[newImplementation];
+
+        emit EmergencyUpgradeCancelled(newImplementation);
     }
 
     // ============ View Functions ============
@@ -298,15 +404,15 @@ contract TruxifyUpgradeable is
     }
 
     function getUpgradeCount() external view returns (uint256) {
-        return _upgradeHistoryCounter.current();
+        return _upgradeHistoryCounter;
     }
 
     function getProposalCount() external view returns (uint256) {
-        return _proposalIdCounter.current();
+        return _proposalIdCounter;
     }
 
     function getEscrowCount() external view returns (uint256) {
-        return _escrowIdCounter.current();
+        return _escrowIdCounter;
     }
 
     // ============ DAO Configuration ============

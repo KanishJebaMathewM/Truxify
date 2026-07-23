@@ -765,30 +765,34 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
 
     try {
       final service = OrderService();
-      final result = await service.estimatePriceRange(
-        pickupLat: _pickupPoint!.latitude,
-        pickupLng: _pickupPoint!.longitude,
-        dropLat: _dropPoint!.latitude,
-        dropLng: _dropPoint!.longitude,
-        weightTonnes: weight,
-        isFragile: _fragile,
-        isStackable: _stacked,
-      );
+      try {
+        final result = await service.estimatePriceRange(
+          pickupLat: _pickupPoint!.latitude,
+          pickupLng: _pickupPoint!.longitude,
+          dropLat: _dropPoint!.latitude,
+          dropLng: _dropPoint!.longitude,
+          weightTonnes: weight,
+          isFragile: _fragile,
+          isStackable: _stacked,
+        );
 
-      if (!mounted) return;
+        if (!mounted) return;
 
-      setState(() {
-        _estimateLoading = false;
-        if (result != null) {
-          _estimateMinPrice = result['minPrice'] as int?;
-          _estimateMaxPrice = result['maxPrice'] as int?;
-          _estimateError = null;
-        } else {
-          _estimateError = 'Estimate unavailable';
-          _estimateMinPrice = null;
-          _estimateMaxPrice = null;
-        }
-      });
+        setState(() {
+          _estimateLoading = false;
+          if (result != null) {
+            _estimateMinPrice = result['minPrice'] as int?;
+            _estimateMaxPrice = result['maxPrice'] as int?;
+            _estimateError = null;
+          } else {
+            _estimateError = 'Estimate unavailable';
+            _estimateMinPrice = null;
+            _estimateMaxPrice = null;
+          }
+        });
+      } finally {
+        service.dispose();
+      }
     } catch (e) {
       if (mounted) {
         setState(() {

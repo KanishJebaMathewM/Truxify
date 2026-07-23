@@ -111,7 +111,7 @@ class LoadDetailScreen extends StatelessWidget {
                   icon: Icons.star_rounded,
                   iconColor: Colors.amber,
                   label: 'Customer rating',
-                  value: '4.9  (28 orders)',
+                  value: 'N/A',
                 ),
                 _DetailRow(
                   icon: Icons.people_rounded,

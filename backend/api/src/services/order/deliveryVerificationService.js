@@ -213,6 +213,13 @@ export class DeliveryVerificationService {
     await this.completeDeliveryOtp({ otpRecordId: otpRecord.id, orderId });
 
     if (verifiedOrder.escrow_status === 'funded' || verifiedOrder.escrow_status === 'release_failed') {
+      const releaseLockKey = `escrow:release:${orderId}`;
+      const releaseLockAcquired = await redisClient?.set(releaseLockKey, '1', 'NX', 'EX', 60);
+      if (!releaseLockAcquired) {
+        logger.info(`[escrow] Release already in-progress for order ${orderId}, skipping`);
+        return { escrowUpdateFailed: false };
+      }
+
       try {
         const releaseResult = await this.escrowReleaseFn(order.order_display_id);
         if (releaseResult.txHash) {
@@ -228,6 +235,8 @@ export class DeliveryVerificationService {
           error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
           retryable: true,
         });
+      } finally {
+        await redisClient?.del(releaseLockKey);
       }
     } else {
       logger.info(`[escrow] Escrow not funded (status: ${verifiedOrder.escrow_status}) — skipping on-chain release.`);

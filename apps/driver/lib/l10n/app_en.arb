@@ -841,5 +841,21 @@
   "withdrawalSuccessful": "Withdrawal successful",
   "@withdrawalSuccessful": {
     "description": "Success message after a successful withdrawal"
+  },
+  "theme": "Theme",
+  "@theme": {
+    "description": "Label for the theme selection setting"
+  },
+  "system": "System",
+  "@system": {
+    "description": "System theme option label"
+  },
+  "light": "Light",
+  "@light": {
+    "description": "Light theme option label"
+  },
+  "dark": "Dark",
+  "@dark": {
+    "description": "Dark theme option label"
   }
 }

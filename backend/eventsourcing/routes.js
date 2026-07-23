@@ -1,6 +1,7 @@
 import express from 'express';
 import eventStore from './event-store.js';
-import logger from '../../api/src/middleware/logger.js';
+import { supabase } from '../api/src/config/db.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 

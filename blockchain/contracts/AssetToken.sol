@@ -159,6 +159,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         asset.availableTokens -= amount;
 
         // Update fractional ownership
+        bool isNewHolder = fractionalOwnership[assetId][msg.sender].amount == 0;
         fractionalOwnership[assetId][msg.sender].owner = msg.sender;
         fractionalOwnership[assetId][msg.sender].tokenId = assetId;
         fractionalOwnership[assetId][msg.sender].amount += amount;
@@ -173,7 +174,9 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
             require(refunded, "Refund failed");
         }
 
-        userAssets[msg.sender].push(assetId);
+        if (isNewHolder) {
+            userAssets[msg.sender].push(assetId);
+        }
 
         emit FractionalPurchase(assetId, msg.sender, amount);
     }

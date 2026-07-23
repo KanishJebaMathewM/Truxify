@@ -11,6 +11,7 @@ import '../services/invoice_pdf_service.dart';
 import '../services/order_service.dart';
 import '../services/tracking_service.dart';
 import '../theme/app_theme.dart';
+import 'chat_screen.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/timeline_row.dart';
 
@@ -534,6 +535,16 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                       Text(_currentOrder.truckNumber, style: Theme.of(context).textTheme.bodySmall?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
                     ],
                   ),
+                ),
+                IconButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ChatScreen(order: _currentOrder),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.chat_bubble_outline_rounded, color: TruxifyColors.accent),
                 ),
               ],
             ),

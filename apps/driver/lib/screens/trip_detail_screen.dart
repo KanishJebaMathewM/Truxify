@@ -9,6 +9,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/common_widgets.dart';
+import 'chat_screen.dart';
 
 class TripDetailScreen extends StatefulWidget {
   final Trip trip;
@@ -772,6 +773,18 @@ Widget _cargoBadge({
                               fontWeight: FontWeight.bold,
                               color: TruxifyColors.accent,
                             ),
+                          ),
+                          IconButton(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => ChatScreen(trip: trip),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.chat_bubble_outline_rounded, color: TruxifyColors.accent, size: 20),
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.only(left: 12),
                           ),
                         ],
                       ),

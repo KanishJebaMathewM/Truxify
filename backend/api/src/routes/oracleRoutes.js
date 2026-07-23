@@ -2,6 +2,7 @@ import express from 'express';
 import { oracleService } from '../core/container.js';
 import { supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateBody } from '../middleware/validate.js';
 import { oracleConfirmSchema, oracleVerifyCrosschainSchema } from '../validation/requestSchemas.js';
 import { PolicyError, policy } from '../security/policyEngine.js';
@@ -48,7 +49,7 @@ router.get('/status', authenticate, async (req, res) => {
   }
 });
 
-router.post('/confirm', authenticate, validateBody(oracleConfirmSchema), async (req, res) => {
+router.post('/confirm', authenticate, userLimiter, validateBody(oracleConfirmSchema), async (req, res) => {
   try {
     const { orderId, otp, gpsCoordinates } = req.body;
     await authorizeOrderAccess(req, orderId);
@@ -78,7 +79,7 @@ router.post('/confirm', authenticate, validateBody(oracleConfirmSchema), async (
   }
 });
 
-router.post('/verify-crosschain', authenticate, validateBody(oracleVerifyCrosschainSchema), async (req, res) => {
+router.post('/verify-crosschain', authenticate, userLimiter, validateBody(oracleVerifyCrosschainSchema), async (req, res) => {
   try {
     const { orderId, blockchainHash } = req.body;
     await authorizeOrderAccess(req, orderId);

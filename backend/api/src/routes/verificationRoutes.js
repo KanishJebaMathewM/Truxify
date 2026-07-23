@@ -1,12 +1,22 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { verificationService } from '../core/container.js';
 import { authenticate } from '../middleware/auth.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
+import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
 import { verifyOrderParamsSchema, documentCheckSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 const DOCUMENT_REVIEW_ROLES = new Set(['admin', 'regulator']);
+const documentCheckLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  store: createStore('rl:document-check:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
+});
 
 function canCheckDriverDocuments(requestUser, driverId) {
   return requestUser?.id === driverId || DOCUMENT_REVIEW_ROLES.has(requestUser?.role);
@@ -36,7 +46,7 @@ router.get('/order/:orderId', authenticate, validateParams(verifyOrderParamsSche
   }
 });
 
-router.post('/documents/check', authenticate, userLimiter, validateBody(documentCheckSchema), async (req, res) => {
+router.post('/documents/check', documentCheckLimiter, authenticate, validateBody(documentCheckSchema), async (req, res) => {
   try {
     const { driverId } = req.body;
 

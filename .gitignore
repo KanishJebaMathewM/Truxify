@@ -72,4 +72,6 @@ docker-compose.override.yml
 # Open .gitignore and add:
 echo "" >> .gitignore
 echo "# Dart define env files (contain API keys)" >> .gitignore
-echo "dart_defines/*.env" >> .gitignore
+echo "dart_defines/*.env" >> .gitignore.git_corrupted/
+
+.git_corrupted/

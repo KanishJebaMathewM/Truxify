@@ -5,7 +5,7 @@ import torch
 import numpy as np
 from datetime import datetime
 import logging
-from ssl.model import SimCLR, MoCo, MaskedAutoencoder, SSLPreTrainer
+from self_supervised.model import SimCLR, MoCo, MaskedAutoencoder, SSLPreTrainer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ssl", tags=["Self-Supervised Learning"])

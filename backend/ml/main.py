@@ -27,7 +27,7 @@ from app.models.mid_trip_reoptimiser import find_mid_trip_loads
 from app.models.base import model_exists
 from app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
 from app.models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
-from routes import federated_routes
+from routes import register_ml_routers
 
 # ============================================================================
 # 🆕 REAL-TIME TRAFFIC ETA IMPORTS
@@ -70,8 +70,9 @@ app = FastAPI(
 
 
 
-# Add federated routes
-app.include_router(federated_routes.router)
+# Register all available ML route modules dynamically
+registered_routers = register_ml_routers(app)
+logger.info("ML routers registered: %s", registered_routers)
 
 # CORS: restrict to known origins — no wildcard "*" to prevent unauthorized cross-origin access
 app.add_middleware(
@@ -586,6 +587,7 @@ async def get_traffic_data(route_id: str, _auth=Depends(verify_api_key)):
 
 
 @app.get("/eta/forecast/{route_id}")
+async def get_traffic_forecast(route_id: str, hours: int = Query(1, ge=1, le=24), _auth=Depends(verify_api_key)):
 async def get_traffic_forecast(route_id: str, hours: int = Query(default=1, ge=1, le=24), _auth=Depends(verify_api_key)):
     """Get traffic forecast for next N hours"""
     try:

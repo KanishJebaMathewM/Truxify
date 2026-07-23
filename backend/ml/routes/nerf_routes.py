@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import torch
+import torch.nn.functional as F
 import numpy as np
 import base64
 from PIL import Image

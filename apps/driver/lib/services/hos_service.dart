@@ -16,7 +16,7 @@ class HosService {
       final token = session?.accessToken;
       if (token == null) return false;
 
-      final url = Uri.parse('$_defaultApiBaseUrl/api/drivers/hos/status');
+      final url = Uri.parse('$_defaultApiBaseUrl/api/driver/hos/status');
       final response = await http.put(
         url,
         headers: {

@@ -52,6 +52,7 @@ const POLICIES = {
   'driver:view-stats':         { roles: [ROLES.DRIVER] },
   'document:upload':           { roles: [ROLES.DRIVER] },
   'driver:toggle-online':      { roles: [ROLES.DRIVER] },
+  'driver:update-hos':         { roles: [ROLES.DRIVER] },
   'driver:view-wallet':        { roles: [ROLES.DRIVER] },
   'driver:view-earnings':      { roles: [ROLES.DRIVER] },
   'driver:view-trips':         { roles: [ROLES.DRIVER] },

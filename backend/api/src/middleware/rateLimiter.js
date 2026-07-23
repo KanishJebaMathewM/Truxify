@@ -4,7 +4,16 @@ import { redisClient } from '../config/db.js';
 import logger from './logger.js';
 
 function isRedisReady() {
-  return redisClient && redisClient.status === 'ready';
+  function isSuspiciousForwardedHeader(header) {
+  if (!header || typeof header !== 'string') return false;
+
+  // Excessively long headers may indicate spoofing attempts.
+  if (header.length > 512) return true;
+
+  const parts = header.split(',').map((ip) => ip.trim());
+
+  // Reject obviously malformed values.
+  return parts.some((ip) => ip.length === 0 || ip.includes('\n') || ip.includes('\r'));
 }
 
 /**
@@ -81,6 +90,17 @@ class DeferredRedisStore {
  * into one rate-limit bucket.
  */
 export function safeIpKeyGenerator(req) {
+const forwarded = req.headers?.['x-forwarded-for'];
+
+if (isSuspiciousForwardedHeader(forwarded)) {
+  logger.warn(
+    {
+      requestId: req.requestId,
+      header: forwarded,
+      socketIp: req.socket?.remoteAddress,
+    },
+    'Suspicious X-Forwarded-For header detected'
+  );
   let ip = req.ip || req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown';
   if (typeof ip === 'string') {
     if (ip.includes(',')) ip = ip.split(',')[0].trim();
@@ -89,6 +109,12 @@ export function safeIpKeyGenerator(req) {
   }
   return ip;
 }
+
+let ip =
+  req.ip ||
+  req.socket?.remoteAddress ||
+  req.connection?.remoteAddress ||
+  'unknown';
 
 /**
  * Keys a limiter by the authenticated principal, falling back to the client IP

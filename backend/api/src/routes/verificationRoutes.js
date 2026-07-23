@@ -1,15 +1,25 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { verificationService } from '../core/container.js';
 import { supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
+import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
 import { verifyOrderParamsSchema, documentCheckSchema } from '../validation/requestSchemas.js';
 import { PolicyError, policy } from '../security/policyEngine.js';
 
 const router = express.Router();
+const orderVerificationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  store: createStore('rl:order-verification:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
+});
 
-router.get('/order/:orderId', authenticate, userLimiter, validateParams(verifyOrderParamsSchema), async (req, res) => {
+router.get('/order/:orderId', orderVerificationLimiter, authenticate, validateParams(verifyOrderParamsSchema), async (req, res) => {
   try {
     const { orderId } = req.params;
     const { data: order, error: orderError } = await supabase

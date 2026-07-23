@@ -75,7 +75,7 @@ router.get('/zkp/status/:userId', authenticate, userLimiter, async (req, res) =>
 });
 
 // Get document hash (regulator only)
-router.get('/zkp/document-hash/:userId', authenticate, userLimiter, requireRole(['regulator']), async (req, res) => {
+router.get('/zkp/document-hash/:userId', userLimiter, authenticate, requireRole(['regulator']), async (req, res) => {
   try {
     const { userId } = req.params;
     const hash = await zkpService.getDocumentHash(userId);
@@ -98,7 +98,7 @@ router.get('/zkp/document-hash/:userId', authenticate, userLimiter, requireRole(
 });
 
 // Get verification stats
-router.get('/zkp/stats', authenticate, userLimiter, requireRole(['regulator']), async (req, res) => {
+router.get('/zkp/stats', userLimiter, authenticate, requireRole(['regulator']), async (req, res) => {
   try {
     const stats = await zkpService.getVerificationStats();
     

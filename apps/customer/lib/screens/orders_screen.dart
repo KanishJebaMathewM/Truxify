@@ -300,6 +300,12 @@ class _OrdersScreenState extends State<OrdersScreen>
     final controller = TruxifyScope.of(context);
     _controller = controller;
 
+    if (controller.currentTab != 2) {
+      if (_selectedStatusFilter != 'All Trips') {
+        _selectedStatusFilter = 'All Trips';
+      }
+    }
+
     if (_tabController.index != controller.ordersTabIndex &&
         !_tabController.indexIsChanging) {
       _tabController.animateTo(controller.ordersTabIndex);

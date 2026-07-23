@@ -1,10 +1,20 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import zkpService from '../services/zkp/zkp.service.js';
 import logger from '../middleware/logger.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
+import { userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
+const zkpRegulatorLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  store: createStore('rl:zkp-regulator:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
+});
 
 // Verify driver KYC using ZK-SNARK
 router.post('/zkp/verify', authenticate, userLimiter, async (req, res) => {
@@ -75,7 +85,7 @@ router.get('/zkp/status/:userId', authenticate, userLimiter, async (req, res) =>
 });
 
 // Get document hash (regulator only)
-router.get('/zkp/document-hash/:userId', userLimiter, authenticate, requireRole(['regulator']), async (req, res) => {
+router.get('/zkp/document-hash/:userId', zkpRegulatorLimiter, authenticate, requireRole(['regulator']), async (req, res) => {
   try {
     const { userId } = req.params;
     const hash = await zkpService.getDocumentHash(userId);
@@ -98,7 +108,7 @@ router.get('/zkp/document-hash/:userId', userLimiter, authenticate, requireRole(
 });
 
 // Get verification stats
-router.get('/zkp/stats', userLimiter, authenticate, requireRole(['regulator']), async (req, res) => {
+router.get('/zkp/stats', zkpRegulatorLimiter, authenticate, requireRole(['regulator']), async (req, res) => {
   try {
     const stats = await zkpService.getVerificationStats();
     

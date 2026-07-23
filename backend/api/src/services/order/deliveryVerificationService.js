@@ -185,34 +185,8 @@ export class DeliveryVerificationService {
     let releaseTxHash = null;
     let escrowAlreadyReleased = false;
 
-    const { data: tripData, error: rpcErr } = await this.orderRepository.executeRpc('complete_trip_tx', {
-      p_order_id: orderId,
-      p_otp_id: otpRecord.id,
-      p_release_tx_hash: null,
-    });
-
-    if (rpcErr) {
-      logger.error('complete_trip_tx RPC failed:', rpcErr.message);
-      throw new DomainError(500, { error: 'Failed to complete trip.', details: rpcErr.message });
-    }
-
-    const { data: verifiedOrder, error: verifyErr } = await this.orderRepository.findOrderById(orderId, 'status, escrow_status, escrow_release_attempts');
-
-    if (verifyErr || !verifiedOrder) {
-      logger.error(`[verify-delivery] Failed to verify order status after RPC for order ${orderId}`);
-      throw new DomainError(500, { error: 'Failed to verify order status after payment release.' });
-    }
-
-    if (verifiedOrder.status !== 'payment_released') {
-      logger.warn(`[verify-delivery] Order ${orderId} status changed to "${verifiedOrder.status}" — payment was not released.`);
-      throw new DomainError(409, {
-        error: 'Order status changed during processing. Payment was not released.',
-      });
-    }
-
-    await this.completeDeliveryOtp({ otpRecordId: otpRecord.id, orderId });
-
-    if (verifiedOrder.escrow_status === 'funded' || verifiedOrder.escrow_status === 'release_failed') {
+    // 1. Execute Blockchain Release FIRST to fail-safe if network errors occur
+    if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
       try {
         const releaseResult = await this.escrowReleaseFn(order.order_display_id);
         if (releaseResult.txHash) {
@@ -230,8 +204,36 @@ export class DeliveryVerificationService {
         });
       }
     } else {
-      logger.info(`[escrow] Escrow not funded (status: ${verifiedOrder.escrow_status}) — skipping on-chain release.`);
+      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
     }
+
+    // 2. Execute Postgres RPC to complete the trip AFTER blockchain success
+    const { data: tripData, error: rpcErr } = await this.orderRepository.executeRpc('complete_trip_tx', {
+      p_order_id: orderId,
+      p_otp_id: otpRecord.id,
+      p_release_tx_hash: releaseTxHash,
+    });
+
+    if (rpcErr) {
+      logger.error('complete_trip_tx RPC failed:', rpcErr.message);
+      throw new DomainError(500, { error: 'Failed to complete trip in database.', details: rpcErr.message });
+    }
+
+    const { data: verifiedOrder, error: verifyErr } = await this.orderRepository.findOrderById(orderId, 'status, escrow_status, escrow_release_attempts');
+
+    if (verifyErr || !verifiedOrder) {
+      logger.error(`[verify-delivery] Failed to verify order status after RPC for order ${orderId}`);
+      throw new DomainError(500, { error: 'Failed to verify order status after payment release.' });
+    }
+
+    if (verifiedOrder.status !== 'payment_released') {
+      logger.warn(`[verify-delivery] Order ${orderId} status changed to "${verifiedOrder.status}" — payment was not released.`);
+      throw new DomainError(409, {
+        error: 'Order status changed during processing. Payment was not released.',
+      });
+    }
+
+    await this.completeDeliveryOtp({ otpRecordId: otpRecord.id, orderId });
 
     let escrowUpdateFailed = false;
     if (releaseTxHash || escrowAlreadyReleased) {

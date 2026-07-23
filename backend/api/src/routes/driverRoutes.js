@@ -164,6 +164,14 @@ function parseIntegerQuery(value) {
   return Number.parseInt(value, 10);
 }
 
+function hasValidCoordinates(lat, lng) {
+  return Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180;
+}
 
 // ============================================================================
 // 1. GET DRIVER STATS (DRIVER)
@@ -1058,6 +1066,11 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
     const driverId = req.user.id;
     const lat = parseFloat(req.query.lat);
     const lng = parseFloat(req.query.lng);
+
+    if (!hasValidCoordinates(lat, lng)) {
+      return res.status(400).json({ error: 'lat and lng must be valid coordinates.' });
+    }
+
     const status = await checkBypassEligibility(driverId, lat, lng);
     return res.status(200).json(status);
   } catch (err) {

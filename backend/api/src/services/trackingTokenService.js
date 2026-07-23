@@ -158,9 +158,14 @@ export class TrackingTokenService {
         created_at
       `)
       .eq('order_display_id', orderDisplayId)
-      .single();
+      .maybeSingle();
 
-    if (orderError || !order) {
+    if (orderError) {
+      this._logger.error({ error: orderError, orderDisplayId }, 'Failed to fetch public tracking order');
+      throw new Error('Failed to fetch public tracking order');
+    }
+
+    if (!order) {
       return null;
     }
 

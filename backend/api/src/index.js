@@ -17,6 +17,7 @@ import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
 import { validateEscrowSetup } from './services/escrow.js'
+import { startDlqWorker } from './workers/dlqWorker.js'
 
 // Load REST routes
 import orderRoutes from './routes/orderRoutes.js'

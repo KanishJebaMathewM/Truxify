@@ -1,97 +1,97 @@
 {
-  "@@locale": "en",
+  "@@locale": "ta",
 
-  "appTitle": "Truxify Driver",
+  "appTitle": "ட்ரக்ஸிஃபை ஓட்டுநர்",
   "@appTitle": {
     "description": "The title of the driver application"
   },
 
-  "loadingText": "Loading...",
+  "loadingText": "ஏற்றுகிறது...",
   "@loadingText": {
     "description": "General loading indicator text"
   },
 
-  "retry": "Retry",
+  "retry": "மீண்டும் முயற்சி",
   "@retry": {
     "description": "Button label to retry a failed action"
   },
 
-  "error": "Error",
+  "error": "பிழை",
   "@error": {
     "description": "Generic error title"
   },
 
-  "cancel": "Cancel",
+  "cancel": "ரத்துசெய்",
   "@cancel": {
     "description": "Button label to cancel an action"
   },
 
-  "save": "Save",
+  "save": "சேமி",
   "@save": {
     "description": "Button label to save changes"
   },
 
-  "close": "Close",
+  "close": "மூடு",
   "@close": {
     "description": "Button label to close a dialog or screen"
   },
 
-  "apply": "Apply",
+  "apply": "பயன்படுத்து",
   "@apply": {
     "description": "Button label to apply a selection or setting"
   },
 
-  "reset": "Reset",
+  "reset": "மீட்டமை",
   "@reset": {
     "description": "Button label to reset filters or form fields"
   },
 
-  "search": "Search",
+  "search": "தேடு",
   "@search": {
     "description": "Placeholder text for search input fields"
   },
 
-  "welcomeDriver": "Welcome, Driver!",
+  "welcomeDriver": "வரவேற்கிறோம், ஓட்டுநர்!",
   "@welcomeDriver": {
     "description": "Greeting on the login screen"
   },
 
-  "logInToStartEarning": "Log in to start earning",
+  "logInToStartEarning": "சம்பாதிக்கத் தொடங்க உள்நுழையுங்கள்",
   "@logInToStartEarning": {
     "description": "Subtitle on the login screen encouraging sign-in"
   },
 
-  "phoneNumber": "Phone Number",
+  "phoneNumber": "தொலைபேசி எண்",
   "@phoneNumber": {
     "description": "Label for the phone number input field"
   },
 
-  "sendOtp": "Send OTP",
+  "sendOtp": "OTP அனுப்பு",
   "@sendOtp": {
     "description": "Button label to send a one-time password"
   },
 
-  "sending": "Sending...",
+  "sending": "அனுப்புகிறது...",
   "@sending": {
     "description": "Status text while an OTP is being sent"
   },
 
-  "verificationFailed": "Verification failed",
+  "verificationFailed": "சரிபார்ப்பு தோல்வியடைந்தது",
   "@verificationFailed": {
     "description": "Error message when login verification fails"
   },
 
-  "pleaseEnterPhone": "Please enter your phone number",
+  "pleaseEnterPhone": "தயவுசெய்து உங்கள் தொலைபேசி எண்ணை உள்ளிடவும்",
   "@pleaseEnterPhone": {
     "description": "Validation message when phone field is empty"
   },
 
-  "enterValidPhone": "Please enter a valid phone number",
+  "enterValidPhone": "தயவுசெய்து சரியான தொலைபேசி எண்ணை உள்ளிடவும்",
   "@enterValidPhone": {
     "description": "Validation message for invalid phone format"
   },
 
-  "phoneMustBeExactDigits": "Phone number must be exactly {digitCount} digits",
+  "phoneMustBeExactDigits": "தொலைபேசி எண் சரியாக {digitCount} இலக்கங்களாக இருக்க வேண்டும்",
   "@phoneMustBeExactDigits": {
     "description": "Validation message for incorrect phone number length",
     "placeholders": {
@@ -102,32 +102,32 @@
     }
   },
 
-  "phoneMustBeDigits": "Phone number must contain only digits",
+  "phoneMustBeDigits": "தொலைபேசி எண் இலக்கங்களை மட்டும் கொண்டிருக்க வேண்டும்",
   "@phoneMustBeDigits": {
     "description": "Validation message when phone contains non-digit characters"
   },
 
-  "autoVerificationFailed": "Auto-verification failed. Please enter OTP manually.",
+  "autoVerificationFailed": "தானியங்கு சரிபார்ப்பு தோல்வியடைந்தது. தயவுசெய்து OTP ஐ கைமுறையாக உள்ளிடவும்.",
   "@autoVerificationFailed": {
     "description": "Message shown when automatic OTP detection fails"
   },
 
-  "protectedDriverAccess": "This area is restricted to registered drivers.",
+  "protectedDriverAccess": "இப்பகுதி பதிவுசெய்யப்பட்ட ஓட்டுநர்களுக்கு மட்டுமே.",
   "@protectedDriverAccess": {
     "description": "Message indicating driver-only access"
   },
 
-  "verifyOtp": "Verify OTP",
+  "verifyOtp": "OTP ஐ சரிபார்",
   "@verifyOtp": {
     "description": "Title of the OTP verification screen"
   },
 
-  "enterOtp": "Enter the OTP sent to your phone",
+  "enterOtp": "உங்கள் தொலைபேசிக்கு அனுப்பப்பட்ட OTP ஐ உள்ளிடவும்",
   "@enterOtp": {
     "description": "Instruction text on the OTP screen"
   },
 
-  "sentTo": "Sent to {phoneNumber}",
+  "sentTo": "{phoneNumber} க்கு அனுப்பப்பட்டது",
   "@sentTo": {
     "description": "Text showing which phone number the OTP was sent to",
     "placeholders": {
@@ -138,72 +138,72 @@
     }
   },
 
-  "invalidOtp": "Invalid OTP. Please try again.",
+  "invalidOtp": "தவறான OTP. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.",
   "@invalidOtp": {
     "description": "Error message for incorrect OTP entry"
   },
 
-  "codeExpired": "OTP has expired. Please request a new one.",
+  "codeExpired": "OTP காலாவதியாகிவிட்டது. தயவுசெய்து புதியதைக் கோருங்கள்.",
   "@codeExpired": {
     "description": "Message when the OTP code has expired"
   },
 
-  "verificationFailedMsg": "Verification failed. Please try again.",
+  "verificationFailedMsg": "சரிபார்ப்பு தோல்வியடைந்தது. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.",
   "@verificationFailedMsg": {
     "description": "General verification failure message on OTP screen"
   },
 
-  "couldNotVerifyOtp": "Could not verify OTP. Please try again.",
+  "couldNotVerifyOtp": "OTP ஐ சரிபார்க்க முடியவில்லை. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.",
   "@couldNotVerifyOtp": {
     "description": "Error message when OTP verification request fails"
   },
 
-  "verifying": "Verifying...",
+  "verifying": "சரிபார்க்கிறது...",
   "@verifying": {
     "description": "Status text while OTP is being verified"
   },
 
-  "home": "Home",
+  "home": "முகப்பு",
   "@home": {
     "description": "Navigation label for the Home tab"
   },
 
-  "trips": "Trips",
+  "trips": "பயணங்கள்",
   "@trips": {
     "description": "Navigation label for the Trips tab"
   },
 
-  "earnings": "Earnings",
+  "earnings": "வருமானம்",
   "@earnings": {
     "description": "Navigation label for the Earnings tab"
   },
 
-  "profile": "Profile",
+  "profile": "சுயவிவரம்",
   "@profile": {
     "description": "Navigation label for the Profile tab"
   },
 
-  "offlineUsingCachedData": "You are offline. Using cached data.",
+  "offlineUsingCachedData": "நீங்கள் ஆஃப்லைனில் உள்ளீர்கள். தற்காலிக தரவைப் பயன்படுத்துகிறது.",
   "@offlineUsingCachedData": {
     "description": "Banner text when app is in offline mode"
   },
 
-  "newLoadAvailable": "New load available!",
+  "newLoadAvailable": "புதிய சரக்கு கிடைக்கிறது!",
   "@newLoadAvailable": {
     "description": "Notification text when a new load appears"
   },
 
-  "view": "View",
+  "view": "பார்",
   "@view": {
     "description": "Button label to view details"
   },
 
-  "navigationActive": "Navigation active",
+  "navigationActive": "வழிசெலுத்தல் செயலில் உள்ளது",
   "@navigationActive": {
     "description": "Status text when GPS navigation is active"
   },
 
-  "headingTo": "Heading to {destination}",
+  "headingTo": "{destination} க்கு செல்கிறது",
   "@headingTo": {
     "description": "Text showing the current trip destination",
     "placeholders": {
@@ -214,142 +214,142 @@
     }
   },
 
-  "locating": "Locating you...",
+  "locating": "உங்கள் இருப்பை கண்டறிகிறது...",
   "@locating": {
     "description": "Status text while GPS is determining position"
   },
 
-  "locationUnavailable": "Location unavailable",
+  "locationUnavailable": "இருப்பு கிடைக்கவில்லை",
   "@locationUnavailable": {
     "description": "Error text when GPS cannot determine position"
   },
 
-  "currentLocation": "Current Location",
+  "currentLocation": "தற்போதைய இருப்பு",
   "@currentLocation": {
     "description": "Label for the driver's current GPS location"
   },
 
-  "tapToRefresh": "Tap to refresh",
+  "tapToRefresh": "புதுப்பிக்க தட்டவும்",
   "@tapToRefresh": {
     "description": "Instruction text to pull-to-refresh"
   },
 
-  "fetchingLocation": "Fetching your location...",
+  "fetchingLocation": "உங்கள் இருப்பை பெறுகிறது...",
   "@fetchingLocation": {
     "description": "Status text while location is being fetched"
   },
 
-  "whereAreYouHeading": "Where are you heading?",
+  "whereAreYouHeading": "நீங்கள் எங்கு செல்கிறீர்கள்?",
   "@whereAreYouHeading": {
     "description": "Prompt for destination input"
   },
 
-  "onlineAndReady": "Online & Ready",
+  "onlineAndReady": "ஆன்லைன் & தயார்",
   "@onlineAndReady": {
     "description": "Status text when driver is online and available"
   },
 
-  "offline": "Offline",
+  "offline": "ஆஃப்லைன்",
   "@offline": {
     "description": "Status text when driver is offline"
   },
 
-  "offlineGoOnline": "You are offline. Go online to receive loads.",
+  "offlineGoOnline": "நீங்கள் ஆஃப்லைனில் உள்ளீர்கள். சரக்குகளைப் பெற ஆன்லைனில் செல்லுங்கள்.",
   "@offlineGoOnline": {
     "description": "Message encouraging driver to go online"
   },
 
-  "radarActiveFetching": "Radar active — fetching nearby loads...",
+  "radarActiveFetching": "ரேடார் செயலில் — அருகிலுள்ள சரக்குகளைப் பெறுகிறது...",
   "@radarActiveFetching": {
     "description": "Status text while radar is scanning for loads"
   },
 
-  "radarActiveLooking": "Radar active — looking for loads near you.",
+  "radarActiveLooking": "ரேடார் செயலில் — உங்கள் அருகில் சரக்குகளைத் தேடுகிறது.",
   "@radarActiveLooking": {
     "description": "Status text when radar is actively searching"
   },
 
-  "todayPay": "Today's Pay",
+  "todayPay": "இன்றைய ஊதியம்",
   "@todayPay": {
     "description": "Label for today's earnings display"
   },
 
-  "shiftHours": "Shift Hours",
+  "shiftHours": "பணிநேரம்",
   "@shiftHours": {
     "description": "Label for hours worked display"
   },
 
-  "rating": "Rating",
+  "rating": "மதிப்பீடு",
   "@rating": {
     "description": "Label for driver rating display"
   },
 
-  "metricsUnavailable": "Metrics unavailable",
+  "metricsUnavailable": "அளவீடுகள் கிடைக்கவில்லை",
   "@metricsUnavailable": {
     "description": "Text when dashboard metrics cannot be loaded"
   },
 
-  "noDestinationAvailable": "No destination set",
+  "noDestinationAvailable": "இலக்கு அமைக்கப்படவில்லை",
   "@noDestinationAvailable": {
     "description": "Text when no destination has been entered"
   },
 
-  "currentLocationUnavailable": "Current location unavailable",
+  "currentLocationUnavailable": "தற்போதைய இருப்பு கிடைக்கவில்லை",
   "@currentLocationUnavailable": {
     "description": "Error text when current GPS location is unavailable"
   },
 
-  "unableToOpenGoogleMaps": "Unable to open Google Maps",
+  "unableToOpenGoogleMaps": "Google Maps ஐ திறக்க முடியவில்லை",
   "@unableToOpenGoogleMaps": {
     "description": "Error message when Google Maps launch fails"
   },
 
-  "failedToGenerateRoute": "Failed to generate route",
+  "failedToGenerateRoute": "வழியை உருவாக்க முடியவில்லை",
   "@failedToGenerateRoute": {
     "description": "Error message when route generation fails"
   },
 
-  "enRoute": "En Route",
+  "enRoute": "வழியில்",
   "@enRoute": {
     "description": "Status label when driver is en route to destination"
   },
 
-  "assignedLoad": "Assigned Load",
+  "assignedLoad": "ஒதுக்கப்பட்ட சரக்கு",
   "@assignedLoad": {
     "description": "Label for the currently assigned load"
   },
 
-  "distance": "Distance",
+  "distance": "தொலைவு",
   "@distance": {
     "description": "Label for trip distance"
   },
 
-  "estDuration": "Est. Duration",
+  "estDuration": "மதிப்பிடப்பட்ட காலம்",
   "@estDuration": {
     "description": "Label for estimated trip duration"
   },
 
-  "estPayout": "Est. Payout",
+  "estPayout": "மதிப்பிடப்பட்ட பணம்",
   "@estPayout": {
     "description": "Label for estimated trip payout"
   },
 
-  "slideToCompleteTrip": "Slide to complete trip",
+  "slideToCompleteTrip": "பயணத்தை நிறைவு செய்ய ஸ்லைடு செய்யுங்கள்",
   "@slideToCompleteTrip": {
     "description": "Instruction on the slide-to-confirm button to complete"
   },
 
-  "slideToStartTrip": "Slide to start trip",
+  "slideToStartTrip": "பயணத்தைத் தொடங்க ஸ்லைடு செய்யுங்கள்",
   "@slideToStartTrip": {
     "description": "Instruction on the slide-to-confirm button to start"
   },
 
-  "cancelAssignment": "Cancel Assignment",
+  "cancelAssignment": "ஒதுக்கீட்டை ரத்துசெய்",
   "@cancelAssignment": {
     "description": "Button label to cancel a trip assignment"
   },
 
-  "tripCompletedNetEarnings": "Trip completed! Net earnings: {amount}",
+  "tripCompletedNetEarnings": "பயணம் நிறைவடைந்தது! நிகர வருமானம்: {amount}",
   "@tripCompletedNetEarnings": {
     "description": "Success message after trip completion with earnings",
     "placeholders": {
@@ -360,485 +360,487 @@
     }
   },
 
-  "failedToCompleteTrip": "Failed to complete trip",
+  "failedToCompleteTrip": "பயணத்தை நிறைவு செய்ய முடியவில்லை",
   "@failedToCompleteTrip": {
     "description": "Error message when trip completion fails"
   },
 
-  "failedToStartTrip": "Failed to start trip",
+  "failedToStartTrip": "பயணத்தைத் தொடங்க முடியவில்லை",
   "@failedToStartTrip": {
     "description": "Error message when trip start fails"
   },
 
-  "tripCompleted": "Trip Completed",
+  "tripCompleted": "பயணம் நிறைவடைந்தது",
   "@tripCompleted": {
     "description": "Title or status for a completed trip"
   },
 
-  "pleaseGoOnline": "Please go online first",
+  "pleaseGoOnline": "தயவுசெய்து முதலில் ஆன்லைனில் செல்லுங்கள்",
   "@pleaseGoOnline": {
     "description": "Prompt asking the driver to go online before proceeding"
   },
 
-  "noDestinationAvailable2": "No destination available. Please set a destination.",
+  "noDestinationAvailable2": "இலக்கு கிடைக்கவில்லை. தயவுசெய்து இலக்கை அமையுங்கள்.",
   "@noDestinationAvailable2": {
     "description": "Message when no destination is set for navigation"
   },
 
-  "locationPermissionRequired": "Location permission is required",
+  "locationPermissionRequired": "இருப்பு அனுமதி தேவை",
   "@locationPermissionRequired": {
     "description": "Error message when location permission has not been granted"
   },
 
-  "locationAccessDenied": "Location access denied",
+  "locationAccessDenied": "இருப்பு அணுகல் மறுக்கப்பட்டது",
   "@locationAccessDenied": {
     "description": "Error message when location access is denied by user"
   },
 
-  "locationPermDenied": "Location permission permanently denied. Please enable in settings.",
+  "locationPermDenied": "இருப்பு அனுமதி நிரந்தரமாக மறுக்கப்பட்டது. தயவுசெய்து அமைப்புகளில் இயக்குங்கள்.",
   "@locationPermDenied": {
     "description": "Error message when location permission is permanently denied"
   },
 
-  "openSettings": "Open Settings",
+  "openSettings": "அமைப்புகளைத் திற",
   "@openSettings": {
     "description": "Button label to open device settings"
   },
 
-  "editProfile": "Edit Profile",
+  "editProfile": "சுயவிவரத்தைத் திருத்து",
   "@editProfile": {
     "description": "Title or button label to edit the driver profile"
   },
 
-  "fullNames": "Full Names",
+  "fullNames": "முழு பெயர்கள்",
   "@fullNames": {
     "description": "Label for the full name input field"
   },
 
-  "phoneNumbers": "Phone Number",
+  "phoneNumbers": "தொலைபேசி எண்",
   "@phoneNumbers": {
     "description": "Label for the phone number display"
   },
 
-  "emailAddress": "Email Address",
+  "emailAddress": "மின்னஞ்சல் முகவரி",
   "@emailAddress": {
     "description": "Label for the email address input field"
   },
 
-  "vehicleRegistrationNumber": "Vehicle Registration Number",
+  "vehicleRegistrationNumber": "வாகன பதிவு எண்",
   "@vehicleRegistrationNumber": {
     "description": "Label for the vehicle registration input field"
   },
 
-  "saveChanges": "Save Changes",
+  "saveChanges": "மாற்றங்களைச் சேமி",
   "@saveChanges": {
     "description": "Button label to save profile changes"
   },
 
-  "profileUpdatedSuccessfully": "Profile updated successfully",
+  "profileUpdatedSuccessfully": "சுயவிவரம் வெற்றிகரமாக புதுப்பிக்கப்பட்டது",
   "@profileUpdatedSuccessfully": {
     "description": "Success message after profile update"
   },
 
-  "selectLanguage": "Select Language",
+  "selectLanguage": "மொழியைத் தேர்ந்தெடு",
   "@selectLanguage": {
     "description": "Title or label for language selection"
   },
 
-  "applyLanguage": "Apply Language",
+  "applyLanguage": "மொழியைப் பயன்படுத்து",
   "@applyLanguage": {
     "description": "Button label to confirm language change"
   },
 
-  "languageSwitched": "Language switched successfully",
+  "languageSwitched": "மொழி வெற்றிகரமாக மாற்றப்பட்டது",
   "@languageSwitched": {
     "description": "Success message after language change"
   },
 
-  "polygonWalletAddress": "Polygon Wallet Address",
+  "polygonWalletAddress": "Polygon பணப்பை முகவரி",
   "@polygonWalletAddress": {
     "description": "Label for the Polygon wallet address field"
   },
 
-  "saveWalletAddress": "Save Wallet Address",
+  "saveWalletAddress": "பணப்பை முகவரியைச் சேமி",
   "@saveWalletAddress": {
     "description": "Button label to save the wallet address"
   },
 
-  "walletAddressUpdated": "Wallet address updated",
+  "walletAddressUpdated": "பணப்பை முகவரி புதுப்பிக்கப்பட்டது",
   "@walletAddressUpdated": {
     "description": "Success message after wallet address update"
   },
 
-  "failedToUpdateWallet": "Failed to update wallet address",
+  "failedToUpdateWallet": "பணப்பை முகவரியைப் புதுப்பிக்க முடியவில்லை",
   "@failedToUpdateWallet": {
     "description": "Error message when wallet address update fails"
   },
 
-  "helpSupport": "Help & Support",
+  "helpSupport": "உதவி & ஆதரவு",
   "@helpSupport": {
     "description": "Section title for help and support"
   },
 
-  "browseFAQs": "Browse FAQs",
+  "browseFAQs": "அடிக்கடி கேட்கப்படும் கேள்விகளை உலாவு",
   "@browseFAQs": {
     "description": "Button label to view frequently asked questions"
   },
 
-  "instantAnswers": "Get instant answers to common questions",
+  "instantAnswers": "பொதுவான கேள்விகளுக்கு உடனடி பதில்களைப் பெறுங்கள்",
   "@instantAnswers": {
     "description": "Subtitle describing the FAQ section"
   },
 
-  "aboutTruxifyDriverApp": "About Truxify Driver App",
+  "aboutTruxifyDriverApp": "Truxify ஓட்டுநர் பயன்பாடு பற்றி",
   "@aboutTruxifyDriverApp": {
     "description": "Section title for app about information"
   },
 
-  "truxifyDescription": "Truxify is a truck logistics platform connecting drivers with loads across East Africa.",
+  "truxifyDescription": "Truxify என்பது கிழக்கு ஆப்பிரிக்கா முழுவதும் ஓட்டுநர்களை சரக்குகளுடன் இணைக்கும் லாரி தளவாட தளம்.",
   "@truxifyDescription": {
     "description": "Description of the Truxify application"
   },
 
-  "documents": "Documents",
+  "documents": "ஆவணங்கள்",
   "@documents": {
     "description": "Section title for driver documents"
   },
 
-  "driverLicensePermitPapers": "Driver License & Permit Papers",
+  "driverLicensePermitPapers": "ஓட்டுநர் உரிமம் & அனுமதி ஆவணங்கள்",
   "@driverLicensePermitPapers": {
     "description": "Label for driver license and permit document section"
   },
 
-  "notifications": "Notifications",
+  "notifications": "அறிவிப்புகள்",
   "@notifications": {
     "description": "Section title for notifications settings"
   },
 
-  "viewTripAlerts": "View Trip Alerts",
+  "viewTripAlerts": "பயண எச்சரிக்கைகளைக் காண்",
   "@viewTripAlerts": {
     "description": "Label for trip notification alerts toggle"
   },
 
-  "walletAddress": "Wallet Address",
+  "walletAddress": "பணப்பை முகவரி",
   "@walletAddress": {
     "description": "Label for wallet address display"
   },
 
-  "notSet": "Not set",
+  "notSet": "அமைக்கப்படவில்லை",
   "@notSet": {
     "description": "Placeholder text when a value has not been set"
   },
 
-  "languageLabel": "Language",
+  "languageLabel": "மொழி",
   "@languageLabel": {
     "description": "Label for the current language setting"
   },
 
-  "helpAndSupport247": "Help & Support (24/7)",
+  "helpAndSupport247": "உதவி & ஆதரவு (24/7)",
   "@helpAndSupport247": {
     "description": "Label indicating round-the-clock support availability"
   },
 
-  "versionAndAppInfo": "Version & App Info",
+  "versionAndAppInfo": "பதிப்பு & பயன்பாட்டு தகவல்",
   "@versionAndAppInfo": {
     "description": "Label for app version information section"
   },
 
-  "logout": "Logout",
+  "logout": "வெளியேறு",
   "@logout": {
     "description": "Button label to log out of the application"
   },
 
-  "logoutFailed": "Logout failed. Please try again.",
+  "logoutFailed": "வெளியேற்றம் தோல்வியடைந்தது. தயவுசெய்து மீண்டும் முயற்சிக்கவும்.",
   "@logoutFailed": {
     "description": "Error message when logout fails"
   },
 
-  "myTrips": "My Trips",
+  "myTrips": "என் பயணங்கள்",
   "@myTrips": {
     "description": "Title of the trips screen"
   },
 
-  "marketplace": "Marketplace",
+  "marketplace": "சந்தை",
   "@marketplace": {
     "description": "Title or tab for the load marketplace"
   },
 
-  "sortTrips": "Sort Trips",
+  "sortTrips": "பயணங்களை வரிசைப்படுத்து",
   "@sortTrips": {
     "description": "Label for the trip sorting option"
   },
 
-  "newestFirst": "Newest First",
+  "newestFirst": "சமீபத்தியது முதலில்",
   "@newestFirst": {
     "description": "Sort option to show newest trips first"
   },
 
-  "oldestFirst": "Oldest First",
+  "oldestFirst": "பழமையானது முதலில்",
   "@oldestFirst": {
     "description": "Sort option to show oldest trips first"
   },
 
-  "highestEarnings": "Highest Earnings",
+  "highestEarnings": "அதிகபட்ச வருமானம்",
   "@highestEarnings": {
     "description": "Sort option to show highest-earning trips first"
   },
 
-  "lowestEarnings": "Lowest Earnings",
+  "lowestEarnings": "குறைந்தபட்ச வருமானம்",
   "@lowestEarnings": {
     "description": "Sort option to show lowest-earning trips first"
   },
 
-  "byStatus": "By Status",
+  "byStatus": "நிலை வாரியாக",
   "@byStatus": {
     "description": "Sort or filter option to group trips by status"
   },
 
-  "totalTrips": "Total Trips",
+  "totalTrips": "மொத்த பயணங்கள்",
   "@totalTrips": {
     "description": "Label for total number of trips"
   },
 
-  "totalEarned": "Total Earned",
+  "totalEarned": "மொத்த சம்பாதிப்பு",
   "@totalEarned": {
     "description": "Label for total earnings amount"
   },
 
-  "completion": "Completion",
+  "completion": "நிறைவு",
   "@completion": {
     "description": "Label for trip completion percentage"
   },
 
-  "all": "All",
+  "all": "அனைத்தும்",
   "@all": {
     "description": "Filter option to show all trips"
   },
 
-  "active2": "Active",
+  "active2": "செயலில்",
   "@active2": {
     "description": "Filter option to show active trips"
   },
 
-  "completed2": "Completed",
+  "completed2": "நிறைவடைந்தது",
   "@completed2": {
     "description": "Filter option to show completed trips"
   },
 
-  "cancelled2": "Cancelled",
+  "cancelled2": "ரத்துசெய்யப்பட்டது",
   "@cancelled2": {
     "description": "Filter option to show cancelled trips"
   },
 
-  "failedToLoadTrips": "Failed to load trips",
+  "failedToLoadTrips": "பயணங்களை ஏற்ற முடியவில்லை",
   "@failedToLoadTrips": {
     "description": "Error message when trips list fails to load"
   },
 
-  "pullDownToRetry": "Pull down to retry",
+  "pullDownToRetry": "மீண்டும் முயற்சிக்க கீழே இழுக்கவும்",
   "@pullDownToRetry": {
     "description": "Instruction text for pull-to-refresh gesture"
   },
 
-  "noTripsFound": "No trips found",
+  "noTripsFound": "பயணங்கள் எதுவும் கிடைக்கவில்லை",
   "@noTripsFound": {
     "description": "Empty state text when no trips match filters"
   },
 
-  "deliveryStops": "Delivery Stops",
+  "deliveryStops": "டெலிவரி நிறுத்தங்கள்",
   "@deliveryStops": {
     "description": "Label for the number of delivery stops on a trip"
   },
 
-  "markCurrentStopCompleted": "Mark Current Stop Completed",
+  "markCurrentStopCompleted": "தற்போதைய நிறுத்தத்தை நிறைவடைந்ததாகக் குறி",
   "@markCurrentStopCompleted": {
     "description": "Button label to mark the current delivery stop as done"
   },
 
-  "activeStatus": "Active",
+  "activeStatus": "செயலில்",
   "@activeStatus": {
     "description": "Status badge text for an active trip"
   },
 
-  "completedStatus": "Completed",
+  "completedStatus": "நிறைவடைந்தது",
   "@completedStatus": {
     "description": "Status badge text for a completed trip"
   },
 
-  "cancelledStatus": "Cancelled",
+  "cancelledStatus": "ரத்துசெய்யப்பட்டது",
   "@cancelledStatus": {
     "description": "Status badge text for a cancelled trip"
   },
 
-  "enRouteOpportunities": "En Route Opportunities",
+  "enRouteOpportunities": "வழியில் வாய்ப்புகள்",
   "@enRouteOpportunities": {
     "description": "Section title for loads available along current route"
   },
 
-  "pickupNearbyLoads": "Pickup Nearby Loads",
+  "pickupNearbyLoads": "அருகிலுள்ள சரக்குகளை எடு",
   "@pickupNearbyLoads": {
     "description": "Label for nearby load pickup section"
   },
 
-  "marketplaceLoads": "Marketplace Loads",
+  "marketplaceLoads": "சந்தை சரக்குகள்",
   "@marketplaceLoads": {
     "description": "Section title for marketplace load listings"
   },
 
-  "availableLoadsYouCanBidFor": "Available loads you can bid for",
+  "availableLoadsYouCanBidFor": "நீங்கள் ஏலம் கட்டக்கூடிய கிடைக்கும் சரக்குகள்",
   "@availableLoadsYouCanBidFor": {
     "description": "Subtitle describing available marketplace loads"
   },
 
-  "couldNotLoadMarketplace": "Could not load marketplace",
+  "couldNotLoadMarketplace": "சந்தையை ஏற்ற முடியவில்லை",
   "@couldNotLoadMarketplace": {
     "description": "Error message when marketplace data fails to load"
   },
 
-  "pullToRefresh": "Pull to refresh",
+  "pullToRefresh": "புதுப்பிக்க இழுக்கவும்",
   "@pullToRefresh": {
     "description": "Instruction text to refresh marketplace data"
   },
 
-  "noLoadsAvailable": "No loads available",
+  "noLoadsAvailable": "சரக்குகள் கிடைக்கவில்லை",
   "@noLoadsAvailable": {
     "description": "Empty state text when no loads are available"
   },
 
-  "bidSubmitted": "Bid submitted successfully",
+  "bidSubmitted": "ஏலம் வெற்றிகரமாக சமர்ப்பிக்கப்பட்டது",
   "@bidSubmitted": {
     "description": "Success message after submitting a bid"
   },
 
-  "failedToSubmitBid": "Failed to submit bid",
+  "failedToSubmitBid": "ஏலத்தை சமர்ப்பிக்க முடியவில்லை",
   "@failedToSubmitBid": {
     "description": "Error message when bid submission fails"
   },
 
-  "thisLoadIsMissingId": "This load is missing an ID",
+  "thisLoadIsMissingId": "இந்த சரக்கிற்கு ஒரு அடையாளம் இல்லை",
   "@thisLoadIsMissingId": {
     "description": "Error message when a load record has no valid identifier"
   },
 
-  "recommendedReturnLoads": "Recommended Return Loads",
+  "recommendedReturnLoads": "பரிந்துரைக்கப்பட்ட திரும்ப சரக்குகள்",
   "@recommendedReturnLoads": {
     "description": "Section title for ML-powered return load recommendations"
   },
 
-  "recommendedForYou": "Recommended For You",
+  "recommendedForYou": "உங்களுக்காக பரிந்துரைக்கப்பட்டது",
   "@recommendedForYou": {
     "description": "Label shown when a recommendation has no route"
   },
 
-  "matchScore": "Match Score",
+  "matchScore": "பொருத்த மதிப்பீடு",
   "@matchScore": {
     "description": "Label for ML match score percentage"
   },
 
-  "bestMatch": "Best Match",
+  "bestMatch": "சிறந்த பொருத்தம்",
   "@bestMatch": {
     "description": "Label for the top recommendation"
   },
 
-  "noRecommendations": "No return load recommendations available",
+  "noRecommendations": "திரும்ப சரக்கு பரிந்துரைகள் கிடைக்கவில்லை",
   "@noRecommendations": {
     "description": "Empty state when ML returns no recommendations"
   },
 
-  "couldNotLoadRecommendations": "Could not load recommendations",
+  "couldNotLoadRecommendations": "பரிந்துரைகளை ஏற்ற முடியவில்லை",
   "@couldNotLoadRecommendations": {
     "description": "Error state when ML endpoint fails"
   },
 
-  "noActiveTripForRecommendations": "Complete a trip to see return load suggestions",
+  "noActiveTripForRecommendations": "திரும்ப சரக்கு பரிந்துரைகளைக் காண ஒரு பயணத்தை நிறைவு செய்யுங்கள்",
   "@noActiveTripForRecommendations": {
     "description": "Hint shown when driver has no active trip for recommendations"
   },
 
-  "detourDistance": "Detour",
+  "detourDistance": "சுற்றுவழி",
   "@detourDistance": {
     "description": "Label for detour distance"
   },
 
-  "bidOnLoad": "Bid",
+  "bidOnLoad": "ஏலம்",
   "@bidOnLoad": {
     "description": "Button label to place a bid on a load"
   },
 
-  "updateBid": "Update Bid",
+  "updateBid": "ஏலத்தைப் புதுப்பி",
   "@updateBid": {
     "description": "Button label to update an existing bid"
   },
 
-  "placeYourBid": "Place Your Bid",
+  "placeYourBid": "உங்கள் ஏலத்தை வையுங்கள்",
   "@placeYourBid": {
     "description": "Title of the bid placement bottom sheet"
   },
 
-  "bidAmount": "Bid Amount",
+  "bidAmount": "ஏலத் தொகை",
   "@bidAmount": {
     "description": "Label for the bid amount input field"
   },
 
-  "submitBid": "Submit Bid",
+  "submitBid": "ஏலத்தைச் சமர்ப்",
   "@submitBid": {
     "description": "Button label to submit a bid"
   },
 
-  "enterValidBid": "Enter a valid bid amount",
+  "enterValidBid": "சரியான ஏலத் தொகையை உள்ளிடவும்",
   "@enterValidBid": {
     "description": "Validation message for invalid bid input"
   },
-  "unableToOpen": "Unable to open notification",
+
+  "unableToOpen": "அறிவிப்பைத் திறக்க முடியவில்லை",
   "@unableToOpen": {
     "description": "Error message when a notification cannot be navigated to"
   },
-  "withdraw": "Withdraw",
+
+  "withdraw": "பணம் எடு",
   "@withdraw": {
     "description": "Button label to withdraw funds from wallet"
   },
 
-  "withdrawFunds": "Withdraw Funds",
+  "withdrawFunds": "நிதிகளை எடு",
   "@withdrawFunds": {
     "description": "Title of the withdrawal bottom sheet"
   },
 
-  "availableBalance": "Available Balance",
+  "availableBalance": "கிடைக்கும் இருப்பு",
   "@availableBalance": {
     "description": "Label for the confirmed wallet balance in the withdrawal sheet"
   },
 
-  "enterAmount": "Enter Amount",
+  "enterAmount": "தொகையை உள்ளிடவும்",
   "@enterAmount": {
     "description": "Label for the amount input field in the withdrawal sheet"
   },
 
-  "amountRequired": "Amount is required",
+  "amountRequired": "தொகை தேவை",
   "@amountRequired": {
     "description": "Validation error when amount field is empty"
   },
 
-  "enterValidAmount": "Please enter a valid amount",
+  "enterValidAmount": "தயவுசெய்து சரியான தொகையை உள்ளிடவும்",
   "@enterValidAmount": {
     "description": "Validation error when amount is not a valid number"
   },
 
-  "amountMustBePositive": "Amount must be greater than zero",
+  "amountMustBePositive": "தொகை பூஜ்யத்தை விட அதிகமாக இருக்க வேண்டும்",
   "@amountMustBePositive": {
     "description": "Validation error when amount is zero or negative"
   },
 
-  "insufficientBalance": "Insufficient balance",
+  "insufficientBalance": "போதுமான இருப்பு இல்லை",
   "@insufficientBalance": {
     "description": "Validation error when amount exceeds confirmed balance"
   },
 
-  "max": "Max",
+  "max": "அதிகபட்சம்",
   "@max": {
     "description": "Label for the quick-fill button that sets the maximum withdrawal amount"
   },
 
-  "withdrawalSuccessful": "Withdrawal successful",
+  "withdrawalSuccessful": "பணம் எடுப்பு வெற்றிகரமாக முடிந்தது",
   "@withdrawalSuccessful": {
     "description": "Success message after a successful withdrawal"
   }

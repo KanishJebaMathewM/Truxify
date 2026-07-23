@@ -333,7 +333,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  ...['English', 'Hindi (हिंदी)', 'Gujarati (ગુજરાતી)']
+                  ...['English', 'Hindi (हिंदी)', 'Tamil (தமிழ்)', 'Kannada (ಕನ್ನಡ)', 'Marathi (मराठी)']
                       .map((lang) {
                     final isSelected = lang.startsWith(selectedLang);
                     return GestureDetector(

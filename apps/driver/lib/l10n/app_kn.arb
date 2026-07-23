@@ -1,97 +1,97 @@
 {
-  "@@locale": "en",
+  "@@locale": "kn",
 
-  "appTitle": "Truxify Driver",
+  "appTitle": "Truxify ಚಾಲಕ",
   "@appTitle": {
     "description": "The title of the driver application"
   },
 
-  "loadingText": "Loading...",
+  "loadingText": "ಲೋಡ್ ಆಗುತ್ತಿದೆ...",
   "@loadingText": {
     "description": "General loading indicator text"
   },
 
-  "retry": "Retry",
+  "retry": "ಮರುಪ್ರಯತ್ನಿಸಿ",
   "@retry": {
     "description": "Button label to retry a failed action"
   },
 
-  "error": "Error",
+  "error": "ದೋಷ",
   "@error": {
     "description": "Generic error title"
   },
 
-  "cancel": "Cancel",
+  "cancel": "ರದ್ದುಮಾಡಿ",
   "@cancel": {
     "description": "Button label to cancel an action"
   },
 
-  "save": "Save",
+  "save": "ಉಳಿಸಿ",
   "@save": {
     "description": "Button label to save changes"
   },
 
-  "close": "Close",
+  "close": "ಮುಚ್ಚಿ",
   "@close": {
     "description": "Button label to close a dialog or screen"
   },
 
-  "apply": "Apply",
+  "apply": "ಅನ್ವಯಿಸಿ",
   "@apply": {
     "description": "Button label to apply a selection or setting"
   },
 
-  "reset": "Reset",
+  "reset": "ಮರುಹೊಂದಿಸಿ",
   "@reset": {
     "description": "Button label to reset filters or form fields"
   },
 
-  "search": "Search",
+  "search": "ಹುಡುಕಿ",
   "@search": {
     "description": "Placeholder text for search input fields"
   },
 
-  "welcomeDriver": "Welcome, Driver!",
+  "welcomeDriver": "ಸ್ವಾಗತ, ಚಾಲಕ!",
   "@welcomeDriver": {
     "description": "Greeting on the login screen"
   },
 
-  "logInToStartEarning": "Log in to start earning",
+  "logInToStartEarning": "ಹಣ ಸಂಪಾದಿಸಲು ಲಾಗ್ ಇನ್ ಮಾಡಿ",
   "@logInToStartEarning": {
     "description": "Subtitle on the login screen encouraging sign-in"
   },
 
-  "phoneNumber": "Phone Number",
+  "phoneNumber": "ಫೋನ್ ಸಂಖ್ಯೆ",
   "@phoneNumber": {
     "description": "Label for the phone number input field"
   },
 
-  "sendOtp": "Send OTP",
+  "sendOtp": "OTP ಕಳುಹಿಸಿ",
   "@sendOtp": {
     "description": "Button label to send a one-time password"
   },
 
-  "sending": "Sending...",
+  "sending": "ಕಳುಹಿಸಲಾಗುತ್ತಿದೆ...",
   "@sending": {
     "description": "Status text while an OTP is being sent"
   },
 
-  "verificationFailed": "Verification failed",
+  "verificationFailed": "ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ",
   "@verificationFailed": {
     "description": "Error message when login verification fails"
   },
 
-  "pleaseEnterPhone": "Please enter your phone number",
+  "pleaseEnterPhone": "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು ನಮೂದಿಸಿ",
   "@pleaseEnterPhone": {
     "description": "Validation message when phone field is empty"
   },
 
-  "enterValidPhone": "Please enter a valid phone number",
+  "enterValidPhone": "ದಯವಿಟ್ಟು ಮಾನ್ಯ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು ನಮೂದಿಸಿ",
   "@enterValidPhone": {
     "description": "Validation message for invalid phone format"
   },
 
-  "phoneMustBeExactDigits": "Phone number must be exactly {digitCount} digits",
+  "phoneMustBeExactDigits": "ಫೋನ್ ಸಂಖ್ಯೆಯು ನಿಖರವಾಗಿ {digitCount} ಅಂಕಿಗಳನ್ನು ಹೊಂದಿರಬೇಕು",
   "@phoneMustBeExactDigits": {
     "description": "Validation message for incorrect phone number length",
     "placeholders": {
@@ -102,32 +102,32 @@
     }
   },
 
-  "phoneMustBeDigits": "Phone number must contain only digits",
+  "phoneMustBeDigits": "ಫೋನ್ ಸಂಖ್ಯೆಯು ಕೇವಲ ಅಂಕಿಗಳನ್ನು ಮಾತ್ರ ಹೊಂದಿರಬೇಕು",
   "@phoneMustBeDigits": {
     "description": "Validation message when phone contains non-digit characters"
   },
 
-  "autoVerificationFailed": "Auto-verification failed. Please enter OTP manually.",
+  "autoVerificationFailed": "ಸ್ವಯಂ-ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು OTP ಅನ್ನು ಹಸ್ತಚಾಲಿತವಾಗಿ ನಮೂದಿಸಿ.",
   "@autoVerificationFailed": {
     "description": "Message shown when automatic OTP detection fails"
   },
 
-  "protectedDriverAccess": "This area is restricted to registered drivers.",
+  "protectedDriverAccess": "ಈ ಪ್ರದೇಶವು ನೋಂದಾಯಿತ ಚಾಲಕರಿಗೆ ಮಾತ್ರ ಸೀಮಿತವಾಗಿದೆ.",
   "@protectedDriverAccess": {
     "description": "Message indicating driver-only access"
   },
 
-  "verifyOtp": "Verify OTP",
+  "verifyOtp": "OTP ಪರಿಶೀಲಿಸಿ",
   "@verifyOtp": {
     "description": "Title of the OTP verification screen"
   },
 
-  "enterOtp": "Enter the OTP sent to your phone",
+  "enterOtp": "ನಿಮ್ಮ ಫೋನ್‌ಗೆ ಕಳುಹಿಸಲಾದ OTP ಅನ್ನು ನಮೂದಿಸಿ",
   "@enterOtp": {
     "description": "Instruction text on the OTP screen"
   },
 
-  "sentTo": "Sent to {phoneNumber}",
+  "sentTo": "{phoneNumber} ಗೆ ಕಳುಹಿಸಲಾಗಿದೆ",
   "@sentTo": {
     "description": "Text showing which phone number the OTP was sent to",
     "placeholders": {
@@ -138,72 +138,72 @@
     }
   },
 
-  "invalidOtp": "Invalid OTP. Please try again.",
+  "invalidOtp": "ಅಮಾನ್ಯ OTP. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
   "@invalidOtp": {
     "description": "Error message for incorrect OTP entry"
   },
 
-  "codeExpired": "OTP has expired. Please request a new one.",
+  "codeExpired": "OTP ಅವಧಿ ಮುಗಿದಿದೆ. ದಯವಿಟ್ಟು ಹೊಸದನ್ನು ವಿನಂತಿಸಿ.",
   "@codeExpired": {
     "description": "Message when the OTP code has expired"
   },
 
-  "verificationFailedMsg": "Verification failed. Please try again.",
+  "verificationFailedMsg": "ಪರಿಶೀಲನೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
   "@verificationFailedMsg": {
     "description": "General verification failure message on OTP screen"
   },
 
-  "couldNotVerifyOtp": "Could not verify OTP. Please try again.",
+  "couldNotVerifyOtp": "OTP ಪರಿಶೀಲಿಸಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
   "@couldNotVerifyOtp": {
     "description": "Error message when OTP verification request fails"
   },
 
-  "verifying": "Verifying...",
+  "verifying": "ಪರಿಶೀಲಿಸಲಾಗುತ್ತಿದೆ...",
   "@verifying": {
     "description": "Status text while OTP is being verified"
   },
 
-  "home": "Home",
+  "home": "ಮನೆ",
   "@home": {
     "description": "Navigation label for the Home tab"
   },
 
-  "trips": "Trips",
+  "trips": "ಪ್ರಯಾಣಗಳು",
   "@trips": {
     "description": "Navigation label for the Trips tab"
   },
 
-  "earnings": "Earnings",
+  "earnings": "ಸಂಪಾದನೆ",
   "@earnings": {
     "description": "Navigation label for the Earnings tab"
   },
 
-  "profile": "Profile",
+  "profile": "ಪ್ರೊಫೈಲ್",
   "@profile": {
     "description": "Navigation label for the Profile tab"
   },
 
-  "offlineUsingCachedData": "You are offline. Using cached data.",
+  "offlineUsingCachedData": "ನೀವು ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿದ್ದೀರಿ. ಕ್ಯಾಶ್ ಮಾಡಿದ ಡೇಟಾವನ್ನು ಬಳಸುತ್ತಿದೆ.",
   "@offlineUsingCachedData": {
     "description": "Banner text when app is in offline mode"
   },
 
-  "newLoadAvailable": "New load available!",
+  "newLoadAvailable": "ಹೊಸ ಲೋಡ್ ಲಭ್ಯವಿದೆ!",
   "@newLoadAvailable": {
     "description": "Notification text when a new load appears"
   },
 
-  "view": "View",
+  "view": "ನೋಡಿ",
   "@view": {
     "description": "Button label to view details"
   },
 
-  "navigationActive": "Navigation active",
+  "navigationActive": "ನಾವಿಗೇಶನ್ ಸಕ್ರಿಯ",
   "@navigationActive": {
     "description": "Status text when GPS navigation is active"
   },
 
-  "headingTo": "Heading to {destination}",
+  "headingTo": "{destination} ಗೆ ಹೋಗುತ್ತಿದೆ",
   "@headingTo": {
     "description": "Text showing the current trip destination",
     "placeholders": {
@@ -214,142 +214,142 @@
     }
   },
 
-  "locating": "Locating you...",
+  "locating": "ನಿಮ್ಮ ಸ್ಥಳವನ್ನು ಪತ್ತೆಹಚ್ಚಲಾಗುತ್ತಿದೆ...",
   "@locating": {
     "description": "Status text while GPS is determining position"
   },
 
-  "locationUnavailable": "Location unavailable",
+  "locationUnavailable": "ಸ್ಥಳ ಲಭ್ಯವಿಲ್ಲ",
   "@locationUnavailable": {
     "description": "Error text when GPS cannot determine position"
   },
 
-  "currentLocation": "Current Location",
+  "currentLocation": "ಪ್ರಸ್ತುತ ಸ್ಥಳ",
   "@currentLocation": {
     "description": "Label for the driver's current GPS location"
   },
 
-  "tapToRefresh": "Tap to refresh",
+  "tapToRefresh": "ರಿಫ್ರೆಶ್ ಮಾಡಲು ಟ್ಯಾಪ್ ಮಾಡಿ",
   "@tapToRefresh": {
     "description": "Instruction text to pull-to-refresh"
   },
 
-  "fetchingLocation": "Fetching your location...",
+  "fetchingLocation": "ನಿಮ್ಮ ಸ್ಥಳವನ್ನು ಪಡೆಯಲಾಗುತ್ತಿದೆ...",
   "@fetchingLocation": {
     "description": "Status text while location is being fetched"
   },
 
-  "whereAreYouHeading": "Where are you heading?",
+  "whereAreYouHeading": "ನೀವು ಎಲ್ಲಿಗೆ ಹೋಗುತ್ತಿದ್ದೀರಿ?",
   "@whereAreYouHeading": {
     "description": "Prompt for destination input"
   },
 
-  "onlineAndReady": "Online & Ready",
+  "onlineAndReady": "ಆನ್‌ಲೈನ್ ಮತ್ತು ಸಿದ್ಧ",
   "@onlineAndReady": {
     "description": "Status text when driver is online and available"
   },
 
-  "offline": "Offline",
+  "offline": "ಆಫ್‌ಲೈನ್",
   "@offline": {
     "description": "Status text when driver is offline"
   },
 
-  "offlineGoOnline": "You are offline. Go online to receive loads.",
+  "offlineGoOnline": "ನೀವು ಆಫ್‌ಲೈನ್‌ನಲ್ಲಿದ್ದೀರಿ. ಲೋಡ್‌ಗಳನ್ನು ಸ್ವೀಕರಿಸಲು ಆನ್‌ಲೈನ್‌ಗೆ ಹೋಗಿ.",
   "@offlineGoOnline": {
     "description": "Message encouraging driver to go online"
   },
 
-  "radarActiveFetching": "Radar active — fetching nearby loads...",
+  "radarActiveFetching": "ರಾಡಾರ್ ಸಕ್ರಿಯ — ಹತ್ತಿರದ ಲೋಡ್‌ಗಳನ್ನು ಪಡೆಯಲಾಗುತ್ತಿದೆ...",
   "@radarActiveFetching": {
     "description": "Status text while radar is scanning for loads"
   },
 
-  "radarActiveLooking": "Radar active — looking for loads near you.",
+  "radarActiveLooking": "ರಾಡಾರ್ ಸಕ್ರಿಯ — ನಿಮ್ಮ ಹತ್ತಿರ ಲೋಡ್‌ಗಳನ್ನು ಹುಡುಕಲಾಗುತ್ತಿದೆ.",
   "@radarActiveLooking": {
     "description": "Status text when radar is actively searching"
   },
 
-  "todayPay": "Today's Pay",
+  "todayPay": "ಇಂದಿನ ವೇತನ",
   "@todayPay": {
     "description": "Label for today's earnings display"
   },
 
-  "shiftHours": "Shift Hours",
+  "shiftHours": "ಶಿಫ್ಟ್ ಗಂಟೆಗಳು",
   "@shiftHours": {
     "description": "Label for hours worked display"
   },
 
-  "rating": "Rating",
+  "rating": "ರೇಟಿಂಗ್",
   "@rating": {
     "description": "Label for driver rating display"
   },
 
-  "metricsUnavailable": "Metrics unavailable",
+  "metricsUnavailable": "ಮೆಟ್ರಿಕ್ಸ್ ಲಭ್ಯವಿಲ್ಲ",
   "@metricsUnavailable": {
     "description": "Text when dashboard metrics cannot be loaded"
   },
 
-  "noDestinationAvailable": "No destination set",
+  "noDestinationAvailable": "ಯಾವುದೇ ಗಮ್ಯಸ್ಥಾನ ಹೊಂದಿಸಲಾಗಿಲ್ಲ",
   "@noDestinationAvailable": {
     "description": "Text when no destination has been entered"
   },
 
-  "currentLocationUnavailable": "Current location unavailable",
+  "currentLocationUnavailable": "ಪ್ರಸ್ತುತ ಸ್ಥಳ ಲಭ್ಯವಿಲ್ಲ",
   "@currentLocationUnavailable": {
     "description": "Error text when current GPS location is unavailable"
   },
 
-  "unableToOpenGoogleMaps": "Unable to open Google Maps",
+  "unableToOpenGoogleMaps": "Google Maps ತೆರೆಯಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
   "@unableToOpenGoogleMaps": {
     "description": "Error message when Google Maps launch fails"
   },
 
-  "failedToGenerateRoute": "Failed to generate route",
+  "failedToGenerateRoute": "ಮಾರ್ಗವನ್ನು ರಚಿಸಲು ವಿಫಲವಾಗಿದೆ",
   "@failedToGenerateRoute": {
     "description": "Error message when route generation fails"
   },
 
-  "enRoute": "En Route",
+  "enRoute": "ಮಾರ್ಗದಲ್ಲಿ",
   "@enRoute": {
     "description": "Status label when driver is en route to destination"
   },
 
-  "assignedLoad": "Assigned Load",
+  "assignedLoad": "ನಿಯೋಜಿತ ಲೋಡ್",
   "@assignedLoad": {
     "description": "Label for the currently assigned load"
   },
 
-  "distance": "Distance",
+  "distance": "ದೂರ",
   "@distance": {
     "description": "Label for trip distance"
   },
 
-  "estDuration": "Est. Duration",
+  "estDuration": "ಅಂದಾಜು ಅವಧಿ",
   "@estDuration": {
     "description": "Label for estimated trip duration"
   },
 
-  "estPayout": "Est. Payout",
+  "estPayout": "ಅಂದಾಜು ಪಾವತಿ",
   "@estPayout": {
     "description": "Label for estimated trip payout"
   },
 
-  "slideToCompleteTrip": "Slide to complete trip",
+  "slideToCompleteTrip": "ಪ್ರಯಾಣ ಪೂರ್ಣಗೊಳಿಸಲು ಸ್ಲೈಡ್ ಮಾಡಿ",
   "@slideToCompleteTrip": {
     "description": "Instruction on the slide-to-confirm button to complete"
   },
 
-  "slideToStartTrip": "Slide to start trip",
+  "slideToStartTrip": "ಪ್ರಯಾಣ ಪ್ರಾರಂಭಿಸಲು ಸ್ಲೈಡ್ ಮಾಡಿ",
   "@slideToStartTrip": {
     "description": "Instruction on the slide-to-confirm button to start"
   },
 
-  "cancelAssignment": "Cancel Assignment",
+  "cancelAssignment": "ನಿಯೋಜನೆ ರದ್ದುಮಾಡಿ",
   "@cancelAssignment": {
     "description": "Button label to cancel a trip assignment"
   },
 
-  "tripCompletedNetEarnings": "Trip completed! Net earnings: {amount}",
+  "tripCompletedNetEarnings": "ಪ್ರಯಾಣ ಪೂರ್ಣಗೊಂಡಿದೆ! ನಿವ್ವಳ ಸಂಪಾದನೆ: {amount}",
   "@tripCompletedNetEarnings": {
     "description": "Success message after trip completion with earnings",
     "placeholders": {
@@ -360,485 +360,487 @@
     }
   },
 
-  "failedToCompleteTrip": "Failed to complete trip",
+  "failedToCompleteTrip": "ಪ್ರಯಾಣ ಪೂರ್ಣಗೊಳಿಸಲು ವಿಫಲವಾಗಿದೆ",
   "@failedToCompleteTrip": {
     "description": "Error message when trip completion fails"
   },
 
-  "failedToStartTrip": "Failed to start trip",
+  "failedToStartTrip": "ಪ್ರಯಾಣ ಪ್ರಾರಂಭಿಸಲು ವಿಫಲವಾಗಿದೆ",
   "@failedToStartTrip": {
     "description": "Error message when trip start fails"
   },
 
-  "tripCompleted": "Trip Completed",
+  "tripCompleted": "ಪ್ರಯಾಣ ಪೂರ್ಣಗೊಂಡಿದೆ",
   "@tripCompleted": {
     "description": "Title or status for a completed trip"
   },
 
-  "pleaseGoOnline": "Please go online first",
+  "pleaseGoOnline": "ದಯವಿಟ್ಟು ಮೊದಲು ಆನ್‌ಲೈನ್‌ಗೆ ಹೋಗಿ",
   "@pleaseGoOnline": {
     "description": "Prompt asking the driver to go online before proceeding"
   },
 
-  "noDestinationAvailable2": "No destination available. Please set a destination.",
+  "noDestinationAvailable2": "ಯಾವುದೇ ಗಮ್ಯಸ್ಥಾನ ಲಭ್ಯವಿಲ್ಲ. ದಯವಿಟ್ಟು ಗಮ್ಯಸ್ಥಾನವನ್ನು ಹೊಂದಿಸಿ.",
   "@noDestinationAvailable2": {
     "description": "Message when no destination is set for navigation"
   },
 
-  "locationPermissionRequired": "Location permission is required",
+  "locationPermissionRequired": "ಸ್ಥಳ ಅನುಮತಿ ಅಗತ್ಯವಿದೆ",
   "@locationPermissionRequired": {
     "description": "Error message when location permission has not been granted"
   },
 
-  "locationAccessDenied": "Location access denied",
+  "locationAccessDenied": "ಸ್ಥಳ ಪ್ರವೇಶ ನಿರಾಕರಿಸಲಾಗಿದೆ",
   "@locationAccessDenied": {
     "description": "Error message when location access is denied by user"
   },
 
-  "locationPermDenied": "Location permission permanently denied. Please enable in settings.",
+  "locationPermDenied": "ಸ್ಥಳ ಅನುಮತಿಯನ್ನು ಶಾಶ್ವತವಾಗಿ ನಿರಾಕರಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಸೆಟ್ಟಿಂಗ್‌ಗಳಲ್ಲಿ ಸಕ್ರಿಯಗೊಳಿಸಿ.",
   "@locationPermDenied": {
     "description": "Error message when location permission is permanently denied"
   },
 
-  "openSettings": "Open Settings",
+  "openSettings": "ಸೆಟ್ಟಿಂಗ್‌ಗಳನ್ನು ತೆರೆಯಿರಿ",
   "@openSettings": {
     "description": "Button label to open device settings"
   },
 
-  "editProfile": "Edit Profile",
+  "editProfile": "ಪ್ರೊಫೈಲ್ ಸಂಪಾದಿಸಿ",
   "@editProfile": {
     "description": "Title or button label to edit the driver profile"
   },
 
-  "fullNames": "Full Names",
+  "fullNames": "ಪೂರ್ಣ ಹೆಸರುಗಳು",
   "@fullNames": {
     "description": "Label for the full name input field"
   },
 
-  "phoneNumbers": "Phone Number",
+  "phoneNumbers": "ಫೋನ್ ಸಂಖ್ಯೆ",
   "@phoneNumbers": {
     "description": "Label for the phone number display"
   },
 
-  "emailAddress": "Email Address",
+  "emailAddress": "ಇಮೇಲ್ ವಿಳಾಸ",
   "@emailAddress": {
     "description": "Label for the email address input field"
   },
 
-  "vehicleRegistrationNumber": "Vehicle Registration Number",
+  "vehicleRegistrationNumber": "ವಾಹನ ನೋಂದಣಿ ಸಂಖ್ಯೆ",
   "@vehicleRegistrationNumber": {
     "description": "Label for the vehicle registration input field"
   },
 
-  "saveChanges": "Save Changes",
+  "saveChanges": "ಬದಲಾವಣೆಗಳನ್ನು ಉಳಿಸಿ",
   "@saveChanges": {
     "description": "Button label to save profile changes"
   },
 
-  "profileUpdatedSuccessfully": "Profile updated successfully",
+  "profileUpdatedSuccessfully": "ಪ್ರೊಫೈಲ್ ಯಶಸ್ವಿಯಾಗಿ ನವೀಕರಿಸಲಾಗಿದೆ",
   "@profileUpdatedSuccessfully": {
     "description": "Success message after profile update"
   },
 
-  "selectLanguage": "Select Language",
+  "selectLanguage": "ಭಾಷೆ ಆಯ್ಕೆಮಾಡಿ",
   "@selectLanguage": {
     "description": "Title or label for language selection"
   },
 
-  "applyLanguage": "Apply Language",
+  "applyLanguage": "ಭಾಷೆ ಅನ್ವಯಿಸಿ",
   "@applyLanguage": {
     "description": "Button label to confirm language change"
   },
 
-  "languageSwitched": "Language switched successfully",
+  "languageSwitched": "ಭಾಷೆ ಯಶಸ್ವಿಯಾಗಿ ಬದಲಾಯಿಸಲಾಗಿದೆ",
   "@languageSwitched": {
     "description": "Success message after language change"
   },
 
-  "polygonWalletAddress": "Polygon Wallet Address",
+  "polygonWalletAddress": "Polygon ವಾಲೆಟ್ ವಿಳಾಸ",
   "@polygonWalletAddress": {
     "description": "Label for the Polygon wallet address field"
   },
 
-  "saveWalletAddress": "Save Wallet Address",
+  "saveWalletAddress": "ವಾಲೆಟ್ ವಿಳಾಸ ಉಳಿಸಿ",
   "@saveWalletAddress": {
     "description": "Button label to save the wallet address"
   },
 
-  "walletAddressUpdated": "Wallet address updated",
+  "walletAddressUpdated": "ವಾಲೆಟ್ ವಿಳಾಸ ನವೀಕರಿಸಲಾಗಿದೆ",
   "@walletAddressUpdated": {
     "description": "Success message after wallet address update"
   },
 
-  "failedToUpdateWallet": "Failed to update wallet address",
+  "failedToUpdateWallet": "ವಾಲೆಟ್ ವಿಳಾಸ ನವೀಕರಿಸಲು ವಿಫಲವಾಗಿದೆ",
   "@failedToUpdateWallet": {
     "description": "Error message when wallet address update fails"
   },
 
-  "helpSupport": "Help & Support",
+  "helpSupport": "ಸಹಾಯ ಮತ್ತು ಬೆಂಬಲ",
   "@helpSupport": {
     "description": "Section title for help and support"
   },
 
-  "browseFAQs": "Browse FAQs",
+  "browseFAQs": "FAQs ವೀಕ್ಷಿಸಿ",
   "@browseFAQs": {
     "description": "Button label to view frequently asked questions"
   },
 
-  "instantAnswers": "Get instant answers to common questions",
+  "instantAnswers": "ಸಾಮಾನ್ಯ ಪ್ರಶ್ನೆಗಳಿಗೆ ತಕ್ಷಣದ ಉತ್ತರಗಳನ್ನು ಪಡೆಯಿರಿ",
   "@instantAnswers": {
     "description": "Subtitle describing the FAQ section"
   },
 
-  "aboutTruxifyDriverApp": "About Truxify Driver App",
+  "aboutTruxifyDriverApp": "Truxify ಚಾಲಕ ಅಪ್ಲಿಕೇಶನ್ ಬಗ್ಗೆ",
   "@aboutTruxifyDriverApp": {
     "description": "Section title for app about information"
   },
 
-  "truxifyDescription": "Truxify is a truck logistics platform connecting drivers with loads across East Africa.",
+  "truxifyDescription": "Truxify ಒಂದು ಟ್ರಕ್ ಲಾಜಿಸ್ಟಿಕ್ಸ್ ಪ್ಲಾಟ್‌ಫಾರ್ಮ್ ಆಗಿದ್ದು, ಪೂರ್ವ ಆಫ್ರಿಕಾದಾದ್ಯಂತ ಚಾಲಕರನ್ನು ಲೋಡ್‌ಗಳೊಂದಿಗೆ ಸಂಪರ್ಕಿಸುತ್ತದೆ.",
   "@truxifyDescription": {
     "description": "Description of the Truxify application"
   },
 
-  "documents": "Documents",
+  "documents": "ಡಾಕ್ಯುಮೆಂಟ್‌ಗಳು",
   "@documents": {
     "description": "Section title for driver documents"
   },
 
-  "driverLicensePermitPapers": "Driver License & Permit Papers",
+  "driverLicensePermitPapers": "ಚಾಲಕ ಪರವಾನಗಿ ಮತ್ತು ಅನುಮತಿ ಪತ್ರಗಳು",
   "@driverLicensePermitPapers": {
     "description": "Label for driver license and permit document section"
   },
 
-  "notifications": "Notifications",
+  "notifications": "ಅಧಿಸೂಚನೆಗಳು",
   "@notifications": {
     "description": "Section title for notifications settings"
   },
 
-  "viewTripAlerts": "View Trip Alerts",
+  "viewTripAlerts": "ಪ್ರಯಾಣ ಎಚ್ಚರಿಕೆಗಳನ್ನು ವೀಕ್ಷಿಸಿ",
   "@viewTripAlerts": {
     "description": "Label for trip notification alerts toggle"
   },
 
-  "walletAddress": "Wallet Address",
+  "walletAddress": "ವಾಲೆಟ್ ವಿಳಾಸ",
   "@walletAddress": {
     "description": "Label for wallet address display"
   },
 
-  "notSet": "Not set",
+  "notSet": "ಹೊಂದಿಸಲಾಗಿಲ್ಲ",
   "@notSet": {
     "description": "Placeholder text when a value has not been set"
   },
 
-  "languageLabel": "Language",
+  "languageLabel": "ಭಾಷೆ",
   "@languageLabel": {
     "description": "Label for the current language setting"
   },
 
-  "helpAndSupport247": "Help & Support (24/7)",
+  "helpAndSupport247": "ಸಹಾಯ ಮತ್ತು ಬೆಂಬಲ (24/7)",
   "@helpAndSupport247": {
     "description": "Label indicating round-the-clock support availability"
   },
 
-  "versionAndAppInfo": "Version & App Info",
+  "versionAndAppInfo": "ಆವೃತ್ತಿ ಮತ್ತು ಅಪ್ಲಿಕೇಶನ್ ಮಾಹಿತಿ",
   "@versionAndAppInfo": {
     "description": "Label for app version information section"
   },
 
-  "logout": "Logout",
+  "logout": "ಲಾಗ್ಔಟ್",
   "@logout": {
     "description": "Button label to log out of the application"
   },
 
-  "logoutFailed": "Logout failed. Please try again.",
+  "logoutFailed": "ಲಾಗ್ಔಟ್ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.",
   "@logoutFailed": {
     "description": "Error message when logout fails"
   },
 
-  "myTrips": "My Trips",
+  "myTrips": "ನನ್ನ ಪ್ರಯಾಣಗಳು",
   "@myTrips": {
     "description": "Title of the trips screen"
   },
 
-  "marketplace": "Marketplace",
+  "marketplace": "ಮಾರುಕಟ್ಟೆ",
   "@marketplace": {
     "description": "Title or tab for the load marketplace"
   },
 
-  "sortTrips": "Sort Trips",
+  "sortTrips": "ಪ್ರಯಾಣಗಳನ್ನು ವಿಂಗಡಿಸಿ",
   "@sortTrips": {
     "description": "Label for the trip sorting option"
   },
 
-  "newestFirst": "Newest First",
+  "newestFirst": "ಹೊಸದನ್ನು ಮೊದಲು",
   "@newestFirst": {
     "description": "Sort option to show newest trips first"
   },
 
-  "oldestFirst": "Oldest First",
+  "oldestFirst": "ಹಳೆಯದನ್ನು ಮೊದಲು",
   "@oldestFirst": {
     "description": "Sort option to show oldest trips first"
   },
 
-  "highestEarnings": "Highest Earnings",
+  "highestEarnings": "ಹೆಚ್ಚಿನ ಸಂಪಾದನೆ",
   "@highestEarnings": {
     "description": "Sort option to show highest-earning trips first"
   },
 
-  "lowestEarnings": "Lowest Earnings",
+  "lowestEarnings": "ಕಡಿಮೆ ಸಂಪಾದನೆ",
   "@lowestEarnings": {
     "description": "Sort option to show lowest-earning trips first"
   },
 
-  "byStatus": "By Status",
+  "byStatus": "ಸ್ಥಿತಿಯ ಪ್ರಕಾರ",
   "@byStatus": {
     "description": "Sort or filter option to group trips by status"
   },
 
-  "totalTrips": "Total Trips",
+  "totalTrips": "ಒಟ್ಟು ಪ್ರಯಾಣಗಳು",
   "@totalTrips": {
     "description": "Label for total number of trips"
   },
 
-  "totalEarned": "Total Earned",
+  "totalEarned": "ಒಟ್ಟು ಸಂಪಾದನೆ",
   "@totalEarned": {
     "description": "Label for total earnings amount"
   },
 
-  "completion": "Completion",
+  "completion": "ಪೂರ್ಣಗೊಳಿಸುವಿಕೆ",
   "@completion": {
     "description": "Label for trip completion percentage"
   },
 
-  "all": "All",
+  "all": "ಎಲ್ಲಾ",
   "@all": {
     "description": "Filter option to show all trips"
   },
 
-  "active2": "Active",
+  "active2": "ಸಕ್ರಿಯ",
   "@active2": {
     "description": "Filter option to show active trips"
   },
 
-  "completed2": "Completed",
+  "completed2": "ಪೂರ್ಣಗೊಂಡಿದೆ",
   "@completed2": {
     "description": "Filter option to show completed trips"
   },
 
-  "cancelled2": "Cancelled",
+  "cancelled2": "ರದ್ದಾಗಿದೆ",
   "@cancelled2": {
     "description": "Filter option to show cancelled trips"
   },
 
-  "failedToLoadTrips": "Failed to load trips",
+  "failedToLoadTrips": "ಪ್ರಯಾಣಗಳನ್ನು ಲೋಡ್ ಮಾಡಲು ವಿಫಲವಾಗಿದೆ",
   "@failedToLoadTrips": {
     "description": "Error message when trips list fails to load"
   },
 
-  "pullDownToRetry": "Pull down to retry",
+  "pullDownToRetry": "ಮರುಪ್ರಯತ್ನಿಸಲು ಕೆಳಗೆ ಎಳೆಯಿರಿ",
   "@pullDownToRetry": {
     "description": "Instruction text for pull-to-refresh gesture"
   },
 
-  "noTripsFound": "No trips found",
+  "noTripsFound": "ಯಾವುದೇ ಪ್ರಯಾಣಗಳು ಕಂಡುಬಂದಿಲ್ಲ",
   "@noTripsFound": {
     "description": "Empty state text when no trips match filters"
   },
 
-  "deliveryStops": "Delivery Stops",
+  "deliveryStops": "ಡೆಲಿವರಿ ಸ್ಟಾಪ್‌ಗಳು",
   "@deliveryStops": {
     "description": "Label for the number of delivery stops on a trip"
   },
 
-  "markCurrentStopCompleted": "Mark Current Stop Completed",
+  "markCurrentStopCompleted": "ಪ್ರಸ್ತುತ ಸ್ಟಾಪ್ ಪೂರ್ಣಗೊಂಡಿದೆ ಎಂದು ಗುರುತಿಸಿ",
   "@markCurrentStopCompleted": {
     "description": "Button label to mark the current delivery stop as done"
   },
 
-  "activeStatus": "Active",
+  "activeStatus": "ಸಕ್ರಿಯ",
   "@activeStatus": {
     "description": "Status badge text for an active trip"
   },
 
-  "completedStatus": "Completed",
+  "completedStatus": "ಪೂರ್ಣಗೊಂಡಿದೆ",
   "@completedStatus": {
     "description": "Status badge text for a completed trip"
   },
 
-  "cancelledStatus": "Cancelled",
+  "cancelledStatus": "ರದ್ದಾಗಿದೆ",
   "@cancelledStatus": {
     "description": "Status badge text for a cancelled trip"
   },
 
-  "enRouteOpportunities": "En Route Opportunities",
+  "enRouteOpportunities": "ಮಾರ್ಗದ ಅವಕಾಶಗಳು",
   "@enRouteOpportunities": {
     "description": "Section title for loads available along current route"
   },
 
-  "pickupNearbyLoads": "Pickup Nearby Loads",
+  "pickupNearbyLoads": "ಹತ್ತಿರದ ಲೋಡ್‌ಗಳನ್ನು ಪಿಕಪ್ ಮಾಡಿ",
   "@pickupNearbyLoads": {
     "description": "Label for nearby load pickup section"
   },
 
-  "marketplaceLoads": "Marketplace Loads",
+  "marketplaceLoads": "ಮಾರುಕಟ್ಟೆ ಲೋಡ್‌ಗಳು",
   "@marketplaceLoads": {
     "description": "Section title for marketplace load listings"
   },
 
-  "availableLoadsYouCanBidFor": "Available loads you can bid for",
+  "availableLoadsYouCanBidFor": "ನೀವು ಬಿಡ್ ಮಾಡಬಹುದಾದ ಲಭ್ಯವಿರುವ ಲೋಡ್‌ಗಳು",
   "@availableLoadsYouCanBidFor": {
     "description": "Subtitle describing available marketplace loads"
   },
 
-  "couldNotLoadMarketplace": "Could not load marketplace",
+  "couldNotLoadMarketplace": "ಮಾರುಕಟ್ಟೆಯನ್ನು ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
   "@couldNotLoadMarketplace": {
     "description": "Error message when marketplace data fails to load"
   },
 
-  "pullToRefresh": "Pull to refresh",
+  "pullToRefresh": "ರಿಫ್ರೆಶ್ ಮಾಡಲು ಎಳೆಯಿರಿ",
   "@pullToRefresh": {
     "description": "Instruction text to refresh marketplace data"
   },
 
-  "noLoadsAvailable": "No loads available",
+  "noLoadsAvailable": "ಯಾವುದೇ ಲೋಡ್‌ಗಳು ಲಭ್ಯವಿಲ್ಲ",
   "@noLoadsAvailable": {
     "description": "Empty state text when no loads are available"
   },
 
-  "bidSubmitted": "Bid submitted successfully",
+  "bidSubmitted": "ಬಿಡ್ ಯಶಸ್ವಿಯಾಗಿ ಸಲ್ಲಿಸಲಾಗಿದೆ",
   "@bidSubmitted": {
     "description": "Success message after submitting a bid"
   },
 
-  "failedToSubmitBid": "Failed to submit bid",
+  "failedToSubmitBid": "ಬಿಡ್ ಸಲ್ಲಿಸಲು ವಿಫಲವಾಗಿದೆ",
   "@failedToSubmitBid": {
     "description": "Error message when bid submission fails"
   },
 
-  "thisLoadIsMissingId": "This load is missing an ID",
+  "thisLoadIsMissingId": "ಈ ಲೋಡ್‌ನಲ್ಲಿ ID ಇಲ್ಲ",
   "@thisLoadIsMissingId": {
     "description": "Error message when a load record has no valid identifier"
   },
 
-  "recommendedReturnLoads": "Recommended Return Loads",
+  "recommendedReturnLoads": "ಶಿಫಾರಸು ಮಾಡಲಾದ ಹಿಂತಿರುಗುವ ಲೋಡ್‌ಗಳು",
   "@recommendedReturnLoads": {
     "description": "Section title for ML-powered return load recommendations"
   },
 
-  "recommendedForYou": "Recommended For You",
+  "recommendedForYou": "ನಿಮಗಾಗಿ ಶಿಫಾರಸು ಮಾಡಲಾಗಿದೆ",
   "@recommendedForYou": {
     "description": "Label shown when a recommendation has no route"
   },
 
-  "matchScore": "Match Score",
+  "matchScore": "ಹೊಂದಾಣಿಕೆ ಸ್ಕೋರ್",
   "@matchScore": {
     "description": "Label for ML match score percentage"
   },
 
-  "bestMatch": "Best Match",
+  "bestMatch": "ಅತ್ಯುತ್ತಮ ಹೊಂದಾಣಿಕೆ",
   "@bestMatch": {
     "description": "Label for the top recommendation"
   },
 
-  "noRecommendations": "No return load recommendations available",
+  "noRecommendations": "ಯಾವುದೇ ಹಿಂತಿರುಗುವ ಲೋಡ್ ಶಿಫಾರಸುಗಳು ಲಭ್ಯವಿಲ್ಲ",
   "@noRecommendations": {
     "description": "Empty state when ML returns no recommendations"
   },
 
-  "couldNotLoadRecommendations": "Could not load recommendations",
+  "couldNotLoadRecommendations": "ಶಿಫಾರಸುಗಳನ್ನು ಲೋಡ್ ಮಾಡಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
   "@couldNotLoadRecommendations": {
     "description": "Error state when ML endpoint fails"
   },
 
-  "noActiveTripForRecommendations": "Complete a trip to see return load suggestions",
+  "noActiveTripForRecommendations": "ಹಿಂತಿರುಗುವ ಲೋಡ್ ಸೂಚನೆಗಳನ್ನು ನೋಡಲು ಪ್ರಯಾಣವನ್ನು ಪೂರ್ಣಗೊಳಿಸಿ",
   "@noActiveTripForRecommendations": {
     "description": "Hint shown when driver has no active trip for recommendations"
   },
 
-  "detourDistance": "Detour",
+  "detourDistance": "ಡೀಟೂರ್",
   "@detourDistance": {
     "description": "Label for detour distance"
   },
 
-  "bidOnLoad": "Bid",
+  "bidOnLoad": "ಬಿಡ್",
   "@bidOnLoad": {
     "description": "Button label to place a bid on a load"
   },
 
-  "updateBid": "Update Bid",
+  "updateBid": "ಬಿಡ್ ನವೀಕರಿಸಿ",
   "@updateBid": {
     "description": "Button label to update an existing bid"
   },
 
-  "placeYourBid": "Place Your Bid",
+  "placeYourBid": "ನಿಮ್ಮ ಬಿಡ್ ಇರಿಸಿ",
   "@placeYourBid": {
     "description": "Title of the bid placement bottom sheet"
   },
 
-  "bidAmount": "Bid Amount",
+  "bidAmount": "ಬಿಡ್ ಮೊತ್ತ",
   "@bidAmount": {
     "description": "Label for the bid amount input field"
   },
 
-  "submitBid": "Submit Bid",
+  "submitBid": "ಬಿಡ್ ಸಲ್ಲಿಸಿ",
   "@submitBid": {
     "description": "Button label to submit a bid"
   },
 
-  "enterValidBid": "Enter a valid bid amount",
+  "enterValidBid": "ಮಾನ್ಯ ಬಿಡ್ ಮೊತ್ತವನ್ನು ನಮೂದಿಸಿ",
   "@enterValidBid": {
     "description": "Validation message for invalid bid input"
   },
-  "unableToOpen": "Unable to open notification",
+
+  "unableToOpen": "ಅಧಿಸೂಚನೆಯನ್ನು ತೆರೆಯಲು ಸಾಧ್ಯವಾಗಲಿಲ್ಲ",
   "@unableToOpen": {
     "description": "Error message when a notification cannot be navigated to"
   },
-  "withdraw": "Withdraw",
+
+  "withdraw": "ಹಿಂಪಡೆಯಿರಿ",
   "@withdraw": {
     "description": "Button label to withdraw funds from wallet"
   },
 
-  "withdrawFunds": "Withdraw Funds",
+  "withdrawFunds": "ಹಣ ಹಿಂಪಡೆಯಿರಿ",
   "@withdrawFunds": {
     "description": "Title of the withdrawal bottom sheet"
   },
 
-  "availableBalance": "Available Balance",
+  "availableBalance": "ಲಭ್ಯ ಬ್ಯಾಲೆನ್ಸ್",
   "@availableBalance": {
     "description": "Label for the confirmed wallet balance in the withdrawal sheet"
   },
 
-  "enterAmount": "Enter Amount",
+  "enterAmount": "ಮೊತ್ತ ನಮೂದಿಸಿ",
   "@enterAmount": {
     "description": "Label for the amount input field in the withdrawal sheet"
   },
 
-  "amountRequired": "Amount is required",
+  "amountRequired": "ಮೊತ್ತ ಅಗತ್ಯವಿದೆ",
   "@amountRequired": {
     "description": "Validation error when amount field is empty"
   },
 
-  "enterValidAmount": "Please enter a valid amount",
+  "enterValidAmount": "ದಯವಿಟ್ಟು ಮಾನ್ಯ ಮೊತ್ತವನ್ನು ನಮೂದಿಸಿ",
   "@enterValidAmount": {
     "description": "Validation error when amount is not a valid number"
   },
 
-  "amountMustBePositive": "Amount must be greater than zero",
+  "amountMustBePositive": "ಮೊತ್ತವು ಶೂನ್ಯಕ್ಕಿಂತ ಹೆಚ್ಚಿರಬೇಕು",
   "@amountMustBePositive": {
     "description": "Validation error when amount is zero or negative"
   },
 
-  "insufficientBalance": "Insufficient balance",
+  "insufficientBalance": "ಅಪರ್ಯಾಪ್ತ ಬ್ಯಾಲೆನ್ಸ್",
   "@insufficientBalance": {
     "description": "Validation error when amount exceeds confirmed balance"
   },
 
-  "max": "Max",
+  "max": "ಗರಿಷ್ಠ",
   "@max": {
     "description": "Label for the quick-fill button that sets the maximum withdrawal amount"
   },
 
-  "withdrawalSuccessful": "Withdrawal successful",
+  "withdrawalSuccessful": "ಹಿಂಪಡೆಯುವಿಕೆ ಯಶಸ್ವಿಯಾಗಿದೆ",
   "@withdrawalSuccessful": {
     "description": "Success message after a successful withdrawal"
   }

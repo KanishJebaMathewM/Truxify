@@ -74,6 +74,9 @@ class _OtpScreenState extends State<OtpScreen> {
         case 'session-expired':
           message = l10n.codeExpired;
           break;
+        case 'network-request-failed':
+          message = l10n.networkError;
+          break;
         default:
           message = e.message ?? l10n.verificationFailedMsg;
       }
@@ -82,8 +85,12 @@ class _OtpScreenState extends State<OtpScreen> {
       );
     } catch (e) {
       if (!mounted) return;
+      String errorMsg = AppLocalizations.of(context)!.couldNotVerifyOtp;
+      if (e.toString().contains('SocketException') || e.toString().contains('network-request-failed')) {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context)!.couldNotVerifyOtp)),
+        SnackBar(content: Text(errorMsg)),
       );
     } finally {
       if (mounted) {

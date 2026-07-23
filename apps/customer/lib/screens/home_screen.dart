@@ -69,14 +69,12 @@ class _HomeScreenState extends State<HomeScreen> {
       final profile = results[0] is Map<String, dynamic> ? results[0] as Map<String, dynamic> : <String, dynamic>{};
       final orders = results[1] is List ? List<Map<String, dynamic>>.from(results[1] as List) : <Map<String, dynamic>>[];
       final stats = results[2] is Map<String, dynamic> ? results[2] as Map<String, dynamic> : null;
+      final history = results[3] is List ? List<Map<String, dynamic>>.from(results[3] as List) : <Map<String, dynamic>>[];
+
       setState(() {
         _customerName = (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '').trim();
         _activeOrders = orders;
         _customerStats = stats;
-      final history = results[2] is List ? List<Map<String, dynamic>>.from(results[2] as List) : <Map<String, dynamic>>[];
-      setState(() {
-        _customerName = (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '').trim();
-        _activeOrders = orders;
         _usualRoutes = _computeUsualRoutes(history);
         _isLoading = false;
       });

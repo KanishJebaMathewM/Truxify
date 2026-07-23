@@ -97,7 +97,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
   String? _formatRupeesFromPaise(dynamic value) {
     if (value is! num) return null;
-    return 'Rs ${(value / 100).toStringAsFixed(0)}';
+    return '₹ ${(value / 100).toStringAsFixed(0)}';
   }
 
   Future<void> _loadOrderAndTimeline() async {
@@ -137,7 +137,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
 
           _currentOrder = HistoryOrderData(
             orderId: orderMap['order_display_id']?.toString() ?? _currentOrder.orderId,
-            route: '${orderMap['pickup_address']} → ${orderMap['drop_address']}',
+            route: '${orderMap['pickup_address'] ?? 'Unknown'} → ${orderMap['drop_address'] ?? 'Unknown'}',
             date: orderMap['pickup_date']?.toString() ?? _currentOrder.date,
             amount: '₹$amountInRupees',
             status: _formatStatus(orderMap['status']?.toString() ?? 'pending'),
@@ -456,6 +456,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final isSuccess = _currentOrder.status == 'Delivered' || _currentOrder.status == 'Payment Released';
+    final isCancelled = _currentOrder.status == 'Cancelled';
 
     return Scaffold(
       appBar: AppBar(
@@ -492,9 +493,19 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 const SizedBox(height: 8),
                 Text('Date: ${_currentOrder.date}', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 8),
+                if (_currentOrder.requiresRefrigeration) ...[
+                  Row(
+                    children: [
+                      const Icon(Icons.ac_unit_rounded, size: 16, color: Colors.blue),
+                      const SizedBox(width: 4),
+                      Text('Temperature: ${_currentOrder.targetTemperatureMin ?? '?'}°C to ${_currentOrder.targetTemperatureMax ?? '?'}°C', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: Colors.blue)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 StatusBadge(
-                  label: isSuccess ? '✅ ${_currentOrder.status}' : '❌ Cancelled',
-                  color: isSuccess ? TruxifyColors.accentDark : TruxifyColors.error,
+                  label: isSuccess ? '✅ ${_currentOrder.status}' : isCancelled ? '❌ Cancelled' : '🔄 ${_currentOrder.status}',
+                  color: isSuccess ? TruxifyColors.accentDark : isCancelled ? TruxifyColors.error : TruxifyColors.warning,
                   filled: true,
                 ),
               ],

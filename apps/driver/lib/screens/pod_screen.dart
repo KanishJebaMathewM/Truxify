@@ -5,17 +5,20 @@ import 'package:signature/signature.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:truxify_shared/truxify_shared.dart';
+import '../services/sync_service.dart';
 
 class ProofOfDeliveryScreen extends StatefulWidget {
   final String tripDisplayId;
   final String stopId;
-  final Future<void> Function(String? photoPath, String? signaturePath) onComplete;
+  final String? orderId;
+  final Future<void> Function(String? photoPath, String? signaturePath)? onComplete;
 
   const ProofOfDeliveryScreen({
     Key? key,
     required this.tripDisplayId,
     required this.stopId,
-    required this.onComplete,
+    this.orderId,
+    this.onComplete,
   }) : super(key: key);
 
   @override
@@ -27,6 +30,8 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
   late SignatureController _signatureController;
   XFile? _capturedPhoto;
   bool _isProcessing = false;
+  String _uploadStatus = '';
+  double? _uploadProgress;
 
   @override
   void initState() {
@@ -71,6 +76,15 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
     }
   }
 
+  void _updateStatus(String status, {double? progress}) {
+    if (mounted) {
+      setState(() {
+        _uploadStatus = status;
+        _uploadProgress = progress;
+      });
+    }
+  }
+
   Future<void> _submit() async {
     if (_capturedPhoto == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please capture a photo.')));
@@ -93,14 +107,41 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
         signPath = file.path;
       }
 
-      await widget.onComplete(_capturedPhoto?.path, signPath);
+      _updateStatus('Uploading proof of delivery...');
+
+      if (widget.onComplete != null) {
+        await widget.onComplete!(_capturedPhoto?.path, signPath);
+      } else {
+        await SyncService.instance.queueOrSyncPoD(
+          tripDisplayId: widget.tripDisplayId,
+          stopId: widget.stopId,
+          orderId: widget.orderId,
+          photoPath: _capturedPhoto?.path,
+          signaturePath: signPath,
+          onProgress: _updateStatus,
+        );
+      }
+
+      _updateStatus('Upload complete!');
       if (mounted) {
-        Navigator.of(context).pop(); // Go back on success
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Proof of Delivery submitted successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.of(context).pop();
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to submit: $e')));
-        setState(() => _isProcessing = false);
+        _updateStatus('Upload failed, will retry when online.');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Upload failed. Will retry when online: $e'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        Navigator.of(context).pop();
       }
     }
   }
@@ -115,7 +156,27 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
         elevation: 0,
       ),
       body: _isProcessing
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 24),
+                    Text(
+                      _uploadStatus.isNotEmpty ? _uploadStatus : 'Processing...',
+                      style: GoogleFonts.dmSans(fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (_uploadProgress != null) ...[
+                      const SizedBox(height: 16),
+                      LinearProgressIndicator(value: _uploadProgress),
+                    ],
+                  ],
+                ),
+              ),
+            )
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(

@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  liquibase:
+    image: liquibase/liquibase:latest
+    volumes:
+      - ./:/liquibase/changelog
+    environment:
+      - LIQUIBASE_COMMAND_CHANGELOG_FILE=changelog-master.xml
+      - LIQUIBASE_COMMAND_URL=jdbc:postgresql://postgres:5432/truxify
+      - LIQUIBASE_COMMAND_USERNAME=postgres
+      - LIQUIBASE_COMMAND_PASSWORD=password
+    command: update
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=truxify
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

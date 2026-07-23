@@ -67,11 +67,23 @@ class RouteCardData {
     required this.route,
     required this.pickup,
     required this.drop,
+    this.tripCount,
+    this.lastUsedDate,
+    this.pickupLat,
+    this.pickupLng,
+    this.dropLat,
+    this.dropLng,
   });
 
   final String route;
   final String pickup;
   final String drop;
+  final int? tripCount;
+  final String? lastUsedDate;
+  final double? pickupLat;
+  final double? pickupLng;
+  final double? dropLat;
+  final double? dropLng;
 }
 
 class StatCardData {

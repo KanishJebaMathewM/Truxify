@@ -45,12 +45,6 @@ class DIDService {
             this.wallet
         );
 
-        this.keyPair = crypto.generateKeyPairSync('rsa', {
-            modulusLength: 2048,
-            publicKeyEncoding: { type: 'spki', format: 'pem' },
-            privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-        });
-
         logger.info('✅ DID Service initialized');
     }
 
@@ -64,8 +58,12 @@ class DIDService {
             await this.addServiceEndpoint(did, 'identity', 'IdentityService', `${process.env.API_URL}/api/did/identity`, 'Main identity service');
             await this.addServiceEndpoint(did, 'credentials', 'CredentialService', `${process.env.API_URL}/api/did/credentials`, 'Credential management service');
 
-            const publicKey = this.keyPair.publicKey;
-            const publicKeyMultibase = Buffer.from(publicKey).toString('base64');
+            const keyPair = crypto.generateKeyPairSync('rsa', {
+                modulusLength: 2048,
+                publicKeyEncoding: { type: 'spki', format: 'pem' },
+                privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+            });
+            const publicKeyMultibase = Buffer.from(keyPair.publicKey).toString('base64');
             await this.addVerificationMethod(did, 'key-1', 'RsaVerificationKey2018', did, publicKeyMultibase);
 
             await this.identityWallet.createWallet(did);
@@ -108,11 +106,13 @@ class DIDService {
             const proof = this.generateProof(subject, credentialType, schema);
             const proofHash = ethers.keccak256(ethers.toUtf8Bytes(proof));
 
+            const validUntilTimestamp = validUntil || Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
+
             const tx = await this.didRegistry.issueCredential(
                 subject,
                 credentialType,
                 schemaHash,
-                validUntil || Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60,
+                validUntilTimestamp,
                 proofHash
             );
             const receipt = await tx.wait();
@@ -129,7 +129,7 @@ class DIDService {
                 credentialType,
                 schema,
                 issuedAt: new Date().toISOString(),
-                validUntil: new Date(validUntil * 1000).toISOString(),
+                validUntil: new Date(validUntilTimestamp * 1000).toISOString(),
                 txHash: receipt.hash,
                 proof
             });
@@ -182,7 +182,10 @@ class DIDService {
     }
 
     generateProof(subject, credentialType, schema) {
-        return JSON.stringify({ subject, credentialType, schema, timestamp: Date.now() });
+        const secret = process.env.DID_PROOF_SECRET || 'default-proof-secret';
+        const payload = JSON.stringify({ subject, credentialType, schema, timestamp: Date.now() });
+        const proof = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+        return proof;
     }
 
     async getDID(did) {
@@ -262,14 +265,21 @@ class DIDService {
     }
 
     async getDIDStats() {
-        const { data: dids } = await supabase.from('dids').select('*').order('created_at', { ascending: false }).limit(100);
-        const { data: credentials } = await supabase.from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
+        const { data: dids, error: didsErr } = await supabase.from('dids').select('*').order('created_at', { ascending: false }).limit(100);
+        const { data: credentials, error: credsErr } = await supabase.from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
+
+        if (didsErr || credsErr) {
+            logger.error('Failed to fetch DID stats', { didsErr, credsErr });
+        }
+
+        const safeDids = dids || [];
+        const safeCreds = credentials || [];
 
         return {
-            totalDIDs: dids.length,
-            activeDIDs: dids.filter(d => d.is_active !== false).length,
-            totalCredentials: credentials.length,
-            revokedCredentials: credentials.filter(c => c.revoked === true).length
+            totalDIDs: safeDids.length,
+            activeDIDs: safeDids.filter(d => d.is_active !== false).length,
+            totalCredentials: safeCreds.length,
+            revokedCredentials: safeCreds.filter(c => c.revoked === true).length
         };
     }
 }

@@ -42,7 +42,7 @@ class AudioMonitor:
     def _load_emergency_model(self):
         """Load emergency sound detection model"""
         model = keras.Sequential([
-            keras.layers.Conv1D(64, 3, activation='relu', input_shape=(16000, 1)),
+            keras.layers.Conv1D(64, 3, activation='relu', input_shape=(3000, 1)),
             keras.layers.MaxPooling1D(2),
             keras.layers.Conv1D(128, 3, activation='relu'),
             keras.layers.MaxPooling1D(2),
@@ -62,7 +62,7 @@ class AudioMonitor:
     def _load_emotion_model(self):
         """Load speech emotion recognition model"""
         model = keras.Sequential([
-            keras.layers.Conv1D(64, 3, activation='relu', input_shape=(16000, 1)),
+            keras.layers.Conv1D(64, 3, activation='relu', input_shape=(3000, 1)),
             keras.layers.MaxPooling1D(2),
             keras.layers.Conv1D(128, 3, activation='relu'),
             keras.layers.MaxPooling1D(2),

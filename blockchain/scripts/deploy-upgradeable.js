@@ -1,4 +1,5 @@
-const hre = require("hardhat");
+import hre from "hardhat";
+import fs from "fs";
 
 async function main() {
   console.log("🚀 Deploying UUPS Proxy with DAO Governance...");
@@ -25,18 +26,21 @@ async function main() {
   // Get proxy contract instance
   const truxify = await hre.ethers.getContractAt("TruxifyUpgradeable", proxyAddress);
 
+  const signers = await hre.ethers.getSigners();
+  const defaultAddress = signers[0].address;
+
   // Grant DAO roles
-  const daoAddress = process.env.DAO_ADDRESS || await hre.ethers.getSigners()[0].getAddress();
+  const daoAddress = process.env.DAO_ADDRESS || defaultAddress;
   await truxify.grantDAORole(daoAddress);
   console.log(`👥 DAO role granted to: ${daoAddress}`);
 
   // Grant upgrader role for emergency upgrades
-  const upgraderAddress = process.env.UPGRADER_ADDRESS || await hre.ethers.getSigners()[0].getAddress();
+  const upgraderAddress = process.env.UPGRADER_ADDRESS || defaultAddress;
   await truxify.grantUpgraderRole(upgraderAddress);
   console.log(`🔧 Upgrader role granted to: ${upgraderAddress}`);
 
   // Grant pauser role
-  const pauserAddress = process.env.PAUSER_ADDRESS || await hre.ethers.getSigners()[0].getAddress();
+  const pauserAddress = process.env.PAUSER_ADDRESS || defaultAddress;
   await truxify.grantPauserRole(pauserAddress);
   console.log(`⏸️ Pauser role granted to: ${pauserAddress}`);
 
@@ -49,7 +53,6 @@ async function main() {
   console.log(`Pauser: ${pauserAddress}`);
 
   // Save deployment info
-  const fs = require("fs");
   const deploymentInfo = {
     implementation: implementationAddress,
     proxy: proxyAddress,

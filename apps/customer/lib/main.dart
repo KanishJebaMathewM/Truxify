@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 
 import 'app.dart';
 import 'constants/firebase_config.dart';
@@ -10,6 +13,11 @@ import 'constants/supabase_config.dart';
 void main() async {
   // Ensure Flutter engine is initialized.
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize crash reporting as early as possible.
+  // This wires up FlutterError.onError, PlatformDispatcher.onError,
+  // and initializes the Sentry SDK (when SENTRY_DSN is configured).
+  await CrashReportingService.init(appName: 'Customer');
 
   // Initialize Firebase (required for Phone Auth & FCM).
   try {
@@ -53,5 +61,17 @@ void main() async {
     debugPrint('Supabase URL/AnonKey not provided. Skipping initialization.');
   }
 
-  runApp(const TruxifyApp());
+  // Replace Flutter's default red error screen in release/profile builds.
+  ErrorWidget.builder = TruxifyErrorWidget.builder;
+
+  // Wrap runApp in a guarded zone to capture uncaught async errors.
+  runZonedGuarded(() {
+    runApp(const TruxifyApp());
+  }, (error, stackTrace) {
+    CrashReportingService.captureException(
+      error,
+      stackTrace: stackTrace,
+      mechanism: 'runZonedGuarded',
+    );
+  });
 }

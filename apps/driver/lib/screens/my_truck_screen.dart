@@ -1,11 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../models/truck_models.dart';
+import '../services/api_client.dart';
 import '../services/truck_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import '../core/driver_session.dart';
+import '../widgets/maintenance_photo_picker.dart';
+import '../widgets/maintenance_photo_gallery.dart';
 
 class MyTruckScreen extends StatefulWidget {
   const MyTruckScreen({super.key});
@@ -68,6 +74,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
     String selectedCategory = 'Engine';
     final descController = TextEditingController();
     bool isSubmitting = false;
+    List<XFile> selectedPhotos = [];
 
     await showModalBottomSheet<void>(
       context: context,
@@ -82,147 +89,209 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
             return Padding(
               padding: EdgeInsets.fromLTRB(
                   20, 10, 20, MediaQuery.of(context).viewInsets.bottom + 20),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const BottomSheetHandle(),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Report Maintenance Issue',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Select Issue Category',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: TruxifyColors.adaptiveSecondaryText(context),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: selectedCategory,
-                    decoration: InputDecoration(
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 12),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            const BorderSide(color: TruxifyColors.border),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const BottomSheetHandle(),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Report Maintenance Issue',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
-                    items: [
-                      'Engine',
-                      'Tyres',
-                      'Brakes',
-                      'Electricals',
-                      'Documents',
-                      'Other'
-                    ]
-                        .map((cat) => DropdownMenuItem(
-                            value: cat,
-                            child: Text(cat, style: GoogleFonts.dmSans())))
-                        .toList(),
-                    onChanged: (val) {
-                      if (val != null) {
-                        setSheetState(() => selectedCategory = val);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Describe the problem in detail',
-                    style: GoogleFonts.dmSans(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Select Issue Category',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: TruxifyColors.adaptiveSecondaryText(context),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: descController,
-                    maxLines: 3,
-                    style: GoogleFonts.dmSans(fontSize: 14),
-                    decoration: InputDecoration(
-                      hintText:
-                          'e.g. Squeaking sound from front brakes when slowing down...',
-                      hintStyle: GoogleFonts.dmSans(
-                          color: TruxifyColors.hintText, fontSize: 13),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(
-                          color: Theme.of(context).brightness == Brightness.dark
-                              ? TruxifyColors.darkBorder
-                              : TruxifyColors.border,
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      value: selectedCategory,
+                      decoration: InputDecoration(
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide:
+                              const BorderSide(color: TruxifyColors.border),
                         ),
                       ),
+                      items: [
+                        'Engine',
+                        'Tyres',
+                        'Brakes',
+                        'Electricals',
+                        'Documents',
+                        'Other'
+                      ]
+                          .map((cat) => DropdownMenuItem(
+                              value: cat,
+                              child: Text(cat, style: GoogleFonts.dmSans())))
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setSheetState(() => selectedCategory = val);
+                        }
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  isSubmitting
-                      ? const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(12.0),
-                            child: CircularProgressIndicator(
-                                color: TruxifyColors.accent),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Describe the problem in detail',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: TruxifyColors.adaptiveSecondaryText(context),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: descController,
+                      maxLines: 3,
+                      style: GoogleFonts.dmSans(fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText:
+                            'e.g. Squeaking sound from front brakes when slowing down...',
+                        hintStyle: GoogleFonts.dmSans(
+                            color: TruxifyColors.hintText, fontSize: 13),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? TruxifyColors.darkBorder
+                                : TruxifyColors.border,
                           ),
-                        )
-                      : PrimaryButton(
-                          label: 'Submit Ticket',
-                          onPressed: () async {
-                            if (descController.text.trim().isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content:
-                                      Text('Please enter an issue description'),
-                                  backgroundColor: TruxifyColors.error,
-                                ),
-                              );
-                              return;
-                            }
-                            final navigator = Navigator.of(context);
-                            final messenger = ScaffoldMessenger.of(context);
-                            setSheetState(() => isSubmitting = true);
-
-                            try {
-                              final newTicket = await _truckRepository
-                                  .createMaintenanceTicket(
-                                truckId: _truck!.id,
-                                driverId: _truck!.driverId,
-                                category: selectedCategory,
-                                description: descController.text.trim(),
-                              );
-
-                              if (!mounted) return;
-                              setState(() {
-                                _reportedIssues.insert(0, newTicket);
-                              });
-                              navigator.pop();
-                              messenger.showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                      'Maintenance ticket submitted successfully'),
-                                  backgroundColor: TruxifyColors.success,
-                                ),
-                              );
-                            } catch (e) {
-                              setSheetState(() => isSubmitting = false);
-                              messenger.showSnackBar(
-                                SnackBar(
-                                  content: Text('Failed to submit ticket: $e'),
-                                  backgroundColor: TruxifyColors.error,
-                                ),
-                              );
-                            }
-                          },
                         ),
-                ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    MaintenancePhotoPicker(
+                      selectedPhotos: selectedPhotos,
+                      onPhotosChanged: (photos) {
+                        setSheetState(() => selectedPhotos = photos);
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                    isSubmitting
+                        ? const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(12.0),
+                              child: CircularProgressIndicator(
+                                  color: TruxifyColors.accent),
+                            ),
+                          )
+                        : PrimaryButton(
+                            label: selectedPhotos.isNotEmpty
+                                ? 'Submit Ticket (${selectedPhotos.length} photo${selectedPhotos.length > 1 ? 's' : ''})'
+                                : 'Submit Ticket',
+                            onPressed: () async {
+                              if (descController.text.trim().isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('Please enter an issue description'),
+                                    backgroundColor: TruxifyColors.error,
+                                  ),
+                                );
+                                return;
+                              }
+                              final navigator = Navigator.of(context);
+                              final messenger = ScaffoldMessenger.of(context);
+                              setSheetState(() => isSubmitting = true);
+
+                              try {
+                                final newTicket = await _truckRepository
+                                    .createMaintenanceTicket(
+                                  truckId: _truck!.id,
+                                  driverId: _truck!.driverId,
+                                  category: selectedCategory,
+                                  description: descController.text.trim(),
+                                );
+
+                                // Upload photos if any were selected
+                                if (selectedPhotos.isNotEmpty) {
+                                  final files = <MultipartFileInfo>[];
+                                  for (final photo in selectedPhotos) {
+                                    final file = File(photo.path);
+                                    final bytes = await file.readAsBytes();
+                                    files.add(MultipartFileInfo(
+                                      fieldName: 'photos',
+                                      bytes: bytes,
+                                      fileName: photo.name,
+                                    ));
+                                  }
+
+                                  final urls =
+                                      await _truckRepository.uploadMaintenancePhotos(
+                                    ticketId: newTicket.id,
+                                    files: files,
+                                  );
+
+                                  // Create updated ticket with photo URLs
+                                  final updatedTicket = TruckMaintenanceTicket(
+                                    id: newTicket.id,
+                                    truckId: newTicket.truckId,
+                                    driverId: newTicket.driverId,
+                                    category: newTicket.category,
+                                    description: newTicket.description,
+                                    status: newTicket.status,
+                                    createdAt: newTicket.createdAt,
+                                    photoUrls: urls,
+                                  );
+
+                                  if (!mounted) return;
+                                  setState(() {
+                                    final idx = _reportedIssues.indexWhere(
+                                        (t) => t.id == updatedTicket.id);
+                                    if (idx >= 0) {
+                                      _reportedIssues[idx] = updatedTicket;
+                                    } else {
+                                      _reportedIssues.insert(0, updatedTicket);
+                                    }
+                                  });
+                                  navigator.pop();
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          'Ticket submitted with ${urls.length} photo${urls.length > 1 ? 's' : ''}'),
+                                      backgroundColor: TruxifyColors.success,
+                                    ),
+                                  );
+                                } else {
+                                  if (!mounted) return;
+                                  setState(() {
+                                    _reportedIssues.insert(0, newTicket);
+                                  });
+                                  navigator.pop();
+                                  messenger.showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                          'Maintenance ticket submitted successfully'),
+                                      backgroundColor: TruxifyColors.success,
+                                    ),
+                                  );
+                                }
+                              } catch (e) {
+                                setSheetState(() => isSubmitting = false);
+                                messenger.showSnackBar(
+                                  SnackBar(
+                                    content: Text('Failed to submit ticket: $e'),
+                                    backgroundColor: TruxifyColors.error,
+                                  ),
+                                );
+                              }
+                            },
+                          ),
+                  ],
+                ),
               ),
             );
           },
@@ -438,7 +507,9 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
         ? DateFormat('MMM yyyy').format(truck.permitExpiry!)
         : 'N/A';
 
-    return Scaffold(
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -458,11 +529,25 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.calculate_outlined, color: TruxifyColors.accent),
+            tooltip: 'Weight Calculator',
+            onPressed: () => Navigator.pushNamed(context, '/weight-calculator'),
+          ),
+          IconButton(
             icon: const Icon(Icons.build_rounded, color: TruxifyColors.accent),
             tooltip: 'Report Issue',
             onPressed: () => _showReportIssueSheet(context),
           ),
         ],
+        bottom: const TabBar(
+          indicatorColor: TruxifyColors.accent,
+          labelColor: TruxifyColors.accent,
+          unselectedLabelColor: TruxifyColors.hintText,
+          tabs: [
+            Tab(text: 'Overview'),
+            Tab(text: 'Fuel Analytics'),
+          ],
+        ),
         shape: Border(
           bottom: BorderSide(
             color: Theme.of(context).brightness == Brightness.dark
@@ -471,7 +556,9 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
           ),
         ),
       ),
-      body: SafeArea(
+      body: TabBarView(
+        children: [
+          SafeArea(
         child: RefreshIndicator(
           onRefresh: _loadData,
           color: TruxifyColors.accent,
@@ -547,6 +634,7 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                 ),
                 const SizedBox(height: 12),
                 ..._reportedIssues.map((ticket) {
+                  final hasPhotos = ticket.photoUrls.isNotEmpty;
                   return AppCard(
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.all(12),
@@ -578,11 +666,54 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    ticket.category,
-                                    style: GoogleFonts.dmSans(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13),
+                                  Row(
+                                    children: [
+                                      Text(
+                                        ticket.category,
+                                        style: GoogleFonts.dmSans(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 13),
+                                      ),
+                                      if (hasPhotos) ...[
+                                        const SizedBox(width: 6),
+                                        GestureDetector(
+                                          onTap: () =>
+                                              MaintenancePhotoGallery.show(
+                                            context,
+                                            ticket.photoUrls,
+                                          ),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                                horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: TruxifyColors.accent
+                                                  .withValues(alpha: 0.1),
+                                              borderRadius:
+                                                  BorderRadius.circular(8),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(
+                                                  Icons.photo_camera_rounded,
+                                                  size: 10,
+                                                  color: TruxifyColors.accent,
+                                                ),
+                                                const SizedBox(width: 3),
+                                                Text(
+                                                  '${ticket.photoUrls.length}',
+                                                  style: GoogleFonts.dmSans(
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: TruxifyColors.accent,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
                                   ),
                                   Text(
                                     ticket.status,
@@ -704,7 +835,10 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
           ),
         ),
       ),
-    );
+          _FuelAnalyticsTab(averageMpg: truck.averageMpg),
+        ],
+      ),
+    ));
   }
 
   Widget _buildSpecRow({
@@ -751,6 +885,194 @@ class _MyTruckScreenState extends State<MyTruckScreen> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+class _FuelAnalyticsTab extends StatefulWidget {
+  final double averageMpg;
+  const _FuelAnalyticsTab({required this.averageMpg});
+
+  @override
+  State<_FuelAnalyticsTab> createState() => _FuelAnalyticsTabState();
+}
+
+class _FuelAnalyticsTabState extends State<_FuelAnalyticsTab> {
+  final FuelAnalyticsService _service = FuelAnalyticsService();
+  bool _isLoading = true;
+  String? _error;
+  Map<String, dynamic>? _data;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final data = await _service.calculateAnalytics(widget.averageMpg);
+      if (mounted) {
+        setState(() {
+          _data = data;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: TruxifyColors.accent));
+    }
+    if (_error != null) {
+      return Center(child: Text(_error!, style: const TextStyle(color: TruxifyColors.error)));
+    }
+
+    final totalPayout = _data!['totalPayout'] as double;
+    final estFuel = _data!['estimatedFuelCost'] as double;
+    final margin = _data!['profitMargin'] as double;
+    final chartPoints = _data!['chartPoints'] as List<Map<String, dynamic>>;
+
+    return RefreshIndicator(
+      onRefresh: _load,
+      color: TruxifyColors.accent,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          // Summary Cards
+          Row(
+            children: [
+              Expanded(child: _StatCard(title: 'Total Payout', value: '\$${totalPayout.toStringAsFixed(2)}')),
+              const SizedBox(width: 12),
+              Expanded(child: _StatCard(title: 'Est. Fuel', value: '\$${estFuel.toStringAsFixed(2)}')),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: _StatCard(title: 'Profit Margin', value: '${margin.toStringAsFixed(1)}%')),
+              const SizedBox(width: 12),
+              Expanded(child: _StatCard(title: 'Avg MPG', value: widget.averageMpg.toStringAsFixed(1))),
+            ],
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'RECENT TRIPS (PAYOUT VS FUEL)',
+            style: GoogleFonts.dmSans(
+              fontSize: 11,
+              letterSpacing: 0.8,
+              fontWeight: FontWeight.bold,
+              color: TruxifyColors.adaptiveSecondaryText(context),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (chartPoints.isEmpty)
+            const Center(child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: Text('No recent trips to display'),
+            ))
+          else
+            ...chartPoints.map((p) => _buildChartBar(context, p['label'], p['payout'], p['fuelCost'])),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChartBar(BuildContext context, String label, double payout, double fuel) {
+    final maxVal = payout > fuel ? payout : fuel;
+    final payoutFlex = maxVal > 0 ? (payout / maxVal * 100).toInt() : 0;
+    final fuelFlex = maxVal > 0 ? (fuel / maxVal * 100).toInt() : 0;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: GoogleFonts.dmSans(fontSize: 12, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              SizedBox(
+                width: 70,
+                child: Text('Payout', style: GoogleFonts.dmSans(fontSize: 11, color: TruxifyColors.success)),
+              ),
+              Expanded(
+                child: Row(
+                  children: [
+                    if (payoutFlex > 0)
+                      Expanded(flex: payoutFlex, child: Container(height: 12, color: TruxifyColors.success)),
+                    if (100 - payoutFlex > 0)
+                      Expanded(flex: 100 - payoutFlex, child: const SizedBox()),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text('\$${payout.toStringAsFixed(0)}', style: GoogleFonts.dmSans(fontSize: 11)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              SizedBox(
+                width: 70,
+                child: Text('Fuel', style: GoogleFonts.dmSans(fontSize: 11, color: TruxifyColors.warning)),
+              ),
+              Expanded(
+                child: Row(
+                  children: [
+                    if (fuelFlex > 0)
+                      Expanded(flex: fuelFlex, child: Container(height: 12, color: TruxifyColors.warning)),
+                    if (100 - fuelFlex > 0)
+                      Expanded(flex: 100 - fuelFlex, child: const SizedBox()),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text('\$${fuel.toStringAsFixed(0)}', style: GoogleFonts.dmSans(fontSize: 11)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final String title;
+  final String value;
+  const _StatCard({required this.title, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Theme.of(context).brightness == Brightness.dark
+              ? TruxifyColors.darkBorder
+              : TruxifyColors.border,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: GoogleFonts.dmSans(fontSize: 11, color: TruxifyColors.adaptiveSecondaryText(context))),
+          const SizedBox(height: 4),
+          Text(value, style: GoogleFonts.dmSans(fontSize: 18, fontWeight: FontWeight.bold, color: Theme.of(context).colorScheme.onSurface)),
+        ],
       ),
     );
   }

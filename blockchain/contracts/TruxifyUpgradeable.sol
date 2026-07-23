@@ -343,6 +343,10 @@ contract TruxifyUpgradeable is
         grantRole(DAO_ROLE, account);
     }
 
+    // ============ Storage Gap ============
+
+    uint256[50] private __gap;
+
     // ============ Receive ============
     receive() external payable {}
 }

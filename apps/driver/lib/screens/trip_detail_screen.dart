@@ -475,10 +475,7 @@ Widget _cargoBadge({
                             Text(
                               'Earnings',
                               style: GoogleFonts.dmSans(
-                                color:Theme.of(context)
-                                              .colorScheme
-                                              .onSurface
-                                              .withValues(alpha: 0.6),
+                                color: Colors.white.withValues(alpha: 0.5),
                                 fontSize: 10,
                               ),
                             ),

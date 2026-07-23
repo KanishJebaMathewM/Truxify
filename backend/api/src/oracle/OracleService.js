@@ -1,146 +1,179 @@
-const axios = require('axios');
-const CircuitBreaker = require('circuit-breaker-js');
+import { supabase } from '../config/db.js';
+import logger from '../middleware/logger.js';
+
+const DELIVERY_COMPLETED_STATUSES = new Set([
+  'delivered',
+  'payment_released',
+]);
 
 class OracleService {
-  constructor(config = {}) {
-    this.providers = [];
-    this.consensusThreshold = config.consensusThreshold || 2;
-    this.circuitBreaker = new CircuitBreaker(config.circuitBreaker || {
-      failureThreshold: 3,
-      timeout: 5000
-    });
-    this.initializeProviders();
+  constructor(deps = {}) {
+    this.orderRepository = deps.orderRepository || null;
+    this.supabase = deps.supabase || supabase;
   }
 
-  initializeProviders() {
-    // Provider 1: Chainlink
-    if (process.env.CHAINLINK_ENABLED === 'true') {
-      const chainlinkUrl = process.env.CHAINLINK_API_URL || 'http://localhost:8545';
-      const chainlinkApiKey = process.env.CHAINLINK_API_KEY;
-      this.providers.push({
-        name: 'Chainlink',
-        url: chainlinkUrl,
-        apiKey: chainlinkApiKey,
-        confirmDelivery: async (data) => {
-          const response = await axios.post(`${chainlinkUrl}/verify-delivery`, data, {
-            headers: { 'X-API-Key': chainlinkApiKey }
-          });
-          return response.data;
-        }
-      });
-    }
+  async confirmDelivery({ orderId, otp, gpsCoordinates }) {
+    const providerResults = [];
 
-    // Provider 2: Custom GPS+OTP Verifier
-    this.providers.push({
-      name: 'CustomVerifier',
-      confirmDelivery: async (data) => {
-        // Simulate GPS+OTP verification
-        const { orderId, otp, gpsCoordinates } = data;
-        // In real implementation: check OTP from DB and GPS from tracking
-        const isValid = await this.verifyOTPAndGPS(orderId, otp, gpsCoordinates);
-        return {
-          confirmed: isValid,
-          provider: 'CustomVerifier',
-          timestamp: new Date().toISOString()
-        };
-      }
-    });
+    const otpResult = await this._verifyOTP(orderId, otp);
+    providerResults.push(otpResult);
 
-    // Provider 3: Backup/Third Party
-    if (process.env.BACKUP_ORACLE_ENABLED === 'true') {
-      const backupUrl = process.env.BACKUP_ORACLE_URL;
-      this.providers.push({
-        name: 'BackupOracle',
-        url: backupUrl,
-        confirmDelivery: async (data) => {
-          const response = await axios.post(`${backupUrl}/confirm`, data);
-          return response.data;
-        }
-      });
-    }
-  }
+    const gpsResult = this._verifyGPS(gpsCoordinates);
+    providerResults.push(gpsResult);
 
-  async verifyOTPAndGPS(orderId, otp, gpsCoordinates) {
-    // This would check against database records
-    // For now, returning true for demo
-    return true;
-  }
+    const statusResult = await this._verifyOrderStatus(orderId);
+    providerResults.push(statusResult);
 
-  async confirmDelivery(orderData) {
-    const { orderId, otp, gpsCoordinates } = orderData;
-    
-    // Get confirmations from all providers with circuit breaker
-    const results = await Promise.allSettled(
-      this.providers.map(provider => 
-        this.circuitBreaker.run(() => 
-          provider.confirmDelivery({ orderId, otp, gpsCoordinates })
-        ).catch(err => ({ error: err.message }))
-      )
-    );
+    const confirmedCount = providerResults.filter(r => r.confirmed === true).length;
+    const totalProviders = providerResults.length;
+    const hasConsensus = confirmedCount >= 2;
 
-    // Apply M-of-N consensus
-    const successfulConfirmations = results.filter(r => 
-      r.status === 'fulfilled' && r.value && r.value.confirmed === true
-    );
-
-    const hasConsensus = successfulConfirmations.length >= this.consensusThreshold;
-
-    // Log results to MongoDB
-    await this.logOracleResult(orderId, results, hasConsensus);
+    await this.logOracleResult(orderId, providerResults, hasConsensus);
 
     return {
       confirmed: hasConsensus,
-      consensusCount: successfulConfirmations.length,
-      threshold: this.consensusThreshold,
-      totalProviders: this.providers.length,
-      providerResults: results.map(r => ({
-        status: r.status,
-        value: r.status === 'fulfilled' ? r.value : r.reason
-      })),
-      timestamp: new Date().toISOString()
+      consensusCount: confirmedCount,
+      threshold: 2,
+      totalProviders,
+      providerResults,
+      timestamp: new Date().toISOString(),
     };
   }
 
+  async _verifyOTP(orderId, otp) {
+    try {
+      const { data: order, error: orderErr } = await this.supabase
+        .from('orders')
+        .select('id, otp_verified')
+        .eq('id', orderId)
+        .maybeSingle();
+
+      if (orderErr) {
+        logger.warn('[OracleService] OTP verification DB error:', orderErr.message);
+        return { confirmed: false, provider: 'OTPVerifier', error: orderErr.message, timestamp: new Date().toISOString() };
+      }
+
+      if (!order) {
+        return { confirmed: false, provider: 'OTPVerifier', reason: 'Order not found', timestamp: new Date().toISOString() };
+      }
+
+      const { data: otpRecord } = await this.supabase
+        .from('delivery_otps')
+        .select('id, verified')
+        .eq('order_id', orderId)
+        .eq('verified', true)
+        .limit(1)
+        .maybeSingle();
+
+      const isVerified = order.otp_verified === true || (otpRecord && otpRecord.verified === true);
+
+      return {
+        confirmed: isVerified,
+        provider: 'OTPVerifier',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (err) {
+      logger.error('[OracleService] OTP verification error:', err.message);
+      return { confirmed: false, provider: 'OTPVerifier', error: err.message, timestamp: new Date().toISOString() };
+    }
+  }
+
+  _verifyGPS(gpsCoordinates) {
+    const hasValidCoords = gpsCoordinates &&
+      typeof gpsCoordinates.lat === 'number' &&
+      typeof gpsCoordinates.lng === 'number' &&
+      gpsCoordinates.lat >= -90 && gpsCoordinates.lat <= 90 &&
+      gpsCoordinates.lng >= -180 && gpsCoordinates.lng <= 180;
+
+    return {
+      confirmed: hasValidCoords === true,
+      provider: 'GPSVerifier',
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  async _verifyOrderStatus(orderId) {
+    try {
+      const { data: order, error } = await this.supabase
+        .from('orders')
+        .select('id, status')
+        .eq('id', orderId)
+        .maybeSingle();
+
+      if (error) {
+        logger.warn('[OracleService] Status verification DB error:', error.message);
+        return { confirmed: false, provider: 'StatusVerifier', error: error.message, timestamp: new Date().toISOString() };
+      }
+
+      if (!order) {
+        return { confirmed: false, provider: 'StatusVerifier', reason: 'Order not found', timestamp: new Date().toISOString() };
+      }
+
+      return {
+        confirmed: DELIVERY_COMPLETED_STATUSES.has(order.status),
+        provider: 'StatusVerifier',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (err) {
+      logger.error('[OracleService] Status verification error:', err.message);
+      return { confirmed: false, provider: 'StatusVerifier', error: err.message, timestamp: new Date().toISOString() };
+    }
+  }
+
   async logOracleResult(orderId, results, hasConsensus) {
-    // Store in MongoDB for audit trail
     const logEntry = {
       orderId,
       timestamp: new Date().toISOString(),
       results: results.map(r => ({
-        status: r.status,
-        value: r.status === 'fulfilled' ? r.value : r.reason
+        provider: r.provider,
+        confirmed: r.confirmed,
+        error: r.error || undefined,
+        reason: r.reason || undefined,
       })),
-      consensusReached: hasConsensus
+      consensusReached: hasConsensus,
     };
-    
-    // In real implementation: save to MongoDB
-    // await mongoClient.collection('oracle_logs').insertOne(logEntry);
-    console.log('Oracle Result Logged:', logEntry);
+
+    logger.info('[OracleService] Verification result:', JSON.stringify(logEntry));
     return logEntry;
   }
 
   async verifyCrossChain(orderId, blockchainHash) {
-    // Verify delivery hash across chains
-    // Store hash in IPFS/Arweave
-    const ipfsHash = await this.storeOnIPFS({
-      orderId,
-      blockchainHash,
-      verificationTimestamp: new Date().toISOString()
-    });
+    try {
+      const { data: order, error } = await this.supabase
+        .from('orders')
+        .select('id, blockchain_tx_hash, escrow_status')
+        .eq('id', orderId)
+        .maybeSingle();
 
-    return {
-      verified: true,
-      ipfsHash,
-      blockchainHash,
-      verificationUrl: `https://ipfs.io/ipfs/${ipfsHash}`
-    };
-  }
+      if (error) {
+        logger.warn('[OracleService] Cross-chain verification DB error:', error.message);
+        return { verified: false, ipfsHash: null, blockchainHash, verificationUrl: null, error: error.message };
+      }
 
-  async storeOnIPFS(data) {
-    // In real implementation: use IPFS HTTP API
-    // For demo, return fake hash
-    return `Qm${Math.random().toString(36).substring(7)}`;
+      if (!order) {
+        return { verified: false, ipfsHash: null, blockchainHash, verificationUrl: null, error: 'Order not found' };
+      }
+
+      const hashMatch = order.blockchain_tx_hash &&
+        order.blockchain_tx_hash.toLowerCase() === blockchainHash.toLowerCase();
+
+      const escrowValid = order.escrow_status === 'funded' || order.escrow_status === 'released';
+
+      const verified = hashMatch && escrowValid;
+
+      return {
+        verified,
+        ipfsHash: order.blockchain_tx_hash || null,
+        blockchainHash,
+        verificationUrl: order.blockchain_tx_hash
+          ? `https://polygonscan.com/tx/${order.blockchain_tx_hash}`
+          : null,
+      };
+    } catch (err) {
+      logger.error('[OracleService] Cross-chain verification error:', err.message);
+      return { verified: false, ipfsHash: null, blockchainHash, verificationUrl: null, error: err.message };
+    }
   }
 }
 
-module.exports = OracleService;
+export default OracleService;

@@ -106,6 +106,9 @@ export async function sendFcmNotification(userId, notification, data = {}) {
         const delay = calculateRetryBackoff(attempt);
         logger.info(`[FCM] Retrying after ${delay}ms for user ${userId}`);
         await new Promise(resolve => setTimeout(resolve, delay));
+      } else if (!isTransientError(err.code)) {
+        logger.warn(`[FCM] Non-retryable error for user ${userId}: ${err.code}`);
+        return { success: false, error: err.message, errorCode: err.code };
       }
     }
   }

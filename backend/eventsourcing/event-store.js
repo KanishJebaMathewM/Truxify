@@ -230,7 +230,11 @@ class EventStore {
 
     async getAggregateState(aggregateId) {
         const events = await this.getEventStream(aggregateId);
-        if (events.length === 0) return null;
+        if (events.length === 0) {
+            // Check snapshot for last known state when event stream is empty
+            const snapshot = await this.getSnapshot(aggregateId);
+            return snapshot ? snapshot.state : null;
+        }
 
         // Apply events to build state
         let state = { id: aggregateId, version: 0 };
@@ -470,17 +474,17 @@ class EventStore {
     // ============ Stats ============
 
     async getEventStoreStats() {
-        const { data: events } = await supabase
+        const { data: events, count: totalEvents } = await supabase
             .from('event_store')
-            .select('event_type, count');
+            .select('event_type', { count: 'exact' });
 
-        const { data: snapshots } = await supabase
+        const { count: totalSnapshots } = await supabase
             .from('snapshots')
-            .select('count');
+            .select('*', { count: 'exact', head: true });
 
         return {
-            totalEvents: events?.length || 0,
-            totalSnapshots: snapshots?.[0]?.count || 0,
+            totalEvents: totalEvents || 0,
+            totalSnapshots: totalSnapshots || 0,
             eventTypes: events?.reduce((acc, e) => {
                 acc[e.event_type] = (acc[e.event_type] || 0) + 1;
                 return acc;

@@ -17,6 +17,7 @@ export const dlqService = {
           event_type: eventType,
           payload,
           error_message: String(error.message || error).slice(0, 1000),
+          retry_count: 0,
           next_retry_at: new Date(Date.now() + RETRY_BACKOFF[0] * 60000).toISOString(),
         });
 
@@ -38,15 +39,31 @@ export const dlqService = {
     try {
       const now = new Date().toISOString();
 
-      // Atomically claim pending events by updating status to 'processing'
-      // This prevents concurrent workers from processing the same events
-      const { data: claimedEvents, error: claimErr } = await supabase
+      // 1. Fetch up to 50 pending events safely without modifying them yet
+      const { data: pendingEvents, error: fetchErr } = await supabase
         .from('webhook_failures')
-        .update({ status: 'processing', updated_at: now })
+        .select('id')
         .eq('status', 'pending')
         .lte('next_retry_at', now)
         .order('next_retry_at', { ascending: true })
-        .limit(50)
+        .limit(50);
+
+      if (fetchErr) {
+        logger.error(`[DLQ] Failed to fetch pending events: ${fetchErr.message}`);
+        return;
+      }
+
+      if (!pendingEvents || pendingEvents.length === 0) {
+        return;
+      }
+
+      const eventIds = pendingEvents.map(e => e.id);
+
+      // 2. Atomically claim only those specific events
+      const { data: claimedEvents, error: claimErr } = await supabase
+        .from('webhook_failures')
+        .update({ status: 'processing', updated_at: now })
+        .in('id', eventIds)
         .select();
 
       if (claimErr) {
@@ -79,7 +96,7 @@ export const dlqService = {
         } catch (procErr) {
           logger.error(`[DLQ] Retry failed for event ${event.id}: ${procErr.message}`);
 
-          const newRetryCount = event.retry_count + 1;
+          const newRetryCount = (event.retry_count ?? 0) + 1;
           const nextBackoffMin = RETRY_BACKOFF[newRetryCount] || -1;
 
           if (nextBackoffMin === -1) {

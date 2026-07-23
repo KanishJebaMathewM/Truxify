@@ -3,7 +3,9 @@ import hmac
 import logging
 import os
 import time
-from fastapi import FastAPI, HTTPException, Header, Depends
+import numpy as np
+from datetime import datetime, timedelta
+from fastapi import FastAPI, HTTPException, Header, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -25,7 +27,7 @@ from app.models.mid_trip_reoptimiser import find_mid_trip_loads
 from app.models.base import model_exists
 from app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
 from app.models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
-from routes import federated_routes
+from routes import register_ml_routers
 
 # ============================================================================
 # 🆕 REAL-TIME TRAFFIC ETA IMPORTS
@@ -68,8 +70,9 @@ app = FastAPI(
 
 
 
-# Add federated routes
-app.include_router(federated_routes.router)
+# Register all available ML route modules dynamically
+registered_routers = register_ml_routers(app)
+logger.info("ML routers registered: %s", registered_routers)
 
 # CORS: restrict to known origins — no wildcard "*" to prevent unauthorized cross-origin access
 app.add_middleware(
@@ -88,7 +91,11 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    from .models.base import preload_all_models
+    import sys
+    from .models.base import load_model, preload_all_models
+    from .models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
+    from .models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
+    
     logger.info("ML Engine starting, pre-loading models...")
     persisted_models = await preload_all_models()
     loaded_models.update(persisted_models)
@@ -423,7 +430,8 @@ async def health():
         "eta_predictor": eta_predictor.model is not None,
         "traffic_eta": traffic_pipeline.model is not None,
     }
-    all_ready = all(models.values())
+    non_optional = {k: v for k, v in models.items() if k != 'eta_predictor'}
+    all_ready = all(non_optional.values())
     return {
         "status": "healthy" if all_ready else "degraded",
         "service": "ml-engine",
@@ -512,7 +520,6 @@ async def predict_traffic_eta(request: TrafficETARequest, _auth=Depends(verify_a
             eta_seconds = traffic_pipeline.predict_eta(features)
             
             if eta_seconds:
-                from datetime import timedelta
                 return TrafficETAResponse(
                     order_id=request.order_id,
                     eta_seconds=eta_seconds,
@@ -580,7 +587,8 @@ async def get_traffic_data(route_id: str, _auth=Depends(verify_api_key)):
 
 
 @app.get("/eta/forecast/{route_id}")
-async def get_traffic_forecast(route_id: str, hours: int = Field(1, ge=1, le=24), _auth=Depends(verify_api_key)):
+async def get_traffic_forecast(route_id: str, hours: int = Query(1, ge=1, le=24), _auth=Depends(verify_api_key)):
+async def get_traffic_forecast(route_id: str, hours: int = Query(default=1, ge=1, le=24), _auth=Depends(verify_api_key)):
     """Get traffic forecast for next N hours"""
     try:
         forecast = await traffic_pipeline.get_traffic_forecast(route_id, hours)

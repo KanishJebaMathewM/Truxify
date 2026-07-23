@@ -1,10 +1,15 @@
 import json
+import hashlib
+import time
+from datetime import datetime
+import numpy as np
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.hazmat.primitives import hashes
 from kyber import KyberKEM, DilithiumSignature
 import base64
 import logging
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +44,7 @@ class HybridCrypto:
         # Combine keys
         hybrid_keys = {
             'classical': {
-                'public': self.classical_key.public_key(),
+                'public': hybrid_key['classical']['public'],
                 'private': self.classical_key
             },
             'quantum': self.quantum_key,
@@ -61,7 +66,7 @@ class HybridCrypto:
             )
             
             # Classical RSA encryption of data + quantum secret
-            encrypted_data = self.classical_key.public_key().encrypt(
+            encrypted_data = hybrid_key['classical']['public'].encrypt(
                 data + quantum_secret,
                 padding.OAEP(
                     mgf=padding.MGF1(algorithm=hashes.SHA256()),

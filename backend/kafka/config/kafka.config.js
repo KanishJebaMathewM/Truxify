@@ -222,22 +222,36 @@ class KafkaConfig {
     return offsets;
   }
 
+  parsePartitionId(partition) {
+    if (!/^\d+$/.test(String(partition))) {
+      throw new Error(`Invalid Kafka partition id: ${partition}`);
+    }
+    const parsed = Number(partition);
+    if (!Number.isSafeInteger(parsed)) {
+      throw new Error(`Invalid Kafka partition id: ${partition}`);
+    }
+    return parsed;
+  }
+
   async resetConsumerOffsets(groupId, topic) {
     const admin = kafka.admin();
     await admin.connect();
     try {
       const offsets = await admin.listConsumerGroupOffsets(groupId);
-      const partitions = Object.keys(offsets[topic] || {});
+      const topicData = (offsets.topics || []).find(t => t.topic === topic);
+      if (!topicData) {
+        logger.warn(`Topic ${topic} not found in consumer group offsets`);
+        return;
+      }
       
-      for (const partition of partitions) {
-        const parsed = parseInt(partition, 10);
-        if (Number.isNaN(parsed) || parsed < 0) {
-          logger.warn(`Skipping invalid partition key: ${partition}`);
+      for (const entry of topicData.partitions) {
+        if (Number.isNaN(entry.partition) || entry.partition < 0) {
+          logger.warn(`Skipping invalid partition: ${entry.partition}`);
           continue;
         }
         await admin.setConsumerGroupOffset(
           groupId,
-          { topic, partition: parsed },
+          { topic, partition: entry.partition },
           'latest'
         );
       }

@@ -5,6 +5,15 @@ import { supabase } from '../../config/db.js';
 
 class ZKPService {
   constructor() {
+    if (!process.env.POLYGON_RPC_URL || !process.env.PRIVATE_KEY || !process.env.KYC_VERIFIER_CONTRACT) {
+      logger.warn('ZKPService disabled: POLYGON_RPC_URL, PRIVATE_KEY, or KYC_VERIFIER_CONTRACT not set.');
+      this.provider = null;
+      this.wallet = null;
+      this.contract = null;
+      this.contractAddress = null;
+      this.contractABI = [];
+      return;
+    }
     this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
     this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
     this.contractAddress = process.env.KYC_VERIFIER_CONTRACT;
@@ -69,6 +78,7 @@ class ZKPService {
 
   async verifyKYCOnChain(userId, proof) {
     try {
+      if (!this.contract) throw new Error('ZKPService not configured: missing environment variables');
       // Get user address
       const userData = await this.getUserAddress(userId);
       if (!userData) {
@@ -81,7 +91,7 @@ class ZKPService {
         proof.b,
         proof.c,
         proof.input,
-        userData.address
+        userData.wallet_address
       );
       
       const receipt = await tx.wait();
@@ -140,10 +150,11 @@ class ZKPService {
 
   async isVerified(userId) {
     try {
+      if (!this.contract) return false;
       const userData = await this.getUserAddress(userId);
       if (!userData) return false;
       
-      const verified = await this.contract.isVerified(userData.address);
+      const verified = await this.contract.isVerified(userData.wallet_address);
       return verified;
     } catch (error) {
       logger.error('Verification check failed:', error);
@@ -153,10 +164,11 @@ class ZKPService {
 
   async getDocumentHash(userId) {
     try {
+      if (!this.contract) return null;
       const userData = await this.getUserAddress(userId);
       if (!userData) return null;
       
-      const hash = await this.contract.getDocumentHash(userData.address);
+      const hash = await this.contract.getDocumentHash(userData.wallet_address);
       return hash;
     } catch (error) {
       logger.error('Document hash fetch failed:', error);

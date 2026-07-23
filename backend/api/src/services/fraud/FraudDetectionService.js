@@ -18,6 +18,7 @@ class FraudDetectionService {
     this._totalRiskScoresEvicted = 0;
     this._totalBehavioralProfilesEvicted = 0;
     this._cleanupInterval = setInterval(() => this._evictStale(), 300_000); // every 5 min
+    this._cleanupInterval.unref?.();
     
     // Initialize ML models (in production, load from FastAPI)
     this.models = {
@@ -32,6 +33,7 @@ class FraudDetectionService {
   // ============ Behavioral Fingerprinting ============
   async trackBehavior(userId, eventData) {
     try {
+      if (!supabase) return null;
       const profile = await this.getOrCreateProfile(userId);
       
       // Update behavioral metrics
@@ -56,6 +58,23 @@ class FraudDetectionService {
           3600,
           JSON.stringify(profile)
         );
+      } else {
+        this.behavioralProfiles.set(userId, profile);
+      }
+
+      // Persist to Supabase to prevent data loss across Redis expirations
+      const { error: dbErr } = await supabase
+        .from('behavioral_profiles')
+        .upsert({
+          user_id: userId,
+          events: profile.events,
+          patterns: profile.patterns,
+          last_activity: new Date(profile.lastActivity).toISOString(),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+
+      if (dbErr) {
+        logger.error('[FraudDetection] Failed to persist behavioral profile to DB:', dbErr.message);
       }
 
       // Calculate risk score
@@ -81,6 +100,7 @@ class FraudDetectionService {
   }
 
   async getOrCreateProfile(userId) {
+    if (!supabase) return null;
     // Check Redis cache
     const cached = this.redis ? await this.redis.get(`behavior:${userId}`) : null;
     if (cached) {
@@ -95,6 +115,10 @@ class FraudDetectionService {
       .single();
 
     if (data) {
+      // Normalize: DB returns user_id, code expects userId
+      if (data.user_id && !data.userId) {
+        data.userId = data.user_id;
+      }
       return data;
     }
 
@@ -260,6 +284,7 @@ class FraudDetectionService {
   }
 
   async getUserConnections(userId) {
+    if (!supabase) return [];
     // Get all connections (orders, trips, shared routes)
     const { data: orders, error } = await supabase
       .from('orders')
@@ -287,6 +312,44 @@ class FraudDetectionService {
     return Array.from(connections);
   }
 
+  async getBatchUserConnections(userIds) {
+    if (userIds.length === 0) return {};
+
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('customer_id, driver_id')
+      .or(userIds.map(id => `customer_id.eq.${id}`).join(',') + ',' + userIds.map(id => `driver_id.eq.${id}`).join(','));
+
+    if (error) {
+      logger.error('Failed to load batch user fraud connections:', error);
+      return {};
+    }
+
+    if (!Array.isArray(orders)) {
+      return {};
+    }
+
+    const connectionsMap = {};
+    for (const userId of userIds) {
+      connectionsMap[userId] = new Set();
+    }
+
+    orders.forEach(order => {
+      if (userIds.includes(order.customer_id) && order.driver_id) {
+        connectionsMap[order.customer_id].add(order.driver_id);
+      }
+      if (userIds.includes(order.driver_id) && order.customer_id) {
+        connectionsMap[order.driver_id].add(order.customer_id);
+      }
+    });
+
+    const result = {};
+    for (const userId of userIds) {
+      result[userId] = Array.from(connectionsMap[userId]);
+    }
+    return result;
+  }
+
   async buildGraph(userId, connections) {
     const graph = {
       nodes: [userId, ...connections],
@@ -302,9 +365,11 @@ class FraudDetectionService {
       });
     }
 
-    // Get second-degree connections
+    // Get second-degree connections in a single batch query
+    const secondDegreeMap = await this.getBatchUserConnections(connections);
+
     for (const conn of connections) {
-      const secondConn = await this.getUserConnections(conn);
+      const secondConn = secondDegreeMap[conn] || [];
       for (const sc of secondConn) {
         if (sc !== userId && !connections.includes(sc)) {
           graph.edges.push({
@@ -398,13 +463,10 @@ class FraudDetectionService {
       );
 
       // 2. Network risk
-      const networkRisk = await this.calculateNetworkRisk(
-        userId, 
-        await this.buildGraph(userId, await this.getUserConnections(userId)),
-        await this.detectFraudRings(
-          await this.buildGraph(userId, await this.getUserConnections(userId))
-        )
-      );
+      const connections = await this.getUserConnections(userId);
+      const graph = await this.buildGraph(userId, connections);
+      const fraudRings = await this.detectFraudRings(graph);
+      const networkRisk = await this.calculateNetworkRisk(userId, graph, fraudRings);
 
       // 3. Transaction risk
       const transactionRisk = this.calculateTransactionRisk(transactionData);
@@ -491,32 +553,42 @@ class FraudDetectionService {
   }
 
   async storeRiskScore(userId, score, components) {
-    await supabase
-      .from('fraud_risk_scores')
-      .insert([{
-        user_id: userId,
-        risk_score: score,
-        components: components,
-        created_at: new Date().toISOString()
-      }]);
+    try {
+      if (!supabase) return;
+      await supabase
+        .from('fraud_risk_scores')
+        .insert([{
+          user_id: userId,
+          risk_score: score,
+          components: components,
+          created_at: new Date().toISOString()
+        }]);
+    } catch (err) {
+      logger.error(`[FraudDetection] Failed to store risk score for user ${userId}: ${err.message}`);
+    }
 
     // Cache in Redis
     if (this.redis) {
-      await this.redis.setex(
-        `risk:${userId}`,
-        3600,
-        JSON.stringify({
-          score,
-          components,
-          timestamp: Date.now()
-        })
-      );
+      try {
+        await this.redis.setex(
+          `risk:${userId}`,
+          3600,
+          JSON.stringify({
+            score,
+            components,
+            timestamp: Date.now()
+          })
+        );
+      } catch (err) {
+        logger.warn(`[FraudDetection] Failed to cache risk score for user ${userId}: ${err.message}`);
+      }
     }
   }
 
   // ============ Auto-Review Queue ============
   async addToReviewQueue(userId, reason, riskScore) {
     try {
+      if (!supabase) return null;
       const { data } = await supabase
         .from('fraud_review_queue')
         .insert([{
@@ -538,6 +610,7 @@ class FraudDetectionService {
   }
 
   async getReviewQueue(limit = 50) {
+    if (!supabase) return [];
     const { data } = await supabase
       .from('fraud_review_queue')
       .select('*')
@@ -549,6 +622,7 @@ class FraudDetectionService {
   }
 
   async resolveReview(reviewId, action, notes) {
+    if (!supabase) return null;
     const { data } = await supabase
       .from('fraud_review_queue')
       .update({
@@ -578,6 +652,7 @@ class FraudDetectionService {
   }
 
   async getFraudStats() {
+    if (!supabase) return { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 };
     const { data: scores } = await supabase
       .from('fraud_risk_scores')
       .select('risk_score, created_at')

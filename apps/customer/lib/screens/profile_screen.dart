@@ -454,9 +454,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   MenuItem(
                     icon: Icons.account_balance_wallet_rounded,
                     label: AppLocalizations.of(context)!.walletAddressLabel,
-                    trailing: _walletAddress.isNotEmpty
+                    trailing: _walletAddress.length >= 10
                         ? '${_walletAddress.substring(0, 6)}...${_walletAddress.substring(_walletAddress.length - 4)}'
-                        : AppLocalizations.of(context)!.notSet,
+                        : _walletAddress.isNotEmpty
+                            ? _walletAddress
+                            : AppLocalizations.of(context)!.notSet,
                     showDivider: false,
                     onTap: () => _showWalletSheet(context),
                   ),

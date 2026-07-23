@@ -47,12 +47,7 @@ export function validateParams(schema) {
       });
     }
 
-    Object.defineProperty(req, 'params', {
-      value: result.data,
-      writable: true,
-      configurable: true,
-      enumerable: true,
-    });
+    req.params = result.data;
     return next();
   };
 }

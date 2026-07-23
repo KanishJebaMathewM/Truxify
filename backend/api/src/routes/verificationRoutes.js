@@ -2,13 +2,14 @@ import express from 'express';
 import { verificationService } from '../core/container.js';
 import { supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
 import { verifyOrderParamsSchema, documentCheckSchema } from '../validation/requestSchemas.js';
 import { PolicyError, policy } from '../security/policyEngine.js';
 
 const router = express.Router();
 
-router.get('/order/:orderId', authenticate, validateParams(verifyOrderParamsSchema), async (req, res) => {
+router.get('/order/:orderId', authenticate, userLimiter, validateParams(verifyOrderParamsSchema), async (req, res) => {
   try {
     const { orderId } = req.params;
     const { data: order, error: orderError } = await supabase

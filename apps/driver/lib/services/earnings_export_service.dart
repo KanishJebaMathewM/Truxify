@@ -14,7 +14,11 @@ class EarningsExportService {
     final tempDir = Directory.systemTemp;
     final file = File('${tempDir.path}/$filename');
     await file.writeAsString(csvContent);
-    await Share.shareXFiles([XFile(file.path)], text: 'Earnings Statement');
+    try {
+      await Share.shareXFiles([XFile(file.path)], text: 'Earnings Statement');
+    } finally {
+      await file.delete().catchError((_) {});
+    }
   }
 
   Future<String> saveCsv(String csvContent, String filename) async {

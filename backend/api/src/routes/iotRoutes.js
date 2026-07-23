@@ -2,6 +2,7 @@ import express from 'express';
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
+import { authenticate } from '../middleware/auth.js';
 import { validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 
@@ -15,7 +16,7 @@ const telemetrySchema = z.object({
 // 1. POST TELEMETRY DATA (IoT)
 // POST /api/iot/telemetry/:id
 // ============================================================================
-router.post('/telemetry/:id', validateParams(paramIdSchema), async (req, res) => {
+router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
   try {
     const parseResult = telemetrySchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -43,6 +44,10 @@ router.post('/telemetry/:id', validateParams(paramIdSchema), async (req, res) =>
 
     if (!load.requires_refrigeration) {
       return res.status(400).json({ error: 'Load does not require refrigeration' });
+    }
+
+    if (req.user.role !== 'admin' && load.customer_id !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied for this load' });
     }
 
     // Insert telemetry

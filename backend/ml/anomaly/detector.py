@@ -5,7 +5,7 @@ import json
 import logging
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-from models import LSTMAutoencoder
+from .models import LSTMAutoencoder
 from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)

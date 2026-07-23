@@ -1,0 +1,66 @@
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: api-intentions
+  namespace: truxify
+spec:
+  destination:
+    name: api-service
+  sources:
+    - name: ml-service
+      action: allow
+      description: "Allow ML service to call API"
+    - name: web-service
+      action: allow
+      description: "Allow web service to call API"
+    - name: "*"
+      action: deny
+      description: "Deny all others"
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: ml-intentions
+  namespace: truxify
+spec:
+  destination:
+    name: ml-service
+  sources:
+    - name: api-service
+      action: allow
+      description: "Allow API to call ML"
+    - name: "*"
+      action: deny
+      description: "Deny all others"
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: db-intentions
+  namespace: truxify
+spec:
+  destination:
+    name: db-service
+  sources:
+    - name: api-service
+      action: allow
+      description: "Allow API to call DB"
+    - name: "*"
+      action: deny
+      description: "Deny all others"
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceIntentions
+metadata:
+  name: all-intentions
+  namespace: truxify
+spec:
+  destination:
+    name: "*"
+  sources:
+    - name: "api-service"
+      action: allow
+    - name: "ml-service"
+      action: allow
+    - name: "web-service"
+      action: allow

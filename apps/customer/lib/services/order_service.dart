@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../core/api_client.dart';
 
@@ -7,20 +6,41 @@ class OrderService {
     ApiClient? apiClient,
   }) : _apiClient = apiClient ?? ApiClient();
 
-  static const String defaultApiBaseUrl = String.fromEnvironment(
-    'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
-  );
-
   final ApiClient _apiClient;
 
   String _encodePathSegment(String value) => Uri.encodeComponent(value);
 
+  List<Map<String, dynamic>> _mapList(dynamic value, String label) {
+    if (value is! List) {
+      throw StateError('Unexpected $label response type');
+    }
+
+    return value.map((item) {
+      if (item is Map<String, dynamic>) {
+        return item;
+      }
+      if (item is Map) {
+        return Map<String, dynamic>.from(item);
+      }
+      throw StateError('Unexpected $label item type');
+    }).toList(growable: false);
+  }
+
+  List<Map<String, dynamic>> _timelineFromResponse(dynamic body) {
+    if (body is Map<String, dynamic>) {
+      return _mapList(body['timeline'], 'order timeline');
+    }
+    return _mapList(body, 'order timeline');
+  }
+
   List<Map<String, dynamic>> _historyFromResponse(dynamic body) {
     if (body is Map<String, dynamic>) {
-      return List<Map<String, dynamic>>.from(body['history'] as List? ?? []);
+      final history = body['history'];
+      return history == null
+          ? <Map<String, dynamic>>[]
+          : _mapList(history, 'order history');
     }
-    return List<Map<String, dynamic>>.from(body as List);
+    return _mapList(body, 'order history');
   }
 
   Future<String> createOrder({
@@ -36,6 +56,9 @@ class OrderService {
     String? paymentMethodId,
     String? upiId,
     DateTime? pickupDate,
+    bool requiresRefrigeration = false,
+    double? targetTemperatureMin,
+    double? targetTemperatureMax,
   }) async {
     try {
       final body = await _apiClient.post(
@@ -53,6 +76,9 @@ class OrderService {
           'weight_tonnes': weightTonnes,
           'payment_method_id': paymentMethodId,
           'upi_id': upiId,
+          if (requiresRefrigeration) 'requires_refrigeration': true,
+          if (targetTemperatureMin != null) 'target_temperature_min': targetTemperatureMin,
+          if (targetTemperatureMax != null) 'target_temperature_max': targetTemperatureMax,
         },
       ) as Map<String, dynamic>?;
 
@@ -140,7 +166,7 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/${_encodePathSegment(orderDisplayId)}/timeline',
       );
-      return List<Map<String, dynamic>>.from(body as List);
+      return _timelineFromResponse(body);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -153,8 +179,14 @@ class OrderService {
       final body = await _apiClient.get(
         '/api/orders/my/active',
       );
-      if (body is! List) return <Map<String, dynamic>>[];
-      return List<Map<String, dynamic>>.from(body);
+      if (body is! List) {
+        throw StateError('Unexpected active orders response type');
+      }
+      return body.map((item) {
+        if (item is Map<String, dynamic>) return item;
+        if (item is Map) return Map<String, dynamic>.from(item);
+        throw StateError('Unexpected active order item type');
+      }).toList(growable: false);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -170,6 +202,10 @@ class OrderService {
     required double weightTonnes,
     bool isFragile = false,
     bool isStackable = true,
+    String? truckType,
+    double? minCapacity,
+    double? maxCapacity,
+    String? materialType,
   }) async {
     final params = <String, String>{
       'pickup_lat': pickupLat.toString(),
@@ -179,6 +215,10 @@ class OrderService {
       'weight_tonnes': weightTonnes.toString(),
       'is_fragile': isFragile.toString(),
       'is_stackable': isStackable.toString(),
+      if (truckType != null) 'truck_type': truckType,
+      if (minCapacity != null) 'min_capacity': minCapacity.toString(),
+      if (maxCapacity != null) 'max_capacity': maxCapacity.toString(),
+      if (materialType != null) 'material_type': materialType,
     };
 
     final path = Uri(path: '/api/trucks/search', queryParameters: params).toString();
@@ -187,7 +227,10 @@ class OrderService {
       final body = await _apiClient.get(
         path,
       );
-      final List<dynamic> listBody = body is List<dynamic> ? body : <dynamic>[];
+      if (body is! List) {
+        throw StateError('Unexpected truck search response type');
+      }
+      final listBody = body;
       return listBody.cast<Map<String, dynamic>>();
     } on ApiException catch (e) {
       throw StateError(e.message);
@@ -246,19 +289,6 @@ class OrderService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> fetchHistoryOrders() async {
-    try {
-      final body = await _apiClient.get(
-        '/api/orders/history',
-      );
-      return _historyFromResponse(body);
-    } on ApiException catch (e) {
-      throw StateError(e.message);
-    } catch (e) {
-      throw StateError('Failed to fetch history orders: $e');
-    }
-  }
-
   Future<String?> fetchDriverName(String driverId) async {
     try {
       final body = await _apiClient.get(
@@ -295,6 +325,32 @@ class OrderService {
       throw StateError(e.message);
     } catch (e) {
       throw StateError('Failed to fetch driver location: $e');
+    }
+  }
+
+  /// Submits a star rating (and optional comment) for a delivered order.
+  ///
+  /// Calls `POST /api/orders/:id/ratings` with `{ stars, comment }`.
+  /// Returns the rating payload from the server on success.
+  /// Throws [StateError] on API or network failure.
+  Future<Map<String, dynamic>> submitRating({
+    required String orderId,
+    required int stars,
+    String? comment,
+  }) async {
+    try {
+      final body = await _apiClient.post(
+        '/api/orders/${_encodePathSegment(orderId)}/ratings',
+        body: <String, dynamic>{
+          'stars': stars,
+          if (comment != null && comment.isNotEmpty) 'comment': comment,
+        },
+      );
+      return body is Map<String, dynamic> ? body : <String, dynamic>{};
+    } on ApiException catch (e) {
+      throw StateError(e.message);
+    } catch (e) {
+      throw StateError('Failed to submit rating: $e');
     }
   }
 

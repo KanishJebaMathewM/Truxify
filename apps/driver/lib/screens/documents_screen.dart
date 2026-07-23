@@ -6,6 +6,14 @@ import 'package:truxify_driver/core/driver_session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 
+class DocumentsParseException implements Exception {
+  const DocumentsParseException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class DriverDocument {
   const DriverDocument({
     required this.id,
@@ -121,22 +129,36 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Future<List<DriverDocument>> _fetchDocuments() async {
-    final driverId = DriverSession.driverId;
+  final driverId = DriverSession.driverId;
 
-    if (driverId.isEmpty) {
-      throw AuthException('No authenticated user. Please log in again.');
-    }
+  if (driverId.isEmpty) {
+    throw AuthException('No authenticated user. Please log in again.');
+  }
 
-    final response = await _supabase
+  try {
+    final dynamic response = await _supabase
         .from('documents')
         .select()
         .eq('user_id', driverId)
         .order('created_at', ascending: false);
 
-    return (response as List)
-        .map((row) => DriverDocument.fromMap(row as Map<String, dynamic>))
-        .toList();
+    final documents = <DriverDocument>[];
+    for (final dynamic row in response as Iterable) {
+      if (row is! Map) continue;
+      try {
+        documents.add(DriverDocument.fromMap(Map<String, dynamic>.from(row)));
+      } catch (_) {
+        continue;
+      }
+    }
+
+    return documents;
+  } on AuthException {
+    rethrow;
+  } catch (e) {
+    throw DocumentsParseException('Unable to read documents: $e');
   }
+}
 
   bool _requireAuth(BuildContext context) {
     if (DriverSession.driverId.isNotEmpty) return true;
@@ -591,6 +613,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               final isAuthError = snapshot.error is AuthException;
+              final isParseError = snapshot.error is DocumentsParseException;
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(32),
@@ -608,7 +631,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       Text(
                         isAuthError
                             ? 'Session Expired'
-                            : 'Could Not Load Documents',
+                            : isParseError
+                                ? 'Could Not Read Documents'
+                                : 'Could Not Load Documents',
                         style: GoogleFonts.dmSans(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -619,7 +644,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       Text(
                         isAuthError
                             ? 'Please log in again to view your documents.'
-                            : 'Something went wrong. Please try again later.',
+                            : isParseError
+                                ? 'We had trouble reading your documents. Please try again later.'
+                                : 'Something went wrong. Please try again later.',
                         style: GoogleFonts.dmSans(
                           fontSize: 13,
                           color: TruxifyColors.secondaryText,

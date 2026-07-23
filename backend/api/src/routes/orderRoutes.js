@@ -1,12 +1,154 @@
-import express from 'express';
-import rateLimit from 'express-rate-limit';
-import crypto from 'crypto';
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     CreateOrderRequest:
+ *       type: object
+ *       properties:
+ *         pickup_address:
+ *           type: string
+ *         drop_address:
+ *           type: string
+ *         pickup_lat:
+ *           type: number
+ *         pickup_lng:
+ *           type: number
+ *         drop_lat:
+ *           type: number
+ *         drop_lng:
+ *           type: number
+ *         weight_tonnes:
+ *           type: number
+ *         goods_type:
+ *           type: string
+ *         is_fragile:
+ *           type: boolean
+ *         is_stackable:
+ *           type: boolean
+ *     OrderListResponse:
+ *       type: object
+ *       properties:
+ *         page:
+ *           type: integer
+ *         limit:
+ *           type: integer
+ *         total:
+ *           type: integer
+ *         totalPages:
+ *           type: integer
+ *         orders:
+ *           type: array
+ *           items:
+ *             type: object
+ *     SubmitBidRequest:
+ *       type: object
+ *       required:
+ *         - amount
+ *       properties:
+ *         amount:
+ *           type: number
+ *           description: Bid amount in paisa
+ *     SubmitRatingRequest:
+ *       type: object
+ *       required:
+ *         - rating
+ *       properties:
+ *         rating:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 5
+ *         review:
+ *           type: string
+ *     AcceptBidResponse:
+ *       type: object
+ *       properties:
+ *         message:
+ *           type: string
+ *         order:
+ *           type: object
+ *     UpdateMilestoneRequest:
+ *       type: object
+ *       required:
+ *         - milestone
+ *       properties:
+ *         milestone:
+ *           type: string
+ *     VerifyDeliveryResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *         message:
+ *           type: string
+ *     ChangeDropRequest:
+ *       type: object
+ *       required:
+ *         - drop_lat
+ *         - drop_lng
+ *       properties:
+ *         drop_lat:
+ *           type: number
+ *         drop_lng:
+ *           type: number
+ *         drop_address:
+ *           type: string
+ *     CancelOrderRequest:
+ *       type: object
+ *       required:
+ *         - reason
+ *       properties:
+ *         reason:
+ *           type: string
+ *     PredictDemandRequest:
+ *       type: object
+ *       properties:
+ *         pickup_lat:
+ *           type: number
+ *         pickup_lng:
+ *           type: number
+ *         drop_lat:
+ *           type: number
+ *         drop_lng:
+ *           type: number
+ *     DriverLocationResponse:
+ *       type: object
+ *       properties:
+ *         driver_id:
+ *           type: string
+ *         lat:
+ *           type: number
+ *         lng:
+ *           type: number
+ *         updated_at:
+ *           type: string
+ *     OrderRouteResponse:
+ *       type: object
+ *       properties:
+ *         route:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               lat:
+ *                 type: number
+ *               lng:
+ *                 type: number
+ *         distance_km:
+ *           type: number
+ *         duration_minutes:
+ *           type: number
+ */
 
-import { bidLimiter, userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
-import { redisClient, mongoDb } from '../config/db.js';
-import { supabase } from '../config/db.js';
-import { OrderRepository } from '../repositories/orderRepository.js';
+import express from 'express';
+import multer from 'multer';
+import crypto from 'crypto';
+import rateLimit from 'express-rate-limit';
+
+import { bidLimiter, userLimiter, userKeyGenerator, createStore } from '../middleware/rateLimiter.js';
+import { mongoDb, supabase, redisClient, createUserClient } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
+import { validateDocumentBuffer } from '../lib/documentValidation.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 import {
@@ -22,69 +164,31 @@ import {
   cancelOrderSchema,
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
+import { expireDeliveryOtps } from '../services/notificationService.js';
+import { DomainError } from '../services/order/domainError.js';
+import { predictDemand, predictPrice } from '../services/ml.js';
+import { requireIdempotency } from '../middleware/idempotency.js';
+import { acquireLock, releaseLock } from '../lib/redisLock.js';
+import logger from '../middleware/logger.js';
+import { auditLog } from '../middleware/auditLog.js';
 import {
-  escrowRefund,
+  orderRepository,
+  orderValidationService,
+  orderTimelineService,
+  orderMilestoneService,
+  orderLifecycleService,
+  deliveryVerificationService,
   buildDepositTx,
   recordDepositTx,
   submitEscrowRefund,
   confirmEscrowRefund,
-} from '../services/escrow.js';
-import { BidAcceptanceService, DomainError } from '../services/order/bidAcceptanceService.js';
-import { DeliveryVerificationService } from '../services/order/deliveryVerificationService.js';
-import { expireDeliveryOtps } from '../services/notificationService.js';
-import { OrderTimelineService } from '../services/order/orderTimelineService.js';
-import { createOrder } from '../services/order/orderCreationService.js';
-import {
-  sendDeliveryOtpNotification,
-  storeDeliveryOtp,
-  getActiveDeliveryOtp,
-  verifyDeliveryOtp,
-  expireDeliveryOtps
-} from '../services/notificationService.js';
-import { predictDemand } from '../services/ml.js';
-import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
-import { DomainError } from '../services/order/domainError.js';
-import { OrderValidationService } from '../services/order/orderValidationService.js';
-import { OrderMilestoneService } from '../services/order/orderMilestoneService.js';
-import { expireDeliveryOtps } from '../services/notificationService.js';
-import {
-  verifyDelivery,
-  resendDeliveryOtp,
-} from '../services/order/deliveryVerificationService.js';
-import { predictDemand, predictPrice } from '../services/ml.js';
-import { requireIdempotency } from '../middleware/idempotency.js';
-import logger from '../middleware/logger.js';
-import { OrderRepository } from '../repositories/orderRepository.js';
-import { OrderTimelineService } from '../services/order/orderTimelineService.js';
-import { BidAcceptanceService } from '../services/order/bidAcceptanceService.js';
-import { OrderLifecycleService } from '../services/order/orderLifecycleService.js';
+  escrowRefund,
+} from '../core/container.js';
+import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
+import { computeOrderPricing } from '../lib/pricing.js';
 
 const router = express.Router();
-const orderRepository = new OrderRepository(supabase);
-
-const orderValidationService = new OrderValidationService({ supabase, logger });
-const orderMilestoneService = new OrderMilestoneService({ orderValidationService });
-
-const bidAcceptanceService = new BidAcceptanceService({
-  orderRepository,
-  buildDepositTxFn: buildDepositTx,
-  recordDepositTxFn: recordDepositTx,
-  escrowRefundFn: escrowRefund,
-  logger,
-});
-const deliveryVerificationService = new DeliveryVerificationService(orderRepository);
-const orderTimelineService = new OrderTimelineService({
-  supabase,
-  logger,
-});
-
-const orderLifecycleService = new OrderLifecycleService({
-  orderRepository,
-  orderTimelineService,
-  bidAcceptanceService,
-});
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+router.use(userLimiter);
 
 const verifyDeliveryLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -119,12 +223,7 @@ const predictDemandLimiter = rateLimit({
 const telemetryLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: process.env.NODE_ENV === 'test' ? 1000 : 30,
-  keyGenerator: (req) => {
-    if (!req.user || !req.user.id) {
-      return req.ip ? safeIpKeyGenerator(req) : 'unknown-ip';
-    }
-    return req.user.id;
-  },
+  keyGenerator: userKeyGenerator,
   store: createStore('rl:telemetry:'),
   standardHeaders: true,
   legacyHeaders: false,
@@ -154,180 +253,31 @@ const changeDropLimiter = rateLimit({
 // ============================================================================
 // 1. CREATE AN ORDER (CUSTOMER)
 // ============================================================================
-router.post('/', authenticate, userLimiter, requireRole(['customer']), validateBody(createOrderSchema), async (req, res) => {
-  const {
-    pickup_address, pickup_lat, pickup_lng,
-    drop_address, drop_lat, drop_lng,
-    goods_type, weight_tonnes,
-  } = req.body;
-
-  if (pickup_address && pickup_address.length > 200) {
-    return res.status(400).json({ error: 'pickup_address too long (max 200 chars)' });
-  }
-  if (drop_address && drop_address.length > 200) {
-    return res.status(400).json({ error: 'drop_address too long (max 200 chars)' });
-  }
-
-  if (!pickup_address || pickup_lat == null || pickup_lng == null || !drop_address || drop_lat == null || drop_lng == null || !goods_type || weight_tonnes == null) {
-    return res.status(400).json({ error: 'Missing required routing or cargo specification fields.' });
-  }
-
+/**
+ * @openapi
+ * /api/orders:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Create a new order
+ *     description: Creates a new order with pickup/drop locations and cargo details. Customer role required.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateOrderRequest'
+ *     responses:
+ *       201:
+ *         description: Order created
+ *       400:
+ *         description: Validation error
+ */
+router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requireIdempotency(86400), validateBody(createOrderSchema), async (req, res) => {
   try {
-    const routeEstimate = await getRouteEstimate({
-      pickupLat: Number(pickup_lat),
-      pickupLng: Number(pickup_lng),
-      dropLat: Number(drop_lat),
-      dropLng: Number(drop_lng),
-    });
-    pricing = computeOrderPricing({
-      pickupLat:  Number(pickup_lat),
-      pickupLng:  Number(pickup_lng),
-      dropLat:    Number(drop_lat),
-      dropLng:    Number(drop_lng),
-      weightTonnes: Number(weight_tonnes),
-      roadDistanceKm: routeEstimate?.distanceKm,
-      isFragile:   Boolean(is_fragile),
-      isStackable: Boolean(is_stackable),
-    });
-  } catch (pricingErr) {
-    logger.error('Pricing computation error:', pricingErr.message);
-    return res.status(400).json({
-      error: 'Unable to compute freight pricing for the given route/cargo.',
-      details: pricingErr.message,
-    });
-  }
-
-  let estimatedPrice = null;
-  try {
-    const mlResult = await predictPrice({
-      distanceKm: pricing.distanceKm,
-      cargoWeightKg: Number(weight_tonnes) * 1000,
-      routeOrigin: pickup_address,
-      routeDestination: drop_address,
-    });
-    if (!mlResult || typeof mlResult.estimated_price !== 'number' || mlResult.estimated_price <= 0) {
-      throw new Error(`Invalid or non-positive price prediction: ${JSON.stringify(mlResult)}`);
-    }
-    estimatedPrice = Math.round(mlResult.estimated_price * 100);
-  } catch (mlErr) {
-    logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
-  }
-
-  const MAX_ID_RETRIES = 3;
-  let order = null;
-  let orderErr = null;
-  let orderDisplayId = null;
-
-  try {
-    for (let attempt = 0; attempt < MAX_ID_RETRIES; attempt++) {
-      orderDisplayId = generateOrderDisplayId();
-      const result = await orderRepository
-        .createOrder({
-      const result = await supabase
-        .from('orders')
-        .insert({
-          order_display_id: orderDisplayId,
-          customer_id: req.user.id,
-          status: 'pending',
-          pickup_address, pickup_lat, pickup_lng,
-          drop_address, drop_lat, drop_lng,
-          pickup_date, pickup_time,
-          goods_type, weight_tonnes, length_ft, width_ft, height_ft,
-          is_stackable, is_fragile, special_requirements,
-          base_freight: pricing.baseFreight,
-          toll_estimate: pricing.tollEstimate,
-          platform_fee: pricing.platformFee,
-          total_amount: pricing.totalAmount,
-          estimated_price: estimatedPrice,
-          payment_method_id, upi_id
-        });
-        })
-        .select('id, order_display_id, status, created_at')
-        .single();
-
-      order = result.data;
-      orderErr = result.error;
-
-      if (!orderErr || orderErr.code !== '23505') break;
-      logger.warn(`[Orders] display ID collision on ${orderDisplayId}, retrying (attempt ${attempt + 1}/${MAX_ID_RETRIES})`);
-    }
-
-    if (orderErr) {
-      logger.error('Order Insertion Error:', orderErr.message);
-      return res.status(500).json({ error: 'Failed to create order record.', details: orderErr.message });
-    }
-
-    const milestones = [
-      { order_display_id: orderDisplayId, milestone: 'Order Placed', milestone_time: new Date().toISOString(), completed: true, sort_order: 10 },
-      { order_display_id: orderDisplayId, milestone: 'Truck Assigned', milestone_time: null, completed: false, sort_order: 20 },
-      { order_display_id: orderDisplayId, milestone: 'En Route to Pickup', milestone_time: null, completed: false, sort_order: 30 },
-      { order_display_id: orderDisplayId, milestone: 'Arrived at Pickup', milestone_time: null, completed: false, sort_order: 35 },
-      { order_display_id: orderDisplayId, milestone: 'Goods Loaded', milestone_time: null, completed: false, sort_order: 40 },
-      { order_display_id: orderDisplayId, milestone: 'In Transit', milestone_time: null, completed: false, sort_order: 50 },
-      { order_display_id: orderDisplayId, milestone: 'Arriving', milestone_time: null, completed: false, sort_order: 55 },
-      { order_display_id: orderDisplayId, milestone: 'Delivered', milestone_time: null, completed: false, sort_order: 60 }
-    ];
-
-    const { error: timelineErr } = await orderRepository.createTimeline(milestones);
-
-    if (timelineErr) {
-      logger.error('Timeline Insertion Error:', timelineErr.message);
-      await orderRepository.deleteOrder(order.id);
-      return res.status(500).json({ error: 'Failed to create order timeline.', details: timelineErr.message });
-    }
-
-    const { error: offerErr } = await orderRepository
-      .createLoadOffer({
-    try {
-      await orderTimelineService.createOrderTimeline(orderDisplayId);
-    } catch (timelineErr) {
-      await supabase.from('orders').delete().eq('id', order.id);
-      if (timelineErr instanceof DomainError) {
-        return res.status(timelineErr.status).json(timelineErr.payload);
-      }
-      return res.status(500).json({ error: 'Failed to create order timeline.', details: timelineErr.message });
-    }
-
-    const { error: offerErr } = await supabase
-      .from('load_offers')
-      .insert({
-        order_display_id: orderDisplayId,
-        customer_id: req.user.id,
-        customer_name: req.user.fullName || 'Customer',
-        route_label: `${pickup_address.split(',')[0]} → ${drop_address.split(',')[0]}`,
-        route_subtitle: `${weight_tonnes} tonnes • ${goods_type}`,
-        pickup_address, pickup_lat, pickup_lng,
-        drop_address, drop_lat, drop_lng,
-        goods_type,
-        weight: `${weight_tonnes} tonnes`,
-        freight_value: pricing.totalAmount,
-        fuel_cost: pricing.fuelCost,
-        toll_cost: pricing.tollEstimate,
-        net_profit: pricing.netProfit,
-        extra_distance_km: pricing.distanceKm,
-        status: 'available'
-      });
-
-    if (offerErr) {
-      logger.error('Load Offer Insertion Error:', offerErr.message);
-      await orderRepository.deleteTimeline(orderDisplayId);
-      await orderRepository.deleteOrder(order.id);
-      return res.status(500).json({ error: 'Failed to create load offer.', details: offerErr.message });
-    }
-
-      await orderTimelineService.deleteOrderTimeline(orderDisplayId);
-      await supabase.from('orders').delete().eq('id', order.id);
-      return res.status(500).json({ error: 'Failed to create load offer.', details: offerErr.message });
-    }
-
-    const result = await createOrder({
-      orderData: req.body,
-      userId: req.user.id,
-      user: req.user,
-    });
-    return res.status(201).json(result);
     const { order } = await orderLifecycleService.createOrder(req.user.id, req.user.fullName || 'Customer', req.body);
-    res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
+    return res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
   } catch (err) {
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
@@ -340,20 +290,21 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), validateB
 // ============================================================================
 // 2. FETCH MY ACTIVE ORDERS (CUSTOMER)
 // ============================================================================
-router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/my/active:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Get customer's active orders
+ *     description: Returns active orders for the authenticated customer.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Active orders
+ */
+router.get('/my/active', authenticate, userLimiter, requirePolicy('order:view-active'), async (req, res) => {
   try {
-    const { data: orders, error } = await orderRepository
-      .findOrdersByCustomer(req.user.id, '*', activeStatuses, 'pickup_date', false);
-
-    if (error) return res.status(500).json({ error: 'Failed to fetch active orders.', details: error.message });
-
-    const driverIds = [...new Set(orders.filter(o => o.driver_id).map(o => o.driver_id))];
-    if (driverIds.length > 0) {
-      const { data: profiles } = await orderRepository.findProfilesByIds(driverIds, 'id, full_name');
-      const driverMap = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
-      orders.forEach(o => { o.driver_name = driverMap[o.driver_id] || 'Driver Assigned'; });
-    }
-
     const orders = await orderLifecycleService.getActiveOrders(req.user.id);
     res.json(orders);
   } catch (err) {
@@ -368,21 +319,35 @@ router.get('/my/active', authenticate, userLimiter, requireRole(['customer']), a
 // ============================================================================
 // 3. FETCH LOAD OFFERS (MARKETPLACE)
 // ============================================================================
+/**
+ * @openapi
+ * /api/orders/load-offers:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Get order load offers
+ *     description: Returns load offers related to orders for the authenticated user.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Load offers
+ */
 router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-  const from = (page - 1) * limit;
-  const to = page * limit - 1;
   try {
-    const { data: offers, error } = await orderRepository.findLoadOffers({ is_en_route: false });
-    const { data: offers, error } = await supabase
-      .from('load_offers')
-      .select('*')
-      .eq('is_en_route', false)
-      .order('created_at', { ascending: false })
-      .range(from, to);
+    const { data: offers, error } = await orderRepository.findLoadOffers(
+      { is_en_route: false },
+      { pagination: { page, limit } }
+    );
 
     if (error) return res.status(500).json({ error: 'Failed to fetch load offers.', details: error.message });
+
+    const cacheKey = `load-offers:${page}:${limit}`;
+    if (redisClient) {
+      await redisClient.set(cacheKey, JSON.stringify(offers), 'EX', 120).catch(() => {});
+    }
+
     res.json(offers);
   } catch (err) {
     logger.error("[orderRoutes] Failed to fetch load offers:", err.message);
@@ -393,21 +358,35 @@ router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
 // ============================================================================
 // 4. FETCH EN-ROUTE LOADS (MARKETPLACE)
 // ============================================================================
+/**
+ * @openapi
+ * /api/orders/load-offers/en-route:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Get en-route load offers
+ *     description: Returns load offers along the driver's current route.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: En-route offers
+ */
 router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
-  const from = (page - 1) * limit;
-  const to = page * limit - 1;
   try {
-    const { data: offers, error } = await orderRepository.findLoadOffers({ is_en_route: true });
-    const { data: offers, error } = await supabase
-      .from('load_offers')
-      .select('*')
-      .eq('is_en_route', true)
-      .order('created_at', { ascending: false })
-      .range(from, to);
+    const { data: offers, error } = await orderRepository.findLoadOffers(
+      { is_en_route: true },
+      { pagination: { page, limit } }
+    );
 
     if (error) return res.status(500).json({ error: 'Failed to fetch en-route loads.', details: error.message });
+
+    const cacheKey = `load-offers:en-route:${page}:${limit}`;
+    if (redisClient) {
+      await redisClient.set(cacheKey, JSON.stringify(offers), 'EX', 120).catch(() => {});
+    }
+
     res.json(offers);
   } catch (err) {
     logger.error("[orderRoutes] Failed to fetch en-route loads:", err.message);
@@ -418,7 +397,24 @@ router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) 
 // ============================================================================
 // 5. FETCH MY ORDER HISTORY (CUSTOMER)
 // ============================================================================
-router.get('/history', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/history:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Get customer's order history
+ *     description: Returns paginated order history for the authenticated customer.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Order history
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderListResponse'
+ */
+router.get('/history', authenticate, userLimiter, requirePolicy('order:view-history'), async (req, res) => {
   try {
     const pageParam = req.query.page ?? '1';
     const limitParam = req.query.limit ?? '10';
@@ -433,25 +429,6 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
       return res.status(400).json({ error: 'limit must be between 1 and 100' });
     }
 
-    const { data: history, error, count } = await orderRepository
-      .findOrdersWithCount(req.user.id, 'id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, goods_type, driver_id, eta, created_at', { page, limit });
-
-    if (error) return res.status(500).json({ error: 'Failed to fetch history.', details: error.message });
-
-    const driverIds = [...new Set((history || []).filter(o => o.driver_id).map(o => o.driver_id))];
-    if (driverIds.length > 0) {
-      const { data: profiles } = await orderRepository.findProfilesByIds(driverIds, 'id, full_name');
-      const driverMap = Object.fromEntries((profiles || []).map(p => [p.id, p.full_name]));
-      (history || []).forEach(o => { o.driver_name = driverMap[o.driver_id] || 'Driver Assigned'; });
-    }
-
-    res.json({
-      page,
-      limit,
-      total: count || 0,
-      totalPages: Math.ceil((count || 0) / limit),
-      history: history || []
-    });
     const result = await orderLifecycleService.getOrderHistory(req.user.id, page, limit);
     res.json(result);
   } catch (err) {
@@ -466,26 +443,37 @@ router.get('/history', authenticate, userLimiter, requireRole(['customer']), asy
 // ============================================================================
 // 6. FETCH SPECIFIC ORDER DETAILS AND TIMELINE (CUSTOMER OR DRIVER)
 // ============================================================================
+/**
+ * @openapi
+ * /api/orders/{id}:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Get order details
+ *     description: Returns details for a specific order by ID.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Order ID (UUID or display ID)
+ *     responses:
+ *       200:
+ *         description: Order details
+ *       404:
+ *         description: Order not found
+ */
 router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
-    const result = await orderRepository.findOrderByAnyId(orderId, '*');
-    const order = result.data;
-    const orderErr = result.error;
-    if (orderErr) return res.status(500).json({ error: 'Query failed.', details: orderErr.message });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-
-    if (order.customer_id !== req.user.id && order.driver_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    }
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
-    orderValidationService.assertOrderAccess(order, req.user.id);
+    orderValidationService.assertOrderAccess(order, req.user);
 
     const responseOrder = { ...order };
-
-    const { data: timeline } = await orderRepository.getTimeline(order.order_display_id);
     const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
 
     let driverProfile = null;
@@ -515,75 +503,84 @@ router.get('/:id', authenticate, userLimiter, validateParams(paramIdSchema), asy
 // ============================================================================
 // 7. FETCH ORDER TIMELINE (CUSTOMER OR DRIVER)
 // ============================================================================
+/**
+ * @openapi
+ * /api/orders/{id}/timeline:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Get order timeline
+ *     description: Returns the event timeline for a specific order.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Order timeline events
+ */
 router.get('/:id/timeline', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
-    let order = null;
-    if (uuidRegex.test(orderId)) {
-      const { data: orderById } = await orderRepository.findOrderForTimeline(orderId);
-      order = orderById;
-    }
-    if (!order) {
-      const { data: orderByDisplay } = await orderRepository.findOrderByDisplayForTimeline(orderId);
-      order = orderByDisplay;
-    }
-
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-
-    if (order.customer_id !== req.user.id && order.driver_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You do not own or are not assigned to this order.' });
-    }
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'customer_id, driver_id, order_display_id');
     orderValidationService.assertOrderFound(order);
-    orderValidationService.assertOrderAccess(order, req.user.id);
+    orderValidationService.assertOrderAccess(order, req.user);
 
-    const { data: timeline, error: timelineErr } = await orderRepository.getTimeline(order.order_display_id);
-
-    if (timelineErr) return res.status(500).json({ error: 'Failed to fetch timeline.', details: timelineErr.message });
-    res.json(timeline || []);
-    try {
-      const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
-      res.json(timeline);
-    } catch (timelineErr) {
-      if (timelineErr instanceof DomainError) {
-        return res.status(timelineErr.status).json(timelineErr.payload);
-      }
-      return res.status(500).json({ error: 'Failed to fetch timeline.' });
-    }
+    const timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
+    res.json(timeline);
   } catch (err) {
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
     }
-    logger.error("[orderRoutes] Failed to fetch order timeline:", err.message);
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[orderRoutes] Failed to fetch timeline:", err.message);
+    return res.status(500).json({ error: 'Failed to fetch timeline.' });
   }
 });
 
 // ============================================================================
 // 8. SUBMIT BID FOR LOAD OFFER (DRIVER)
 // ============================================================================
-router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/{id}/bids:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Submit a bid on an order
+ *     description: Allows a driver to place a bid on an order. Rate-limited per driver.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/SubmitBidRequest'
+ *     responses:
+ *       201:
+ *         description: Bid submitted
+ *       400:
+ *         description: Validation error
+ *       429:
+ *         description: Rate limited
+ */
+router.post('/:id/bids', authenticate, userLimiter, requirePolicy('bid:submit'), bidLimiter, validateParams(paramIdSchema), validateBody(submitBidSchema), async (req, res) => {
   try {
-    const { data: offer, error: offerErr } = await orderRepository.findLoadOfferById(loadOfferId);
-    if (offerErr || !offer) return res.status(404).json({ error: 'Load offer not found.' });
-    if (offer.status !== 'available') return res.status(410).json({ error: 'Load is no longer available for bidding.' });
-    if (offer.customer_id === req.user.id) return res.status(403).json({ error: 'You cannot bid on your own load offer' });
-
-    const { data: driverDetails, error: driverDetailsErr } = await orderRepository.findDriverDetailMinimal(req.user.id);
-    if (driverDetailsErr) return res.status(500).json({ error: 'Failed to verify driver profile.', details: driverDetailsErr.message });
-    if (!driverDetails?.truck_id) return res.status(400).json({ error: 'You must assign a valid truck to your profile before bidding on loads' });
-
-    const { data: truck, error: truckErr } = await orderRepository.findTruckById(driverDetails.truck_id);
-    if (truckErr) return res.status(500).json({ error: 'Failed to verify assigned truck.', details: truckErr.message });
-    if (!truck) return res.status(400).json({ error: 'Assigned truck record could not be found' });
-
-    const { data: existingBid, error: existingBidErr } = await orderRepository.findExistingBid(loadOfferId, req.user.id, 'pending');
-    if (existingBidErr) return res.status(500).json({ error: 'Failed to verify existing bids.', details: existingBidErr.message });
-    if (existingBid) return res.status(409).json({ error: 'You already have a pending bid for this load.' });
+    const loadOfferId = req.params.id;
+    const { bid_amount } = req.body;
     const offer = await orderValidationService.assertLoadOfferAvailable(loadOfferId);
     orderValidationService.assertNotOwnLoad(offer.customer_id, req.user.id);
     await orderValidationService.assertTruckAssigned(req.user.id);
+    await orderValidationService.assertHosCompliant(req.user.id);
     await orderValidationService.assertNoDuplicateBid(loadOfferId, req.user.id);
 
     const { data: bid, error: bidErr } = await orderRepository.createBid({ load_id: loadOfferId, driver_id: req.user.id, bid_amount, status: 'pending' });
@@ -602,39 +599,38 @@ router.post('/:id/bids', authenticate, userLimiter, requireRole(['driver']), bid
 // ============================================================================
 // 9. SUBMIT RATING FOR A DELIVERED ORDER (CUSTOMER)
 // ============================================================================
-router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/{id}/ratings:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Submit a rating for an order
+ *     description: Allows a customer to submit a rating and review for a completed order.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/SubmitRatingRequest'
+ *     responses:
+ *       201:
+ *         description: Rating submitted
+ *       400:
+ *         description: Validation error
+ */
+router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:submit-rating'), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
   try {
-    const { data: order, error: orderErr } = await orderRepository.findOrderById(orderId, 'id, order_display_id, customer_id, driver_id, status');
+    const orderId = req.params.id;
+    const { stars, comment } = req.body;
 
-    if (orderErr) {
-      return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
-    }
-
-    if (!order) {
-      return res.status(404).json({ error: 'Order not found.' });
-    }
-
-    if (order.customer_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    }
-
-    if (!['delivered', 'payment_released'].includes(order.status)) {
-      return res.status(400).json({ error: 'Order must be delivered before a rating can be submitted.' });
-    }
-
-    if (!order.driver_id) {
-      return res.status(400).json({ error: 'Order does not have an assigned driver.' });
-    }
-
-    const { data: existingRating, error: ratingCheckErr } = await orderRepository.findRatingByOrder(order.order_display_id, req.user.id);
-
-    if (ratingCheckErr) {
-      return res.status(500).json({ error: 'Failed to verify existing rating.', details: ratingCheckErr.message });
-    }
-
-    if (existingRating) {
-      return res.status(409).json({ error: 'A rating has already been submitted for this order.' });
-    }
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, customer_id, driver_id, status');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
@@ -647,21 +643,16 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
       p_driver_id: order.driver_id,
       p_stars: stars,
       p_comment: comment,
-    });
+    }, req.token ? createUserClient(req.token) : undefined);
 
     if (rpcErr) {
       return res.status(500).json({ error: 'Failed to submit rating.', details: rpcErr.message });
     }
 
-    // Fetch driver's registered Polygon wallet address for on-chain reputation update.
-    // This is intentionally fire-and-forget — a blockchain failure must never block
-    // the HTTP response. The Supabase rating is the source of truth.
     const { data: driverDetails } = await orderRepository.findDriverWallet(order.driver_id);
-
     const polygonAddress = driverDetails?.polygon_wallet_address ?? null;
 
     if (polygonAddress) {
-      // Fire-and-forget: blockchain confirmation must never block the HTTP response.
       void awardReputationPoints(polygonAddress, stars).catch((repErr) => {
         logger.error('[reputation] On-chain reputation update failed:', repErr.message);
         orderRepository.insertReputationFailure({
@@ -673,9 +664,7 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
         }).catch((dbErr) => logger.error('[reputation] Failed to log failure:', dbErr.message));
       });
     } else {
-      logger.warn(
-        `[reputation] Driver ${order.driver_id} has no polygon_wallet_address — skipping on-chain update.`
-      );
+      logger.warn(`[reputation] Driver ${order.driver_id} has no polygon_wallet_address — skipping on-chain update.`);
     }
 
     return res.status(201).json({
@@ -700,13 +689,31 @@ router.post('/:id/ratings', authenticate, userLimiter, requireRole(['customer'])
 // ============================================================================
 // 10. VIEW BIDS FOR AN ORDER (CUSTOMER)
 // ============================================================================
-router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/{id}/bids:
+ *   get:
+ *     tags: [Orders]
+ *     summary: List bids on an order
+ *     description: Returns all bids for a specific order. Customer role required.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Array of bids
+ */
+router.get('/:id/bids', authenticate, userLimiter, requirePolicy('order:view-bids'), validateParams(paramIdSchema), async (req, res) => {
+  const orderId = req.params.id;
   try {
-    const { data: order } = await orderRepository.findOrderById(orderId, 'order_display_id, customer_id');
-    if (!order || order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'order_display_id, customer_id');
-    orderValidationService.assertOrderFound(order);
-    orderValidationService.assertCustomerOwnership(order, req.user.id);
+    if (!order) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
+    if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
 
     const { data: offer } = await orderRepository.findLoadOfferByOrderDisplayId(order.order_display_id);
     if (!offer) return res.json([]);
@@ -759,15 +766,40 @@ router.get('/:id/bids', authenticate, userLimiter, requireRole(['customer']), va
 // ============================================================================
 // 11. ACCEPT BID (CUSTOMER)
 // ============================================================================
-const bidAcceptanceService = new BidAcceptanceService({
-  supabase,
-  buildDepositTxFn: buildDepositTx,
-  recordDepositTxFn: recordDepositTx,
-  escrowRefundFn: escrowRefund,
-  logger
-});
+/**
+ * @openapi
+ * /api/orders/{id}/bids/{bidId}/accept:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Accept a bid on an order
+ *     description: Accepts a driver's bid for an order. Handles escrow deposit, reputation award, and bid acceptance with idempotency.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: path
+ *         name: bidId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Bid accepted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/AcceptBidResponse'
+ *       400:
+ *         description: Bid acceptance failed
+ *       409:
+ *         description: Bid already accepted or conflict
+ */
 
-router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['customer']), validateParams(acceptBidParamsSchema), async (req, res) => {
+router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requirePolicy('order:accept-bid'), auditLog({ action: 'order:accept-bid', resourceType: 'order' }), requireIdempotency(86400), validateParams(acceptBidParamsSchema), async (req, res) => {
   try {
     const result = await orderLifecycleService.acceptBid(req.params.id, req.params.bidId, req.user.id);
     return res.status(result.status).json(result.body);
@@ -783,99 +815,42 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requireRole(['
 // ============================================================================
 // 12. UPDATE ORDER MILESTONE (ASSIGNED DRIVER)
 // ============================================================================
-router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver']), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/{id}/milestones:
+ *   put:
+ *     tags: [Orders]
+ *     summary: Update order milestones
+ *     description: Updates the milestone status for an order. Rate-limited to 5 updates per minute per driver.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateMilestoneRequest'
+ *     responses:
+ *       200:
+ *         description: Milestone updated
+ *       429:
+ *         description: Rate limited
+ */
+router.put('/:id/milestones', authenticate, userLimiter, requirePolicy('milestone:update'), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   const orderId = req.params.id;
   const { milestone } = req.body;
-
-  const milestoneMap = {
-    'Truck Assigned': 'truck_assigned',
-    'En Route to Pickup': 'en_route_pickup',
-    'Arrived at Pickup': 'arrived_pickup',
-    'Goods Loaded': 'picked_up',
-    'In Transit': 'in_transit',
-    'Arriving': 'arriving',
-  };
 
   try {
     if (milestone === 'Delivered') {
       return res.status(400).json({ error: 'Cannot set Delivered milestone directly. Use /verify-delivery endpoint to confirm delivery.' });
     }
 
-    const orderId = req.params.id;
-    const { milestone } = req.body;
-    const milestoneMap = {
-      'Arrived at Pickup': 'at_pickup',
-      'Goods Loaded': 'loaded',
-      'In Transit': 'in_transit',
-      'Arrived at Drop-off': 'at_dropoff',
-      'Goods Unloaded': 'at_dropoff'
-    };
-    const { data: order, error: orderErr } = await orderRepository.findOrderById(orderId, '*');
-    if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
-    if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
-
-    const { data: timeline, error: tlErr } = await orderRepository.getTimelineWithSortCheck(order.order_display_id);
-    if (tlErr) return res.status(500).json({ error: 'Failed to fetch order timeline.' });
-    let timeline;
-    try {
-      timeline = await orderTimelineService.getOrderTimeline(order.order_display_id);
-    } catch (tlErr) {
-      return res.status(500).json({ error: 'Failed to fetch order timeline.' });
-    }
-
-    const canonicalMilestones = new Set([...Object.keys(milestoneMap), 'Order Placed', 'Delivered']);
-    const lastCompleted = [...timeline].reverse().find(t => t.completed && canonicalMilestones.has(t.milestone));
-    const lastCompletedSortOrder = lastCompleted ? lastCompleted.sort_order : 10;
-
-    const timelineEntry = timeline.find(t => t.milestone === milestone);
-    if (!timelineEntry) return res.status(400).json({ error: `Milestone "${milestone}" is not part of this order's timeline.` });
-
-    if (timelineEntry.completed) {
-      return res.status(409).json({ error: `Milestone "${milestone}" has already been completed.` });
-    }
-
-    const nextExpected = timeline.find(t => !t.completed && t.sort_order > lastCompletedSortOrder);
-    if (!nextExpected || nextExpected.sort_order !== timelineEntry.sort_order) {
-      return res.status(422).json({
-        error: `Milestone out of sequence. Expected "${nextExpected ? nextExpected.milestone : 'none'}" before "${milestone}".`,
-      });
-    }
-
-    const status = milestoneMap[milestone];
-    const updates = { status, updated_at: new Date().toISOString() };
-    let generatedOtp = null;
-
-    if (milestone === 'In Transit') {
-      const result = await deliveryVerificationService.generateDeliveryOtp({ orderId });
-      generatedOtp = result.otp;
-    }
-
-    const { error: timelineErr } = await orderRepository.updateTimelineMilestone(order.order_display_id, milestone, { completed: true, milestone_time: new Date().toISOString() });
-    if (timelineErr) return res.status(500).json({ error: 'Failed to update order timeline.', details: timelineErr.message });
-    try {
-      await orderTimelineService.completeMilestone(order.order_display_id, milestone);
-    } catch (timelineErr) {
-      if (timelineErr instanceof DomainError) {
-        return res.status(timelineErr.status).json(timelineErr.payload);
-      }
-      return res.status(500).json({ error: 'Failed to update order timeline.', details: timelineErr.message });
-    }
-
-    const { data: updatedOrder, error: updateErr } = await orderRepository.updateOrder(orderId, updates);
-    if (updateErr) {
-      // Roll back the timeline mark since the order update failed
-      await orderRepository.updateTimelineMilestone(order.order_display_id, milestone, { completed: false, milestone_time: null });
-      await orderTimelineService.resetMilestone(order.order_display_id, milestone);
-      return res.status(500).json({ error: 'Failed to update order.', details: updateErr.message });
-    }
-
-    if (generatedOtp) {
-      await deliveryVerificationService.sendOtpNotification({ orderId, customerId: order.customer_id, orderDisplayId: order.order_display_id, otp: generatedOtp });
-    }
-
-    const response = { message: 'Milestone updated successfully.', order: updatedOrder, milestone, status };
-
-  try {
     const result = await orderMilestoneService.updateMilestone({ orderId, milestone, driverId: req.user.id });
     res.json({ message: 'Milestone updated successfully.', ...result });
   } catch (err) {
@@ -890,13 +865,33 @@ router.put('/:id/milestones', authenticate, userLimiter, requireRole(['driver'])
 // ============================================================================
 // 13. VERIFY DELIVERY OTP AND RELEASE FUNDS (DRIVER)
 // ============================================================================
-router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['driver']), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/{id}/verify-delivery:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Verify delivery with OTP
+ *     description: Verifies delivery completion using OTP. Idempotent for 24 hours. Rate-limited to 20 attempts per 15 minutes.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Delivery verified
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/VerifyDeliveryResponse'
+ *       429:
+ *         description: Rate limited
+ */
+router.post('/:id/verify-delivery', authenticate, userLimiter, requirePolicy('delivery:verify'), auditLog({ action: 'delivery:verify', resourceType: 'delivery_verification' }), verifyDeliveryLimiter, requireIdempotency(86400), validateParams(paramIdSchema), validateBody(verifyDeliverySchema), async (req, res) => {
   try {
-    const { escrowUpdateFailed } = await deliveryVerificationService.verifyDelivery({
-      orderId,
-      driverId: req.user.id,
-      otp,
-    });
     const { escrowUpdateFailed } = await orderLifecycleService.verifyDeliveryFn(req.params.id, req.user.id, req.body.otp);
 
     if (escrowUpdateFailed) {
@@ -920,11 +915,30 @@ router.post('/:id/verify-delivery', authenticate, userLimiter, requireRole(['dri
 // ============================================================================
 // 14. RESEND DELIVERY OTP (DRIVER)
 // ============================================================================
-router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requireRole(['driver']), validateParams(paramIdSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/{id}/resend-otp:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Resend delivery OTP
+ *     description: Resends the delivery verification OTP to the customer. Rate-limited.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: OTP resent
+ *       429:
+ *         description: Rate limited
+ */
+router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requirePolicy('delivery:resend-otp'), validateParams(paramIdSchema), async (req, res) => {
   try {
-    const { data: order, error: orderErr } = await orderRepository.findOrderById(orderId, 'id, order_display_id, driver_id, customer_id, status');
-    if (orderErr || !order) return res.status(404).json({ error: 'Order not found.' });
-    if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You are not assigned to this order.' });
+    const orderId = req.params.id;
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, driver_id, customer_id, status');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertDriverAssignment(order, req.user.id);
@@ -949,24 +963,37 @@ router.post('/:id/resend-otp', authenticate, userLimiter, resendOtpLimiter, requ
 // ============================================================================
 // 15. CHANGE DROP (CUSTOMER)
 // ============================================================================
-router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/{id}/change-drop:
+ *   put:
+ *     tags: [Orders]
+ *     summary: Change drop location
+ *     description: Updates the drop location for an active order. Customer role required. Rate-limited.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ChangeDropRequest'
+ *     responses:
+ *       200:
+ *         description: Drop location updated
+ *       429:
+ *         description: Rate limited
+ */
+router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, requirePolicy('order:change-drop'), auditLog({ action: 'order:change-drop', resourceType: 'order' }), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
+  const { id: orderId } = req.params;
+  const { drop_address, drop_lat, drop_lng } = req.body;
   try {
-    const orderResult = await orderRepository.findOrderByAnyId(orderId, '*');
-    const order = orderResult.data;
-    const orderErr = orderResult.error;
-    if (orderErr) return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-    if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    if (order.escrow_status === 'funded' || order.status !== 'pending') {
-      const reason = order.escrow_status === 'funded'
-        ? 'after escrow has been funded'
-        : `after order status is '${order.status}'`;
-      return res.status(409).json({
-        error: `Drop location cannot be changed ${reason}.`,
-        recovery: 'Cancel this order to receive a refund, then rebook with the correct destination.',
-      });
-    }
-    if (order.weight_tonnes == null) return res.status(500).json({ error: 'Data inconsistency: Order is missing weight_tonnes.' });
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
@@ -1058,214 +1085,37 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
 // ============================================================================
 // 16. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
 // ============================================================================
-router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/{id}/cancel:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Cancel an order
+ *     description: Cancels an order with a required reason. Customer role required.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CancelOrderRequest'
+ *     responses:
+ *       200:
+ *         description: Order cancelled
+ *       400:
+ *         description: Validation error
+ */
+router.post('/:id/cancel', authenticate, userLimiter, requirePolicy('order:cancel'), auditLog({ action: 'order:cancel', resourceType: 'order' }), requireIdempotency(86400), validateParams(paramIdSchema), validateBody(cancelOrderSchema), async (req, res) => {
   try {
-    const orderResult = await orderRepository.findOrderByAnyId(orderId, '*');
-    const order = orderResult.data;
-    const orderErr = orderResult.error;
-    if (orderErr) return res.status(500).json({ error: 'Failed to fetch order.', details: orderErr.message });
-    if (!order) return res.status(404).json({ error: 'Order not found.' });
-    if (order.customer_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, '*');
-    orderValidationService.assertOrderFound(order);
-    orderValidationService.assertCustomerOwnership(order, req.user.id);
-    await orderValidationService.assertDeliveryNotVerified(order.id);
-
-    // Prevent cancellation if delivery OTP was already verified
-    const { data: otpCheck, error: otpCheckErr } = await orderRepository.findVerifiedDeliveryOtp(order.id);
-
-    if (!otpCheckErr && otpCheck) {
-      return res.status(409).json({ error: 'Cannot cancel: delivery OTP has already been verified.' });
-    }
-
-    if (order.status === 'cancelled' && order.escrow_status === 'refunded') {
-      return res.json({
-        message: 'Order was already cancelled and refunded.',
-        cancellation_fee: order.cancellation_fee ?? 0,
-        order,
-      });
-    }
-
-    const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(order.escrow_status);
-    let workingOrder = order;
-
-    // Persist cancellation before touching the blockchain. A failed or delayed
-    // refund must never leave the order available for continued work.
-    if (requiresRefund && (order.status !== 'cancelled' || order.escrow_status !== 'refund_pending')) {
-      const attemptAt = new Date().toISOString();
-      const { data: pendingOrder, error: pendingErr } = await orderRepository.updateOrderWithFilter(
-        order.id,
-        {
-          status: 'cancelled',
-          cancellation_reason: reason ?? order.cancellation_reason,
-          escrow_status: 'refund_pending',
-          escrow_refund_error: null,
-          escrow_refund_attempts: (order.escrow_refund_attempts ?? 0) + 1,
-          escrow_refund_last_attempt_at: attemptAt,
-          updated_at: attemptAt,
-        },
-        [
-          { op: 'not', column: 'status', operator: 'in', value: '("delivered","payment_released")' },
-        ]
-      );
-
-      if (pendingErr) {
-        if (pendingErr.code === 'PGRST116') {
-          return res.status(409).json({ error: 'Order was already delivered or payment released. Cannot cancel.' });
-        }
-        return res.status(500).json({
-          error: 'Failed to place the order into refund reconciliation.',
-          details: pendingErr.message,
-        });
-      }
-      workingOrder = pendingOrder;
-    }
-
-    if (requiresRefund) {
-      const lockKey = `escrow_lock:${workingOrder.id}`;
-      const lockValue = await acquireLock(lockKey, 30000);
-      if (!lockValue) {
-        return res.status(409).json({ error: 'Refund is currently being processed. Please try again later.' });
-      }
-
-      try {
-        let refundTxHash = workingOrder.refund_tx_hash ?? null;
-
-        try {
-          let receipt;
-
-          if (refundTxHash) {
-            receipt = await confirmEscrowRefund(refundTxHash);
-          } else {
-            const submitted = await submitEscrowRefund(order.order_display_id);
-            refundTxHash = submitted.txHash;
-            if (!refundTxHash || !submitted.waitForConfirmation) {
-              throw new Error('Escrow refund transaction was not submitted.');
-            }
-
-            const submittedAt = new Date().toISOString();
-            const { error: hashErr } = await orderRepository.updateOrderSelective(
-              order.id,
-              {
-                refund_tx_hash: refundTxHash,
-                escrow_refund_submitted_at: submittedAt,
-                updated_at: submittedAt,
-              },
-              '*'
-            );
-
-            if (hashErr) {
-              logger.error('[escrow] Failed to persist refund tx hash for order', orderId, ':', hashErr.message);
-            }
-            receipt = await submitted.waitForConfirmation();
-          }
-
-          const refundedAt = new Date().toISOString();
-          const { data: updatedOrder, error: updateErr } = await orderRepository.updateOrderWithFilter(
-            order.id,
-            {
-              status: 'cancelled',
-              cancellation_reason: reason ?? workingOrder.cancellation_reason,
-              escrow_status: 'refunded',
-              refund_tx_hash: receipt.hash ?? refundTxHash,
-              escrow_refunded_at: refundedAt,
-              escrow_refund_error: null,
-              updated_at: refundedAt,
-            },
-            [
-              { op: 'in', column: 'escrow_status', value: ['refund_pending', 'refund_failed'] },
-            ],
-            'cancellation_fee, order_display_id, status, cancellation_reason, escrow_status, refund_tx_hash'
-          );
-
-          if (updateErr) {
-            logger.error('[escrow] Refund confirmed but final order update failed for', orderId, ':', updateErr.message);
-            return res.status(202).json({
-              message: 'Order cancelled and escrow refund confirmed. Database reconciliation is pending.',
-              refund_tx_hash: receipt.hash ?? refundTxHash,
-              escrow_status: 'refund_pending',
-              reconciliation_required: true,
-            });
-          }
-
-          await orderRepository.updateTimelineMilestone(order.order_display_id, 'Order Placed', { completed: true, milestone_time: refundedAt });
-          await orderTimelineService.completeOrderPlacedMilestone(order.order_display_id, refundedAt);
-
-          await expireDeliveryOtps(order.id);
-
-          return res.json({
-            message: 'Order cancelled and escrow refunded successfully.',
-            cancellation_fee: updatedOrder?.cancellation_fee ?? 0,
-            order: updatedOrder,
-          });
-        } catch (refundErr) {
-          logger.error('[escrow] Refund failed for order', orderId, ':', refundErr.message);
-          const failedAt = new Date().toISOString();
-          const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
-          await orderRepository.updateOrder(order.id, {
-            status: 'cancelled',
-            escrow_status: nextEscrowStatus,
-            refund_tx_hash: refundTxHash,
-            escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
-            escrow_refund_last_attempt_at: failedAt,
-            updated_at: failedAt,
-          });
-
-          return res.status(202).json({
-            message: 'Order cancelled. Escrow refund requires reconciliation.',
-            escrow_status: nextEscrowStatus,
-            refund_tx_hash: refundTxHash,
-            retryable: true,
-          });
-        }
-      } finally {
-        await releaseLock(lockKey, lockValue);
-      }
-    } else if (order.escrow_booking_id) {
-      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain refund.`);
-    }
-
-    const updatePayload = {
-      status: 'cancelled',
-      cancellation_reason: reason,
-      updated_at: new Date().toISOString(),
-    };
-
-    const { data: updatedOrder, error: updateErr } = await orderRepository.updateOrderWithFilter(
-      order.id,
-      updatePayload,
-      [
-        { op: 'not', column: 'status', operator: 'in', value: '("delivered","payment_released","cancelled")' },
-      ],
-      'cancellation_fee, order_display_id, status, cancellation_reason, escrow_status'
-    );
-
-    if (updateErr) {
-      if (updateErr.code === 'PGRST116') {
-        return res.status(409).json({ error: 'Order was already cancelled, delivered, or payment released. Cannot cancel.' });
-      }
-      return res.status(500).json({ error: 'Failed to cancel order.', details: updateErr.message });
-    }
-
-    const cancellationFee = updatedOrder?.cancellation_fee ?? 0;
-
-    await orderRepository.updateTimelineMilestone(order.order_display_id, 'Order Placed', { completed: true, milestone_time: new Date().toISOString() });
-
-    await expireDeliveryOtps(order.id);
-
-    return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
-    if (result.status === 202) {
-      return res.status(202).json(result.body);
-    }
-
-    const cancellationFee = updatedOrder?.cancellation_fee ?? 0;
-
-    await orderTimelineService.completeOrderPlacedMilestone(order.order_display_id);
-
-    await expireDeliveryOtps(order.id);
-
-    return res.json({ message: 'Order cancelled successfully.', cancellation_fee: cancellationFee, order: updatedOrder });
-    return res.json(result.body);
+    const result = await orderLifecycleService.cancelOrder(req.params.id, req.user.id, req.body.reason);
+    return res.status(result.status).json(result.body);
   } catch (err) {
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
@@ -1278,46 +1128,65 @@ router.post('/:id/cancel', authenticate, userLimiter, requireRole(['customer']),
 // ============================================================================
 // 17. CONFIRM ESCROW DEPOSIT (CUSTOMER)
 // ============================================================================
-router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['customer']), validateParams(paramIdSchema), validateBody(
+/**
+ * @openapi
+ * /api/orders/{id}/confirm-deposit:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Confirm escrow deposit
+ *     description: Confirms that an escrow deposit transaction has been completed for an order.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Deposit confirmed
+ */
+router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('order:confirm-deposit'), auditLog({ action: 'order:confirm-deposit', resourceType: 'order' }), validateParams(paramIdSchema), validateBody(
   z.object({ txHash: z.string().regex(/^0x([A-Fa-f0-9]{64})$/, 'Invalid transaction hash') }),
 ), async (req, res) => {
   const orderId = req.params.id;
   const { txHash } = req.body;
 
-  const lockKey = `deposit_lock:${orderId}`;
-  const lockTimeoutMs = 10000;
+  const lockKey = `escrow_lock:${orderId}`;
   let lockValue = null;
-  if (redisClient) {
-    lockValue = crypto.randomUUID();
-    const acquired = await redisClient.set(lockKey, lockValue, 'PX', lockTimeoutMs, 'NX');
-    if (!acquired) {
-      return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
-    }
+  lockValue = await acquireLock(lockKey, 120000);
+  if (!lockValue) {
+    return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
   }
 
   try {
-    const { data: order, error: fetchErr } = await orderRepository.findOrderById(orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status');
-
-    if (fetchErr || !order) return res.status(404).json({ error: 'Order not found' });
-    if (order.customer_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access Denied: You do not own this order.' });
-    }
-    if (order.escrow_status !== 'funding') {
-      return res.status(400).json({ error: 'Order is not in funding state' });
-    }
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
     orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
+    if (order.status === 'cancelled') return res.status(409).json({ error: 'Order is already cancelled. Cannot confirm deposit.' });
 
     const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
-
     const customerWallet = customerProfile?.polygon_wallet_address ?? null;
-
-    const bookingId = order.escrow_booking_id || `escrow:${order.order_display_id}`;
+    const bookingId = order.escrow_booking_id || getEscrowBookingId(order.order_display_id);
     const result = await recordDepositTx(bookingId, txHash, customerWallet);
 
-    if (result.error) return res.status(422).json({ error: result.error });
+    if (result.error) {
+      if (result.alreadyFunded) {
+        const { error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
+          escrow_status: 'funded',
+          deposit_tx_hash: result.txHash,
+          escrow_deposited_at: new Date().toISOString(),
+        }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
+
+        if (!updateErr) {
+          return res.json({ message: 'Escrow deposit confirmed (recovered).', txHash: result.txHash });
+        }
+        return res.status(202).json({ message: 'Escrow deposit confirmed on-chain. Database sync pending.', txHash: result.txHash });
+      }
+      return res.status(422).json({ error: result.error });
+    }
 
     const { error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
       escrow_status: 'funded',
@@ -1338,27 +1207,35 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requireRole(['cus
     logger.error('[confirm-deposit] Exception:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   } finally {
-    if (redisClient && lockValue) {
-      const luaScript = `
-        if redis.call('GET', KEYS[1]) == ARGV[1] then
-          redis.call('DEL', KEYS[1])
-          return 1
-        end
-        return 0
-      `;
-      try {
-        await redisClient.eval(luaScript, 1, lockKey, lockValue);
-      } catch (err) {
-        logger.warn('[confirm-deposit] Failed to release deposit lock for key %s: %s', lockKey, err.message);
-      }
-    }
+    await releaseLock(lockKey, lockValue);
   }
 });
 
 // ============================================================================
 // 18. PREDICT RIDE DEMAND (CUSTOMER OR DRIVER)
 // ============================================================================
-router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer', 'driver']), predictDemandLimiter, validateBody(predictDemandSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/predict-demand:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Predict demand/price
+ *     description: Uses ML to predict demand or price for a given route. Rate-limited to 10 requests per minute.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/PredictDemandRequest'
+ *     responses:
+ *       200:
+ *         description: Prediction result
+ *       429:
+ *         description: Rate limited
+ */
+router.post('/predict-demand', authenticate, userLimiter, requirePolicy('order:predict-demand'), predictDemandLimiter, validateBody(predictDemandSchema), async (req, res) => {
   try {
     const prediction = await predictDemand(req.body);
     return res.json(prediction);
@@ -1374,7 +1251,30 @@ router.post('/predict-demand', authenticate, userLimiter, requireRole(['customer
 // ============================================================================
 // 19. GET DRIVER LOCATION (CUSTOMER OR DRIVER)
 // ============================================================================
-router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/orders/{id}/driver-location:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Get driver's current location
+ *     description: Returns the current GPS location of the driver assigned to an order.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Driver location
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DriverLocationResponse'
+ */
+router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location'), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
   try {
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, customer_id, driver_id, status');
@@ -1426,7 +1326,31 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
 // ============================================================================
 // 20. GET LIVE ROUTE GEOMETRY (CUSTOMER OR DRIVER)
 // ============================================================================
-router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRole(['customer', 'driver']), validateParams(paramIdSchema), async (req, res) => {
+
+/**
+ * @openapi
+ * /api/orders/{id}/route:
+ *   get:
+ *     tags: [Orders]
+ *     summary: Get order route
+ *     description: Returns the computed route geometry and distance/duration for an order.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Route data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/OrderRouteResponse'
+ */
+router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-route'), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
 
   try {
@@ -1512,6 +1436,109 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requireRol
     }
     logger.error({ err }, 'Fetch order route exception');
     return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+const POD_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
+const POD_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+const podUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: POD_MAX_FILE_SIZE },
+  fileFilter: (_req, file, cb) => {
+    if (POD_ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(null, false);
+    }
+  },
+});
+
+function computeFileHash(buffer) {
+  return crypto.createHash('sha256').update(buffer).digest('hex');
+}
+
+// POST /api/orders/:id/pod
+router.post('/:id/pod', authenticate, requireRole(['driver']), podUpload.fields([{ name: 'signature', maxCount: 1 }, { name: 'photo', maxCount: 1 }]), async (req, res) => {
+  try {
+    const orderId = req.params.id;
+    const { data: order, error: orderErr } = await orderRepository.findOrderById(orderId);
+
+    if (orderErr || !order) return res.status(404).json({ error: 'Order not found' });
+    if (order.driver_id !== req.user.id) return res.status(403).json({ error: 'Access Denied: Not your order' });
+
+    let signatureUrl = order.pod_signature_url;
+    let photoUrl = order.pod_photo_url;
+    let signatureHash = order.pod_signature_hash || null;
+    let photoHash = order.pod_photo_hash || null;
+    const files = req.files || {};
+
+    if (files.signature && files.signature[0]) {
+      const file = files.signature[0];
+      try {
+        validateDocumentBuffer(file.buffer, file.mimetype);
+      } catch (validationErr) {
+        return res.status(400).json({ error: `Invalid signature file: ${validationErr.message}` });
+      }
+      const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
+      const storagePath = `${req.user.id}/pod_sig_${orderId}_${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('driver-documents')
+        .upload(storagePath, file.buffer, { contentType: file.mimetype });
+      if (upErr) {
+        logger.error('Signature upload to storage failed:', upErr.message);
+        return res.status(500).json({ error: 'Failed to upload signature to storage' });
+      }
+      signatureUrl = storagePath;
+      signatureHash = computeFileHash(file.buffer);
+    }
+
+    if (files.photo && files.photo[0]) {
+      const file = files.photo[0];
+      try {
+        validateDocumentBuffer(file.buffer, file.mimetype);
+      } catch (validationErr) {
+        return res.status(400).json({ error: `Invalid photo file: ${validationErr.message}` });
+      }
+      const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
+      const storagePath = `${req.user.id}/pod_photo_${orderId}_${Date.now()}.${ext}`;
+      const { error: upErr } = await supabase.storage
+        .from('driver-documents')
+        .upload(storagePath, file.buffer, { contentType: file.mimetype });
+      if (upErr) {
+        logger.error('Photo upload to storage failed:', upErr.message);
+        return res.status(500).json({ error: 'Failed to upload photo to storage' });
+      }
+      photoUrl = storagePath;
+      photoHash = computeFileHash(file.buffer);
+    }
+
+    const updates = {
+      updated_at: new Date().toISOString(),
+    };
+    if (signatureUrl !== order.pod_signature_url) updates.pod_signature_url = signatureUrl;
+    if (photoUrl !== order.pod_photo_url) updates.pod_photo_url = photoUrl;
+    if (signatureHash) updates.pod_signature_hash = signatureHash;
+    if (photoHash) updates.pod_photo_hash = photoHash;
+
+    const { data: updatedOrder, error: updateErr } = await orderRepository.updateOrder(orderId, updates);
+
+    if (updateErr) {
+      logger.error('Failed to update order with PoD:', updateErr.message);
+      return res.status(500).json({ error: 'Failed to update order with PoD data' });
+    }
+
+    return res.json({
+      message: 'Proof of Delivery uploaded successfully',
+      photoUrl: updatedOrder.pod_photo_url,
+      signatureUrl: updatedOrder.pod_signature_url,
+      photoHash: updatedOrder.pod_photo_hash,
+      signatureHash: updatedOrder.pod_signature_hash,
+      uploadTimestamp: updatedOrder.updated_at,
+    });
+  } catch (err) {
+    logger.error('PoD upload error:', err.message);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 });
 

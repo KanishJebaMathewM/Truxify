@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: linkerd-config
+  namespace: linkerd
+data:
+  config.yaml: |
+    proxy:
+      ports:
+        inbound: 4143
+        outbound: 4140
+      resources:
+        cpu:
+          request: 100m
+          limit: 200m
+        memory:
+          request: 128Mi
+          limit: 256Mi
+    destination:
+      resources:
+        cpu:
+          request: 100m
+          limit: 200m
+        memory:
+          request: 128Mi
+          limit: 256Mi
+    identity:
+      issuer:
+        tls:
+          key: |
+            -----BEGIN EC PRIVATE KEY-----
+            -----END EC PRIVATE KEY-----
+          crt: |
+            -----BEGIN CERTIFICATE-----
+            -----END CERTIFICATE-----
+      trustAnchors: |
+        -----BEGIN CERTIFICATE-----
+        -----END CERTIFICATE-----
+    prometheus:
+      resources:
+        cpu:
+          request: 100m
+          limit: 200m
+        memory:
+          request: 128Mi
+          limit: 256Mi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: linkerd-identity-trust-roots
+  namespace: linkerd
+data:
+  trust-bundle.crt: |
+    -----BEGIN CERTIFICATE-----
+    -----END CERTIFICATE-----

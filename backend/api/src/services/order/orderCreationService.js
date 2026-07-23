@@ -5,6 +5,7 @@ import { computeOrderPricing } from '../../lib/pricing.js';
 import { predictPrice } from '../ml.js';
 import { DomainError } from './bidAcceptanceService.js';
 import logger from '../../middleware/logger.js';
+import { measureExecution } from '../../core/performanceMetrics.js';
 
 function generateOrderDisplayId() {
   const prefix = '#FF';
@@ -15,6 +16,7 @@ function generateOrderDisplayId() {
 }
 
 export async function createOrder({ orderData, userId, user }) {
+  return measureExecution('OrderCreationService.createOrder', async () => {
   const {
     pickup_address, pickup_lat, pickup_lng,
     drop_address, drop_lat, drop_lng,
@@ -62,10 +64,7 @@ export async function createOrder({ orderData, userId, user }) {
       routeOrigin: pickup_address,
       routeDestination: drop_address,
     });
-    if (!mlResult || typeof mlResult.estimated_price !== 'number' || mlResult.estimated_price <= 0) {
-      throw new Error(`Invalid or non-positive price prediction: ${JSON.stringify(mlResult)}`);
-    }
-    estimatedPrice = Math.round(mlResult.estimated_price * 100);
+    estimatedPrice = mlResult.estimatedPricePaisa;
   } catch (mlErr) {
     logger.warn({ err: mlErr.message }, 'Price prediction unavailable, falling back to base pricing');
   }
@@ -156,5 +155,32 @@ export async function createOrder({ orderData, userId, user }) {
     throw new DomainError(500, { error: 'Failed to create load offer.', details: offerErr.message });
   }
 
+  try {
+    const { sendFcmNotification } = await import('../notificationService.js');
+    const { data: drivers } = await supabase
+      .from('profiles')
+      .select('id, fcm_token')
+      .eq('role', 'driver')
+      .not('fcm_token', 'is', null);
+
+    if (drivers && drivers.length > 0) {
+      const notification = {
+        title: 'New Trip Available',
+        body: `A new trip from ${pickup_address.split(',')[0]} to ${drop_address.split(',')[0]} is available.`,
+      };
+      const payload = {
+        type: 'new_trip',
+        orderId: orderDisplayId,
+      };
+      // Fire and forget notifications
+      Promise.all(drivers.map(driver => sendFcmNotification(driver.id, notification, payload))).catch(e => {
+        logger.error('Error in batch push notification:', e.message);
+      });
+    }
+  } catch (pushErr) {
+    logger.error('Failed to send push notifications to drivers:', pushErr.message);
+  }
+
   return { message: 'Order created successfully and broadcasted to loads board.', order };
+  });
 }

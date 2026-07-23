@@ -1,26 +1,13 @@
-/**
- * Unit tests for backend/api/src/middleware/idempotency.js
- *
- * Coverage:
- *   - requireIdempotency: returns 400 when X-Idempotency-Key header is missing
- *   - requireIdempotency: calls next immediately when Redis client is unavailable
- *   - requireIdempotency: returns cached response on cache hit
- *   - requireIdempotency: intercepts res.json to cache the response body on miss
- *   - requireIdempotency: skips caching for 5xx responses (res.statusCode >= 500)
- *   - requireIdempotency: fails open on Redis errors (calls next)
- *
- * Run with:  npm run test:unit -- test/unit/idempotency.test.js
- */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { requireIdempotency } from '../../src/middleware/idempotency.js';
 
-const redisClientMock = vi.hoisted(() => ({
-  get: vi.fn(),
-  set: vi.fn(),
-}));
+const mockRedisRef = vi.hoisted(() => {
+  const mock = { get: vi.fn(), set: vi.fn() };
+  return { current: mock, mock };
+});
 
 vi.mock('../../src/config/db.js', () => ({
-  redisClient: redisClientMock,
+  get redisClient() { return mockRedisRef.current; },
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -50,8 +37,9 @@ function makeNext() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  redisClientMock.get.mockReset();
-  redisClientMock.set.mockReset();
+  mockRedisRef.mock.get.mockReset();
+  mockRedisRef.mock.set.mockReset();
+  mockRedisRef.current = mockRedisRef.mock;
 });
 
 describe('requireIdempotency middleware', () => {
@@ -70,14 +58,13 @@ describe('requireIdempotency middleware', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  it('calls next immediately when Redis client is unavailable (bypass)', async () => {
+  it('calls next on cache miss (Redis available)', async () => {
     const middleware = requireIdempotency();
     const req = makeReq({ headers: { 'x-idempotency-key': 'key-abc' } });
     const res = makeRes();
     const next = makeNext();
 
-    // Simulate redisClient being null/undefined via the mock returning undefined
-    redisClientMock.get.mockResolvedValue(undefined);
+    mockRedisRef.mock.get.mockResolvedValue(null);
 
     await middleware(req, res, next);
 
@@ -87,7 +74,7 @@ describe('requireIdempotency middleware', () => {
   it('returns cached response with original statusCode and body on cache hit', async () => {
     const middleware = requireIdempotency();
     const cachedBody = { orderId: '123', status: 'confirmed' };
-    redisClientMock.get.mockResolvedValue(
+    mockRedisRef.mock.get.mockResolvedValue(
       JSON.stringify({ statusCode: 201, body: cachedBody })
     );
 
@@ -104,8 +91,8 @@ describe('requireIdempotency middleware', () => {
 
   it('intercepts res.json to cache the response body on cache miss', async () => {
     const middleware = requireIdempotency();
-    redisClientMock.get.mockResolvedValue(null);
-    redisClientMock.set.mockResolvedValue('OK');
+    mockRedisRef.mock.get.mockResolvedValue(null);
+    mockRedisRef.mock.set.mockResolvedValue('OK');
 
     const req = makeReq({ headers: { 'x-idempotency-key': 'key-def' } });
     const res = makeRes({ statusCode: 200 });
@@ -113,64 +100,68 @@ describe('requireIdempotency middleware', () => {
 
     await middleware(req, res, next);
 
-    // The middleware calls next() to let the route handler run.
-    // When the route handler calls res.json(), the overridden version
-    // caches the response before calling the original json.
     expect(next).toHaveBeenCalled();
-
-    // Verify res.json was overridden (middleware intercepted it)
     expect(typeof res.json).toBe('function');
 
-    // Simulate the route handler calling the overridden res.json
     const responseBody = { success: true, data: 'some-data' };
     res.json(responseBody);
 
-    // After res.json is called, the cache should have been set
-    expect(redisClientMock.set).toHaveBeenCalled();
-    const [cacheKey, cacheData] = redisClientMock.set.mock.calls[0];
+    expect(mockRedisRef.mock.set).toHaveBeenCalled();
+    const [cacheKey, cacheData] = mockRedisRef.mock.set.mock.calls[0];
     expect(cacheKey).toBe('idempotency:user-1:key-def');
     const parsed = JSON.parse(cacheData);
     expect(parsed.statusCode).toBe(200);
     expect(parsed.body).toEqual(responseBody);
   });
 
-  it('skips caching for 5xx responses', async () => {
+  it.each([
+    [200],
+    [201],
+    [202],
+    [204],
+  ])('caches %i responses', async (statusCode) => {
     const middleware = requireIdempotency();
-    redisClientMock.get.mockResolvedValue(null);
+    mockRedisRef.mock.get.mockResolvedValue(null);
+    mockRedisRef.mock.set.mockResolvedValue('OK');
 
-    const req = makeReq({ headers: { 'x-idempotency-key': 'key-5xx' } });
-    const res = makeRes({ statusCode: 500 });
+    const req = makeReq({ headers: { 'x-idempotency-key': 'cacheable-key' } });
+    const res = makeRes({ statusCode });
     const next = makeNext();
 
     await middleware(req, res, next);
-    expect(next).toHaveBeenCalled();
+    res.json({ result: 'ok' });
 
-    // Simulate route handler calling res.json with 5xx body
-    res.json({ error: 'Internal server error' });
-
-    // redisClient.set should NOT have been called for 5xx
-    expect(redisClientMock.set).not.toHaveBeenCalled();
+    expect(mockRedisRef.mock.set).toHaveBeenCalled();
   });
 
-  it('skips caching for 503 responses', async () => {
+  it.each([
+    [400],
+    [401],
+    [403],
+    [404],
+    [409],
+    [422],
+    [429],
+    [500],
+    [502],
+    [503],
+  ])('does NOT cache %i responses', async (statusCode) => {
     const middleware = requireIdempotency();
-    redisClientMock.get.mockResolvedValue(null);
+    mockRedisRef.mock.get.mockResolvedValue(null);
 
-    const req = makeReq({ headers: { 'x-idempotency-key': 'key-503' } });
-    const res = makeRes({ statusCode: 503 });
+    const req = makeReq({ headers: { 'x-idempotency-key': 'non-cacheable-key' } });
+    const res = makeRes({ statusCode });
     const next = makeNext();
 
     await middleware(req, res, next);
-    expect(next).toHaveBeenCalled();
+    res.json({ error: 'some error' });
 
-    res.json({ error: 'Service unavailable' });
-
-    expect(redisClientMock.set).not.toHaveBeenCalled();
+    expect(mockRedisRef.mock.set).not.toHaveBeenCalled();
   });
 
   it('fails open when Redis get throws an error', async () => {
     const middleware = requireIdempotency();
-    redisClientMock.get.mockRejectedValue(new Error('Redis connection error'));
+    mockRedisRef.mock.get.mockRejectedValue(new Error('Redis connection error'));
 
     const req = makeReq({ headers: { 'x-idempotency-key': 'key-err' } });
     const res = makeRes();
@@ -183,8 +174,8 @@ describe('requireIdempotency middleware', () => {
 
   it('fails open when Redis set throws an error (does not propagate)', async () => {
     const middleware = requireIdempotency();
-    redisClientMock.get.mockResolvedValue(null);
-    redisClientMock.set.mockRejectedValue(new Error('Redis write error'));
+    mockRedisRef.mock.get.mockResolvedValue(null);
+    mockRedisRef.mock.set.mockRejectedValue(new Error('Redis write error'));
 
     const req = makeReq({ headers: { 'x-idempotency-key': 'key-set-err' } });
     const res = makeRes();
@@ -193,14 +184,13 @@ describe('requireIdempotency middleware', () => {
     await middleware(req, res, next);
     expect(next).toHaveBeenCalled();
 
-    // The overridden res.json should not throw even when redisClient.set fails
     expect(() => res.json({ success: true })).not.toThrow();
   });
 
   it('uses correct cache key format idempotency:{userId}:{key}', async () => {
     const middleware = requireIdempotency();
-    redisClientMock.get.mockResolvedValue(null);
-    redisClientMock.set.mockResolvedValue('OK');
+    mockRedisRef.mock.get.mockResolvedValue(null);
+    mockRedisRef.mock.set.mockResolvedValue('OK');
 
     const req = makeReq({
       headers: { 'x-idempotency-key': 'my-unique-key-123' },
@@ -212,14 +202,14 @@ describe('requireIdempotency middleware', () => {
     await middleware(req, res, next);
     res.json({ result: 'done' });
 
-    const [cacheKey] = redisClientMock.set.mock.calls[0];
+    const [cacheKey] = mockRedisRef.mock.set.mock.calls[0];
     expect(cacheKey).toBe('idempotency:driver-42:my-unique-key-123');
   });
 
   it('uses anonymous cache key when req.user is not present', async () => {
     const middleware = requireIdempotency();
-    redisClientMock.get.mockResolvedValue(null);
-    redisClientMock.set.mockResolvedValue('OK');
+    mockRedisRef.mock.get.mockResolvedValue(null);
+    mockRedisRef.mock.set.mockResolvedValue('OK');
 
     const req = makeReq({
       headers: { 'x-idempotency-key': 'anon-key' },
@@ -231,23 +221,41 @@ describe('requireIdempotency middleware', () => {
     await middleware(req, res, next);
     res.json({ result: 'done' });
 
-    const [cacheKey] = redisClientMock.set.mock.calls[0];
+    const [cacheKey] = mockRedisRef.mock.set.mock.calls[0];
     expect(cacheKey).toBe('idempotency:anonymous:anon-key');
   });
 
-  it('caches 409 Conflict responses (client errors are cacheable)', async () => {
-    const middleware = requireIdempotency();
-    redisClientMock.get.mockResolvedValue(null);
-    redisClientMock.set.mockResolvedValue('OK');
+  it('falls back to in-memory store when redisClient is null', async () => {
+    mockRedisRef.current = null;
 
-    const req = makeReq({ headers: { 'x-idempotency-key': 'conflict-key' } });
-    const res = makeRes({ statusCode: 409 });
+    const middleware = requireIdempotency();
+    const req = makeReq({ headers: { 'x-idempotency-key': 'mem-key' } });
+    const res = makeRes({ statusCode: 200 });
     const next = makeNext();
 
     await middleware(req, res, next);
-    res.json({ error: 'Duplicate order' });
+    expect(next).toHaveBeenCalled();
 
-    // 409 is < 500 so it should be cached
-    expect(redisClientMock.set).toHaveBeenCalled();
+    res.json({ result: 'from-memory' });
+
+    await middleware(req, res, next);
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('returns in-memory cached response on repeat call when Redis is unavailable', async () => {
+    mockRedisRef.current = null;
+
+    const middleware = requireIdempotency();
+    const req = makeReq({ headers: { 'x-idempotency-key': 'mem-cached' } });
+    const res1 = makeRes({ statusCode: 201 });
+    const res2 = makeRes();
+    const next = makeNext();
+
+    await middleware(req, res1, next);
+    res1.json({ id: 'order-1' });
+
+    await middleware(req, res2, next);
+    expect(res2.status).toHaveBeenCalledWith(201);
+    expect(res2.json).toHaveBeenCalledWith({ id: 'order-1' });
   });
 });

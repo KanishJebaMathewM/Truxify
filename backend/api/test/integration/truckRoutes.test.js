@@ -5,11 +5,19 @@ import express from 'express';
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();
 
+let mockTelemetryResults = [];
+
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   firebaseAdmin: null,
   redisClient: null,
-  mongoDb: null,
+  mongoDb: {
+    collection: (name) => ({
+      find: () => ({
+        toArray: () => Promise.resolve(mockTelemetryResults),
+      }),
+    }),
+  },
 }));
 
 // Stub out external service calls so the /search route doesn't fail
@@ -43,7 +51,10 @@ describe('Truck Routes', () => {
     process.env.BYPASS_AUTH = 'true';
     process.env.NODE_ENV = 'test';
     m.store.trucks = [];
+    m.store.driver_details = [];
+    m.store.profiles = [];
     m.calls.length = 0;
+    mockTelemetryResults = [];
     vi.clearAllMocks();
   });
 
@@ -188,6 +199,143 @@ describe('Truck Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.trucks).toHaveLength(1);
       expect(res.body.trucks[0].id).toBe('truck-1');
+    });
+  });
+
+  describe('GET /api/trucks/search', () => {
+    const SEARCH_PARAMS = 'pickup_lat=19.0760&pickup_lng=72.8777&drop_lat=28.6139&drop_lng=77.2090&weight_tonnes=5';
+
+    function seedSearchData() {
+      mockTelemetryResults = [{ driver_id: 'driver-uuid-456' }];
+      m.store.trucks = [
+        { id: 'truck-open', name: 'Open Body Truck', number_plate: 'MH12AB0001', max_capacity_tons: 10, owner_id: 'driver-uuid-456' },
+      ];
+      m.store.driver_details = [
+        { user_id: 'driver-uuid-456', is_online: true, truck_id: 'truck-open', rating: 4.5, total_trips: 100, completion_rate: 95 },
+      ];
+      m.store.profiles = [
+        { id: 'driver-uuid-456', full_name: 'Ravi Kumar' },
+      ];
+    }
+
+    it('returns 400 when required parameters are missing', async () => {
+      const res = await request(buildApp())
+        .get('/api/trucks/search')
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Missing required query parameters');
+    });
+
+    it('returns trucks for valid search without filters', async () => {
+      seedSearchData();
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBeGreaterThanOrEqual(1);
+      expect(res.body[0].driver).toBe('Ravi Kumar');
+      expect(res.body[0].truck).toBe('Open Body Truck');
+    });
+
+    it('returns 400 for invalid truck_type', async () => {
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}&truck_type=InvalidType`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid truck_type');
+    });
+
+    it('returns 400 for invalid material_type', async () => {
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}&material_type=InvalidMaterial`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('Invalid material_type');
+    });
+
+    it('returns 400 when min_capacity > max_capacity', async () => {
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}&min_capacity=20&max_capacity=5`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('min_capacity must be less than or equal to max_capacity');
+    });
+
+    it('filters by capacity range', async () => {
+      mockTelemetryResults = [{ driver_id: 'driver-uuid-456' }];
+      m.store.trucks = [
+        { id: 'truck-small', name: 'Mini Truck', number_plate: 'MH12AB0001', max_capacity_tons: 3, owner_id: 'driver-uuid-456' },
+        { id: 'truck-big', name: 'Container Truck', number_plate: 'MH12AB0002', max_capacity_tons: 15, owner_id: 'driver-uuid-456' },
+      ];
+      m.store.driver_details = [
+        { user_id: 'driver-uuid-456', is_online: true, truck_id: 'truck-small', rating: 4.0, total_trips: 50, completion_rate: 90 },
+      ];
+      m.store.profiles = [
+        { id: 'driver-uuid-456', full_name: 'Ravi Kumar' },
+      ];
+
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}&min_capacity=10`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBe(0);
+    });
+
+    it('filters by truck_type using name match', async () => {
+      seedSearchData();
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}&truck_type=Refrigerated`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBe(0);
+    });
+
+    it('accepts valid optional filters without errors', async () => {
+      seedSearchData();
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}&truck_type=Open%20Body&min_capacity=5&max_capacity=20&material_type=Textile`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+    });
+
+    it('returns empty when no nearby drivers', async () => {
+      mockTelemetryResults = [];
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual([]);
+    });
+
+    it('returns 400 for invalid min_capacity value', async () => {
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}&min_capacity=abc`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('min_capacity');
+    });
+
+    it('returns 400 for negative capacity', async () => {
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}&min_capacity=-5`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('min_capacity');
     });
   });
 });

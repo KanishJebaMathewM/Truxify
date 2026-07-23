@@ -12,7 +12,7 @@ function canVerifyUser(requestUser, targetUserId) {
 }
 
 // Verify driver KYC using ZK-SNARK
-router.post('/zkp/verify', authenticate, userLimiter, async (req, res) => {
+router.post('/zkp/verify', userLimiter, authenticate, async (req, res) => {
   try {
     const { userId, name, licenseNumber, rcNumber, insuranceNumber, issueDate, expiryDate } = req.body;
     

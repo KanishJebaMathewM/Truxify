@@ -183,6 +183,7 @@ class NotificationRouter {
       case 'payment':
       case 'payment_released':
         return NotificationTarget.earnings;
+      case 'new_trip':
       case 'load_offer':
         return NotificationTarget.loadDetail;
       case 'system':

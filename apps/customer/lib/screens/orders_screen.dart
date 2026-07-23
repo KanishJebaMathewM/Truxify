@@ -2,6 +2,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/widgets/order_card.dart';
+import 'package:truxify_shared/truxify_shared.dart';
+
 import '../constants/supabase_config.dart';
 import '../l10n/app_localizations.dart';
 import '../services/order_service.dart';
@@ -91,19 +93,8 @@ class _OrdersScreenState extends State<OrdersScreen>
   }
 
   String _formatLastUpdated(String? updatedAt) {
-    if (updatedAt == null || updatedAt.isEmpty) {
-      return 'just now';
-    }
-
-    final lastUpdated = DateTime.tryParse(updatedAt);
-    if (lastUpdated == null) {
-      return 'just now';
-    }
-
-    final minutes = DateTime.now().difference(lastUpdated).inMinutes;
-    if (minutes < 1) return 'just now';
-    if (minutes == 1) return '1 min ago';
-    return '$minutes mins ago';
+    final lastUpdated = updatedAt != null ? DateTime.tryParse(updatedAt) : null;
+    return DateFormatter.formatRelativeTime(lastUpdated);
   }
 
   String _resolveDriverName(Map<String, dynamic> order) {

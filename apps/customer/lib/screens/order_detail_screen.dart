@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 
 import '../constants/supabase_config.dart';
 import '../controllers/app_controller.dart';
@@ -125,7 +126,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             if (updatedAt.isNotEmpty) {
               final parsedDate = DateTime.tryParse(updatedAt);
               if (parsedDate != null) {
-                timeStr = _formatTime(parsedDate.toLocal());
+                timeStr = DateFormatter.formatTime(parsedDate.toLocal());
               }
             }
             return TimelineStepData(

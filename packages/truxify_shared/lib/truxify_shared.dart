@@ -1,3 +1,6 @@
+// ── Utils ───────────────────────────────────────────────────────────
+export 'src/utils/date_formatter.dart';
+
 // ── Config ──────────────────────────────────────────────────────────
 export 'src/config/app_config.dart';
 export 'src/config/env.dart';

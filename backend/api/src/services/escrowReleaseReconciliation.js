@@ -39,7 +39,7 @@ export async function reconcilePendingEscrowReleases() {
     const instanceId = process.env.HOSTNAME || os.hostname();
     const { data: failedOrders, error } = await supabaseAdmin
       .from('orders')
-      .select('id, order_display_id, escrow_release_attempts')
+      .select('id, order_display_id, escrow_release_attempts, release_tx_hash')
       .eq('escrow_status', 'release_failed')
       .lt('escrow_release_attempts', MAX_RETRIES)
       .limit(50);

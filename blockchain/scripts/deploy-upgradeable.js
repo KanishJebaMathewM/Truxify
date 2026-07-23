@@ -1,4 +1,5 @@
-const hre = require("hardhat");
+import hre from "hardhat";
+import fs from "fs";
 
 async function main() {
   console.log("🚀 Deploying UUPS Proxy with DAO Governance...");
@@ -49,7 +50,6 @@ async function main() {
   console.log(`Pauser: ${pauserAddress}`);
 
   // Save deployment info
-  const fs = require("fs");
   const deploymentInfo = {
     implementation: implementationAddress,
     proxy: proxyAddress,

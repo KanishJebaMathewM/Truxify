@@ -160,13 +160,32 @@ export const healthLimiter = rateLimit({
 });
 
 export const authLimiter = rateLimit({
+  windowMs: authWindowMs,
+  max: authMaxRequests,
   windowMs: AUTH_WINDOW_MS,
   max: AUTH_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
   store: createStore('rl:auth:'),
-  message: { error: 'Rate limit exceeded', retryAfter: 3600 },
+
+  handler: (req, res) => {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        ip: safeIpKeyGenerator(req),
+        path: req.originalUrl,
+        method: req.method,
+        userAgent: req.get('user-agent'),
+      },
+      'Authentication rate limit exceeded'
+    );
+
+    res.status(429).json({
+      error: 'Rate limit exceeded',
+      retryAfter: Math.ceil(authWindowMs / 1000),
+    });
+  },
 });
 
 export const bidLimiter = rateLimit({

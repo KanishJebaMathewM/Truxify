@@ -1,13 +1,23 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { oracleService } from '../core/container.js';
 import { supabase } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
+import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateBody } from '../middleware/validate.js';
 import { oracleConfirmSchema, oracleVerifyCrosschainSchema } from '../validation/requestSchemas.js';
 import { PolicyError, policy } from '../security/policyEngine.js';
 
 const router = express.Router();
+const oracleVerificationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  store: createStore('rl:oracle-verification:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
+});
 
 async function authorizeOrderAccess(req, orderId) {
   const { data: order, error } = await supabase
@@ -49,7 +59,7 @@ router.get('/status', authenticate, async (req, res) => {
   }
 });
 
-router.post('/confirm', authenticate, userLimiter, validateBody(oracleConfirmSchema), async (req, res) => {
+router.post('/confirm', oracleVerificationLimiter, authenticate, validateBody(oracleConfirmSchema), async (req, res) => {
   try {
     const { orderId, otp, gpsCoordinates } = req.body;
     await authorizeOrderAccess(req, orderId);
@@ -79,7 +89,7 @@ router.post('/confirm', authenticate, userLimiter, validateBody(oracleConfirmSch
   }
 });
 
-router.post('/verify-crosschain', authenticate, userLimiter, validateBody(oracleVerifyCrosschainSchema), async (req, res) => {
+router.post('/verify-crosschain', oracleVerificationLimiter, authenticate, validateBody(oracleVerifyCrosschainSchema), async (req, res) => {
   try {
     const { orderId, blockchainHash } = req.body;
     await authorizeOrderAccess(req, orderId);

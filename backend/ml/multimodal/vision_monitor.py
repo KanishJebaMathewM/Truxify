@@ -184,13 +184,29 @@ class VisionMonitor:
     
     def _estimate_head_pose(self, landmarks) -> Dict:
         """Estimate head pose from facial landmarks"""
-        # Simplified head pose estimation
-        # In production: use solvePnP with 3D model
-        return {
-            'yaw': np.random.uniform(-30, 30),
-            'pitch': np.random.uniform(-20, 20),
-            'roll': np.random.uniform(-10, 10)
-        }
+        nose_tip = landmarks[1]  # nose tip
+        forehead = landmarks[10]  # forehead center
+        left_eye = landmarks[33]  # left eye inner corner
+        right_eye = landmarks[263]  # right eye inner corner
+        chin = landmarks[152]  # chin
+
+        eye_center_x = (left_eye[0] + right_eye[0]) / 2
+        eye_center_y = (left_eye[1] + right_eye[1]) / 2
+
+        dx = nose_tip[0] - eye_center_x
+        dy = nose_tip[1] - eye_center_y
+
+        face_height = chin[1] - forehead[1]
+        face_width = abs(right_eye[0] - left_eye[0])
+
+        yaw = max(-30, min(30, (dx / max(face_width, 1)) * 30))
+        pitch = max(-20, min(20, (dy / max(face_height, 1)) * 20))
+
+        eye_dx = right_eye[0] - left_eye[0]
+        eye_dy = right_eye[1] - left_eye[1]
+        roll = max(-10, min(10, (eye_dy / max(eye_dx, 1)) * 10))
+
+        return {'yaw': yaw, 'pitch': pitch, 'roll': roll}
     
     def process_frame(self, frame) -> Dict:
         """Process single video frame"""

@@ -24,7 +24,6 @@ class MarketplaceRepository {
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
   );
 
   final SupabaseClient? _providedClient;
@@ -41,7 +40,8 @@ class MarketplaceRepository {
   Future<String?> _firebaseAccessToken() async {
     try {
       return await FirebaseAuth.instance.currentUser?.getIdToken();
-    } catch (_) {
+    } catch (e) {
+      print('Error: $e');
       return null;
     }
   }
@@ -49,7 +49,8 @@ class MarketplaceRepository {
   String? _supabaseAccessToken() {
     try {
       return _client.auth.currentSession?.accessToken;
-    } catch (_) {
+    } catch (e) {
+      print('Error: $e');
       return null;
     }
   }
@@ -172,11 +173,41 @@ class MarketplaceRepository {
 
   LoadOffer _mapLoadOffer(Map<String, dynamic> row) {
     String s(String key, [String fallback = '']) => (row[key] ?? fallback).toString();
-    num n(String key, [num fallback = 0]) => (row[key] as num?) ?? fallback;
-    double d(String key, [double fallback = 0]) => (row[key] as num?)?.toDouble() ?? fallback;
-    int i(String key, [int fallback = 0]) => (row[key] as num?)?.toInt() ?? fallback;
-    bool b(String key, [bool fallback = false]) => (row[key] as bool?) ?? fallback;
-    double? nullableDouble(String key) => (row[key] as num?)?.toDouble();
+    num n(String key, [num fallback = 0]) {
+      final v = row[key];
+      if (v is num) return v;
+      if (v is String) return num.tryParse(v) ?? fallback;
+      return fallback;
+    }
+    double d(String key, [double fallback = 0]) {
+      final v = row[key];
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v) ?? fallback;
+      return fallback;
+    }
+    int i(String key, [int fallback = 0]) {
+      final v = row[key];
+      if (v is num) return v.toInt();
+      if (v is String) return int.tryParse(v) ?? fallback;
+      return fallback;
+    }
+    bool b(String key, [bool fallback = false]) {
+      final v = row[key];
+      if (v is bool) return v;
+      if (v is String) {
+        final lower = v.toLowerCase();
+        if (lower == 'true' || lower == '1') return true;
+        if (lower == 'false' || lower == '0') return false;
+      }
+      if (v is num) return v != 0;
+      return fallback;
+    }
+    double? nullableDouble(String key) {
+      final v = row[key];
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v);
+      return null;
+    }
 
     final freightValue = row.containsKey('freight_value')
         ? _formatCurrency(n('freight_value'))

@@ -1,8 +1,10 @@
-import { ApolloGateway } from '@apollo/gateway';
+import { ApolloGateway, IntrospectAndCompose } from '@apollo/gateway';
+import { RemoteGraphQLDataSource } from '@apollo/gateway';
 import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { InMemoryLRUCache } from '@apollo/utils.keyvaluecache';
 import logger from '../../api/src/middleware/logger.js';
+import { supabase } from '../../api/src/config/db.js';
 
 class GraphQLGateway {
     constructor() {
@@ -33,18 +35,12 @@ class GraphQLGateway {
                 ttl: 300 // 5 minutes
             }),
             buildService({ name, url }) {
-                return {
-                    name,
+                return new RemoteGraphQLDataSource({
                     url,
-                    requestDidStart() {
-                        return {
-                            willSendResponse({ response }) {
-                                // Log response
-                                logger.debug(`GraphQL ${name} response sent`);
-                            }
-                        };
-                    }
-                };
+                    willSendRequest({ request }) {
+                        logger.debug(`GraphQL ${name} request sent`);
+                    },
+                });
             }
         });
     }
@@ -327,8 +323,20 @@ class GraphQLGateway {
     }
 
     async getUserFromToken(token) {
-        // In production: decode JWT and fetch user
-        return { id: 'user-123', role: 'CUSTOMER' };
+        if (!token) return null;
+
+        try {
+            const stripped = token.startsWith('Bearer ') ? token.slice(7) : token;
+            const { data: { user }, error } = await supabase.auth.getUser(stripped);
+            if (error || !user) {
+                logger.warn('[GraphQL Gateway] Invalid auth token:', error?.message || 'no user');
+                return null;
+            }
+            return { id: user.id, role: user.user_metadata?.role || 'CUSTOMER' };
+        } catch (err) {
+            logger.warn('[GraphQL Gateway] Token verification failed:', err.message);
+            return null;
+        }
     }
 
     async stop() {

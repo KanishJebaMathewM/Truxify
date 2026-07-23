@@ -52,6 +52,7 @@ const POLICIES = {
   'driver:view-stats':         { roles: [ROLES.DRIVER] },
   'document:upload':           { roles: [ROLES.DRIVER] },
   'driver:toggle-online':      { roles: [ROLES.DRIVER] },
+  'driver:update-hos':         { roles: [ROLES.DRIVER] },
   'driver:view-wallet':        { roles: [ROLES.DRIVER] },
   'driver:view-earnings':      { roles: [ROLES.DRIVER] },
   'driver:view-trips':         { roles: [ROLES.DRIVER] },
@@ -66,6 +67,8 @@ const POLICIES = {
   'truck:register':            { roles: [ROLES.DRIVER] },
   'truck:list-own':            { roles: [ROLES.DRIVER] },
 
+  'maintenance:upload-photos':  { roles: [ROLES.DRIVER] },
+
   'ticket:create':             {},
   'ticket:view-own':           {},
   'ticket:view':               { ownership: (u, r) => r?.ticket && (r.ticket.user_id === u.id || u.role === ROLES.ADMIN) },
@@ -76,9 +79,16 @@ const POLICIES = {
 
   'admin:view-dashboard':      { roles: [ROLES.ADMIN] },
   'admin:invalidate-cache':    { roles: [ROLES.ADMIN] },
+  'admin:view-audit-logs':     { roles: [ROLES.ADMIN] },
 
   'shard:view':                { roles: [ROLES.ADMIN] },
   'shard:query-orders':        { roles: [ROLES.ADMIN] },
+
+  'fraud:view-stats':          { roles: [ROLES.ADMIN] },
+  'fraud:view-risk':           { roles: [ROLES.ADMIN] },
+  'fraud:manage-review':       { roles: [ROLES.ADMIN] },
+  'fraud:track':               {},
+  'fraud:analyze-network':     { roles: [ROLES.ADMIN] },
 
   'trip:sync-events':          {},
   'trip:view-events':          { ownership: (u, r) => r?.trip && (u.role === ROLES.ADMIN || r.trip.driver_id === u.id || r.trip.customer_id === u.id) },

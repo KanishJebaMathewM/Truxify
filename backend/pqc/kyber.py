@@ -23,6 +23,13 @@ class KyberKEM:
         self.n = params.n
         self.k = params.k
         self.q = params.q
+
+    @staticmethod
+    def _negacyclic_convolve(a: np.ndarray, b: np.ndarray, n: int, q: int) -> np.ndarray:
+        c = np.convolve(a, b)
+        c_padded = np.zeros(2 * n)
+        c_padded[:len(c)] = c
+        return (c_padded[:n] - c_padded[n:]) % q
         
     def _sample_cbd(self, eta: int, size: int) -> np.ndarray:
         """Sample from centered binomial distribution"""
@@ -55,7 +62,7 @@ class KyberKEM:
         t = np.zeros((self.k, self.n))
         for i in range(self.k):
             for j in range(self.k):
-                t[i] = (t[i] + np.convolve(A[i][j], s[j])[:self.n]) % self.q
+                t[i] = (t[i] + self._negacyclic_convolve(A[i][j], s[j], self.n, self.q)) % self.q
             t[i] = (t[i] + e[i]) % self.q
         
         # Compress public key
@@ -91,13 +98,13 @@ class KyberKEM:
         u = np.zeros((self.k, self.n))
         for i in range(self.k):
             for j in range(self.k):
-                u[i] = (u[i] + np.convolve(A[j][i], r[j])[:self.n]) % self.q
+                u[i] = (u[i] + self._negacyclic_convolve(A[j][i], r[j], self.n, self.q)) % self.q
             u[i] = (u[i] + e1[i]) % self.q
         
         # Compute v = t^T * r + e2
         v = np.zeros(self.n)
         for i in range(self.k):
-            v = (v + np.convolve(t_decompressed[i], r[i])[:self.n]) % self.q
+            v = (v + self._negacyclic_convolve(t_decompressed[i], r[i], self.n, self.q)) % self.q
         v = (v + e2) % self.q
         
         # Compress ciphertext
@@ -129,7 +136,7 @@ class KyberKEM:
         # Compute v - s^T * u
         result = v_decompressed.copy()
         for i in range(self.k):
-            result = (result - np.convolve(s[i], u_decompressed[i])[:self.n]) % self.q
+            result = (result - self._negacyclic_convolve(s[i], u_decompressed[i], self.n, self.q)) % self.q
         
         # Derive shared secret
         shared_secret = hashlib.sha256(
@@ -170,12 +177,13 @@ class DilithiumSignature:
         
         for i in range(self.params['k']):
             for j in range(self.params['l']):
-                t[i] = (t[i] + np.convolve(A[i][j], private_key['s1'][j])[:self.params['n']]) % self.params['q']
+                t[i] = (t[i] + KyberKEM._negacyclic_convolve(A[i][j], private_key['s1'][j], self.params['n'], self.params['q'])) % self.params['q']
             t[i] = (t[i] + private_key['s2'][i]) % self.params['q']
         
         public_key = {
             'A': A,
-            't': t
+            't': t,
+            'seed': private_key['seed']
         }
         
         self.private_key = private_key
@@ -204,7 +212,7 @@ class DilithiumSignature:
         # Simplified verification
         # In production: implement full Dilithium verification
         expected = hashlib.sha256(
-            message + self.private_key['seed'] + b'signature'
-        ).digest() if self.private_key else b''
+            message + self.public_key['seed'] + b'signature'
+        ).digest()
         
         return signature == expected

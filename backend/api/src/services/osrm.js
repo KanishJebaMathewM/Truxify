@@ -132,7 +132,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
       clearTimeout(timeout);
       if (attempt < maxRetries - 1) {
         const delayMs = baseDelayMs * Math.pow(2, attempt);
-        if (err.code === 'EOPENBREAKER' || err.message.includes('Breaker is open')) {
+        if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
           logger.warn('[OSRM] Circuit is open. Falling back instantly.');
           return null; // Return null so caller knows to use straight-line fallback
         }
@@ -226,7 +226,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
 
   } catch (err) {
     logger.error('[osrm] Fetch error (geometry):', err.message);
-    if (err.message.includes('Circuit open')) return null;
+    if (err.message?.includes('Circuit open')) return null;
     return null;
   } finally {
     clearTimeout(timeout);

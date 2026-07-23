@@ -5,7 +5,7 @@
   "type": "module",
   "dependencies": {
     "@apollo/gateway": "^2.5.0",
-    "@apollo/server": "^4.9.0",
+    "@apollo/server": "^5.5.1",
     "@apollo/federation": "^2.5.0",
     "@apollo/utils.keyvaluecache": "^2.1.0",
     "graphql": "^16.8.0",

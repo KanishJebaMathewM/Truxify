@@ -3,11 +3,13 @@ import { corsMiddleware } from './middleware/cors.js'
 import helmet from 'helmet' // 🔒 ADDED HELMET IMPORT FOR ISSUES #361 & #944
 import http from 'http'
 import dotenv from 'dotenv'
+import hppProtection from './middleware/hppProtection.js';
 
 import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimiter.js'
 import tripRoutes from './routes/tripRoutes.js'
 import deviceRoutes from './routes/deviceRoutes.js'
 import documentRoutes from './routes/documentRoutes.js'
+import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js'
 import { orderRepository } from './core/container.js'
@@ -15,6 +17,7 @@ import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
 import { validateEscrowSetup } from './services/escrow.js'
+import { startDlqWorker } from './workers/dlqWorker.js'
 
 // Load REST routes
 import orderRoutes from './routes/orderRoutes.js'
@@ -29,6 +32,7 @@ import healthRoutes from './routes/healthRoutes.js'
 import adminRoutes from './routes/adminRoutes.js'
 import lookupRoutes from './routes/lookupRoutes.js'
 import webhookRoutes from './routes/webhookRoutes.js'
+import auditRoutes from './routes/auditRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -78,6 +82,7 @@ import { tracingMiddleware } from './middleware/tracingMiddleware.js'
 
 
 import logger from './middleware/logger.js'
+import { errorHandler } from './middleware/errorHandler.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
 import { requestIdMiddleware, requestLogger } from './middleware/requestId.js'
@@ -96,6 +101,10 @@ import {
   startDocumentExpiryWorker,
   stopDocumentExpiryWorker,
 } from './services/documentExpiryService.js'
+import {
+  startDlqWorker,
+  stopDlqWorker,
+} from './workers/dlqWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -266,6 +275,16 @@ app.use(helmet({
   dnsPrefetchControl: { allow: false },
   hidePoweredBy: true, // Removes X-Powered-By: Express
   referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  permissionsPolicy: {
+    features: {
+      camera: [],
+      microphone: [],
+      geolocation: [],
+      payment: [],
+      usb: [],
+      fullscreen: ['self']
+    }
+  },
   xssFilter: true
 }))
 
@@ -289,6 +308,7 @@ const jsonBodyLimit =
 
 const urlEncodedBodyLimit =
   process.env.URLENCODED_BODY_LIMIT || '1mb';
+const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
 
 app.use(
   express.json({
@@ -301,6 +321,10 @@ app.use(
   express.urlencoded({
     extended: true,
     limit: urlEncodedBodyLimit,
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: jsonBodyLimit,
   })
 );
 
@@ -344,6 +368,8 @@ app.use(networkAnalysisMiddleware)
 // ============================================================================
 app.use('/api/health', healthLimiter)
 app.use('/api/health', healthRoutes)
+app.use('/api/v1/health', healthLimiter)
+app.use('/api/v1/health', healthRoutes)
 app.use('/api/', globalLimiter)
 app.use('/api/v1/trips', tripRoutes)
 
@@ -365,11 +391,13 @@ app.use('/api/support', supportRoutes)
 app.use('/api/profile', profileRoutes)
 app.use('/api/devices', deviceRoutes)
 app.use('/api/driver/documents', documentRoutes)
+app.use('/api/maintenance', maintenancePhotoRoutes)
 app.use('/api/trucks', truckRoutes)
 app.use('/api/v1', lookupRoutes)
 app.use('/api/public', publicTrackingRoutes)
 app.use('/api/auth', authLimiter, authRoutes)
 app.use('/api/v1/admin', adminRoutes)
+app.use('/api/v1/admin/audit-logs', auditRoutes)
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -525,17 +553,7 @@ app.use((req, res) => {
 app.use(sentryErrorHandler())
 
 // Error handling middleware
-app.use((err, req, res, next) => {
-  if (err && err.name === 'MulterError') {
-    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400
-    return res.status(status).json({
-      error: `File upload error: ${err.message}`,
-      code: err.code
-    })
-  }
-  logger.error({ requestId: req.requestId, err }, 'Unhandled express exception')
-  res.status(500).json({ error: 'Critical Internal Server Error.' })
-})
+app.use(errorHandler)
 
 // ============================================================================
 // WEBSOCKET SERVER INIT (wait for MongoDB before accepting WebSocket connections)
@@ -567,10 +585,6 @@ server.listen(PORT, () => {
 
   logger.info(`🆕 ZK-Proof KYC Verification enabled with contract: ${process.env.KYC_VERIFIER_CONTRACT || 'not-deployed'}`)
 
-  logger.info(`☁️ Multi-Cloud Disaster Recovery enabled (Active: ${process.env.ACTIVE_CLOUD || 'aws'})`)
-
-
-  logger.info(`☁️ Multi-Cloud Disaster Recovery enabled (Active: ${process.env.ACTIVE_CLOUD || 'aws'})`)
 
   startEscrowRefundReconciliation(orderRepository)
   startReputationReconciliation(orderRepository)
@@ -629,26 +643,15 @@ async function shutdown (signal) {
     await shardManager.closeAllConnections()
     logger.info('[shutdown] Shard connections closed.')
 
-    // 4. Close database/cache connections
-
-    // 3. Close WebRTC signaling server
+    // 4. Close WebRTC signaling server
     await closeWebRTCSignaling()
     logger.info('[shutdown] WebRTC signaling server closed.')
-
-    // 4. Close shard connections
-    await shardManager.closeAllConnections()
-    logger.info('[shutdown] Shard connections closed.')
-
-
-    // 5. Close database/cache connections
-
 
     // 5. Close OpenTelemetry tracing
     await tracing.shutdown()
     logger.info('[shutdown] OpenTelemetry tracing shut down.')
 
     // 6. Close database/cache connections
-
     await closeDbConnections()
 
     logger.info('[shutdown] Clean exit.')
@@ -677,3 +680,43 @@ process.on('unhandledRejection', async (reason) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM')) // Docker / Kubernetes stop
 process.on('SIGINT', () => shutdown('SIGINT')) // Ctrl+C in dev
+
+app.use((err, req, res, next) => {
+  if (err?.type === 'entity.too.large') {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        ip: req.ip,
+        method: req.method,
+        path: req.originalUrl,
+      },
+      'Request payload exceeded configured limit'
+    );
+
+    return res.status(413).json({
+      error: 'Payload too large',
+    });
+  }
+
+  if (
+    err instanceof SyntaxError &&
+    err.status === 400 &&
+    'body' in err
+  ) {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        ip: req.ip,
+        method: req.method,
+        path: req.originalUrl,
+      },
+      'Malformed JSON payload received'
+    );
+
+    return res.status(400).json({
+      error: 'Malformed JSON payload',
+    });
+  }
+
+  next(err);
+});

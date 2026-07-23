@@ -79,45 +79,48 @@ class ABTestModel:
         """Compare performance of production vs shadow model"""
         session = self.Session()
         
-        # Get metrics for both models
-        metrics = session.query(ABTestMetrics).filter(
-            ABTestMetrics.test_id == test_id
-        ).all()
-        
-        df = pd.DataFrame([{
-            'model_version': m.model_version,
-            'metric_name': m.metric_name,
-            'metric_value': m.metric_value
-        } for m in metrics])
-        
-        if df.empty:
-            return {'error': 'No metrics found'}
-        
-        # Calculate average metrics per model
-        results = {}
-        for metric in df['metric_name'].unique():
-            metric_df = df[df['metric_name'] == metric]
-            avg_metrics = metric_df.groupby('model_version')['metric_value'].mean()
+        try:
+            # Get metrics for both models
+            metrics = session.query(ABTestMetrics).filter(
+                ABTestMetrics.test_id == test_id
+            ).all()
             
-            results[metric] = {
-                'production': avg_metrics.get('production', None),
-                'shadow': avg_metrics.get('shadow', None),
-                'improvement': self.calculate_improvement(
-                    avg_metrics.get('production', 0),
-                    avg_metrics.get('shadow', 0)
-                )
+            df = pd.DataFrame([{
+                'model_version': m.model_version,
+                'metric_name': m.metric_name,
+                'metric_value': m.metric_value
+            } for m in metrics])
+            
+            if df.empty:
+                return {'error': 'No metrics found'}
+            
+            # Calculate average metrics per model
+            results = {}
+            for metric in df['metric_name'].unique():
+                metric_df = df[df['metric_name'] == metric]
+                avg_metrics = metric_df.groupby('model_version')['metric_value'].mean()
+                
+                results[metric] = {
+                    'production': avg_metrics.get('production', None),
+                    'shadow': avg_metrics.get('shadow', None),
+                    'improvement': self.calculate_improvement(
+                        avg_metrics.get('production', 0),
+                        avg_metrics.get('shadow', 0)
+                    )
+                }
+            
+            # Determine if shadow model is better
+            is_better = self.is_shadow_better(results)
+            
+            return {
+                'test_id': test_id,
+                'results': results,
+                'shadow_better': is_better,
+                'should_rollback': not is_better,
+                'timestamp': datetime.utcnow().isoformat()
             }
-        
-        # Determine if shadow model is better
-        is_better = self.is_shadow_better(results)
-        
-        return {
-            'test_id': test_id,
-            'results': results,
-            'shadow_better': is_better,
-            'should_rollback': not is_better,
-            'timestamp': datetime.utcnow().isoformat()
-        }
+        finally:
+            session.close()
     
     def calculate_improvement(self, prod_value: float, shadow_value: float) -> float:
         """Calculate percentage improvement"""

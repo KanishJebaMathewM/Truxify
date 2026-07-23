@@ -5,6 +5,7 @@ from torch_geometric.nn import GCNConv, GATConv, SAGEConv, global_mean_pool
 from torch_geometric.data import Data, DataLoader
 import numpy as np
 import networkx as nx
+from datetime import datetime
 import logging
 
 logger = logging.getLogger(__name__)

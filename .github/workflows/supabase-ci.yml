@@ -1,0 +1,27 @@
+name: Supabase CI
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/supabase-ci.yml'
+
+jobs:
+  db-check:
+    name: Database Migration Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start Supabase locally and run migrations
+        run: supabase start
+
+      - name: Lint database schema
+        run: supabase db lint

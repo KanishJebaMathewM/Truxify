@@ -42,8 +42,16 @@ const ESCROW_ABI = [
 const rpcUrl            = process.env.POLYGON_RPC_URL;
 const contractAddress   = process.env.ESCROW_CONTRACT_ADDRESS;
 const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
-export const ESCROW_MATIC_PER_PAISA = parseFloat(process.env.ESCROW_MATIC_PER_PAISA || '0.01');
-const MAX_ESCROW_MATIC = parseFloat(process.env.MAX_ESCROW_MATIC || '5');
+function parseEnvFloat(raw, defaultVal, name) {
+  const val = parseFloat(raw || defaultVal);
+  if (isNaN(val) || val <= 0) {
+    throw new Error(`Invalid ${name}: "${raw}" — must be a positive number`);
+  }
+  return val;
+}
+
+export const ESCROW_MATIC_PER_PAISA = parseEnvFloat(process.env.ESCROW_MATIC_PER_PAISA, '0.01', 'ESCROW_MATIC_PER_PAISA');
+const MAX_ESCROW_MATIC = parseEnvFloat(process.env.MAX_ESCROW_MATIC, '5', 'MAX_ESCROW_MATIC');
 
 /** @type {ethers.Contract | null} */
 let escrowContract = null
@@ -142,7 +150,7 @@ export function paisaToMaticWei(paisa) {
   }
   const matic = amount * ESCROW_MATIC_PER_PAISA;
   if (matic > MAX_ESCROW_MATIC) {
-    logger.warn(`[escrow] Deposit ${matic} MATIC exceeds safety cap of ${MAX_ESCROW_MATIC} MATIC (${paisa} paisa @ ${ESCROW_MATIC_PER_PAISA} MATIC/paisa)`);
+    throw new RangeError(`Deposit ${matic} MATIC exceeds safety cap of ${MAX_ESCROW_MATIC} MATIC (${paisa} paisa @ ${ESCROW_MATIC_PER_PAISA} MATIC/paisa)`);
   }
   return ethers.parseEther(matic.toFixed(18));
 }
@@ -201,19 +209,18 @@ export function getEscrowBookingId (orderDisplayId) {
  * backend can confirm the on-chain deposit.
  *
  * @param {string} orderDisplayId
- * @param {string} customerWalletAddress — 0x-prefixed Polygon address of the customer
  * @param {string} driverWalletAddress   — 0x-prefixed Polygon address of the driver
  * @param {string} amountWei             — amount in wei (string or bigint)
  * @returns {Promise<{txData: object|null, bookingId: string}>}
  */
-export async function buildDepositTx (orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
+export async function buildDepositTx (orderDisplayId, driverWalletAddress, amountWei) {
   return measureExecution('EscrowService.buildDepositTx', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
   if (!escrowContract) {
     return { txData: null, bookingId }
   }
 
-  if (!ethers.isAddress(customerWalletAddress) || !ethers.isAddress(driverWalletAddress)) {
+  if (!ethers.isAddress(driverWalletAddress)) {
     return { txData: null, bookingId }
   }
   if (!amountWei || BigInt(amountWei) <= 0n) {

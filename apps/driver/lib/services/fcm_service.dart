@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -7,9 +8,13 @@ import 'package:http/http.dart' as http;
 import 'api_client.dart';
 
 class FcmService {
-  static final String _apiBaseUrl = 'http://localhost:5000';
   static final ApiClient apiClient = ApiClient();
+  static bool _initialized = false;
+  static StreamSubscription<String>? _tokenRefreshSub;
+
   static Future<void> initializeAndRegister() async {
+    if (_initialized) return;
+    _initialized = true;
     try {
       final messaging = FirebaseMessaging.instance;
 
@@ -30,7 +35,8 @@ class FcmService {
           await _sendTokenToBackend(token);
         }
 
-        messaging.onTokenRefresh.listen((newToken) async {
+        _tokenRefreshSub?.cancel();
+        _tokenRefreshSub = messaging.onTokenRefresh.listen((newToken) async {
           await _sendTokenToBackend(newToken);
         });
       } else {
@@ -112,4 +118,4 @@ class FcmService {
     }
   }
 }
-export 'package:truxify_shared/src/services/fcm_service.dart';
+export 'package:truxify_shared/src/services/fcm_service.dart' hide FcmService;

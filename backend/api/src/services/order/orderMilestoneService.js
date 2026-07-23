@@ -163,10 +163,31 @@ export class OrderMilestoneService {
     let releaseTxHash = null;
     let escrowAlreadyReleased = false;
 
+    if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
+      try {
+        const releaseResult = await escrowRelease(order.order_display_id);
+        if (releaseResult.txHash) {
+          releaseTxHash = releaseResult.txHash;
+        } else if (releaseResult.alreadyReleased) {
+          escrowAlreadyReleased = true;
+        } else {
+          throw new Error('Escrow release returned no transaction hash');
+        }
+      } catch (releaseErr) {
+        logger.error('[escrow] Blockchain release failed for order', orderId, ':', releaseErr.message);
+        throw new DomainError(503, {
+          error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
+          retryable: true,
+        });
+      }
+    } else {
+      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
+    }
+
     const { data: tripData, error: rpcErr } = await this.orderRepository.executeRpc('complete_trip_tx', {
       p_order_id: orderId,
       p_otp_id: otpRecord.id,
-      p_release_tx_hash: null,
+      p_release_tx_hash: releaseTxHash,
     });
     if (rpcErr) {
       logger.error('complete_trip_tx RPC failed:', rpcErr.message);
@@ -189,27 +210,6 @@ export class OrderMilestoneService {
 
     await verifyDeliveryOtp(otpRecord.id);
     await clearOtpState(orderId);
-
-    if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
-      try {
-        const releaseResult = await escrowRelease(order.order_display_id);
-        if (releaseResult.txHash) {
-          releaseTxHash = releaseResult.txHash;
-        } else if (releaseResult.alreadyReleased) {
-          escrowAlreadyReleased = true;
-        } else {
-          throw new Error('Escrow release returned no transaction hash');
-        }
-      } catch (releaseErr) {
-        logger.error('[escrow] Blockchain release failed for order', orderId, ':', releaseErr.message);
-        throw new DomainError(503, {
-          error: 'Blockchain escrow release failed. Payment cannot be processed. Please retry.',
-          retryable: true,
-        });
-      }
-    } else {
-      logger.info(`[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`);
-    }
 
     if (releaseTxHash || escrowAlreadyReleased) {
       const { error: releaseUpdateErr } = await this.orderRepository.updateOrder(orderId, {

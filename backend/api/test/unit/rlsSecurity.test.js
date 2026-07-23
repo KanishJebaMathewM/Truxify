@@ -38,12 +38,15 @@ const ALL_TABLES = [
   'driver_documents',
   'vehicle_types',
   'regions',
+  'webhook_failures',
+  'tracking_tokens',
 ];
 
 // Tables with RLS policies in the main RLS migration (20240101000000_rls.sql).
-// user_devices and driver_documents have RLS in their own individual migrations.
+// user_devices, driver_documents, webhook_failures, and tracking_tokens have
+// RLS in their own individual migrations.
 const MAIN_RLS_TABLES = ALL_TABLES.filter(
-  (t) => !['user_devices', 'driver_documents'].includes(t)
+  (t) => !['user_devices', 'driver_documents', 'webhook_failures', 'tracking_tokens'].includes(t)
 );
 
 describe('RLS Migration (20240101000000_rls.sql)', () => {
@@ -122,6 +125,21 @@ describe('Individual migration files with RLS policies', () => {
     expect(content).toMatch(/CREATE POLICY "Service role full access on driver_documents"/);
     expect(content).toMatch(/CREATE POLICY "Drivers read own driver_documents"/);
   });
+
+  it('webhook_failures migration has RLS (20260710000000)', async () => {
+    const p = path.resolve(__dirname, '../../../../supabase/migrations/20260710000000_create_webhook_failures.sql');
+    const content = await fs.readFile(p, 'utf8');
+    expect(content).toMatch(/ALTER TABLE webhook_failures ENABLE ROW LEVEL SECURITY/i);
+    expect(content).toMatch(/CREATE POLICY "Allow Service Role full access to webhook_failures"/);
+  });
+
+  it('tracking_tokens migration has RLS and customer SELECT policy (20260716000000)', async () => {
+    const p = path.resolve(__dirname, '../../../../supabase/migrations/20260716000000_add_public_tracking_tokens.sql');
+    const content = await fs.readFile(p, 'utf8');
+    expect(content).toMatch(/alter table tracking_tokens enable row level security/i);
+    expect(content).toMatch(/create policy "Service role full access on tracking_tokens"/i);
+    expect(content).toMatch(/create policy "Customers select own tracking tokens"/i);
+  });
 });
 
 describe('Revoke anon privileges (revoke_anon_privileges.sql)', () => {
@@ -168,7 +186,7 @@ describe('RPC Security Fix (20260708000000_fix_rpc_security.sql)', () => {
   });
 });
 
-describe('accept_bid_tx — no regression in latest migration chain', () => {
+describe('accept_bid_tx — auth.uid() verification present in migration chain', () => {
   let secureRpcContent;
 
   beforeAll(async () => {
@@ -176,9 +194,20 @@ describe('accept_bid_tx — no regression in latest migration chain', () => {
     secureRpcContent = await fs.readFile(path2, 'utf8');
   });
 
-  it('the 20260706075009 version of accept_bid_tx is missing auth.uid() — proving the regression existed', () => {
-    // The version in 20260706075009 lacks auth.uid() — our fix migration restores it.
+  it('the 20260706075009 version of accept_bid_tx has auth.uid() check restored', () => {
+    // The 20260706075009 migration restores auth.uid() in accept_bid_tx,
+    // ensuring only the order's customer can accept bids.
     const hasAuthCheck = /IF auth\.uid\(\) <> v_customer_id THEN/i.test(secureRpcContent);
-    expect(hasAuthCheck).toBe(false);
+    expect(hasAuthCheck).toBe(true);
+  });
+
+  it('complete_trip_tx has auth.uid() check verifying driver assignment', () => {
+    const hasAuthCheck = /IF auth\.uid\(\) <> v_order.driver_id THEN/i.test(secureRpcContent);
+    expect(hasAuthCheck).toBe(true);
+  });
+
+  it('withdraw_funds_tx has auth.uid() check verifying caller owns the wallet', () => {
+    const hasAuthCheck = /IF auth\.uid\(\) <> p_driver_id THEN/i.test(secureRpcContent);
+    expect(hasAuthCheck).toBe(true);
   });
 });

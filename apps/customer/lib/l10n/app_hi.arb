@@ -310,6 +310,11 @@
     "description": "Label for savings summary on home screen"
   },
 
+  "totalShipments": "कुल शिपमेंट",
+  "@totalShipments": {
+    "description": "Label for total shipments count on home screen"
+  },
+
   "yourUsualRoutes": "आपके नियमित मार्ग",
   "@yourUsualRoutes": {
     "description": "Section title for frequently used routes"

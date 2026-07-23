@@ -42,7 +42,6 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
   reconciliationRunning = true;
 
   try {
-    // Acquire a global lock just to prevent multiple instances from pulling the exact same batch unnecessarily
     let globalLockAcquired = false;
     if (redisClient) {
       try {
@@ -55,8 +54,6 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
         logger.info('[escrow-reconciliation] Global lock held by another instance, skipping batch pull.');
         return;
       }
-    } else {
-      // Redis not configured — single-instance mode, proceed without distributed lock
     }
 
     const instanceId = process.env.HOSTNAME || os.hostname();
@@ -68,8 +65,16 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
     }
 
     for (const order of pendingOrders ?? []) {
+      if (globalLockAcquired && redisClient) {
+        try {
+          await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
+        } catch (err) {
+          logger.warn('[escrow-reconciliation] Failed to refresh lock:', err.message);
+        }
+      }
+
       const lockKey = `escrow_lock:${order.id}`;
-      const lockValue = await acquireLock(lockKey, 30000); // 30 seconds for blockchain confirmation
+      const lockValue = await acquireLock(lockKey, 30000);
       if (!lockValue) {
         logger.info(`[escrow-reconciliation] Order ${order.order_display_id} locked by another process (API or Job), skipping.`);
         continue;
@@ -98,13 +103,21 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
         }
 
         let refundTxHash = order.refund_tx_hash;
+        let receipt;
+
         if (!refundTxHash) {
           const submitted = await submitEscrowRefund(order.order_display_id);
-          await submitted.waitForConfirmation();
-          refundTxHash = submitted.txHash;
+          if (submitted.waitForConfirmation) {
+            receipt = await submitted.waitForConfirmation();
+          } else {
+            logger.warn(`[escrow-reconciliation] waitForConfirmation unavailable for ${order.order_display_id} — escrow contract may not be initialized.`);
+            receipt = { hash: submitted.txHash };
+          }
+          refundTxHash = receipt.hash ?? submitted.txHash;
+        } else {
+          receipt = await confirmEscrowRefund(refundTxHash);
         }
 
-        const receipt = await confirmEscrowRefund(refundTxHash);
         const refundedAt = new Date().toISOString();
         const { error: updateError } = await orderRepository.updateOrderWithFilter(order.id, {
           status: 'cancelled',

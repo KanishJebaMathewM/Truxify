@@ -1,12 +1,17 @@
-const { ethers } = require("hardhat");
-const fs = require("fs");
-const path = require("path");
+import hre from "hardhat";
+const { ethers } = hre;
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 async function main() {
     console.log("⚡ Deploying zkEVM Rollup...");
 
     // Deploy Verifier (placeholder)
-    const MockVerifier = await ethers.getContractFactory("ZKVerifier");
+    const MockVerifier = await ethers.getContractFactory("Verifier");
     const verifier = await MockVerifier.deploy();
     await verifier.waitForDeployment();
     console.log(`✅ Verifier deployed: ${await verifier.getAddress()}`);
@@ -38,10 +43,11 @@ async function main() {
     console.log(`💰 Balance: ${ethers.formatEther(balance)} ETH`);
 
     // Execute transaction
-    const txData = ethers.solidityPacked(
-        ["address", "address", "uint256", "bytes", "uint256", "uint256", "uint256", "bytes"],
-        [signer.address, signer.address, 0, "0x", 0, 0, 21000, "0x"]
+    const txHash = ethers.solidityPackedKeccak256(
+        ["address", "address", "uint256", "bytes", "uint256", "uint256", "uint256"],
+        [signer.address, signer.address, 0, "0x", 0, 0, 21000]
     );
+    const signature = await signer.signMessage(ethers.getBytes(txHash));
 
     const tx = await rollup.executeTransaction(
         signer.address,
@@ -51,7 +57,7 @@ async function main() {
         0,
         0,
         21000,
-        "0x"
+        signature
     );
     await tx.wait();
     console.log("✅ Transaction executed");

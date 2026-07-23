@@ -72,6 +72,9 @@ class _TruxifyAppState extends State<TruxifyApp> {
         supportedLocales: const [
           Locale('en', ''),
           Locale('hi', ''),
+          Locale('ta', ''),
+          Locale('kn', ''),
+          Locale('mr', ''),
         ],
         home: const SplashScreen(),
       ),

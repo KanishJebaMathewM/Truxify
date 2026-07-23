@@ -242,7 +242,7 @@ describe("TruxifyEscrow", function () {
       await escrow.connect(customer).createBooking(1, driver.address, {
         value: ethers.parseEther("1.0"),
       });
-      await escrow.connect(customer).cancelBooking(1);
+      await escrow.connect(owner).cancelBooking(1);
 
       await expect(
         escrow.connect(owner).releasePayment(1)
@@ -255,7 +255,7 @@ describe("TruxifyEscrow", function () {
       await escrow.connect(customer).createBooking(1, driver.address, {
         value: ethers.parseEther("1.0"),
       });
-      await escrow.connect(customer).raiseDispute(1);
+      await escrow.connect(owner).raiseDispute(1);
 
       await expect(
         escrow.connect(owner).releasePayment(1)
@@ -340,13 +340,13 @@ describe("TruxifyEscrow", function () {
   // ═══════════════════════════════════════════════════════════════════════════
   describe("cancelBooking", function () {
     it("refunds customer on cancellation", async function () {
-      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       const amount = ethers.parseEther("1.0");
       await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
 
       const balanceBefore = await ethers.provider.getBalance(customer.address);
-      await escrow.connect(customer).cancelBooking(1);
+      await escrow.connect(owner).cancelBooking(1);
 
       await escrow.connect(customer).withdraw();
 
@@ -369,21 +369,21 @@ describe("TruxifyEscrow", function () {
     });
 
     it("adds refund to customer pendingWithdrawals", async function () {
-      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("2.5");
 
       await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
-      await escrow.connect(customer).cancelBooking(1);
+      await escrow.connect(owner).cancelBooking(1);
 
       expect(await escrow.pendingWithdrawals(customer.address)).to.equal(amount);
     });
 
     it("sets releaseTimestamps for customer", async function () {
-      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
 
-      const tx = await escrow.connect(customer).cancelBooking(1);
+      const tx = await escrow.connect(owner).cancelBooking(1);
       const receipt = await tx.wait();
       const block = await ethers.provider.getBlock(receipt.blockNumber);
 
@@ -392,12 +392,12 @@ describe("TruxifyEscrow", function () {
     });
 
     it("emits BookingCancelled and WithdrawalReady events", async function () {
-      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("1.5");
 
       await escrow.connect(customer).createBooking(5, driver.address, { value: amount });
 
-      const tx = escrow.connect(customer).cancelBooking(5);
+      const tx = escrow.connect(owner).cancelBooking(5);
 
       await expect(tx)
         .to.emit(escrow, "BookingCancelled")
@@ -416,7 +416,8 @@ describe("TruxifyEscrow", function () {
 
       await expect(
         escrow.connect(attacker).cancelBooking(1)
-      ).to.be.revertedWith("TruxifyEscrow: Not authorised");
+      ).to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount")
+       .withArgs(attacker.address);
     });
 
     it("reverts if driver tries to cancel", async function () {
@@ -428,7 +429,8 @@ describe("TruxifyEscrow", function () {
 
       await expect(
         escrow.connect(driver).cancelBooking(1)
-      ).to.be.revertedWith("TruxifyEscrow: Not authorised");
+      ).to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount")
+       .withArgs(driver.address);
     });
 
     it("reverts if booking is already paid", async function () {
@@ -439,19 +441,17 @@ describe("TruxifyEscrow", function () {
       });
       await escrow.connect(owner).releasePayment(1);
 
-      // After release, status is Delivered (1), so "Cannot cancel - booking not active" fires first
       await expect(
-        escrow.connect(customer).cancelBooking(1)
+        escrow.connect(owner).cancelBooking(1)
       ).to.be.revertedWith("TruxifyEscrow: Cannot cancel - booking not active");
     });
 
     it("reverts for non-existent booking", async function () {
-      const { escrow, attacker } = await loadFixture(deployEscrowFixture);
+      const { escrow, owner } = await loadFixture(deployEscrowFixture);
 
-      // Non-existent booking has zero customer, so "Not authorised" fires first
       await expect(
-        escrow.connect(attacker).cancelBooking(999)
-      ).to.be.revertedWith("TruxifyEscrow: Not authorised");
+        escrow.connect(owner).cancelBooking(999)
+      ).to.be.revertedWith("TruxifyEscrow: Cannot cancel - booking not active");
     });
 
     it("reverts when contract is paused", async function () {
@@ -463,7 +463,7 @@ describe("TruxifyEscrow", function () {
       await escrow.connect(owner).pause();
 
       await expect(
-        escrow.connect(customer).cancelBooking(1)
+        escrow.connect(owner).cancelBooking(1)
       ).to.be.revertedWithCustomError(escrow, "EnforcedPause");
     });
   });
@@ -472,61 +472,47 @@ describe("TruxifyEscrow", function () {
   // raiseDispute
   // ═══════════════════════════════════════════════════════════════════════════
   describe("raiseDispute", function () {
-    it("allows customer to raise dispute", async function () {
-      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
+    it("allows owner to raise dispute", async function () {
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
-      await escrow.connect(customer).raiseDispute(1);
+      await escrow.connect(owner).raiseDispute(1);
 
       const booking = await escrow.getBooking(1);
       expect(booking.status).to.equal(3); // Disputed
     });
 
-    it("allows driver to raise dispute", async function () {
-      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
-
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
-      await escrow.connect(driver).raiseDispute(1);
-
-      const booking = await escrow.getBooking(1);
-      expect(booking.status).to.equal(3);
-    });
-
     it("emits BookingDisputed event with correct args", async function () {
-      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
-
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
-
-      // Customer raises dispute on booking 1
-      await expect(escrow.connect(customer).raiseDispute(1))
-        .to.emit(escrow, "BookingDisputed")
-        .withArgs(1, customer.address);
-
-      // Create a second booking and have driver raise dispute
-      await escrow.connect(customer).createBooking(2, driver.address, { value: ethers.parseEther("1") });
-      await expect(escrow.connect(driver).raiseDispute(2))
-        .to.emit(escrow, "BookingDisputed")
-        .withArgs(2, driver.address);
-    });
-
-    it("reverts if caller is not a party to the booking", async function () {
-      const { escrow, customer, driver, attacker } = await loadFixture(deployEscrowFixture);
-
-      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
-
-      await expect(
-        escrow.connect(attacker).raiseDispute(1)
-      ).to.be.revertedWith("TruxifyEscrow: Not a party to this booking");
-    });
-
-    it("reverts if owner tries to raise dispute", async function () {
       const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
 
+      // Owner raises dispute on booking 1
+      await expect(escrow.connect(owner).raiseDispute(1))
+        .to.emit(escrow, "BookingDisputed")
+        .withArgs(1, owner.address);
+    });
+
+    it("reverts if customer tries to raise dispute", async function () {
+      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
+
+      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+
       await expect(
-        escrow.connect(owner).raiseDispute(1)
-      ).to.be.revertedWith("TruxifyEscrow: Not a party to this booking");
+        escrow.connect(customer).raiseDispute(1)
+      ).to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount")
+       .withArgs(customer.address);
+    });
+
+    it("reverts if driver tries to raise dispute", async function () {
+      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
+
+      await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
+
+      await expect(
+        escrow.connect(driver).raiseDispute(1)
+      ).to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount")
+       .withArgs(driver.address);
     });
 
     it("reverts if booking is not active", async function () {
@@ -536,27 +522,27 @@ describe("TruxifyEscrow", function () {
       await escrow.connect(owner).releasePayment(1);
 
       await expect(
-        escrow.connect(customer).raiseDispute(1)
+        escrow.connect(owner).raiseDispute(1)
       ).to.be.revertedWith("TruxifyEscrow: Cannot dispute - booking not active");
     });
 
     it("reverts if booking is already cancelled", async function () {
-      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1") });
-      await escrow.connect(customer).cancelBooking(1);
+      await escrow.connect(owner).cancelBooking(1);
 
       await expect(
-        escrow.connect(customer).raiseDispute(1)
+        escrow.connect(owner).raiseDispute(1)
       ).to.be.revertedWith("TruxifyEscrow: Cannot dispute - booking not active");
     });
 
     it("reverts for non-existent booking", async function () {
-      const { escrow, customer } = await loadFixture(deployEscrowFixture);
+      const { escrow, owner } = await loadFixture(deployEscrowFixture);
 
       await expect(
-        escrow.connect(customer).raiseDispute(999)
-      ).to.be.revertedWith("TruxifyEscrow: Not a party to this booking");
+        escrow.connect(owner).raiseDispute(999)
+      ).to.be.revertedWith("TruxifyEscrow: Cannot dispute - booking not active");
     });
   });
 
@@ -582,11 +568,11 @@ describe("TruxifyEscrow", function () {
     });
 
     it("allows customer to withdraw cancelled refund", async function () {
-      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
       const amount = ethers.parseEther("1.5");
 
       await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
-      await escrow.connect(customer).cancelBooking(1);
+      await escrow.connect(owner).cancelBooking(1);
 
       const before = await ethers.provider.getBalance(customer.address);
       const tx = await escrow.connect(customer).withdraw();
@@ -757,7 +743,7 @@ describe("TruxifyEscrow", function () {
 
       await expect(
         escrow.connect(owner).emergencyRecover(attacker.address, ethers.parseEther("1"))
-      ).to.be.revertedWith("Insufficient pending");
+      ).to.be.revertedWith("No pending withdrawal");
     });
 
     it("allows partial recovery", async function () {
@@ -853,7 +839,7 @@ describe("TruxifyEscrow", function () {
       await escrow.connect(owner).pause();
 
       await expect(
-        escrow.connect(customer).cancelBooking(1)
+        escrow.connect(owner).cancelBooking(1)
       ).to.be.revertedWithCustomError(escrow, "EnforcedPause");
     });
   });
@@ -991,11 +977,11 @@ describe("TruxifyEscrow", function () {
     });
 
     it("preserves earliest deadline for customer with multiple cancellations", async function () {
-      const { escrow, customer, driver } = await loadFixture(deployEscrowFixture);
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
 
       // First booking for customer — sets deadline D1
       await escrow.connect(customer).createBooking(1, driver.address, { value: ethers.parseEther("1.0") });
-      await escrow.connect(customer).cancelBooking(1);
+      await escrow.connect(owner).cancelBooking(1);
       const deadline1 = await escrow.releaseTimestamps(customer.address);
 
       // Advance time
@@ -1003,7 +989,7 @@ describe("TruxifyEscrow", function () {
 
       // Second booking for same customer — must NOT extend deadline
       await escrow.connect(customer).createBooking(2, driver.address, { value: ethers.parseEther("2.0") });
-      await escrow.connect(customer).cancelBooking(2);
+      await escrow.connect(owner).cancelBooking(2);
       const deadline2 = await escrow.releaseTimestamps(customer.address);
 
       expect(deadline2).to.equal(deadline1);

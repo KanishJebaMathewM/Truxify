@@ -8,6 +8,7 @@ export const tracingMiddleware = (req, res, next) => {
         return next();
     }
 
+    req._startTime = Date.now();
     const tracer = tracing.getTracer();
     const span = tracer.startSpan(`HTTP ${req.method} ${req.path}`, {
         attributes: {

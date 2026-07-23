@@ -20,16 +20,22 @@ import '../services/geocode_service.dart';
 import '../services/marketplace_repository.dart';
 import '../services/route_service.dart';
 import '../services/trip_service.dart';
+import '../services/sync_service.dart';
+import '../services/battery_service.dart';
 import '../services/location_service.dart';
+import '../services/weigh_station_service.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../theme/app_theme.dart';
 import '../widgets/map_markers.dart';
 import '../widgets/home/offline_banner.dart';
+import '../widgets/home/low_battery_banner.dart';
 import '../widgets/home/active_navigation_header.dart';
 import '../widgets/home/search_destination_card.dart';
 import '../widgets/home/new_load_notification_banner.dart';
 import '../widgets/home/driver_status_sheet.dart';
 import '../widgets/home/active_trip_sheet.dart';
 import 'destination_picker_screen.dart';
+import 'pod_capture_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
@@ -61,6 +67,9 @@ class _HomeScreenState extends State<HomeScreen> {
   DestinationPickResult? _destination;
   bool _isSearchExpanded = false;
   Map<String, dynamic>? _heatmapData;
+
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _hasPendingPods = false;
 
   List<Marker>? _cachedMarkers;
   ll.LatLng? _lastDest;
@@ -133,7 +142,12 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoadingLocation = true;
   String? _locationError;
   late final MarketplaceRepository _marketplaceRepo;
-  StreamSubscription<LoadOffer>? _loadSubscription;
+  StreamSubscription? _tripSubscription;
+
+  String _hosStatus = 'off_duty';
+  int _hosDrivingMinutes = 0;
+  int _hosOnDutyMinutes = 0;
+
   Timer? _autoHideTimer;
   LoadOffer? _latestNewLoad;
   bool _dismissedNewLoad = false;
@@ -147,10 +161,15 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _networkError;
   int _retryCount = 0;
 
+  final BatteryService _batteryService = BatteryService.instance;
+  int _batteryLevel = 100;
+  bool _isCharging = false;
+  bool _criticalDialogShown = false;
+
   String _sanitizeCoordinate(dynamic coord) {
     if (coord == null) return '0.0';
     if (coord is double) return coord.toStringAsFixed(6);
-    if (coord is int) return coord.toStringAsFixed(6);
+    if (coord is int) return coord.toDouble().toStringAsFixed(6);
     return (double.tryParse(coord.toString()) ?? 0.0).toStringAsFixed(6);
   }
 
@@ -187,6 +206,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _subscribeToNewLoads();
     _loadDashboardMetrics();
     _loadHeatmapData();
+    _initBatteryMonitoring();
   }
 
   Future<void> _loadHeatmapData() async {
@@ -202,6 +222,61 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  void _initBatteryMonitoring() {
+    _batteryService.addListener(_onBatteryChanged);
+    _batteryService.startMonitoring();
+  }
+
+  void _onBatteryChanged() {
+    if (!mounted) return;
+    final info = _batteryService.currentInfo;
+    setState(() {
+      _batteryLevel = info.level;
+      _isCharging = info.isCharging;
+    });
+    if (info.isCritical && !_criticalDialogShown) {
+      _criticalDialogShown = true;
+      _showCriticalBatteryDialog();
+    }
+  }
+
+  void _showCriticalBatteryDialog() {
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(
+          Icons.battery_alert_rounded,
+          color: TruxifyColors.errorRed,
+          size: 48,
+        ),
+        title: const Text('Critical Battery'),
+        content: Text(
+          'Battery is at $_batteryLevel%. '
+          'Please connect your charger immediately to continue tracking.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Dismiss'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              BatteryService.instance.openBatterySettings();
+            },
+            child: const Text('Open Battery Settings'),
+          ),
+        ],
+      ),
+    ).then((_) {
+      if (mounted && _batteryService.currentInfo.isCritical) {
+        _criticalDialogShown = false;
+      }
+    });
+  }
+
   @override
   void didUpdateWidget(HomeScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -214,6 +289,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _batteryService.removeListener(_onBatteryChanged);
+    _connectivitySubscription?.cancel();
     _loadSubscription?.cancel();
     _autoHideTimer?.cancel();
     _mapController.dispose();
@@ -277,16 +354,30 @@ class _HomeScreenState extends State<HomeScreen> {
 
     try {
       final results = await Future.wait([
-        _earningsService.fetchTodayEarningsSummary().catchError((_) => null),
-        _earningsService.fetchDriverStats().catchError((_) => <String, dynamic>{}),
-        _tripService.fetchTripHistory(limit: 50).catchError((_) => <String, dynamic>{'trips': []}),
+        _earningsService.fetchTodayEarningsSummary().catchError((e) {
+          debugPrint('Failed to fetch earnings summary: $e');
+          return null;
+        }),
+        _earningsService.fetchDriverStats().catchError((e) {
+          debugPrint('Failed to fetch driver stats: $e');
+          return <String, dynamic>{};
+        }),
+        _tripService.fetchTripHistory(limit: 50).catchError((e) {
+          debugPrint('Failed to fetch trip history: $e');
+          return <String, dynamic>{'trips': []};
+        }),
       ]);
 
       if (!mounted) return;
 
       final historyData = results[2] as Map<String, dynamic>;
-      final historyList = (historyData['trips'] as List?)
-          ?.map((t) => TripRecord(
+      final historyRows = historyData['trips'] is List
+          ? (historyData['trips'] as List)
+              .whereType<Map>()
+              .map((t) => Map<String, dynamic>.from(t))
+          : const Iterable<Map<String, dynamic>>.empty();
+      final historyList = historyRows
+          .map((t) => TripRecord(
                 route: (t['route'] as String?) ?? (t['route_label'] as String?) ?? '',
                 date: (t['date'] as String?) ?? (t['trip_date'] as String?) ?? '',
                 earnings: (t['earnings'] as String?) ?? (t['payout'] as String?) ?? '',
@@ -296,7 +387,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 verifiedBadge: (t['verified_badge'] as String?) ?? '',
                 completed: (t['completed'] as bool?) ?? (t['is_completed'] as bool?) ?? false,
               ))
-          .toList() ?? [];
+          .toList();
 
       setState(() {
         _todayEarnings = results[0] as EarningsDailyModel?;
@@ -628,6 +719,7 @@ class _HomeScreenState extends State<HomeScreen> {
         await LocationService.instance.startTracking();
       } else {
         LocationService.instance.stopTracking();
+        WeighStationService.instance.resetAlertedStations();
         if (mounted) {
           setState(() {
             _activeTripId = null;
@@ -732,6 +824,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
   _clearDestination();
+  WeighStationService.instance.resetAlertedStations();
   if (mounted) {
     setState(() {
       _activeTripId = null;
@@ -744,6 +837,19 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     _loadDashboardMetrics();
+  }
+
+  Future<void> _checkPendingPods() async {
+    try {
+      final hasPending = await SyncService.instance.isStopPendingSync(_activeTripId ?? '');
+      if (hasPending && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Some deliveries are pending sync.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error checking pending PoDs: $e');
+    }
   }
 }
 
@@ -769,6 +875,22 @@ class _HomeScreenState extends State<HomeScreen> {
             Positioned.fill(
               child: _buildMapBody(context),
             ),
+
+            if (_hasPendingPods)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: Container(
+                  color: Colors.orange,
+                  padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+                  child: const Text(
+                    'Offline Mode - Pending Sync',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                  ),
+                ),
+              ),
 
             // Top Bar
             Positioned(
@@ -801,6 +923,11 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     if (_isOffline) const OfflineBanner(),
+                    if (!_isCharging && _batteryLevel <= 20)
+                      LowBatteryBanner(
+                        batteryLevel: _batteryLevel,
+                        isCritical: _batteryLevel <= 10,
+                      ),
                     _isTripStarted
                         ? ActiveNavigationHeader(
                             destinationAddress:
@@ -816,6 +943,62 @@ class _HomeScreenState extends State<HomeScreen> {
                             onOpenDestinationPicker: _openDestinationPicker,
                           ),
                   ],
+                ),
+              ),
+            ),
+
+            // HoS Warning Banner
+            if (_hosDrivingMinutes >= 660 || _hosOnDutyMinutes >= 840)
+              Positioned(
+                left: 12,
+                right: 12,
+                top: 96,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.redAccent,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'HoS Limit Exceeded! Mandatory 30-min rest break required.',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+
+            // HoS Status Banner
+            Positioned(
+              left: 12,
+              right: 12,
+              top: (_hosDrivingMinutes >= 660 || _hosOnDutyMinutes >= 840) ? 156 : 96,
+              child: Card(
+                elevation: 4,
+                child: Padding(
+                  padding: const EdgeInsets.all(8.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('HoS Status: ${_hosStatus.toUpperCase()}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          Text('Driving: ${(_hosDrivingMinutes / 60).toStringAsFixed(1)}h / 11h'),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          TextButton(
+                            onPressed: () => _toggleHosStatus('off_duty'),
+                            child: const Text('Off Duty', style: TextStyle(fontSize: 12)),
+                          ),
+                          TextButton(
+                            onPressed: () => _toggleHosStatus('driving'),
+                            child: const Text('Driving', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                      )
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -980,6 +1163,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             todayEarnings: _todayEarnings,
                             driverRating: _driverRating,
                             onToggleOnline: _toggleOnlineState,
+                            batteryLevel: _batteryLevel,
+                            isCharging: _isCharging,
                           )
                         : ActiveTripSheet(
                             isTripStarted: _isTripStarted,
@@ -1072,8 +1257,51 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
+          IconButton(
+            icon: const Icon(Icons.qr_code_2, size: 28, color: TruxifyColors.accent),
+            onPressed: _showEbolQrCode,
+            tooltip: 'Show eBoL QR Code',
+          ),
         ],
       ),
+    );
+  }
+
+  void _showEbolQrCode() {
+    if (_activeTripId == null) return;
+    
+    final payload = jsonEncode({
+      "order_id": _activeTripId,
+      "type": "eBoL",
+    });
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Digital Bill of Lading (eBoL)'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Show this QR code to the warehouse clerk for instant verification.'),
+              const SizedBox(height: 20),
+              QrImageView(
+                data: payload,
+                version: QrVersions.auto,
+                size: 200.0,
+              ),
+              const SizedBox(height: 10),
+              Text('Order ID: $_activeTripId', style: const TextStyle(fontSize: 10, color: Colors.grey)),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            )
+          ],
+        );
+      }
     );
   }
 
@@ -1367,11 +1595,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           _isRefreshingLocation || _isLoadingLocation
                               ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 1.5,
-                                    color: TruxifyColors.accent,
+                                  width: 24,
+                                  height: 24,
+                                  child: Padding(
+                                    padding: EdgeInsets.all(4.0),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.0,
+                                      color: TruxifyColors.accent,
+                                    ),
                                   ),
                                 )
                               : Icon(
@@ -1765,8 +1996,20 @@ class _HomeScreenState extends State<HomeScreen> {
               _buildTripSpec(AppLocalizations.of(context)!.estPayout, _activeTripPayout.isNotEmpty ? _activeTripPayout : '--'),
             ],
           ),
-          const SizedBox(height: 16),
-          if (_isTripStarted) ...[
+            const SizedBox(height: 16),
+            if (_isTripStarted && _activeTripId != null) ...[
+              ElevatedButton.icon(
+                onPressed: () async {
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => PodCaptureScreen(orderId: _activeTripId!)));
+                  _checkPendingPods();
+                },
+                icon: const Icon(Icons.camera_alt),
+                label: const Text('Capture Proof of Delivery'),
+                style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_isTripStarted) ...[
             SlideToConfirmButton(
               label: AppLocalizations.of(context)!.slideToCompleteTrip,
               backgroundColor: TruxifyColors.success,

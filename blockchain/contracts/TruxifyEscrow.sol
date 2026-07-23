@@ -88,8 +88,22 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     constructor() Ownable(msg.sender) {}
 
-    receive() external payable {}
-    fallback() external payable {}
+    receive() external payable {
+        pendingWithdrawals[msg.sender] += msg.value;
+    }
+    fallback() external {
+        revert("TruxifyEscrow: fallback not supported");
+    }
+
+    // ─── Modifiers ───────────────────────────────────────────────────────────
+
+    modifier onlyBookingParticipant(uint256 bookingId) {
+        require(
+            msg.sender == bookings[bookingId].customer || msg.sender == bookings[bookingId].driver,
+            "TruxifyEscrow: Not authorised"
+        );
+        _;
+    }
 
     // ─── External Functions ──────────────────────────────────────────────────
 
@@ -197,7 +211,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         Booking storage booking = bookings[bookingId];
 
         require(
-            booking.status == BookingStatus.Active,
+            booking.customer != address(0) && booking.status == BookingStatus.Active,
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
@@ -236,7 +250,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         Booking storage booking = bookings[bookingId];
 
         require(
-            booking.status == BookingStatus.Active,
+            booking.customer != address(0) && booking.status == BookingStatus.Active,
             "TruxifyEscrow: Cannot dispute - booking not active"
         );
 

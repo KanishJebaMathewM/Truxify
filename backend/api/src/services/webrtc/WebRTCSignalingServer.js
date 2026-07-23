@@ -1,13 +1,12 @@
 import { WebSocketServer } from 'ws';
 import jwt from 'jsonwebtoken';
 import logger from '../../middleware/logger.js';
-import Redis from 'ioredis';
-import { supabase } from '../../config/db.js';
+import { supabase, redisClient } from '../../config/db.js';
 
 class WebRTCSignalingServer {
   constructor(server) {
     this.wss = new WebSocketServer({ server, path: '/webrtc' });
-    this.redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379');
+    this.redis = redisClient;
     this.peers = new Map(); // peerId -> { ws, location, meshId }
     this.meshes = new Map(); // meshId -> Set of peerIds
     
@@ -84,6 +83,11 @@ class WebRTCSignalingServer {
         this.handleDisconnect(peerId);
       });
 
+      // Handle errors to prevent process crash
+      ws.on('error', (err) => {
+        logger.warn('WebSocket error for peer %s: %s', peerId, err.message);
+      });
+
       // Send connected peers list
       this.sendPeerList(peerId);
     });
@@ -96,11 +100,13 @@ class WebRTCSignalingServer {
     switch (message.type) {
       case 'location-update':
         peer.location = message.location;
-        await this.redis.setex(
-          `peer:${peerId}:location`,
-          60,
-          JSON.stringify(message.location)
-        );
+        if (this.redis) {
+          await this.redis.setex(
+            `peer:${peerId}:location`,
+            60,
+            JSON.stringify(message.location)
+          );
+        }
         // Relay location to nearby peers
         this.relayLocation(peerId, message.location);
         break;
@@ -213,15 +219,27 @@ class WebRTCSignalingServer {
       synced: false
     };
 
-    // Store in MongoDB
-    await supabase.from('gps_offline_data').insert([gpsEntry]);
+    try {
+      const { error } = await supabase.from('gps_offline_data').insert([gpsEntry]);
+      if (error) {
+        logger.warn(`Failed to persist WebRTC GPS payload for peer ${peerId}: ${error.message}`);
+      }
+    } catch (err) {
+      logger.warn(`Failed to persist WebRTC GPS payload for peer ${peerId}: ${err.message}`);
+    }
 
     // Store locally in Redis for quick access
-    await this.redis.setex(
-      `gps:${peerId}:latest`,
-      300,
-      JSON.stringify(normalizedData)
-    );
+    try {
+      if (this.redis) {
+        await this.redis.setex(
+          `gps:${peerId}:latest`,
+          300,
+          JSON.stringify(normalizedData)
+        );
+      }
+    } catch (err) {
+      logger.warn(`Failed to cache WebRTC GPS payload for peer ${peerId}: ${err.message}`);
+    }
 
     // Relayed to peers in mesh
     await this.relayLocation(peerId, normalizedData.location);
@@ -308,7 +326,6 @@ class WebRTCSignalingServer {
     this.peers.clear();
     this.meshes.clear();
     this.wss.close();
-    this.redis.disconnect();
   }
 
   async getPeersNearLocation(lat, lng, radius = 10) {

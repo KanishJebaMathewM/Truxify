@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import torch
 import numpy as np
+import networkx as nx
 from datetime import datetime
 import logging
 from gat.model import SpatialTemporalGAT, TrafficGraphBuilder, GATTrainer

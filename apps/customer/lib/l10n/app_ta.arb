@@ -1,0 +1,812 @@
+{
+  "@@locale": "ta",
+
+  "appTitle": "Truxify",
+  "@appTitle": {
+    "description": "The title of the application"
+  },
+
+  "loginTitle": "Truxify-க்கு வரவேற்கிறோம்",
+  "@loginTitle": {
+    "description": "Greeting title on the login screen"
+  },
+
+  "bookLoadButton": "சரக்கு பதிவு செய்யுங்கள்",
+  "@bookLoadButton": {
+    "description": "Text for the book a load button"
+  },
+
+  "loadingText": "ஏற்றுகிறது...",
+  "@loadingText": {
+    "description": "Generic loading indicator text"
+  },
+
+  "comingSoon": "{title} விரைவில் வருகிறது",
+  "@comingSoon": {
+    "description": "Coming soon message",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Feature"
+      }
+    }
+  },
+
+  "greetingMessage": "{greeting}, {displayName} 👋",
+  "@greetingMessage": {
+    "description": "Greeting message with name",
+    "placeholders": {
+      "greeting": {
+        "type": "String",
+        "example": "Good morning"
+      },
+      "displayName": {
+        "type": "String",
+        "example": "John"
+      }
+    }
+  },
+
+  "noActiveShipments": "செயலில் உள்ள சரக்குகள் இல்லை",
+  "@noActiveShipments": {
+    "description": "Text shown when there are no active shipments"
+  },
+
+  "routeHistoryComingSoon": "வழிகாட்டி வரலாறு விரைவில் வருகிறது",
+  "@routeHistoryComingSoon": {
+    "description": "Text shown for route history placeholder"
+  },
+
+  "walletAddressUpdated": "வாலெட் முகவரி புதுப்பிக்கப்பட்டது",
+  "@walletAddressUpdated": {
+    "description": "Success message when wallet address is updated"
+  },
+
+  "polygonWalletAddress": "Polygon வாலெட் முகவரி",
+  "@polygonWalletAddress": {
+    "description": "Label for the Polygon wallet address field"
+  },
+
+  "saveWalletAddress": "வாலெட் முகவரியைச் சேமியுங்கள்",
+  "@saveWalletAddress": {
+    "description": "Button text to save wallet address"
+  },
+
+  "error": "பிழை: {errorMsg}",
+  "@error": {
+    "description": "Error message format",
+    "placeholders": {
+      "errorMsg": {
+        "type": "String",
+        "example": "Something went wrong"
+      }
+    }
+  },
+
+  "lightTheme": "ஒளிர்",
+  "@lightTheme": {
+    "description": "Light theme option"
+  },
+
+  "darkTheme": "இருண்ட",
+  "@darkTheme": {
+    "description": "Dark theme option"
+  },
+
+  "retry": "மீண்டும் முயற்சிக்கவும்",
+  "@retry": {
+    "description": "Button text to retry a failed action"
+  },
+
+  "cancel": "ரத்து செய்",
+  "@cancel": {
+    "description": "Button text to cancel an action"
+  },
+
+  "save": "சேமி",
+  "@save": {
+    "description": "Generic save button text"
+  },
+
+  "close": "மூடு",
+  "@close": {
+    "description": "Button text to close a dialog or sheet"
+  },
+
+  "apply": "பயன்படுத்து",
+  "@apply": {
+    "description": "Button text to apply filters or settings"
+  },
+
+  "reset": "மீட்டமை",
+  "@reset": {
+    "description": "Button text to reset filters or form fields"
+  },
+
+  "search": "தேடு",
+  "@search": {
+    "description": "Placeholder text for search input"
+  },
+
+  "welcomeBack": "மீண்டும் வரவேற்கிறோம்",
+  "@welcomeBack": {
+    "description": "Subtitle greeting on login screen for returning users"
+  },
+
+  "signInSubtitle": "தொடர உள்நுழையுங்கள்",
+  "@signInSubtitle": {
+    "description": "Subtitle text below the login title"
+  },
+
+  "phoneNumber": "தொலைபேசி எண்",
+  "@phoneNumber": {
+    "description": "Label for phone number input field"
+  },
+
+  "sendOtp": "OTP அனுப்பு",
+  "@sendOtp": {
+    "description": "Button text to send a one-time password"
+  },
+
+  "sendingOtp": "OTP அனுப்புகிறது...",
+  "@sendingOtp": {
+    "description": "Loading text while OTP is being sent"
+  },
+
+  "verifyingOtp": "சரிபார்க்கிறது...",
+  "@verifyingOtp": {
+    "description": "Loading text while OTP is being verified"
+  },
+
+  "verifyOtp": "OTP சரிபார்",
+  "@verifyOtp": {
+    "description": "Button text to verify the entered OTP"
+  },
+
+  "loginWithBiometrics": "பயோமெட்ரிக்ஸ் மூலம் உள்நுழையுங்கள்",
+  "@loginWithBiometrics": {
+    "description": "Button text to login using biometric authentication"
+  },
+
+  "biometricsNotSupported": "இந்த சாதனத்தில் பயோமெட்ரிக்ஸ் ஆதரிக்கப்படவில்லை",
+  "@biometricsNotSupported": {
+    "description": "Message shown when device does not support biometric auth"
+  },
+
+  "biometricAuthSuccessful": "பயோமெட்ரிக் அங்கீகாரம் வெற்றிகரமாக முடிந்தது",
+  "@biometricAuthSuccessful": {
+    "description": "Success message after biometric authentication"
+  },
+
+  "pleaseEnterPhone": "உங்கள் தொலைபேசி எண்ணை உள்ளிடவும்",
+  "@pleaseEnterPhone": {
+    "description": "Validation message when phone number field is empty"
+  },
+
+  "phoneDigitsOnly": "தொலைபேசி எண் எண்களை மட்டுமே கொண்டிருக்க வேண்டும்",
+  "@phoneDigitsOnly": {
+    "description": "Validation message when phone number contains non-digit characters"
+  },
+
+  "phoneMustBeExactDigits": "தொலைபேசி எண் சரியாக {digitCount} எண்கள் இருக்க வேண்டும்",
+  "@phoneMustBeExactDigits": {
+    "description": "Validation message when phone number does not have the exact required digit count",
+    "placeholders": {
+      "digitCount": {
+        "type": "int",
+        "example": "10"
+      }
+    }
+  },
+
+  "phoneMustBeDigits": "தொலைபேசி எண் எண்களை மட்டுமே கொண்டிருக்க வேண்டும்",
+  "@phoneMustBeDigits": {
+    "description": "Validation message when phone number contains non-digit characters"
+  },
+
+  "verificationFailed": "சரிபார்ப்பு தோல்வியடைந்தது. மீண்டும் முயற்சிக்கவும்.",
+  "@verificationFailed": {
+    "description": "Generic verification failure message"
+  },
+
+  "phoneVerificationFailed": "தொலைபேசி சரிபார்ப்பு தோல்வியடைந்தது. மீண்டும் முயற்சிக்கவும்.",
+  "@phoneVerificationFailed": {
+    "description": "Message shown when phone OTP verification fails"
+  },
+
+  "autoVerificationFailed": "தானியங்கு சரிபார்ப்பு தோல்வியடைந்தது. OTP-ஐ கைமுறையாக உள்ளிடவும்.",
+  "@autoVerificationFailed": {
+    "description": "Message shown when automatic OTP detection fails"
+  },
+
+  "failedToSendOtp": "OTP அனுப்ப முடியவில்லை. மீண்டும் முயற்சிக்கவும்.",
+  "@failedToSendOtp": {
+    "description": "Error message when OTP sending fails"
+  },
+
+  "enterOtp": "OTP உள்ளிடவும்",
+  "@enterOtp": {
+    "description": "Label for OTP input field"
+  },
+
+  "sentTo": "{phoneNumber}-க்கு அனுப்பப்பட்டது",
+  "@sentTo": {
+    "description": "Text indicating where the OTP was sent",
+    "placeholders": {
+      "phoneNumber": {
+        "type": "String",
+        "example": "+91 98765 43210"
+      }
+    }
+  },
+
+  "invalidOtp": "தவறான OTP. சரிபார்த்து மீண்டும் முயற்சிக்கவும்.",
+  "@invalidOtp": {
+    "description": "Error message when entered OTP is invalid"
+  },
+
+  "verificationSessionExpired": "சரிபார்ப்பு அமர்வு காலாவதியாகிவிட்டது. புதிய OTP கோருங்கள்.",
+  "@verificationSessionExpired": {
+    "description": "Message shown when the verification session times out"
+  },
+
+  "invalidVerificationCode": "தவறான சரிபார்ப்புக் குறியீடு.",
+  "@invalidVerificationCode": {
+    "description": "Error message for an invalid verification code"
+  },
+
+  "otpExpired": "OTP காலாவதியாகிவிட்டது. புதிய ஒன்றைக் கோருங்கள்.",
+  "@otpExpired": {
+    "description": "Message shown when the OTP has expired"
+  },
+
+  "home": "முகப்பு",
+  "@home": {
+    "description": "Bottom navigation tab label for home"
+  },
+
+  "findTrucks": "லாரிகளைக் கண்டறியுங்கள்",
+  "@findTrucks": {
+    "description": "Bottom navigation tab label and screen title for finding trucks"
+  },
+
+  "orders": "ஆர்டர்கள்",
+  "@orders": {
+    "description": "Bottom navigation tab label for orders"
+  },
+
+  "profile": "சுயவிவரம்",
+  "@profile": {
+    "description": "Bottom navigation tab label for profile"
+  },
+
+  "activeShipments": "செயலில் உள்ள சரக்குகள்",
+  "@activeShipments": {
+    "description": "Section title for active shipments on home screen"
+  },
+
+  "seeAll": "அனைத்தும் காண்க",
+  "@seeAll": {
+    "description": "Link text to view all items in a list"
+  },
+
+  "bookATruck": "ஒரு லாரி பதிவு செய்யுங்கள்",
+  "@bookATruck": {
+    "description": "Button or card text to book a truck"
+  },
+
+  "active": "செயலில்",
+  "@active": {
+    "description": "Badge or status label for active items"
+  },
+
+  "moreStats": "மேலும் புள்ளிவிவரங்கள்",
+  "@moreStats": {
+    "description": "Button text to view more statistics"
+  },
+
+  "savings": "சேமிப்புகள்",
+  "@savings": {
+    "description": "Label for savings summary on home screen"
+  },
+
+  "totalShipments": "மொத்த சரக்குகள்",
+  "@totalShipments": {
+    "description": "Label for total shipments count on home screen"
+  },
+
+  "yourUsualRoutes": "உங்கள் வழக்கமான வழிகள்",
+  "@yourUsualRoutes": {
+    "description": "Section title for frequently used routes"
+  },
+
+  "lastTruckLocation": "கடைசி லாரி இருப்பிடம்",
+  "@lastTruckLocation": {
+    "description": "Label for the last known truck location"
+  },
+
+  "couldNotLoadData": "தரவை ஏற்ற முடியவில்லை",
+  "@couldNotLoadData": {
+    "description": "Error message when data loading fails"
+  },
+
+  "mlPoweredMatching": "ML-இயக்கப்படும் பொருத்தம்",
+  "@mlPoweredMatching": {
+    "description": "Subtitle indicating AI-based truck matching"
+  },
+
+  "route": "வழி",
+  "@route": {
+    "description": "Label for route section"
+  },
+
+  "pickupLocation": "ஏற்றும் இடம்",
+  "@pickupLocation": {
+    "description": "Label for pickup location input"
+  },
+
+  "dropLocation": "இறக்கும் இடம்",
+  "@dropLocation": {
+    "description": "Label for drop location input"
+  },
+
+  "date": "தேதி",
+  "@date": {
+    "description": "Label for date picker"
+  },
+
+  "time": "நேரம்",
+  "@time": {
+    "description": "Label for time picker"
+  },
+
+  "goodsDetails": "சரக்கு விவரங்கள்",
+  "@goodsDetails": {
+    "description": "Section title for goods information"
+  },
+
+  "goodsType": "சரக்கு வகை",
+  "@goodsType": {
+    "description": "Label for goods type selector"
+  },
+
+  "weightTonnes": "எடை (டன்கள்)",
+  "@weightTonnes": {
+    "description": "Label for weight input in tonnes"
+  },
+
+  "lengthFt": "நீளம் (அடி)",
+  "@lengthFt": {
+    "description": "Label for length input in feet"
+  },
+
+  "widthFt": "அகலம் (அடி)",
+  "@widthFt": {
+    "description": "Label for width input in feet"
+  },
+
+  "heightFt": "உயரம் (அடி)",
+  "@heightFt": {
+    "description": "Label for height input in feet"
+  },
+
+  "stackable": "அடுக்கக்கூடியது",
+  "@stackable": {
+    "description": "Label for stackable goods option"
+  },
+
+  "fragile": "உடையக்கூடியது",
+  "@fragile": {
+    "description": "Label for fragile goods option"
+  },
+
+  "specialRequirements": "சிறப்புத் தேவைகள்",
+  "@specialRequirements": {
+    "description": "Label for special requirements text field"
+  },
+
+  "estimatedPriceRange": "மதிப்பிடப்பட்ட விலை வரம்பு",
+  "@estimatedPriceRange": {
+    "description": "Label for the estimated price display"
+  },
+
+  "stableThisWeek": "இந்த வாரம் நிலையானது",
+  "@stableThisWeek": {
+    "description": "Indicator that the price has been stable this week"
+  },
+
+  "estimatingPrice": "விலை மதிப்பிடப்படுகிறது...",
+  "@estimatingPrice": {
+    "description": "Loading text while price is being estimated"
+  },
+
+  "estimateUnavailable": "மதிப்பீடு கிடைக்கவில்லை",
+  "@estimateUnavailable": {
+    "description": "Text shown when a price estimate cannot be generated"
+  },
+
+  "enterRouteDetails": "தொடங்க வழிகாட்டி விவரங்களை உள்ளிடவும்",
+  "@enterRouteDetails": {
+    "description": "Prompt text to encourage user to fill in route details"
+  },
+
+  "basedOnCurrentDemand": "தற்போதைய தேவையின் அடிப்படையில்",
+  "@basedOnCurrentDemand": {
+    "description": "Subtext indicating price estimate is based on demand"
+  },
+
+  "filterTrucks": "லாரிகளை வடிகட்டுங்கள்",
+  "@filterTrucks": {
+    "description": "Button text to open truck filter options"
+  },
+
+  "truckType": "லாரி வகை",
+  "@truckType": {
+    "description": "Label for truck type filter"
+  },
+
+  "capacityTonnes": "கொள்ளளவு (டன்கள்)",
+  "@capacityTonnes": {
+    "description": "Label for truck capacity filter in tonnes"
+  },
+
+  "materialType": "பொருள் வகை",
+  "@materialType": {
+    "description": "Label for material type filter"
+  },
+
+  "today": "இன்று",
+  "@today": {
+    "description": "Date selection option for today"
+  },
+
+  "tomorrow": "நாளை",
+  "@tomorrow": {
+    "description": "Date selection option for tomorrow"
+  },
+
+  "selectPickupOnMap": "வரைபடத்தில் ஏற்றும் இடத்தைத் தேர்ந்தெடுக்கவும்",
+  "@selectPickupOnMap": {
+    "description": "Button text to select pickup location on map"
+  },
+
+  "selectDropOnMap": "வரைபடத்தில் இறக்கும் இடத்தைத் தேர்ந்தெடுக்கவும்",
+  "@selectDropOnMap": {
+    "description": "Button text to select drop location on map"
+  },
+
+  "temperatureControl": "வெப்பநிலை கட்டுப்பாடு",
+  "@temperatureControl": {
+    "description": "Label for temperature controlled truck option"
+  },
+
+  "waterproofCover": "நீர்ப்புகா மூடி",
+  "@waterproofCover": {
+    "description": "Label for waterproof cover truck option"
+  },
+
+  "loadingHelp": "ஏற்றுதல் உதவி",
+  "@loadingHelp": {
+    "description": "Label for loading assistance option"
+  },
+
+  "loadingHelpNeeded": "ஏற்றுதல் உதவி தேவை",
+  "@loadingHelpNeeded": {
+    "description": "Indicator that loading assistance is required"
+  },
+
+  "other": "மற்றவை",
+  "@other": {
+    "description": "Generic option for other/miscellaneous selection"
+  },
+
+  "describeYourGoods": "உங்கள் சரக்குகளை விவரியுங்கள்...",
+  "@describeYourGoods": {
+    "description": "Placeholder text for goods description input"
+  },
+
+  "activeTab": "செயலில்",
+  "@activeTab": {
+    "description": "Tab label for active orders"
+  },
+
+  "historyTab": "வரலாறு",
+  "@historyTab": {
+    "description": "Tab label for order history"
+  },
+
+  "searchOrdersHint": "ஆர்டர்களைத் தேடுங்கள்...",
+  "@searchOrdersHint": {
+    "description": "Placeholder text for order search input"
+  },
+
+  "noActiveOrders": "செயலில் உள்ள ஆர்டர்கள் இல்லை",
+  "@noActiveOrders": {
+    "description": "Text shown when there are no active orders"
+  },
+
+  "noHistoryOrders": "ஆர்டர் வரலாறு இல்லை",
+  "@noHistoryOrders": {
+    "description": "Text shown when there is no order history"
+  },
+
+  "offlineMode": "ஆஃப்லைன் பயன்முறை",
+  "@offlineMode": {
+    "description": "Label indicating the app is in offline mode"
+  },
+
+  "lastUpdated": "கடைசியாகப் புதுப்பிக்கப்பட்டது {timeAgo}",
+  "@lastUpdated": {
+    "description": "Text showing when data was last updated",
+    "placeholders": {
+      "timeAgo": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+
+  "driverAssigned": "ஓட்டுநர் நியமிக்கப்பட்டார்",
+  "@driverAssigned": {
+    "description": "Order status label when a driver has been assigned"
+  },
+
+  "inTransit": "போக்குவரத்தில் உள்ளது",
+  "@inTransit": {
+    "description": "Order status label when shipment is in transit"
+  },
+
+  "paymentReleased": "பணம் விடுவிக்கப்பட்டது",
+  "@paymentReleased": {
+    "description": "Order status label when payment has been released"
+  },
+
+  "delivered": "வழங்கப்பட்டது",
+  "@delivered": {
+    "description": "Order status label for completed delivery"
+  },
+
+  "cancelled": "ரத்து செய்யப்பட்டது",
+  "@cancelled": {
+    "description": "Order status label for cancelled orders"
+  },
+
+  "pending": "நிலுவையில் உள்ளது",
+  "@pending": {
+    "description": "Order status label for pending orders"
+  },
+
+  "account": "கணக்கு",
+  "@account": {
+    "description": "Profile section title for account settings"
+  },
+
+  "preferences": "விருப்பத்தேர்வுகள்",
+  "@preferences": {
+    "description": "Profile section title for app preferences"
+  },
+
+  "paymentMethods": "பணம் செலுத்தும் முறைகள்",
+  "@paymentMethods": {
+    "description": "Profile menu item for payment methods"
+  },
+
+  "myDocuments": "என் ஆவணங்கள்",
+  "@myDocuments": {
+    "description": "Profile menu item for documents"
+  },
+
+  "savedAddresses": "சேமிக்கப்பட்ட முகவரிகள்",
+  "@savedAddresses": {
+    "description": "Profile menu item for saved addresses"
+  },
+
+  "walletAddressLabel": "வாலெட் முகவரி",
+  "@walletAddressLabel": {
+    "description": "Label for wallet address in profile"
+  },
+
+  "notSet": "அமைக்கப்படவில்லை",
+  "@notSet": {
+    "description": "Text shown when a field has not been configured"
+  },
+
+  "language": "மொழி",
+  "@language": {
+    "description": "Profile menu item for language settings"
+  },
+
+  "helpSupport": "உதவி மற்றும் ஆதரவு",
+  "@helpSupport": {
+    "description": "Profile menu item for help and support"
+  },
+
+  "aboutTruxify": "Truxify பற்றி",
+  "@aboutTruxify": {
+    "description": "Profile menu item for about page"
+  },
+
+  "logout": "வெளியேறு",
+  "@logout": {
+    "description": "Button text to log out of the app"
+  },
+
+  "offlineModeLabel": "ஆஃப்லைன் பயன்முறை (கடைசியாகப் புதுப்பிக்கப்பட்டது {timeAgo})",
+  "@offlineModeLabel": {
+    "description": "Label indicating offline mode with last updated time",
+    "placeholders": {
+      "timeAgo": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+
+  "ordersLabel": "ஆர்டர்கள்",
+  "@ordersLabel": {
+    "description": "Label for orders count or section in profile"
+  },
+
+  "savedLabel": "சேமிக்கப்பட்டது",
+  "@savedLabel": {
+    "description": "Label for saved items count in profile"
+  },
+
+  "co2Label": "CO₂ சேமிக்கப்பட்டது",
+  "@co2Label": {
+    "description": "Label for CO2 emissions saved metric"
+  },
+
+  "editProfile": "சுயவிவரத்தைத் திருத்து",
+  "@editProfile": {
+    "description": "Button text to edit profile information"
+  },
+
+  "fullName": "முழுப்பெயர்",
+  "@fullName": {
+    "description": "Label for full name input field"
+  },
+
+  "companyName": "நிறுவனப் பெயர்",
+  "@companyName": {
+    "description": "Label for company name input field"
+  },
+
+  "phone": "தொலைபேசி",
+  "@phone": {
+    "description": "Label for phone number display or input"
+  },
+
+  "enterFullName": "உங்கள் முழுப்பெயரை உள்ளிடவும்",
+  "@enterFullName": {
+    "description": "Placeholder text for full name input"
+  },
+
+  "enterCompanyName": "உங்கள் நிறுவனப் பெயரை உள்ளிடவும்",
+  "@enterCompanyName": {
+    "description": "Placeholder text for company name input"
+  },
+
+  "enterPhoneNumber": "உங்கள் தொலைபேசி எண்ணை உள்ளிடவும்",
+  "@enterPhoneNumber": {
+    "description": "Placeholder text for phone number input"
+  },
+
+  "nameIsRequired": "பெயர் கட்டாயம்",
+  "@nameIsRequired": {
+    "description": "Validation error when name field is empty"
+  },
+
+  "companyNameIsRequired": "நிறுவனப் பெயர் கட்டாயம்",
+  "@companyNameIsRequired": {
+    "description": "Validation error when company name field is empty"
+  },
+
+  "phoneNumberIsRequired": "தொலைபேசி எண் கட்டாயம்",
+  "@phoneNumberIsRequired": {
+    "description": "Validation error when phone number field is empty"
+  },
+
+  "saving": "சேமிக்கிறது...",
+  "@saving": {
+    "description": "Loading text while profile changes are being saved"
+  },
+
+  "saveChanges": "மாற்றங்களைச் சேமியுங்கள்",
+  "@saveChanges": {
+    "description": "Button text to save profile changes"
+  },
+
+  "profileUpdatedSuccessfully": "சுயவிவரம் வெற்றிகரமாகப் புதுப்பிக்கப்பட்டது",
+  "@profileUpdatedSuccessfully": {
+    "description": "Success message after profile is updated"
+  },
+
+  "failedToLoadProfile": "சுயவிவரத்தை ஏற்ற முடியவில்லை",
+  "@failedToLoadProfile": {
+    "description": "Error message when profile data fails to load"
+  },
+
+  "failedToUpdateProfile": "சுயவிவரத்தைப் புதுப்பிக்க முடியவில்லை",
+  "@failedToUpdateProfile": {
+    "description": "Error message when profile update fails"
+  },
+
+  "shareTracking": "கண்காணிப்பைப் பகிருங்கள்",
+  "@shareTracking": {
+    "description": "Button text to share order tracking link"
+  },
+
+  "trackingLinkGenerated": "கண்காணிப்பு இணைப்பு உருவாக்கப்பட்டது",
+  "@trackingLinkGenerated": {
+    "description": "Success message when tracking link is generated"
+  },
+
+  "unableToShare": "பகிர முடியவில்லை",
+  "@unableToShare": {
+    "description": "Error message when sharing fails"
+  },
+
+  "linkExpired": "இந்தக் கண்காணிப்பு இணைப்பு காலாவதியாகிவிட்டது அல்லது இனி செல்லுபடியாகாது.",
+  "@linkExpired": {
+    "description": "Message shown when a tracking link has expired"
+  },
+
+  "trackingRevoked": "அனைத்து கண்காணிப்பு இணைப்புகளும் ரத்து செய்யப்பட்டன.",
+  "@trackingRevoked": {
+    "description": "Message shown when tracking links are revoked"
+  },
+
+  "copyLink": "இணைப்பை நகலெடு",
+  "@copyLink": {
+    "description": "Button text to copy tracking link to clipboard"
+  },
+
+  "shareMessage": "Truxify-ல் உங்கள் சரக்கைக் கண்காணியுங்கள்",
+  "@shareMessage": {
+    "description": "Default message included when sharing tracking link"
+  },
+  "orderNotFound": "ஆர்டர் கிடைக்கவில்லை",
+  "@orderNotFound": {
+    "description": "Error message when an order referenced by a notification cannot be found"
+  },
+
+  "notification": "அறிவிப்பு",
+  "@notification": {
+    "description": "Title for notification-related UI elements"
+  },
+
+  "unableToOpen": "அறிவிப்பைத் திறக்க முடியவில்லை",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
+  },
+  "downloadInvoice": "விலைப்பட்டியலைப் பதிவிறக்கு",
+  "@downloadInvoice": {
+    "description": "Button text to download the order invoice as PDF"
+  },
+
+  "generatingInvoice": "விலைப்பட்டியல் உருவாக்கப்படுகிறது...",
+  "@generatingInvoice": {
+    "description": "Status text while the PDF invoice is being generated"
+  },
+
+  "invoiceReady": "விலைப்பட்டியல் தயாராக உள்ளது",
+  "@invoiceReady": {
+    "description": "Success message after invoice PDF is generated"
+  },
+
+  "shareInvoice": "விலைப்பட்டியலைப் பகிருங்கள்",
+  "@shareInvoice": {
+    "description": "Button text to share the generated invoice"
+  },
+
+  "printInvoice": "விலைப்பட்டியலை அச்சிடுங்கள்",
+  "@printInvoice": {
+    "description": "Button text to print the generated invoice"
+  },
+
+  "downloadFailed": "பதிவிறக்கம் தோல்வியடைந்தது",
+  "@downloadFailed": {
+    "description": "Error message when invoice download or generation fails"
+  }
+}

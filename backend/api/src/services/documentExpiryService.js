@@ -48,7 +48,7 @@ function endOfDay(date) {
 async function hasExistingNotification(userId, documentId, daysRemaining) {
   if (!supabase) return false;
   try {
-    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
     const { data, error } = await supabase
       .from('notifications')
       .select('id, metadata')

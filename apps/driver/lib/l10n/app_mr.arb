@@ -1,0 +1,847 @@
+{
+  "@@locale": "mr",
+
+  "appTitle": "ट्रक्सिफाय चालक",
+  "@appTitle": {
+    "description": "The title of the driver application"
+  },
+
+  "loadingText": "लोड होत आहे...",
+  "@loadingText": {
+    "description": "General loading indicator text"
+  },
+
+  "retry": "पुन्हा प्रयत्न करा",
+  "@retry": {
+    "description": "Button label to retry a failed action"
+  },
+
+  "error": "त्रुटी",
+  "@error": {
+    "description": "Generic error title"
+  },
+
+  "cancel": "रद्द करा",
+  "@cancel": {
+    "description": "Button label to cancel an action"
+  },
+
+  "save": "जतन करा",
+  "@save": {
+    "description": "Button label to save changes"
+  },
+
+  "close": "बंद करा",
+  "@close": {
+    "description": "Button label to close a dialog or screen"
+  },
+
+  "apply": "लागू करा",
+  "@apply": {
+    "description": "Button label to apply a selection or setting"
+  },
+
+  "reset": "रीसेट करा",
+  "@reset": {
+    "description": "Button label to reset filters or form fields"
+  },
+
+  "search": "शोधा",
+  "@search": {
+    "description": "Placeholder text for search input fields"
+  },
+
+  "welcomeDriver": "स्वागत आहे, चालक!",
+  "@welcomeDriver": {
+    "description": "Greeting on the login screen"
+  },
+
+  "logInToStartEarning": "कमाई सुरू करण्यासाठी लॉग इन करा",
+  "@logInToStartEarning": {
+    "description": "Subtitle on the login screen encouraging sign-in"
+  },
+
+  "phoneNumber": "फोन नंबर",
+  "@phoneNumber": {
+    "description": "Label for the phone number input field"
+  },
+
+  "sendOtp": "OTP पाठवा",
+  "@sendOtp": {
+    "description": "Button label to send a one-time password"
+  },
+
+  "sending": "पाठवत आहे...",
+  "@sending": {
+    "description": "Status text while an OTP is being sent"
+  },
+
+  "verificationFailed": "पडताळणी अयशस्वी",
+  "@verificationFailed": {
+    "description": "Error message when login verification fails"
+  },
+
+  "pleaseEnterPhone": "कृपया तुमचा फोन नंबर प्रविष्ट करा",
+  "@pleaseEnterPhone": {
+    "description": "Validation message when phone field is empty"
+  },
+
+  "enterValidPhone": "कृपया वैध फोन नंबर प्रविष्ट करा",
+  "@enterValidPhone": {
+    "description": "Validation message for invalid phone format"
+  },
+
+  "phoneMustBeExactDigits": "फोन नंबर अचूकपणे {digitCount} अंकांचा असणे आवश्यक आहे",
+  "@phoneMustBeExactDigits": {
+    "description": "Validation message for incorrect phone number length",
+    "placeholders": {
+      "digitCount": {
+        "type": "int",
+        "example": "10"
+      }
+    }
+  },
+
+  "phoneMustBeDigits": "फोन नंबरात केवळ अंक असणे आवश्यक आहे",
+  "@phoneMustBeDigits": {
+    "description": "Validation message when phone contains non-digit characters"
+  },
+
+  "autoVerificationFailed": "स्वयं-पडताळणी अयशस्वी. कृपया OTP मॅन्युअली प्रविष्ट करा.",
+  "@autoVerificationFailed": {
+    "description": "Message shown when automatic OTP detection fails"
+  },
+
+  "protectedDriverAccess": "हा भाग नोंदणीकृत चालकांपुरती जमावून ठेवलेला आहे.",
+  "@protectedDriverAccess": {
+    "description": "Message indicating driver-only access"
+  },
+
+  "verifyOtp": "OTP पडताळा",
+  "@verifyOtp": {
+    "description": "Title of the OTP verification screen"
+  },
+
+  "enterOtp": "तुमच्या फोनवर पाठवलेला OTP प्रविष्ट करा",
+  "@enterOtp": {
+    "description": "Instruction text on the OTP screen"
+  },
+
+  "sentTo": "{phoneNumber} वर पाठवले",
+  "@sentTo": {
+    "description": "Text showing which phone number the OTP was sent to",
+    "placeholders": {
+      "phoneNumber": {
+        "type": "String",
+        "example": "+91 98765 43210"
+      }
+    }
+  },
+
+  "invalidOtp": "अवैध OTP. कृपया पुन्हा प्रयत्न करा.",
+  "@invalidOtp": {
+    "description": "Error message for incorrect OTP entry"
+  },
+
+  "codeExpired": "OTP कालबाह्य झाला आहे. कृपया नवीन मागवा.",
+  "@codeExpired": {
+    "description": "Message when the OTP code has expired"
+  },
+
+  "verificationFailedMsg": "पडताळणी अयशस्वी. कृपया पुन्हा प्रयत्न करा.",
+  "@verificationFailedMsg": {
+    "description": "General verification failure message on OTP screen"
+  },
+
+  "couldNotVerifyOtp": "OTP पडताळणी शक्य नाही. कृपया पुन्हा प्रयत्न करा.",
+  "@couldNotVerifyOtp": {
+    "description": "Error message when OTP verification request fails"
+  },
+
+  "verifying": "पडताळत आहे...",
+  "@verifying": {
+    "description": "Status text while OTP is being verified"
+  },
+
+  "home": "मुख्यपृष्ठ",
+  "@home": {
+    "description": "Navigation label for the Home tab"
+  },
+
+  "trips": "प्रवास",
+  "@trips": {
+    "description": "Navigation label for the Trips tab"
+  },
+
+  "earnings": "कमाई",
+  "@earnings": {
+    "description": "Navigation label for the Earnings tab"
+  },
+
+  "profile": "प्रोफाइल",
+  "@profile": {
+    "description": "Navigation label for the Profile tab"
+  },
+
+  "offlineUsingCachedData": "तुम्ही ऑफलाइन आहात. कॅशे केलेला डेटा वापरत आहे.",
+  "@offlineUsingCachedData": {
+    "description": "Banner text when app is in offline mode"
+  },
+
+  "newLoadAvailable": "नवीन माल उपलब्ध!",
+  "@newLoadAvailable": {
+    "description": "Notification text when a new load appears"
+  },
+
+  "view": "पहा",
+  "@view": {
+    "description": "Button label to view details"
+  },
+
+  "navigationActive": "नेव्हिगेशन सक्रिय",
+  "@navigationActive": {
+    "description": "Status text when GPS navigation is active"
+  },
+
+  "headingTo": "{destination} जात आहोत",
+  "@headingTo": {
+    "description": "Text showing the current trip destination",
+    "placeholders": {
+      "destination": {
+        "type": "String",
+        "example": "Warehouse A, Nairobi"
+      }
+    }
+  },
+
+  "locating": "तुम्हाला शोधत आहे...",
+  "@locating": {
+    "description": "Status text while GPS is determining position"
+  },
+
+  "locationUnavailable": "स्थान उपलब्ध नाही",
+  "@locationUnavailable": {
+    "description": "Error text when GPS cannot determine position"
+  },
+
+  "currentLocation": "सध्याचे स्थान",
+  "@currentLocation": {
+    "description": "Label for the driver's current GPS location"
+  },
+
+  "tapToRefresh": "रिफ्रेश करण्यासाठी टॅप करा",
+  "@tapToRefresh": {
+    "description": "Instruction text to pull-to-refresh"
+  },
+
+  "fetchingLocation": "तुमचे स्थान मिळवत आहे...",
+  "@fetchingLocation": {
+    "description": "Status text while location is being fetched"
+  },
+
+  "whereAreYouHeading": "तुम्ही कुठे जात आहात?",
+  "@whereAreYouHeading": {
+    "description": "Prompt for destination input"
+  },
+
+  "onlineAndReady": "ऑनलाइन आणि तयार",
+  "@onlineAndReady": {
+    "description": "Status text when driver is online and available"
+  },
+
+  "offline": "ऑफलाइन",
+  "@offline": {
+    "description": "Status text when driver is offline"
+  },
+
+  "offlineGoOnline": "तुम्ही ऑफलाइन आहात. माल मिळवण्यासाठी ऑनलाइन व्हा.",
+  "@offlineGoOnline": {
+    "description": "Message encouraging driver to go online"
+  },
+
+  "radarActiveFetching": "रडार सक्रिय — जवळचा माल शोधत आहे...",
+  "@radarActiveFetching": {
+    "description": "Status text while radar is scanning for loads"
+  },
+
+  "radarActiveLooking": "रडार सक्रिय — तुमच्या जवळ माल शोधत आहे.",
+  "@radarActiveLooking": {
+    "description": "Status text when radar is actively searching"
+  },
+
+  "todayPay": "आजची तगाई",
+  "@todayPay": {
+    "description": "Label for today's earnings display"
+  },
+
+  "shiftHours": "शिफ्ट तास",
+  "@shiftHours": {
+    "description": "Label for hours worked display"
+  },
+
+  "rating": "रेटिंग",
+  "@rating": {
+    "description": "Label for driver rating display"
+  },
+
+  "metricsUnavailable": "मेट्रिक्स उपलब्ध नाही",
+  "@metricsUnavailable": {
+    "description": "Text when dashboard metrics cannot be loaded"
+  },
+
+  "noDestinationAvailable": "गंतव्य निर्धारित नाही",
+  "@noDestinationAvailable": {
+    "description": "Text when no destination has been entered"
+  },
+
+  "currentLocationUnavailable": "सध्याचे स्थान उपलब्ध नाही",
+  "@currentLocationUnavailable": {
+    "description": "Error text when current GPS location is unavailable"
+  },
+
+  "unableToOpenGoogleMaps": "Google Maps उघडता येत नाही",
+  "@unableToOpenGoogleMaps": {
+    "description": "Error message when Google Maps launch fails"
+  },
+
+  "failedToGenerateRoute": "मार्ग तयार करण्यात अयशस्वी",
+  "@failedToGenerateRoute": {
+    "description": "Error message when route generation fails"
+  },
+
+  "enRoute": "मार्गावर",
+  "@enRoute": {
+    "description": "Status label when driver is en route to destination"
+  },
+
+  "assignedLoad": "नियुक्त माल",
+  "@assignedLoad": {
+    "description": "Label for the currently assigned load"
+  },
+
+  "distance": "अंतर",
+  "@distance": {
+    "description": "Label for trip distance"
+  },
+
+  "estDuration": "अंदाजे कालावधी",
+  "@estDuration": {
+    "description": "Label for estimated trip duration"
+  },
+
+  "estPayout": "अंदाजे तगाई",
+  "@estPayout": {
+    "description": "Label for estimated trip payout"
+  },
+
+  "slideToCompleteTrip": "प्रवास पूर्ण करण्यासाठी स्लाइड करा",
+  "@slideToCompleteTrip": {
+    "description": "Instruction on the slide-to-confirm button to complete"
+  },
+
+  "slideToStartTrip": "प्रवास सुरू करण्यासाठी स्लाइड करा",
+  "@slideToStartTrip": {
+    "description": "Instruction on the slide-to-confirm button to start"
+  },
+
+  "cancelAssignment": "नियुक्ती रद्द करा",
+  "@cancelAssignment": {
+    "description": "Button label to cancel a trip assignment"
+  },
+
+  "tripCompletedNetEarnings": "प्रवास पूर्ण झाला! शुद्ध कमाई: {amount}",
+  "@tripCompletedNetEarnings": {
+    "description": "Success message after trip completion with earnings",
+    "placeholders": {
+      "amount": {
+        "type": "String",
+        "example": "KES 2,500"
+      }
+    }
+  },
+
+  "failedToCompleteTrip": "प्रवास पूर्ण करण्यात अयशस्वी",
+  "@failedToCompleteTrip": {
+    "description": "Error message when trip completion fails"
+  },
+
+  "failedToStartTrip": "प्रवास सुरू करण्यात अयशस्वी",
+  "@failedToStartTrip": {
+    "description": "Error message when trip start fails"
+  },
+
+  "tripCompleted": "प्रवास पूर्ण झाला",
+  "@tripCompleted": {
+    "description": "Title or status for a completed trip"
+  },
+
+  "pleaseGoOnline": "कृपया प्रथम ऑनलाइन व्हा",
+  "@pleaseGoOnline": {
+    "description": "Prompt asking the driver to go online before proceeding"
+  },
+
+  "noDestinationAvailable2": "गंतव्य उपलब्ध नाही. कृपया गंतव्य निर्धारित करा.",
+  "@noDestinationAvailable2": {
+    "description": "Message when no destination is set for navigation"
+  },
+
+  "locationPermissionRequired": "स्थान परवानगी आवश्यक आहे",
+  "@locationPermissionRequired": {
+    "description": "Error message when location permission has not been granted"
+  },
+
+  "locationAccessDenied": "स्थान प्रवेश नाकारला",
+  "@locationAccessDenied": {
+    "description": "Error message when location access is denied by user"
+  },
+
+  "locationPermDenied": "स्थान परवानगी कायमच्या नाकारली. कृपया सेटिंग्जमध्ये सक्षम करा.",
+  "@locationPermDenied": {
+    "description": "Error message when location permission is permanently denied"
+  },
+
+  "openSettings": "सेटिंग्ज उघडा",
+  "@openSettings": {
+    "description": "Button label to open device settings"
+  },
+
+  "editProfile": "प्रोफाइल संपादित करा",
+  "@editProfile": {
+    "description": "Title or button label to edit the driver profile"
+  },
+
+  "fullNames": "पूर्ण नावे",
+  "@fullNames": {
+    "description": "Label for the full name input field"
+  },
+
+  "phoneNumbers": "फोन नंबर",
+  "@phoneNumbers": {
+    "description": "Label for the phone number display"
+  },
+
+  "emailAddress": "ईमेल पत्ता",
+  "@emailAddress": {
+    "description": "Label for the email address input field"
+  },
+
+  "vehicleRegistrationNumber": "वाहन नोंदणी क्रमांक",
+  "@vehicleRegistrationNumber": {
+    "description": "Label for the vehicle registration input field"
+  },
+
+  "saveChanges": "बदल जतन करा",
+  "@saveChanges": {
+    "description": "Button label to save profile changes"
+  },
+
+  "profileUpdatedSuccessfully": "प्रोफाइल यशस्वीरित्या अद्ययावत केली",
+  "@profileUpdatedSuccessfully": {
+    "description": "Success message after profile update"
+  },
+
+  "selectLanguage": "भाषा निवडा",
+  "@selectLanguage": {
+    "description": "Title or label for language selection"
+  },
+
+  "applyLanguage": "भाषा लागू करा",
+  "@applyLanguage": {
+    "description": "Button label to confirm language change"
+  },
+
+  "languageSwitched": "भाषा यशस्वीरित्या बदलली",
+  "@languageSwitched": {
+    "description": "Success message after language change"
+  },
+
+  "polygonWalletAddress": "पॉलिगॉन वॉलेट पत्ता",
+  "@polygonWalletAddress": {
+    "description": "Label for the Polygon wallet address field"
+  },
+
+  "saveWalletAddress": "वॉलेट पत्ता जतन करा",
+  "@saveWalletAddress": {
+    "description": "Button label to save the wallet address"
+  },
+
+  "walletAddressUpdated": "वॉलेट पत्ता अद्ययावत केला",
+  "@walletAddressUpdated": {
+    "description": "Success message after wallet address update"
+  },
+
+  "failedToUpdateWallet": "वॉलेट पत्ता अद्ययावत करण्यात अयशस्वी",
+  "@failedToUpdateWallet": {
+    "description": "Error message when wallet address update fails"
+  },
+
+  "helpSupport": "मदत आणि समर्थन",
+  "@helpSupport": {
+    "description": "Section title for help and support"
+  },
+
+  "browseFAQs": "वारंवार विचारले जाणारे प्रश्न पहा",
+  "@browseFAQs": {
+    "description": "Button label to view frequently asked questions"
+  },
+
+  "instantAnswers": "सामान्य प्रश्नांचे त्वरित उत्तरे मिळवा",
+  "@instantAnswers": {
+    "description": "Subtitle describing the FAQ section"
+  },
+
+  "aboutTruxifyDriverApp": "ट्रक्सिफाय चालक अॅपबद्दल",
+  "@aboutTruxifyDriverApp": {
+    "description": "Section title for app about information"
+  },
+
+  "truxifyDescription": "ट्रक्सिफाय हे पूर्व आफ्रिकेतील चालकांना मालांशी जोडणारे ट्रक लॉजिस्टिक्स प्लॅटफॉर्म आहे.",
+  "@truxifyDescription": {
+    "description": "Description of the Truxify application"
+  },
+
+  "documents": "कागदपत्रे",
+  "@documents": {
+    "description": "Section title for driver documents"
+  },
+
+  "driverLicensePermitPapers": "चालक परवाना आणि परवानगी कागदपत्रे",
+  "@driverLicensePermitPapers": {
+    "description": "Label for driver license and permit document section"
+  },
+
+  "notifications": "सूचना",
+  "@notifications": {
+    "description": "Section title for notifications settings"
+  },
+
+  "viewTripAlerts": "प्रवास सूचना पहा",
+  "@viewTripAlerts": {
+    "description": "Label for trip notification alerts toggle"
+  },
+
+  "walletAddress": "वॉलेट पत्ता",
+  "@walletAddress": {
+    "description": "Label for wallet address display"
+  },
+
+  "notSet": "निर्धारित नाही",
+  "@notSet": {
+    "description": "Placeholder text when a value has not been set"
+  },
+
+  "languageLabel": "भाषा",
+  "@languageLabel": {
+    "description": "Label for the current language setting"
+  },
+
+  "helpAndSupport247": "मदत आणि समर्थन (24/7)",
+  "@helpAndSupport247": {
+    "description": "Label indicating round-the-clock support availability"
+  },
+
+  "versionAndAppInfo": "आवृत्ती आणि अॅप माहिती",
+  "@versionAndAppInfo": {
+    "description": "Label for app version information section"
+  },
+
+  "logout": "लॉगआउट",
+  "@logout": {
+    "description": "Button label to log out of the application"
+  },
+
+  "logoutFailed": "लॉगआउट अयशस्वी. कृपया पुन्हा प्रयत्न करा.",
+  "@logoutFailed": {
+    "description": "Error message when logout fails"
+  },
+
+  "myTrips": "माझे प्रवास",
+  "@myTrips": {
+    "description": "Title of the trips screen"
+  },
+
+  "marketplace": "बाजारपेठ",
+  "@marketplace": {
+    "description": "Title or tab for the load marketplace"
+  },
+
+  "sortTrips": "प्रवास क्रमवारी लावा",
+  "@sortTrips": {
+    "description": "Label for the trip sorting option"
+  },
+
+  "newestFirst": "नवीनतम प्रथम",
+  "@newestFirst": {
+    "description": "Sort option to show newest trips first"
+  },
+
+  "oldestFirst": "जुनातम प्रथम",
+  "@oldestFirst": {
+    "description": "Sort option to show oldest trips first"
+  },
+
+  "highestEarnings": "सर्वाधिक कमाई",
+  "@highestEarnings": {
+    "description": "Sort option to show highest-earning trips first"
+  },
+
+  "lowestEarnings": "कमीत कमी कमाई",
+  "@lowestEarnings": {
+    "description": "Sort option to show lowest-earning trips first"
+  },
+
+  "byStatus": "स्थितीनुसार",
+  "@byStatus": {
+    "description": "Sort or filter option to group trips by status"
+  },
+
+  "totalTrips": "एकूण प्रवास",
+  "@totalTrips": {
+    "description": "Label for total number of trips"
+  },
+
+  "totalEarned": "एकूण कमाई",
+  "@totalEarned": {
+    "description": "Label for total earnings amount"
+  },
+
+  "completion": "पूर्णत्व",
+  "@completion": {
+    "description": "Label for trip completion percentage"
+  },
+
+  "all": "सर्व",
+  "@all": {
+    "description": "Filter option to show all trips"
+  },
+
+  "active2": "सक्रिय",
+  "@active2": {
+    "description": "Filter option to show active trips"
+  },
+
+  "completed2": "पूर्ण झालेले",
+  "@completed2": {
+    "description": "Filter option to show completed trips"
+  },
+
+  "cancelled2": "रद्द केलेले",
+  "@cancelled2": {
+    "description": "Filter option to show cancelled trips"
+  },
+
+  "failedToLoadTrips": "प्रवास लोड करण्यात अयशस्वी",
+  "@failedToLoadTrips": {
+    "description": "Error message when trips list fails to load"
+  },
+
+  "pullDownToRetry": "पुन्हा प्रयत्न करण्यासाठी खाली ओढा",
+  "@pullDownToRetry": {
+    "description": "Instruction text for pull-to-refresh gesture"
+  },
+
+  "noTripsFound": "प्रवास सापडले नाहीत",
+  "@noTripsFound": {
+    "description": "Empty state text when no trips match filters"
+  },
+
+  "deliveryStops": "डिलिव्हरी थांबे",
+  "@deliveryStops": {
+    "description": "Label for the number of delivery stops on a trip"
+  },
+
+  "markCurrentStopCompleted": "सध्याचे थांब पूर्ण म्हणून चिन्हांकित करा",
+  "@markCurrentStopCompleted": {
+    "description": "Button label to mark the current delivery stop as done"
+  },
+
+  "activeStatus": "सक्रिय",
+  "@activeStatus": {
+    "description": "Status badge text for an active trip"
+  },
+
+  "completedStatus": "पूर्ण झालेले",
+  "@completedStatus": {
+    "description": "Status badge text for a completed trip"
+  },
+
+  "cancelledStatus": "रद्द केलेले",
+  "@cancelledStatus": {
+    "description": "Status badge text for a cancelled trip"
+  },
+
+  "enRouteOpportunities": "मार्गावरील संधी",
+  "@enRouteOpportunities": {
+    "description": "Section title for loads available along current route"
+  },
+
+  "pickupNearbyLoads": "जवळचा माल उचला",
+  "@pickupNearbyLoads": {
+    "description": "Label for nearby load pickup section"
+  },
+
+  "marketplaceLoads": "बाजारपेठेतील माल",
+  "@marketplaceLoads": {
+    "description": "Section title for marketplace load listings"
+  },
+
+  "availableLoadsYouCanBidFor": "तुम्ही बोली लावू शकता ते उपलब्ध माल",
+  "@availableLoadsYouCanBidFor": {
+    "description": "Subtitle describing available marketplace loads"
+  },
+
+  "couldNotLoadMarketplace": "बाजारपेठ लोड करता आली नाही",
+  "@couldNotLoadMarketplace": {
+    "description": "Error message when marketplace data fails to load"
+  },
+
+  "pullToRefresh": "रिफ्रेश करण्यासाठी ओढा",
+  "@pullToRefresh": {
+    "description": "Instruction text to refresh marketplace data"
+  },
+
+  "noLoadsAvailable": "माल उपलब्ध नाही",
+  "@noLoadsAvailable": {
+    "description": "Empty state text when no loads are available"
+  },
+
+  "bidSubmitted": "बोली यशस्वीरित्या सबमिट केली",
+  "@bidSubmitted": {
+    "description": "Success message after submitting a bid"
+  },
+
+  "failedToSubmitBid": "बोली सबमिट करण्यात अयशस्वी",
+  "@failedToSubmitBid": {
+    "description": "Error message when bid submission fails"
+  },
+
+  "thisLoadIsMissingId": "या मालाला ID गरक आहे",
+  "@thisLoadIsMissingId": {
+    "description": "Error message when a load record has no valid identifier"
+  },
+
+  "recommendedReturnLoads": "शिफारस केलेले परतील माल",
+  "@recommendedReturnLoads": {
+    "description": "Section title for ML-powered return load recommendations"
+  },
+
+  "recommendedForYou": "तुमच्यासाठी शिफारस केलेले",
+  "@recommendedForYou": {
+    "description": "Label shown when a recommendation has no route"
+  },
+
+  "matchScore": "जुळवा स्कोअर",
+  "@matchScore": {
+    "description": "Label for ML match score percentage"
+  },
+
+  "bestMatch": "सर्वोत्तम जुळवा",
+  "@bestMatch": {
+    "description": "Label for the top recommendation"
+  },
+
+  "noRecommendations": "परतील माल शिफारशी उपलब्ध नाहीत",
+  "@noRecommendations": {
+    "description": "Empty state when ML returns no recommendations"
+  },
+
+  "couldNotLoadRecommendations": "शिफारशी लोड करता आल्या नाहीत",
+  "@couldNotLoadRecommendations": {
+    "description": "Error state when ML endpoint fails"
+  },
+
+  "noActiveTripForRecommendations": "परतील माल सूचना पाहण्यासाठी एक प्रवास पूर्ण करा",
+  "@noActiveTripForRecommendations": {
+    "description": "Hint shown when driver has no active trip for recommendations"
+  },
+
+  "detourDistance": "विचलन",
+  "@detourDistance": {
+    "description": "Label for detour distance"
+  },
+
+  "bidOnLoad": "बोली",
+  "@bidOnLoad": {
+    "description": "Button label to place a bid on a load"
+  },
+
+  "updateBid": "बोली अद्ययावत करा",
+  "@updateBid": {
+    "description": "Button label to update an existing bid"
+  },
+
+  "placeYourBid": "तुमची बोली लावा",
+  "@placeYourBid": {
+    "description": "Title of the bid placement bottom sheet"
+  },
+
+  "bidAmount": "बोली रक्कम",
+  "@bidAmount": {
+    "description": "Label for the bid amount input field"
+  },
+
+  "submitBid": "बोली सबमिट करा",
+  "@submitBid": {
+    "description": "Button label to submit a bid"
+  },
+
+  "enterValidBid": "वैध बोली रक्कम प्रविष्ट करा",
+  "@enterValidBid": {
+    "description": "Validation message for invalid bid input"
+  },
+
+  "unableToOpen": "सूचना उघडता येत नाही",
+  "@unableToOpen": {
+    "description": "Error message when a notification cannot be navigated to"
+  },
+
+  "withdraw": "पैसे काढा",
+  "@withdraw": {
+    "description": "Button label to withdraw funds from wallet"
+  },
+
+  "withdrawFunds": "पैसे काढा",
+  "@withdrawFunds": {
+    "description": "Title of the withdrawal bottom sheet"
+  },
+
+  "availableBalance": "उपलब्ध शिल्लक",
+  "@availableBalance": {
+    "description": "Label for the confirmed wallet balance in the withdrawal sheet"
+  },
+
+  "enterAmount": "रक्कम प्रविष्ट करा",
+  "@enterAmount": {
+    "description": "Label for the amount input field in the withdrawal sheet"
+  },
+
+  "amountRequired": "रक्कम आवश्यक आहे",
+  "@amountRequired": {
+    "description": "Validation error when amount field is empty"
+  },
+
+  "enterValidAmount": "कृपया वैध रक्कम प्रविष्ट करा",
+  "@enterValidAmount": {
+    "description": "Validation error when amount is not a valid number"
+  },
+
+  "amountMustBePositive": "रक्कम शून्यापेक्षा अधिक असणे आवश्यक आहे",
+  "@amountMustBePositive": {
+    "description": "Validation error when amount is zero or negative"
+  },
+
+  "insufficientBalance": "अपुरी शिल्लक",
+  "@insufficientBalance": {
+    "description": "Validation error when amount exceeds confirmed balance"
+  },
+
+  "max": "कमाल",
+  "@max": {
+    "description": "Label for the quick-fill button that sets the maximum withdrawal amount"
+  },
+
+  "withdrawalSuccessful": "पैसे काढणे यशस्वी",
+  "@withdrawalSuccessful": {
+    "description": "Success message after a successful withdrawal"
+  }
+}

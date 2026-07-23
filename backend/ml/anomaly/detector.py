@@ -3,9 +3,10 @@ import pandas as pd
 import redis
 import json
 import logging
+from collections import deque
 from datetime import datetime
 from typing import Dict, List, Any, Optional
-from models import LSTMAutoencoder
+from .models import LSTMAutoencoder
 from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ class AnomalyDetector:
         for name, model in self.models.items():
             model.build_model()
         
-        self.anomaly_history = []
+        self.anomaly_history = deque(maxlen=self.max_history)
         self.max_history = 1000
         
         logger.info("✅ Anomaly Detector initialized")
@@ -114,8 +115,6 @@ class AnomalyDetector:
             # Store anomaly history
             if result['is_anomaly']:
                 self.anomaly_history.append(result)
-                if len(self.anomaly_history) > self.max_history:
-                    self.anomaly_history = self.anomaly_history[-self.max_history:]
                 
                 # Store in Redis
                 self.redis.setex(
@@ -242,21 +241,26 @@ class AnomalyDetector:
         """Get anomaly detection history"""
         if data_type:
             return [h for h in self.anomaly_history if h.get('data_type') == data_type]
-        return self.anomaly_history
+        return list(self.anomaly_history)
     
     def get_alerts(self, severity: Optional[str] = None) -> List[Dict]:
         """Get recent alerts"""
         alerts = []
-        keys = self.redis.keys('anomaly:alert:*')
-        
-        for key in keys[-50:]:  # Last 50 alerts
-            data = self.redis.get(key)
-            if data:
-                alert = json.loads(data)
-                if severity is None or alert.get('severity') == severity:
-                    alerts.append(alert)
-        
-        return alerts
+        cursor = 0
+        pattern = 'anomaly:alert:*'
+
+        while True:
+            cursor, keys = self.redis.scan(cursor=cursor, match=pattern, count=100)
+            for key in keys:
+                data = self.redis.get(key)
+                if data:
+                    alert = json.loads(data)
+                    if severity is None or alert.get('severity') == severity:
+                        alerts.append(alert)
+            if cursor == 0:
+                break
+
+        return alerts[-50:]
     
     def get_stats(self) -> Dict:
         """Get anomaly detection statistics"""

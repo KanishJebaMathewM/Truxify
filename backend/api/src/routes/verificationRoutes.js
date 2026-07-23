@@ -1,6 +1,7 @@
 import express from 'express';
 import { verificationService } from '../core/container.js';
 import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
 import { verifyOrderParamsSchema, documentCheckSchema } from '../validation/requestSchemas.js';
 
@@ -35,7 +36,7 @@ router.get('/order/:orderId', authenticate, validateParams(verifyOrderParamsSche
   }
 });
 
-router.post('/documents/check', authenticate, validateBody(documentCheckSchema), async (req, res) => {
+router.post('/documents/check', authenticate, userLimiter, validateBody(documentCheckSchema), async (req, res) => {
   try {
     const { driverId } = req.body;
 

@@ -55,9 +55,14 @@ export class TrackingTokenService {
       .from('tracking_tokens')
       .select('id, order_display_id, expires_at, revoked, revoked_at')
       .eq('token_hash', tokenHash)
-      .single();
+      .maybeSingle();
 
-    if (error || !token) {
+    if (error) {
+      this._logger.error({ error }, 'Failed to validate tracking token');
+      return { valid: false, reason: 'validation_error' };
+    }
+
+    if (!token) {
       return { valid: false, reason: 'not_found' };
     }
 

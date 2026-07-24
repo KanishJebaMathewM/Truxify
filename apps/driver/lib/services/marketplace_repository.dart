@@ -55,7 +55,6 @@ class MarketplaceRepository {
   }
 
   Future<Map<String, String>> _authHeaders() async {
-    final accessToken = await _firebaseAccessToken() ?? _supabaseAccessToken();
     return <String, String>{
       'Content-Type': 'application/json',
       if (accessToken != null && accessToken.isNotEmpty)

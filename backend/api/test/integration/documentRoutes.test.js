@@ -12,7 +12,16 @@ vi.mock('../../src/config/db.js', () => ({
   mongoDb: null,
 }));
 
+vi.mock('../../src/lib/malwareScanner.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    scanDocument: vi.fn().mockResolvedValue({ clean: true, engine: 'mock' }),
+  };
+});
+
 const { default: documentRouter } = await import('../../src/routes/documentRoutes.js');
+const { scanDocument } = await import('../../src/lib/malwareScanner.js');
 
 function buildApp() {
   const app = express();
@@ -37,6 +46,7 @@ describe('Document Routes Integration Tests', () => {
     m.store.driver_documents = [];
     m.store.__storageObjects = [];
     m.calls.length = 0;
+    scanDocument.mockResolvedValue({ clean: true, engine: 'mock' });
   });
 
   describe('POST /api/driver/documents', () => {
@@ -125,6 +135,34 @@ describe('Document Routes Integration Tests', () => {
 
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('Failed to store document');
+    });
+
+    it('rejects upload when malware scanner detects a threat (422)', async () => {
+      const { MalwareScanError } = await import('../../src/lib/malwareScanner.js');
+      scanDocument.mockRejectedValue(new MalwareScanError('Uploaded file is infected: TestVirus'));
+
+      const res = await request(buildApp())
+        .post('/api/driver/documents')
+        .set(DRIVER_HEADERS)
+        .field('documentType', 'aadhaar_card')
+        .attach('document', JPEG_BYTES, { filename: 'id.jpg', contentType: 'image/jpeg' });
+
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatch(/infected|TestVirus/i);
+      expect(m.store.__storageObjects.length).toBe(0);
+    });
+
+    it('returns 500 when malware scanner throws an unexpected error', async () => {
+      scanDocument.mockRejectedValue(new Error('Unexpected scanner failure'));
+
+      const res = await request(buildApp())
+        .post('/api/driver/documents')
+        .set(DRIVER_HEADERS)
+        .field('documentType', 'aadhaar_card')
+        .attach('document', JPEG_BYTES, { filename: 'id.jpg', contentType: 'image/jpeg' });
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('An unexpected error occurred');
     });
   });
 });

@@ -12,7 +12,16 @@ vi.mock('../../src/config/db.js', () => ({
   mongoDb: null,
 }));
 
+vi.mock('../../src/lib/malwareScanner.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    scanDocument: vi.fn().mockResolvedValue({ clean: true, engine: 'mock' }),
+  };
+});
+
 const { default: maintenanceRouter } = await import('../../src/routes/maintenancePhotoRoutes.js');
+const { scanDocument } = await import('../../src/lib/malwareScanner.js');
 
 function buildApp() {
   const app = express();
@@ -49,6 +58,7 @@ describe('Maintenance Photo Routes Integration Tests', () => {
     ];
     m.store.__storageObjects = [];
     m.calls.length = 0;
+    scanDocument.mockResolvedValue({ clean: true, engine: 'mock' });
   });
 
   describe('POST /api/maintenance/:ticketId/photos', () => {
@@ -145,6 +155,50 @@ describe('Maintenance Photo Routes Integration Tests', () => {
 
       expect(res.status).toBe(500);
       expect(res.body.error).toBe('Failed to store photo');
+    });
+
+    it('rejects upload when malware scanner detects a threat (422)', async () => {
+      const { MalwareScanError } = await import('../../src/lib/malwareScanner.js');
+      scanDocument.mockRejectedValue(new MalwareScanError('Uploaded file is infected: TestVirus'));
+
+      const res = await request(buildApp())
+        .post('/api/maintenance/ticket-uuid-001/photos')
+        .set(DRIVER_HEADERS)
+        .attach('photos', JPEG_BYTES, { filename: 'photo.jpg', contentType: 'image/jpeg' });
+
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatch(/infected|TestVirus/i);
+      expect(m.store.__storageObjects.length).toBe(0);
+    });
+
+    it('cleans up previously uploaded photos when a later photo fails malware scan', async () => {
+      const { MalwareScanError } = await import('../../src/lib/malwareScanner.js');
+
+      scanDocument
+        .mockResolvedValueOnce({ clean: true, engine: 'mock' })
+        .mockRejectedValueOnce(new MalwareScanError('Uploaded file is infected: TestVirus'));
+
+      const res = await request(buildApp())
+        .post('/api/maintenance/ticket-uuid-001/photos')
+        .set(DRIVER_HEADERS)
+        .attach('photos', JPEG_BYTES, { filename: 'photo1.jpg', contentType: 'image/jpeg' })
+        .attach('photos', JPEG_BYTES, { filename: 'photo2.jpg', contentType: 'image/jpeg' });
+
+      expect(res.status).toBe(422);
+      expect(res.body.error).toMatch(/infected|TestVirus/i);
+      expect(m.store.__storageObjects.length).toBe(0);
+    });
+
+    it('returns 500 when malware scanner throws an unexpected error', async () => {
+      scanDocument.mockRejectedValue(new Error('Unexpected scanner failure'));
+
+      const res = await request(buildApp())
+        .post('/api/maintenance/ticket-uuid-001/photos')
+        .set(DRIVER_HEADERS)
+        .attach('photos', JPEG_BYTES, { filename: 'photo.jpg', contentType: 'image/jpeg' });
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('An unexpected error occurred');
     });
 
     it('supports uploading multiple photos at once', async () => {

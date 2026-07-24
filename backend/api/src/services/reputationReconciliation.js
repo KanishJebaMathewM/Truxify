@@ -95,9 +95,8 @@ export async function reconcileFailedReputationUpdates() {
     if (lockAcquired && redisClient) {
       await redisClient.del(LOCK_KEY).catch(() => {});
     }
-    if (!lockAcquired) {
-      reconciliationRunning = false;
-    }
+    // Always reset running flag so fallback/single-instance logic doesn't permanently deadlock
+    reconciliationRunning = false;
   }
 }
 

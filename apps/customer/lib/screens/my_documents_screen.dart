@@ -179,9 +179,9 @@ class _MyDocumentsScreenState extends State<MyDocumentsScreen> {
                   setSheetState(() {
                     progress += 0.15;
                     if (progress > 0.7) {
-                      statusText = 'Processing document...';
-                    } else if (progress > 0.4) {
                       statusText = 'Uploading to secure storage...';
+                    } else if (progress > 0.4) {
+                      statusText = 'Processing document...';
                     }
                   });
                 } else if (progress >= 0.8 && progress < 1.0) {

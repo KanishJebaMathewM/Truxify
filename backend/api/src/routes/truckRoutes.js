@@ -334,6 +334,26 @@ function isLongitude(value) {
   return Number.isFinite(value) && value >= -180 && value <= 180;
 }
 
+async function canViewTruckNumber(user, truck) {
+  if (user.role === 'admin' || truck.owner_id === user.id) {
+    return { allowed: true };
+  }
+
+  const { data: order, error } = await supabase
+    .from('orders')
+    .select('id')
+    .eq('truck_id', truck.id)
+    .or(`customer_id.eq.${user.id},driver_id.eq.${user.id}`)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    return { allowed: false, error };
+  }
+
+  return { allowed: Boolean(order) };
+}
+
 /**
  * @openapi
  * /api/trucks/search:
@@ -635,12 +655,20 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
   try {
     const { data: truck, error } = await supabase
       .from('trucks')
-      .select('number_plate')
+      .select('id, owner_id, number_plate')
       .eq('id', req.params.id)
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: 'Failed to fetch truck number.', details: error.message });
     if (!truck) return res.status(404).json({ error: 'Truck not found.' });
+
+    const access = await canViewTruckNumber(req.user, truck);
+    if (access.error) {
+      return res.status(500).json({ error: 'Failed to verify truck access.', details: access.error.message });
+    }
+    if (!access.allowed) {
+      return res.status(403).json({ error: 'Access Denied: You do not have permission to view this truck number.' });
+    }
 
     res.json({ number_plate: truck.number_plate });
   } catch (err) {

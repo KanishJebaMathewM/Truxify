@@ -100,7 +100,7 @@ import {
 } from '../services/profileService.js';
 import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
-import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
+import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
 import { auditLog } from '../middleware/auditLog.js';
 
 const router = express.Router();
@@ -314,7 +314,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
     if (req.user && req.user.id) {
       try {
-        await invalidateCachedSupabaseProfile(req.user.id);
+        await invalidateCachedSupabaseProfileAll(req.user.id);
       } catch (err) {
         logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
       }
@@ -387,7 +387,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     }
     if (req.user && req.user.id) {
       try {
-        await invalidateCachedSupabaseProfile(req.user.id);
+        await invalidateCachedSupabaseProfileAll(req.user.id);
       } catch (err) {
         logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
       }
@@ -458,7 +458,7 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
     }
     if (req.user.id) {
       try {
-        await invalidateCachedSupabaseProfile(req.user.id);
+        await invalidateCachedSupabaseProfileAll(req.user.id);
       } catch (err) {
         logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
       }
@@ -673,7 +673,7 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
 
     await Promise.all([
       profile.firebase_uid ? invalidateCachedProfile(profile.firebase_uid) : Promise.resolve(),
-      invalidateCachedSupabaseProfile(profile.id),
+      invalidateCachedSupabaseProfileAll(profile.id),
     ]);
 
     return res.json({ success: true, message: `Cache invalidated for user ${profile.id}.` });

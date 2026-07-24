@@ -5,11 +5,18 @@ import express from 'express';
 vi.mock('../../src/lib/profileCache.js', () => ({
   invalidateCachedProfile: vi.fn(),
   invalidateCachedSupabaseProfile: vi.fn(),
+  invalidateCachedSupabaseProfileAll: vi.fn(),
   getCachedProfile: vi.fn(),
   setCachedProfile: vi.fn(),
+  getCachedSupabaseProfile: vi.fn(),
+  setCachedSupabaseProfile: vi.fn(),
+  getCachedCustomerStats: vi.fn(),
+  setCachedCustomerStats: vi.fn(),
+  getCachedDriverDetails: vi.fn(),
+  setCachedDriverDetails: vi.fn(),
 }));
 
-const { invalidateCachedProfile } = await import('../../src/lib/profileCache.js');
+const { invalidateCachedProfile, invalidateCachedSupabaseProfileAll } = await import('../../src/lib/profileCache.js');
 
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();
@@ -279,6 +286,7 @@ describe('Profile Routes', () => {
       expect(res.body.message).toBe('Profile updated');
       expect(res.body.profile).toEqual(updatedProfileRow);
       expect(invalidateCachedProfile).toHaveBeenCalledWith('test_firebase_uid_123');
+      expect(invalidateCachedSupabaseProfileAll).toHaveBeenCalledWith('customer-uuid-123');
 
       const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
       expect(profileUpdateCall.payload).toEqual({
@@ -339,6 +347,7 @@ describe('Profile Routes', () => {
       expect(res.body.message).toBe('Profile updated');
       expect(res.body.profile).toEqual(updatedProfileRow);
       expect(invalidateCachedProfile).toHaveBeenCalledWith('test_firebase_uid_123');
+      expect(invalidateCachedSupabaseProfileAll).toHaveBeenCalledWith('driver-uuid-456');
 
       const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
       expect(profileUpdateCall.payload).toEqual({
@@ -376,6 +385,7 @@ describe('Profile Routes', () => {
         walletAddress: '0x1234567890abcdef1234567890abcdef12345678',
       });
       expect(invalidateCachedProfile).toHaveBeenCalledWith('test_firebase_uid_123');
+      expect(invalidateCachedSupabaseProfileAll).toHaveBeenCalledWith('customer-uuid-123');
 
       const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
       expect(profileUpdateCall.payload).toEqual({

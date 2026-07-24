@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   firebaseProfileKey,
   supabaseProfileKey,
+  customerStatsKey,
+  driverDetailsKey,
   PROFILE_KEY_PREFIX,
 } from '../../src/cache/profileCacheKeys.js';
 
@@ -50,6 +52,52 @@ describe('profileCacheKeys', () => {
     });
   });
 
+  describe('customerStatsKey', () => {
+    it('generates correct key for a standard UUID', () => {
+      expect(customerStatsKey('550e8400-e29b-41d4-a716-446655440000'))
+        .toBe('user:profile:sb:550e8400-e29b-41d4-a716-446655440000:stats');
+    });
+
+    it('generates correct key for a short ID', () => {
+      expect(customerStatsKey('short-id')).toBe('user:profile:sb:short-id:stats');
+    });
+
+    it('returns a string', () => {
+      expect(typeof customerStatsKey('id')).toBe('string');
+    });
+
+    it('starts with the profile key prefix and sb namespace', () => {
+      expect(customerStatsKey('test')).toMatch(/^user:profile:sb:/);
+    });
+
+    it('ends with :stats segment', () => {
+      expect(customerStatsKey('test')).toMatch(/:stats$/);
+    });
+  });
+
+  describe('driverDetailsKey', () => {
+    it('generates correct key for a standard UUID', () => {
+      expect(driverDetailsKey('550e8400-e29b-41d4-a716-446655440000'))
+        .toBe('user:profile:sb:550e8400-e29b-41d4-a716-446655440000:driver');
+    });
+
+    it('generates correct key for a short ID', () => {
+      expect(driverDetailsKey('short-id')).toBe('user:profile:sb:short-id:driver');
+    });
+
+    it('returns a string', () => {
+      expect(typeof driverDetailsKey('id')).toBe('string');
+    });
+
+    it('starts with the profile key prefix and sb namespace', () => {
+      expect(driverDetailsKey('test')).toMatch(/^user:profile:sb:/);
+    });
+
+    it('ends with :driver segment', () => {
+      expect(driverDetailsKey('test')).toMatch(/:driver$/);
+    });
+  });
+
   describe('key separation', () => {
     it('Firebase and Supabase keys for the same ID are different', () => {
       const id = '550e8400-e29b-41d4-a716-446655440000';
@@ -62,6 +110,15 @@ describe('profileCacheKeys', () => {
 
     it('Supabase key contains "sb:" segment', () => {
       expect(supabaseProfileKey('test')).toContain(':sb:');
+    });
+
+    it('all Supabase-scoped keys for the same user are distinct', () => {
+      const userId = '550e8400-e29b-41d4-a716-446655440000';
+      const profile = supabaseProfileKey(userId);
+      const stats = customerStatsKey(userId);
+      const driver = driverDetailsKey(userId);
+      const allKeys = new Set([profile, stats, driver]);
+      expect(allKeys.size).toBe(3);
     });
   });
 });

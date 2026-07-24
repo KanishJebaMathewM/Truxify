@@ -7,6 +7,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
 describe('profileCache utility', () => {
   beforeEach(() => {
     vi.resetModules();
+    delete process.env.REDIS_CACHE_TTL;
   });
 
   afterEach(() => {
@@ -222,6 +223,204 @@ describe('profileCache utility', () => {
         expect(logger.error).toHaveBeenCalled();
       } finally {
       }
+    });
+  });
+
+  describe('getCachedSupabaseProfile', () => {
+    it('returns null if redisClient is not defined', async () => {
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: null }));
+      const { getCachedSupabaseProfile } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedSupabaseProfile('user-123');
+      expect(result).toBeNull();
+    });
+
+    it('retrieves and parses cached profile on hit', async () => {
+      const mockProfile = { id: 'user-123', role: 'driver' };
+      const redisClientMock = {
+        get: vi.fn().mockResolvedValue(JSON.stringify(mockProfile)),
+      };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { getCachedSupabaseProfile } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedSupabaseProfile('user-123');
+      expect(redisClientMock.get).toHaveBeenCalledWith('user:profile:sb:user-123');
+      expect(result).toEqual(mockProfile);
+    });
+
+    it('returns null on cache miss', async () => {
+      const redisClientMock = { get: vi.fn().mockResolvedValue(null) };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { getCachedSupabaseProfile } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedSupabaseProfile('user-123');
+      expect(result).toBeNull();
+    });
+
+    it('returns null and cleans up corrupted key on parse error', async () => {
+      const redisClientMock = {
+        get: vi.fn().mockResolvedValue('invalid-json{'),
+        del: vi.fn().mockResolvedValue(1),
+      };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { getCachedSupabaseProfile } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedSupabaseProfile('user-123');
+      expect(result).toBeNull();
+      expect(redisClientMock.del).toHaveBeenCalledWith('user:profile:sb:user-123');
+    });
+  });
+
+  describe('getCachedCustomerStats', () => {
+    it('returns null if redisClient is not defined', async () => {
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: null }));
+      const { getCachedCustomerStats } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedCustomerStats('user-123');
+      expect(result).toBeNull();
+    });
+
+    it('retrieves cached stats on hit', async () => {
+      const mockStats = { total_orders: 42, total_saved: 8 };
+      const redisClientMock = {
+        get: vi.fn().mockResolvedValue(JSON.stringify(mockStats)),
+      };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { getCachedCustomerStats } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedCustomerStats('user-123');
+      expect(redisClientMock.get).toHaveBeenCalledWith('user:profile:sb:user-123:stats');
+      expect(result).toEqual(mockStats);
+    });
+
+    it('returns null on cache miss', async () => {
+      const redisClientMock = { get: vi.fn().mockResolvedValue(null) };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { getCachedCustomerStats } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedCustomerStats('user-123');
+      expect(result).toBeNull();
+    });
+
+    it('returns null and cleans up on parse error', async () => {
+      const redisClientMock = {
+        get: vi.fn().mockResolvedValue('bad-json{'),
+        del: vi.fn().mockResolvedValue(1),
+      };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { getCachedCustomerStats } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedCustomerStats('user-123');
+      expect(result).toBeNull();
+      expect(redisClientMock.del).toHaveBeenCalledWith('user:profile:sb:user-123:stats');
+    });
+  });
+
+  describe('setCachedCustomerStats', () => {
+    it('writes to Redis with correct key and TTL', async () => {
+      const redisClientMock = { set: vi.fn().mockResolvedValue('OK') };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { setCachedCustomerStats, TTL_SECONDS } = await import('../../src/lib/profileCache.js');
+      const stats = { total_orders: 42 };
+      await setCachedCustomerStats('user-123', stats);
+      expect(redisClientMock.set).toHaveBeenCalledWith(
+        'user:profile:sb:user-123:stats',
+        JSON.stringify(stats),
+        'EX',
+        TTL_SECONDS
+      );
+    });
+  });
+
+  describe('getCachedDriverDetails', () => {
+    it('returns null if redisClient is not defined', async () => {
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: null }));
+      const { getCachedDriverDetails } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedDriverDetails('user-123');
+      expect(result).toBeNull();
+    });
+
+    it('retrieves cached driver details on hit', async () => {
+      const mockDetails = { truck_id: 'truck-01', rating: 4.7 };
+      const redisClientMock = {
+        get: vi.fn().mockResolvedValue(JSON.stringify(mockDetails)),
+      };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { getCachedDriverDetails } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedDriverDetails('user-123');
+      expect(redisClientMock.get).toHaveBeenCalledWith('user:profile:sb:user-123:driver');
+      expect(result).toEqual(mockDetails);
+    });
+
+    it('returns null on cache miss', async () => {
+      const redisClientMock = { get: vi.fn().mockResolvedValue(null) };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { getCachedDriverDetails } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedDriverDetails('user-123');
+      expect(result).toBeNull();
+    });
+
+    it('returns null and cleans up on parse error', async () => {
+      const redisClientMock = {
+        get: vi.fn().mockResolvedValue('not-json['),
+        del: vi.fn().mockResolvedValue(1),
+      };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { getCachedDriverDetails } = await import('../../src/lib/profileCache.js');
+      const result = await getCachedDriverDetails('user-123');
+      expect(result).toBeNull();
+      expect(redisClientMock.del).toHaveBeenCalledWith('user:profile:sb:user-123:driver');
+    });
+  });
+
+  describe('setCachedDriverDetails', () => {
+    it('writes to Redis with correct key and TTL', async () => {
+      const redisClientMock = { set: vi.fn().mockResolvedValue('OK') };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { setCachedDriverDetails, TTL_SECONDS } = await import('../../src/lib/profileCache.js');
+      const details = { truck_id: 'truck-01', rating: 4.7 };
+      await setCachedDriverDetails('user-123', details);
+      expect(redisClientMock.set).toHaveBeenCalledWith(
+        'user:profile:sb:user-123:driver',
+        JSON.stringify(details),
+        'EX',
+        TTL_SECONDS
+      );
+    });
+  });
+
+  describe('invalidateCachedSupabaseProfileAll', () => {
+    it('deletes all three Supabase profile keys', async () => {
+      const redisClientMock = {
+        del: vi.fn().mockResolvedValue(1),
+      };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { invalidateCachedSupabaseProfileAll } = await import('../../src/lib/profileCache.js');
+      await invalidateCachedSupabaseProfileAll('user-123');
+
+      expect(redisClientMock.del).toHaveBeenCalledTimes(3);
+      expect(redisClientMock.del).toHaveBeenCalledWith('user:profile:sb:user-123');
+      expect(redisClientMock.del).toHaveBeenCalledWith('user:profile:sb:user-123:stats');
+      expect(redisClientMock.del).toHaveBeenCalledWith('user:profile:sb:user-123:driver');
+    });
+
+    it('does not throw if redisClient is not defined', async () => {
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: null }));
+      const { invalidateCachedSupabaseProfileAll } = await import('../../src/lib/profileCache.js');
+      await expect(invalidateCachedSupabaseProfileAll('user-123')).resolves.toBeUndefined();
+    });
+
+    it('does not throw if userId is missing', async () => {
+      const redisClientMock = { del: vi.fn() };
+      vi.doMock('../../src/config/db.js', () => ({ redisClient: redisClientMock }));
+
+      const { invalidateCachedSupabaseProfileAll } = await import('../../src/lib/profileCache.js');
+      await invalidateCachedSupabaseProfileAll(null);
+      expect(redisClientMock.del).not.toHaveBeenCalled();
     });
   });
 

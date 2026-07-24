@@ -1,8 +1,8 @@
 import * as db from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { firebaseProfileKey, supabaseProfileKey } from '../cache/profileCacheKeys.js';
+import { firebaseProfileKey, supabaseProfileKey, customerStatsKey, driverDetailsKey } from '../cache/profileCacheKeys.js';
 
-export const TTL_SECONDS = 900; // 15 minutes
+export const TTL_SECONDS = parseInt(process.env.REDIS_CACHE_TTL || '900', 10); // 15 minutes default
 export const TOMBSTONE_TTL_SECONDS = 30; // 30 seconds
 
 let cacheHits = 0;
@@ -242,5 +242,105 @@ export async function invalidateCachedSupabaseProfile(userId) {
     await redisClient.del(supabaseProfileKey(userId));
   } catch (err) {
     logCacheError('invalidateCachedSupabaseProfile', err);
+  }
+}
+
+// ─── Profile Service Cache (getProfile / getCustomerStats / getDriverDetails) ──
+
+/**
+ * Retrieves cached customer stats from Redis.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {Promise<object|null>}
+ */
+export async function getCachedCustomerStats(userId) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId) return null;
+  try {
+    const raw = await redisClient.get(customerStatsKey(userId));
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    logCacheError('getCachedCustomerStats', err);
+    try { await redisClient.del(customerStatsKey(userId)); } catch (_) {}
+    return null;
+  }
+}
+
+/**
+ * Stores customer stats in the Redis cache.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @param {object} stats - The customer stats to cache.
+ * @param {number} [ttlSeconds] - TTL in seconds.
+ * @returns {Promise<void>}
+ */
+export async function setCachedCustomerStats(userId, stats, ttlSeconds = TTL_SECONDS) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId || !stats) return;
+  if (ttlSeconds < 1) ttlSeconds = 1;
+  try {
+    await redisClient.set(customerStatsKey(userId), JSON.stringify(stats), 'EX', ttlSeconds);
+  } catch (err) {
+    logCacheError('setCachedCustomerStats', err);
+  }
+}
+
+/**
+ * Retrieves cached driver details from Redis.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {Promise<object|null>}
+ */
+export async function getCachedDriverDetails(userId) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId) return null;
+  try {
+    const raw = await redisClient.get(driverDetailsKey(userId));
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    logCacheError('getCachedDriverDetails', err);
+    try { await redisClient.del(driverDetailsKey(userId)); } catch (_) {}
+    return null;
+  }
+}
+
+/**
+ * Stores driver details in the Redis cache.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @param {object} details - The driver details to cache.
+ * @param {number} [ttlSeconds] - TTL in seconds.
+ * @returns {Promise<void>}
+ */
+export async function setCachedDriverDetails(userId, details, ttlSeconds = TTL_SECONDS) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId || !details) return;
+  if (ttlSeconds < 1) ttlSeconds = 1;
+  try {
+    await redisClient.set(driverDetailsKey(userId), JSON.stringify(details), 'EX', ttlSeconds);
+  } catch (err) {
+    logCacheError('setCachedDriverDetails', err);
+  }
+}
+
+/**
+ * Invalidates ALL cached Supabase profile data for a user:
+ * profile, customer stats, and driver details.
+ * Use this on any profile mutation to ensure no stale data is served.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {Promise<void>}
+ */
+export async function invalidateCachedSupabaseProfileAll(userId) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId) return;
+  try {
+    await Promise.all([
+      redisClient.del(supabaseProfileKey(userId)),
+      redisClient.del(customerStatsKey(userId)),
+      redisClient.del(driverDetailsKey(userId)),
+    ]);
+  } catch (err) {
+    logCacheError('invalidateCachedSupabaseProfileAll', err);
   }
 }

@@ -19,6 +19,7 @@ import {
 import { escrowRelease } from '../escrow.js';
 import { DomainError } from './domainError.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
+import { broadcastOrderMilestone } from '../../sockets/tracker.js';
 
 export class OrderMilestoneService {
   constructor(args = {}) {
@@ -102,6 +103,9 @@ export class OrderMilestoneService {
         });
       }
     }
+
+    // Broadcast milestone update to connected WebSocket clients
+    broadcastOrderMilestone(order.order_display_id, milestone, status);
 
     return { order: updatedOrder, milestone, status };
     });
@@ -238,6 +242,9 @@ export class OrderMilestoneService {
         }
       }
     }
+
+    // Broadcast "Delivered" milestone to connected WebSocket clients
+    broadcastOrderMilestone(order.order_display_id, 'Delivered', 'payment_released');
 
     return { status: 200, body: { message: 'Delivery verified successfully! Payment released to driver.' } };
     });

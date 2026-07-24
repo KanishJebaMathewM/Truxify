@@ -214,7 +214,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           final item = _items[index];
                           final relativeTime = _formatRelativeTime(item.createdAt);
                           return ListTile(
-                            onTap: () => _onTileTap(item),
+                            onTap: () async {
+                              if (!item.isRead) await _markRead(item);
+                              widget.onNotificationTap?.call(item);
+                              widget.onItemTap?.call(item);
+                            },
                             tileColor: item.isRead ? null : Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.25),
                             leading: Icon(Icons.notifications_rounded, color: item.isRead ? null : Theme.of(context).colorScheme.primary),
                             title: Text(item.title),
@@ -225,10 +229,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               ].join('\n'),
                             ),
                             isThreeLine: true,
-                            onTap: () {
-                              if (!item.isRead) _markRead(item);
-                              widget.onNotificationTap?.call(item);
-                            },
                             trailing: item.isRead
                                 ? const Icon(Icons.done_rounded)
                                 : TextButton(

@@ -310,6 +310,11 @@
     "description": "Label for savings summary on home screen"
   },
 
+  "totalShipments": "Total Shipments",
+  "@totalShipments": {
+    "description": "Label for total shipments count on home screen"
+  },
+
   "yourUsualRoutes": "Your Usual Routes",
   "@yourUsualRoutes": {
     "description": "Section title for frequently used routes"
@@ -803,5 +808,9 @@
   "downloadFailed": "Download failed",
   "@downloadFailed": {
     "description": "Error message when invoice download or generation fails"
+  },
+  "networkError": "Network error. Please check your connection.",
+  "@networkError": {
+    "description": "Error message when network connection fails"
   }
 }

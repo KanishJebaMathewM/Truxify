@@ -4,12 +4,11 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard {
-    using Counters for Counters.Counter;
+
 
     // ============ Structs ============
 
@@ -57,8 +56,8 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     mapping(uint256 => TradeOrder[]) public tradeOrders;
     mapping(uint256 => bool) public assetExists;
 
-    Counters.Counter private _assetCounter;
-    Counters.Counter private _tradeOrderCounter;
+    uint256 private _assetCounter;
+    uint256 private _tradeOrderCounter;
 
     uint256 public constant MIN_TRADE_AMOUNT = 1e18; // 1 token
     uint256 public constant MAX_TRADE_AMOUNT = 10000e18; // 10000 tokens
@@ -92,8 +91,8 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         require(totalValue > 0, "Value must be > 0");
         require(totalTokens > 0, "Tokens must be > 0");
 
-        _assetCounter.increment();
-        uint256 assetId = _assetCounter.current();
+        _assetCounter++;
+        uint256 assetId = _assetCounter;
 
         uint256 tokenPrice = totalValue / totalTokens;
 
@@ -161,6 +160,15 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         asset.availableTokens -= amount;
 
         // Update fractional ownership
+        FractionalOwnership storage ownership = fractionalOwnership[assetId][msg.sender];
+        if (ownership.amount == 0) {
+            userAssets[msg.sender].push(assetId);
+        }
+        ownership.owner = msg.sender;
+        ownership.tokenId = assetId;
+        ownership.amount += amount;
+        ownership.purchasedAt = block.timestamp;
+        bool isNewHolder = fractionalOwnership[assetId][msg.sender].amount == 0;
         fractionalOwnership[assetId][msg.sender].owner = msg.sender;
         fractionalOwnership[assetId][msg.sender].tokenId = assetId;
         fractionalOwnership[assetId][msg.sender].amount += amount;
@@ -171,7 +179,12 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
 
         // Refund excess payment
         if (msg.value > totalCost) {
-            payable(msg.sender).transfer(msg.value - totalCost);
+            (bool refunded, ) = payable(msg.sender).call{value: msg.value - totalCost}("");
+            require(refunded, "Refund failed");
+        }
+
+        if (isNewHolder) {
+            userAssets[msg.sender].push(assetId);
         }
 
         emit FractionalPurchase(assetId, msg.sender, amount);
@@ -196,6 +209,10 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         // Update asset
         assets[assetId].availableTokens += amount;
 
+        if (ownership.amount == 0) {
+            _removeUserAsset(msg.sender, assetId);
+        }
+
         emit FractionalSale(assetId, msg.sender, amount);
     }
 
@@ -212,8 +229,20 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         require(amount <= MAX_TRADE_AMOUNT, "Amount too large");
         require(price > 0, "Price must be > 0");
 
-        _tradeOrderCounter.increment();
-        uint256 orderId = _tradeOrderCounter.current();
+        FractionalOwnership storage ownership = fractionalOwnership[assetId][msg.sender];
+        require(ownership.amount >= amount, "Insufficient fractional ownership");
+
+        _tradeOrderCounter++;
+        uint256 orderId = _tradeOrderCounter;
+
+        // Decrement seller's fractional ownership
+        ownership.amount -= amount;
+        if (ownership.amount == 0) {
+            _removeUserAsset(msg.sender, assetId);
+        }
+
+        // Escrow seller's tokens into the contract
+        _transfer(msg.sender, address(this), amount);
 
         TradeOrder memory order = TradeOrder({
             orderId: orderId,
@@ -236,7 +265,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     function executeTradeOrder(
         uint256 assetId,
         uint256 orderIndex
-    ) external nonReentrant whenNotPaused {
+    ) external payable nonReentrant whenNotPaused {
         require(assetExists[assetId], "Asset not found");
         require(orderIndex < tradeOrders[assetId].length, "Order not found");
 
@@ -248,15 +277,34 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         uint256 totalCost = order.amount * order.price;
         require(msg.value >= totalCost, "Insufficient payment");
 
-        // Transfer tokens
-        _transfer(order.seller, msg.sender, order.amount);
+        // Increment buyer's fractional ownership
+        FractionalOwnership storage buyerOwnership = fractionalOwnership[assetId][msg.sender];
+        if (buyerOwnership.amount == 0) {
+            userAssets[msg.sender].push(assetId);
+        }
+        buyerOwnership.owner = msg.sender;
+        buyerOwnership.tokenId = assetId;
+        buyerOwnership.amount += order.amount;
+        buyerOwnership.purchasedAt = block.timestamp;
+
+        // Transfer escrowed tokens from contract to buyer
+        _transfer(address(this), msg.sender, order.amount);
 
         // Update order
         order.buyer = msg.sender;
         order.isActive = false;
 
         // Transfer payment
-        payable(order.seller).transfer(totalCost);
+        {
+            (bool paid, ) = payable(order.seller).call{value: totalCost}("");
+            require(paid, "Payment to seller failed");
+        }
+
+        // Refund excess payment
+        if (msg.value > totalCost) {
+            (bool refunded, ) = payable(msg.sender).call{value: msg.value - totalCost}("");
+            require(refunded, "Excess refund failed");
+        }
 
         emit TradeOrderExecuted(order.orderId, assetId, msg.sender);
         emit AssetTraded(assetId, order.seller, msg.sender, order.amount);
@@ -272,6 +320,18 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         TradeOrder storage order = tradeOrders[assetId][orderIndex];
         require(order.seller == msg.sender, "Not seller");
         require(order.isActive, "Order not active");
+
+        // Restore fractional ownership to seller
+        FractionalOwnership storage ownership = fractionalOwnership[assetId][order.seller];
+        if (ownership.amount == 0) {
+            userAssets[order.seller].push(assetId);
+        }
+        ownership.owner = order.seller;
+        ownership.tokenId = assetId;
+        ownership.amount += order.amount;
+
+        // Return escrowed tokens to seller
+        _transfer(address(this), order.seller, order.amount);
 
         order.isActive = false;
     }
@@ -328,11 +388,22 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     }
 
     function getTotalAssets() external view returns (uint256) {
-        return _assetCounter.current();
+        return _assetCounter;
     }
 
     function getTotalTradeOrders() external view returns (uint256) {
-        return _tradeOrderCounter.current();
+        return _tradeOrderCounter;
+    }
+
+    function _removeUserAsset(address user, uint256 assetId) internal {
+        uint256[] storage userAssetList = userAssets[user];
+        for (uint256 i = 0; i < userAssetList.length; i++) {
+            if (userAssetList[i] == assetId) {
+                userAssetList[i] = userAssetList[userAssetList.length - 1];
+                userAssetList.pop();
+                break;
+            }
+        }
     }
 
     function getUserAssets(address user) external view returns (uint256[] memory) {

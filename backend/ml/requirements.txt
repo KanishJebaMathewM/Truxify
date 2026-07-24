@@ -1,88 +1,61 @@
+# ============================================================================
+# Truxify ML Engine - Dependencies
+# ============================================================================
+# Core constraint: tensorflow==2.13.0 requires numpy<1.24,>=1.22
+# All versions below are tested for mutual compatibility.
+# ============================================================================
+
+# --- Web Framework ---
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
-scikit-learn==1.5.0
-numpy==2.2.4
-pandas==2.2.3
 pydantic==2.11.1
-pytest==9.0.3
-httpx==0.27.0
-scipy>=1.14.0
+python-multipart==0.0.32
+
+# --- ML / Scientific Computing ---
+numpy==1.23.5
+pandas==2.1.4
+scikit-learn==1.3.2
+scipy==1.11.3
 tensorflow==2.13.0
+
+# --- Deep Learning (PyTorch) ---
+torch==2.2.0
+torch_geometric==2.5.0
+
+# --- Async / HTTP ---
 aiohttp==3.14.1
+requests==2.33.0
+httpx==0.27.0
+
+# --- Data / Caching ---
 redis==5.0.0
 sqlalchemy==2.0.23
-pandas==2.1.4
-numpy==1.26.2
-requests==2.33.0
-python-dotenv==1.2.2
 
+# --- Observability ---
+opentelemetry-api==1.22.0
+opentelemetry-sdk==1.22.0
+opentelemetry-exporter-otlp-proto-grpc==1.22.0
+opentelemetry-instrumentation-fastapi==0.43b0
+opentelemetry-instrumentation-requests==0.43b0
+opentelemetry-instrumentation-sqlalchemy==0.43b0
 
-requests==2.33.0
-python-dotenv==1.2.2
-
-
-requests==2.33.0
-python-dotenv==1.2.2
-
-
-requests==2.33.0
-python-dotenv==1.2.2
-
-tensorflow==2.13.0
-redis==5.0.0
-cryptography==49.0.0
-numpy==1.26.2
-fastapi==0.104.1
-uvicorn==0.24.0
-tensorflow==2.13.0
-redis==5.0.0
-numpy==1.26.2
-fastapi==0.104.1
-uvicorn==0.24.0
+# --- Computer Vision ---
 opencv-python==4.8.1.78
-mediapipe==0.10.3
+mediapipe==0.10.14
 dlib==19.24.2
-scipy==1.11.3
+
+# --- Audio Processing ---
 librosa==0.10.0
 sounddevice==0.4.6
 soundfile==0.12.1
 noisereduce==3.0.0
-tensorflow==2.13.0
-redis==5.0.0
-numpy==1.26.2
-fastapi==0.104.1
-uvicorn==0.24.0
-python-multipart==0.0.32
-tensorflow==2.13.0
-numpy==1.26.2
-pandas==2.1.4
-scikit-learn==1.3.2
-redis==5.0.0
-fastapi==0.104.1
-uvicorn==0.24.0
-python-multipart==0.0.32
 
-tensorflow==2.13.0
-numpy==1.26.2
-pandas==2.1.4
-scikit-learn==1.3.2
-redis==5.0.0
-fastapi==0.104.1
-uvicorn==0.24.0
-python-multipart==0.0.32
-
-
-requests==2.33.0
+# --- Utilities ---
 python-dotenv==1.2.2
+cryptography==49.0.0
+tqdm==4.66.0
+Pillow==10.2.0
+networkx==3.2.1
 
-
-
-requests==2.33.0
-python-dotenv==1.2.2
-
-
-requests==2.33.0
-python-dotenv==1.2.2
-
-
-
+# --- Testing ---
+pytest==9.0.3

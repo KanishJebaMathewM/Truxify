@@ -16,7 +16,7 @@ router.get('/', authenticate, userLimiter, requireRole(['driver', 'admin']), asy
     // 1. Fetch recent load offers (historical/current volume)
     const { data: loads, error } = await supabase
       .from('load_offers')
-      .select('pickup_address, drop_address, status')
+      .select('pickup_address, drop_address, status, pickup_lat, pickup_lng')
       .in('status', ['available', 'claimed'])
       .limit(100);
 
@@ -39,25 +39,26 @@ router.get('/', authenticate, userLimiter, requireRole(['driver', 'admin']), asy
 
     // 3. Construct GeoJSON
     const features = (loads || []).map((load) => {
-      // Fallback coordinate generation for heatmap visual validation since DB coords might be missing
-      const baseLat = 28.6139; // Base Lat (e.g., Delhi)
-      const baseLng = 77.2090; // Base Lng
+      const lat = load.pickup_lat;
+      const lng = load.pickup_lng;
+
+      if (lat == null || lng == null) {
+        return null;
+      }
+
       return {
         type: "Feature",
         geometry: {
           type: "Point",
-          coordinates: [
-            baseLng + (Math.random() - 0.5) * 0.5,
-            baseLat + (Math.random() - 0.5) * 0.5
-          ]
+          coordinates: [lng, lat]
         },
         properties: {
-          intensity: (mlPrediction.predicted_demand || 0.5) + (Math.random() * 0.5),
+          intensity: mlPrediction.predicted_demand || 0.5,
           status: load.status,
           address: load.pickup_address
         }
       };
-    });
+    }).filter(Boolean);
 
     const geoJson = {
       type: "FeatureCollection",

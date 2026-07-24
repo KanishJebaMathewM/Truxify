@@ -64,6 +64,9 @@ class _TruxifyAppState extends State<TruxifyApp> {
         supportedLocales: const [
           Locale('en', ''),
           Locale('hi', ''),
+          Locale('ta', ''),
+          Locale('kn', ''),
+          Locale('mr', ''),
         ],
         initialRoute: AppRoutes.splash,
         onGenerateRoute: (settings) {

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import logger from '../middleware/logger.js';
 
-const TOKEN_BYTE_LENGTH = 32; // 256-bit tokens
+const TOKEN_BYTE_LENGTH = 32;
 const TOKEN_EXPIRY_DAYS = 7;
 
 export class TrackingTokenService {
@@ -55,9 +55,14 @@ export class TrackingTokenService {
       .from('tracking_tokens')
       .select('id, order_display_id, expires_at, revoked, revoked_at')
       .eq('token_hash', tokenHash)
-      .single();
+      .maybeSingle();
 
-    if (error || !token) {
+    if (error) {
+      this._logger.error({ error }, 'Failed to validate tracking token');
+      return { valid: false, reason: 'validation_error' };
+    }
+
+    if (!token) {
       return { valid: false, reason: 'not_found' };
     }
 
@@ -96,6 +101,25 @@ export class TrackingTokenService {
     }
   }
 
+  async purgeExpiredTokens() {
+    const { data, error } = await this._supabase
+      .from('tracking_tokens')
+      .delete()
+      .lt('expires_at', new Date().toISOString())
+      .select('id');
+
+    if (error) {
+      this._logger.error({ error }, 'Failed to purge expired tracking tokens');
+      return 0;
+    }
+
+    const count = data?.length ?? 0;
+    if (count > 0) {
+      this._logger.info({ purgedCount: count }, 'Purged expired tracking tokens');
+    }
+    return count;
+  }
+
   async getActiveTokensForOrder(orderDisplayId) {
     const { data, error } = await this._supabase
       .from('tracking_tokens')
@@ -106,7 +130,11 @@ export class TrackingTokenService {
       .order('created_at', { ascending: false });
 
     if (error) {
-      return [];
+      this._logger.error(
+        { error, orderDisplayId },
+        'Failed to fetch active tracking tokens'
+      );
+      throw new Error('Failed to fetch active tracking tokens');
     }
 
     return data || [];
@@ -135,9 +163,14 @@ export class TrackingTokenService {
         created_at
       `)
       .eq('order_display_id', orderDisplayId)
-      .single();
+      .maybeSingle();
 
-    if (orderError || !order) {
+    if (orderError) {
+      this._logger.error({ error: orderError, orderDisplayId }, 'Failed to fetch public tracking order');
+      throw new Error('Failed to fetch public tracking order');
+    }
+
+    if (!order) {
       return null;
     }
 
@@ -152,7 +185,11 @@ export class TrackingTokenService {
       .order('sort_order', { ascending: true });
 
     if (error) {
-      return [];
+      this._logger.error(
+        { error, orderDisplayId },
+        'Failed to fetch public tracking timeline'
+      );
+      throw new Error('Failed to fetch public tracking timeline');
     }
 
     return data || [];
@@ -169,7 +206,7 @@ export class TrackingTokenService {
       return null;
     }
 
-    const { data: location } = await this._supabase
+    const { data: location, error: locationError } = await this._supabase
       .from('driver_locations')
       .select('latitude, longitude, last_updated_at')
       .eq('driver_id', order.driver_id)
@@ -177,6 +214,14 @@ export class TrackingTokenService {
       .order('last_updated_at', { ascending: false })
       .limit(1)
       .single();
+
+    if (locationError) {
+      this._logger.error(
+        { error: locationError, orderDisplayId, driverId: order.driver_id },
+        'Failed to fetch public tracking driver location'
+      );
+      return null;
+    }
 
     return location || null;
   }

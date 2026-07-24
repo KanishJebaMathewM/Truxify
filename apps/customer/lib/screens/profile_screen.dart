@@ -2,6 +2,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:truxify/widgets/menu_card.dart';
 import 'package:truxify/widgets/menu_item.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 
 import '../controllers/app_controller.dart';
 import '../core/api_client.dart';
@@ -148,12 +149,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   String _formatLastUpdated(String? updatedAt) {
-    if (updatedAt == null || updatedAt.isEmpty) return 'just now';
-    final lastUpdated = DateTime.tryParse(updatedAt);
-    if (lastUpdated == null) return 'just now';
-    final minutes = DateTime.now().difference(lastUpdated).inMinutes;
-    if (minutes < 1) return 'just now';
-    return minutes == 1 ? '1 min ago' : '$minutes mins ago';
+    final lastUpdated = updatedAt != null ? DateTime.tryParse(updatedAt) : null;
+    return DateFormatter.formatRelativeTime(lastUpdated);
   }
 
   Future<void> _showWalletSheet(BuildContext context) async {
@@ -454,9 +451,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   MenuItem(
                     icon: Icons.account_balance_wallet_rounded,
                     label: AppLocalizations.of(context)!.walletAddressLabel,
-                    trailing: _walletAddress.isNotEmpty
+                    trailing: _walletAddress.length >= 10
                         ? '${_walletAddress.substring(0, 6)}...${_walletAddress.substring(_walletAddress.length - 4)}'
-                        : AppLocalizations.of(context)!.notSet,
+                        : _walletAddress.isNotEmpty
+                            ? _walletAddress
+                            : AppLocalizations.of(context)!.notSet,
                     showDivider: false,
                     onTap: () => _showWalletSheet(context),
                   ),

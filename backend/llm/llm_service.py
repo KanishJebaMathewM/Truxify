@@ -9,6 +9,7 @@ from sentence_transformers import SentenceTransformer
 import chromadb
 from chromadb.config import Settings
 import json
+import os
 import redis
 import logging
 from typing import Dict, List, Any, Optional

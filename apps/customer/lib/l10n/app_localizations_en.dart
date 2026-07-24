@@ -174,6 +174,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get savings => 'Savings';
 
   @override
+  String get totalShipments => 'Total Shipments';
+
+  @override
   String get yourUsualRoutes => 'Your Usual Routes';
 
   @override
@@ -440,4 +443,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get downloadFailed => 'Download failed';
+
+  @override
+  String get noRoutesFound => 'No routes found';
+
+  @override
+  String get bookAgain => 'Book Again';
+
+  @override
+  String get viewAllOrders => 'View All Orders';
+
+  @override
+  String get recentRoutes => 'Recent Routes';
+
+  @override
+  String get allTrips => 'All Trips';
+
+  @override
+  String get filterStatus => 'Filter by Status';
+
+  @override
+  String get noMatchingTrips => 'No trips match the selected filter';
 }

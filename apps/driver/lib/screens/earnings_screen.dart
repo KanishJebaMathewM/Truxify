@@ -5,6 +5,7 @@ import 'package:truxify_driver/models/earnings_daily_model.dart';
 import 'package:truxify_driver/models/earnings_statement_model.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
 import 'package:truxify_driver/services/earnings_export_service.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 import '../theme/app_theme.dart';
 import '../widgets/earnings/withdraw_bottom_sheet.dart';
 import '../widgets/earnings_shimmer.dart';
@@ -54,15 +55,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
 
-    await Future.wait([
-      _loadMonthlyEarnings(),
-      _loadSelectedDayTrips(),
-      _loadTransactions(),
-      _loadWalletSummary(),
-    ]);
-
-    if (mounted) {
-      setState(() => _isLoading = false);
+    try {
+      await Future.wait([
+        _loadMonthlyEarnings(),
+        _loadSelectedDayTrips(),
+        _loadTransactions(),
+        _loadWalletSummary(),
+      ]);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -155,6 +158,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   void _nextMonth() {
+    final now = DateTime.now();
+    if (_currentYear >= now.year && _currentMonth >= now.month) return;
+
     setState(() {
       _currentMonth++;
 
@@ -167,50 +173,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
     _loadMonthlyEarnings();
   }
 
-  // Custom helper for formatting date: Thursday, 14 May 2026
   String _formatFullDate(DateTime date) {
-    final weekdays = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday'
-    ];
-    final months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December'
-    ];
-    return '${weekdays[date.weekday - 1]}, ${date.day} ${months[date.month - 1]} ${date.year}';
+    return DateFormatter.formatFullDate(date);
   }
 
   String _getMonthYearLabel(int month, int year) {
-    final months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December'
-    ];
-    return '${months[month - 1]} $year';
+    return DateFormatter.formatMonthYear(month, year);
   }
 
   String _formatRupees(double amount) {

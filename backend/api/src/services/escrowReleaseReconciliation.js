@@ -32,14 +32,14 @@ export async function reconcilePendingEscrowReleases() {
   } else {
     // Redis not configured — single-instance mode, use in-process guard only
     if (reconciliationRunning) return;
-    reconciliationRunning = true;
   }
 
   try {
+    if (!lockAcquired) reconciliationRunning = true;
     const instanceId = process.env.HOSTNAME || os.hostname();
     const { data: failedOrders, error } = await supabaseAdmin
       .from('orders')
-      .select('id, order_display_id, escrow_release_attempts')
+      .select('id, order_display_id, escrow_release_attempts, release_tx_hash')
       .eq('escrow_status', 'release_failed')
       .lt('escrow_release_attempts', MAX_RETRIES)
       .limit(50);

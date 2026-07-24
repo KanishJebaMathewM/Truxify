@@ -73,12 +73,25 @@ export class BidAcceptanceService {
       truckInfo = truck;
     }
 
+    // Re-validate wallets immediately before escrow deposit (close TOCTOU window)
+    const { data: freshDriverDetails } = await this.orderRepository.findDriverDetail(bid.driver_id);
+    const { data: freshCustomerProfile } = await this.orderRepository.findCustomerWallet(customerId);
+    const freshDriverWallet = freshDriverDetails?.polygon_wallet_address ?? null;
+    const freshCustomerWallet = freshCustomerProfile?.polygon_wallet_address ?? null;
+
+    if (!freshDriverWallet || !freshCustomerWallet) {
+      this.logger?.warn?.(`[escrow] Wallet disconnected between validation and deposit: driver=${!!freshDriverWallet}, customer=${!!freshCustomerWallet}`);
+      throw new DomainError(422, {
+        error: 'A wallet was disconnected before the escrow deposit could be initiated. Please reconnect your wallet and try again.'
+      });
+    }
+
     // Build the escrow deposit transaction
     let depositTx = null;
     let bookingId = null;
     const amountWei = paisaToMaticWei(bid.bid_amount);
     try {
-      const buildResult = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
+      const buildResult = await this.buildDepositTxFn(order.order_display_id, driverWallet, amountWei);
       depositTx = buildResult;
       bookingId = buildResult?.bookingId || `escrow:${order.order_display_id}`;
     } catch (buildErr) {
@@ -99,7 +112,7 @@ export class BidAcceptanceService {
     // Update order with escrow booking info
     const { error: escrowUpdateErr } = await this.orderRepository.updateEscrowBooking(orderId, bookingId, 'funding');
     if (escrowUpdateErr) {
-      this.logger?.warn?.('[escrow] Failed to update escrow booking reference:', escrowUpdateErr.message);
+      throw new DomainError(500, { error: 'Failed to store escrow booking reference.', details: escrowUpdateErr.message });
     }
 
     // Execute RPC to accept bid

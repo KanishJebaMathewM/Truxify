@@ -5,6 +5,7 @@ class Truck {
     required this.name,
     required this.numberPlate,
     required this.maxCapacityTons,
+    required this.averageMpg,
     required this.insuranceExpiry,
     required this.pucExpiry,
     required this.permitExpiry,
@@ -15,6 +16,7 @@ class Truck {
   final String name;
   final String numberPlate;
   final double maxCapacityTons;
+  final double averageMpg;
   final DateTime? insuranceExpiry;
   final DateTime? pucExpiry;
   final DateTime? permitExpiry;
@@ -26,6 +28,7 @@ class Truck {
       name: json['name'] as String,
       numberPlate: json['number_plate'] as String,
       maxCapacityTons: (json['max_capacity_tons'] as num?)?.toDouble() ?? 0.0,
+      averageMpg: (json['average_mpg'] as num?)?.toDouble() ?? 6.0,
       insuranceExpiry: json['insurance_expiry'] != null
           ? DateTime.tryParse(json['insurance_expiry'] as String)
           : null,
@@ -45,6 +48,7 @@ class Truck {
       'name': name,
       'number_plate': numberPlate,
       'max_capacity_tons': maxCapacityTons,
+      'average_mpg': averageMpg,
       'insurance_expiry': insuranceExpiry?.toIso8601String(),
       'puc_expiry': pucExpiry?.toIso8601String(),
       'permit_expiry': permitExpiry?.toIso8601String(),
@@ -61,6 +65,7 @@ class TruckMaintenanceTicket {
     required this.description,
     required this.status,
     this.createdAt,
+    this.photoUrls = const [],
   });
 
   final String id;
@@ -70,6 +75,7 @@ class TruckMaintenanceTicket {
   final String description;
   final String status;
   final DateTime? createdAt;
+  final List<String> photoUrls;
 
   factory TruckMaintenanceTicket.fromJson(Map<String, dynamic> json) {
     return TruckMaintenanceTicket(
@@ -82,6 +88,9 @@ class TruckMaintenanceTicket {
       createdAt: json['created_at'] != null
           ? DateTime.tryParse(json['created_at'] as String)
           : null,
+      photoUrls: json['photo_urls'] != null
+          ? List<String>.from(json['photo_urls'] as List)
+          : const [],
     );
   }
 
@@ -94,6 +103,7 @@ class TruckMaintenanceTicket {
       'description': description,
       'status': status,
       if (createdAt != null) 'created_at': createdAt?.toIso8601String(),
+      'photo_urls': photoUrls,
     };
   }
 }

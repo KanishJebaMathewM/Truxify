@@ -116,21 +116,6 @@ export class OrderRepository {
       .eq('id', id)
       .maybeSingle(), 'findOrderForTimeline');
   } 
-  async findOrderById(id, columns = '*') {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .select(columns)
-      .eq('id', id)
-      .maybeSingle(), 'findOrderById');
-  }
-
-  async findOrderByDisplayId(displayId, columns = '*') {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .select(columns)
-      .eq('order_display_id', displayId)
-      .maybeSingle(), 'findOrderByDisplayId');
-  }
 
   async updateOrder(id, updates) {
     return this._retryableQuery(() => this.supabase
@@ -505,7 +490,9 @@ export class OrderRepository {
       .update(updates)
       .eq('driver_id', driverId)
       .eq('order_display_id', orderDisplayId)
-      .eq('txn_type', 'credit'), 'updateWalletTransaction');
+      .eq('txn_type', 'credit')
+      .order('created_at', { ascending: false })
+      .limit(1), 'updateWalletTransaction');
   }
 
   // ===================================================================

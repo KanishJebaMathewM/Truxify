@@ -34,9 +34,20 @@ class TripCache {
             .toList(growable: false);
       });
       return sections;
-    } catch (_) {
+    } catch (e) {
+      print('Error: $e');
       return <String, List<Map<String, dynamic>>>{};
     }
+  }
+
+  static Future<void> _clear(SharedPreferences prefs) async {
+    await Future.wait([
+      prefs.remove(_tripsKey),
+      prefs.remove(_stopsKey),
+      prefs.remove(_routePointsKey),
+      prefs.remove(_itemsKey),
+      prefs.remove(_savedAtKey),
+    ]);
   }
 
   static Future<void> save({
@@ -76,6 +87,7 @@ class TripCache {
       final savedAt = savedAtRaw != null ? DateTime.tryParse(savedAtRaw) : null;
 
       if (savedAt != null && DateTime.now().difference(savedAt) > _ttl) {
+        await _clear(prefs);
         return null;
       }
 
@@ -86,8 +98,8 @@ class TripCache {
         itemsByTripId: itemsByTripId,
         savedAt: savedAt,
       );
-    } catch (_) {
-      // Corrupt or incompatible cache entry; treat as no cache available.
+    } catch (e) {
+      print('Error: $e');
       return null;
     }
   }

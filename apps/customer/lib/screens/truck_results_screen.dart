@@ -131,9 +131,9 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
   }
 
   int _price(String price) {
-    return int.parse(
+    return int.tryParse(
       price.replaceAll('₹', '').replaceAll(',', '').trim(),
-    );
+    ) ?? 0;
   }
 
   double _eta(String eta) {
@@ -380,7 +380,7 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
                 padding: const EdgeInsets.only(bottom: 14),
                 child: TruckCard(
                   truck: entry.value,
-                  draft: widget.draft,
+                  draft: _activeDraft,
                   isHighlighted: entry.key == 0,
                 ),
               );

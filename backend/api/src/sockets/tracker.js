@@ -57,20 +57,6 @@ let _orderRepository = null;
 let telemetryDropCounter = 0;
 const RECOVERY_FILE_PATH = process.env.RECOVERY_FILE_PATH || path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
 
-function scrubPII(record) {
-  const scrubbed = { ...record };
-  if (scrubbed.driver_id) {
-    scrubbed.driver_id = 'scrubbed:' + crypto.createHash('sha256').update(scrubbed.driver_id).digest('hex').slice(0, 12);
-  }
-  if (typeof scrubbed.lat === 'number') {
-    scrubbed.lat = Math.round(scrubbed.lat * 100) / 100;
-  }
-  if (typeof scrubbed.lng === 'number') {
-    scrubbed.lng = Math.round(scrubbed.lng * 100) / 100;
-  }
-  return scrubbed;
-}
-
 // In-memory mapping of active client subscriptions
 const trackingSubscriptions = new Map();
 
@@ -323,6 +309,7 @@ export function initWebSocketServer(server, orderRepository) {
   });
 
   wss.on('connection', async (ws, req) => {
+    ws._request = req;
     const reqUrl = new URL(req.url, 'http://localhost');
     const token    = reqUrl.searchParams.get('token');
     const bypassAuth = process.env.BYPASS_AUTH === 'true';

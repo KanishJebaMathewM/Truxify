@@ -33,6 +33,8 @@ REVOKE ALL ON TABLE public.user_devices FROM anon;
 REVOKE ALL ON TABLE public.driver_documents FROM anon;
 REVOKE ALL ON TABLE public.vehicle_types FROM anon;
 REVOKE ALL ON TABLE public.regions FROM anon;
+REVOKE ALL ON TABLE public.webhook_failures FROM anon;
+REVOKE ALL ON TABLE public.tracking_tokens FROM anon;
 
 -- Note: RLS policies should still be enabled and strictly defined 
 -- for authenticated users, but revoking from anon adds an extra layer 

@@ -3,8 +3,23 @@ import { RedisStore } from 'rate-limit-redis';
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
 
+function isSuspiciousForwardedHeader(header) {
+  if (!header || typeof header !== 'string') return false;
+
+  // Excessively long headers may indicate spoofing attempts.
+  if (header.length > 512) return true;
+
+  const parts = header.split(',').map((ip) => ip.trim());
+
+  // Reject obviously malformed values.
+  return parts.some((ip) => ip.length === 0 || ip.includes('\n') || ip.includes('\r'));
+}
+
 function isRedisReady() {
-  return redisClient && redisClient.status === 'ready';
+  return !!(
+    redisClient?.status === 'ready' &&
+    redisClient?.isOpen
+  );
 }
 
 /**
@@ -81,11 +96,31 @@ class DeferredRedisStore {
  * into one rate-limit bucket.
  */
 export function safeIpKeyGenerator(req) {
-  let ip = req.ip || req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || req.connection?.remoteAddress || 'unknown';
-  if (typeof ip === 'string') {
-    ip = ip.replace(/^::ffff:/, '');
-    if (ip === '::1') ip = '127.0.0.1';
+  const forwarded = req.headers?.['x-forwarded-for'];
+
+  if (isSuspiciousForwardedHeader(forwarded)) {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        header: forwarded,
+        socketIp: req.socket?.remoteAddress,
+      },
+      'Suspicious X-Forwarded-For header detected'
+    );
+    let ip = req.ip || req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown';
+    if (typeof ip === 'string') {
+      if (ip.includes(',')) ip = ip.split(',')[0].trim();
+      ip = ip.replace(/^::ffff:/, '');
+      if (ip === '::1') ip = '127.0.0.1';
+    }
+    return ip;
   }
+
+  let ip =
+    req.ip ||
+    req.socket?.remoteAddress ||
+    req.connection?.remoteAddress ||
+    'unknown';
   return ip;
 }
 
@@ -105,9 +140,28 @@ export function userKeyGenerator(req) {
 // key by IP; kept generous so that legitimate users sharing a NAT'd IP are not
 // throttled by each other. Per-user fairness is enforced by userLimiter once
 // the request is authenticated.
+// Configurable rate limiter settings (defaults preserve existing behaviour)
+const GLOBAL_WINDOW_MS = Number(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const GLOBAL_MAX_REQUESTS = Number(process.env.GLOBAL_RATE_LIMIT_MAX_REQUESTS) || 1000;
+
+const USER_WINDOW_MS = Number(process.env.USER_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const USER_MAX_REQUESTS = Number(process.env.USER_RATE_LIMIT_MAX_REQUESTS) || 300;
+
+const HEALTH_WINDOW_MS = Number(process.env.HEALTH_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const HEALTH_MAX_REQUESTS = Number(process.env.HEALTH_RATE_LIMIT_MAX_REQUESTS) || 60;
+
+const AUTH_WINDOW_MS = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000;
+const AUTH_MAX_REQUESTS = Number(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS) || 10;
+
+const BID_WINDOW_MS = Number(process.env.BID_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const BID_MAX_REQUESTS = Number(process.env.BID_RATE_LIMIT_MAX_REQUESTS) || 30;
+
+const DEVICE_WINDOW_MS = Number(process.env.DEVICE_RATE_LIMIT_WINDOW_MS) || 10 * 60 * 1000;
+const DEVICE_MAX_REQUESTS = Number(process.env.DEVICE_RATE_LIMIT_MAX_REQUESTS) || 10;
+
 export const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 1000,
+  windowMs: GLOBAL_WINDOW_MS,
+  max: GLOBAL_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
@@ -120,8 +174,8 @@ export const globalLimiter = rateLimit({
 // authenticate middleware so req.user is populated and each user gets an
 // independent bucket regardless of shared IPs.
 export const userLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
+  windowMs: USER_WINDOW_MS,
+  max: USER_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: userKeyGenerator,
@@ -130,8 +184,8 @@ export const userLimiter = rateLimit({
 });
 
 export const healthLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 60,
+  windowMs: HEALTH_WINDOW_MS,
+  max: HEALTH_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
@@ -140,18 +194,35 @@ export const healthLimiter = rateLimit({
 });
 
 export const authLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 10,
+  windowMs: AUTH_WINDOW_MS,
+  max: AUTH_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
   store: createStore('rl:auth:'),
-  message: { error: 'Rate limit exceeded', retryAfter: 3600 },
+
+  handler: (req, res) => {
+    logger.warn(
+      {
+        requestId: req.requestId,
+        ip: safeIpKeyGenerator(req),
+        path: req.originalUrl,
+        method: req.method,
+        userAgent: req.get('user-agent'),
+      },
+      'Authentication rate limit exceeded'
+    );
+
+    res.status(429).json({
+      error: 'Rate limit exceeded',
+      retryAfter: Math.ceil(AUTH_WINDOW_MS / 1000),
+    });
+  },
 });
 
 export const bidLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
+  windowMs: BID_WINDOW_MS,
+  max: BID_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: userKeyGenerator,
@@ -160,8 +231,8 @@ export const bidLimiter = rateLimit({
 });
 
 export const deviceLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 10,
+  windowMs: DEVICE_WINDOW_MS,
+  max: DEVICE_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => {

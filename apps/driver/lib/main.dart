@@ -1,15 +1,25 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 import 'app.dart';
 import 'core/firebase_config.dart';
-// Remove the import of 'core/supabase_config.dart' – we now use Env
-import 'package:truxify_driver/config/env.dart';  // Adjust package name to match your pubspec
+import 'package:truxify_driver/config/env.dart';
+import 'services/background_sync_service.dart';
 
 Future<void> main() async {
   // Ensure Flutter engine is initialized.
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize crash reporting as early as possible.
+  // This wires up FlutterError.onError, PlatformDispatcher.onError,
+  // and initializes the Sentry SDK (when SENTRY_DSN is configured).
+  await CrashReportingService.init(appName: 'Driver');
+
+  BackgroundSyncService.initialize();
 
   // ── Validate all required environment variables before app starts ────────
   Env.validate();  // Throws an error if SUPABASE_URL or SUPABASE_ANON_KEY are missing
@@ -53,5 +63,17 @@ Future<void> main() async {
     // You may rethrow or handle gracefully; Env.validate already ensures they exist.
   }
 
-  runApp(const TruxifyApp());
+  // Replace Flutter's default red error screen in release/profile builds.
+  ErrorWidget.builder = TruxifyErrorWidget.builder;
+
+  // Wrap runApp in a guarded zone to capture uncaught async errors.
+  runZonedGuarded(() {
+    runApp(const TruxifyApp());
+  }, (error, stackTrace) {
+    CrashReportingService.captureException(
+      error,
+      stackTrace: stackTrace,
+      mechanism: 'runZonedGuarded',
+    );
+  });
 }

@@ -4,7 +4,7 @@ import numpy as np
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 import logging
-from quantum_circuit import QuantumCircuitDesigner, QUBOFormatter, QAOAOptimizer, HybridQuantumClassic
+from quantum_circuit import QuantumCircuitDesigner, QUBOFormatter, QAOAOptimizer, HybridQuantumClassical
 
 logger = logging.getLogger(__name__)
 

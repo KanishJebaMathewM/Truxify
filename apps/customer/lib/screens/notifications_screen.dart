@@ -27,7 +27,6 @@ class NotificationsScreen extends StatelessWidget {
         final route = shared.NotificationRouter.resolve(payload);
         shared.NotificationRouter.executeNavigation(context, route);
       },
-      repository: NotificationRepository(client),
       onItemTap: onItemTap,
     );
   }

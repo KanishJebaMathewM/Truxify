@@ -12,6 +12,10 @@ const telemetrySchema = z.object({
   temperature: z.number()
 });
 
+function canReadTelemetry(user, load) {
+  return user?.role === 'admin' || load.customer_id === user?.id || load.driver_id === user?.id;
+}
+
 // ============================================================================
 // 1. POST TELEMETRY DATA (IoT)
 // POST /api/iot/telemetry/:id
@@ -99,12 +103,32 @@ router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async
 // 2. GET TELEMETRY DATA
 // GET /api/iot/telemetry/:id
 // ============================================================================
-router.get('/telemetry/:id', validateParams(paramIdSchema), async (req, res) => {
+router.get('/telemetry/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
   try {
+    const loadId = req.params.id;
+    const { data: load, error: loadErr } = await supabase
+      .from('load_offers')
+      .select('id, customer_id, driver_id')
+      .eq('id', loadId)
+      .maybeSingle();
+
+    if (loadErr) {
+      logger.error('Failed to fetch load for telemetry history:', loadErr);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (!load) {
+      return res.status(404).json({ error: 'Load not found' });
+    }
+
+    if (!canReadTelemetry(req.user, load)) {
+      return res.status(403).json({ error: 'Access denied for this load' });
+    }
+
     const { data, error } = await supabase
       .from('temperature_telemetry')
       .select('*')
-      .eq('load_id', req.params.id)
+      .eq('load_id', loadId)
       .order('recorded_at', { ascending: false })
       .limit(20);
       

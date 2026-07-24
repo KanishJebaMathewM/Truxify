@@ -536,7 +536,7 @@ export class OrderRepository {
   async findPendingEscrowRefunds() {
     return this._retryableQuery(() => this.supabase
       .from('orders')
-      .select('id, order_display_id, refund_tx_hash, escrow_status, escrow_refund_retry_count')
+      .select('id, order_display_id, refund_tx_hash, escrow_status, escrow_refund_retry_count, updated_at')
       .in('escrow_status', ['refund_pending', 'refund_failed'])
       .limit(50), 'findPendingEscrowRefunds');
   }

@@ -31,6 +31,7 @@ const LOCK_KEY = 'escrow:reconciliation:lock';
 const LOCK_TTL_SECONDS = 120;
 const LEASE_EXTENSION_INTERVAL_MS = (LOCK_TTL_SECONDS * 1000) / 2;
 const MAX_RETRIES = 10;
+const BASE_BACKOFF_MS = 60_000; // Base backoff for exponential retries (1 minute)
 let reconciliationTimer = null;
 let reconciliationRunning = false;
 
@@ -65,6 +66,20 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
     }
 
     for (const order of pendingOrders ?? []) {
+      const retryCount = order.escrow_refund_retry_count ?? 0;
+
+      // Exponential backoff logic based on updated_at
+      if (retryCount > 0 && order.updated_at) {
+        const updatedAtTime = new Date(order.updated_at).getTime();
+        const backoffMs = Math.pow(2, retryCount - 1) * BASE_BACKOFF_MS;
+        const nextRetryTime = updatedAtTime + backoffMs;
+
+        if (Date.now() < nextRetryTime) {
+          logger.info(`[escrow-reconciliation] Order ${order.order_display_id} in backoff period (retry ${retryCount}), skipping until ${new Date(nextRetryTime).toISOString()}`);
+          continue;
+        }
+      }
+
       if (globalLockAcquired && redisClient) {
         try {
           await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);

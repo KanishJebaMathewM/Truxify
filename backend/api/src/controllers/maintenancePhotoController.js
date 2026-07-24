@@ -4,6 +4,7 @@ import {
   validateDocumentBuffer,
   DocumentValidationError,
 } from '../lib/documentValidation.js';
+import { scanDocument, MalwareScanError } from '../lib/malwareScanner.js';
 
 const ALLOWED_PHOTO_MIME_TYPES = Object.freeze([
   'image/jpeg',
@@ -92,6 +93,28 @@ export async function uploadMaintenancePhotos(req, res) {
         return res.status(422).json({
           error: `Photo ${i + 1}: Unsupported image type (${verifiedMimeType}). Only JPEG and PNG are accepted.`,
         });
+      }
+
+      try {
+        const scanResult = await scanDocument(file.buffer);
+        if (!scanResult.clean) {
+          await cleanupStorage(uploadedPaths);
+          return res.status(422).json({
+            error: `Photo ${i + 1}: Uploaded file failed malware scanning.`,
+          });
+        }
+      } catch (scanError) {
+        await cleanupStorage(uploadedPaths);
+        if (scanError instanceof MalwareScanError) {
+          logger.warn(
+            { driverId, ticketId, photoIndex: i, reason: scanError.message },
+            '[MaintenancePhotoController] Upload rejected by malware scanner',
+          );
+          return res.status(422).json({
+            error: `Photo ${i + 1}: ${scanError.message}`,
+          });
+        }
+        throw scanError;
       }
 
       const ext = extensionForMime(verifiedMimeType);

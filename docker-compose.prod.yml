@@ -34,6 +34,9 @@ services:
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
       ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
       ML_ENGINE_URL: http://ml-engine:8000
+      # Malware scanning
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
     # Remove dev volumes — code is baked into the image
     volumes: []
     ports:
@@ -47,6 +50,9 @@ services:
         condition: service_healthy
       ml-engine:
         condition: service_started
+      clamav:
+        condition: service_healthy
+        required: false
     deploy:
       resources:
         limits:
@@ -264,6 +270,37 @@ services:
       retries: 5
       start_period: 60s
 
+  # ─── ClamAV (malware scanning daemon) ────────────────────────────────────
+  clamav:
+    image: clamav/clamav:1.4
+    container_name: truxify-clamav
+    ports:
+      - "${CLAMAV_PORT:-3310}:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    deploy:
+      resources:
+        limits:
+          cpus: "${CLAMAV_CPU_LIMIT:-1}"
+          memory: "${CLAMAV_MEM_LIMIT:-1G}"
+        reservations:
+          cpus: "${CLAMAV_CPU_RESERVATION:-0.5}"
+          memory: "${CLAMAV_MEM_RESERVATION:-512M}"
+    restart: unless-stopped
+    logging:
+      driver: "${LOG_DRIVER:-json-file}"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --version || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
 # ============================================================================
 # Volumes
 # ============================================================================
@@ -278,6 +315,8 @@ volumes:
     name: truxify_ml_models
   n8n_data:
     name: truxify_n8n_data
+  clamav_data:
+    name: truxify_clamav_data
 
 # ============================================================================
 # Networks

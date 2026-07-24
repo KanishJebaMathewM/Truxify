@@ -89,6 +89,7 @@ import { uuidParamSchema, registerTruckSchema } from '../validation/requestSchem
 import { getRouteEstimate } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 import { predictPrice } from '../services/ml.js';
+import { getLiveTrafficMultiplier } from '../services/trafficService.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import logger from '../middleware/logger.js';
 
@@ -502,10 +503,13 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     let isAiEstimate = false;
 
     try {
+      const trafficMultiplier = await getLiveTrafficMultiplier(numPickupLat, numPickupLng);
+
       const mlResult = await predictPrice({
         distanceKm: pricing.distanceKm,
         cargoWeightKg: numWeightTonnes * 1000,
         truckType: 'medium_truck',
+        trafficMultiplier,
       });
       if (mlResult && mlResult.estimatedPricePaisa > 0) {
         finalTotalAmount = mlResult.estimatedPricePaisa;

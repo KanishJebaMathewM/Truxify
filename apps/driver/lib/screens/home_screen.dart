@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
+import 'package:truxify_shared/truxify_shared.dart';
 
 import '../core/app_routes.dart';
 import '../l10n/app_localizations.dart';
@@ -1309,7 +1310,7 @@ class _HomeScreenState extends State<HomeScreen> {
     DateTime? latest;
     for (final record in _tripHistory) {
       if (!record.completed) continue;
-      final parsed = _parseTripHistoryDate(record.date);
+      final parsed = DateFormatter._parseDate(record.date);
       if (parsed == null) continue;
       if (latest == null || parsed.isAfter(latest)) {
         latest = parsed;
@@ -1317,34 +1318,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (latest == null) return '-';
-
-    final now = DateTime.now();
-    var diff = now.difference(latest);
-    if (diff.isNegative) diff = diff * -1;
-
-    if (diff.inDays >= 1) return '${diff.inDays}d ago';
-    if (diff.inHours >= 1) return '${diff.inHours}h ago';
-    if (diff.inMinutes >= 1) return '${diff.inMinutes}m ago';
-    return 'Just now';
-  }
-
-  DateTime? _parseTripHistoryDate(String raw) {
-    final parts = raw.trim().split(RegExp(r'\s+'));
-    if (parts.length < 3) return null;
-
-    final day = int.tryParse(parts[0]);
-    final year = int.tryParse(parts[2]);
-    if (day == null || year == null) return null;
-
-    final monthMap = <String, int>{
-      'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4,
-      'may': 5, 'jun': 6, 'jul': 7, 'aug': 8,
-      'sep': 9, 'oct': 10, 'nov': 11, 'dec': 12,
-    };
-    final month = monthMap[parts[1].toLowerCase()];
-    if (month == null) return null;
-
-    return DateTime(year, month, day);
+    return DateFormatter.formatRelativeTime(latest);
   }
 
   Widget _buildMapBody(BuildContext context) {

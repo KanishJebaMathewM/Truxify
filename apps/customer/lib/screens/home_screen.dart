@@ -1,6 +1,7 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 
 import '../controllers/app_controller.dart';
 import '../core/offline/cache/cache_manager.dart';
@@ -248,7 +249,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       Text(AppLocalizations.of(context)!.greetingMessage(greeting, displayName), style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
                       const SizedBox(height: 6),
                       Text(
-                        DateFormat('EEEE, d MMMM yyyy').format(now),
+                        DateFormatter.formatFullDate(now),
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
                       ),
                       const SizedBox(height: 26),

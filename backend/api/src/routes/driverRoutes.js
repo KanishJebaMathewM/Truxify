@@ -1093,6 +1093,87 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
   }
 });
 
+// ============================================================================
+// LTL ROUTE OPTIMIZATION (DRIVER)
+// ============================================================================
+/**
+ * @openapi
+ * /api/driver/ltl/optimize-route:
+ *   get:
+ *     tags: [Driver, LTL]
+ *     summary: Get optimized LTL route for active orders
+ *     description: Returns an optimized sequence of pickups and drop-offs for the driver's active orders.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: lat
+ *         required: true
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: lng
+ *         required: true
+ *         schema:
+ *           type: number
+ *     responses:
+ *       200:
+ *         description: Optimized route tasks
+ */
+router.get('/ltl/optimize-route', authenticate, userLimiter, requireDriverRole, async (req, res) => {
+  try {
+    const lat = parseFloat(req.query.lat);
+    const lng = parseFloat(req.query.lng);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({ error: 'Valid lat and lng query parameters are required.' });
+    }
+
+    const { data: activeOrders, error } = await supabase
+      .from('orders')
+      .select('id, order_display_id, status, pickup_address, pickup_lat, pickup_lng, drop_address, drop_lat, drop_lng')
+      .eq('driver_id', req.user.id)
+      .in('status', ['truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving']);
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch active orders.', details: error.message });
+    }
+
+    const tasks = [];
+    for (const order of activeOrders || []) {
+      if (['truck_assigned', 'en_route_pickup', 'arrived_pickup'].includes(order.status)) {
+        tasks.push({
+          id: `pickup_${order.id}`,
+          orderId: order.id,
+          orderDisplayId: order.order_display_id,
+          type: 'pickup',
+          address: order.pickup_address,
+          lat: order.pickup_lat,
+          lng: order.pickup_lng
+        });
+      }
+      tasks.push({
+        id: `dropoff_${order.id}`,
+        orderId: order.id,
+        orderDisplayId: order.order_display_id,
+        type: 'dropoff',
+        address: order.drop_address,
+        lat: order.drop_lat,
+        lng: order.drop_lng
+      });
+    }
+
+    // Import dynamically to avoid circular dependencies
+    const { optimizeLtlRoute } = await import('../services/routingService.js');
+    const optimizedTasks = optimizeLtlRoute(lat, lng, tasks);
+
+    res.json({ optimized_route: optimizedTasks });
+  } catch (err) {
+    logger.error(`[LTL Route] Error optimizing route for driver ${req.user.id}: ${err.message}`);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 export default router;
 
 // Resolves #2051: Composite indexes added for 2dsphere queries

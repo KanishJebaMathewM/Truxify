@@ -110,6 +110,7 @@ import {
   startDlqWorker,
   stopDlqWorker,
 } from './workers/dlqWorker.js'
+import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -594,6 +595,7 @@ server.listen(PORT, () => {
   startEscrowRefundReconciliation(orderRepository)
   startReputationReconciliation(orderRepository)
   startDlqWorker()
+  startStaleOrderWorker()
   startDocumentExpiryWorker()
 })
 

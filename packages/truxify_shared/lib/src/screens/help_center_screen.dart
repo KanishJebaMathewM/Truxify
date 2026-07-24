@@ -110,7 +110,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
             decoration: const InputDecoration(labelText: 'Category'),
           ),
           const SizedBox(height: 12),
-          TextField(controller: _descriptionController, minLines: 4, maxLines: 6, decoration: const InputDecoration(labelText: 'Description')),
+          TextField(controller: _descriptionController, minLines: 4, maxLines: 6, maxLength: 500, decoration: const InputDecoration(labelText: 'Description')),
           const SizedBox(height: 16),
           ElevatedButton(onPressed: _submitting ? null : _submit, child: _submitting ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Submit')),
         ],

@@ -117,7 +117,7 @@ class DriverStatusSheet extends StatelessWidget {
           if (isLoadingMetrics)
             const SummaryCardsShimmer()
           else if (metricsError != null)
-            const MetricsErrorCard()
+            MetricsErrorCard(errorMessage: metricsError)
           else
             ShiftMetricsRow(
               payValue: payValue,

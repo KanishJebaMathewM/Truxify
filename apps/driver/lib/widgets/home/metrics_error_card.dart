@@ -3,7 +3,9 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../theme/app_theme.dart';
 
 class MetricsErrorCard extends StatelessWidget {
-  const MetricsErrorCard({super.key});
+  const MetricsErrorCard({super.key, this.errorMessage});
+
+  final String? errorMessage;
 
   @override
   Widget build(BuildContext context) {
@@ -23,7 +25,7 @@ class MetricsErrorCard extends StatelessWidget {
               size: 14, color: TruxifyColors.errorRed),
           const SizedBox(width: 6),
           Text(
-            'Metrics unavailable',
+            errorMessage ?? 'Metrics unavailable',
             style: GoogleFonts.dmSans(
               fontSize: 11,
               color: TruxifyColors.errorRed,

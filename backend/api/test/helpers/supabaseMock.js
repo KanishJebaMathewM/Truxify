@@ -108,6 +108,7 @@ class SupabaseQueryBuilder {
       negate = true;
       op = op.substring(4);
     }
+    // eslint-disable-next-line no-useless-assignment
     let res = true;
     switch (op) {
       case 'eq':

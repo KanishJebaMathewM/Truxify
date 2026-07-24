@@ -40,9 +40,9 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
   }
   if (reconciliationRunning) return;
   reconciliationRunning = true;
+  let globalLockAcquired = false;
 
   try {
-    let globalLockAcquired = false;
     if (redisClient) {
       try {
         globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
@@ -149,7 +149,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
         await releaseLock(lockKey, lockValue);
       }
     }
-
+  } finally {
     if (globalLockAcquired && redisClient) {
       try {
         await redisClient.del(LOCK_KEY);
@@ -157,7 +157,6 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
         logger.warn('[escrow-reconciliation] Failed to release global lock:', err.message);
       }
     }
-  } finally {
     reconciliationRunning = false;
   }
 }

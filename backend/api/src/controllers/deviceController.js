@@ -1,5 +1,6 @@
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import { errorResponse } from '../utils/apiResponse.js';
 import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
@@ -41,6 +42,12 @@ export async function registerDeviceToken(req, res, next) {
     }
 
     const tokenErr = validateFcmToken(fcmToken);
+    return res.status(400).json(
+      errorResponse(
+        'VALIDATION_ERROR',
+        tokenErr
+      )
+    );
     if (tokenErr) {
       return next(new ValidationError(tokenErr));
     }

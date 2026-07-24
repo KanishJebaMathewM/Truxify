@@ -57,6 +57,7 @@ import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 import fraudRoutes from './routes/fraudRoutes.js'
 import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
 import fraudDetection from './services/fraud/FraudDetectionService.js'
+import headerSizeMonitor from './middleware/headerSizeMonitor.js';
 
 // ============================================================================
 // 🆕 ZK-PROOFS FOR DRIVER KYC
@@ -223,7 +224,7 @@ validateEscrowSetup().then((valid) => {
 
 const app = express()
 const server = http.createServer(app)
-
+app.use(headerSizeMonitor);
 // Trust proxy required for rate-limiting behind load balancers/Docker.
 // TRUST_PROXY env var allows each deployment to set the correct proxy count:
 //   - Production (behind Nginx/ALB/Cloudflare) → 1 (default)

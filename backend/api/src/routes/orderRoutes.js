@@ -149,6 +149,7 @@ import { mongoDb, supabase, redisClient, createUserClient } from '../config/db.j
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateDocumentBuffer } from '../lib/documentValidation.js';
+import { scanDocument } from '../lib/malwareScanner.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 import {
@@ -1458,6 +1459,17 @@ function computeFileHash(buffer) {
   return crypto.createHash('sha256').update(buffer).digest('hex');
 }
 
+async function validateAndScanPodFile(file, label) {
+  validateDocumentBuffer(file.buffer, file.mimetype);
+  const scanResult = await scanDocument(file.buffer);
+
+  if (!scanResult.clean) {
+    const err = new Error(`${label} file failed malware scanning.`);
+    err.status = 422;
+    throw err;
+  }
+}
+
 // POST /api/orders/:id/pod
 router.post('/:id/pod', authenticate, requireRole(['driver']), podUpload.fields([{ name: 'signature', maxCount: 1 }, { name: 'photo', maxCount: 1 }]), async (req, res) => {
   try {
@@ -1476,9 +1488,9 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUpload.fields(
     if (files.signature && files.signature[0]) {
       const file = files.signature[0];
       try {
-        validateDocumentBuffer(file.buffer, file.mimetype);
+        await validateAndScanPodFile(file, 'Signature');
       } catch (validationErr) {
-        return res.status(400).json({ error: `Invalid signature file: ${validationErr.message}` });
+        return res.status(validationErr.status || 400).json({ error: `Invalid signature file: ${validationErr.message}` });
       }
       const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
       const storagePath = `${req.user.id}/pod_sig_${orderId}_${Date.now()}.${ext}`;
@@ -1496,9 +1508,9 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUpload.fields(
     if (files.photo && files.photo[0]) {
       const file = files.photo[0];
       try {
-        validateDocumentBuffer(file.buffer, file.mimetype);
+        await validateAndScanPodFile(file, 'Photo');
       } catch (validationErr) {
-        return res.status(400).json({ error: `Invalid photo file: ${validationErr.message}` });
+        return res.status(validationErr.status || 400).json({ error: `Invalid photo file: ${validationErr.message}` });
       }
       const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
       const storagePath = `${req.user.id}/pod_photo_${orderId}_${Date.now()}.${ext}`;

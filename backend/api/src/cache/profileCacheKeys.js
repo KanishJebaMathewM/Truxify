@@ -35,3 +35,23 @@ export function firebaseProfileKey(firebaseUid) {
 export function supabaseProfileKey(userId) {
   return `${PROFILE_KEY_PREFIX}${SEP}sb${SEP}${userId}`;
 }
+
+/**
+ * Generate the Redis cache key for customer stats.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {string} Redis key, e.g. `"user:profile:sb:550e8400-...:stats"`
+ */
+export function customerStatsKey(userId) {
+  return `${PROFILE_KEY_PREFIX}${SEP}sb${SEP}${userId}${SEP}stats`;
+}
+
+/**
+ * Generate the Redis cache key for driver details.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {string} Redis key, e.g. `"user:profile:sb:550e8400-...:driver"`
+ */
+export function driverDetailsKey(userId) {
+  return `${PROFILE_KEY_PREFIX}${SEP}sb${SEP}${userId}${SEP}driver`;
+}

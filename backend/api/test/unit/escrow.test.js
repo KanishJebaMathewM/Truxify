@@ -19,8 +19,10 @@ import {
   confirmEscrowRefund,
   ESCROW_MATIC_PER_PAISA,
   validateEscrowSetup,
-  isEscrowEnabled
+  isEscrowEnabled,
+  paisaToMaticWei,
 } from '../../src/services/escrow.js'
+import { ethers } from 'ethers'
 
 describe('escrow service — getEscrowBookingId', () => {
   it('returns a hex string prefixed with 0x', () => {

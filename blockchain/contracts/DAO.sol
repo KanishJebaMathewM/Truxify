@@ -155,7 +155,7 @@ contract DAO is Ownable, ReentrancyGuard, Pausable {
         address target,
         uint256 value,
         ProposalType proposalType
-    ) external onlyMember whenNotPaused returns (uint256) {
+    ) public onlyMember whenNotPaused returns (uint256) {
         require(bytes(title).length > 0, "Title required");
         require(target != address(0), "Invalid target");
         require(members[msg.sender].votingPower >= proposalThreshold, "Insufficient voting power");

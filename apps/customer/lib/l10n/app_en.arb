@@ -808,5 +808,9 @@
   "downloadFailed": "Download failed",
   "@downloadFailed": {
     "description": "Error message when invoice download or generation fails"
+  },
+  "networkError": "Network error. Please check your connection.",
+  "@networkError": {
+    "description": "Error message when network connection fails"
   }
 }

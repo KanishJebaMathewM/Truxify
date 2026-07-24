@@ -55,9 +55,14 @@ export class TrackingTokenService {
       .from('tracking_tokens')
       .select('id, order_display_id, expires_at, revoked, revoked_at')
       .eq('token_hash', tokenHash)
-      .single();
+      .maybeSingle();
 
-    if (error || !token) {
+    if (error) {
+      this._logger.error({ error }, 'Failed to validate tracking token');
+      return { valid: false, reason: 'validation_error' };
+    }
+
+    if (!token) {
       return { valid: false, reason: 'not_found' };
     }
 
@@ -158,9 +163,14 @@ export class TrackingTokenService {
         created_at
       `)
       .eq('order_display_id', orderDisplayId)
-      .single();
+      .maybeSingle();
 
-    if (orderError || !order) {
+    if (orderError) {
+      this._logger.error({ error: orderError, orderDisplayId }, 'Failed to fetch public tracking order');
+      throw new Error('Failed to fetch public tracking order');
+    }
+
+    if (!order) {
       return null;
     }
 

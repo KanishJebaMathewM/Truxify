@@ -129,11 +129,11 @@ export async function uploadMaintenancePhotos(req, res) {
       photoUrls.push(urlData.signedUrl);
     }
 
-    // Update the ticket with the new photo URLs
-    const allUrls = [...existingUrls, ...photoUrls];
+    // Update the ticket with the new photo PATHS (not ephemeral URLs)
+    const allPaths = [...existingUrls, ...uploadedPaths];
     const { error: updateError } = await supabase
       .from('truck_maintenance_tickets')
-      .update({ photo_urls: allUrls })
+      .update({ photo_urls: allPaths })
       .eq('id', ticketId);
 
     if (updateError) {
@@ -144,7 +144,7 @@ export async function uploadMaintenancePhotos(req, res) {
 
     return res.status(200).json({
       success: true,
-      photo_urls: allUrls,
+      photo_urls: [...existingUrls, ...photoUrls], // Return signed URLs to the client for immediate rendering
       uploaded_count: photoUrls.length,
     });
   } catch (err) {

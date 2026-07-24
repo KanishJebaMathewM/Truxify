@@ -164,6 +164,28 @@ function parseIntegerQuery(value) {
   return Number.parseInt(value, 10);
 }
 
+function parseCoordinate(value) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!/^-?(?:\d+|\d*\.\d+)(?:e-?\d+)?$/i.test(trimmed)) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function hasValidCoordinates(lat, lng) {
+  return lat !== null &&
+    lng !== null &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180;
+}
 
 // ============================================================================
 // 1. GET DRIVER STATS (DRIVER)
@@ -1056,8 +1078,13 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('dr
 router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, async (req, res) => {
   try {
     const driverId = req.user.id;
-    const lat = parseFloat(req.query.lat);
-    const lng = parseFloat(req.query.lng);
+    const lat = parseCoordinate(req.query.lat);
+    const lng = parseCoordinate(req.query.lng);
+
+    if (!hasValidCoordinates(lat, lng)) {
+      return res.status(400).json({ error: 'lat and lng must be valid coordinates.' });
+    }
+
     const status = await checkBypassEligibility(driverId, lat, lng);
     return res.status(200).json(status);
   } catch (err) {

@@ -94,8 +94,14 @@ class _LoginScreenState extends State<LoginScreen> {
         onVerificationFailed: (FirebaseAuthException e) {
           if (!mounted) return;
           setState(() => _loading = false);
+          
+          String errorMsg = e.message ?? AppLocalizations.of(context)!.verificationFailed;
+          if (e.code == 'network-request-failed') {
+            errorMsg = AppLocalizations.of(context)!.networkError;
+          }
+          
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message ?? AppLocalizations.of(context)!.verificationFailed)),
+            SnackBar(content: Text(errorMsg)),
           );
         },
         onAutoVerification: (PhoneAuthCredential credential) async {
@@ -116,8 +122,14 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
+      String errorMsg = AppLocalizations.of(context)!.verificationFailed;
+      if (e is FirebaseAuthException && e.code == 'network-request-failed') {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      } else if (e.toString().contains('SocketException') || e.toString().contains('network-request-failed')) {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context)!.verificationFailed)),
+        SnackBar(content: Text(errorMsg)),
       );
     }
   }

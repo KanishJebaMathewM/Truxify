@@ -3,9 +3,12 @@ export function requireJsonContent(req, res, next) {
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
     const contentType = req.headers['content-type'];
     
-    if (!contentType) {
-      return res.status(415).json({ error: 'Unsupported Media Type. Content-Type header is missing.' });
-    }
+  // Reject all other content types
+  return res.status(415).json({
+    error: 'Unsupported Media Type.',
+    received: mimeType,
+    allowed: allowed,
+  });
 
     // Compare the base media type exactly (ignoring parameters such as
     // charset). A substring match previously let malformed values like

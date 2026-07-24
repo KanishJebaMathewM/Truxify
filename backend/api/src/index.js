@@ -308,6 +308,11 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 // Payload parsers
+const jsonBodyLimit =
+  process.env.JSON_BODY_LIMIT || '1mb';
+
+const urlEncodedBodyLimit =
+  process.env.URLENCODED_BODY_LIMIT || '1mb';
 const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
 
 app.use(
@@ -316,6 +321,11 @@ app.use(
     strict: true,
   })
 );
+
+app.use(
+  express.urlencoded({
+    extended: true,
+    limit: urlEncodedBodyLimit,
 app.use(
   express.urlencoded({
     extended: true,

@@ -63,6 +63,7 @@ export const dlqService = {
       const { data: claimedEvents, error: claimErr } = await supabase
         .from('webhook_failures')
         .update({ status: 'processing', updated_at: now })
+        .eq('status', 'pending')
         .in('id', eventIds)
         .eq('status', 'pending')
         .select();

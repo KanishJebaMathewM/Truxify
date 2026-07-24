@@ -37,6 +37,10 @@ router.get(
 
       const validation = await trackingTokenService.validateToken(token);
 
+      if (validation.reason === 'validation_error') {
+        return res.status(500).json({ error: 'Failed to validate tracking link' });
+      }
+
       if (!validation.valid) {
         const statusMessages = {
           not_found: { status: 404, message: 'Tracking link not found or invalid' },
@@ -125,6 +129,10 @@ router.get(
       }
 
       const validation = await trackingTokenService.validateToken(token);
+
+      if (validation.reason === 'validation_error') {
+        return res.status(500).json({ error: 'Failed to validate tracking link' });
+      }
 
       if (!validation.valid) {
         return res.status(404).json({ error: 'Tracking link not found or invalid' });

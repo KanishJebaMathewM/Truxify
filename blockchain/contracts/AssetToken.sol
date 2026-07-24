@@ -160,6 +160,14 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         asset.availableTokens -= amount;
 
         // Update fractional ownership
+        FractionalOwnership storage ownership = fractionalOwnership[assetId][msg.sender];
+        if (ownership.amount == 0) {
+            userAssets[msg.sender].push(assetId);
+        }
+        ownership.owner = msg.sender;
+        ownership.tokenId = assetId;
+        ownership.amount += amount;
+        ownership.purchasedAt = block.timestamp;
         bool isNewHolder = fractionalOwnership[assetId][msg.sender].amount == 0;
         fractionalOwnership[assetId][msg.sender].owner = msg.sender;
         fractionalOwnership[assetId][msg.sender].tokenId = assetId;
@@ -221,8 +229,17 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         require(amount <= MAX_TRADE_AMOUNT, "Amount too large");
         require(price > 0, "Price must be > 0");
 
+        FractionalOwnership storage ownership = fractionalOwnership[assetId][msg.sender];
+        require(ownership.amount >= amount, "Insufficient fractional ownership");
+
         _tradeOrderCounter++;
         uint256 orderId = _tradeOrderCounter;
+
+        // Decrement seller's fractional ownership
+        ownership.amount -= amount;
+        if (ownership.amount == 0) {
+            _removeUserAsset(msg.sender, assetId);
+        }
 
         // Escrow seller's tokens into the contract
         _transfer(msg.sender, address(this), amount);
@@ -260,6 +277,16 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         uint256 totalCost = order.amount * order.price;
         require(msg.value >= totalCost, "Insufficient payment");
 
+        // Increment buyer's fractional ownership
+        FractionalOwnership storage buyerOwnership = fractionalOwnership[assetId][msg.sender];
+        if (buyerOwnership.amount == 0) {
+            userAssets[msg.sender].push(assetId);
+        }
+        buyerOwnership.owner = msg.sender;
+        buyerOwnership.tokenId = assetId;
+        buyerOwnership.amount += order.amount;
+        buyerOwnership.purchasedAt = block.timestamp;
+
         // Transfer escrowed tokens from contract to buyer
         _transfer(address(this), msg.sender, order.amount);
 
@@ -293,6 +320,15 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         TradeOrder storage order = tradeOrders[assetId][orderIndex];
         require(order.seller == msg.sender, "Not seller");
         require(order.isActive, "Order not active");
+
+        // Restore fractional ownership to seller
+        FractionalOwnership storage ownership = fractionalOwnership[assetId][order.seller];
+        if (ownership.amount == 0) {
+            userAssets[order.seller].push(assetId);
+        }
+        ownership.owner = order.seller;
+        ownership.tokenId = assetId;
+        ownership.amount += order.amount;
 
         // Return escrowed tokens to seller
         _transfer(address(this), order.seller, order.amount);

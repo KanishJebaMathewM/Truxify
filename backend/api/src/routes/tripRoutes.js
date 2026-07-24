@@ -82,6 +82,20 @@ import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
+function parseOptionalCoordinate(value, field, min, max) {
+  if (value === undefined) return { value: undefined };
+  if (typeof value !== 'string' || !/^-?(?:\d+|\d*\.\d+)$/.test(value.trim())) {
+    return { error: `${field} must be a finite number` };
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+    return { error: `${field} must be between ${min} and ${max}` };
+  }
+
+  return { value: parsed };
+}
+
 // ============================================================================
 // 🛡️ OFFLINE SYNC VALIDATION SCHEMAS (ISSUE #362)
 // ============================================================================
@@ -377,6 +391,33 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
   const tripId = req.params.id;
   const { type, sort, min_lat, max_lat, min_lng, max_lng } = req.query;
   const isAscending = sort !== 'desc';
+  const parsedBounds = {
+    minLat: parseOptionalCoordinate(min_lat, 'min_lat', -90, 90),
+    maxLat: parseOptionalCoordinate(max_lat, 'max_lat', -90, 90),
+    minLng: parseOptionalCoordinate(min_lng, 'min_lng', -180, 180),
+    maxLng: parseOptionalCoordinate(max_lng, 'max_lng', -180, 180),
+  };
+  const boundsError = Object.values(parsedBounds).find((result) => result.error);
+
+  if (boundsError) {
+    return res.status(400).json({ error: boundsError.error });
+  }
+
+  if (
+    parsedBounds.minLat.value !== undefined &&
+    parsedBounds.maxLat.value !== undefined &&
+    parsedBounds.minLat.value > parsedBounds.maxLat.value
+  ) {
+    return res.status(400).json({ error: 'min_lat must be less than or equal to max_lat' });
+  }
+
+  if (
+    parsedBounds.minLng.value !== undefined &&
+    parsedBounds.maxLng.value !== undefined &&
+    parsedBounds.minLng.value > parsedBounds.maxLng.value
+  ) {
+    return res.status(400).json({ error: 'min_lng must be less than or equal to max_lng' });
+  }
 
   try {
     // 1. Fetch the trip to determine the driver
@@ -472,10 +513,10 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
         if (e.latitude === null || e.longitude === null || e.latitude === undefined || e.longitude === undefined) return false;
         const lat = Number(e.latitude);
         const lng = Number(e.longitude);
-        if (min_lat !== undefined && lat < Number(min_lat)) return false;
-        if (max_lat !== undefined && lat > Number(max_lat)) return false;
-        if (min_lng !== undefined && lng < Number(min_lng)) return false;
-        if (max_lng !== undefined && lng > Number(max_lng)) return false;
+        if (parsedBounds.minLat.value !== undefined && lat < parsedBounds.minLat.value) return false;
+        if (parsedBounds.maxLat.value !== undefined && lat > parsedBounds.maxLat.value) return false;
+        if (parsedBounds.minLng.value !== undefined && lng < parsedBounds.minLng.value) return false;
+        if (parsedBounds.maxLng.value !== undefined && lng > parsedBounds.maxLng.value) return false;
         return true;
       });
     }

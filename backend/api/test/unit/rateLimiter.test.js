@@ -135,13 +135,21 @@ describe('userKeyGenerator', () => {
 });
 
 describe('isRedisReady', () => {
-  it('returns true when redisClient is ready', () => {
+  it('returns true when redisClient is ready and open', () => {
     redisClientMock.status = 'ready';
+    redisClientMock.isOpen = true;
     expect(__testing.isRedisReady()).toBe(true);
   });
 
   it('returns false when redisClient is not ready', () => {
     redisClientMock.status = 'connecting';
+    redisClientMock.isOpen = false;
+    expect(__testing.isRedisReady()).toBe(false);
+  });
+
+  it('returns false when redisClient is ready but not open', () => {
+    redisClientMock.status = 'ready';
+    redisClientMock.isOpen = false;
     expect(__testing.isRedisReady()).toBe(false);
   });
 });
@@ -149,6 +157,7 @@ describe('isRedisReady', () => {
 describe('DeferredRedisStore', () => {
   beforeEach(() => {
     redisClientMock.status = 'connecting';
+    redisClientMock.isOpen = false;
     redisStoreCtor.mockClear();
     redisStoreInit.mockClear();
   });
@@ -171,6 +180,7 @@ describe('DeferredRedisStore', () => {
     expect(redisStoreCtor).not.toHaveBeenCalled();
 
     redisClientMock.status = 'ready';
+    redisClientMock.isOpen = true;
     await store.increment('client-a'); // should promote
 
     expect(redisStoreCtor).toHaveBeenCalledTimes(1);
@@ -181,6 +191,7 @@ describe('DeferredRedisStore', () => {
     const store = new DeferredRedisStore('rl:test:');
     store.init({ windowMs: 1000 });
     redisClientMock.status = 'ready';
+    redisClientMock.isOpen = true;
 
     await store.increment('client-a');
     await store.increment('client-b');
@@ -195,6 +206,7 @@ describe('DeferredRedisStore', () => {
     const store = new DeferredRedisStore('rl:test:');
     store.init({ windowMs: 1000 });
     redisClientMock.status = 'ready';
+    redisClientMock.isOpen = true;
 
     const result = await store.increment('client-a');
     expect(result.totalHits).toBe(1); // memory store answered

@@ -29,8 +29,8 @@ class EarningsStatementModel {
     return EarningsStatementModel(
       driverName: json['driver_name'] as String? ?? 'Driver',
       driverPhone: json['driver_phone'] as String?,
-      startDate: DateTime.parse(json['start_date'] as String),
-      endDate: DateTime.parse(json['end_date'] as String),
+      startDate: DateTime.tryParse(json['start_date'] as String? ?? '') ?? DateTime.now(),
+      endDate: DateTime.tryParse(json['end_date'] as String? ?? '') ?? DateTime.now(),
       totalTrips: (json['total_trips'] as num?)?.toInt() ?? tripsList.length,
       totalEarnings: _parsePaisa(json['total_earnings']),
       platformFees: _parsePaisa(json['platform_fees']),

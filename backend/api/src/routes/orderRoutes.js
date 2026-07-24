@@ -189,6 +189,28 @@ import { computeOrderPricing } from '../lib/pricing.js';
 
 const router = express.Router();
 router.use(userLimiter);
+const LOAD_OFFER_CACHE_TTL_SECONDS = 120;
+
+async function readLoadOfferCache(cacheKey) {
+  if (!redisClient) return null;
+
+  try {
+    const cached = await redisClient.get(cacheKey);
+    if (!cached) return null;
+
+    const parsed = JSON.parse(cached);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch (err) {
+    logger.warn(`[orderRoutes] Ignoring malformed load-offer cache entry for ${cacheKey}: ${err.message}`);
+    await redisClient.del(cacheKey).catch(() => {});
+    return null;
+  }
+}
+
+async function writeLoadOfferCache(cacheKey, offers) {
+  if (!redisClient) return;
+  await redisClient.set(cacheKey, JSON.stringify(offers), 'EX', LOAD_OFFER_CACHE_TTL_SECONDS).catch(() => {});
+}
 
 const verifyDeliveryLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -335,7 +357,13 @@ router.get('/my/active', authenticate, userLimiter, requirePolicy('order:view-ac
 router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+  const cacheKey = `load-offers:${page}:${limit}`;
   try {
+    const cachedOffers = await readLoadOfferCache(cacheKey);
+    if (cachedOffers) {
+      return res.json(cachedOffers);
+    }
+
     const { data: offers, error } = await orderRepository.findLoadOffers(
       { is_en_route: false },
       { pagination: { page, limit } }
@@ -343,10 +371,7 @@ router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
 
     if (error) return res.status(500).json({ error: 'Failed to fetch load offers.', details: error.message });
 
-    const cacheKey = `load-offers:${page}:${limit}`;
-    if (redisClient) {
-      await redisClient.set(cacheKey, JSON.stringify(offers), 'EX', 120).catch(() => {});
-    }
+    await writeLoadOfferCache(cacheKey, offers);
 
     res.json(offers);
   } catch (err) {
@@ -374,7 +399,13 @@ router.get('/load-offers', authenticate, userLimiter, async (req, res) => {
 router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) => {
   const page = Math.max(1, parseInt(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+  const cacheKey = `load-offers:en-route:${page}:${limit}`;
   try {
+    const cachedOffers = await readLoadOfferCache(cacheKey);
+    if (cachedOffers) {
+      return res.json(cachedOffers);
+    }
+
     const { data: offers, error } = await orderRepository.findLoadOffers(
       { is_en_route: true },
       { pagination: { page, limit } }
@@ -382,10 +413,7 @@ router.get('/load-offers/en-route', authenticate, userLimiter, async (req, res) 
 
     if (error) return res.status(500).json({ error: 'Failed to fetch en-route loads.', details: error.message });
 
-    const cacheKey = `load-offers:en-route:${page}:${limit}`;
-    if (redisClient) {
-      await redisClient.set(cacheKey, JSON.stringify(offers), 'EX', 120).catch(() => {});
-    }
+    await writeLoadOfferCache(cacheKey, offers);
 
     res.json(offers);
   } catch (err) {

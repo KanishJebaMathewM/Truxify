@@ -2,13 +2,6 @@ export function requireJsonContent(req, res, next) {
   // Only enforce on mutating requests
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
     const contentType = req.headers['content-type'];
-    
-  // Reject all other content types
-  return res.status(415).json({
-    error: 'Unsupported Media Type.',
-    received: mimeType,
-    allowed: allowed,
-  });
 
     // Compare the base media type exactly (ignoring parameters such as
     // charset). A substring match previously let malformed values like
@@ -27,7 +20,11 @@ export function requireJsonContent(req, res, next) {
     }
 
     // Reject all other content types
-    return res.status(415).json({ error: 'Unsupported Media Type. Expected application/json.' });
+    return res.status(415).json({
+      error: 'Unsupported Media Type. Expected application/json.',
+      received: mimeType,
+      allowed: allowed.join(', '),
+    });
   }
 
   // Pass through for GET, DELETE, etc.

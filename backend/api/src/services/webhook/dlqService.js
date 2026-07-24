@@ -65,6 +65,7 @@ export const dlqService = {
         .update({ status: 'processing', updated_at: now })
         .eq('status', 'pending')
         .in('id', eventIds)
+        .eq('status', 'pending')
         .select();
 
       if (claimErr) {

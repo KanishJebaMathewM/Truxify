@@ -1,8 +1,10 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { authenticate } from '../middleware/auth.js';
+import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 
@@ -10,6 +12,15 @@ const router = express.Router();
 
 const telemetrySchema = z.object({
   temperature: z.number()
+});
+const telemetryHistoryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  store: createStore('rl:iot-telemetry-history:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
 });
 
 function canReadTelemetry(user, load) {
@@ -103,7 +114,7 @@ router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async
 // 2. GET TELEMETRY DATA
 // GET /api/iot/telemetry/:id
 // ============================================================================
-router.get('/telemetry/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
+router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validateParams(paramIdSchema), async (req, res) => {
   try {
     const loadId = req.params.id;
     const { data: load, error: loadErr } = await supabase

@@ -1,11 +1,18 @@
 import { redisClient } from '../config/db.js';
 import logger from './logger.js';
+import crypto from 'crypto';
 
 const CACHEABLE_STATUS = new Set([200, 201, 202, 204]);
 
 const inMemoryStore = new Map();
 const IN_MEMORY_TTL_MS = 86400_000;
 const CLEANUP_INTERVAL_MS = 60_000;
+const RELEASE_LOCK_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+end
+return 0
+`;
 
 const cleanupTimer = setInterval(() => {
   const now = Date.now();
@@ -76,9 +83,13 @@ export function requireIdempotency(ttlSeconds = 3600) {
         return res.status(cached.statusCode).json(cached.body);
       }
 
+      let lockKey = null;
+      let lockToken = null;
+
       if (redisClient) {
-        const lockKey = `${key}:lock`;
-        const lockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', 10000);
+        lockKey = `${key}:lock`;
+        lockToken = crypto.randomUUID();
+        const lockAcquired = await redisClient.set(lockKey, lockToken, 'NX', 'PX', 10000);
         if (!lockAcquired) {
           await new Promise(r => setTimeout(r, 200));
           const retryRaw = await redisClient.get(key);
@@ -109,9 +120,8 @@ export function requireIdempotency(ttlSeconds = 3600) {
           }
         }
 
-        if (redisClient) {
-          const lockKey = `${key}:lock`;
-          redisClient.del(lockKey).catch(() => {});
+        if (redisClient && lockKey && lockToken) {
+          redisClient.eval(RELEASE_LOCK_SCRIPT, 1, lockKey, lockToken).catch(() => {});
         }
 
         return originalJson(body);

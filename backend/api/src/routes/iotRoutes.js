@@ -99,15 +99,54 @@ router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async
 // 2. GET TELEMETRY DATA
 // GET /api/iot/telemetry/:id
 // ============================================================================
-router.get('/telemetry/:id', validateParams(paramIdSchema), async (req, res) => {
+router.get('/telemetry/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
+  const loadId = req.params.id;
+
   try {
+    // Fetch the load to check ownership
+    const { data: load, error: loadErr } = await supabase
+      .from('load_offers')
+      .select('customer_id')
+      .eq('id', loadId)
+      .maybeSingle();
+
+    if (loadErr) {
+      logger.error('Failed to fetch load for telemetry authorization:', loadErr);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (!load) {
+      return res.status(404).json({ error: 'Load not found' });
+    }
+
+    // Authorization: admin, customer, or assigned driver
+    if (req.user.role !== 'admin') {
+      let isAuthorized = load.customer_id === req.user.id;
+
+      // Check if the user is the assigned driver for this load
+      if (!isAuthorized) {
+        const { data: order } = await supabase
+          .from('orders')
+          .select('driver_id')
+          .eq('load_offer_id', loadId)
+          .in('status', ['assigned', 'in_progress', 'picked_up', 'delivered'])
+          .maybeSingle();
+
+        isAuthorized = order?.driver_id === req.user.id;
+      }
+
+      if (!isAuthorized) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
     const { data, error } = await supabase
       .from('temperature_telemetry')
       .select('*')
-      .eq('load_id', req.params.id)
+      .eq('load_id', loadId)
       .order('recorded_at', { ascending: false })
       .limit(20);
-      
+
     if (error) {
       return res.status(500).json({ error: 'Failed to fetch telemetry' });
     }

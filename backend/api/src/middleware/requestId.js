@@ -27,15 +27,13 @@ export function requestLogger(req, res, next) {
     childBindings.correlationId = req.correlationId;
   }
 
-  const reqLogger = logger.child(childBindings);
+  let reqLogger = logger.child(childBindings);
 
   if (
+    process.env.NODE_ENV !== 'production' &&
     requestedLogLevel &&
     ['trace', 'debug', 'info', 'warn', 'error'].includes(requestedLogLevel.toLowerCase())
   ) {
-  let reqLogger = logger;
-  
-  if (process.env.NODE_ENV !== 'production' && requestedLogLevel && ['info', 'warn', 'error', 'debug', 'trace'].includes(requestedLogLevel.toLowerCase())) {
     reqLogger = logger.child({});
     reqLogger.level = requestedLogLevel.toLowerCase();
   }

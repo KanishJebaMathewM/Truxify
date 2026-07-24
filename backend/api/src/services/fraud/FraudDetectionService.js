@@ -241,9 +241,18 @@ class FraudDetectionService {
           locations[i].lat, locations[i].lng
         );
       }
-      
-      // Impossible travel distance in short time
-      if (distanceTraveled > 100) { // 100km in short time
+
+      // Impossible travel: check both distance AND speed (time window)
+      // Extract timestamps to compute actual time elapsed across history
+      const firstTs = locations[0].timestamp;
+      const lastTs = locations[locations.length - 1].timestamp;
+      const elapsedHours = (lastTs - firstTs) / (1000 * 60 * 60);
+
+      // Speed threshold: 200 km/h is well above any legal trucking speed.
+      // Score only added if distance is large AND elapsed time is short
+      // enough to imply physically impossible speed.
+      const MAX_LEGIT_SPEED_KMH = 200;
+      if (distanceTraveled > 100 && elapsedHours > 0 && (distanceTraveled / elapsedHours) > MAX_LEGIT_SPEED_KMH) {
         riskScore += 0.3;
       }
     }

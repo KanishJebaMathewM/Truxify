@@ -17,12 +17,7 @@ import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
 import { validateEscrowSetup } from './services/escrow.js'
-import { startDlqWorker } from './workers/dlqWorker.js'
 
-import {
-  requestIdMiddleware,
-  securityHeaders,
-} from "./middleware/index.js";
 
 // Load REST routes
 import orderRoutes from './routes/orderRoutes.js'
@@ -313,7 +308,6 @@ const jsonBodyLimit =
 
 const urlEncodedBodyLimit =
   process.env.URLENCODED_BODY_LIMIT || '1mb';
-const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
 
 app.use(
   express.json({
@@ -326,10 +320,6 @@ app.use(
   express.urlencoded({
     extended: true,
     limit: urlEncodedBodyLimit,
-app.use(
-  express.urlencoded({
-    extended: true,
-    limit: jsonBodyLimit,
   })
 );
 
@@ -403,6 +393,11 @@ app.use('/api/public', publicTrackingRoutes)
 app.use('/api/auth', authLimiter, authRoutes)
 app.use('/api/v1/admin', adminRoutes)
 app.use('/api/v1/admin/audit-logs', auditRoutes)
+
+// ============================================================================
+// WEBHOOK ROUTES
+// ============================================================================
+app.use('/api/webhooks', webhookRoutes)
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES

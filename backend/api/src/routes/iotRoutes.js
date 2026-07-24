@@ -1,8 +1,10 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { authenticate } from '../middleware/auth.js';
+import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 
@@ -11,6 +13,19 @@ const router = express.Router();
 const telemetrySchema = z.object({
   temperature: z.number()
 });
+const telemetryHistoryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  store: createStore('rl:iot-telemetry-history:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
+});
+
+function canReadTelemetry(user, load) {
+  return user?.role === 'admin' || load.customer_id === user?.id || load.driver_id === user?.id;
+}
 
 // ============================================================================
 // 1. POST TELEMETRY DATA (IoT)
@@ -99,12 +114,32 @@ router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async
 // 2. GET TELEMETRY DATA
 // GET /api/iot/telemetry/:id
 // ============================================================================
-router.get('/telemetry/:id', validateParams(paramIdSchema), async (req, res) => {
+router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validateParams(paramIdSchema), async (req, res) => {
   try {
+    const loadId = req.params.id;
+    const { data: load, error: loadErr } = await supabase
+      .from('load_offers')
+      .select('id, customer_id, driver_id')
+      .eq('id', loadId)
+      .maybeSingle();
+
+    if (loadErr) {
+      logger.error('Failed to fetch load for telemetry history:', loadErr);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (!load) {
+      return res.status(404).json({ error: 'Load not found' });
+    }
+
+    if (!canReadTelemetry(req.user, load)) {
+      return res.status(403).json({ error: 'Access denied for this load' });
+    }
+
     const { data, error } = await supabase
       .from('temperature_telemetry')
       .select('*')
-      .eq('load_id', req.params.id)
+      .eq('load_id', loadId)
       .order('recorded_at', { ascending: false })
       .limit(20);
       

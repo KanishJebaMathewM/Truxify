@@ -82,35 +82,3 @@ const logger = new Proxy(rootLogger, {
 
 export { LOG_LEVELS, sanitizeLogLevel };
 export default logger;
-
-redact: {
-  paths: [
-    // Request headers
-    'req.headers.authorization',
-    'req.headers.cookie',
-
-    // Generic headers
-    'headers.authorization',
-    'headers.cookie',
-
-    // Axios errors
-    'err.config.headers.authorization',
-
-    // Common secrets
-    'authorization',
-    'cookie',
-    'password',
-    'accessToken',
-    'refreshToken',
-    'apiKey',
-    'secret',
-    'clientSecret',
-
-    // Nested payloads
-    '*.password',
-    '*.accessToken',
-    '*.refreshToken',
-    '*.apiKey',
-  ],
-  censor: '[REDACTED]',
-},

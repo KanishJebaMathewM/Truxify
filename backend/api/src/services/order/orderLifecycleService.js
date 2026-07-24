@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { DomainError } from './domainError.js';
 import { DeliveryVerificationService } from './deliveryVerificationService.js';
-import { expireDeliveryOtps } from '../notificationService.js';
+import { expireDeliveryOtps, sendPushNotification } from '../notificationService.js';
 import { acquireLock, releaseLock } from '../../lib/redisLock.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 import {
@@ -304,6 +304,14 @@ export class OrderLifecycleService {
 
     if (bidErr) throw new DomainError(500, { error: 'Failed to record bid.', details: bidErr.message });
 
+    sendPushNotification(
+      offer.customer_id,
+      'New Bid Received',
+      `A driver has submitted a bid of ₹${bidAmount} for your order.`,
+      'new_bid',
+      { loadOfferId, bidId: bid.id }
+    ).catch(err => logger.error(`[FCM] Failed to notify customer of new bid: ${err.message}`));
+
     return { message: 'Bid submitted successfully.', bid };
     });
   }
@@ -428,6 +436,14 @@ export class OrderLifecycleService {
         otp: generatedOtp,
       });
     }
+
+    sendPushNotification(
+      order.customer_id,
+      'Order Update',
+      `Order ${order.order_display_id} is now: ${milestone}`,
+      'order_update',
+      { orderId, orderDisplayId: order.order_display_id, milestone }
+    ).catch(err => logger.error(`[FCM] Failed to notify customer of order update: ${err.message}`));
 
     return { order: updatedOrder, milestone, status };
     });

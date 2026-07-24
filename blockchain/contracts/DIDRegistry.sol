@@ -2,7 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 
 contract DIDRegistry is Ownable, Pausable {
     // DID Document
@@ -19,7 +19,7 @@ contract DIDRegistry is Ownable, Pausable {
     // Service Endpoint
     struct ServiceEndpoint {
         string id;
-        string type;
+        string endpointType;
         string serviceEndpoint;
         string description;
     }
@@ -27,7 +27,7 @@ contract DIDRegistry is Ownable, Pausable {
     // Verification Method
     struct VerificationMethod {
         string id;
-        string type;
+        string keyType;
         string controller;
         string publicKeyMultibase;
     }
@@ -73,7 +73,6 @@ contract DIDRegistry is Ownable, Pausable {
     function createDID(string memory did) external {
         require(bytes(did).length > 0, "DID cannot be empty");
         require(dids[did].owner == address(0), "DID already exists");
-        require(dids[did].did == "", "DID already exists");
 
         dids[did] = DIDDocument({
             owner: msg.sender,
@@ -118,7 +117,7 @@ contract DIDRegistry is Ownable, Pausable {
     function addServiceEndpoint(
         string memory did,
         string memory id,
-        string memory type,
+        string memory endpointType,
         string memory serviceEndpoint,
         string memory description
     ) external {
@@ -128,7 +127,7 @@ contract DIDRegistry is Ownable, Pausable {
 
         didServiceEndpoints[did].push(ServiceEndpoint({
             id: id,
-            type: type,
+            endpointType: endpointType,
             serviceEndpoint: serviceEndpoint,
             description: description
         }));
@@ -141,7 +140,7 @@ contract DIDRegistry is Ownable, Pausable {
     function addVerificationMethod(
         string memory did,
         string memory id,
-        string memory type,
+        string memory keyType,
         string memory controller,
         string memory publicKeyMultibase
     ) external {
@@ -151,7 +150,7 @@ contract DIDRegistry is Ownable, Pausable {
 
         didVerificationMethods[did].push(VerificationMethod({
             id: id,
-            type: type,
+            keyType: keyType,
             controller: controller,
             publicKeyMultibase: publicKeyMultibase
         }));

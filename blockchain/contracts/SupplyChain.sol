@@ -209,7 +209,7 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
         _eventCounter++;
         uint256 eventId = _eventCounter;
 
-        TraceEvent memory event = TraceEvent({
+        TraceEvent memory traceEvent = TraceEvent({
             id: eventId,
             productId: productId,
             shipmentId: shipmentId,
@@ -221,7 +221,7 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
             eventHash: keccak256(abi.encodePacked(productId, shipmentId, eventType, location, block.timestamp))
         });
 
-        productEvents[productId].push(event);
+        productEvents[productId].push(traceEvent);
 
         emit TraceEventAdded(eventId, productId, eventType);
     }

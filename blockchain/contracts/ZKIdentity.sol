@@ -182,7 +182,7 @@ contract ZKIdentity is Ownable, ReentrancyGuard, Pausable {
         emit CredentialRevoked(credentialHash);
     }
 
-    function verifyCredential(bytes32 credentialHash) external view returns (bool) {
+    function verifyCredential(bytes32 credentialHash) public view returns (bool) {
         Credential memory cred = credentials[credentialHash];
         return cred.issuer != address(0) && !cred.revoked && cred.expiresAt > block.timestamp;
     }

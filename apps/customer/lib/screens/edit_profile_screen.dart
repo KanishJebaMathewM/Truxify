@@ -52,7 +52,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _isLoading = false;
         });
       } else if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _loadError = AppLocalizations.of(context)!.failedToLoadProfile;
+        });
       }
     } catch (e) {
       if (mounted) {

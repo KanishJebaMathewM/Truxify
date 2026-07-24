@@ -672,6 +672,63 @@ describe('ml service — recommendLoads', () => {
     expect(body.top_n).toBe(5);
   });
 
+  it('calls the /recommend/loads endpoint with correct URL and method', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ recommendations: [] })),
+    });
+
+    await recommendLoads({ userId: 'user-123' });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain('/recommend/loads');
+    expect(opts.method).toBe('POST');
+  });
+
+  it('throws with descriptive message on non-ok response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 500,
+      ok: false,
+      statusText: 'Internal Server Error',
+      text: () => Promise.resolve('Model not loaded'),
+    });
+
+    await expect(recommendLoads({ userId: 'user-123' }))
+      .rejects
+      .toThrow('[ML] Request failed (500)');
+  });
+
+  it('throws with descriptive message on 401/403 auth failure', async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 403,
+      ok: false,
+      statusText: 'Forbidden',
+      text: () => Promise.resolve('Forbidden'),
+    });
+
+    await expect(recommendLoads({ userId: 'user-123' }))
+      .rejects
+      .toThrow('[ML] Authentication failed (403)');
+  });
+
+  it('rejects when fetch throws (network error)', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network unreachable'));
+
+    await expect(recommendLoads({ userId: 'user-123' }))
+      .rejects
+      .toThrow('Network unreachable');
+  });
+
+  it('rejects when fetch times out', async () => {
+    const abortError = new DOMException('The operation was aborted.', 'AbortError');
+    mockFetch.mockRejectedValueOnce(abortError);
+
+    await expect(recommendLoads({ userId: 'user-123' }))
+      .rejects
+      .toThrow('aborted');
+  });
+
   it('throws on missing ML_API_KEY', async () => {
     delete process.env.ML_API_KEY;
     await expect(recommendLoads({ userId: 'user-123' })).rejects.toThrow('[ML] ML_API_KEY is not configured');

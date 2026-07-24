@@ -149,6 +149,7 @@ import { mongoDb, supabase, redisClient, createUserClient } from '../config/db.j
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateDocumentBuffer } from '../lib/documentValidation.js';
+import { scanDocument } from '../lib/malwareScanner.js';
 import { validateBody, validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 import {
@@ -163,6 +164,7 @@ import {
   changeDropSchema,
   cancelOrderSchema,
 } from '../validation/requestSchemas.js';
+import { getEscrowBookingId } from '../services/escrow.js';
 import { awardReputationPoints } from '../services/reputation.js';
 import { expireDeliveryOtps } from '../services/notificationService.js';
 import { DomainError } from '../services/order/domainError.js';
@@ -1154,8 +1156,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   const { txHash } = req.body;
 
   const lockKey = `escrow_lock:${orderId}`;
-  let lockValue = null;
-  lockValue = await acquireLock(lockKey, 120000);
+  const lockValue = await acquireLock(lockKey, 120000);
   if (!lockValue) {
     return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
   }
@@ -1480,6 +1481,16 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUpload.fields(
       } catch (validationErr) {
         return res.status(400).json({ error: `Invalid signature file: ${validationErr.message}` });
       }
+      // Scan for malware before storing
+      try {
+        const scanResult = await scanDocument(file.buffer);
+        if (!scanResult.clean) {
+          return res.status(422).json({ error: 'Signature file failed malware scan. Upload rejected.' });
+        }
+      } catch (scanErr) {
+        logger.warn('[PoD] Malware scan error for signature:', scanErr.message);
+        // Proceed without blocking on scan errors — keep behaviour non-breaking
+      }
       const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
       const storagePath = `${req.user.id}/pod_sig_${orderId}_${Date.now()}.${ext}`;
       const { error: upErr } = await supabase.storage
@@ -1499,6 +1510,16 @@ router.post('/:id/pod', authenticate, requireRole(['driver']), podUpload.fields(
         validateDocumentBuffer(file.buffer, file.mimetype);
       } catch (validationErr) {
         return res.status(400).json({ error: `Invalid photo file: ${validationErr.message}` });
+      }
+      // Scan for malware before storing
+      try {
+        const scanResult = await scanDocument(file.buffer);
+        if (!scanResult.clean) {
+          return res.status(422).json({ error: 'Photo file failed malware scan. Upload rejected.' });
+        }
+      } catch (scanErr) {
+        logger.warn('[PoD] Malware scan error for photo:', scanErr.message);
+        // Proceed without blocking on scan errors — keep behaviour non-breaking
       }
       const ext = file.mimetype === 'image/png' ? 'png' : 'jpg';
       const storagePath = `${req.user.id}/pod_photo_${orderId}_${Date.now()}.${ext}`;

@@ -1,13 +1,28 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import zkpService from '../services/zkp/zkp.service.js';
 import logger from '../middleware/logger.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
-import { userLimiter } from '../middleware/rateLimiter.js';
+import { userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
+const PRIVILEGED_VERIFICATION_ROLES = new Set(['admin', 'regulator']);
+const zkpVerifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  store: createStore('rl:zkp-verify:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
+});
+
+function canVerifyUser(requestUser, targetUserId) {
+  return requestUser?.id === targetUserId || PRIVILEGED_VERIFICATION_ROLES.has(requestUser?.role);
+}
 
 // Verify driver KYC using ZK-SNARK
-router.post('/zkp/verify', authenticate, userLimiter, async (req, res) => {
+router.post('/zkp/verify', zkpVerifyLimiter, authenticate, async (req, res) => {
   try {
     const { userId, name, licenseNumber, rcNumber, insuranceNumber, issueDate, expiryDate } = req.body;
     
@@ -15,6 +30,13 @@ router.post('/zkp/verify', authenticate, userLimiter, async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Missing required fields: userId, name, licenseNumber'
+      });
+    }
+
+    if (!canVerifyUser(req.user, userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied: cannot verify another user.'
       });
     }
     

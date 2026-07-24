@@ -32,8 +32,23 @@ class FraudDetectionService {
 
   // ============ Behavioral Fingerprinting ============
   async trackBehavior(userId, eventData) {
+    let lockAcquired = false;
+    const lockKey = `lock:behavior:${userId}`;
     try {
       if (!supabase) return null;
+
+      if (this.redis) {
+        for (let i = 0; i < 5; i++) {
+          lockAcquired = await this.redis.set(lockKey, '1', 'NX', 'PX', 5000);
+          if (lockAcquired) break;
+          await new Promise(r => setTimeout(r, 100));
+        }
+        if (!lockAcquired) {
+          logger.warn(`[FraudDetection] Could not acquire lock for user ${userId}, dropping behavioral event to prevent data corruption`);
+          return null;
+        }
+      }
+
       const profile = await this.getOrCreateProfile(userId);
       
       // Update behavioral metrics
@@ -96,6 +111,10 @@ class FraudDetectionService {
     } catch (error) {
       logger.error('Behavior tracking error:', error);
       return null;
+    } finally {
+      if (lockAcquired && this.redis) {
+        await this.redis.del(lockKey).catch(() => {});
+      }
     }
   }
 

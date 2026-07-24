@@ -17,7 +17,7 @@ import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
 import { validateEscrowSetup } from './services/escrow.js'
-import { startDlqWorker } from './workers/dlqWorker.js'
+import { startDlqWorker, stopDlqWorker } from './workers/dlqWorker.js'
 
 import {
   requestIdMiddleware,
@@ -90,7 +90,7 @@ import logger from './middleware/logger.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
-import { requestIdMiddleware, requestLogger } from './middleware/requestId.js'
+import { requestLogger } from './middleware/requestId.js'
 import { requestCacheMiddleware } from './middleware/requestCacheMiddleware.js'
 import { requireJsonContent } from './middleware/contentType.js'
 import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js'
@@ -106,10 +106,6 @@ import {
   startDocumentExpiryWorker,
   stopDocumentExpiryWorker,
 } from './services/documentExpiryService.js'
-import {
-  startDlqWorker,
-  stopDlqWorker,
-} from './workers/dlqWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -313,7 +309,6 @@ const jsonBodyLimit =
 
 const urlEncodedBodyLimit =
   process.env.URLENCODED_BODY_LIMIT || '1mb';
-const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
 
 app.use(
   express.json({
@@ -326,10 +321,6 @@ app.use(
   express.urlencoded({
     extended: true,
     limit: urlEncodedBodyLimit,
-app.use(
-  express.urlencoded({
-    extended: true,
-    limit: jsonBodyLimit,
   })
 );
 

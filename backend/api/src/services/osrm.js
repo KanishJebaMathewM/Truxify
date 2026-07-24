@@ -6,6 +6,7 @@ import { measureExecution } from '../core/performanceMetrics.js';
 export const osrmBreaker = new CircuitBreaker(async (url, options) => {
   const response = await fetch(url, options);
   if (response.status >= 500) {
+    await response.text().catch(() => {});
     throw new Error(`[OSRM] Request failed (${response.status})`);
   }
   return response;
@@ -97,6 +98,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
 
       if (!response.ok) {
         clearTimeout(timeout);
+        await response.text().catch(() => {});
         if (response.status >= 500 && attempt < maxRetries - 1) {
           logger.warn({ status: response.status, attempt: attempt + 1, maxRetries }, 'Server error. Retrying...');
           await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
@@ -194,7 +196,10 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
       buildGeometryUrl({ originLat, originLng, destLat, destLng }),
       { signal: controller.signal },
     );
-    if (!response.ok) return null;
+    if (!response.ok) {
+      await response.text().catch(() => {});
+      return null;
+    }
 
     const payload = await response.json();
     const route = Array.isArray(payload?.routes) ? payload.routes[0] : null;

@@ -14,6 +14,7 @@ import { computeOrderPricing } from '../../lib/pricing.js';
 import { getRouteEstimate } from '../osrm.js';
 import { optimizeWaypoints } from '../routingService.js';
 import { predictPrice } from '../ml.js';
+import { getLiveTrafficMultiplier } from '../trafficService.js';
 import { eventBus } from '../../core/events.js';
 import logger from '../../middleware/logger.js';
 
@@ -83,11 +84,14 @@ export class OrderLifecycleService {
 
     let estimatedPrice = null;
     try {
+      const trafficMultiplier = await getLiveTrafficMultiplier(pickup_lat, pickup_lng);
+
       const mlResult = await predictPrice({
         distanceKm: pricing.distanceKm,
         cargoWeightKg: Number(weight_tonnes) * 1000,
         routeOrigin: pickup_address,
         routeDestination: drop_address,
+        trafficMultiplier,
       });
       estimatedPrice = mlResult.estimatedPricePaisa;
     } catch (mlErr) {

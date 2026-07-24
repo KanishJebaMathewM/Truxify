@@ -103,6 +103,7 @@ export async function predictPrice({
     truckType = 'medium_truck',
     routeOrigin = '',
     routeDestination = '',
+    trafficMultiplier = 1.0,
 } = {}) {
   guardMlApiKey();
   
@@ -118,6 +119,7 @@ export async function predictPrice({
       truck_type: truckType,
       route_origin: routeOrigin,
       route_destination: routeDestination,
+      traffic_multiplier: trafficMultiplier,
   };
 
   const response = await fetch(url, {

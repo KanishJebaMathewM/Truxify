@@ -118,14 +118,12 @@ export function safeIpKeyGenerator(req) {
 
   let ip =
     req.ip ||
-    req.headers?.['x-forwarded-for']?.split(',')[0]?.trim() ||
     req.socket?.remoteAddress ||
     req.connection?.remoteAddress ||
     'unknown';
-  ip = ip.replace(/^::ffff:/, '');
-  if (ip === '::1') ip = '127.0.0.1';
   return ip;
 }
+
 /**
  * Keys a limiter by the authenticated principal, falling back to the client IP
  * for unauthenticated requests. Used wherever req.user is available so that

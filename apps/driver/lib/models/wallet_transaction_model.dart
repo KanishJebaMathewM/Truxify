@@ -40,13 +40,13 @@ class WalletTransactionModel {
 
   factory WalletTransactionModel.fromMap(Map<String, dynamic> map) {
     return WalletTransactionModel(
-      id: map['id'],
-      tripDisplayId: map['trip_display_id'],
+      id: map['id'].toString(),
+      tripDisplayId: map['trip_display_id']?.toString(),
       amount: (map['amount'] ?? 0) / 100.0,
       txnType: map['txn_type'] ?? '',
       status: map['status'] ?? '',
       description: map['description'] ?? '',
-      createdAt: DateTime.parse(map['created_at']),
+      createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ?? DateTime.now(),
     );
   }
 }

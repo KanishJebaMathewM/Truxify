@@ -17,10 +17,10 @@ import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
 import { validateEscrowSetup } from './services/escrow.js'
-import { startDlqWorker } from './workers/dlqWorker.js'
 
 import {
   requestIdMiddleware,
+  requestLogger,
   securityHeaders,
 } from "./middleware/index.js";
 
@@ -90,7 +90,6 @@ import logger from './middleware/logger.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
-import { requestIdMiddleware, requestLogger } from './middleware/requestId.js'
 import { requestCacheMiddleware } from './middleware/requestCacheMiddleware.js'
 import { requireJsonContent } from './middleware/contentType.js'
 import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js'

@@ -81,6 +81,22 @@ import { uuidParamSchema } from '../validation/requestSchemas.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+const DEFAULT_EVENTS_LIMIT = 100;
+const MAX_EVENTS_LIMIT = 500;
+
+function parsePositiveIntegerQuery(value, fallback, max) {
+  if (value === undefined) return { value: fallback };
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return { error: 'Query value must be a positive integer' };
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  if (parsed < 1) {
+    return { error: 'Query value must be a positive integer' };
+  }
+
+  return { value: Math.min(parsed, max) };
+}
 
 // ============================================================================
 // 🛡️ OFFLINE SYNC VALIDATION SCHEMAS (ISSUE #362)
@@ -377,70 +393,18 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
   const tripId = req.params.id;
   const { type, sort, min_lat, max_lat, min_lng, max_lng } = req.query;
   const isAscending = sort !== 'desc';
+  const parsedPage = parsePositiveIntegerQuery(req.query.page, 1, Number.MAX_SAFE_INTEGER);
+  const parsedLimit = parsePositiveIntegerQuery(req.query.limit, DEFAULT_EVENTS_LIMIT, MAX_EVENTS_LIMIT);
+
+  if (parsedPage.error || parsedLimit.error) {
+    return res.status(400).json({ error: parsedPage.error || parsedLimit.error });
+  }
+
+  const page = parsedPage.value;
+  const limit = parsedLimit.value;
+  const offset = (page - 1) * limit;
 
   try {
-    // 1. Fetch the trip to determine the driver
-    const { data: events, error: eventsErr } = await supabase
-      .from('trip_events')
-      .select('event_id, user_id, trip_id, event_type, event_timestamp, latitude, longitude, metadata, created_at')
-      .eq('trip_id', tripId)
-      .order('event_timestamp', { ascending: isAscending });
-
-    if (eventsErr) {
-      return res.status(500).json({
-        error: 'Failed to fetch trip events.',
-        code: 'TRIP_EVENTS_FETCH_ERROR',
-        details: eventsErr.message,
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    if (!events || events.length === 0) {
-      // Check if the trip even exists
-      const { data: existingEvent, error: existingEventErr } = await supabase
-        .from('trip_events')
-        .select('trip_id')
-        .eq('trip_id', tripId)
-        .limit(1)
-        .maybeSingle();
-
-      if (existingEventErr) {
-        logger.error('[TripRoutes] Failed to check existing trip events:', existingEventErr.message);
-        return res.status(500).json({ error: 'Internal Server Error' });
-      }
-
-      // If no events found at all, check via orders whether this trip/order exists
-      const { data: order, error: orderErr } = await supabase
-        .from('orders')
-        .select('id, driver_id, customer_id')
-        .eq('id', tripId)
-        .maybeSingle();
-
-      if (orderErr) {
-        logger.error('[TripRoutes] Failed to check order for trip:', orderErr.message);
-        return res.status(500).json({ error: 'Internal Server Error' });
-      }
-
-      if (!order && !existingEvent) {
-        return res.status(404).json({ error: 'Trip not found.' });
-      }
-
-      // Authorisation check even for empty trips
-      if (req.user.role !== 'admin') {
-        const isDriver = order?.driver_id === req.user.id;
-        const isCustomer = order?.customer_id === req.user.id;
-        if (!isDriver && !isCustomer) {
-          return res.status(403).json({ error: 'Access Denied: You are not authorised to view events for this trip.' });
-        }
-      }
-
-      return res.json({ trip_id: tripId, events: [] });
-    }
-
-    // 2. Determine trip's driver from the first event's user_id (the driver who uploaded events)
-    const driverUserId = events[0]?.user_id;
-
-    // 3. Also look up the linked order to check customer access
     const { data: order, error: orderErr } = await supabase
       .from('orders')
       .select('id, driver_id, customer_id')
@@ -452,20 +416,57 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
       return res.status(500).json({ error: 'Internal Server Error' });
     }
 
-    // 4. Access control
+    let existingEvent = null;
+    if (!order || req.user.role !== 'admin') {
+      const { data, error: existingEventErr } = await supabase
+        .from('trip_events')
+        .select('trip_id, user_id')
+        .eq('trip_id', tripId)
+        .limit(1)
+        .maybeSingle();
+
+      if (existingEventErr) {
+        logger.error('[TripRoutes] Failed to check existing trip events:', existingEventErr.message);
+        return res.status(500).json({ error: 'Internal Server Error' });
+      }
+      existingEvent = data;
+    }
+
+    if (!order && !existingEvent) {
+      return res.status(404).json({ error: 'Trip not found.' });
+    }
+
     if (req.user.role !== 'admin') {
-      const isDriver = driverUserId === req.user.id || order?.driver_id === req.user.id;
+      const isDriver = order?.driver_id === req.user.id || existingEvent?.user_id === req.user.id;
       const isCustomer = order?.customer_id === req.user.id;
       if (!isDriver && !isCustomer) {
         return res.status(403).json({ error: 'Access Denied: You are not authorised to view events for this trip.' });
       }
     }
 
-    // 5. Optional type filter
-    let filteredEvents = events;
+    let eventsQuery = supabase
+      .from('trip_events')
+      .select('event_id, user_id, trip_id, event_type, event_timestamp, latitude, longitude, metadata, created_at', { count: 'exact' })
+      .eq('trip_id', tripId);
+
     if (type && typeof type === 'string') {
-      filteredEvents = events.filter(e => e.event_type === type);
+      eventsQuery = eventsQuery.eq('event_type', type);
     }
+
+    const { data: events, error: eventsErr, count } = await eventsQuery
+      .order('event_timestamp', { ascending: isAscending })
+      .range(offset, offset + limit - 1);
+
+    if (eventsErr) {
+      return res.status(500).json({
+        error: 'Failed to fetch trip events.',
+        code: 'TRIP_EVENTS_FETCH_ERROR',
+        details: eventsErr.message,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    let filteredEvents = events || [];
 
     if (min_lat !== undefined || max_lat !== undefined || min_lng !== undefined || max_lng !== undefined) {
       filteredEvents = filteredEvents.filter(e => {
@@ -483,6 +484,12 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
     return res.json({
       trip_id: tripId,
       events: filteredEvents,
+      pagination: {
+        page,
+        limit,
+        total: count || 0,
+        totalPages: count ? Math.ceil(count / limit) : 0,
+      },
     });
   } catch (err) {
     return res.status(500).json({ error: 'Internal Server Error', details: err.message });

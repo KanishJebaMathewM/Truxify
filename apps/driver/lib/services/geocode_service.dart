@@ -39,9 +39,9 @@ class GeocodeService {
   static Future<LatLng?> resolvePlace(String query) async {
     final key = query.trim().toLowerCase();
     if (key.isEmpty) return null;
+    _evictExpired();
     final cached = _cache[key];
     if (cached != null) return cached.value;
-    _evictExpired();
 
     final uri = Uri.https(
       'nominatim.openstreetmap.org',
@@ -89,9 +89,9 @@ class GeocodeService {
   /// Reverse geocode coordinates to an address string.
   static Future<String?> reverseGeocode(LatLng point) async {
     final key = '${point.latitude},${point.longitude}';
+    _evictExpired();
     final cached = _reverseCache[key];
     if (cached != null) return cached.value;
-    _evictExpired();
 
     final uri = Uri.https(
       'nominatim.openstreetmap.org',

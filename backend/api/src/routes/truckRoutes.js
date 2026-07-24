@@ -572,6 +572,16 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       supabase.from('profiles').select('id, full_name, avatar_url').in('id', driverIds),
     ]);
 
+    if (trucksRes.error) {
+      logger.error('Truck enrichment lookup error:', trucksRes.error.message);
+      return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
+    }
+
+    if (profilesRes.error) {
+      logger.error('Driver profile enrichment lookup error:', profilesRes.error.message);
+      return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
+    }
+
     const truckMap = Object.fromEntries((trucksRes.data || []).map(t => [t.id, t]));
     const profileMap = Object.fromEntries((profilesRes.data || []).map(p => [p.id, p]));
 

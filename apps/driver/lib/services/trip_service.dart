@@ -222,6 +222,7 @@ class TripService {
   }
 
   void dispose() {
+    _isDisposed = true;
     _apiClient.dispose();
   }
 }

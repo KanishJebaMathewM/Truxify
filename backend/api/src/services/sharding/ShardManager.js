@@ -154,7 +154,7 @@ class ShardManager {
         // Default to north shard
         connection = await this.getShardConnection('north');
       }
-      const [rows] = await connection.execute(query, params);
+      const { rows } = await connection.query(query, params);
       return rows;
     } catch (error) {
       logger.error('Query execution error:', error);
@@ -168,7 +168,7 @@ class ShardManager {
     for (const [name, shard] of this.shards) {
       if (shard.pool) {
         try {
-          const [rows] = await shard.pool.execute(queries.query, queries.params || []);
+          const { rows } = await shard.pool.query(queries.query, queries.params || []);
           results.push({ shard: name, data: rows });
         } catch (error) {
           logger.error(`Error querying shard ${name}:`, error);
@@ -183,7 +183,7 @@ class ShardManager {
     for (const [name, shard] of this.shards) {
       try {
         if (shard.pool) {
-          await shard.pool.execute('SELECT 1');
+          await shard.pool.query('SELECT 1');
           status[name] = 'healthy';
         } else {
           status[name] = 'uninitialized';

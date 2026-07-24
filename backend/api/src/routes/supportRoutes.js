@@ -571,7 +571,7 @@ router.get('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSc
  *       404:
  *         description: Ticket not found
  */
-router.patch('/tickets/:id', authenticate, userLimiter, validateBody(updateTicketSchema), async (req, res) => {
+router.patch('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSchema), validateBody(updateTicketSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { subject, description, category, status } = req.body;
 

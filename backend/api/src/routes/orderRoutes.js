@@ -163,6 +163,7 @@ import {
   changeDropSchema,
   cancelOrderSchema,
 } from '../validation/requestSchemas.js';
+import { getEscrowBookingId } from '../services/escrow.js';
 import { awardReputationPoints } from '../services/reputation.js';
 import { expireDeliveryOtps } from '../services/notificationService.js';
 import { DomainError } from '../services/order/domainError.js';
@@ -1154,8 +1155,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   const { txHash } = req.body;
 
   const lockKey = `escrow_lock:${orderId}`;
-  let lockValue = null;
-  lockValue = await acquireLock(lockKey, 120000);
+  const lockValue = await acquireLock(lockKey, 120000);
   if (!lockValue) {
     return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
   }

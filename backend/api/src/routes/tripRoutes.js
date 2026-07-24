@@ -378,6 +378,36 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
   const { type, sort, min_lat, max_lat, min_lng, max_lng } = req.query;
   const isAscending = sort !== 'desc';
 
+  // Validate coordinate query parameters strictly
+  const coordErrors = [];
+  if (min_lat !== undefined) {
+    const v = Number(min_lat);
+    if (!Number.isFinite(v) || v < -90 || v > 90) {
+      coordErrors.push('min_lat must be a number between -90 and 90');
+    }
+  }
+  if (max_lat !== undefined) {
+    const v = Number(max_lat);
+    if (!Number.isFinite(v) || v < -90 || v > 90) {
+      coordErrors.push('max_lat must be a number between -90 and 90');
+    }
+  }
+  if (min_lng !== undefined) {
+    const v = Number(min_lng);
+    if (!Number.isFinite(v) || v < -180 || v > 180) {
+      coordErrors.push('min_lng must be a number between -180 and 180');
+    }
+  }
+  if (max_lng !== undefined) {
+    const v = Number(max_lng);
+    if (!Number.isFinite(v) || v < -180 || v > 180) {
+      coordErrors.push('max_lng must be a number between -180 and 180');
+    }
+  }
+  if (coordErrors.length > 0) {
+    return res.status(400).json({ error: 'Invalid coordinate parameters', details: coordErrors });
+  }
+
   try {
     // 1. Fetch the trip to determine the driver
     const { data: events, error: eventsErr } = await supabase

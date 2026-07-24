@@ -118,7 +118,8 @@ def find_return_loads(
 
             # --- Time feasibility ---
             try:
-                deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
+                deadline_dt_raw = datetime.fromisoformat(load.get("pickup_deadline", ""))
+                deadline_dt = deadline_dt_raw.replace(tzinfo=None)
             except (ValueError, TypeError):
                 # Skip loads with unparseable deadlines
                 continue

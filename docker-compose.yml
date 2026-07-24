@@ -84,6 +84,7 @@ services:
 
   db:
     image: postgis/postgis:15-3.3-alpine
+    container_name: truxify-postgres
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
@@ -163,36 +164,24 @@ services:
       - "5436:5432"
     volumes:
       - shard_west_data:/var/lib/postgresql/data
-
-    restart: unless-stopped
-    security_opt:
-      - no-new-privileges:true
-
-  db:
-    image: postgis/postgis:15-3.3-alpine
-    container_name: truxify-postgres
-
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-
-
-  mongo:
-    image: mongo:6-jammy
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
   mongo:
     image: mongo:6-jammy
     container_name: truxify-mongo
-
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
       interval: 10s
@@ -202,25 +191,18 @@ services:
 
   redis:
     image: redis:7-alpine
+    container_name: truxify-redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    container_name: truxify-redis
-
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-
-    restart: unless-stopped
-
 
 volumes:
   mongo_data:

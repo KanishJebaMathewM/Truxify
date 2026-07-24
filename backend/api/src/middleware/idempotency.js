@@ -88,6 +88,16 @@ export function requireIdempotency(ttlSeconds = 3600) {
           }
           return res.status(409).json({ error: 'Duplicate request being processed' });
         }
+
+        let lockReleased = false;
+        const releaseLock = () => {
+          if (lockReleased) return;
+          lockReleased = true;
+          redisClient.del(lockKey).catch(() => {});
+        };
+
+        res.once('finish', releaseLock);
+        res.once('close', releaseLock);
       }
 
       let responded = false;
@@ -107,11 +117,6 @@ export function requireIdempotency(ttlSeconds = 3600) {
           } else {
             setInMemory(key, cacheData, ttlMs);
           }
-        }
-
-        if (redisClient) {
-          const lockKey = `${key}:lock`;
-          redisClient.del(lockKey).catch(() => {});
         }
 
         return originalJson(body);

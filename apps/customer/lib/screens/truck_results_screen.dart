@@ -131,9 +131,9 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
   }
 
   int _price(String price) {
-    return int.parse(
+    return int.tryParse(
       price.replaceAll('₹', '').replaceAll(',', '').trim(),
-    );
+    ) ?? 0;
   }
 
   double _eta(String eta) {

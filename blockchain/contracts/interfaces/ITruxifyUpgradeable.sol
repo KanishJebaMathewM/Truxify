@@ -10,6 +10,10 @@ interface ITruxifyUpgradeable {
     function executeProposal(uint256 proposalId) external returns (bool);
     function emergencyPause() external;
     function emergencyUnpause() external;
-    function emergencyUpgrade(address newImplementation, string memory reason) external;
+    function requestEmergencyUpgrade(address newImplementation, string memory reason) external;
+    function cancelEmergencyUpgrade(address newImplementation) external;
     function getEscrow(uint256 escrowId) external view returns (address, address, uint256, bool, bool, uint256, uint256);
+    function daoApprovedUpgrades(address implementation) external view returns (bool);
+    function emergencyUpgradeRequests(address implementation) external view returns (uint256);
+    function EMERGENCY_UPGRADE_TIMELOCK() external view returns (uint256);
 }

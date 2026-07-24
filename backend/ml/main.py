@@ -91,6 +91,7 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
+    from app.models.base import preload_all_models
     import sys
     from .models.base import load_model, preload_all_models
     from .models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME

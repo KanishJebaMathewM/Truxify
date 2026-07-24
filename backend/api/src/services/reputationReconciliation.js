@@ -1,4 +1,4 @@
-import { supabase, redisClient } from '../config/db.js';
+import { supabaseAdmin, redisClient } from '../config/db.js';
 import { awardReputationPoints } from './reputation.js';
 import logger from '../middleware/logger.js';
 import os from 'os';
@@ -12,6 +12,11 @@ let reconciliationTimer = null;
 let reconciliationRunning = false;
 
 export async function reconcileFailedReputationUpdates() {
+  if (!supabaseAdmin) {
+    logger.warn('[reputation-reconciliation] supabaseAdmin not available — skipping cycle');
+    return;
+  }
+
   let lockAcquired = false;
   let leaseExtender = null;
 
@@ -45,7 +50,7 @@ export async function reconcileFailedReputationUpdates() {
 
   try {
     const instanceId = process.env.HOSTNAME || os.hostname();
-    const { data: failedReputations, error } = await supabase
+    const { data: failedReputations, error } = await supabaseAdmin
       .from('reputation_failures')
       .select('*')
       .lt('retry_count', MAX_RETRIES)
@@ -73,14 +78,14 @@ export async function reconcileFailedReputationUpdates() {
 
       try {
         await awardReputationPoints(row.driver_wallet, row.stars);
-        const { error: deleteError } = await supabase.from('reputation_failures').delete().eq('id', row.id);
+        const { error: deleteError } = await supabaseAdmin.from('reputation_failures').delete().eq('id', row.id);
         if (deleteError) {
           throw new Error(`Award succeeded but failed to delete reconciled reputation failure ${row.id}: ${deleteError.message}`);
         }
         logger.info(`[reputation-reconciliation] Successfully retried reputation update for ${row.driver_wallet}`);
       } catch (err) {
         const newRetryCount = (row.retry_count ?? 0) + 1;
-        await supabase.from('reputation_failures').update({
+        await supabaseAdmin.from('reputation_failures').update({
           retry_count: newRetryCount,
           last_error: err.message,
           last_attempt_at: new Date().toISOString(),
@@ -95,9 +100,8 @@ export async function reconcileFailedReputationUpdates() {
     if (lockAcquired && redisClient) {
       await redisClient.del(LOCK_KEY).catch(() => {});
     }
-    if (!lockAcquired) {
-      reconciliationRunning = false;
-    }
+    // Always reset running flag so fallback/single-instance logic doesn't permanently deadlock
+    reconciliationRunning = false;
   }
 }
 

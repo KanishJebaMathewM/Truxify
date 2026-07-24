@@ -116,5 +116,5 @@ class GpsCompressionStats {
 
   void recordSkip() { originalPoints++; }
 
-  String get summary => 'compressionRatio:F1 pointsSaved points saved';
+  String get summary => 'compressionRatio: ${compressionRatio.toStringAsFixed(1)}%, $pointsSaved points saved';
 }

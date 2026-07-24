@@ -40,6 +40,13 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
     _loadFaqs();
   }
 
+  @override
+  void dispose() {
+    _subjectController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadFaqs() async {
     try {
       final faqs = await widget.faqRepository.fetchFaqs(widget.appType);

@@ -26,7 +26,7 @@ contract FlashbotsRelay is Ownable {
         bytes[] calldata signedTxs,
         uint256 blockNumber
     ) external onlyOwner returns (bytes32) {
-        bytes32 bundleId = keccak256(abi.encodePacked(signedTxs, blockNumber));
+        bytes32 bundleId = keccak256(abi.encode(signedTxs, blockNumber));
         require(!submittedBundles[bundleId], "Bundle already submitted");
 
         bytes32 result = relay.submitBundle(signedTxs, blockNumber);

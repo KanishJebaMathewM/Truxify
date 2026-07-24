@@ -59,11 +59,13 @@ export const dlqService = {
 
       const eventIds = pendingEvents.map(e => e.id);
 
-      // 2. Atomically claim only those specific events
+      // 2. Atomically claim only those specific events that are still pending
       const { data: claimedEvents, error: claimErr } = await supabase
         .from('webhook_failures')
         .update({ status: 'processing', updated_at: now })
+        .eq('status', 'pending')
         .in('id', eventIds)
+        .eq('status', 'pending')
         .select();
 
       if (claimErr) {

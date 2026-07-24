@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 
 import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
@@ -164,11 +165,15 @@ class _LoginScreenState extends State<LoginScreen> {
         onVerificationFailed: (e) {
           if (!mounted) return;
           setState(() => _sendingOtp = false);
+          
+          String errorMsg = e.message ?? AppLocalizations.of(context)!.phoneVerificationFailed;
+          if (e.code == 'network-request-failed') {
+            errorMsg = AppLocalizations.of(context)!.networkError;
+          }
+          
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                e.message ?? AppLocalizations.of(context)!.phoneVerificationFailed,
-              ),
+              content: Text(errorMsg),
             ),
           );
         },
@@ -192,8 +197,14 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _sendingOtp = false);
+      String errorMsg = AppLocalizations.of(context)!.failedToSendOtp;
+      if (e is FirebaseAuthException && e.code == 'network-request-failed') {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      } else if (e.toString().contains('SocketException') || e.toString().contains('network-request-failed')) {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context)!.failedToSendOtp)),
+        SnackBar(content: Text(errorMsg)),
       );
     }
   }
@@ -230,6 +241,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final message = switch (e.code) {
         'invalid-verification-code' => AppLocalizations.of(context)!.invalidVerificationCode,
         'session-expired' => AppLocalizations.of(context)!.otpExpired,
+        'network-request-failed' => AppLocalizations.of(context)!.networkError,
         _ => e.message ?? AppLocalizations.of(context)!.verificationFailed,
       };
       ScaffoldMessenger.of(context).showSnackBar(
@@ -238,8 +250,12 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _verifyingOtp = false);
+      String errorMsg = AppLocalizations.of(context)!.verificationFailed;
+      if (e.toString().contains('SocketException') || e.toString().contains('network-request-failed')) {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(AppLocalizations.of(context)!.verificationFailed)),
+        SnackBar(content: Text(errorMsg)),
       );
     }
   }

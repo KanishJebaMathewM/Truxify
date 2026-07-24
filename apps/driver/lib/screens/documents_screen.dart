@@ -178,6 +178,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     double progress = 0.0;
     String statusText = 'Reading file contents...';
     bool isDone = false;
+    Timer? uploadTimer;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -191,7 +192,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         return StatefulBuilder(
           builder: (context, setSheetState) {
             if (progress == 0.0) {
-              Timer.periodic(const Duration(milliseconds: 300), (timer) {
+              uploadTimer?.cancel();
+              uploadTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
                 if (!context.mounted) {
                   timer.cancel();
                   return;
@@ -310,7 +312,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           },
         );
       },
-    );
+    ).then((_) => uploadTimer?.cancel());
   }
 
   Future<void> _showUploadSheet(BuildContext context) async {

@@ -105,6 +105,26 @@ describe('reconcilePendingEscrowRefunds', () => {
     expect(mocks.redisDel).toHaveBeenCalledTimes(1);
   });
 
+  it('skips order if it is still within the exponential backoff window', async () => {
+    mocks.redisSet.mockReturnValueOnce('OK'); // global lock
+    const now = Date.now();
+    // retryCount = 2, so backoff = 2^(2-1) * 60000 = 120000ms.
+    // updated_at is only 30000ms ago, so it should skip!
+    const recentUpdate = new Date(now - 30000).toISOString();
+    configureBuilder([{
+      id: 'oB',
+      order_display_id: 'OB',
+      escrow_refund_retry_count: 2,
+      updated_at: recentUpdate
+    }]);
+
+    await reconcilePendingEscrowRefunds(orderRepository);
+
+    // Global lock acquired and released. No per-order lock because it skipped.
+    expect(mocks.redisSet).toHaveBeenCalledTimes(1);
+    expect(mocks.redisDel).toHaveBeenCalledTimes(1);
+  });
+
   it('skips order when per-order redisClient.set returns null', async () => {
     // Global lock OK (truthy); per-order lock fails (returns null)
     mocks.redisSet.mockReturnValueOnce('OK').mockReturnValueOnce(null);

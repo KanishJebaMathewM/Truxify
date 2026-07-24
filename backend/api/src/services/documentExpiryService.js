@@ -1,6 +1,7 @@
 import { supabase, redisClient } from '../config/db.js';
 import { sendPushNotification } from './notificationService.js';
 import logger from '../middleware/logger.js';
+import crypto from 'crypto';
 
 const REMINDER_WINDOWS = [
   { days: 30, label: '30 days' },
@@ -12,6 +13,18 @@ const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const LOCK_KEY = 'document:expiry:worker:lock';
 const LOCK_TTL_SECONDS = 600;
 const LEASE_EXTENSION_INTERVAL_MS = (LOCK_TTL_SECONDS * 1000) / 2;
+const EXTEND_LOCK_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("expire", KEYS[1], ARGV[2])
+end
+return 0
+`;
+const RELEASE_LOCK_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+end
+return 0
+`;
 
 const DOC_TYPE_LABELS = {
   rc_book: 'RC Book',
@@ -70,10 +83,11 @@ async function hasExistingNotification(userId, documentId, daysRemaining) {
 export async function processDocumentExpiryBatch() {
   let lockAcquired = false;
   let leaseExtender = null;
+  const lockToken = `${process.pid}:${crypto.randomUUID()}`;
 
   if (redisClient) {
     try {
-      const acquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
+      const acquired = await redisClient.set(LOCK_KEY, lockToken, 'NX', 'EX', LOCK_TTL_SECONDS);
       if (!acquired) {
         logger.info('[document-expiry] Lock held by another instance, skipping.');
         return;
@@ -81,7 +95,10 @@ export async function processDocumentExpiryBatch() {
       lockAcquired = true;
       leaseExtender = setInterval(async () => {
         try {
-          await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
+          const extended = await redisClient.eval(EXTEND_LOCK_SCRIPT, 1, LOCK_KEY, lockToken, LOCK_TTL_SECONDS);
+          if (!extended) {
+            logger.warn('[document-expiry] Lock lease was not extended because ownership changed.');
+          }
         } catch (err) {
           logger.warn('[document-expiry] Failed to extend lock lease:', err.message);
         }
@@ -178,7 +195,7 @@ export async function processDocumentExpiryBatch() {
       clearInterval(leaseExtender);
     }
     if (lockAcquired && redisClient) {
-      await redisClient.del(LOCK_KEY).catch(() => {});
+      await redisClient.eval(RELEASE_LOCK_SCRIPT, 1, LOCK_KEY, lockToken).catch(() => {});
     }
     if (!lockAcquired) {
       workerRunning = false;

@@ -9,6 +9,7 @@ import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimi
 import tripRoutes from './routes/tripRoutes.js'
 import deviceRoutes from './routes/deviceRoutes.js'
 import documentRoutes from './routes/documentRoutes.js'
+import securityHeaderDuplicates from './middleware/securityHeaderDuplicates.js';
 import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js'
@@ -250,6 +251,7 @@ app.set('trust proxy', trustProxy)
 // 🔒 ADVANCED SECURITY HEADERS (HELMET CONFIGURATION)
 // Resolves missing security headers from Issues #361 and #944
 // ============================================================================
+app.use(securityHeaderDuplicates);
 app.use(helmet({
   // Content Security Policy (CSP) - Prevents XSS and data injection
   contentSecurityPolicy: {

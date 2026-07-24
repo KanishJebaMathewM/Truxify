@@ -64,6 +64,7 @@ export const dlqService = {
         .from('webhook_failures')
         .update({ status: 'processing', updated_at: now })
         .in('id', eventIds)
+        .eq('status', 'pending')
         .select();
 
       if (claimErr) {

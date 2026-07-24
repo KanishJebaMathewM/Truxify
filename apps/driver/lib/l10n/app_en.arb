@@ -842,6 +842,10 @@
   "@withdrawalSuccessful": {
     "description": "Success message after a successful withdrawal"
   },
+  "networkError": "Network error. Please check your connection.",
+  "@networkError": {
+    "description": "Error message when network connection fails"
+  },
   "theme": "Theme",
   "@theme": {
     "description": "Label for the theme selection setting"

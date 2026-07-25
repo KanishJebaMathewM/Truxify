@@ -457,7 +457,7 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
  */
 export async function optimiseMidTrip(routeData) {
   guardMlApiKey();
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const baseUrl = getBaseUrl();
   const url = `${baseUrl}/optimise/mid-trip`;
   const response = await fetch(url, {
     method: 'POST',
@@ -475,7 +475,7 @@ export async function optimiseMidTrip(routeData) {
  */
 export async function trainDemandModel(force = false) {
   guardMlApiKey();
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const baseUrl = getBaseUrl();
   const url = `${baseUrl}/train/demand`;
   const response = await fetch(url, {
     method: 'POST',
@@ -493,7 +493,7 @@ export async function trainDemandModel(force = false) {
  */
 export async function trainPriceModel(force = false) {
   guardMlApiKey();
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const baseUrl = getBaseUrl();
   const url = `${baseUrl}/train/price`;
   const response = await fetch(url, {
     method: 'POST',
@@ -510,7 +510,7 @@ export async function trainPriceModel(force = false) {
  */
 export async function listModels() {
   guardMlApiKey();
-  const baseUrl = process.env.ML_ENGINE_URL || DEFAULT_ML_ENGINE_URL;
+  const baseUrl = getBaseUrl();
   const url = `${baseUrl}/models`;
   const response = await fetch(url, {
     method: 'GET',

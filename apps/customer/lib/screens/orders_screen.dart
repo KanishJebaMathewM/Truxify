@@ -1,7 +1,7 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:truxify/widgets/order_card.dart';
+import '../widgets/order_card.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
 import '../constants/supabase_config.dart';

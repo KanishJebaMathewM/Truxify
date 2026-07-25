@@ -1,7 +1,7 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:truxify/widgets/menu_card.dart';
-import 'package:truxify/widgets/menu_item.dart';
+import '../widgets/menu_card.dart';
+import '../widgets/menu_item.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
 import '../controllers/app_controller.dart';

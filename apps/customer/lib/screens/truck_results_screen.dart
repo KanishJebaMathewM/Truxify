@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:truxify/theme/app_theme.dart';
+import '../theme/app_theme.dart';
 
 import '../models/app_models.dart';
 import '../services/order_service.dart';

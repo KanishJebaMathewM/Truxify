@@ -184,6 +184,7 @@ import {
   confirmEscrowRefund,
   escrowRefund,
 } from '../core/container.js';
+import { paisaToMaticWei } from '../services/escrow.js';
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 
@@ -1161,7 +1162,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   }
 
   try {
-    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status');
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status, total_amount');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
     orderValidationService.assertEscrowState(order, ['funding'], 'Order is not in funding state');
@@ -1170,7 +1171,8 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
     const customerWallet = customerProfile?.polygon_wallet_address ?? null;
     const bookingId = order.escrow_booking_id || getEscrowBookingId(order.order_display_id);
-    const result = await recordDepositTx(bookingId, txHash, customerWallet);
+    const expectedAmountWei = paisaToMaticWei(order.total_amount || 0).toString();
+    const result = await recordDepositTx(bookingId, txHash, customerWallet, expectedAmountWei);
 
     if (result.error) {
       if (result.alreadyFunded) {

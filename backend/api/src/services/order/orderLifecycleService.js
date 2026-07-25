@@ -9,6 +9,7 @@ import {
   recordDepositTx,
   submitEscrowRefund,
   confirmEscrowRefund,
+  paisaToMaticWei,
 } from '../escrow.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { getRouteEstimate } from '../osrm.js';
@@ -779,7 +780,7 @@ export class OrderLifecycleService {
 
     try {
       const { data: order, error: fetchErr } = await this.orderRepository.findOrderById(
-        orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status'
+        orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status, total_amount'
       );
 
       if (fetchErr || !order) throw new DomainError(404, { error: 'Order not found' });
@@ -794,7 +795,8 @@ export class OrderLifecycleService {
       const customerWallet = customerProfile?.polygon_wallet_address ?? null;
 
       const bookingId = order.escrow_booking_id || `escrow:${order.order_display_id}`;
-      const result = await recordDepositTx(bookingId, txHash, customerWallet);
+      const expectedAmountWei = paisaToMaticWei(order.total_amount || 0).toString();
+      const result = await recordDepositTx(bookingId, txHash, customerWallet, expectedAmountWei);
 
       if (result.error) throw new DomainError(422, { error: result.error });
 

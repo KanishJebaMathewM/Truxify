@@ -245,7 +245,7 @@ export async function buildDepositTx (orderDisplayId, driverWalletAddress, amoun
   });
 }
 
-export async function recordDepositTx (bookingId, txHash, expectedSenderAddress = null) {
+export async function recordDepositTx (bookingId, txHash, expectedSenderAddress = null, expectedAmountWei = null) {
   return measureExecution('EscrowService.recordDepositTx', async () => {
   if (!escrowContract) {
     return { error: 'Contract not initialised' }
@@ -258,6 +258,9 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
   try {
     const booking = await escrowContract.bookings(bookingId)
     if (booking && booking.amount > 0n) {
+      if (expectedAmountWei && booking.amount < BigInt(expectedAmountWei)) {
+        return { error: `On-chain escrow funded with ${booking.amount} wei, which is less than expected ${expectedAmountWei} wei` }
+      }
       logger.info(`[escrow] Booking ${bookingId} already has a funded escrow — idempotency skip.`)
       return { txHash, bookingId, alreadyFunded: true }
     }
@@ -278,6 +281,11 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
 
   if (!tx.to || tx.to.toLowerCase() !== contractAddress.toLowerCase()) {
     return { error: 'Transaction destination is not the Escrow contract' }
+  }
+
+  // Critical Security Check: Verify tx.value (deposit amount)
+  if (expectedAmountWei && BigInt(tx.value) < BigInt(expectedAmountWei)) {
+    return { error: `Transaction value ${tx.value} wei is less than expected ${expectedAmountWei} wei` }
   }
 
   let decoded

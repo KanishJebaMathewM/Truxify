@@ -92,10 +92,6 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     from app.models.base import preload_all_models
-    import sys
-    from .models.base import load_model, preload_all_models
-    from .models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
-    from .models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
     
     logger.info("ML Engine starting, pre-loading models...")
     persisted_models = await preload_all_models()

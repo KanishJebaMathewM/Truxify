@@ -652,25 +652,26 @@ class _HomeScreenState extends State<HomeScreen> {
         
         if (stops.isNotEmpty) {
           final lastStop = stops.last;
-          final address = lastStop['drop_location'] as String;
-          await prefs.setString('cached_address', address);
+          final address = (lastStop['drop_location'] as String?) ?? '';
+          if (address.isNotEmpty) {
+            await prefs.setString('cached_address', address);
           
-          final dropPoint = await GeocodeService.resolvePlace(address);
-          if (dropPoint != null) {
-            await prefs.setDouble('cached_drop_lat', dropPoint.latitude);
-            await prefs.setDouble('cached_drop_lng', dropPoint.longitude);
-          }
+            final dropPoint = await GeocodeService.resolvePlace(address);
+            if (dropPoint != null) {
+              await prefs.setDouble('cached_drop_lat', dropPoint.latitude);
+              await prefs.setDouble('cached_drop_lng', dropPoint.longitude);
+            }
           
-          if (dropPoint != null && mounted) {
-            setState(() {
-              _destination = DestinationPickResult(address: address, point: dropPoint);
-              final routePoints = <ll.LatLng>[_currentLocation ?? dropPoint, dropPoint];
-              _routeFuture = RouteService.fetchRouteGeoJson(routePoints).onError(
-                (_, __) => routePoints,
-              );
-            });
+            if (dropPoint != null && mounted) {
+              setState(() {
+                _destination = DestinationPickResult(address: address, point: dropPoint);
+                final routePoints = <ll.LatLng>[_currentLocation ?? dropPoint, dropPoint];
+                _routeFuture = RouteService.fetchRouteGeoJson(routePoints).onError(
+                  (_, __) => routePoints,
+                );
+              });
+            }
           }
-        }
       } else {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('cached_trip_id');

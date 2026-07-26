@@ -234,16 +234,21 @@ class FraudDetectionService {
     // 2. Check location anomalies
     if (patterns.locationHistory.length > 10) {
       const locations = patterns.locationHistory;
-      let distanceTraveled = 0;
+      let hasImpossibleSpeed = false;
       for (let i = 1; i < locations.length; i++) {
-        distanceTraveled += this.calculateDistance(
+        const distance = this.calculateDistance(
           locations[i-1].lat, locations[i-1].lng,
           locations[i].lat, locations[i].lng
         );
+        const timeDiffHours = (locations[i].timestamp - locations[i-1].timestamp) / 3600000;
+        if (timeDiffHours > 0 && (distance / timeDiffHours) > 150) {
+          hasImpossibleSpeed = true;
+          break;
+        }
       }
       
-      // Impossible travel distance in short time
-      if (distanceTraveled > 100) { // 100km in short time
+      // Impossible travel speed (>150 km/h for a truck)
+      if (hasImpossibleSpeed) {
         riskScore += 0.3;
       }
     }

@@ -97,8 +97,8 @@ class OrderService {
     required double dropLng,
   }) async {
     try {
-      final body = await _apiClient.put(
-        '/api/orders/${_encodePathSegment(orderDisplayId)}/change-drop',
+      final body = await _apiClient.patch(
+        '/api/bookings/${_encodePathSegment(orderDisplayId)}/drop-location',
         body: <String, dynamic>{
           'drop_address': dropAddress,
           'drop_lat': dropLat,
@@ -119,7 +119,7 @@ class OrderService {
   }) async {
     try {
       final body = await _apiClient.post(
-        '/api/orders/${_encodePathSegment(orderDisplayId)}/cancel',
+        '/api/bookings/${_encodePathSegment(orderDisplayId)}/cancel',
         body: <String, dynamic>{
           if (reason != null) 'reason': reason,
         },

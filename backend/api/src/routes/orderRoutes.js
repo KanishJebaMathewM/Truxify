@@ -1112,6 +1112,20 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
   }
 });
 
+router.patch('/:id/drop-location', authenticate, userLimiter, changeDropLimiter, requirePolicy('order:change-drop'), auditLog({ action: 'order:change-drop', resourceType: 'order' }), validateParams(paramIdSchema), validateBody(changeDropSchema), async (req, res) => {
+  const { id: orderId } = req.params;
+  try {
+    const result = await orderLifecycleService.changeDrop(orderId, req.user.id, req.body);
+    return res.json(result);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Patch drop location exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // ============================================================================
 // 16. CANCEL ORDER AND REFUND ESCROW (CUSTOMER)
 // ============================================================================

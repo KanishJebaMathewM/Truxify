@@ -9,14 +9,16 @@ import {
   recordDepositTx,
   submitEscrowRefund,
   confirmEscrowRefund,
+  escrowUpdateDropLocation,
 } from '../escrow.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { getRouteEstimate } from '../osrm.js';
 import { optimizeWaypoints } from '../routingService.js';
-import { predictPrice } from '../ml.js';
+import { predictPrice, calculateCancellationPenalty } from '../ml.js';
 import { getLiveTrafficMultiplier } from '../trafficService.js';
 import { eventBus } from '../../core/events.js';
 import logger from '../../middleware/logger.js';
+import { mongoDb } from '../../config/db.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -492,18 +494,18 @@ export class OrderLifecycleService {
     try {
       const { data: order, error: refetchErr } = await this.orderRepository.findOrderById(initialOrder.id, '*');
       if (refetchErr) throw new DomainError(500, { error: 'Failed to fetch order.', details: refetchErr.message });
-      if (!order) throw new DomainError(404, { error: 'Order not found.' });
+      if (!order) throw new DomainError(404, { orderId: initialOrder.id, error: 'Order not found.' });
 
       if (order.customer_id !== customerId) throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
-      if (order.escrow_status === 'funded' || order.status !== 'pending') {
-        const reason = order.escrow_status === 'funded'
-          ? 'after escrow has been funded'
-          : `after order status is '${order.status}'`;
+
+      const allowedStatuses = ['pending', 'active', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'at_dropoff'];
+      if (!allowedStatuses.includes(order.status)) {
         throw new DomainError(409, {
-          error: `Drop location cannot be changed ${reason}.`,
-          recovery: 'Cancel this order to receive a refund, then rebook with the correct destination.',
+          error: `Drop location cannot be changed when order is in '${order.status}' status.`,
+          recovery: 'Drop location can only be updated for pending or active in-transit orders.',
         });
       }
+
       if (order.weight_tonnes == null) throw new DomainError(500, { error: 'Data inconsistency: Order is missing weight_tonnes.' });
 
       let pricing;
@@ -515,18 +517,77 @@ export class OrderLifecycleService {
           dropLng: Number(drop_lng),
         });
 
-        pricing = computeOrderPricing({
-          pickupLat: Number(order.pickup_lat),
-          pickupLng: Number(order.pickup_lng),
-          dropLat: Number(drop_lat),
-          dropLng: Number(drop_lng),
-          weightTonnes: Number(order.weight_tonnes),
-          roadDistanceKm: routeEstimate?.distanceKm,
-          isFragile: Boolean(order.is_fragile),
-          isStackable: Boolean(order.is_stackable),
-        });
+        const distanceKm = routeEstimate ? routeEstimate.distanceKm : 10.0;
+        let totalAmount = 0;
+        let baseFreight = 0;
+        let tollEstimate = 0;
+        let platformFee = 0;
+
+        try {
+          const trafficMultiplier = await getLiveTrafficMultiplier();
+          const mlResult = await predictPrice({
+            distanceKm,
+            cargoWeightKg: (order.weight_tonnes || 1.0) * 1000,
+            routeOrigin: order.pickup_address,
+            routeDestination: drop_address,
+            trafficMultiplier
+          });
+          
+          if (mlResult && mlResult.estimatedPricePaisa != null) {
+            totalAmount = mlResult.estimatedPricePaisa;
+            baseFreight = Math.round(totalAmount * 0.85);
+            tollEstimate = Math.round(totalAmount * 0.05);
+            platformFee = Math.round(totalAmount * 0.10);
+          } else {
+            throw new Error('ML returned invalid pricing.');
+          }
+        } catch (mlErr) {
+          logger.warn(`[orderLifecycleService] ML pricing estimation failed: ${mlErr.message}. Falling back to default computeOrderPricing.`);
+          const fallbackPricing = computeOrderPricing({
+            pickupLat: Number(order.pickup_lat),
+            pickupLng: Number(order.pickup_lng),
+            dropLat: Number(drop_lat),
+            dropLng: Number(drop_lng),
+            weightTonnes: Number(order.weight_tonnes),
+            roadDistanceKm: distanceKm,
+            isFragile: Boolean(order.is_fragile),
+            isStackable: Boolean(order.is_stackable),
+          });
+          totalAmount = fallbackPricing.totalAmount;
+          baseFreight = fallbackPricing.baseFreight;
+          tollEstimate = fallbackPricing.tollEstimate;
+          platformFee = fallbackPricing.platformFee;
+        }
+
+        pricing = {
+          totalAmount,
+          baseFreight,
+          tollEstimate,
+          platformFee,
+          distanceKm
+        };
       } catch (pricingErr) {
         throw new DomainError(400, { error: 'Unable to compute new pricing for the requested drop.', details: pricingErr.message });
+      }
+
+      // Update escrow on-chain if funded
+      const isFunded = order.escrow_status === 'funded';
+      let escrowUpdateTxHash = null;
+
+      if (isFunded) {
+        try {
+          const escrowUpdate = await escrowUpdateDropLocation(order.order_display_id, pricing.totalAmount);
+          if (escrowUpdate && escrowUpdate.txHash) {
+            escrowUpdateTxHash = escrowUpdate.txHash;
+            await escrowUpdate.waitForConfirmation();
+          }
+        } catch (escrowErr) {
+          logger.error(`[orderLifecycleService] Escrow adjustment failed for order ${order.id}: ${escrowErr.message}`);
+          throw new DomainError(502, {
+            error: 'Failed to adjust escrow on-chain for the new drop location.',
+            details: escrowErr.message
+          });
+        }
       }
 
       const updates = {
@@ -540,6 +601,10 @@ export class OrderLifecycleService {
         updated_at: new Date().toISOString(),
       };
 
+      if (escrowUpdateTxHash) {
+        updates.escrow_status = 'funded'; // Ensure remains funded
+      }
+
       const { data: updatedOrder, error: updateErr } = await this.orderRepository.updateOrder(order.id, updates);
       if (updateErr) throw new DomainError(500, { error: 'Failed to update order.', details: updateErr.message });
 
@@ -549,9 +614,7 @@ export class OrderLifecycleService {
         drop_lng: Number(drop_lng),
         route_label: `${(order.pickup_address || '').split(',')[0]} \u2192 ${drop_address.split(',')[0]}`,
         freight_value: pricing.totalAmount,
-        fuel_cost: pricing.fuelCost,
         toll_cost: pricing.tollEstimate,
-        net_profit: pricing.netProfit,
         extra_distance_km: pricing.distanceKm,
       });
 
@@ -560,6 +623,11 @@ export class OrderLifecycleService {
           error: 'Failed to update load offer after drop change.',
           details: offerUpdateErr.message,
         });
+      }
+
+      // Simulate auto call / notification to assigned driver
+      if (order.driver_id) {
+        logger.info(`[changeDrop] Auto-notifying/calling driver ${order.driver_id} about drop location change for order ${order.id}`);
       }
 
       try {
@@ -621,6 +689,71 @@ export class OrderLifecycleService {
         };
       }
 
+      // Proportional cancellation penalty calculation if driver is en route
+      let penaltyAmountPaisa = 0;
+      const enRouteStatuses = ['en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'at_dropoff'];
+      if (enRouteStatuses.includes(currentOrder.status) && currentOrder.driver_id) {
+        try {
+          let driverLat = currentOrder.pickup_lat;
+          let driverLng = currentOrder.pickup_lng;
+
+          if (mongoDb) {
+            const telemetry = await mongoDb.collection('telemetry')
+              .findOne({ driver_id: currentOrder.driver_id, order_id: currentOrder.id }, { sort: { timestamp: -1 } });
+            if (telemetry && telemetry.lat != null && telemetry.lng != null) {
+              driverLat = telemetry.lat;
+              driverLng = telemetry.lng;
+            }
+          }
+
+          let totalDistanceKm = 10.0;
+          let distanceCoveredKm = 0.0;
+
+          const totalRouteEstimate = await getRouteEstimate({
+            pickupLat: Number(currentOrder.pickup_lat),
+            pickupLng: Number(currentOrder.pickup_lng),
+            dropLat: Number(currentOrder.drop_lat),
+            dropLng: Number(currentOrder.drop_lng)
+          });
+          if (totalRouteEstimate && totalRouteEstimate.distanceKm > 0) {
+            totalDistanceKm = totalRouteEstimate.distanceKm;
+          }
+
+          if (['picked_up', 'in_transit', 'arriving', 'at_dropoff'].includes(currentOrder.status)) {
+            const coveredEstimate = await getRouteEstimate({
+              pickupLat: Number(currentOrder.pickup_lat),
+              pickupLng: Number(currentOrder.pickup_lng),
+              dropLat: Number(driverLat),
+              dropLng: Number(driverLng)
+            });
+            if (coveredEstimate) {
+              distanceCoveredKm = coveredEstimate.distanceKm;
+            }
+          } else {
+            // Driver en route to pickup
+            distanceCoveredKm = 2.0;
+          }
+
+          distanceCoveredKm = Math.min(Math.max(distanceCoveredKm, 0), totalDistanceKm);
+
+          const totalAmountInr = (currentOrder.total_amount || 0) / 100;
+          const mlPenalty = await calculateCancellationPenalty({
+            distanceCoveredKm,
+            totalDistanceKm,
+            totalAmount: totalAmountInr
+          });
+
+          if (mlPenalty && mlPenalty.penalty_amount != null) {
+            penaltyAmountPaisa = Math.round(mlPenalty.penalty_amount * 100);
+          }
+        } catch (mlErr) {
+          logger.warn(`[orderLifecycleService] ML cancellation penalty calculation failed: ${mlErr.message}. Falling back to 10% base penalty.`);
+          penaltyAmountPaisa = Math.round((currentOrder.total_amount || 0) * 0.10);
+        }
+      }
+
+      penaltyAmountPaisa = Math.min(Math.max(penaltyAmountPaisa, 0), currentOrder.total_amount || 0);
+
       const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(currentOrder.escrow_status);
       let workingOrder = currentOrder;
 
@@ -631,6 +764,7 @@ export class OrderLifecycleService {
           {
             status: 'cancelled',
             cancellation_reason: reason ?? currentOrder.cancellation_reason,
+            cancellation_fee: penaltyAmountPaisa,
             escrow_status: 'refund_pending',
             escrow_refund_error: null,
             escrow_refund_attempts: (currentOrder.escrow_refund_attempts ?? 0) + 1,
@@ -661,7 +795,7 @@ export class OrderLifecycleService {
           if (refundTxHash) {
             receipt = await confirmEscrowRefund(refundTxHash);
           } else {
-            const submitted = await submitEscrowRefund(order.order_display_id);
+            const submitted = await submitEscrowRefund(order.order_display_id, penaltyAmountPaisa);
             refundTxHash = submitted.txHash;
             if (!refundTxHash || !submitted.waitForConfirmation) {
               throw new Error('Escrow refund transaction was not submitted.');
@@ -683,6 +817,7 @@ export class OrderLifecycleService {
             {
               status: 'cancelled',
               cancellation_reason: reason ?? workingOrder.cancellation_reason,
+              cancellation_fee: penaltyAmountPaisa,
               escrow_status: 'refunded',
               refund_tx_hash: receipt.hash ?? refundTxHash,
               escrow_refunded_at: refundedAt,
@@ -713,7 +848,7 @@ export class OrderLifecycleService {
             status: 200,
             body: {
               message: 'Order cancelled and escrow refunded successfully.',
-              cancellation_fee: updatedOrder?.cancellation_fee ?? 0,
+              cancellation_fee: updatedOrder?.cancellation_fee ?? penaltyAmountPaisa,
               order: updatedOrder,
             },
           };
@@ -723,6 +858,7 @@ export class OrderLifecycleService {
           const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
           await this.orderRepository.updateOrder(order.id, {
             status: 'cancelled',
+            cancellation_fee: penaltyAmountPaisa,
             escrow_status: nextEscrowStatus,
             refund_tx_hash: refundTxHash,
             escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
@@ -747,6 +883,7 @@ export class OrderLifecycleService {
       const updatePayload = {
         status: 'cancelled',
         cancellation_reason: reason,
+        cancellation_fee: penaltyAmountPaisa,
         updated_at: new Date().toISOString(),
       };
 
@@ -763,7 +900,7 @@ export class OrderLifecycleService {
         throw new DomainError(500, { error: 'Failed to cancel order.', details: updateErr.message });
       }
 
-      const cancellationFee = updatedOrder?.cancellation_fee ?? 0;
+      const cancellationFee = updatedOrder?.cancellation_fee ?? penaltyAmountPaisa;
 
       await this.orderTimelineService.insertCancelEvent(order.order_display_id);
       await expireDeliveryOtps(order.id);

@@ -35,7 +35,9 @@ import { measureExecution } from '../core/performanceMetrics.js'
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver) external payable',
   'function releasePayment(uint256 bookingId) external',
+  'function cancelBookingWithPenalty(uint256 bookingId, uint256 penaltyAmount) external',
   'function cancelBooking(uint256 bookingId) external',
+  'function updateDropLocation(uint256 bookingId, uint256 newAmount) external payable',
   'function bookings(uint256 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, uint256 createdAt)'
 ]
 
@@ -355,7 +357,7 @@ export async function escrowRelease (orderDisplayId) {
 /**
  * Submit an escrow refund and return its hash before confirmation.
  */
-export async function submitEscrowRefund (orderDisplayId) {
+export async function submitEscrowRefund (orderDisplayId, penaltyAmountPaisa = 0) {
   return measureExecution('EscrowService.submitEscrowRefund', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
@@ -366,8 +368,14 @@ export async function submitEscrowRefund (orderDisplayId) {
 
   let tx
   try {
-    tx = await escrowContract.cancelBooking(bookingId)
-    logger.info(`[escrow] cancelBooking tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
+    if (penaltyAmountPaisa > 0) {
+      const penaltyWei = paisaToMaticWei(penaltyAmountPaisa)
+      tx = await escrowContract.cancelBookingWithPenalty(bookingId, penaltyWei)
+      logger.info(`[escrow] cancelBookingWithPenalty tx submitted: ${tx.hash} for booking ${orderDisplayId} with penalty: ${penaltyAmountPaisa} paisa`)
+    } else {
+      tx = await escrowContract.cancelBooking(bookingId)
+      logger.info(`[escrow] cancelBooking tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
+    }
   } catch (err) {
     logger.error(`[escrow] refundFunds failed for booking ${orderDisplayId}: ${err.message}`)
     return { txHash: null, bookingId, error: err.message }
@@ -417,4 +425,51 @@ export async function releaseEscrowFunds (orderDisplayId) {
 
 export async function escrowRefund (orderDisplayId) {
   return submitEscrowRefund(orderDisplayId)
+}
+
+/**
+ * Update the escrow booking amount on-chain when the drop location/price changes.
+ */
+export async function escrowUpdateDropLocation (orderDisplayId, newAmountPaisa) {
+  return measureExecution('EscrowService.escrowUpdateDropLocation', async () => {
+  const bookingId = getEscrowBookingId(orderDisplayId)
+
+  if (!escrowContract) {
+    logger.warn('[escrow] Contract not initialised — skipping updateDropLocation.')
+    return { txHash: null, bookingId }
+  }
+
+  const newAmountWei = paisaToMaticWei(newAmountPaisa)
+
+  let tx
+  try {
+    const booking = await escrowContract.bookings(bookingId)
+    const oldAmountWei = booking.amount
+
+    if (newAmountWei > oldAmountWei) {
+      const differenceWei = newAmountWei - oldAmountWei
+      tx = await escrowContract.updateDropLocation(bookingId, newAmountWei, { value: differenceWei })
+    } else {
+      tx = await escrowContract.updateDropLocation(bookingId, newAmountWei)
+    }
+
+    logger.info(`[escrow] updateDropLocation tx submitted: ${tx.hash} for booking ${orderDisplayId} with new amount: ${newAmountPaisa} paisa`)
+  } catch (err) {
+    logger.error(`[escrow] updateDropLocation failed for booking ${orderDisplayId}: ${err.message}`)
+    return { txHash: null, bookingId, error: err.message }
+  }
+
+  return {
+    txHash: tx.hash,
+    bookingId,
+    waitForConfirmation: async () => {
+      const receipt = await tx.wait(1)
+      if (!receipt || receipt.status === 0) {
+        throw new Error('Escrow update drop location transaction reverted or was not found.')
+      }
+      logger.info(`[escrow] updateDropLocation confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`)
+      return receipt
+    }
+  }
+  });
 }

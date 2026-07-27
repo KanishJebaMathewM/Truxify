@@ -12,6 +12,7 @@ import '../services/order_service.dart';
 import '../services/tracking_service.dart';
 import '../theme/app_theme.dart';
 import 'chat_screen.dart';
+import 'location_picker_screen.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/timeline_row.dart';
 
@@ -455,6 +456,163 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
     }
   }
 
+  Future<void> _cancelBooking() async {
+    String? selectedReason = 'Change of plans';
+    final reasons = [
+      'Driver delayed',
+      'Change of plans',
+      'Pricing too high',
+      'Incorrect details',
+      'Other'
+    ];
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Cancel Booking'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('Are you sure you want to cancel this booking? If the driver is already en route, a proportional penalty may apply on-chain.'),
+              const SizedBox(height: 16),
+              const Text('Select reason:', style: TextStyle(fontWeight: FontWeight.bold)),
+              DropdownButton<String>(
+                value: selectedReason,
+                isExpanded: true,
+                items: reasons.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
+                onChanged: (val) {
+                  setDialogState(() {
+                    selectedReason = val;
+                  });
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(false),
+              child: const Text('Keep Booking'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              onPressed: () => Navigator.of(dialogCtx).pop(true),
+              child: const Text('Cancel Booking'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      try {
+        await _orderService.cancelOrder(
+          orderDisplayId: _currentOrder.orderId,
+          reason: selectedReason,
+        );
+        if (!mounted) return;
+        Navigator.of(context).pop(); // Dismiss progress indicator
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Booking cancelled successfully.'),
+            backgroundColor: TruxifyColors.success,
+          ),
+        );
+        _loadOrderAndTimeline();
+      } catch (e) {
+        if (!mounted) return;
+        Navigator.of(context).pop(); // Dismiss progress indicator
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Cancellation failed: $e'),
+            backgroundColor: TruxifyColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _changeDropLocation() async {
+    final result = await Navigator.of(context).push<LocationPickResult>(
+      MaterialPageRoute(
+        builder: (_) => LocationPickerScreen(
+          title: 'Select New Drop Location',
+          initialQuery: _currentOrder.route.split(' → ').last,
+        ),
+      ),
+    );
+
+    if (result != null) {
+      if (!mounted) return;
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (dialogCtx) => AlertDialog(
+          title: const Text('Confirm Drop Location Change'),
+          content: Text('Update destination to: ${result.address}?\n\nThis will recalculate the route and automatically adjust the payment on the blockchain.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(dialogCtx).pop(true),
+              child: const Text('Confirm'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirm == true) {
+        if (!mounted) return;
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+
+        try {
+          await _orderService.changeDrop(
+            orderDisplayId: _currentOrder.orderId,
+            dropAddress: result.address,
+            dropLat: result.point.latitude,
+            dropLng: result.point.longitude,
+          );
+          if (!mounted) return;
+          Navigator.of(context).pop(); // Dismiss progress indicator
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Drop location updated successfully.'),
+              backgroundColor: TruxifyColors.success,
+            ),
+          );
+          _loadOrderAndTimeline();
+        } catch (e) {
+          if (!mounted) return;
+          Navigator.of(context).pop(); // Dismiss progress indicator
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to update drop location: $e'),
+              backgroundColor: TruxifyColors.error,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isSuccess = _currentOrder.status == 'Delivered' || _currentOrder.status == 'Payment Released';
@@ -580,6 +738,22 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             ),
           ),
           const SizedBox(height: 16),
+          if (!isSuccess && !isCancelled) ...[
+            PrimaryButton(
+              label: 'Change Drop Location',
+              onPressed: _changeDropLocation,
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: _cancelBooking,
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Colors.red),
+                foregroundColor: Colors.red,
+              ),
+              child: const Text('Cancel Booking'),
+            ),
+            const SizedBox(height: 12),
+          ],
           OutlinedButton(onPressed: _showReceipt, child: const Text('View Blockchain Receipt')),
           const SizedBox(height: 12),
           PrimaryButton(

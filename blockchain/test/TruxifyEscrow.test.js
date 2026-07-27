@@ -1032,4 +1032,67 @@ describe("TruxifyEscrow", function () {
       expect(balanceAfter).to.be.gt(balanceBefore);
     });
   });
+
+  describe("cancelBooking with penalty", function () {
+    it("splits refund and penalty between customer and driver", async function () {
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
+      const amount = ethers.parseEther("1.0");
+      const penalty = ethers.parseEther("0.3");
+      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+      await escrow.connect(owner).cancelBookingWithPenalty(1, penalty);
+
+      expect(await escrow.pendingWithdrawals(driver.address)).to.equal(penalty);
+      expect(await escrow.pendingWithdrawals(customer.address)).to.equal(amount - penalty);
+    });
+
+    it("reverts if penalty exceeds booking amount", async function () {
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
+      const amount = ethers.parseEther("1.0");
+      const penalty = ethers.parseEther("1.2");
+      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+
+      await expect(
+        escrow.connect(owner).cancelBookingWithPenalty(1, penalty)
+      ).to.be.revertedWith("TruxifyEscrow: Penalty exceeds booking amount");
+    });
+  });
+
+  describe("updateDropLocation", function () {
+    it("increases locked amount if newAmount > oldAmount", async function () {
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
+      const amount = ethers.parseEther("1.0");
+      const newAmount = ethers.parseEther("1.5");
+      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+
+      const diff = newAmount - amount;
+      await escrow.connect(owner).updateDropLocation(1, newAmount, { value: diff });
+
+      const booking = await escrow.getBooking(1);
+      expect(booking.amount).to.equal(newAmount);
+    });
+
+    it("refunds difference to customer if newAmount < oldAmount", async function () {
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
+      const amount = ethers.parseEther("1.0");
+      const newAmount = ethers.parseEther("0.7");
+      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+
+      await escrow.connect(owner).updateDropLocation(1, newAmount);
+
+      const booking = await escrow.getBooking(1);
+      expect(booking.amount).to.equal(newAmount);
+      expect(await escrow.pendingWithdrawals(customer.address)).to.equal(amount - newAmount);
+    });
+
+    it("reverts if newAmount > oldAmount but insufficient top-up value sent", async function () {
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
+      const amount = ethers.parseEther("1.0");
+      const newAmount = ethers.parseEther("1.5");
+      await escrow.connect(customer).createBooking(1, driver.address, { value: amount });
+
+      await expect(
+        escrow.connect(owner).updateDropLocation(1, newAmount, { value: ethers.parseEther("0.2") })
+      ).to.be.revertedWith("TruxifyEscrow: Incorrect top-up value");
+    });
+  });
 });

@@ -106,9 +106,14 @@ class ShardManager {
     // Simplified: Map coordinates to states
     // In production, use reverse geocoding API
     if (lat > 24 && lat < 36 && lng > 68 && lng < 88) return 'delhi';
-    if (lat > 8 && lat < 20 && lng > 72 && lng < 82) return 'tamilnadu';
-    if (lat > 20 && lat < 28 && lng > 82 && lng < 92) return 'westbengal';
+    // Maharashtra must be checked before Tamil Nadu since Mumbai's coordinates
+    // (lat ~19, lng ~73) would otherwise match the Tamil Nadu bounding box
     if (lat > 16 && lat < 24 && lng > 68 && lng < 78) return 'maharashtra';
+    if (lat > 8 && lat < 20 && lng > 72 && lng < 82) return 'tamilnadu';
+    // North-East must be checked before West Bengal since Guwahati (Assam, ~26, ~91)
+    // lies within the West Bengal bounding box
+    if (lat > 25 && lat < 28 && lng > 90 && lng < 97) return 'assam';
+    if (lat > 20 && lat < 28 && lng > 82 && lng < 92) return 'westbengal';
     return 'delhi';
   }
 

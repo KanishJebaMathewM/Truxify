@@ -19,6 +19,7 @@ import multer from 'multer';
 import { uploadDriverDocument } from '../controllers/documentController.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
+import logger from '../middleware/logger.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import digilockerService from '../services/digilockerService.js';
 

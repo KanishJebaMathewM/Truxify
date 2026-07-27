@@ -67,10 +67,9 @@ export async function uploadDriverDocument(req, res) {
           error: scanError.message,
         });
       }
-      if (validationError instanceof MalwareScanError) {
-        return res.status(422).json({ error: validationError.message });
+      if (scanError instanceof MalwareScanError) {
+        return res.status(422).json({ error: scanError.message });
       }
-      throw validationError;
       throw scanError;
     }
 

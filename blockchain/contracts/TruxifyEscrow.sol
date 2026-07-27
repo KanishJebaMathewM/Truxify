@@ -83,6 +83,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     event Withdrawn(address indexed recipient, uint256 amount);
 
     event EmergencyRecovered(address indexed recipient, uint256 amount);
+    event BookingAmountUpdated(uint256 indexed bookingId, uint256 newAmount);
 
     // ─── Constructor ─────────────────────────────────────────────────────────
 
@@ -202,7 +203,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      *
      * @param bookingId The booking to cancel and refund
      */
-    function cancelBooking(uint256 bookingId)
+    function cancelBookingWithPenalty(uint256 bookingId, uint256 penaltyAmount)
         external
         onlyOwner
         nonReentrant
@@ -215,9 +216,56 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
+        require(booking.amount >= penaltyAmount, "TruxifyEscrow: Penalty exceeds booking amount");
+
+        uint256 totalAmount = booking.amount;
+        address payable customer = booking.customer;
+        address payable driver = booking.driver;
+
+        booking.amount  = 0;
+        booking.paid    = true;
+        booking.status  = BookingStatus.Cancelled;
+
+        if (penaltyAmount > 0) {
+            pendingWithdrawals[driver] += penaltyAmount;
+            emit WithdrawalReady(bookingId, driver, penaltyAmount);
+        }
+
+        uint256 refundAmount = totalAmount - penaltyAmount;
+        if (refundAmount > 0) {
+            pendingWithdrawals[customer] += refundAmount;
+            emit WithdrawalReady(bookingId, customer, refundAmount);
+        }
+
+        uint256 customerDeadline = block.timestamp + WITHDRAWAL_TIMEOUT;
+        if (releaseTimestamps[customer] == 0 || customerDeadline < releaseTimestamps[customer]) {
+            releaseTimestamps[customer] = customerDeadline;
+        }
+
+        if (penaltyAmount > 0) {
+            uint256 driverDeadline = block.timestamp + WITHDRAWAL_TIMEOUT;
+            if (releaseTimestamps[driver] == 0 || driverDeadline < releaseTimestamps[driver]) {
+                releaseTimestamps[driver] = driverDeadline;
+            }
+        }
+
+        emit BookingCancelled(bookingId, customer, refundAmount);
+    }
+
+    function cancelBooking(uint256 bookingId)
+        external
+        onlyOwner
+        nonReentrant
+        whenNotPaused
+    {
+        Booking storage booking = bookings[bookingId];
+        require(
+            booking.customer != address(0) && booking.status == BookingStatus.Active,
+            "TruxifyEscrow: Cannot cancel - booking not active"
+        );
+        require(!booking.paid, "TruxifyEscrow: Already paid");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
 
-        // ── EFFECTS ───────────────────────────────────────────────────────
         uint256 refundAmount    = booking.amount;
         address payable customer = booking.customer;
 
@@ -225,7 +273,6 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         booking.paid    = true;
         booking.status  = BookingStatus.Cancelled;
 
-        // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[customer] += refundAmount;
 
         uint256 newDeadline = block.timestamp + WITHDRAWAL_TIMEOUT;
@@ -235,6 +282,41 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
         emit WithdrawalReady(bookingId, customer, refundAmount);
         emit BookingCancelled(bookingId, customer, refundAmount);
+    }
+
+    function updateDropLocation(uint256 bookingId, uint256 newAmount)
+        external
+        payable
+        onlyOwner
+        nonReentrant
+        whenNotPaused
+    {
+        Booking storage booking = bookings[bookingId];
+        require(
+            booking.customer != address(0) && booking.status == BookingStatus.Active,
+            "TruxifyEscrow: Booking not active"
+        );
+        require(!booking.paid, "TruxifyEscrow: Already paid");
+        require(newAmount > 0, "TruxifyEscrow: Invalid amount");
+
+        uint256 oldAmount = booking.amount;
+        if (newAmount > oldAmount) {
+            uint256 difference = newAmount - oldAmount;
+            require(msg.value == difference, "TruxifyEscrow: Incorrect top-up value");
+            booking.amount = newAmount;
+        } else if (newAmount < oldAmount) {
+            uint256 difference = oldAmount - newAmount;
+            booking.amount = newAmount;
+            pendingWithdrawals[booking.customer] += difference;
+            
+            uint256 customerDeadline = block.timestamp + WITHDRAWAL_TIMEOUT;
+            if (releaseTimestamps[booking.customer] == 0 || customerDeadline < releaseTimestamps[booking.customer]) {
+                releaseTimestamps[booking.customer] = customerDeadline;
+            }
+            emit WithdrawalReady(bookingId, booking.customer, difference);
+        }
+
+        emit BookingAmountUpdated(bookingId, newAmount);
     }
 
     /**

@@ -522,6 +522,34 @@ export async function listModels() {
   return handleResponse(response);
 }
 
+/**
+ * Calculates cancellation penalty using ML model.
+ * @param {object} params
+ * @param {number} params.distanceCoveredKm - Distance covered so far in km
+ * @param {number} params.totalDistanceKm - Total route distance in km
+ * @param {number} [params.totalAmount] - Booking total amount in INR
+ * @returns {Promise<{penalty_amount: number}>}
+ */
+export async function calculateCancellationPenalty({ distanceCoveredKm, totalDistanceKm, totalAmount = 1000 }) {
+  guardMlApiKey();
+  const url = `${getBaseUrl()}/ml/cancellation-penalty`;
+
+  const payload = {
+    distance_covered_km: distanceCoveredKm,
+    total_distance_km: totalDistanceKm,
+    total_amount: totalAmount,
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(5000),
+  });
+
+  return handleResponse(response);
+}
+
 export const __testing = {
   demandCache,
   priceCache

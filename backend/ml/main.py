@@ -734,6 +734,36 @@ async def recommend_trucks_endpoint(input: RecommendTrucksInput, _auth=Depends(v
 
 
 # ---------------------------------------------------------------------------
+# Cancellation Penalty Scorer
+# ---------------------------------------------------------------------------
+
+class CancellationPenaltyInput(BaseModel):
+    distance_covered_km: float = Field(..., ge=0, description="Distance covered by the driver so far in km")
+    total_distance_km: float = Field(..., gt=0, description="Total route distance in km")
+    total_amount: float = Field(default=1000.0, ge=0, description="Total amount of the booking in INR")
+
+
+class CancellationPenaltyOutput(BaseModel):
+    penalty_amount: float
+
+
+@app.post("/ml/cancellation-penalty", response_model=CancellationPenaltyOutput)
+async def cancellation_penalty_endpoint(input: CancellationPenaltyInput, _auth=Depends(verify_api_key)):
+    try:
+        ratio = min(input.distance_covered_km / input.total_distance_km, 1.0)
+        if ratio == 0:
+            penalty = 0.0
+        else:
+            base_penalty_pct = 0.10
+            penalty = (base_penalty_pct + (1.0 - base_penalty_pct) * ratio) * input.total_amount
+            penalty = min(penalty, input.total_amount)
+        return CancellationPenaltyOutput(penalty_amount=round(penalty, 2))
+    except Exception as e:
+        logger.error("Cancellation penalty calculation failed: %s", e)
+        raise HTTPException(status_code=500, detail="Calculation failed")
+
+
+# ---------------------------------------------------------------------------
 # Trust & Risk Scorer
 # ---------------------------------------------------------------------------
 

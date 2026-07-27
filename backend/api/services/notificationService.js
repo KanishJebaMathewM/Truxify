@@ -45,7 +45,7 @@ export async function sendPushNotification(fcmToken, title, body, data = {}) {
     console.error('[FCM] Error sending notification:', error.code, error.message);
     // Token invalid/expired — caller should remove from DB
     if (error.code === 'messaging/registration-token-not-registered') {
-      throw new Error('FCM_TOKEN_INVALID');
+      throw new Error('FCM_TOKEN_INVALID', { cause: error });
     }
     throw error;
   }

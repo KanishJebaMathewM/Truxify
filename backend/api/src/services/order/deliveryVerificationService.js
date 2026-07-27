@@ -212,7 +212,7 @@ export class DeliveryVerificationService {
     // 2. Execute Postgres RPC to complete the trip AFTER blockchain success
     const isRetryForStuckEscrow = order.status === 'payment_released' && ['funded', 'release_failed'].includes(order.escrow_status);
 
-    let verifiedOrder = order;
+    let verifiedOrder;
     let tripData = null;
 
     if (!isRetryForStuckEscrow) {

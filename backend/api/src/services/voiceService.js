@@ -82,7 +82,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
   }
 
   // Production Whisper call
-  let transcript = '';
+  let transcript;
   try {
     const boundary = '----VoiceAIBoundary' + Math.random().toString(16).substring(2);
     const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename || 'audio.wav'}"\r\nContent-Type: audio/wav\r\n\r\n`;
@@ -102,11 +102,11 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     transcript = whisperResponse.data.text;
   } catch (err) {
     logger.error('Whisper transcription failed:', err.message);
-    throw new Error('Transcription failed: ' + err.message);
+    throw new Error('Transcription failed: ' + err.message, { cause: err });
   }
 
   // Production LLM call
-  let responseText = '';
+  let responseText;
   try {
     const systemPrompt = `You are a freight assistant. Answer in 1-2 sentences in the customer's language (Hindi/English/Tamil).\nBooking: ${JSON.stringify(bookingData || {})}`;
     
@@ -125,11 +125,11 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     responseText = llmResponse.data.choices[0].message.content;
   } catch (err) {
     logger.error('LLM completion failed:', err.message);
-    throw new Error('LLM failed: ' + err.message);
+    throw new Error('LLM failed: ' + err.message, { cause: err });
   }
 
   // Production ElevenLabs TTS call
-  let audioUrl = '';
+  let audioUrl;
   try {
     const voiceId = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
     const ttsResponse = await axios.post(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
@@ -152,7 +152,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     audioUrl = `/api/voice/audio/${audioId}`;
   } catch (err) {
     logger.error('ElevenLabs TTS failed:', err.message);
-    throw new Error('TTS failed: ' + err.message);
+    throw new Error('TTS failed: ' + err.message, { cause: err });
   }
 
   return {

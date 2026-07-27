@@ -313,7 +313,7 @@ export function initWebSocketServer(server, orderRepository) {
     const reqUrl = new URL(req.url, 'http://localhost');
     const token    = reqUrl.searchParams.get('token');
     const bypassAuth = process.env.BYPASS_AUTH === 'true';
-    let authenticated = false;
+    let authenticated;
 
     if (bypassAuth) {
       if (process.env.NODE_ENV === 'production') {

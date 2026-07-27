@@ -57,7 +57,7 @@ class DigilockerService {
         tokenData = tokenResponse.data;
       } catch (err) {
         logger.error('Digilocker token exchange failed:', err.message);
-        throw new Error('Digilocker token exchange failed: ' + err.message);
+        throw new Error('Digilocker token exchange failed: ' + err.message, { cause: err });
       }
     }
 
@@ -107,7 +107,7 @@ class DigilockerService {
         }
       } catch (err) {
         logger.error('Failed to fetch issued documents from Digilocker:', err.message);
-        throw new Error('Failed to fetch issued documents: ' + err.message);
+        throw new Error('Failed to fetch issued documents: ' + err.message, { cause: err });
       }
     }
 
@@ -131,7 +131,7 @@ class DigilockerService {
       const docBytes = typeof doc.data === 'string' ? Buffer.from(doc.data) : doc.data;
       const docHash = ethers.keccak256(docBytes);
       
-      let txHash = null;
+      let txHash;
       if (this.contract) {
         try {
           const tx = await this.contract.registerDocument(driverWallet, doc.type, docHash, true);
@@ -139,7 +139,6 @@ class DigilockerService {
           txHash = receipt.hash;
         } catch (err) {
           logger.error(`On-chain registration failed for ${doc.type}:`, err.message);
-          // Return mock tx hash if smart contract call fails
           txHash = '0x' + crypto.randomBytes(32).toString('hex');
         }
       } else {

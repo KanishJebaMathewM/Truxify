@@ -1241,13 +1241,13 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
 
     if (result.error) {
       if (result.alreadyFunded) {
-        const { error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
+        const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
           escrow_status: 'funded',
           deposit_tx_hash: result.txHash,
           escrow_deposited_at: new Date().toISOString(),
         }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
 
-        if (!updateErr) {
+        if (!updateErr && updatedData) {
           return res.json({ message: 'Escrow deposit confirmed (recovered).', txHash: result.txHash });
         }
         return res.status(202).json({ message: 'Escrow deposit confirmed on-chain. Database sync pending.', txHash: result.txHash });
@@ -1255,7 +1255,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
       return res.status(422).json({ error: result.error });
     }
 
-    const { error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
+    const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
       escrow_status: 'funded',
       deposit_tx_hash: result.txHash,
       escrow_deposited_at: new Date().toISOString(),
@@ -1264,6 +1264,11 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     if (updateErr) {
       logger.error('[confirm-deposit] DB update failed:', updateErr.message);
       return res.status(500).json({ error: 'Database update failed after deposit confirmation. Please contact support.' });
+    }
+
+    if (!updatedData) {
+      logger.error('[confirm-deposit] No row updated — escrow_status may not have been "funding"');
+      return res.status(409).json({ error: 'Order was not in funding state. Please refresh and try again.' });
     }
 
     res.json({ message: 'Escrow deposit confirmed', txHash: result.txHash });

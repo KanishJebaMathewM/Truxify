@@ -6,10 +6,9 @@ import logger from '../../api/src/middleware/logger.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-function runLiquibase(args, password) {
+function runLiquibase(args) {
   return new Promise((resolve, reject) => {
     const child = spawn('liquibase', args, {
-      env: { ...process.env, LIQUIBASE_PASSWORD: password },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -47,10 +46,11 @@ class LiquibaseService {
                 `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
                 `--url=${this.dbUrl}`,
                 `--username=${this.username}`,
+                `--password=${this.password}`,
                 'update',
             ];
 
-            const { stdout, stderr } = await runLiquibase(args, this.password);
+            const { stdout, stderr } = await runLiquibase(args);
 
             if (stderr && !stderr.includes('WARNING')) {
                 logger.error('Migration error:', stderr);
@@ -71,11 +71,12 @@ class LiquibaseService {
                 `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
                 `--url=${this.dbUrl}`,
                 `--username=${this.username}`,
-                `rollbackCount`,
+                `--password=${this.password}`,
+                'rollbackCount',
                 `${rollbackCount}`,
             ];
 
-            const { stdout, stderr } = await runLiquibase(args, this.password);
+            const { stdout, stderr } = await runLiquibase(args);
 
             if (stderr && !stderr.includes('WARNING')) {
                 logger.error('Rollback error:', stderr);
@@ -96,10 +97,11 @@ class LiquibaseService {
                 `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
                 `--url=${this.dbUrl}`,
                 `--username=${this.username}`,
+                `--password=${this.password}`,
                 'status',
             ];
 
-            const { stdout, stderr } = await runLiquibase(args, this.password);
+            const { stdout, stderr } = await runLiquibase(args);
 
             if (stderr && !stderr.includes('WARNING')) {
                 logger.error('Status error:', stderr);
@@ -119,10 +121,11 @@ class LiquibaseService {
                 `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
                 `--url=${this.dbUrl}`,
                 `--username=${this.username}`,
+                `--password=${this.password}`,
                 'validate',
             ];
 
-            const { stdout, stderr } = await runLiquibase(args, this.password);
+            const { stdout, stderr } = await runLiquibase(args);
 
             if (stderr && !stderr.includes('WARNING')) {
                 logger.error('Validation error:', stderr);

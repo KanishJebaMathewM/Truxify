@@ -16,6 +16,13 @@ class RouteDraft {
     this.pickupLng,
     this.dropLat,
     this.dropLng,
+    this.truckType,
+    this.minCapacity,
+    this.maxCapacity,
+    this.materialType,
+    this.requiresRefrigeration,
+    this.targetTemperatureMin,
+    this.targetTemperatureMax,
   });
 
   final String pickup;
@@ -32,6 +39,13 @@ class RouteDraft {
   final double? pickupLng;
   final double? dropLat;
   final double? dropLng;
+  final String? truckType;
+  final double? minCapacity;
+  final double? maxCapacity;
+  final String? materialType;
+  final bool? requiresRefrigeration;
+  final double? targetTemperatureMin;
+  final double? targetTemperatureMax;
 }
 
 class ShipmentCardData {
@@ -59,11 +73,23 @@ class RouteCardData {
     required this.route,
     required this.pickup,
     required this.drop,
+    this.tripCount,
+    this.lastUsedDate,
+    this.pickupLat,
+    this.pickupLng,
+    this.dropLat,
+    this.dropLng,
   });
 
   final String route;
   final String pickup;
   final String drop;
+  final int? tripCount;
+  final String? lastUsedDate;
+  final double? pickupLat;
+  final double? pickupLng;
+  final double? dropLat;
+  final double? dropLng;
 }
 
 class StatCardData {
@@ -189,44 +215,16 @@ class HistoryOrderData {
     this.distanceCharge,
     this.tollCharge,
     this.platformFee,
-  });
-
-  final String orderId;
-  final String route;
-  final String date;
-  final String amount;
-  final String status;
-  final String driver;
-  final String truckNumber;
-  final List<TimelineStepData> timeline;
-  final String? blockchainTxHash;
-  final String? baseFare;
-  final String? distanceCharge;
-  final String? tollCharge;
-  final String? platformFee;
-}
-
-class HistoryOrderData {
-  const HistoryOrderData({
-    required this.orderId,
-    required this.route,
-    required this.date,
-    required this.amount,
-    required this.status,
-    required this.driver,
-    required this.truckNumber,
-    required this.timeline,
-    this.blockchainTxHash,
-    this.baseFare,
-    this.distanceCharge,
-    this.tollCharge,
-    this.platformFee,
+    this.driverPhone,
     this.goodsType,
     this.weightTonnes,
     this.dimensions,
     this.isStackable,
     this.isFragile,
     this.specialRequirements,
+    this.requiresRefrigeration,
+    this.targetTemperatureMin,
+    this.targetTemperatureMax,
   });
 
   final String orderId;
@@ -242,6 +240,7 @@ class HistoryOrderData {
   final String? distanceCharge;
   final String? tollCharge;
   final String? platformFee;
+  final String? driverPhone;
   final String? goodsType;
   final String? weightTonnes;
   final String? dimensions;

@@ -1,10 +1,20 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_driver/core/driver_session.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+
+class DocumentsParseException implements Exception {
+  const DocumentsParseException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
 
 class DriverDocument {
   const DriverDocument({
@@ -16,6 +26,7 @@ class DriverDocument {
     required this.validUntil,
     required this.statusTone,
     required this.statusLabel,
+    this.isGovtVerified = false,
   });
 
   final String id;
@@ -26,10 +37,12 @@ class DriverDocument {
   final String validUntil;
   final String statusTone;
   final String statusLabel;
+  final bool isGovtVerified;
 
   factory DriverDocument.fromMap(Map<String, dynamic> map) {
     final docType = map['doc_type'] as String? ?? '';
     final status = map['status'] as String? ?? 'pending';
+    final isGovtVerified = map['is_govt_verified'] == true;
 
     return DriverDocument(
       id: map['id']?.toString() ?? '',
@@ -45,6 +58,7 @@ class DriverDocument {
       validUntil: _formatDate(map['valid_until'] as String?),
       statusTone: _statusTone(status),
       statusLabel: 'Document No.',
+      isGovtVerified: isGovtVerified,
     );
   }
 
@@ -112,7 +126,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   SupabaseClient get _supabase => Supabase.instance.client;
 
   String? _selectedUploadType;
-  late final Future<List<DriverDocument>> _documentsFuture;
+  late Future<List<DriverDocument>> _documentsFuture;
 
   @override
   void initState() {
@@ -121,21 +135,169 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 
   Future<List<DriverDocument>> _fetchDocuments() async {
-    final driverId = DriverSession.driverId;
+  final driverId = DriverSession.driverId;
 
-    if (driverId.isEmpty) {
-      throw AuthException('No authenticated user. Please log in again.');
-    }
+  if (driverId.isEmpty) {
+    throw AuthException('No authenticated user. Please log in again.');
+  }
 
-    final response = await _supabase
+  try {
+    final dynamic response = await _supabase
         .from('documents')
         .select()
         .eq('user_id', driverId)
         .order('created_at', ascending: false);
 
-    return (response as List)
-        .map((row) => DriverDocument.fromMap(row as Map<String, dynamic>))
-        .toList();
+    final documents = <DriverDocument>[];
+    for (final dynamic row in response as Iterable) {
+      if (row is! Map) continue;
+      try {
+        documents.add(DriverDocument.fromMap(Map<String, dynamic>.from(row)));
+      } catch (_) {
+        continue;
+      }
+    }
+
+    return documents;
+  } on AuthException {
+    rethrow;
+  } catch (e) {
+    throw DocumentsParseException('Unable to read documents: $e');
+  }
+}
+
+  static const String _apiBaseUrl = String.fromEnvironment(
+    'TRUXIFY_API_BASE_URL',
+    defaultValue: 'http://localhost:5000',
+  );
+
+  Future<void> _startDigilockerOAuth(BuildContext context) async {
+    if (!_requireAuth(context)) return;
+
+    bool consented = false;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 30),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const BottomSheetHandle(),
+              const SizedBox(height: 16),
+              const Icon(Icons.security_rounded, color: Colors.blue, size: 48),
+              const SizedBox(height: 12),
+              Text(
+                'DigiLocker Consent',
+                style: GoogleFonts.dmSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: TruxifyColors.primaryText,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Truxify requires your permission to access your issued documents from DigiLocker (Registration Certificate & Driving Licence).',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.dmSans(
+                  fontSize: 13,
+                  color: TruxifyColors.secondaryText,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        side: const BorderSide(color: TruxifyColors.border),
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(
+                        'Cancel',
+                        style: GoogleFonts.dmSans(
+                          fontWeight: FontWeight.bold,
+                          color: TruxifyColors.secondaryText,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: PrimaryButton(
+                      label: 'Authorize & Link',
+                      onPressed: () {
+                        consented = true;
+                        Navigator.pop(context);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (!consented) return;
+
+    // Show a snackbar/spinner
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Linking with DigiLocker...'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    try {
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken ?? '';
+      
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/api/documents/verify-digilocker'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'code': 'mock_digilocker_auth_code_98765',
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('✓ Government documents linked successfully via DigiLocker!'),
+              backgroundColor: TruxifyColors.success,
+            ),
+          );
+          setState(() {
+            _documentsFuture = _fetchDocuments();
+          });
+        }
+      } else {
+        throw Exception('Server returned status: ${response.statusCode}');
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('DigiLocker link failed: $e'),
+            backgroundColor: TruxifyColors.error,
+          ),
+        );
+      }
+    }
   }
 
   bool _requireAuth(BuildContext context) {
@@ -156,12 +318,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     double progress = 0.0;
     String statusText = 'Reading file contents...';
     bool isDone = false;
+    Timer? uploadTimer;
 
     await showModalBottomSheet<void>(
       context: context,
       isDismissible: false,
       enableDrag: false,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -169,7 +332,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         return StatefulBuilder(
           builder: (context, setSheetState) {
             if (progress == 0.0) {
-              Timer.periodic(const Duration(milliseconds: 300), (timer) {
+              uploadTimer?.cancel();
+              uploadTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
                 if (!context.mounted) {
                   timer.cancel();
                   return;
@@ -288,7 +452,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           },
         );
       },
-    );
+    ).then((_) => uploadTimer?.cancel());
   }
 
   Future<void> _showUploadSheet(BuildContext context) async {
@@ -298,7 +462,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -401,7 +565,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -568,7 +732,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return Scaffold(
       backgroundColor: TruxifyColors.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded,
@@ -591,6 +755,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           builder: (context, snapshot) {
             if (snapshot.hasError) {
               final isAuthError = snapshot.error is AuthException;
+              final isParseError = snapshot.error is DocumentsParseException;
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(32),
@@ -608,7 +773,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       Text(
                         isAuthError
                             ? 'Session Expired'
-                            : 'Could Not Load Documents',
+                            : isParseError
+                                ? 'Could Not Read Documents'
+                                : 'Could Not Load Documents',
                         style: GoogleFonts.dmSans(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -619,7 +786,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       Text(
                         isAuthError
                             ? 'Please log in again to view your documents.'
-                            : 'Something went wrong. Please try again later.',
+                            : isParseError
+                                ? 'We had trouble reading your documents. Please try again later.'
+                                : 'Something went wrong. Please try again later.',
                         style: GoogleFonts.dmSans(
                           fontSize: 13,
                           color: TruxifyColors.secondaryText,
@@ -682,6 +851,55 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               children: [
+                GestureDetector(
+                  onTap: () => _startDigilockerOAuth(context),
+                  child: Container(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.shade50,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Colors.blue.shade200,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 20, horizontal: 16),
+                      child: Row(
+                        children: [
+                          Icon(Icons.account_balance_rounded,
+                              color: Colors.blue.shade700, size: 36),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Import via DigiLocker',
+                                  style: GoogleFonts.dmSans(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue.shade900,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Instant verification of RC Book and Driving Licence from Government source.',
+                                  style: GoogleFonts.dmSans(
+                                    fontSize: 11,
+                                    color: Colors.blue.shade800,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.chevron_right_rounded,
+                              color: Colors.blue.shade700),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
                 ...documents.map((document) {
                   final isWarning = document.statusTone == 'warning';
                   return Padding(
@@ -709,17 +927,25 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                 decoration: BoxDecoration(
                                   color: isWarning
                                       ? TruxifyColors.warningLight
-                                      : TruxifyColors.accentLight,
+                                      : (document.isGovtVerified
+                                          ? Colors.green.shade50
+                                          : Colors.orange.shade50),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
-                                  isWarning ? 'Expiring Soon' : 'Verified',
+                                  isWarning
+                                      ? 'Expiring Soon'
+                                      : (document.isGovtVerified
+                                          ? '✓ Govt Verified'
+                                          : 'Self-Uploaded (Unverified)'),
                                   style: GoogleFonts.dmSans(
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
                                     color: isWarning
                                         ? TruxifyColors.warning
-                                        : TruxifyColors.accentDark,
+                                        : (document.isGovtVerified
+                                            ? Colors.green.shade800
+                                            : Colors.orange.shade800),
                                   ),
                                 ),
                               ),

@@ -19,9 +19,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - name: Setup Node.js 20
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -50,16 +50,16 @@ jobs:
       - name: Get dependencies
         working-directory: apps/customer
         run: flutter pub get
-      - name: Run Dart Analyzer
+      - name: Run Flutter Analyzer
         working-directory: apps/customer
-        run: dart analyze
+        run: flutter analyze
 
   driver-lint:
     name: Driver App Analyzer
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -71,6 +71,6 @@ jobs:
       - name: Get dependencies
         working-directory: apps/driver
         run: flutter pub get
-      - name: Run Dart Analyzer
+      - name: Run Flutter Analyzer
         working-directory: apps/driver
-        run: dart analyze
+        run: flutter analyze

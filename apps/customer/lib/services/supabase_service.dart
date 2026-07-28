@@ -81,11 +81,21 @@ class SupabaseService {
     String? filterColumn,
     dynamic filterValue,
   }) {
-    var filter = RealtimeListenTypes.postgresChanges;
     var channel = client.channel('$table-changes');
     channel.onPostgresChanges(
       table: table,
       schema: 'public',
+      event: PostgresChangeEvent.values.firstWhere(
+        (e) => e.name == event,
+        orElse: () => PostgresChangeEvent.all,
+      ),
+      filter: filterColumn != null && filterValue != null
+          ? PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: filterColumn,
+              value: filterValue,
+            )
+          : null,
       callback: (payload) => onEvent(payload.newRecord),
     );
     channel.subscribe();

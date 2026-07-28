@@ -4,7 +4,7 @@ import logger from "../middleware/logger.js";
 import { GpsLog } from "../models/GpsLog.js";
 import { supabase } from "../config/db.js";
 
-let io;
+let io = null;
 
 /**
  * Initializes the Truxify Live Location WebSocket server on top of an existing
@@ -288,8 +288,6 @@ async function verifyCustomerToken(socket, next) {
  */
 async function verifyDriverAssignment(driverId, bookingId) {
   try {
-    const { supabase } = await import("../config/db.js");
-
     const { data, error } = await supabase
       .from("bookings")
       .select("id")
@@ -325,5 +323,12 @@ async function verifyBookingOwnership(customerId, bookingId) {
   } catch (err) {
     logger.error({ err }, '[WS] isCustomerAuthorized error');
     return false;
+  }
+}
+
+export async function closeLocationServer() {
+  if (io) {
+    io.close();
+    io = null;
   }
 }

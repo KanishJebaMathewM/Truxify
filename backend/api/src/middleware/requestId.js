@@ -5,9 +5,13 @@ const SAFE_REQUEST_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function requestIdMiddleware(req, res, next) {
   const incoming = req.headers['x-request-id'];
-  req.requestId = (typeof incoming === 'string' && SAFE_REQUEST_ID.test(incoming))
-    ? incoming
-    : randomUUID();
+  req.requestId =
+    typeof incoming === 'string' && SAFE_REQUEST_ID.test(incoming)
+      ? incoming
+      : randomUUID();
+
+  res.locals.requestId = req.requestId;
+
   res.setHeader('X-Request-Id', req.requestId);
   next();
 }
@@ -15,13 +19,25 @@ export function requestIdMiddleware(req, res, next) {
 export function requestLogger(req, res, next) {
   const start = Date.now();
   const requestedLogLevel = req.headers?.['x-log-level'];
-  let reqLogger = logger;
-  
-  if (requestedLogLevel && ['info', 'warn', 'error', 'debug', 'trace'].includes(requestedLogLevel.toLowerCase())) {
+  const childBindings = {
+    requestId: req.requestId,
+  };
+
+  if (req.correlationId) {
+    childBindings.correlationId = req.correlationId;
+  }
+
+  let reqLogger = logger.child(childBindings);
+
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    requestedLogLevel &&
+    ['info', 'warn', 'error', 'debug', 'trace'].includes(requestedLogLevel.toLowerCase())
+  ) {
     reqLogger = logger.child({});
     reqLogger.level = requestedLogLevel.toLowerCase();
   }
-  
+
   req.log = reqLogger;
 
   res.on('finish', () => {

@@ -99,8 +99,8 @@ BEGIN
   -- Use COALESCE to prefer bid_amount (immutable) over total_amount (mutable)
   UPDATE driver_details
   SET total_trips = total_trips + 1,
-      wallet_confirmed = wallet_confirmed + COALESCE(v_order.bid_amount, v_order.total_amount),
-      wallet_total = wallet_total + COALESCE(v_order.bid_amount, v_order.total_amount),
+      wallet_confirmed = wallet_confirmed + COALESCE(v_order.bid_amount, v_order.total_amount, 0),
+      wallet_total = wallet_total + COALESCE(v_order.bid_amount, v_order.total_amount, 0),
       updated_at = NOW()
   WHERE user_id = v_order.driver_id;
 
@@ -114,14 +114,14 @@ BEGIN
   ) VALUES (
     v_order.driver_id,
     v_order.order_display_id,
-    COALESCE(v_order.bid_amount, v_order.total_amount),
+    COALESCE(v_order.bid_amount, v_order.total_amount, 0),
     'credit',
     'confirmed',
     'Payout for Order ' || v_order.order_display_id
   );
 
   INSERT INTO earnings_daily (driver_id, day_date, amount, trip_count)
-  VALUES (v_order.driver_id, CURRENT_DATE, COALESCE(v_order.bid_amount, v_order.total_amount), 1)
+  VALUES (v_order.driver_id, CURRENT_DATE, COALESCE(v_order.bid_amount, v_order.total_amount, 0), 1)
   ON CONFLICT (driver_id, day_date)
   DO UPDATE SET
     amount = earnings_daily.amount + EXCLUDED.amount,
@@ -151,6 +151,7 @@ DECLARE
   v_load_status text;
   v_order_status text;
   v_current_version int;
+  v_customer_id uuid;
 BEGIN
   SELECT status INTO v_load_status
     FROM load_offers
@@ -161,13 +162,17 @@ BEGIN
     RAISE EXCEPTION 'Load offer is no longer available';
   END IF;
 
-  SELECT status, version INTO v_order_status, v_current_version
+  SELECT status, version, customer_id INTO v_order_status, v_current_version, v_customer_id
     FROM orders
     WHERE id = p_order_id
     FOR UPDATE;
 
   IF v_order_status IS NULL OR v_order_status <> 'pending' THEN
     RAISE EXCEPTION 'Order is no longer pending';
+  END IF;
+
+  IF auth.uid() <> v_customer_id THEN
+    RAISE EXCEPTION 'Not authorized to accept bids for this order';
   END IF;
 
   IF v_current_version != p_expected_version THEN
@@ -232,9 +237,9 @@ BEGIN
   WHERE user_id = p_driver_id
   FOR UPDATE;
 
-  IF v_confirmed < p_amount THEN
+  IF COALESCE(v_confirmed, 0) < p_amount THEN
     RAISE EXCEPTION 'Insufficient balance: available %, requested %',
-      v_confirmed, p_amount;
+      COALESCE(v_confirmed, 0), p_amount;
   END IF;
 
   UPDATE driver_details

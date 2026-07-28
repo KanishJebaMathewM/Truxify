@@ -22,10 +22,8 @@ Widget _buildTestEarningsApp() {
 
 void main() {
   testWidgets('EarningsScreen shows shimmer skeletons initially', (WidgetTester tester) async {
-    // Start pumping the widget without waiting for asynchronous operations to finish yet
     await tester.pumpWidget(_buildTestEarningsApp());
 
-    // Shimmer skeletons should be visible in the initial loading state
     expect(find.byType(SummaryCardsShimmer), findsOneWidget);
     expect(find.byType(HeatmapCalendarShimmer), findsOneWidget);
     expect(find.byType(SelectedDateDetailsShimmer), findsOneWidget);
@@ -34,18 +32,33 @@ void main() {
 
   testWidgets('EarningsScreen transitions from shimmer to content when load completes', (WidgetTester tester) async {
     await tester.pumpWidget(_buildTestEarningsApp());
-    
-    // Pump and wait for all asynchronous futures (loading data) to complete
+
     await tester.pumpAndSettle();
 
-    // After loading completes (and artificial delay is bypassed), shimmer skeletons should disappear
     expect(find.byType(SummaryCardsShimmer), findsNothing);
     expect(find.byType(HeatmapCalendarShimmer), findsNothing);
     expect(find.byType(SelectedDateDetailsShimmer), findsNothing);
     expect(find.byType(PendingPaymentsShimmer), findsNothing);
 
-    // The actual content widgets should now be present
     expect(find.text('Earning Calendar'), findsOneWidget);
     expect(find.text('Transaction History'), findsOneWidget);
+  });
+
+  testWidgets('EarningsScreen shows export download button in AppBar', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestEarningsApp());
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Export statement'), findsOneWidget);
+    expect(find.byIcon(Icons.file_download_outlined), findsOneWidget);
+  });
+
+  testWidgets('Export button opens date range picker', (WidgetTester tester) async {
+    await tester.pumpWidget(_buildTestEarningsApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Export statement'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Select date range for statement'), findsOneWidget);
   });
 }

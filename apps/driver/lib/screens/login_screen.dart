@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../core/app_routes.dart';
+import '../l10n/app_localizations.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';
@@ -31,6 +32,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _phoneController = TextEditingController();
   final AuthService _authService = AuthService();
   bool _loading = false;
+  String? _verificationId;
   int? _resendToken;
   String _selectedCode = '+91';
   int _expectedDigits = 10;
@@ -41,27 +43,26 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _sendOtp() async {
+  Future<void> _sendOtp() async {
     final phone = _phoneController.text.replaceAll(' ', '').trim();
 
     if (phone.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter phone number')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.pleaseEnterPhone)),
       );
       return;
     }
 
     if (int.tryParse(phone) == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid phone number')),
+        SnackBar(content: Text(AppLocalizations.of(context)!.enterValidPhone)),
       );
       return;
     }
 
     if (phone.length != _expectedDigits) {
-      final msg = _expectedDigits == 10
-          ? 'Phone number must be exactly $_expectedDigits digits for $_selectedCode'
-          : 'Phone number must be $_expectedDigits digits for $_selectedCode';
+      final l10n = AppLocalizations.of(context)!;
+      final msg = l10n.phoneMustBeExactDigits(_expectedDigits);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(msg)),
       );
@@ -93,8 +94,14 @@ class _LoginScreenState extends State<LoginScreen> {
         onVerificationFailed: (FirebaseAuthException e) {
           if (!mounted) return;
           setState(() => _loading = false);
+          
+          String errorMsg = e.message ?? AppLocalizations.of(context)!.verificationFailed;
+          if (e.code == 'network-request-failed') {
+            errorMsg = AppLocalizations.of(context)!.networkError;
+          }
+          
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.message ?? 'Verification failed')),
+            SnackBar(content: Text(errorMsg)),
           );
         },
         onAutoVerification: (PhoneAuthCredential credential) async {
@@ -107,7 +114,7 @@ class _LoginScreenState extends State<LoginScreen> {
             if (!mounted) return;
             setState(() => _loading = false);
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Auto-verification failed: $e')),
+              SnackBar(content: Text(AppLocalizations.of(context)!.autoVerificationFailed)),
             );
           }
         },
@@ -115,8 +122,14 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
+      String errorMsg = AppLocalizations.of(context)!.verificationFailed;
+      if (e is FirebaseAuthException && e.code == 'network-request-failed') {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      } else if (e.toString().contains('SocketException') || e.toString().contains('network-request-failed')) {
+        errorMsg = AppLocalizations.of(context)!.networkError;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Verification failed: $e')),
+        SnackBar(content: Text(errorMsg)),
       );
     }
   }
@@ -136,21 +149,21 @@ class _LoginScreenState extends State<LoginScreen> {
               const TruxifyLogo(size: 30),
               const SizedBox(height: 36),
               Text(
-                'Welcome, Driver',
+                AppLocalizations.of(context)!.welcomeDriver,
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                       color: colorScheme.onSurface,
                     ),
               ),
               const SizedBox(height: 8),
               Text(
-                'Log in to start earning',
+                AppLocalizations.of(context)!.logInToStartEarning,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
               ),
               const SizedBox(height: 28),
               Text(
-                'Phone Number',
+                AppLocalizations.of(context)!.phoneNumber,
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
                       color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
@@ -207,7 +220,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 20),
               PrimaryButton(
-                label: _loading ? 'Sending...' : 'Send OTP',
+                label: _loading ? AppLocalizations.of(context)!.sending : AppLocalizations.of(context)!.sendOtp,
                 onPressed: _loading ? null : _sendOtp,
               ),
               const SizedBox(height: 18),
@@ -231,7 +244,7 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
               const SizedBox(height: 18),
               Text(
-                'Protected driver access. Verified via Firebase.',
+                AppLocalizations.of(context)!.protectedDriverAccess,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       color: TruxifyColors.adaptiveSecondaryText(context),
                     ),

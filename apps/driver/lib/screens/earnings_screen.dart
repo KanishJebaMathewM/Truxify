@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:truxify_driver/l10n/app_localizations.dart';
 import 'package:truxify_driver/models/earnings_daily_model.dart';
+import 'package:truxify_driver/models/earnings_statement_model.dart';
 import 'package:truxify_driver/services/driver_earnings_service.dart';
+import 'package:truxify_driver/services/earnings_export_service.dart';
+import 'package:truxify_shared/truxify_shared.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../theme/app_theme.dart';
+import '../widgets/earnings/withdraw_bottom_sheet.dart';
 import '../widgets/earnings_shimmer.dart';
 
 class EarningsScreen extends StatefulWidget {
@@ -13,10 +19,14 @@ class EarningsScreen extends StatefulWidget {
 }
 
 class _EarningsScreenState extends State<EarningsScreen> {
+  static const double _heatmapMaxDailyEarnings = 8400.0;
+
   final DriverEarningsService _earningsService = DriverEarningsService();
+  final EarningsExportService _exportService = EarningsExportService();
 
   bool _isMonthLoading = false;
   bool _isLoading = true;
+  bool _isExporting = false;
 
   late DateTime _selectedDate;
   late int _currentYear;
@@ -28,6 +38,10 @@ class _EarningsScreenState extends State<EarningsScreen> {
   double _confirmedEarnings = 0.0;
   double _pendingEarnings = 0.0;
   double _totalEarnings = 0.0;
+  bool _showAnalyticsTab = false;
+  bool _isAnalyticsLoading = false;
+  Map<String, dynamic>? _analyticsData;
+  String _selectedPeriod = 'week';
 
   @override
   void initState() {
@@ -48,15 +62,17 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Future<void> _loadAllData() async {
     setState(() => _isLoading = true);
 
-    await Future.wait([
-      _loadMonthlyEarnings(),
-      _loadSelectedDayTrips(),
-      _loadTransactions(),
-      _loadWalletSummary(),
-    ]);
-
-    if (mounted) {
-      setState(() => _isLoading = false);
+    try {
+      await Future.wait([
+        _loadMonthlyEarnings(),
+        _loadSelectedDayTrips(),
+        _loadTransactions(),
+        _loadWalletSummary(),
+      ]);
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -73,7 +89,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
       setState(() {
         _earningsMap = {
           for (final item in data)
-            item['day_date'].toString(): EarningsDailyModel.fromMap(item),
+            item['day_date']?.toString() ?? '': EarningsDailyModel.fromMap(item),
         };
       });
     } catch (e) {
@@ -122,9 +138,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
       if (!mounted) return;
 
       setState(() {
-        _confirmedEarnings = ((summary['wallet_confirmed'] ?? 0) / 100.0);
-        _pendingEarnings = ((summary['wallet_pending'] ?? 0) / 100.0);
-        _totalEarnings = ((summary['wallet_total'] ?? 0) / 100.0);
+        _confirmedEarnings = ((summary['wallet_confirmed'] as num? ?? 0) / 100.0);
+        _pendingEarnings = ((summary['wallet_pending'] as num? ?? 0) / 100.0);
+        _totalEarnings = ((summary['wallet_total'] as num? ?? 0) / 100.0);
       });
     } catch (e) {
       debugPrint('Failed to load wallet summary: $e');
@@ -149,6 +165,9 @@ class _EarningsScreenState extends State<EarningsScreen> {
   }
 
   void _nextMonth() {
+    final now = DateTime.now();
+    if (_currentYear >= now.year && _currentMonth >= now.month) return;
+
     setState(() {
       _currentMonth++;
 
@@ -161,50 +180,12 @@ class _EarningsScreenState extends State<EarningsScreen> {
     _loadMonthlyEarnings();
   }
 
-  // Custom helper for formatting date: Thursday, 14 May 2026
   String _formatFullDate(DateTime date) {
-    final weekdays = [
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-      'Sunday'
-    ];
-    final months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December'
-    ];
-    return '${weekdays[date.weekday - 1]}, ${date.day} ${months[date.month - 1]} ${date.year}';
+    return DateFormatter.formatFullDate(date);
   }
 
   String _getMonthYearLabel(int month, int year) {
-    final months = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December'
-    ];
-    return '${months[month - 1]} $year';
+    return DateFormatter.formatMonthYear(month, year);
   }
 
   String _formatRupees(double amount) {
@@ -228,15 +209,717 @@ class _EarningsScreenState extends State<EarningsScreen> {
     return (double.tryParse(value.toString()) ?? 0.0) / 100.0;
   }
 
+  // ── Export ──────────────────────────────────────────────────────────
+
+  Future<void> _showExportDatePicker() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 2),
+      lastDate: now,
+      initialDateRange: DateTimeRange(
+        start: DateTime(now.year, now.month, 1),
+        end: now,
+      ),
+      helpText: 'Select date range for statement',
+    );
+
+    if (picked == null || !mounted) return;
+    _showExportOptions(picked.start, picked.end);
+  }
+
+  void _showExportOptions(DateTime start, DateTime end) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  height: 4,
+                  width: 40,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Export Statement',
+                style: GoogleFonts.dmSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${_formatFullDate(start)} – ${_formatFullDate(end)}',
+                style: GoogleFonts.dmSans(
+                  fontSize: 12,
+                  color: TruxifyColors.adaptiveSecondaryText(context),
+                ),
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: _exportOptionTile(
+                  icon: Icons.download_rounded,
+                  title: 'Download CSV',
+                  subtitle: 'Comma-separated values file',
+                  color: TruxifyColors.success,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _exportCsv(start, end);
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: _exportOptionTile(
+                  icon: Icons.picture_as_pdf_rounded,
+                  title: 'Export PDF',
+                  subtitle: 'Formatted earnings statement',
+                  color: TruxifyColors.warning,
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _exportPdf(start, end);
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _exportOptionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: color.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: color, size: 24),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 12,
+                        color: TruxifyColors.adaptiveSecondaryText(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded,
+                  color: TruxifyColors.adaptiveSecondaryText(context)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _exportCsv(DateTime start, DateTime end) async {
+    setState(() => _isExporting = true);
+
+    try {
+      final csv = await _earningsService.fetchStatement(
+        startDate: start,
+        endDate: end,
+        format: 'csv',
+      ) as String;
+
+      if (!mounted) return;
+
+      final startLabel =
+          '${start.year}-${start.month.toString().padLeft(2, '0')}-${start.day.toString().padLeft(2, '0')}';
+      final endLabel =
+          '${end.year}-${end.month.toString().padLeft(2, '0')}-${end.day.toString().padLeft(2, '0')}';
+      await _exportService.shareCsv(csv, 'earnings_$startLabel-$endLabel.csv');
+
+      if (!mounted) return;
+      _showSnackBar('CSV downloaded successfully', TruxifyColors.success);
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar(
+        _errorMessage(e),
+        TruxifyColors.error,
+      );
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
+  Future<void> _exportPdf(DateTime start, DateTime end) async {
+    setState(() => _isExporting = true);
+
+    try {
+      final json = await _earningsService.fetchStatement(
+        startDate: start,
+        endDate: end,
+        format: 'json',
+      );
+
+      if (!mounted) return;
+
+      final statement = EarningsStatementModel.fromJson(
+        json as Map<String, dynamic>,
+      );
+
+      await _exportService.sharePdf(statement);
+
+      if (!mounted) return;
+      _showSnackBar('PDF exported successfully', TruxifyColors.success);
+    } catch (e) {
+      if (!mounted) return;
+      _showSnackBar(
+        _errorMessage(e),
+        TruxifyColors.error,
+      );
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
+  String _errorMessage(Object e) {
+    final msg = e.toString();
+    if (msg.startsWith('Exception: ')) return msg.substring(11);
+    if (msg.startsWith('ApiException(')) {
+      final idx = msg.indexOf('): ');
+      if (idx != -1) return msg.substring(idx + 3);
+      return msg;
+    }
+    return msg;
+  }
+
+  void _showSnackBar(String message, Color color) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _showWithdrawSheet() async {
+    final didWithdraw = await showWithdrawBottomSheet(
+      context,
+      confirmedBalanceRupees: _confirmedEarnings,
+    );
+
+    if (!mounted) return;
+
+    if (didWithdraw) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLocalizations.of(context)!.withdrawalSuccessful),
+          backgroundColor: TruxifyColors.success,
+        ),
+      );
+      await _loadAllData();
+    }
+  }
+
+  Future<void> _loadAnalyticsData() async {
+    setState(() => _isAnalyticsLoading = true);
+    try {
+      final data = await _earningsService.fetchEarningsAnalytics(
+        period: _selectedPeriod,
+      );
+      setState(() {
+        _analyticsData = data;
+        _isAnalyticsLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Failed to load analytics: $e');
+      setState(() => _isAnalyticsLoading = false);
+      _showSnackBar('Failed to load analytics: $e', TruxifyColors.error);
+    }
+  }
+
+  Widget _buildPeriodToggle() {
+    final periods = ['day', 'week', 'month'];
+    final labels = {'day': 'Today', 'week': 'This Week', 'month': 'This Month'};
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: periods.map((p) {
+            final isSel = _selectedPeriod == p;
+            return Expanded(
+              child: GestureDetector(
+                onTap: () {
+                  setState(() => _selectedPeriod = p);
+                  _loadAnalyticsData();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSel ? TruxifyColors.accent.withValues(alpha: 0.1) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
+                    border: isSel ? Border.all(color: TruxifyColors.accent, width: 1.5) : null,
+                  ),
+                  child: Center(
+                    child: Text(
+                      labels[p]!,
+                      style: GoogleFonts.dmSans(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: isSel ? TruxifyColors.accent : TruxifyColors.adaptiveSecondaryText(context),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBarChartCard() {
+    if (_analyticsData == null) return const SizedBox.shrink();
+    final chartData = _analyticsData!['weekly_chart'] as List?;
+    if (chartData == null || chartData.isEmpty) return const SizedBox.shrink();
+
+    List<BarChartGroupData> barGroups = [];
+    double maxVal = 1000.0;
+
+    for (int i = 0; i < chartData.length; i++) {
+      final item = chartData[i] as Map;
+      final earningsVal = ((item['earnings'] ?? 0) / 100.0).toDouble();
+      if (earningsVal > maxVal) maxVal = earningsVal;
+
+      barGroups.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: earningsVal,
+              color: TruxifyColors.accent,
+              width: 14,
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(4),
+                topRight: Radius.circular(4),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Daily Earnings Breakdown',
+            style: GoogleFonts.dmSans(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            height: 180,
+            child: BarChart(
+              BarChartData(
+                alignment: BarChartAlignment.spaceAround,
+                maxY: maxVal * 1.1,
+                barTouchData: BarTouchData(
+                  touchTooltipData: BarTouchTooltipData(
+                    getTooltipColor: (_) => TruxifyColors.accentDark,
+                    getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                      final item = chartData[group.x] as Map;
+                      return BarTooltipItem(
+                        '${item['day']}\n₹${rod.toY.toStringAsFixed(0)}',
+                        const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      );
+                    },
+                  ),
+                ),
+                titlesData: FlTitlesData(
+                  show: true,
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      getTitlesWidget: (value, meta) {
+                        final index = value.toInt();
+                        if (index < 0 || index >= chartData.length) return const SizedBox.shrink();
+                        final item = chartData[index] as Map;
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text(
+                            item['day'].toString(),
+                            style: GoogleFonts.dmSans(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: TruxifyColors.adaptiveSecondaryText(context),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 45,
+                      getTitlesWidget: (value, meta) {
+                        return Text(
+                          '₹${value.toStringAsFixed(0)}',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 9,
+                            color: TruxifyColors.adaptiveSecondaryText(context),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                ),
+                gridData: const FlGridData(show: false),
+                borderData: FlBorderData(show: false),
+                barGroups: barGroups,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCumulativeStatsCard() {
+    if (_analyticsData == null) return const SizedBox.shrink();
+    final stats = _analyticsData!['cumulative_stats'] as Map?;
+    final deadheadCount = _analyticsData!['deadhead_trips_saved'] ?? 0;
+    if (stats == null) return const SizedBox.shrink();
+
+    final totalKm = stats['total_km'] ?? 0;
+    final avgEarning = stats['avg_earning_per_km'] ?? 0.0;
+    final lifetimeTrips = stats['lifetime_trips'] ?? 0;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Performance Metrics',
+            style: GoogleFonts.dmSans(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _buildCumulativeMetricTile(
+                icon: Icons.map_outlined,
+                color: Colors.blue,
+                label: 'Total Distance',
+                value: '$totalKm km',
+              ),
+              _buildCumulativeMetricTile(
+                icon: Icons.trending_up_rounded,
+                color: Colors.green,
+                label: 'Avg Earning/km',
+                value: '₹${(avgEarning as double).toStringAsFixed(1)}',
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _buildCumulativeMetricTile(
+                icon: Icons.local_shipping_outlined,
+                color: TruxifyColors.accent,
+                label: 'Lifetime Trips',
+                value: '$lifetimeTrips',
+              ),
+              _buildCumulativeMetricTile(
+                icon: Icons.eco_outlined,
+                color: Colors.teal,
+                label: 'Deadhead Saved',
+                value: '$deadheadCount',
+                subtitle: 'ML Deadhead Eliminator',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCumulativeMetricTile({
+    required IconData icon,
+    required Color color,
+    required String label,
+    required String value,
+    String? subtitle,
+  }) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    label,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 8,
+                        color: color,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTripsListCard() {
+    if (_analyticsData == null) return const SizedBox.shrink();
+    final trips = _analyticsData!['trips'] as List?;
+    
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Trip History Analysis',
+            style: GoogleFonts.dmSans(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (trips == null || trips.isEmpty)
+            _buildEmptyMessage('No completed trips found in this period.')
+          else
+            ...trips.map((item) {
+              final trip = item as Map;
+              final route = trip['route_label'] ?? 'Route Unavailable';
+              final gross = (trip['gross_earnings'] ?? 0) / 100.0;
+              final fuel = (trip['estimated_fuel_cost'] ?? 0) / 100.0;
+              final net = (trip['net_earnings'] ?? 0) / 100.0;
+              final receiptLink = trip['receipt_link'];
+              final displayId = trip['trip_display_id'] ?? '';
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.local_shipping, size: 16, color: TruxifyColors.accent),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            route,
+                            style: GoogleFonts.dmSans(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          displayId,
+                          style: GoogleFonts.dmSans(
+                            fontSize: 11,
+                            color: TruxifyColors.adaptiveSecondaryText(context),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _buildTripValueColumn('Gross Payment', '₹${gross.toStringAsFixed(0)}'),
+                        _buildTripValueColumn('Fuel Cost', '₹${fuel.toStringAsFixed(0)}', color: Colors.orange),
+                        _buildTripValueColumn('Net Earnings', '₹${net.toStringAsFixed(0)}', color: Colors.green, isBold: true),
+                      ],
+                    ),
+                    if (receiptLink != null) ...[
+                      const SizedBox(height: 6),
+                      GestureDetector(
+                        onTap: () async {
+                          final uri = Uri.parse(receiptLink.toString());
+                          _showSnackBar('Receipt link: $receiptLink', TruxifyColors.accent);
+                        },
+                        child: Row(
+                          children: [
+                            const Icon(Icons.link, size: 12, color: Colors.blue),
+                            const SizedBox(width: 4),
+                            Text(
+                              'On-Chain Receipt',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 11,
+                                color: Colors.blue,
+                                fontWeight: FontWeight.w600,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Divider(color: Theme.of(context).colorScheme.outlineVariant),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTripValueColumn(String label, String value, {Color? color, bool isBold = false}) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.dmSans(
+            fontSize: 10,
+            color: TruxifyColors.adaptiveSecondaryText(context),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: GoogleFonts.dmSans(
+            fontSize: 13,
+            fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
+            color: color ?? Theme.of(context).colorScheme.onSurface,
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
         backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: RefreshIndicator(
-          onRefresh: _loadAllData,
+          onRefresh: _showAnalyticsTab ? _loadAnalyticsData : _loadAllData,
           child: CustomScrollView(
             slivers: [
-              // Premium App Bar
               SliverAppBar(
                 backgroundColor: Theme.of(context).colorScheme.surface,
                 pinned: true,
@@ -250,6 +933,26 @@ class _EarningsScreenState extends State<EarningsScreen> {
                     color: Theme.of(context).colorScheme.onSurface,
                   ),
                 ),
+                actions: [
+                  if (_isExporting)
+                    const Padding(
+                      padding: EdgeInsets.only(right: 16),
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  else
+                    IconButton(
+                      icon: Icon(
+                        Icons.file_download_outlined,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                      tooltip: 'Export statement',
+                      onPressed: _isExporting ? null : _showExportDatePicker,
+                    ),
+                ],
                 bottom: PreferredSize(
                   preferredSize: const Size.fromHeight(1),
                   child: Container(
@@ -264,38 +967,126 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 20),
                   child: Column(
                     children: [
-                      if (!_isLoading && _isMonthLoading) const LinearProgressIndicator(),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        child: _isLoading
-                            ? const SummaryCardsShimmer(key: ValueKey('summary_shimmer'))
-                            : _buildOverallSummaryCards(key: const ValueKey('summary_content')),
+                      // Sliding Segmented Tab Control
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.3),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () => setState(() => _showAnalyticsTab = false),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: !_showAnalyticsTab ? TruxifyColors.accent : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        'Wallet & Calendar',
+                                        style: GoogleFonts.dmSans(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                          color: !_showAnalyticsTab ? Colors.white : TruxifyColors.adaptiveSecondaryText(context),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() => _showAnalyticsTab = true);
+                                    _loadAnalyticsData();
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    decoration: BoxDecoration(
+                                      color: _showAnalyticsTab ? TruxifyColors.accent : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Center(
+                                      child: Text(
+                                        'Analytics & Profits',
+                                        style: GoogleFonts.dmSans(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                          color: _showAnalyticsTab ? Colors.white : TruxifyColors.adaptiveSecondaryText(context),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                      const SizedBox(height: 24),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        child: _isLoading
-                            ? HeatmapCalendarShimmer(
-                                key: const ValueKey('calendar_shimmer'),
-                                currentYear: _currentYear,
-                                currentMonth: _currentMonth,
-                              )
-                            : _buildHeatmapCalendarCard(key: const ValueKey('calendar_content')),
-                      ),
-                      const SizedBox(height: 24),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        child: _isLoading
-                            ? const SelectedDateDetailsShimmer(key: ValueKey('details_shimmer'))
-                            : _buildSelectedDateDetailsCard(key: const ValueKey('details_content')),
-                      ),
-                      const SizedBox(height: 24),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 300),
-                        child: _isLoading
-                            ? const PendingPaymentsShimmer(key: ValueKey('payments_shimmer'))
-                            : _buildTransactionHistoryCard(key: const ValueKey('payments_content')),
-                      ),
+                      const SizedBox(height: 16),
+
+                      if (_showAnalyticsTab) ...[
+                        if (_isAnalyticsLoading)
+                          const Center(
+                            child: Padding(
+                              padding: EdgeInsets.symmetric(vertical: 40),
+                              child: CircularProgressIndicator(),
+                            ),
+                          )
+                        else ...[
+                          _buildPeriodToggle(),
+                          const SizedBox(height: 24),
+                          if (_selectedPeriod == 'week' || _selectedPeriod == 'month') ...[
+                            _buildBarChartCard(),
+                            const SizedBox(height: 24),
+                          ],
+                          _buildCumulativeStatsCard(),
+                          const SizedBox(height: 24),
+                          _buildTripsListCard(),
+                        ],
+                      ] else ...[
+                        if (!_isLoading && _isMonthLoading) const LinearProgressIndicator(),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          child: _isLoading
+                              ? const SummaryCardsShimmer(key: ValueKey('summary_shimmer'))
+                              : _buildOverallSummaryCards(key: const ValueKey('summary_content')),
+                        ),
+                        if (!_isLoading && _confirmedEarnings > 0) ...[
+                          const SizedBox(height: 16),
+                          _buildWithdrawButton(),
+                        ],
+                        const SizedBox(height: 24),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          child: _isLoading
+                              ? HeatmapCalendarShimmer(
+                                  key: const ValueKey('calendar_shimmer'),
+                                  currentYear: _currentYear,
+                                  currentMonth: _currentMonth,
+                                )
+                              : _buildHeatmapCalendarCard(key: const ValueKey('calendar_content')),
+                        ),
+                        const SizedBox(height: 24),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          child: _isLoading
+                              ? const SelectedDateDetailsShimmer(key: ValueKey('details_shimmer'))
+                              : _buildSelectedDateDetailsCard(key: const ValueKey('details_content')),
+                        ),
+                        const SizedBox(height: 24),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 300),
+                          child: _isLoading
+                              ? const PendingPaymentsShimmer(key: ValueKey('payments_shimmer'))
+                              : _buildTransactionHistoryCard(key: const ValueKey('payments_content')),
+                        ),
+                      ],
                       const SizedBox(height: 40),
                     ],
                   ),
@@ -397,13 +1188,41 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
+  Widget _buildWithdrawButton() {
+    final l10n = AppLocalizations.of(context)!;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _showWithdrawSheet,
+          icon: const Icon(Icons.account_balance_rounded, size: 18),
+          label: Text(
+            l10n.withdraw,
+            style: GoogleFonts.dmSans(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: TruxifyColors.accent,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildHeatmapCalendarCard({Key? key}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // Days in current selection
     final DateTime firstDay = DateTime(_currentYear, _currentMonth, 1);
-    final int firstWeekday = firstDay.weekday; // 1 = Mon, 7 = Sun
+    final int firstWeekday = firstDay.weekday;
     final int totalDays = DateTime(_currentYear, _currentMonth + 1, 0).day;
-    final int leadingEmptyCells = firstWeekday - 1; // 0-indexed offset
+    final int leadingEmptyCells = firstWeekday - 1;
 
     final int totalGridItems = leadingEmptyCells + totalDays;
 
@@ -452,7 +1271,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   ),
                 ],
               ),
-              // Month Switchers
               Row(
                 children: [
                   IconButton(
@@ -495,7 +1313,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
           ),
           const SizedBox(height: 20),
 
-          // Weekday Labels Row
           Row(
             children: ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((label) {
               return Expanded(
@@ -514,7 +1331,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
           ),
           const SizedBox(height: 10),
 
-          // Calendar Heatmap Grid
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -539,7 +1355,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
               final earningData = _earningsMap[cellKey];
               final earnings = earningData?.amount ?? 0.0;
 
-              // Determine color based on earnings magnitude relative to max ₹8,400
               Color cellBgColor = isDark
                   ? TruxifyColors.darkBorder.withValues(alpha: 0.5)
                   : Theme.of(context)
@@ -550,7 +1365,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               FontWeight textWeight = FontWeight.normal;
 
               if (earnings > 0) {
-                final double scale = (earnings / 8400.0).clamp(0.0, 1.0);
+                final double scale = (earnings / _heatmapMaxDailyEarnings).clamp(0.0, 1.0);
                 final double opacity = 0.15 + (scale * 0.75);
                 cellBgColor = TruxifyColors.accent.withValues(alpha: opacity);
 
@@ -564,7 +1379,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
                   textWeight = FontWeight.w600;
                 }
               } else if (earningData != null && earnings == 0.0) {
-                // Cancelled day (grey card outline style)
                 cellBgColor = Theme.of(context)
                     .colorScheme
                     .outlineVariant
@@ -604,7 +1418,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
                         fontWeight: isSelected ? FontWeight.bold : textWeight,
                         color: isSelected
                             ? (earnings > 0 &&
-                                    (0.15 + (earnings / 8400.0) * 0.75) > 0.6
+                                    (0.15 + (earnings / _heatmapMaxDailyEarnings) * 0.75) > 0.6
                                 ? Colors.white
                                 : TruxifyColors.accent)
                             : textColor,
@@ -617,7 +1431,6 @@ class _EarningsScreenState extends State<EarningsScreen> {
           ),
           const SizedBox(height: 16),
 
-          // Heatmap Legend
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
@@ -851,7 +1664,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
             _buildEmptyMessage('No transactions found.')
           else
             ..._transactions.map((item) {
-              final amount = ((item['amount'] ?? 0) / 100.0);
+              final amount = ((item['amount'] as num? ?? 0) / 100.0);
               final isConfirmed = item['status'] == 'confirmed';
               final txHash = item['tx_hash'];
 

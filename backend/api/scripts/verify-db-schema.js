@@ -10,7 +10,27 @@ const REQUIRED_RPC_FUNCTIONS = [
   'withdraw_funds_tx',
   'complete_trip_tx',
   'submit_rating_tx',
+  'cancel_order_tx',
+  'release_escrow_tx',
+  'refund_escrow_tx',
+  'update_trip_status_tx',
 ];
+
+const REQUIRED_INDEXES = [
+  'profiles_role_idx',
+  'orders_customer_idx',
+  'orders_driver_idx',
+  'trucks_owner_idx',
+  'trips_driver_idx',
+  'load_offers_status_idx',
+];
+
+const TABLE_CATEGORIES = {
+  core: ['profiles', 'orders', 'trips', 'trucks'],
+  marketplace: ['load_offers', 'bids', 'routes'],
+  financial: ['wallet_transactions', 'escrow_transactions'],
+  support: ['support_tickets', 'faqs', 'notifications'],
+};
 
 const icons = {
   pass: '✓',

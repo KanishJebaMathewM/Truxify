@@ -1,4 +1,4 @@
-import { supabase, redisClient } from '../config/db.js';
+import { supabaseAdmin, redisClient } from '../config/db.js';
 import { awardReputationPoints } from './reputation.js';
 import logger from '../middleware/logger.js';
 import os from 'os';
@@ -12,6 +12,11 @@ let reconciliationTimer = null;
 let reconciliationRunning = false;
 
 export async function reconcileFailedReputationUpdates() {
+  if (!supabaseAdmin) {
+    logger.warn('[reputation-reconciliation] supabaseAdmin not available — skipping cycle');
+    return;
+  }
+
   let lockAcquired = false;
   let leaseExtender = null;
 
@@ -31,8 +36,11 @@ export async function reconcileFailedReputationUpdates() {
         }
       }, LEASE_EXTENSION_INTERVAL_MS);
     } catch (err) {
-      logger.error('[reputation-reconciliation] Failed to acquire Redis lock:', err.message);
+      logger.error('[reputation-reconciliation] Failed to acquire Redis lock, skipping batch:', err.message);
+      return;
     }
+  } else {
+    // Redis not configured — single-instance mode, use in-process guard only
   }
 
   if (!lockAcquired) {
@@ -42,7 +50,7 @@ export async function reconcileFailedReputationUpdates() {
 
   try {
     const instanceId = process.env.HOSTNAME || os.hostname();
-    const { data: failedReputations, error } = await supabase
+    const { data: failedReputations, error } = await supabaseAdmin
       .from('reputation_failures')
       .select('*')
       .lt('retry_count', MAX_RETRIES)
@@ -69,16 +77,23 @@ export async function reconcileFailedReputationUpdates() {
       }
 
       try {
+        const { error: deleteError } = await supabaseAdmin.from('reputation_failures').delete().eq('id', row.id);
+        if (deleteError) {
+          throw new Error(`Failed to claim reputation failure ${row.id} for processing: ${deleteError.message}`);
+        }
+
         await awardReputationPoints(row.driver_wallet, row.stars);
-        await supabase.from('reputation_failures').delete().eq('id', row.id);
         logger.info(`[reputation-reconciliation] Successfully retried reputation update for ${row.driver_wallet}`);
       } catch (err) {
         const newRetryCount = (row.retry_count ?? 0) + 1;
-        await supabase.from('reputation_failures').update({
+        await supabaseAdmin.from('reputation_failures').upsert({
+          id: row.id,
+          driver_wallet: row.driver_wallet,
+          stars: row.stars,
           retry_count: newRetryCount,
           last_error: err.message,
           last_attempt_at: new Date().toISOString(),
-        }).eq('id', row.id);
+        });
         logger.warn(`[reputation-reconciliation] Retry ${newRetryCount}/${MAX_RETRIES} failed for ${row.driver_wallet}: ${err.message}`);
       }
     }
@@ -89,9 +104,8 @@ export async function reconcileFailedReputationUpdates() {
     if (lockAcquired && redisClient) {
       await redisClient.del(LOCK_KEY).catch(() => {});
     }
-    if (!lockAcquired) {
-      reconciliationRunning = false;
-    }
+    // Always reset running flag so fallback/single-instance logic doesn't permanently deadlock
+    reconciliationRunning = false;
   }
 }
 

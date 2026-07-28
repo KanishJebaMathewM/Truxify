@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                      http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.1.xsd">
+
+    <changeSet id="1" author="truxify">
+        <comment>Create users table</comment>
+        <createTable tableName="users">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="email" type="VARCHAR(255)">
+                <constraints unique="true" nullable="false"/>
+            </column>
+            <column name="name" type="VARCHAR(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="phone" type="VARCHAR(20)"/>
+            <column name="role" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="is_verified" type="BOOLEAN" defaultValueBoolean="false"/>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="2" author="truxify">
+        <comment>Create drivers table</comment>
+        <createTable tableName="drivers">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="user_id" type="BIGINT">
+                <constraints foreignKeyName="fk_driver_user" references="users(id)"/>
+            </column>
+            <column name="truck_number" type="VARCHAR(50)">
+                <constraints unique="true" nullable="false"/>
+            </column>
+            <column name="truck_type" type="VARCHAR(50)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="VARCHAR(50)" defaultValue="OFFLINE"/>
+            <column name="rating" type="DECIMAL(3,2)" defaultValue="0"/>
+            <column name="total_trips" type="INT" defaultValue="0"/>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="3" author="truxify">
+        <comment>Create orders table</comment>
+        <createTable tableName="orders">
+            <column name="id" type="BIGINT" autoIncrement="true">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="customer_id" type="BIGINT">
+                <constraints foreignKeyName="fk_order_customer" references="users(id)"/>
+            </column>
+            <column name="driver_id" type="BIGINT">
+                <constraints foreignKeyName="fk_order_driver" references="drivers(id)"/>
+            </column>
+            <column name="status" type="VARCHAR(50)" defaultValue="PENDING"/>
+            <column name="amount" type="DECIMAL(10,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="pickup_lat" type="DECIMAL(10,8)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="pickup_lng" type="DECIMAL(11,8)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="drop_lat" type="DECIMAL(10,8)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="drop_lng" type="DECIMAL(11,8)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="distance" type="DECIMAL(10,2)"/>
+            <column name="weight" type="DECIMAL(10,2)"/>
+            <column name="created_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" type="TIMESTAMP" defaultValueComputed="CURRENT_TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+
+    <changeSet id="4" author="truxify">
+        <comment>Create indexes</comment>
+        <createIndex tableName="orders" indexName="idx_orders_customer">
+            <column name="customer_id"/>
+        </createIndex>
+        <createIndex tableName="orders" indexName="idx_orders_driver">
+            <column name="driver_id"/>
+        </createIndex>
+        <createIndex tableName="orders" indexName="idx_orders_status">
+            <column name="status"/>
+        </createIndex>
+        <createIndex tableName="orders" indexName="idx_orders_created_at">
+            <column name="created_at"/>
+        </createIndex>
+    </changeSet>
+
+</databaseChangeLog>

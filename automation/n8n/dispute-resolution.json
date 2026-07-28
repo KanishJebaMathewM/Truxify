@@ -1,0 +1,395 @@
+{
+  "name": "Dispute Resolution and Escalation Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "dispute-trigger",
+        "options": {}
+      },
+      "id": "1d8ea83e-d9a4-4db2-a9b0-30f16f5c5315",
+      "name": "Dispute Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/payments/freeze",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$json.body.bookingId}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4e78b8a5-d8ca-43bc-9cb7-78fe7ea9b10c",
+      "name": "Freeze Payment Contract",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "find",
+        "collection": "driver_locations",
+        "query": "={\"bookingId\": \"{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}\"}"
+      },
+      "id": "dcf3bc23-a1bc-4eb2-9b2f-7fb32d2c884c",
+      "name": "Query MongoDB GPS Trail",
+      "type": "n8n-nodes-base.mongoDb",
+      "typeVersion": 1,
+      "position": [
+        650,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "table": "delivery_otps",
+        "filters": {
+          "conditions": [
+            {
+              "key": "order_id",
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
+            }
+          ]
+        }
+      },
+      "id": "67beee7c-5432-47ef-b1fa-22cd998b2cba",
+      "name": "Query Supabase OTP Logs",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        650,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/support/generate-dispute-pdf",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
+            },
+            {
+              "name": "gpsTrail",
+              "value": "={{$node[\"Query MongoDB GPS Trail\"].json}}"
+            },
+            {
+              "name": "otpLogs",
+              "value": "={{$node[\"Query Supabase OTP Logs\"].json}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f512c1b1-21c2-4632-bd88-12cd2a8aefaa",
+      "name": "Package Dispute PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        850,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/support/notify-dispute",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
+            },
+            {
+              "name": "title",
+              "value": "Dispute Flagged: Delivery Unconfirmed"
+            },
+            {
+              "name": "body",
+              "value": "A dispute has been initiated for booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "76bcca3e-51c3-4d44-be12-2cde2a5bdeee",
+      "name": "Notify Both Parties",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1050,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 24,
+        "unit": "hours"
+      },
+      "id": "c198b22a-cf12-4fcf-b677-2e118ca8cbba",
+      "name": "Wait 24h",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        1250,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.BACKEND_API_URL}}/api/orders/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+        "options": {}
+      },
+      "id": "a98cc7b5-fe1c-4b5c-b1d1-678fe1a22bbb",
+      "name": "Check Dispute Resolution",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        1450,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.status}}",
+              "value2": "disputed"
+            }
+          ]
+        }
+      },
+      "id": "b3cd4fe2-99ab-47bc-ae1f-2877cbefee11",
+      "name": "Is Still Unresolved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1650,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "table": "arbitration_records",
+        "data": {
+          "booking_id": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+          "status": "pending",
+          "details": "Escalated after 24h of inactivity"
+        }
+      },
+      "id": "dc12cbb5-a87f-47bc-9b2f-9811abecdd33",
+      "name": "Create Arbitration Record",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1850,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escalation Alert: Arbitration Required for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+        "textBody": "=The dispute for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}} has remained unresolved for 24 hours. Please review the packaged GPS trail and OTP logs.",
+        "options": {}
+      },
+      "id": "fa21bc87-c1d9-482a-a92c-29b1aa8b9cda",
+      "name": "Email Admin",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        1850,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "admin-resolution",
+        "options": {}
+      },
+      "id": "5b23dca9-48cf-4ef2-ba2e-ffbc8601dd77",
+      "name": "Admin Resolution Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        250,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.BACKEND_API_URL}}/api/payments/release",
+        "sendBody": true,
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "bookingId",
+              "value": "={{$json.body.bookingId}}"
+            },
+            {
+              "name": "recipient",
+              "value": "={{$json.body.recipient}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "cc897db2-6d2c-47bc-ad78-87efcdbc5a8f",
+      "name": "Release Escrow Payment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        500,
+        600
+      ]
+    }
+  ],
+  "connections": {
+    "Dispute Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Freeze Payment Contract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Freeze Payment Contract": {
+      "main": [
+        [
+          {
+            "node": "Query MongoDB GPS Trail",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Query Supabase OTP Logs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query MongoDB GPS Trail": {
+      "main": [
+        [
+          {
+            "node": "Package Dispute PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Supabase OTP Logs": {
+      "main": [
+        [
+          {
+            "node": "Package Dispute PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Package Dispute PDF": {
+      "main": [
+        [
+          {
+            "node": "Notify Both Parties",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify Both Parties": {
+      "main": [
+        [
+          {
+            "node": "Wait 24h",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 24h": {
+      "main": [
+        [
+          {
+            "node": "Check Dispute Resolution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Dispute Resolution": {
+      "main": [
+        [
+          {
+            "node": "Is Still Unresolved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Still Unresolved?": {
+      "main": [
+        [
+          {
+            "node": "Create Arbitration Record",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Admin Resolution Webhook": {
+      "main": [
+        [
+          {
+            "node": "Release Escrow Payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {}
+}

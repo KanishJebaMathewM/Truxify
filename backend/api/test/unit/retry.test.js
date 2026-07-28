@@ -4,6 +4,29 @@ vi.mock('../../src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+vi.mock('../../src/core/telemetry/SpanFactory.js', () => ({
+  default: {
+    startRetrySpan: vi.fn(() => ({
+      setAttributes: vi.fn(),
+      end: vi.fn(),
+    })),
+    recordError: vi.fn(),
+    startSpan: vi.fn(() => ({
+      setAttributes: vi.fn(),
+      end: vi.fn(),
+    })),
+  },
+  STANDARD_ATTRIBUTES: {},
+  SPAN_NAMES: {},
+}));
+
+vi.mock('../../src/core/telemetry/ContextPropagator.js', () => ({
+  ContextPropagator: {
+    snapshot: vi.fn(() => ({ traceparent: '00-test' })),
+    restore: vi.fn((_snapshot, fn) => fn()),
+  },
+}));
+
 const { executeWithRetry, isRetryable } = await import('../../src/core/retry.js');
 
 const logger = (await import('../../src/middleware/logger.js')).default;

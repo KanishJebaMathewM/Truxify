@@ -1,0 +1,217 @@
+{
+  "name": "ML Model Auto-Rollback Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "hours": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "schedule-trigger",
+      "name": "Schedule Check"
+    },
+    {
+      "parameters": {
+        "url": "http://ml-engine:8000/ab-testing/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.ML_API_KEY}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        200,
+        0
+      ],
+      "id": "check-active-tests",
+      "name": "Check Active Tests"
+    },
+    {
+      "parameters": {
+        "url": "={{$node[\"Check Active Tests\"].json.active_test ? 'http://ml-engine:8000/ab-testing/evaluate/' + $node[\"Check Active Tests\"].json.active_test.test_id : 'http://ml-engine:8000/ab-testing/status'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.ML_API_KEY}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        400,
+        0
+      ],
+      "id": "evaluate-test",
+      "name": "Evaluate Test"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const data = $input.item.json;\nconst shouldRollback = Boolean(data.should_rollback || (data.metrics && data.metrics.degradation > 0.15));\nreturn {\n  test_id: data.test_id || 'test-default',\n  should_rollback: shouldRollback,\n  action: shouldRollback ? 'rollback' : 'promote',\n  evaluated_at: new Date().toISOString()\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        600,
+        0
+      ],
+      "id": "decision-node",
+      "name": "Decision"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.should_rollback}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        800,
+        0
+      ],
+      "id": "rollback-branch",
+      "name": "Should Rollback?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ml-engine:8000/ab-testing/rollback/={{$node[\"Decision\"].json.test_id}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{$env.ML_API_KEY}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1000,
+        -100
+      ],
+      "id": "execute-rollback",
+      "name": "Execute Rollback"
+    },
+    {
+      "parameters": {
+        "toEmail": "ml-alerts@truxify.org",
+        "subject": "⚠️ ML Model Auto-Rollback Triggered: {{$node[\"Decision\"].json.test_id}}",
+        "htmlFormat": true,
+        "message": "<h3>ML Model Auto-Rollback Triggered</h3><p>Model performance degradation was detected for test ID: <strong>{{$node[\"Decision\"].json.test_id}}</strong>.</p><p>Auto-rollback executed successfully at: {{$node[\"Decision\"].json.evaluated_at}}.</p><p>Previous stable model baseline has been restored.</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        -100
+      ],
+      "id": "send-alert",
+      "name": "Send Alert"
+    }
+  ],
+  "connections": {
+    "schedule-trigger": {
+      "main": [
+        [
+          {
+            "node": "check-active-tests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check-active-tests": {
+      "main": [
+        [
+          {
+            "node": "evaluate-test",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "evaluate-test": {
+      "main": [
+        [
+          {
+            "node": "decision-node",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "decision-node": {
+      "main": [
+        [
+          {
+            "node": "rollback-branch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "rollback-branch": {
+      "main": [
+        [
+          {
+            "node": "execute-rollback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "execute-rollback": {
+      "main": [
+        [
+          {
+            "node": "send-alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "ml-rollback-v1",
+  "id": "ml-rollback-workflow"
+}

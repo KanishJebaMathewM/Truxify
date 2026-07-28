@@ -31,7 +31,7 @@ function buildApp() {
 }
 
 const DRIVER_HEADERS = {
-  'x-user-id': '11111111-1111-4111-8111-111111111111',
+  'x-user-id': 'driver-1',
   'x-user-role': 'driver',
 };
 
@@ -60,7 +60,7 @@ describe('Driver Routes', () => {
 
   it('GET /stats returns driver statistics', async () => {
     m.store.driver_details.push({
-      user_id: '11111111-1111-4111-8111-111111111111',
+      user_id: 'driver-1',
       rating: 4.9,
       total_trips: 50,
       completion_rate: 98,
@@ -85,7 +85,7 @@ describe('Driver Routes', () => {
 
   it('GET /stats returns truck details when truck assigned', async () => {
     m.store.driver_details.push({
-      user_id: '11111111-1111-4111-8111-111111111111',
+      user_id: 'driver-1',
       rating: 5,
       total_trips: 10,
       completion_rate: 100,
@@ -153,7 +153,7 @@ describe('Driver Routes', () => {
 
   it('GET /wallet/history returns transactions', async () => {
     m.store.wallet_transactions.push({
-      driver_id: '11111111-1111-4111-8111-111111111111',
+      driver_id: 'driver-1',
       amount: 500,
       created_at: '2026-06-01',
     });
@@ -170,7 +170,7 @@ describe('Driver Routes', () => {
 
   it('GET /earnings/summary returns earnings data', async () => {
     m.store.earnings_daily.push({
-      driver_id: '11111111-1111-4111-8111-111111111111',
+      driver_id: 'driver-1',
       day_date: '2026-06-01',
       amount: 5000,
       trip_count: 3,
@@ -191,8 +191,8 @@ describe('Driver Routes', () => {
     const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
     m.store.earnings_daily.push(
-      { driver_id: '11111111-1111-4111-8111-111111111111', day_date: yesterday, amount: 1000, trip_count: 1 },
-      { driver_id: '11111111-1111-4111-8111-111111111111', day_date: today, amount: 2000, trip_count: 2 }
+      { driver_id: 'driver-1', day_date: yesterday, amount: 1000, trip_count: 1 },
+      { driver_id: 'driver-1', day_date: today, amount: 2000, trip_count: 2 }
     );
 
     const app = buildApp();
@@ -219,8 +219,8 @@ describe('Driver Routes', () => {
     const oldDateStr = oldDate.toISOString().split('T')[0];
 
     m.store.earnings_daily.push(
-      { driver_id: '11111111-1111-4111-8111-111111111111', day_date: oldDateStr, amount: 500, trip_count: 1 },
-      ...dates.map((d, i) => ({ driver_id: '11111111-1111-4111-8111-111111111111', day_date: d, amount: (i + 1) * 100, trip_count: i + 1 }))
+      { driver_id: 'driver-1', day_date: oldDateStr, amount: 500, trip_count: 1 },
+      ...dates.map((d, i) => ({ driver_id: 'driver-1', day_date: d, amount: (i + 1) * 100, trip_count: i + 1 }))
     );
 
     const app = buildApp();
@@ -263,7 +263,7 @@ describe('Driver Routes', () => {
 
   it('POST /wallet/withdraw rejects insufficient balance', async () => {
     m.store.driver_details.push({
-      user_id: '11111111-1111-4111-8111-111111111111',
+      user_id: 'driver-1',
       wallet_confirmed: 1000,
     });
 
@@ -280,7 +280,7 @@ describe('Driver Routes', () => {
 
   it('POST /wallet/withdraw succeeds and calls RPC', async () => {
     m.store.driver_details.push({
-      user_id: '11111111-1111-4111-8111-111111111111',
+      user_id: 'driver-1',
       wallet_confirmed: 10000,
     });
 
@@ -364,7 +364,7 @@ describe('Driver Routes', () => {
 
   it('POST /wallet/withdraw returns 400 when RPC fails', async () => {
     m.store.driver_details.push({
-      user_id: '11111111-1111-4111-8111-111111111111',
+      user_id: 'driver-1',
       wallet_confirmed: 10000,
     });
 
@@ -387,13 +387,19 @@ describe('Driver Routes', () => {
   });
 
   describe('GET /:driverId/reputation', () => {
+    const validDriverId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+    const validHeaders = {
+      'x-user-id': validDriverId,
+      'x-user-role': 'driver',
+    };
+
     beforeEach(() => {
       getDriverReputationMock.mockReset();
     });
 
     it('returns both platform rating and on-chain score when wallet exists and blockchain responds', async () => {
       m.store.driver_details.push({
-        user_id: '11111111-1111-4111-8111-111111111111',
+        user_id: validDriverId,
         rating: 4.8,
         polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
       });
@@ -402,12 +408,12 @@ describe('Driver Routes', () => {
 
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/11111111-1111-4111-8111-111111111111/reputation')
-        .set(DRIVER_HEADERS);
+        .get(`/api/drivers/${validDriverId}/reputation`)
+        .set(validHeaders);
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        driverId: '11111111-1111-4111-8111-111111111111',
+        driverId: validDriverId,
         walletAddress: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
         onChainScore: 92,
         supabaseRating: 4.8,
@@ -417,19 +423,19 @@ describe('Driver Routes', () => {
 
     it('returns onChainScore null and walletAddress null when driver has no wallet', async () => {
       m.store.driver_details.push({
-        user_id: '11111111-1111-4111-8111-111111111111',
+        user_id: validDriverId,
         rating: 4.8,
         polygon_wallet_address: null,
       });
 
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/11111111-1111-4111-8111-111111111111/reputation')
-        .set(DRIVER_HEADERS);
+        .get(`/api/drivers/${validDriverId}/reputation`)
+        .set(validHeaders);
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        driverId: '11111111-1111-4111-8111-111111111111',
+        driverId: validDriverId,
         walletAddress: null,
         onChainScore: null,
         supabaseRating: 4.8,
@@ -439,7 +445,7 @@ describe('Driver Routes', () => {
 
     it('returns onChainScore null and supabase rating when blockchain/contract fails', async () => {
       m.store.driver_details.push({
-        user_id: '11111111-1111-4111-8111-111111111111',
+        user_id: validDriverId,
         rating: 4.8,
         polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
       });
@@ -448,12 +454,12 @@ describe('Driver Routes', () => {
 
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/11111111-1111-4111-8111-111111111111/reputation')
-        .set(DRIVER_HEADERS);
+        .get(`/api/drivers/${validDriverId}/reputation`)
+        .set(validHeaders);
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        driverId: '11111111-1111-4111-8111-111111111111',
+        driverId: validDriverId,
         walletAddress: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
         onChainScore: null,
         supabaseRating: 4.8,
@@ -464,8 +470,8 @@ describe('Driver Routes', () => {
     it('returns 404 if driver profile is not found', async () => {
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/11111111-1111-4111-8111-111111111111/reputation')
-        .set(DRIVER_HEADERS);
+        .get(`/api/drivers/${validDriverId}/reputation`)
+        .set(validHeaders);
 
       expect(res.status).toBe(404);
     });
@@ -478,8 +484,8 @@ describe('Driver Routes', () => {
 
     it('returns the paginated bids response shape consumed by the driver app', async () => {
       m.store.load_bids.push(
-        { id: 'bid-1', driver_id: '11111111-1111-4111-8111-111111111111', load_id: 'load-1', bid_amount: 5000, created_at: '2026-01-02T00:00:00.000Z' },
-        { id: 'bid-2', driver_id: '11111111-1111-4111-8111-111111111111', load_id: 'load-2', bid_amount: 7500, created_at: '2026-01-01T00:00:00.000Z' },
+        { id: 'bid-1', driver_id: 'driver-1', load_id: 'load-1', bid_amount: 5000, created_at: '2026-01-02T00:00:00.000Z' },
+        { id: 'bid-2', driver_id: 'driver-1', load_id: 'load-2', bid_amount: 7500, created_at: '2026-01-01T00:00:00.000Z' },
       );
 
       const app = buildApp();
@@ -501,7 +507,7 @@ describe('Driver Routes', () => {
 
     it('only returns bids belonging to the requesting driver', async () => {
       m.store.load_bids.push(
-        { id: 'bid-mine', driver_id: '11111111-1111-4111-8111-111111111111', load_id: 'load-1', bid_amount: 5000, created_at: '2026-01-01T00:00:00.000Z' },
+        { id: 'bid-mine', driver_id: 'driver-1', load_id: 'load-1', bid_amount: 5000, created_at: '2026-01-01T00:00:00.000Z' },
         { id: 'bid-other', driver_id: 'driver-2', load_id: 'load-2', bid_amount: 9000, created_at: '2026-01-01T00:00:00.000Z' },
       );
 
@@ -512,6 +518,228 @@ describe('Driver Routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.bids.map((b) => b.id)).toEqual(['bid-mine']);
+    });
+  });
+
+  describe('GET /statement & GET /earnings/report', () => {
+    beforeEach(() => {
+      m.store.orders = [];
+    });
+
+    it('returns empty list and summary when no trips exist', async () => {
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/statement')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.summary).toEqual({
+        total_trips: 0,
+        total_base_freight: 0,
+        total_platform_fees: 0,
+        total_toll_estimate: 0,
+        total_net_earnings: 0
+      });
+      expect(res.body.trips).toEqual([]);
+    });
+
+    it('filters trips and aggregates earnings for the driver on /statement', async () => {
+      m.store.orders.push(
+        {
+          id: 'order-1',
+          driver_id: 'driver-1',
+          status: 'payment_released',
+          pickup_address: 'A',
+          drop_address: 'B',
+          pickup_date: '2026-06-01',
+          base_freight: 10000,
+          platform_fee: 500,
+          toll_estimate: 1500
+        },
+        {
+          id: 'order-2',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'C',
+          drop_address: 'D',
+          pickup_date: '2026-06-05',
+          base_freight: 20000,
+          platform_fee: 1000,
+          toll_estimate: 2000
+        },
+        {
+          id: 'order-other-driver',
+          driver_id: 'other-driver',
+          status: 'payment_released',
+          pickup_address: 'E',
+          drop_address: 'F',
+          pickup_date: '2026-06-02',
+          base_freight: 15000,
+          platform_fee: 750,
+          toll_estimate: 1000
+        }
+      );
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/statement?start_date=2026-06-02')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.summary).toEqual({
+        total_trips: 1,
+        total_base_freight: 20000,
+        total_platform_fees: 1000,
+        total_toll_estimate: 2000,
+        total_net_earnings: 19000
+      });
+      expect(res.body.trips).toHaveLength(1);
+      expect(res.body.trips[0].id).toBe('order-2');
+    });
+
+    it('filters trips and aggregates earnings for the driver on /earnings/report', async () => {
+      m.store.orders.push(
+        {
+          id: 'order-1',
+          driver_id: 'driver-1',
+          status: 'payment_released',
+          pickup_address: 'A',
+          drop_address: 'B',
+          pickup_date: '2026-06-01',
+          base_freight: 10000,
+          platform_fee: 500,
+          toll_estimate: 1500
+        },
+        {
+          id: 'order-2',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'C',
+          drop_address: 'D',
+          pickup_date: '2026-06-05',
+          base_freight: 20000,
+          platform_fee: 1000,
+          toll_estimate: 2000
+        }
+      );
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/earnings/report?start_date=2026-06-02')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.summary).toEqual({
+        total_trips: 1,
+        total_base_freight: 20000,
+        total_platform_fees: 1000,
+        total_toll_estimate: 2000,
+        total_net_earnings: 19000
+      });
+      expect(res.body.trips).toHaveLength(1);
+      expect(res.body.trips[0].id).toBe('order-2');
+    });
+
+    it('returns CSV formatting and security headers when format=csv is passed', async () => {
+      m.store.orders.push({
+        id: 'order-1',
+        driver_id: 'driver-1',
+        status: 'delivered',
+        pickup_address: '=A1',
+        drop_address: 'B',
+        pickup_date: '2026-06-01',
+        base_freight: 10000,
+        platform_fee: 500,
+        toll_estimate: 1500
+      });
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/statement?format=csv')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/csv');
+      expect(res.headers['content-type']).toContain('charset=utf-8');
+      expect(res.headers['content-disposition']).toBe('attachment; filename="statement.csv"');
+      expect(res.text).toContain('"order-1"');
+      expect(res.text).toContain('"10000"');
+      // Verify CSV Formula Injection escaping
+      expect(res.text).toContain('"' + "'=A1" + '"');
+    });
+
+    it('sorts statement trips by net earnings when sort_by=net_earnings is passed', async () => {
+      m.store.orders.push(
+        {
+          id: 'order-low-earn',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'A',
+          drop_address: 'B',
+          pickup_date: '2026-06-01',
+          base_freight: 10000,
+          platform_fee: 1000,
+          toll_estimate: 0
+        },
+        {
+          id: 'order-high-earn',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'C',
+          drop_address: 'D',
+          pickup_date: '2026-06-05',
+          base_freight: 30000,
+          platform_fee: 1000,
+          toll_estimate: 0
+        }
+      );
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/statement?sort_by=net_earnings')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.trips).toHaveLength(2);
+      expect(res.body.trips[0].id).toBe('order-high-earn');
+    });
+
+    it('sorts statement trips properly in CSV format when sort_by=net_earnings and format=csv are both passed', async () => {
+      m.store.orders.push(
+        {
+          id: 'order-low-earn',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'A',
+          drop_address: 'B',
+          pickup_date: '2026-06-01',
+          base_freight: 10000,
+          platform_fee: 1000,
+          toll_estimate: 0
+        },
+        {
+          id: 'order-high-earn',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'C',
+          drop_address: 'D',
+          pickup_date: '2026-06-05',
+          base_freight: 30000,
+          platform_fee: 1000,
+          toll_estimate: 0
+        }
+      );
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/statement?sort_by=net_earnings&format=csv')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      const lines = res.text.split('\n');
+      // lines[0] is headers, lines[1] should be the high-earning order, lines[2] should be low-earning order
+      expect(lines[1]).toContain('"order-high-earn"');
+      expect(lines[2]).toContain('"order-low-earn"');
     });
   });
 });

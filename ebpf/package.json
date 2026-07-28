@@ -1,0 +1,7 @@
+{
+  "name": "truxify-ebpf",
+  "version": "1.0.0",
+  "dependencies": {
+    "express-rate-limit": "^6.10.0"
+  }
+}

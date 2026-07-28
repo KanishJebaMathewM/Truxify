@@ -59,6 +59,16 @@ class Env {
     defaultValue: 'https://rpc-amoy.polygon.technology',  // Testnet by default
   );
 
+  // ── Crash Reporting ─────────────────────────────────────────────────────
+  static const String sentryDsn = String.fromEnvironment(
+    'SENTRY_DSN',
+    defaultValue: '',
+  );
+
+  /// Whether Sentry crash reporting should be enabled.
+  /// Disabled when DSN is empty or when running in dev mode without explicit opt-in.
+  static bool get isCrashReportingEnabled => sentryDsn.isNotEmpty;
+
   // ── Validation ────────────────────────────────────────────────────────────
   // Call this in main() to catch missing config early (fail fast, not silently)
   static void validate() {

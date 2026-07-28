@@ -1,14 +1,24 @@
-# Deployment Guide — TruxifyEscrow
+# Deployment Guide — Truxify Contracts
 
 ## Overview
 
-This document describes how to deploy the `TruxifyEscrow` smart contract and configure the backend to use it.
+This document describes how to deploy the `TruxifyEscrow` and `Reputation` smart contracts and configure the backend to use them.
 
-## Contract
+## Contracts
 
-- **File**: `contracts/TruxifyEscrow.sol`
-- **Compiler**: Solidity `^0.8.20`
-- **Dependencies**: OpenZeppelin (ReentrancyGuard, Ownable, Pausable)
+| Contract | File | Solidity | Constructor Args |
+|----------|------|----------|-----------------|
+| TruxifyEscrow | `contracts/TruxifyEscrow.sol` | `^0.8.20` | None (Ownable uses msg.sender) |
+| Reputation | `contracts/Reputation.sol` | `^0.8.24` | `address initialRelayer` |
+
+**Dependencies**: OpenZeppelin (ReentrancyGuard, Ownable, Pausable)
+
+## Prerequisites
+
+```bash
+cd blockchain
+npm install
+```
 
 ## Deployment Steps
 
@@ -16,37 +26,42 @@ This document describes how to deploy the `TruxifyEscrow` smart contract and con
 
 ```bash
 export POLYGON_RPC_URL=https://polygon-amoy.g.alchemy.com/v2/YOUR_KEY
-export PRIVATE_KEY=your_deployer_wallet_private_key
+export RELAYER_PRIVATE_KEY=0xYourDeployerPrivateKey
 ```
 
-### 2. Deploy Using Hardhat Ignition
+> **Note**: The config also accepts `DEPLOYER_PRIVATE_KEY` as a fallback. Never commit private keys.
+
+### 2. Deploy Using Hardhat Ignition (Recommended)
 
 ```bash
 cd blockchain
 npx hardhat ignition deploy ignition/modules/TruxifyEscrow.ts --network amoy
 ```
 
-Or using the standalone deploy script:
+This deploys both `TruxifyEscrow` and `Reputation` in a single Ignition execution.
+
+### 3. Deploy Using Standalone Script (Alternative)
 
 ```bash
 cd blockchain
-RELAYER_WALLET_ADDRESS=0xYourRelayerAddress node scripts/deploy.js
+npx hardhat run scripts/deploy.js --network amoy
 ```
 
-### 3. Record the Deployed Address
+### 4. Record the Deployed Addresses
 
-After deployment, note the contract address and set it in the backend `.env`:
+After deployment, note the contract addresses and set them in the backend `.env`:
 
 ```env
-ESCROW_CONTRACT_ADDRESS=0xDeployedContractAddress
+ESCROW_CONTRACT_ADDRESS=0xTruxifyEscrowAddress
+REPUTATION_CONTRACT_ADDRESS=0xReputationAddress
 ```
 
 ## Per-Network Addresses
 
-| Network | Contract Address | Deploy Date | Notes |
-|---------|-----------------|-------------|-------|
-| Amoy (testnet) | TBD | — | Development |
-| Polygon mainnet | TBD | — | Production |
+| Network | TruxifyEscrow | Reputation | Deploy Date | Notes |
+|---------|--------------|------------|-------------|-------|
+| Amoy (testnet) | TBD | TBD | — | Development |
+| Polygon mainnet | TBD | TBD | — | Production |
 
 ## Startup Verification
 

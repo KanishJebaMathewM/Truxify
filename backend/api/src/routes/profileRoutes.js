@@ -1,6 +1,95 @@
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     ProfileResponse:
+ *       type: object
+ *       properties:
+ *         profile:
+ *           type: object
+ *         extra:
+ *           type: object
+ *           nullable: true
+ *     ProfileNameResponse:
+ *       type: object
+ *       properties:
+ *         full_name:
+ *           type: string
+ *     UpdateWalletRequest:
+ *       type: object
+ *       required:
+ *         - wallet_address
+ *       properties:
+ *         wallet_address:
+ *           type: string
+ *           pattern: '^0x[a-fA-F0-9]{40}$'
+ *     UpdateWalletResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *         walletAddress:
+ *           type: string
+ *     UpdateProfileRequest:
+ *       type: object
+ *       properties:
+ *         full_name:
+ *           type: string
+ *         language:
+ *           type: string
+ *         dark_mode:
+ *           type: boolean
+ *         is_online:
+ *           type: boolean
+ *     UpdateProfileResponse:
+ *       type: object
+ *       properties:
+ *         message:
+ *           type: string
+ *         profile:
+ *           type: object
+ *     UpdateFcmTokenRequest:
+ *       type: object
+ *       required:
+ *         - fcmToken
+ *       properties:
+ *         fcmToken:
+ *           type: string
+ *           nullable: true
+ *     DriverStatementResponse:
+ *       type: object
+ *       properties:
+ *         summary:
+ *           type: object
+ *           properties:
+ *             total_trips:
+ *               type: integer
+ *             total_base_freight:
+ *               type: number
+ *             total_platform_fees:
+ *               type: number
+ *             total_toll_estimate:
+ *               type: number
+ *             total_net_earnings:
+ *               type: number
+ *         trips:
+ *           type: array
+ *           items:
+ *             type: object
+ *     CacheInvalidateResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *         message:
+ *           type: string
+ */
+
 import express from 'express';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import { z } from 'zod';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateBody, validateQuery, validateParams } from '../middleware/validate.js';
 import { updateProfileSchema, updateWalletSchema, driverStatementSchema, uuidParamSchema, updateFcmTokenSchema } from '../validation/requestSchemas.js';
 import logger from '../middleware/logger.js';
@@ -11,10 +100,11 @@ import {
 } from '../services/profileService.js';
 import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
-import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
-import { startTimer, endTimer } from '../lib/routeTiming.js';
+import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
+import { auditLog } from '../middleware/auditLog.js';
+
 const router = express.Router();
-const routeTimer = startTimer('profileRoutes');
+
 
 // Cache control middleware for profile endpoints
 function profileCacheControl(req, res, next) {
@@ -25,7 +115,25 @@ function profileCacheControl(req, res, next) {
   next();
 }
 
-// GET PROFILE
+/**
+ * @openapi
+ * /api/profile:
+ *   get:
+ *     tags: [Profile]
+ *     summary: Get authenticated user's profile
+ *     description: Returns the full profile including role-specific data (customer stats or driver details). Cached for 30 seconds.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Profile data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ProfileResponse'
+ *       404:
+ *         description: Profile not found
+ */
 router.get('/', authenticate, userLimiter, async (req, res) => {
   try {
     const userId = req.user.id;
@@ -62,7 +170,53 @@ router.get('/', authenticate, userLimiter, async (req, res) => {
   }
 });
 
+// GET CUSTOMER STATS
+router.get('/customer-stats', authenticate, userLimiter, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const role = req.user.role;
+
+    if (role !== 'customer') {
+      return res.status(403).json({ error: 'Customer stats are only available for customer accounts.' });
+    }
+
+    const stats = await getCustomerStats(userId);
+    return res.json({ stats: ProfileModel.fromCustomerStats(stats) });
+  } catch (err) {
+    return res.status(500).json({
+      error: 'Failed to fetch customer stats',
+      details: err.message
+    });
+  }
+});
+
 // GET PROFILE NAME BY ID
+/**
+ * @openapi
+ * /api/profile/{id}/name:
+ *   get:
+ *     tags: [Profile]
+ *     summary: Get profile name by ID
+ *     description: Returns the full name of a user by their UUID.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Profile name
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ProfileNameResponse'
+ *       404:
+ *         description: Profile not found
+ */
 router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
     const { data: profile, error } = await supabase
@@ -80,7 +234,33 @@ router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchem
   }
 });
 
-// UPDATE WALLET ADDRESS
+/**
+ * @openapi
+ * /api/profile/wallet:
+ *   put:
+ *     tags: [Profile]
+ *     summary: Update wallet address
+ *     description: Updates the user's Polygon wallet address. Validates checksum format (0x-prefixed, 40 hex chars). For drivers, also syncs to driver_details table. Invalidates profile cache.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateWalletRequest'
+ *     responses:
+ *       200:
+ *         description: Wallet address updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/UpdateWalletResponse'
+ *       400:
+ *         description: Invalid wallet address
+ *       409:
+ *         description: Wallet address already registered
+ */
 router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema), async (req, res) => {
   const userId = req.user.id;
   const { wallet_address } = req.body;
@@ -134,7 +314,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
     if (req.user && req.user.id) {
       try {
-        await invalidateCachedSupabaseProfile(req.user.id);
+        await invalidateCachedSupabaseProfileAll(req.user.id);
       } catch (err) {
         logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
       }
@@ -146,7 +326,31 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
   }
 });
 
-// UPDATE PROFILE (basic version)
+/**
+ * @openapi
+ * /api/profile:
+ *   put:
+ *     tags: [Profile]
+ *     summary: Update profile
+ *     description: Updates basic profile fields (full_name, language, dark_mode) and optionally driver online status. Invalidates Redis cache.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateProfileRequest'
+ *     responses:
+ *       200:
+ *         description: Profile updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/UpdateProfileResponse'
+ *       400:
+ *         description: Validation error
+ */
 router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), async (req, res) => {
   try {
     const userId = req.user.id;
@@ -183,7 +387,7 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     }
     if (req.user && req.user.id) {
       try {
-        await invalidateCachedSupabaseProfile(req.user.id);
+        await invalidateCachedSupabaseProfileAll(req.user.id);
       } catch (err) {
         logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
       }
@@ -202,9 +406,34 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
   }
 });
 
-// UPDATE FCM TOKEN
-// Stores or clears the device FCM token for push notification delivery.
-// Invalidates Redis cache so the next authenticated request picks up the new token.
+/**
+ * @openapi
+ * /api/profile/fcm-token:
+ *   put:
+ *     tags: [Profile]
+ *     summary: Update FCM push notification token
+ *     description: Stores or clears the device FCM token for push notification delivery. Pass null to clear. Invalidates Redis cache.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/UpdateFcmTokenRequest'
+ *     responses:
+ *       200:
+ *         description: FCM token updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ */
 router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenSchema), async (req, res) => {
   try {
     const userId = req.user.id;
@@ -229,7 +458,7 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
     }
     if (req.user.id) {
       try {
-        await invalidateCachedSupabaseProfile(req.user.id);
+        await invalidateCachedSupabaseProfileAll(req.user.id);
       } catch (err) {
         logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
       }
@@ -241,8 +470,46 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
   }
 });
 
+/**
+ * @openapi
+ * /api/profile/driver/statement:
+ *   get:
+ *     tags: [Profile]
+ *     summary: Get driver earnings statement
+ *     description: Returns a detailed earnings statement for the authenticated driver. Supports date range filtering, sorting, and CSV export.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: start_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: end_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: sort_by
+ *         schema:
+ *           type: string
+ *           enum: [net_earnings, base_freight]
+ *       - in: query
+ *         name: format
+ *         schema:
+ *           type: string
+ *           enum: [csv]
+ *     responses:
+ *       200:
+ *         description: Driver earnings statement
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DriverStatementResponse'
+ */
 // GET DRIVER STATEMENT
-router.get('/driver/statement', authenticate, requireRole(['driver']), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
+router.get('/driver/statement', authenticate, requirePolicy('profile:view-statement'), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
   const userId = req.user.id;
   const { start_date, end_date, sort_by, format } = req.query;
 
@@ -299,11 +566,18 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
 
     if (format === 'csv') {
       // Optimize memory: construct CSV string directly using string builder/loop
+      const sanitizeCsvValue = (val) => {
+        const str = String(val);
+        if (/^[=+\-@\t\r]/.test(str)) {
+          return `"'"${str.replace(/"/g, '""')}"`;
+        }
+        return `"${str.replace(/"/g, '""')}"`;
+      };
       const headers = ['ID', 'Order Display ID', 'Pickup Address', 'Drop Address', 'Pickup Date', 'Base Freight', 'Platform Fee', 'Toll Estimate', 'Net Earnings', 'Status'];
-      let csvString = headers.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',') + '\n';
+      let csvString = headers.map(val => sanitizeCsvValue(val)).join(',') + '\n';
       for (const t of tripsList) {
         const row = [t.id, t.order_display_id, t.pickup_address, t.drop_address, t.pickup_date, t.base_freight, t.platform_fee, t.toll_estimate, t.net_earnings, t.status];
-        csvString += row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',') + '\n';
+        csvString += row.map(val => sanitizeCsvValue(val)).join(',') + '\n';
       }
       res.setHeader('Content-Type', 'text/csv');
       return res.send(csvString.trimEnd());
@@ -332,11 +606,39 @@ router.get('/driver/statement', authenticate, requireRole(['driver']), userLimit
   }
 });
 
+/**
+ * @openapi
+ * /api/profile/admin/cache/{userId}:
+ *   delete:
+ *     tags: [Profile]
+ *     summary: Invalidate user profile cache (Admin)
+ *     description: Invalidates Redis and Supabase profile cache for a specific user. Accepts UUID or Firebase UID. Requires admin role.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: User UUID or Firebase UID
+ *     responses:
+ *       200:
+ *         description: Cache invalidated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/CacheInvalidateResponse'
+ *       400:
+ *         description: userId parameter required
+ *       404:
+ *         description: Profile not found
+ */
 // ADMIN CACHE INVALIDATION
 // Invalidates the profile cache for a specific user, forcing the next
 // authenticated request to refetch from Supabase. Use this after admin
 // operations that change role, status, or other cached profile fields.
-router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), validateParams(uuidParamSchema), async (req, res) => {
+router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('admin:invalidate-cache'), auditLog({ action: 'admin:invalidate-cache', resourceType: 'user_profile_cache' }), validateParams(z.object({ userId: z.string().min(1, 'userId is required') })), async (req, res) => {
   try {
     const targetUserId = req.params.userId;
     if (!targetUserId) {
@@ -378,7 +680,7 @@ router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), vali
 
     await Promise.all([
       profile.firebase_uid ? invalidateCachedProfile(profile.firebase_uid) : Promise.resolve(),
-      invalidateCachedSupabaseProfile(profile.id),
+      invalidateCachedSupabaseProfileAll(profile.id),
     ]);
 
     return res.json({ success: true, message: `Cache invalidated for user ${profile.id}.` });
@@ -387,7 +689,6 @@ router.delete('/admin/cache/:userId', authenticate, requireRole(['admin']), vali
   }
 });
 
-endTimer(routeTimer);
 export default router;
 
 // Resolves #2046: DELETE /admin/cache/:userId endpoint

@@ -26,10 +26,13 @@ def test_health():
     assert data["status"] in {"healthy", "degraded"}
     assert data["service"] == "ml-engine"
     assert set(data["models"]) == {
-        "eta_predictor",
         "demand_forecast",
         "price_forecast",
         "driver_profit",
+        "trust_scorer",
+        "collaborative_filter",
+        "eta_predictor",
+        "traffic_eta",
     }
 
 

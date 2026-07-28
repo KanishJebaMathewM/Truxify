@@ -1,0 +1,61 @@
+apiVersion: policy.linkerd.io/v1beta1
+kind: Server
+metadata:
+  name: api-server
+  namespace: truxify
+spec:
+  podSelector:
+    matchLabels:
+      app: api
+  port: 5000
+  proxyProtocol: HTTP/1
+---
+apiVersion: policy.linkerd.io/v1beta1
+kind: Server
+metadata:
+  name: ml-server
+  namespace: truxify
+spec:
+  podSelector:
+    matchLabels:
+      app: ml-engine
+  port: 8000
+  proxyProtocol: HTTP/1
+---
+apiVersion: policy.linkerd.io/v1beta1
+kind: Server
+metadata:
+  name: redis-server
+  namespace: truxify
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  port: 6379
+  proxyProtocol: TCP
+---
+apiVersion: policy.linkerd.io/v1beta1
+kind: ServerAuthorization
+metadata:
+  name: api-auth
+  namespace: truxify
+spec:
+  server:
+    name: api-server
+  client:
+    - mesh: true
+  authentication:
+    - mesh: true
+---
+apiVersion: policy.linkerd.io/v1beta1
+kind: ServerAuthorization
+metadata:
+  name: ml-auth
+  namespace: truxify
+spec:
+  server:
+    name: ml-server
+  client:
+    - mesh: true
+  authentication:
+    - mesh: true

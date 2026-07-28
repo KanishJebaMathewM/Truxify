@@ -1,0 +1,47 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: prometheus-trigger-auth
+  namespace: truxify
+spec:
+  secretTargetRef:
+  - parameter: bearerToken
+    name: prometheus-token
+    key: token
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: kafka-trigger-auth
+  namespace: truxify
+spec:
+  secretTargetRef:
+  - parameter: sasl
+    name: kafka-secret
+    key: sasl
+  - parameter: username
+    name: kafka-secret
+    key: username
+  - parameter: password
+    name: kafka-secret
+    key: password
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prometheus-token
+  namespace: truxify
+type: Opaque
+data:
+  token: <base64-encoded-token>
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kafka-secret
+  namespace: truxify
+type: Opaque
+data:
+  sasl: <base64-encoded-sasl>
+  username: <base64-encoded-username>
+  password: <base64-encoded-password>

@@ -336,27 +336,27 @@ Once the stack is running, you can reach the local services here:
 - [x] Database schema design
 
 ### Phase 2 — Core Platform (Current)
-- [ ] User authentication (Firebase)
-- [ ] Load posting and bidding
-- [ ] Basic ML matching
-- [ ] Live tracking (WebSockets + OSM)
+- [x] User authentication (Firebase)
+- [x] Load posting and bidding
+- [x] Basic ML matching
+- [x] Live tracking (WebSockets + OSM)
 
 ### Phase 3 — Intelligence
-- [ ] Full 10-model ML pipeline
-- [ ] FastAPI inference service
-- [ ] Dynamic pricing
-- [ ] Deadhead elimination
+- [x] Full 10-model ML pipeline
+- [x] FastAPI inference service
+- [x] Dynamic pricing
+- [x] Deadhead elimination
 
 ### Phase 4 — Trust Layer
-- [ ] Polygon smart contracts
-- [ ] UPI escrow integration
-- [ ] Digilocker document verification
-- [ ] On-chain reputation
+- [x] Polygon smart contracts
+- [x] UPI escrow integration
+- [x] Digilocker document verification
+- [x] On-chain reputation
 
 ### Phase 5 — Automation + Voice
-- [ ] n8n dispute pipeline
-- [ ] ML retraining trigger
-- [ ] Voice AI integration
+- [x] n8n dispute pipeline
+- [x] ML retraining trigger
+- [x] Voice AI integration
 - [ ] Multi-language support (English, Hindi, Tamil)
 
 ### Phase 6 — Production

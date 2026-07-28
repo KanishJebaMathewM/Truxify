@@ -185,17 +185,33 @@ class DriverProfitPredictor:
 
         prediction = float(self.model.predict(features)[0])
 
-        # Confidence interval from ensemble staged predictions
+        # Confidence interval.
+        # `staged_predict` yields the CUMULATIVE prediction after each boosting
+        # stage (starting near 0 and climbing to the final value). Taking the
+        # std-dev across those cumulative values measures training progression,
+        # not posterior uncertainty, and can produce negative bounds. Instead we
+        # use the spread of the per-stage (per-tree) *contributions*, which is a
+        # meaningful proxy for model disagreement/uncertainty, and we clamp the
+        # lower bound to be non-negative.
         staged_preds = np.array(
             [pred for pred in self.model.staged_predict(features)]
         ).flatten()
-        std_dev = float(np.std(staged_preds)) if len(staged_preds) > 1 else abs(prediction) * 0.1
+        if len(staged_preds) > 1:
+            increments = np.diff(staged_preds)
+            std_dev = float(np.std(increments))
+        else:
+            std_dev = abs(prediction) * 0.1
+        # Guarantee a non-trivial, non-negative band.
+        std_dev = max(std_dev, abs(prediction) * 0.05)
+
+        lower = max(0.0, prediction - 1.96 * std_dev)
+        upper = prediction + 1.96 * std_dev
 
         return {
             "predicted_profit": round(prediction, 2),
             "confidence_interval": {
-                "lower": round(prediction - 1.96 * std_dev, 2),
-                "upper": round(prediction + 1.96 * std_dev, 2),
+                "lower": round(lower, 2),
+                "upper": round(upper, 2),
             },
         }
 

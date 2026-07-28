@@ -2,9 +2,17 @@ export function requireJsonContent(req, res, next) {
   // Only enforce on mutating requests
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
     const contentType = req.headers['content-type'];
-    
+
     if (!contentType) {
-      return res.status(415).json({ error: 'Unsupported Media Type. Content-Type header is missing.' });
+      return res.status(415).json({
+        error: 'Unsupported Media Type.',
+        received: undefined,
+        allowed: [
+          'application/json',
+          'application/x-www-form-urlencoded',
+          'multipart/form-data',
+        ],
+      });
     }
 
     // Compare the base media type exactly (ignoring parameters such as
@@ -24,7 +32,11 @@ export function requireJsonContent(req, res, next) {
     }
 
     // Reject all other content types
-    return res.status(415).json({ error: 'Unsupported Media Type. Expected application/json.' });
+    return res.status(415).json({
+      error: 'Unsupported Media Type.',
+      received: mimeType,
+      allowed,
+    });
   }
 
   // Pass through for GET, DELETE, etc.

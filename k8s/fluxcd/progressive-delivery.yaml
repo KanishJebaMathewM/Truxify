@@ -1,0 +1,96 @@
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: api-canary
+  namespace: truxify
+spec:
+  provider: istio
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-deployment
+  progressDeadlineSeconds: 60
+  service:
+    port: 5000
+    targetPort: 5000
+  analysis:
+    interval: 30s
+    threshold: 10
+    maxWeight: 50
+    stepWeight: 10
+    metrics:
+      - name: success-rate
+        templateRef:
+          name: success-rate
+          namespace: istio-system
+        thresholdRange:
+          min: 95
+      - name: latency
+        templateRef:
+          name: latency
+          namespace: istio-system
+        thresholdRange:
+          max: 0.5
+    webhooks:
+      - name: acceptance-test
+        type: pre-rollout
+        url: http://flagger-loadtester/
+        timeout: 30s
+        metadata:
+          cmd: "curl -s http://api-service/health | grep OK"
+---
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: ml-canary
+  namespace: truxify
+spec:
+  provider: istio
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ml-deployment
+  progressDeadlineSeconds: 60
+  service:
+    port: 8000
+    targetPort: 8000
+  analysis:
+    interval: 30s
+    threshold: 10
+    maxWeight: 50
+    stepWeight: 10
+    metrics:
+      - name: success-rate
+        templateRef:
+          name: ml-success-rate
+          namespace: istio-system
+        thresholdRange:
+          min: 90
+    webhooks:
+      - name: ml-test
+        type: pre-rollout
+        url: http://flagger-loadtester/
+        timeout: 30s
+        metadata:
+          cmd: "curl -s http://ml-engine-service/health | grep healthy"
+---
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: redis-canary
+  namespace: truxify
+spec:
+  provider: istio
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: redis-deployment
+  progressDeadlineSeconds: 60
+  service:
+    port: 6379
+    targetPort: 6379
+  analysis:
+    interval: 30s
+    threshold: 5
+    maxWeight: 30
+    stepWeight: 10

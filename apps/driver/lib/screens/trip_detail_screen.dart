@@ -9,6 +9,10 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/common_widgets.dart';
+import 'chat_screen.dart';
+
+import 'dart:async';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class TripDetailScreen extends StatefulWidget {
   final Trip trip;
@@ -22,18 +26,40 @@ class TripDetailScreen extends StatefulWidget {
 class _TripDetailScreenState extends State<TripDetailScreen> {
   final MapController _mapController = MapController();
   late Future<_RouteResult?> _routeFuture;
+  late StreamSubscription<List<ConnectivityResult>> _connectivitySubscription;
+  bool _isOffline = false;
 
   @override
   void initState() {
     super.initState();
     _routeFuture = _loadRouteForTrip(widget.trip.route);
+    
+    // Check initial connectivity
+    Connectivity().checkConnectivity().then((result) {
+      if (mounted) {
+        setState(() {
+          _isOffline = result.contains(ConnectivityResult.none);
+        });
+      }
+    });
+
+    // Listen for changes
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen((result) {
+      if (mounted) {
+        setState(() {
+          _isOffline = result.contains(ConnectivityResult.none);
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
+    _connectivitySubscription.cancel();
     _mapController.dispose();
     super.dispose();
   }
+
   Future<void> _openGoogleMapsRoute() async {
     final routeResult = await _routeFuture;
     final start = routeResult?.start;
@@ -69,6 +95,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       }
     }
   }
+
   void _showBlockchainBottomSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -233,6 +260,97 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       ),
     );
   }
+  
+  Widget _buildCargoHandlingSection(BuildContext context, TripItem item) {
+  final hasNotes = (item.specialRequirements ?? '').trim().isNotEmpty;
+
+  if (!item.isFragile && item.isStackable && !hasNotes) {
+    return const SizedBox.shrink();
+  }
+
+  return Container(
+    margin: const EdgeInsets.only(top: 8),
+    padding: const EdgeInsets.all(8),
+    decoration: BoxDecoration(
+      color: Theme.of(context).brightness == Brightness.dark
+          ? TruxifyColors.darkSecondaryBackground
+          : TruxifyColors.secondaryBackground,
+      borderRadius: BorderRadius.circular(8),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 6,
+          runSpacing: 4,
+          children: [
+            if (item.isFragile)
+              _cargoBadge(
+                icon: Icons.warning_amber_rounded,
+                label: 'Fragile',
+                color: Colors.orange,
+              ),
+            if (!item.isStackable)
+              _cargoBadge(
+                icon: Icons.layers_clear,
+                label: 'Non-stackable',
+                color: TruxifyColors.errorRed,
+              ),
+          ],
+        ),
+        if (hasNotes) ...[
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.notes_rounded, size: 14, color: TruxifyColors.hintText),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  item.specialRequirements!.trim(),
+                  style: GoogleFonts.dmSans(
+                    fontSize: 11,
+                    color: TruxifyColors.adaptiveSecondaryText(context),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
+Widget _cargoBadge({
+  required IconData icon,
+  required String label,
+  required Color color,
+}) {
+  return Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: color.withValues(alpha: 0.4)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 12, color: color),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: GoogleFonts.dmSans(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
+      ],
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -281,6 +399,26 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (_isOffline)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                color: TruxifyColors.errorRed,
+                child: Row(
+                  children: [
+                    const Icon(Icons.cloud_off, color: Colors.white, size: 16),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Offline Mode. Progress saved locally.',
+                      style: GoogleFonts.dmSans(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             // 1. Route Hero Card
             Container(
               width: double.infinity,
@@ -384,10 +522,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                             Text(
                               'Earnings',
                               style: GoogleFonts.dmSans(
-                                color:Theme.of(context)
-                                              .colorScheme
-                                              .onSurface
-                                              .withValues(alpha: 0.6),
+                                color: Colors.white.withValues(alpha: 0.5),
                                 fontSize: 10,
                               ),
                             ),
@@ -626,62 +761,80 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
                     ),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: item.delivered
-                              ? TruxifyColors.success
-                              : TruxifyColors.errorRed,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.customerName,
-                              style: GoogleFonts.dmSans(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: Theme.of(context).colorScheme.onSurface,
-                              ),
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: item.delivered
+                                  ? TruxifyColors.success
+                                  : TruxifyColors.errorRed,
                             ),
-                            const SizedBox(height: 2),
-                            Row(
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  item.goods,
+                                  item.customerName,
                                   style: GoogleFonts.dmSans(
-                                    fontSize: 11,
-                                    color: TruxifyColors.adaptiveSecondaryText(context),
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                   ),
                                 ),
-                                Text(
-                                  ' → ${item.destination}',
-                                  style: GoogleFonts.dmSans(
-                                    fontSize: 11,
-                                    color: TruxifyColors.accent,
-                                    fontWeight: FontWeight.w500,
-                                  ),
+                                const SizedBox(height: 2),
+                                Row(
+                                  children: [
+                                    Text(
+                                      item.goods,
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 11,
+                                        color: TruxifyColors.adaptiveSecondaryText(context),
+                                      ),
+                                    ),
+                                    Text(
+                                      ' → ${item.destination}',
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 11,
+                                        color: TruxifyColors.accent,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
-                          ],
-                        ),
+                          ),
+                          Text(
+                            item.earnings,
+                            style: GoogleFonts.dmSans(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: TruxifyColors.accent,
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => ChatScreen(trip: trip),
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.chat_bubble_outline_rounded, color: TruxifyColors.accent, size: 20),
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.only(left: 12),
+                          ),
+                        ],
                       ),
-                      Text(
-                        item.earnings,
-                        style: GoogleFonts.dmSans(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
-                          color: TruxifyColors.accent,
-                        ),
-                      ),
+                      _buildCargoHandlingSection(context, item),
                     ],
                   ),
                 );

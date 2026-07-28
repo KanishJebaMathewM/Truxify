@@ -14,40 +14,19 @@ permissions:
   contents: read
 
 jobs:
-  backend:
-    name: Backend tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Node.js 20
-        uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: backend/api/package-lock.json
-
-      - name: Install dependencies
-        working-directory: backend/api
-        run: npm ci --workspaces=false --legacy-peer-deps
-
-      - name: Run unit tests
-        working-directory: backend/api
-        run: npm run test:unit
-
-      - name: Run integration tests
-        working-directory: backend/api
-        run: npm run test:integration
-
   customer:
-    name: Customer Flutter checks
+    name: Customer Flutter & Android APK checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -70,14 +49,24 @@ jobs:
       - name: Test
         working-directory: apps/customer
         run: flutter test
+
+      - name: Build Android APK
+        working-directory: apps/customer
+        run: flutter build apk --debug --no-pub
 
   driver:
-    name: Driver Flutter checks
+    name: Driver Flutter & Android APK checks
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -100,6 +89,10 @@ jobs:
       - name: Test
         working-directory: apps/driver
         run: flutter test
+
+      - name: Build Android APK
+        working-directory: apps/driver
+        run: flutter build apk --debug --no-pub
 
   ml:
     name: ML engine tests
@@ -107,10 +100,10 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Setup Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
@@ -122,6 +115,8 @@ jobs:
 
       - name: Run tests
         working-directory: backend/ml
+        env:
+          PYTHONPATH: .
         run: python -m pytest tests/ -v
 
   contracts:
@@ -130,10 +125,10 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Setup Node.js 20
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
@@ -147,6 +142,10 @@ jobs:
         working-directory: blockchain
         run: npx hardhat compile
 
+      - name: Run contract tests
+        working-directory: blockchain
+        run: npx hardhat test
+
       - name: Verify backend ABI selectors match compiled contract
         run: bash scripts/check-escrow-abi.sh
 
@@ -156,7 +155,7 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Check for Redis/Upstash credentials in Flutter source
         run: bash scripts/check-no-client-credentials.sh

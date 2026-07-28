@@ -186,6 +186,82 @@ class CollaborativeFilter:
         except ValueError:
             return None
 
+    # -- private recommendation pipeline ------------------------------------
+
+    def _recommend(
+        self,
+        user_id: str,
+        entity_type: str,
+        ids: List[str],
+        popular: np.ndarray,
+        approx: np.ndarray,
+        booking_history: List[Dict[str, Any]],
+        booking_key: str,
+        top_n: int,
+    ) -> Dict[str, Any]:
+        """Shared recommendation pipeline for any entity type.
+
+        Parameters
+        ----------
+        user_id : str
+            Requesting user identifier (used for logging).
+        entity_type : str
+            ``"load"`` or ``"truck"`` (used for logging and output keys).
+        ids : list[str]
+            Entity IDs aligned with the columns of *approx*.
+        popular : np.ndarray
+            Popularity-sorted indices (cold-start fallback).
+        approx : np.ndarray
+            SVD-reconstructed user–entity score matrix.
+        booking_history : list[dict]
+            Past bookings used to filter already-seen entities.
+        booking_key : str
+            Key in each booking dict that holds the entity ID
+            (``"load_id"`` or ``"truck_id"``).
+        top_n : int
+            Number of recommendations to return.
+
+        Returns
+        -------
+        dict
+            ``{"recommendations": [{entity_type + "_id": ..., "relevance_score": ...}, ...]}``
+        """
+        idx = self._user_index(user_id)
+
+        # Cold-start fallback
+        if idx is None:
+            logger.info(
+                "Cold start for user '%s'; returning popular %ss.", user_id, entity_type,
+            )
+            recs = []
+            for rank, ei in enumerate(popular[:top_n]):
+                recs.append({
+                    f"{entity_type}_id": ids[int(ei)],
+                    "relevance_score": round(1.0 - rank * 0.05, 4),
+                })
+            return {"recommendations": recs}
+
+        scores = approx[idx]
+
+        # Exclude already-booked entities
+        booked_ids = {b.get(booking_key) for b in booking_history if booking_key in b}
+        masked_scores = scores.copy()
+        for i, eid in enumerate(ids):
+            if eid in booked_ids:
+                masked_scores[i] = -np.inf
+
+        top_indices = np.argsort(-masked_scores)[:top_n]
+        recs = []
+        for i in top_indices:
+            if masked_scores[i] == -np.inf:
+                continue
+            recs.append({
+                f"{entity_type}_id": ids[i],
+                "relevance_score": round(float(np.clip(masked_scores[i] / 5.0, 0, 1)), 4),
+            })
+
+        return {"recommendations": recs}
+
     # -- public API ---------------------------------------------------------
 
     def recommend_loads(
@@ -214,40 +290,10 @@ class CollaborativeFilter:
             ``recommendations`` – list of ``{load_id, relevance_score}``.
         """
         self._ensure_loaded()
-
-        idx = self._user_index(user_id)
-
-        # Cold-start fallback
-        if idx is None:
-            logger.info("Cold start for user '%s'; returning popular loads.", user_id)
-            recs = []
-            for rank, li in enumerate(self._popular_loads[:top_n]):
-                recs.append({
-                    "load_id": self.load_ids[int(li)],
-                    "relevance_score": round(1.0 - rank * 0.05, 4),
-                })
-            return {"recommendations": recs}
-
-        scores = self.user_load_approx[idx]
-
-        # Exclude loads already booked
-        booked_ids = {b.get("load_id") for b in booking_history if "load_id" in b}
-        masked_scores = scores.copy()
-        for i, lid in enumerate(self.load_ids):
-            if lid in booked_ids:
-                masked_scores[i] = -np.inf
-
-        top_indices = np.argsort(-masked_scores)[:top_n]
-        recs = []
-        for i in top_indices:
-            if masked_scores[i] == -np.inf:
-                continue
-            recs.append({
-                "load_id": self.load_ids[i],
-                "relevance_score": round(float(np.clip(masked_scores[i] / 5.0, 0, 1)), 4),
-            })
-
-        return {"recommendations": recs}
+        return self._recommend(
+            user_id, "load", self.load_ids, self._popular_loads,
+            self.user_load_approx, booking_history, "load_id", top_n,
+        )
 
     def recommend_trucks(
         self,
@@ -275,40 +321,10 @@ class CollaborativeFilter:
             ``recommendations`` – list of ``{truck_id, relevance_score}``.
         """
         self._ensure_loaded()
-
-        idx = self._user_index(user_id)
-
-        # Cold-start fallback
-        if idx is None:
-            logger.info("Cold start for user '%s'; returning popular trucks.", user_id)
-            recs = []
-            for rank, ti in enumerate(self._popular_trucks[:top_n]):
-                recs.append({
-                    "truck_id": self.truck_ids[int(ti)],
-                    "relevance_score": round(1.0 - rank * 0.05, 4),
-                })
-            return {"recommendations": recs}
-
-        scores = self.user_truck_approx[idx]
-
-        # Exclude trucks already booked
-        booked_ids = {b.get("truck_id") for b in booking_history if "truck_id" in b}
-        masked_scores = scores.copy()
-        for i, tid in enumerate(self.truck_ids):
-            if tid in booked_ids:
-                masked_scores[i] = -np.inf
-
-        top_indices = np.argsort(-masked_scores)[:top_n]
-        recs = []
-        for i in top_indices:
-            if masked_scores[i] == -np.inf:
-                continue
-            recs.append({
-                "truck_id": self.truck_ids[i],
-                "relevance_score": round(float(np.clip(masked_scores[i] / 5.0, 0, 1)), 4),
-            })
-
-        return {"recommendations": recs}
+        return self._recommend(
+            user_id, "truck", self.truck_ids, self._popular_trucks,
+            self.user_truck_approx, booking_history, "truck_id", top_n,
+        )
 
 
 # Module-level singleton

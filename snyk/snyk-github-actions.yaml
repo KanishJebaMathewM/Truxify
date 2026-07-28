@@ -1,0 +1,104 @@
+name: Snyk Security Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * *'  # Daily scan
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v3
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Install Snyk
+      run: npm install -g snyk
+    
+    - name: Authenticate with Snyk
+      run: snyk auth ${{ secrets.SNYK_TOKEN }}
+    
+    - name: Scan for vulnerabilities
+      run: snyk test --severity-threshold=high
+    
+    - name: Scan for vulnerabilities (JSON)
+      run: snyk test --severity-threshold=high --json > snyk-report.json
+    
+    - name: Upload scan results
+      uses: actions/upload-artifact@v3
+      with:
+        name: snyk-report
+        path: snyk-report.json
+    
+    - name: Snyk Monitor
+      run: snyk monitor --org=${{ secrets.SNYK_ORG_ID }}
+
+  security-scan-backend:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install Snyk
+      run: npm install -g snyk
+    
+    - name: Authenticate with Snyk
+      run: snyk auth ${{ secrets.SNYK_TOKEN }}
+    
+    - name: Scan Python dependencies
+      run: |
+        cd backend/ml
+        snyk test --severity-threshold=high
+
+  container-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Build Docker image
+      run: docker build -t truxify/api:latest -f Dockerfile.api .
+    
+    - name: Install Snyk
+      run: npm install -g snyk
+    
+    - name: Authenticate with Snyk
+      run: snyk auth ${{ secrets.SNYK_TOKEN }}
+    
+    - name: Scan Docker image
+      run: snyk container test truxify/api:latest --severity-threshold=high
+
+  iac-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Install Snyk
+      run: npm install -g snyk
+    
+    - name: Authenticate with Snyk
+      run: snyk auth ${{ secrets.SNYK_TOKEN }}
+    
+    - name: Scan Infrastructure as Code
+      run: snyk iac test k8s/ --severity-threshold=high

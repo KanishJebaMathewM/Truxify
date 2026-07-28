@@ -49,6 +49,70 @@ function labelsMatchingRules(value, rules = []) {
   return labels;
 }
 
+function pickDominantTypeLabel({ candidateLabels, changedFiles, prTitle, rules }) {
+  const priority = (rules.typeLabelPriority || []).map(normalize);
+  if (priority.length === 0) return candidateLabels;
+
+  const prioritySet = new Set(priority);
+  const typeLabels = candidateLabels.filter(l => prioritySet.has(normalize(l)));
+  const nonTypeLabels = candidateLabels.filter(l => !prioritySet.has(normalize(l)));
+
+  if (typeLabels.length <= 1) return candidateLabels;
+
+  // Score each type label by how many changed files match its path rules
+  // plus bonus for title match
+  const scores = new Map();
+  for (const tl of typeLabels) {
+    scores.set(normalize(tl), 0);
+  }
+
+  // Score from path rules: each changed file matching a pathRule that yields a contested type label
+  for (const file of changedFiles) {
+    for (const rule of (rules.pathRules || [])) {
+      const pattern = new RegExp(rule.pattern, 'i');
+      if (pattern.test(file)) {
+        for (const ruleLabel of (rule.labels || [])) {
+          const key = normalize(ruleLabel);
+          if (scores.has(key)) {
+            scores.set(key, scores.get(key) + 1);
+          }
+        }
+      }
+    }
+  }
+
+  // Score from title rules: bonus of 3 for title match
+  for (const rule of (rules.titleRules || [])) {
+    const pattern = new RegExp(rule.pattern, 'i');
+    if (pattern.test(prTitle)) {
+      for (const ruleLabel of (rule.labels || [])) {
+        const key = normalize(ruleLabel);
+        if (scores.has(key)) {
+          scores.set(key, scores.get(key) + 3);
+        }
+      }
+    }
+  }
+
+  // Find the winner: highest score, tiebreak by priority order
+  let winner = null;
+  let winnerScore = -1;
+  let winnerPriority = Infinity;
+
+  for (const [key, score] of scores) {
+    const pIdx = priority.indexOf(key);
+    if (score > winnerScore || (score === winnerScore && pIdx < winnerPriority)) {
+      winner = key;
+      winnerScore = score;
+      winnerPriority = pIdx;
+    }
+  }
+
+  // Keep the original-case version of the winner
+  const winnerLabel = typeLabels.find(l => normalize(l) === winner);
+  return [...nonTypeLabels, winnerLabel].sort((a, b) => a.localeCompare(b));
+}
+
 function selectLabels({
   prTitle = '',
   prBody = '',
@@ -94,10 +158,32 @@ function selectLabels({
     addLabels(selected, labelsMatchingRules(file, rules.pathRules));
   }
 
-  return [...selected]
+  let result = [...selected]
     .filter((label) => available.has(normalize(label)))
     .filter((label) => !current.has(normalize(label)))
     .sort((a, b) => a.localeCompare(b));
+
+  if (rules.singleTypeLabel) {
+    // Also consider type labels already on the PR
+    const currentTypeLabels = currentLabels.filter(l => {
+      const priority = (rules.typeLabelPriority || []).map(normalize);
+      return new Set(priority).has(normalize(l));
+    });
+    if (currentTypeLabels.length > 0) {
+      // PR already has a type label, remove any new type labels from result
+      const prioritySet = new Set((rules.typeLabelPriority || []).map(normalize));
+      result = result.filter(l => !prioritySet.has(normalize(l)));
+    } else {
+      result = pickDominantTypeLabel({
+        candidateLabels: result,
+        changedFiles,
+        prTitle,
+        rules
+      });
+    }
+  }
+
+  return result;
 }
 
 async function fetchPaginatedLabels(github, owner, repo) {
@@ -404,6 +490,7 @@ module.exports = {
   findLinkedIssueNumbers,
   hasProgramSignal,
   loadRules,
+  pickDominantTypeLabel,
   run,
   selectLabels
 };

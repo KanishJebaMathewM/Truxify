@@ -2,32 +2,31 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 
-import { createSupabaseMock } from '../helpers/supabaseMock.js';
+const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();
 
-vi.doMock('../../src/config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,
 }));
 
-vi.doMock('../../src/middleware/idempotency.js', () => ({
-  requireIdempotency: () => (req, res, next) => next()
-}));
-
-vi.doMock('../../src/services/escrow.js', () => ({
-  buildDepositTx: vi.fn(),
-  recordDepositTx: vi.fn(),
-  escrowDeposit: vi.fn(),
-  escrowRelease: vi.fn(),
-  escrowRefund: vi.fn(),
-  submitEscrowRefund: vi.fn(),
-  confirmEscrowRefund: vi.fn(),
-  // Mirrors the real implementation's escrow:<id> booking id derivation
-  bookingIdFromUuid: vi.fn((orderId) => `escrow:${orderId}`),
-  ESCROW_MATIC_PER_PAISA: 0.01,
-}));
+vi.mock('../../src/services/escrow.js', async () => {
+  const actual = await vi.importActual('../../src/services/escrow.js');
+  return {
+    ...actual,
+    buildDepositTx: vi.fn(),
+    recordDepositTx: vi.fn(),
+    escrowDeposit: vi.fn(),
+    escrowRelease: vi.fn(),
+    escrowRefund: vi.fn(),
+    submitEscrowRefund: vi.fn(),
+    confirmEscrowRefund: vi.fn(),
+    // Mirrors the real implementation's escrow:<id> booking id derivation
+    bookingIdFromUuid: vi.fn((orderId) => `escrow:${orderId}`),
+  };
+});
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
 const { buildDepositTx: mockBuildDepositTx, recordDepositTx: mockRecordDepositTx, escrowDeposit: mockEscrowDeposit, escrowRefund: mockEscrowRefund } = await import('../../src/services/escrow.js');
@@ -285,7 +284,7 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept executes RPC', async () => {
-    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' }, bookingId: 'escrow:booking' });
+    mockBuildDepositTx.mockResolvedValue({ to: '0xescrow', data: '0xdeadbeef' });
 
     m.store.orders.push({
       id: 'order-1',
@@ -326,7 +325,7 @@ describe('Bid Routes', () => {
       .set(CUSTOMER);
 
     expect(res.status).toBe(200);
-    expect(res.body.depositTx.txData).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
+    expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
     expect(mockBuildDepositTx).toHaveBeenCalled();
 
     const rpc = m.calls.find(c => c.rpc === 'accept_bid_tx');
@@ -336,7 +335,7 @@ describe('Bid Routes', () => {
   });
 
   it('POST /:id/bids/:bidId/accept triggers escrow deposit when wallet addresses present', async () => {
-    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' }, bookingId: 'escrow:OD-ESCROW' });
+    mockBuildDepositTx.mockResolvedValue({ to: '0xescrow', data: '0xdeadbeef', bookingId: 'escrow:OD-ESCROW' });
 
     m.store.orders.push({
       id: 'order-escrow',
@@ -386,7 +385,7 @@ describe('Bid Routes', () => {
       '0xAbcdef1234567890Abcdef1234567890Abcdef12',
       500000000000000000000n,
     );
-    expect(res.body.depositTx.txData).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
+    expect(res.body.depositTx).toEqual(expect.objectContaining({ to: expect.any(String), data: expect.any(String) }));
 
     let order = m.store.orders.find(o => o.id === 'order-escrow');
     expect(order.escrow_status).toBe('funding');
@@ -626,8 +625,7 @@ describe('Bid Routes', () => {
     expect(res.status).toBe(403);
   });
 
-  it('POST /:id/bids/:bidId/accept returns 500 when load offer is already claimed', async () => {
-    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' } });
+  it('POST /:id/bids/:bidId/accept returns 409 when load offer is no longer available', async () => {
     m.store.orders.push({
       id: 'order-1',
       customer_id: 'customer-1',
@@ -662,13 +660,13 @@ describe('Bid Routes', () => {
       .post('/api/orders/order-1/bids/bid-1/accept')
       .set(CUSTOMER);
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('Conflict: This load offer was already accepted or is no longer available.');
     expect(res.body.details).toBe('Load offer is no longer available');
     expect(m.calls.find(c => c.rpc === 'accept_bid_tx')).toBeTruthy();
   });
 
-  it('POST /:id/bids/:bidId/accept returns 500 when order is no longer pending', async () => {
-    mockBuildDepositTx.mockResolvedValue({ txData: { to: '0xescrow', data: '0xdeadbeef' } });
+  it('POST /:id/bids/:bidId/accept returns 409 when order is no longer pending', async () => {
     m.store.orders.push({
       id: 'order-1',
       customer_id: 'customer-1',
@@ -701,7 +699,8 @@ describe('Bid Routes', () => {
     const app = buildApp();
     const res = await request(app).post('/api/orders/order-1/bids/bid-1/accept').set(CUSTOMER);
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('Conflict: This load offer was already accepted or is no longer available.');
     expect(res.body.details).toBe('Order is no longer pending');
     expect(m.calls.find(c => c.rpc === 'accept_bid_tx')).toBeTruthy();
   });  

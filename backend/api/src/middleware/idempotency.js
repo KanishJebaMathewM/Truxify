@@ -38,7 +38,7 @@ function isCacheable(statusCode) {
 
 function cacheKey(req, idempotencyKey) {
   const identity = req.user?.id || 'anonymous';
-  return `idempotency:${identity}:${idempotencyKey}`;
+  return `idempotency:${req.method}:${req.path}:${identity}:${idempotencyKey}`;
 }
 
 function readAndParse(str) {
@@ -76,6 +76,55 @@ export function requireIdempotency(ttlSeconds = 3600) {
         return res.status(cached.statusCode).json(cached.body);
       }
 
+      if (redisClient) {
+        const lockKey = `${key}:lock`;
+        const lockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', 10000);
+        
+        if (!lockAcquired) {
+          let retries = 50; // Poll for up to 10 seconds
+          let cacheFound = false;
+          
+          while (retries > 0) {
+            await new Promise(r => setTimeout(r, 200));
+            const retryRaw = await redisClient.get(key);
+            const retryCached = retryRaw ? readAndParse(retryRaw) : null;
+            
+            if (retryCached) {
+              cacheFound = true;
+              return res.status(retryCached.statusCode).json(retryCached.body);
+            }
+            
+            const lockStillHeld = await redisClient.get(lockKey);
+            if (!lockStillHeld) {
+              break; // Lock released but cache empty
+            }
+            
+            retries--;
+          }
+          
+          if (!cacheFound && retries === 0) {
+            return res.status(409).json({ error: 'Duplicate request being processed' });
+          }
+          
+          // Re-acquire lock and process if previous request crashed
+          const newLockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', 10000);
+          if (!newLockAcquired) {
+             return res.status(409).json({ error: 'Duplicate request being processed' });
+          }
+        }
+
+        let lockReleased = false;
+        const releaseLock = () => {
+          if (lockReleased) return;
+          lockReleased = true;
+          redisClient.del(lockKey).catch(() => {});
+        };
+
+        // Ensure lock is reliably released when response terminates
+        res.once('finish', releaseLock);
+        res.once('close', releaseLock);
+      }
+
       let responded = false;
 
       const originalJson = res.json.bind(res);
@@ -83,7 +132,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
         if (responded) return originalJson(body);
         responded = true;
 
-        if (isCacheable(res.statusCode)) {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
           const cacheData = JSON.stringify({ statusCode: res.statusCode, body });
 
           if (redisClient) {

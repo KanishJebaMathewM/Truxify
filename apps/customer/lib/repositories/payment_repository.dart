@@ -53,10 +53,40 @@ class PaymentRepository {
 
   Future<void> delete(String methodId) async {
     final userId = SupabaseService.requireUserId();
+    final existing = await SupabaseService.client
+        .from(_table)
+        .select('id,is_default')
+        .eq('id', methodId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
     await SupabaseService.client
         .from(_table)
         .delete()
         .eq('id', methodId)
+        .eq('user_id', userId);
+
+    if (existing?['is_default'] != true) {
+      return;
+    }
+
+    final replacement = await SupabaseService.client
+        .from(_table)
+        .select('id')
+        .eq('user_id', userId)
+        .order('created_at', ascending: true)
+        .limit(1)
+        .maybeSingle();
+
+    final replacementId = replacement?['id']?.toString();
+    if (replacementId == null || replacementId.isEmpty) {
+      return;
+    }
+
+    await SupabaseService.client
+        .from(_table)
+        .update({'is_default': true})
+        .eq('id', replacementId)
         .eq('user_id', userId);
   }
 

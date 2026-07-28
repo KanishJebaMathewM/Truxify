@@ -1,10 +1,7 @@
-import 'dart:convert';
-
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'api_client.dart';
+import 'sync_engine.dart';
 
 class TripService {
   TripService({
@@ -17,7 +14,6 @@ class TripService {
 
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
   );
 
   final SupabaseClient? _providedClient;
@@ -50,6 +46,17 @@ class TripService {
 
   static String _normalizeBaseUrl(String value) {
     return value.endsWith('/') ? value.substring(0, value.length - 1) : value;
+  }
+
+  static int _positiveInt(dynamic value, int fallback) {
+    if (value == null) return fallback;
+    if (value is int && value > 0) return value;
+    if (value is num && value.isFinite && value > 0) return value.toInt();
+    if (value is String) {
+      final parsed = int.tryParse(value);
+      if (parsed != null && parsed > 0) return parsed;
+    }
+    return fallback;
   }
 
   String _encodePathSegment(String value) => Uri.encodeComponent(value);
@@ -95,6 +102,9 @@ class TripService {
     if (page == null || page < 1) {
       throw ArgumentError.value(cursor, 'cursor', 'must be a positive integer');
     }
+    if (limit < 1) {
+      throw ArgumentError.value(limit, 'limit', 'must be a positive integer');
+    }
     var path = '/api/driver/trips?page=$page&limit=$limit';
     if (status != null) {
       path += '&status=${Uri.encodeQueryComponent(status)}';
@@ -102,12 +112,18 @@ class TripService {
     
     try {
       final body = await _apiClient.get(path);
-      final mapBody = body as Map<String, dynamic>;
-      final responsePage = mapBody['page'] as int? ?? page;
-      final totalPages = mapBody['totalPages'] as int? ?? responsePage;
+      if (body is! Map<String, dynamic>) {
+        throw StateError('Unexpected trip history response type');
+      }
+      final trips = body['trips'];
+      if (trips is! List) {
+        throw StateError('Unexpected trip history trips type');
+      }
+      final responsePage = _positiveInt(body['page'], page);
+      final totalPages = _positiveInt(body['totalPages'], responsePage);
       final hasMore = responsePage < totalPages;
       return {
-        'trips': List<Map<String, dynamic>>.from(mapBody['trips'] as List? ?? []),
+        'trips': List<Map<String, dynamic>>.from(trips),
         'nextCursor': hasMore ? '${responsePage + 1}' : null,
         'hasMore': hasMore,
       };
@@ -123,7 +139,9 @@ class TripService {
     final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/items';
     try {
       final body = await _apiClient.get(path);
-      if (body is! List) return [];
+      if (body is! List) {
+        throw StateError('Unexpected trip items response type');
+      }
       return List<Map<String, dynamic>>.from(body);
     } catch (e) {
       if (e is ApiException) throw StateError(e.message);
@@ -137,7 +155,9 @@ class TripService {
     final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops';
     try {
       final body = await _apiClient.get(path);
-      if (body is! List) return [];
+      if (body is! List) {
+        throw StateError('Unexpected trip stops response type');
+      }
       return List<Map<String, dynamic>>.from(body);
     } catch (e) {
       if (e is ApiException) throw StateError(e.message);
@@ -151,7 +171,9 @@ class TripService {
     final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/route-points';
     try {
       final body = await _apiClient.get(path);
-      if (body is! List) return [];
+      if (body is! List) {
+        throw StateError('Unexpected route points response type');
+      }
       return List<Map<String, dynamic>>.from(body);
     } catch (e) {
       if (e is ApiException) throw StateError(e.message);
@@ -163,6 +185,16 @@ class TripService {
     String stopId,
     String tripDisplayId,
   ) async {
+    final connectivityResult = await Connectivity().checkConnectivity();
+    if (connectivityResult == ConnectivityResult.none) {
+      await SyncEngine.queueEvent(
+        tripId: tripDisplayId,
+        eventType: 'markStopCompleted',
+        payload: {'stopId': stopId},
+      );
+      return;
+    }
+
     await verifyTripOwnership(tripDisplayId);
     final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
     try {
@@ -211,6 +243,7 @@ class TripService {
   }
 
   void dispose() {
+    _isDisposed = true;
     _apiClient.dispose();
   }
 }

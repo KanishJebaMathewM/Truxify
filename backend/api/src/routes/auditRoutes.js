@@ -2,6 +2,7 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import { supabaseAdmin } from '../config/db.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { auditLogService } from '../services/auditLogService.js';
 import { validateQuery } from '../middleware/validate.js';
@@ -233,7 +234,6 @@ router.get('/', authenticate, userLimiter, requirePolicy('admin:view-audit-logs'
  */
 router.get('/:id', authenticate, userLimiter, requirePolicy('admin:view-audit-logs'), async (req, res) => {
   try {
-    const { supabaseAdmin } = await import('../config/db.js');
     if (!supabaseAdmin) {
       return res.status(503).json({ error: 'Admin database client not available.' });
     }

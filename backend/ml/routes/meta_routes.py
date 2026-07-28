@@ -54,7 +54,9 @@ async def train_maml(request: TrainRequest):
         }
     except Exception as e:
         logger.error(f"Training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/few-shot/predict")
 async def few_shot_predict(request: FewShotRequest):
@@ -78,7 +80,9 @@ async def few_shot_predict(request: FewShotRequest):
         }
     except Exception as e:
         logger.error(f"Few-shot prediction failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/few-shot/classify")
 async def few_shot_classify(request: FewShotClassifyRequest):
@@ -104,7 +108,9 @@ async def few_shot_classify(request: FewShotClassifyRequest):
         }
     except Exception as e:
         logger.error(f"Few-shot classification failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/task/sample")
 async def sample_task(k_shot: int = 5):
@@ -124,7 +130,9 @@ async def sample_task(k_shot: int = 5):
         }
     except Exception as e:
         logger.error(f"Task sampling failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/task/few-shot")
 async def sample_few_shot_task(k_shot: int = 5, num_classes: int = 2):
@@ -148,7 +156,9 @@ async def sample_few_shot_task(k_shot: int = 5, num_classes: int = 2):
         }
     except Exception as e:
         logger.error(f"Few-shot task sampling failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
 async def get_model_info():
@@ -168,7 +178,9 @@ async def get_model_info():
         }
     except Exception as e:
         logger.error(f"Model info failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
 async def save_model(path: str = "models/maml_model.pth"):
@@ -182,7 +194,9 @@ async def save_model(path: str = "models/maml_model.pth"):
         }
     except Exception as e:
         logger.error(f"Save failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
 async def load_model(path: str = "models/maml_model.pth"):
@@ -196,4 +210,6 @@ async def load_model(path: str = "models/maml_model.pth"):
         }
     except Exception as e:
         logger.error(f"Load failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

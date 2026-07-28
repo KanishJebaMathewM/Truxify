@@ -70,7 +70,9 @@ async def pretrain_model(request: PretrainRequest):
         }
     except Exception as e:
         logger.error(f"Pre-training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/pretrain/simclr")
 async def pretrain_simclr(request: PretrainRequest):
@@ -86,7 +88,9 @@ async def pretrain_simclr(request: PretrainRequest):
         }
     except Exception as e:
         logger.error(f"SimCLR pre-training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/pretrain/moco")
 async def pretrain_moco(request: PretrainRequest):
@@ -102,7 +106,9 @@ async def pretrain_moco(request: PretrainRequest):
         }
     except Exception as e:
         logger.error(f"MoCo pre-training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/pretrain/mae")
 async def pretrain_mae(request: PretrainRequest):
@@ -118,7 +124,9 @@ async def pretrain_mae(request: PretrainRequest):
         }
     except Exception as e:
         logger.error(f"MAE pre-training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
 async def get_model_info():
@@ -152,7 +160,9 @@ async def get_model_info():
         }
     except Exception as e:
         logger.error(f"Model info failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
 async def save_model(model_type: str = 'simclr', path: str = "models/ssl_model.pth"):
@@ -177,7 +187,9 @@ async def save_model(model_type: str = 'simclr', path: str = "models/ssl_model.p
         }
     except Exception as e:
         logger.error(f"Save failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
 async def load_model(model_type: str = 'simclr', path: str = "models/ssl_model.pth"):
@@ -202,4 +214,6 @@ async def load_model(model_type: str = 'simclr', path: str = "models/ssl_model.p
         }
     except Exception as e:
         logger.error(f"Load failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

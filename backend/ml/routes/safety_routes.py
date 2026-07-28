@@ -54,7 +54,9 @@ async def analyze_vision_frame(file: UploadFile = File(...)):
         }
     except Exception as e:
         logger.error(f"Vision analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/audio/analyze")
 async def analyze_audio(file: UploadFile = File(...)):
@@ -74,7 +76,9 @@ async def analyze_audio(file: UploadFile = File(...)):
         }
     except Exception as e:
         logger.error(f"Audio analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/audio/record")
 async def record_audio(duration: int = 2):
@@ -93,7 +97,9 @@ async def record_audio(duration: int = 2):
         }
     except Exception as e:
         logger.error(f"Audio recording failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fusion/analyze")
 async def analyze_safety(
@@ -121,7 +127,9 @@ async def analyze_safety(
         }
     except Exception as e:
         logger.error(f"Safety analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/fusion/report", response_model=SafetyAlertResponse)
 async def get_safety_report():
@@ -137,7 +145,9 @@ async def get_safety_report():
         )
     except Exception as e:
         logger.error(f"Safety report failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/vision/status")
 async def get_vision_status():
@@ -157,7 +167,9 @@ async def get_vision_status():
         }
     except Exception as e:
         logger.error(f"Vision status failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/audio/status")
 async def get_audio_status():
@@ -177,7 +189,9 @@ async def get_audio_status():
         }
     except Exception as e:
         logger.error(f"Audio status failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/fusion/stats")
 async def get_fusion_stats():
@@ -191,7 +205,9 @@ async def get_fusion_stats():
         }
     except Exception as e:
         logger.error(f"Fusion stats failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/alert/trigger")
 async def trigger_alert(level: str = "WARNING"):
@@ -214,4 +230,6 @@ async def trigger_alert(level: str = "WARNING"):
         }
     except Exception as e:
         logger.error(f"Alert trigger failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

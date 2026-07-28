@@ -4,6 +4,9 @@ from pydantic import BaseModel
 from typing import Dict, Any, Optional
 from services.ab_testing import ABTestModel
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ab-testing", tags=["A/B Testing"])
 
@@ -41,7 +44,9 @@ async def predict_with_ab(request: PredictionRequest):
         
         return prediction
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/metrics")
 async def log_metrics(metrics: MetricsRequest):
@@ -55,7 +60,9 @@ async def log_metrics(metrics: MetricsRequest):
         )
         return {'status': 'success', 'message': 'Metrics logged'}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/evaluate/{test_id}")
 async def evaluate_test(test_id: str):
@@ -64,7 +71,9 @@ async def evaluate_test(test_id: str):
         results = ab_service.evaluate_test(test_id)
         return results
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/rollback/{test_id}")
 async def trigger_rollback(test_id: str):
@@ -73,7 +82,9 @@ async def trigger_rollback(test_id: str):
         result = ab_service.trigger_rollback(test_id)
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/status")
 async def get_ab_status():

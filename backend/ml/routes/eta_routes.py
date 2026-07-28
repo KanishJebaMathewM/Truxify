@@ -5,6 +5,9 @@ from services.traffic_pipeline import TrafficPipeline
 import numpy as np
 import os
 from datetime import datetime, timedelta
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/eta", tags=["ETA Predictions"])
 
@@ -65,7 +68,9 @@ async def predict_eta(request: ETARequest):
         raise HTTPException(status_code=500, detail="ETA prediction failed")
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/update/{order_id}")
 async def update_eta(order_id: str):
@@ -92,7 +97,9 @@ async def update_eta(order_id: str):
         raise HTTPException(status_code=404, detail="Order not found")
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/traffic/{route_id}")
 async def get_traffic(route_id: str):
@@ -111,7 +118,9 @@ async def get_traffic(route_id: str):
             'message': 'No traffic data available'
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/forecast/{route_id}")
 async def get_forecast(route_id: str, hours: int = Query(1, ge=1, le=24)):
@@ -124,7 +133,9 @@ async def get_forecast(route_id: str, hours: int = Query(1, ge=1, le=24)):
             'timestamp': datetime.now().isoformat()
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/train")
 async def train_model():
@@ -137,4 +148,6 @@ async def train_model():
             'timestamp': datetime.now().isoformat()
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

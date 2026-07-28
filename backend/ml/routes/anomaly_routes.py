@@ -59,7 +59,9 @@ async def detect_driver_anomaly(data: DriverData):
         }
     except Exception as e:
         logger.error(f"Driver anomaly detection failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/detect/transaction")
 async def detect_transaction_anomaly(data: TransactionData):
@@ -73,7 +75,9 @@ async def detect_transaction_anomaly(data: TransactionData):
         }
     except Exception as e:
         logger.error(f"Transaction anomaly detection failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/detect/gps")
 async def detect_gps_anomaly(data: GPSData):
@@ -87,7 +91,9 @@ async def detect_gps_anomaly(data: GPSData):
         }
     except Exception as e:
         logger.error(f"GPS anomaly detection failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/train")
 async def train_models(request: TrainRequest):
@@ -108,7 +114,9 @@ async def train_models(request: TrainRequest):
         }
     except Exception as e:
         logger.error(f"Model training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/history")
 async def get_anomaly_history(data_type: Optional[str] = None):
@@ -123,7 +131,9 @@ async def get_anomaly_history(data_type: Optional[str] = None):
         }
     except Exception as e:
         logger.error(f"History fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/alerts")
 async def get_alerts(severity: Optional[str] = None):
@@ -138,7 +148,9 @@ async def get_alerts(severity: Optional[str] = None):
         }
     except Exception as e:
         logger.error(f"Alerts fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/stats")
 async def get_anomaly_stats():
@@ -152,7 +164,9 @@ async def get_anomaly_stats():
         }
     except Exception as e:
         logger.error(f"Stats fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/threshold/set")
 async def set_threshold(data_type: str, threshold: float):
@@ -169,7 +183,9 @@ async def set_threshold(data_type: str, threshold: float):
             raise HTTPException(status_code=404, detail=f"Data type {data_type} not found")
     except Exception as e:
         logger.error(f"Threshold setting failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/threshold/{data_type}")
 async def get_threshold(data_type: str):
@@ -189,4 +205,6 @@ async def get_threshold(data_type: str):
             raise HTTPException(status_code=404, detail=f"Data type {data_type} not found")
     except Exception as e:
         logger.error(f"Threshold fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

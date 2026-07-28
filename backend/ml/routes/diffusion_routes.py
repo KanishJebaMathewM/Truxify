@@ -60,7 +60,9 @@ async def generate_routes(request: GenerateRequest):
         }
     except Exception as e:
         logger.error(f"Route generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/generate-route")
 async def generate_route(
@@ -87,7 +89,9 @@ async def generate_route(
         }
     except Exception as e:
         logger.error(f"Route generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/conditional")
 async def conditional_generate(request: GenerateRequest):
@@ -109,7 +113,9 @@ async def conditional_generate(request: GenerateRequest):
         }
     except Exception as e:
         logger.error(f"Conditional generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/train")
 async def train_model(request: TrainRequest):
@@ -135,7 +141,9 @@ async def train_model(request: TrainRequest):
         }
     except Exception as e:
         logger.error(f"Training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
 async def save_model(path: str = "models/diffusion_route.pth"):
@@ -149,7 +157,9 @@ async def save_model(path: str = "models/diffusion_route.pth"):
         }
     except Exception as e:
         logger.error(f"Save failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
 async def load_model(path: str = "models/diffusion_route.pth"):
@@ -163,7 +173,9 @@ async def load_model(path: str = "models/diffusion_route.pth"):
         }
     except Exception as e:
         logger.error(f"Load failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
 async def get_model_info():
@@ -183,4 +195,6 @@ async def get_model_info():
         }
     except Exception as e:
         logger.error(f"Model info failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

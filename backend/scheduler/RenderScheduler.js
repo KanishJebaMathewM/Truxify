@@ -197,21 +197,26 @@ class RenderScheduler extends EventEmitter {
     
     async processLoop() {
         while (this.isProcessing) {
-            // Check if we can run more tasks
-            if (this.running.size >= this.maxConcurrent) {
-                await this.sleep(100);
-                continue;
+            try {
+                // Check if we can run more tasks
+                if (this.running.size >= this.maxConcurrent) {
+                    await this.sleep(100);
+                    continue;
+                }
+                
+                // Get next task
+                const task = this.getNextTask();
+                if (!task) {
+                    await this.sleep(100);
+                    continue;
+                }
+                
+                // Run task
+                this.runTask(task);
+            } catch (err) {
+                logger.error(`Scheduler processLoop error: ${err.message}`);
+                await this.sleep(1000);
             }
-            
-            // Get next task
-            const task = this.getNextTask();
-            if (!task) {
-                await this.sleep(100);
-                continue;
-            }
-            
-            // Run task
-            this.runTask(task);
         }
     }
     

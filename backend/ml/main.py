@@ -535,12 +535,18 @@ async def predict_traffic_eta(request: TrafficETARequest, _auth=Depends(verify_a
 
 
 @app.get("/eta/update/{order_id}")
-async def update_eta_realtime(order_id: str, _auth=Depends(verify_api_key)):
+async def update_eta_endpoint(
+    order_id: str,
+    current_lat: float = Query(...),
+    current_lng: float = Query(...),
+    dest_lat: float = Query(...),
+    dest_lng: float = Query(...),
+    _auth=Depends(verify_api_key),
+):
     """Update ETA in real-time during trip"""
     try:
-        # Get current location from tracking (simulated)
-        current_location = {'lat': 28.6139, 'lng': 77.2090}
-        destination = {'lat': 28.7041, 'lng': 77.1025}
+        current_location = {'lat': current_lat, 'lng': current_lng}
+        destination = {'lat': dest_lat, 'lng': dest_lng}
         
         result = await traffic_pipeline.update_eta_realtime(
             order_id,

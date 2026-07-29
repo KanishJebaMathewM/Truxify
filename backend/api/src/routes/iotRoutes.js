@@ -108,14 +108,10 @@ function canReadTelemetry(user, load) {
   }
 });
 
-// =====================================================================// 2. GET TELEMETRY DATA
+// =====================================================================
+// 2. GET TELEMETRY DATA
 // GET /api/iot/telemetry/:id
-// =====================================================================router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validateParams(paramIdSchema), async (req, res) => {
-  try {
-    const loadId = req.params.id;
-    const { data: load, error: loadErr } = await supabase
-      .from('load_offers')
-      .select('id, customer_id, driver_id')
+// =====================================================================
 router.get('/telemetry/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
   const loadId = req.params.id;
 

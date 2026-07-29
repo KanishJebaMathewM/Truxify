@@ -27,9 +27,11 @@ function canReadTelemetry(user, load) {
   return user?.role === 'admin' || load.customer_id === user?.id || load.driver_id === user?.id;
 }
 
-// =====================================================================// 1. POST TELEMETRY DATA (IoT)
+// =====================================================================
+// 1. POST TELEMETRY DATA (IoT)
 // POST /api/iot/telemetry/:id
-// =====================================================================router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
+// =====================================================================
+router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
   try {
     const parseResult = telemetrySchema.safeParse(req.body);
     if (!parseResult.success) {

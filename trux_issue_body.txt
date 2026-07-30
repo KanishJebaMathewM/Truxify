@@ -1,0 +1,25 @@
+## Summary
+The DigiLocker document verification feature sends a hardcoded mock authentication code `"mock_digilocker_auth_code_98765"` instead of capturing the real OAuth redirect code. Every user who tries to link their DigiLocker account receives a failure.
+
+## Location
+`apps/driver/lib/screens/documents_screen.dart:265-273`
+```dart
+final response = await http.post(
+    Uri.parse('$_apiBaseUrl/api/documents/verify-digilocker'),
+    headers: {
+      'Content-Type': 'application/json',
+      if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+    },
+    body: jsonEncode({
+      'code': 'mock_digilocker_auth_code_98765',  // HARDCODED MOCK
+    }),
+);
+```
+
+## Impact
+Every user who attempts to link their DigiLocker account hits this code path. Since the auth code is a hardcoded mock string, the backend API always rejects it. The DigiLocker document verification feature is completely non-functional for all users.
+
+## Expected
+Implement the actual DigiLocker OAuth redirect flow to capture the real authorization code, then remove the hardcoded mock value.
+
+GSSOC

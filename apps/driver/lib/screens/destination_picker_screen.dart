@@ -155,7 +155,8 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
                 ? 'Pinned location (${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)})'
                 : displayName;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('destination_picker_screen: GeocodeService.resolvePlace error: $e');
       if (!mounted) {
         return;
       }

@@ -1,0 +1,10 @@
+The DigiLocker document verification feature was sending a hardcoded mock auth code `"mock_digilocker_auth_code_98765"` instead of capturing the real OAuth authorization code. Every user who tried to link their DigiLocker account received a failure.
+
+Fix:
+1. Opens the DigiLocker authorization URL in the device browser via `url_launcher`
+2. Shows a dialog for the user to paste the authorization code from the browser redirect URL
+3. Sends the real code to the backend instead of the hardcoded mock
+
+Closes #5504
+
+GSSOC

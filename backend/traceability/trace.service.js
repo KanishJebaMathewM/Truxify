@@ -44,18 +44,18 @@ class TraceabilityService {
             );
             const receipt = await tx.wait();
 
-            const productId = await this.contract.getProductCount();
+            const productId = uuidv4();
 
             await this.storeProduct({
                 ...productData,
-                productId: productId.toString(),
+                productId,
                 txHash: receipt.hash
             });
 
             logger.info(`✅ Product created: ${productId}`);
             return {
                 success: true,
-                productId: productId.toString(),
+                productId,
                 productHash,
                 txHash: receipt.hash
             };

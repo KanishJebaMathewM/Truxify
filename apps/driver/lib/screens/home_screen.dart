@@ -144,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _locationError;
   late final MarketplaceRepository _marketplaceRepo;
   StreamSubscription? _tripSubscription;
+  StreamSubscription? _loadSubscription;
 
   String _hosStatus = 'off_duty';
   int _hosDrivingMinutes = 0;
@@ -293,6 +294,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _batteryService.removeListener(_onBatteryChanged);
     _connectivitySubscription?.cancel();
     _loadSubscription?.cancel();
+    _tripSubscription?.cancel();
     _autoHideTimer?.cancel();
     _mapController.dispose();
     _searchController.dispose();

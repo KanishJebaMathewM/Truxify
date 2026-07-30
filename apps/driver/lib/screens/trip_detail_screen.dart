@@ -87,7 +87,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           const SnackBar(content: Text('Unable to open Google Maps')),
         );
       }
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[TripDetailScreen] Failed to open Google Maps: $e\n$st');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to open Google Maps')),
@@ -1002,7 +1003,8 @@ Widget _cargoBadge({
 
       final result = _RouteResult(start: start, end: end, routePoints: routePoints);
       return result;
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[TripDetailScreen] Route resolution failed: $e\n$st');
       return null;
     }
   }

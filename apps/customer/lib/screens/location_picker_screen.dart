@@ -94,7 +94,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
       setState(() {
         _suggestions = suggestions;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('LocationPickerScreen: searchPlaces failed: $e');
       if (!mounted) {
         return;
       }
@@ -133,7 +134,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
       setState(() {
         _selectedAddress = resolvedAddress;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('LocationPickerScreen: resolveAddress failed: $e');
       if (!mounted) {
         return;
       }
@@ -203,7 +205,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     final point = LatLng(position.latitude, position.longitude);
 
     await _setLocation(point);
-  } catch (_) {
+  } catch (e) {
+    debugPrint('LocationPickerScreen: getCurrentLocation failed: $e');
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Unable to fetch current location')),

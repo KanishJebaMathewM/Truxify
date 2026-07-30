@@ -146,7 +146,7 @@ export async function authenticate(req, res, next) {
       }
       userProfile = profile;
     } else {
-      // Firebase Verification
+      // Firebase Verification (Issue #5549: integrate Firebase Admin SDK for token verification)
       if (!firebaseAdmin) {
         return res.status(500).json({ error: 'Firebase Auth verification is not configured on this server.' });
       }

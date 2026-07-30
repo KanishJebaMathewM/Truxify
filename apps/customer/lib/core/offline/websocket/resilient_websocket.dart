@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class ResilientWebSocket {
@@ -51,7 +52,8 @@ class ResilientWebSocket {
       _attempt = 0;
       _startHeartbeat();
       onConnect?.call();
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[ResilientWebSocket] Connection failed: $e');
       _scheduleReconnect();
     }
   }

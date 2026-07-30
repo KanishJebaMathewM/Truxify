@@ -134,6 +134,23 @@ class PricePredictOutput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Schemas — ETA Prediction
+# ---------------------------------------------------------------------------
+
+class ETAPredictInput(BaseModel):
+    route_distance: float = Field(..., gt=0, description="Route distance in kilometres")
+    time_of_day: float = Field(..., ge=0, le=24, description="Time of day in hours")
+    day_of_week: int = Field(..., ge=0, le=6, description="Day of week (0-6)")
+    route_type: int = Field(1, description="Type of route")
+    historical_speed: float = Field(40.0, description="Historical average speed")
+
+class ETAPredictOutput(BaseModel):
+    estimated_eta_hours: float
+    confidence_interval: list[float] = Field(default=[])
+
+
+
+# ---------------------------------------------------------------------------
 # Schemas — Bilateral Matcher
 # ---------------------------------------------------------------------------
 

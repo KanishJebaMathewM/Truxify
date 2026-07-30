@@ -811,8 +811,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         children: [
           Positioned.fill(
             child: FlutterMap(
-              options: const MapOptions(
-                initialCenter: LatLng(24.25, 74.40),
+              options: MapOptions(
+                initialCenter: _routePoints.isNotEmpty ? _routePoints.first : const LatLng(24.25, 74.40),
                 initialZoom: 6.2,
                 minZoom: 5,
                 maxZoom: 16,

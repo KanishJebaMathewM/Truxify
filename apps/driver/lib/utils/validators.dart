@@ -21,9 +21,8 @@ String? validateRegistrationNumber(String? value) {
   final RegExp regex = RegExp(r'^[A-Z]{2}\d{2}[A-Z]{1,2}\d{4}$');
   final trimmedValue = value.trim();
 
-if (!regex.hasMatch(trimmedValue)) {
-  return 'Enter a valid RTO number (e.g., DL01AA1234)';
-}
+  if (!regex.hasMatch(trimmedValue)) {
+    return 'Enter a valid RTO number (e.g., DL01AA1234)';
   }
 
   return null;

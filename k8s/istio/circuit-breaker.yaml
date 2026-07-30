@@ -1,0 +1,46 @@
+
+﻿apiVersion: networking.istio.io/v1beta1
+
+apiVersion: networking.istio.io/v1beta1
+
+kind: DestinationRule
+metadata:
+  name: api-circuit-breaker
+  namespace: truxify
+spec:
+  host: api-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 30ms
+
+    loadBalancer:
+      simple: ROUND_ROBIN
+
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+
+      minHealthPercent: 50
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: ml-circuit-breaker
+  namespace: truxify
+spec:
+  host: ml-engine-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+        connectTimeout: 30ms
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 20s
+      baseEjectionTime: 20s
+      maxEjectionPercent: 30
+

@@ -62,6 +62,14 @@ class _Shelf:
         return None
 
     def _fit(self, l: float, w: float, h: float, rotated: bool) -> dict | None:
+        # An item taller than the shelf's remaining vertical clearance can
+        # never be placed here, regardless of how it fits in x/y — checking
+        # this first prevents placements that would overflow the truck's
+        # ceiling (or the shelf above) once shelf_height grows past
+        # max_height.
+        if h > self.max_height:
+            return None
+
         # Does it fit in the remaining row?
         if self.cursor_x + l <= self.max_length and self.cursor_y + w <= self.max_width:
             pos = {"x": self.cursor_x, "y": self.cursor_y, "z": self.z_bottom}
@@ -267,6 +275,10 @@ def optimise_packing(
             "utilization_pct": 0.0,
         }
 
+    if not delivery_addresses and packages:
+        raise ValueError(
+            "delivery_addresses must contain at least one address when packages are provided"
+        )
     if len(delivery_addresses) < len(packages):
         logger.warning(
             "Fewer delivery addresses (%d) than packages (%d); "

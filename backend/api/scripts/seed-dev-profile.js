@@ -51,6 +51,8 @@ const DEV_PROFILES = [
     phone:        '+919000000001',
     email:        'dev-customer@truxify.local',
     is_active:    true,
+    language:     'en',
+    dark_mode:    false,
   },
   {
     id:           '22222222-2222-2222-2222-222222222222',
@@ -60,8 +62,26 @@ const DEV_PROFILES = [
     phone:        '+919000000002',
     email:        'dev-driver@truxify.local',
     is_active:    true,
+    language:     'hi',
+    dark_mode:    true,
+  },
+  {
+    id:           '33333333-3333-3333-3333-333333333333',
+    firebase_uid: 'dev_firebase_uid_admin',
+    role:         'admin',
+    full_name:    'Dev Admin',
+    phone:        '+919000000003',
+    email:        'dev-admin@truxify.local',
+    is_active:    true,
+    language:     'en',
+    dark_mode:    true,
   },
 ];
+
+function filterProfiles(roleFilter) {
+  if (!roleFilter) return DEV_PROFILES;
+  return DEV_PROFILES.filter(p => p.role === roleFilter);
+}
 
 // ── Environment validation ────────────────────────────────────────────
 function validateEnv() {

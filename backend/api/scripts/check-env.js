@@ -87,29 +87,39 @@ function main() {
 
   // Variable comparison
   if (exampleVars !== null && envVars !== null) {
-    const missing = [], empty = [];
-    for (const [key] of exampleVars) {
-      if (!envVars.has(key)) missing.push(key);
-      else if (envVars.get(key) === "") empty.push(key);
+    const missing = [], empty = [], optional = new Set();
+    for (const [key, val] of exampleVars) {
+      if (val.startsWith("optional:")) optional.add(key);
+      if (!envVars.has(key)) {
+        if (optional.has(key)) continue;
+        missing.push(key);
+      } else if (envVars.get(key) === "") {
+        if (optional.has(key)) continue;
+        empty.push(key);
+      }
     }
 
     console.log();
 
     if (missing.length === 0) {
-      console.log(`  ${TICK} No missing variables`);
+      console.log(`  ${TICK} No missing required variables`);
     } else {
-      console.log(`  ${WARN} ${c.yellow("Missing variables:")}`);
+      console.log(`  ${WARN} ${c.yellow("Missing required variables:")}`);
       missing.forEach(k => console.log(`      ${c.red("-")} ${k}`));
       warnings++;
     }
 
     if (empty.length === 0) {
-      console.log(`  ${TICK} No empty variables`);
+      console.log(`  ${TICK} No empty required variables`);
     } else {
-      console.log(`  ${WARN} ${c.yellow("Empty variables:")}`);
+      console.log(`  ${WARN} ${c.yellow("Empty required variables:")}`);
       empty.forEach(k => console.log(`      ${c.yellow("-")} ${k}`));
       warnings++;
     }
+
+    const total = exampleVars.size;
+    const configured = total - missing.length - empty.length;
+    console.log(`  ${c.dim(`${configured}/${total} variables configured`)}`);
   }
 
   // Summary

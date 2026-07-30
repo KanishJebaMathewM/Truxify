@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-deployment
+  namespace: truxify
+  labels:
+    app: truxify
+    component: ml
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: truxify
+      component: ml
+  template:
+    metadata:
+      labels:
+        app: truxify
+        component: ml
+    spec:
+      containers:
+      - name: ml-engine
+        image: truxify/ml:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        env:
+        - name: ML_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: truxify-secrets
+              key: ML_API_KEY
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1000m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2

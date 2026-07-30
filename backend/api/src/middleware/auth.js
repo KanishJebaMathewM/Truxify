@@ -91,6 +91,10 @@ export async function authenticate(req, res, next) {
 
   const token = authHeader.split(' ')[1];
 
+  // Store the raw access token on the request so route handlers can create
+  // per-request Supabase clients that carry the user's identity for RPC calls.
+  req.token = token;
+
   try {
     let userProfile = null;
     let firebaseUid = null;

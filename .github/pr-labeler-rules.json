@@ -119,5 +119,18 @@
       "pattern": "(package-lock\\.json|pubspec\\.lock|dependabot\\.yml)",
       "labels": ["dependencies"]
     }
+  ],
+  "singleTypeLabel": true,
+  "typeLabelPriority": [
+    "type:security",
+    "type:performance",
+    "type:bug",
+    "type:feature",
+    "type:refactor",
+    "type:testing",
+    "type:design",
+    "type:devops",
+    "type:docs",
+    "type:accessibility"
   ]
 }

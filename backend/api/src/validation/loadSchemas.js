@@ -19,6 +19,7 @@ export const loadFilterQuerySchema = z.object({
     message: 'distance must be a positive number',
   }),
   order: z.enum(['asc', 'desc']).optional(),
+  sort_by: z.enum(['estimated_price', 'created_at', 'distance']).optional(),
 }).superRefine((filters, ctx) => {
   if (
     filters.min_price !== undefined
@@ -31,4 +32,11 @@ export const loadFilterQuerySchema = z.object({
       message: 'min_price must be less than or equal to max_price',
     });
   }
+});
+
+export const createLoadSchema = z.object({
+  pickup_location: z.string().min(5).max(255),
+  drop_location: z.string().min(5).max(255),
+  weight_tons: z.number().positive().max(50),
+  goods_type: z.string().min(2).max(100)
 });

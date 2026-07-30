@@ -94,7 +94,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
       setState(() {
         _suggestions = suggestions;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('LocationPickerScreen: $e');
       if (!mounted) {
         return;
       }
@@ -133,7 +134,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
       setState(() {
         _selectedAddress = resolvedAddress;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('LocationPickerScreen: $e');
       if (!mounted) {
         return;
       }

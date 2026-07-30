@@ -251,6 +251,133 @@ void main() {
       service.dispose();
     });
 
+    test('fetchStatement returns parsed JSON for format=json', () async {
+      final mockStatement = {
+        'driver_name': 'Test Driver',
+        'driver_phone': '+911234567890',
+        'start_date': '2026-06-01',
+        'end_date': '2026-06-30',
+        'total_trips': 10,
+        'total_earnings': 5000000,
+        'platform_fees': 500000,
+        'net_earnings': 4500000,
+        'trips': [
+          {
+            'trip_id': 'trip-1',
+            'display_id': 'TRP-001',
+            'trip_date': '2026-06-15',
+            'route': 'Delhi → Mumbai',
+            'customer_name': 'Acme Corp',
+            'earnings': 500000,
+          }
+        ],
+      };
+
+      final httpClient = MockHttpClient((request) async {
+        expect(request.url.path, equals('/api/profile/driver/statement'));
+        expect(request.url.queryParameters['start_date'], equals('2026-06-01'));
+        expect(request.url.queryParameters['end_date'], equals('2026-06-30'));
+        expect(request.url.queryParameters['format'], equals('json'));
+        return http.Response(jsonEncode(mockStatement), 200);
+      });
+
+      final supabaseClient = FakeSupabaseClient(auth: mockAuth);
+      final service = DriverEarningsService(
+        client: supabaseClient,
+        httpClient: httpClient,
+      );
+
+      final result = await service.fetchStatement(
+        startDate: DateTime(2026, 6, 1),
+        endDate: DateTime(2026, 6, 30),
+        format: 'json',
+      );
+
+      expect(result, isA<Map<String, dynamic>>());
+      expect((result as Map<String, dynamic>)['driver_name'], equals('Test Driver'));
+
+      service.dispose();
+    });
+
+    test('fetchStatement returns raw CSV string for format=csv', () async {
+      final csvContent = 'date,route,earnings\n2026-06-15,Delhi-Mumbai,5000';
+
+      final httpClient = MockHttpClient((request) async {
+        expect(request.url.path, equals('/api/profile/driver/statement'));
+        expect(request.url.queryParameters['start_date'], equals('2026-06-01'));
+        expect(request.url.queryParameters['end_date'], equals('2026-06-30'));
+        expect(request.url.queryParameters['format'], equals('csv'));
+        return http.Response(csvContent, 200);
+      });
+
+      final supabaseClient = FakeSupabaseClient(auth: mockAuth);
+      final service = DriverEarningsService(
+        client: supabaseClient,
+        httpClient: httpClient,
+      );
+
+      final result = await service.fetchStatement(
+        startDate: DateTime(2026, 6, 1),
+        endDate: DateTime(2026, 6, 30),
+        format: 'csv',
+      );
+
+      expect(result, isA<String>());
+      expect(result as String, contains('date,route,earnings'));
+
+      service.dispose();
+    });
+
+    test('fetchStatement throws exception on API error', () async {
+      final httpClient = MockHttpClient((request) async {
+        return http.Response(jsonEncode({'error': 'Unauthorized'}), 401);
+      });
+
+      final supabaseClient = FakeSupabaseClient(auth: mockAuth);
+      final service = DriverEarningsService(
+        client: supabaseClient,
+        httpClient: httpClient,
+      );
+
+      expect(
+        () => service.fetchStatement(
+          startDate: DateTime(2026, 6, 1),
+          endDate: DateTime(2026, 6, 30),
+        ),
+        throwsA(isA<Exception>()),
+      );
+
+      service.dispose();
+    });
+
+    test('fetchStatement queries with correct endpoint and query parameters', () async {
+      Uri? capturedUri;
+
+      final httpClient = MockHttpClient((request) async {
+        capturedUri = request.url;
+        return http.Response(jsonEncode({'driver_name': 'Test'}), 200);
+      });
+
+      final supabaseClient = FakeSupabaseClient(auth: mockAuth);
+      final service = DriverEarningsService(
+        client: supabaseClient,
+        httpClient: httpClient,
+      );
+
+      await service.fetchStatement(
+        startDate: DateTime(2026, 7, 1),
+        endDate: DateTime(2026, 7, 15),
+        format: 'json',
+      );
+
+      expect(capturedUri!.path, equals('/api/profile/driver/statement'));
+      expect(capturedUri!.queryParameters['start_date'], equals('2026-07-01'));
+      expect(capturedUri!.queryParameters['end_date'], equals('2026-07-15'));
+      expect(capturedUri!.queryParameters['format'], equals('json'));
+
+      service.dispose();
+    });
+
     test('fetchWalletSummary queries driver_details table via supabase client', () async {
       bool databaseCalled = false;
       final supabaseClient = FakeSupabaseClient(

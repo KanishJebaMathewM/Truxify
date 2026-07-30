@@ -1,0 +1,82 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: api-rollout
+  namespace: truxify
+  labels:
+    app: api
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+      - name: api
+        image: truxify/api:latest
+        ports:
+        - containerPort: 5000
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+  strategy:
+    canary:
+      maxSurge: "25%"
+      maxUnavailable: 0
+      steps:
+      - setWeight: 10
+      - pause:
+          duration: 60s
+      - setWeight: 25
+      - pause:
+          duration: 60s
+      - setWeight: 50
+      - pause:
+          duration: 120s
+      - setWeight: 75
+      - pause:
+          duration: 60s
+      - setWeight: 100
+      - pause:
+          duration: 30s
+      analysis:
+        templates:
+        - templateName: success-rate
+        args:
+        - name: service-name
+          value: api-service
+      experiments:
+      - name: canary-experiment
+        templates:
+        - name: baseline
+          specRef: stable
+        - name: canary
+          specRef: canary
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+  namespace: truxify
+spec:
+  args:
+  - name: service-name
+  metrics:
+  - name: success-rate
+    interval: 30s
+    successCondition: result[0] >= 0.95
+    failureLimit: 3
+    provider:
+      prometheus:
+        address: http://prometheus.istio-system:9090
+        query: |
+          sum(irate(istio_requests_total{reporter="destination",destination_service=~"{{args.service-name}}.*",response_code!~"5.*"}[5m])) / 
+          sum(irate(istio_requests_total{reporter="destination",destination_service=~"{{args.service-name}}.*"}[5m]))

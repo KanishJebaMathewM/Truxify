@@ -19,12 +19,8 @@ vi.mock('../../src/services/reputation.js', () => ({
   getDriverReputation: getDriverReputationMock,
 }));
 
-vi.mock('../../src/services/otpService.js', () => ({
-  generateAndStoreOtp: vi.fn().mockResolvedValue('1234'),
-  verifyOtp: vi.fn((_phone, otp) => Promise.resolve(otp === '1234')),
-}));
 
-const { default: driverRouter, otpPhoneKey } = await import('../../src/routes/driverRoutes.js');
+const { default: driverRouter } = await import('../../src/routes/driverRoutes.js');
 
 
 function buildApp() {
@@ -48,19 +44,6 @@ describe('Driver Routes', () => {
     m.calls.length = 0;
   });
 
-  describe('otpPhoneKey', () => {
-    it('normalizes equivalent phone number formats to one limiter key', () => {
-      expect(otpPhoneKey('9876543210')).toBe('phone:9876543210');
-      expect(otpPhoneKey(' 98765 43210 ')).toBe('phone:9876543210');
-      expect(otpPhoneKey('+91 98765-43210')).toBe('phone:9876543210');
-      expect(otpPhoneKey('919876543210')).toBe('phone:9876543210');
-    });
-
-    it('uses an unknown fallback for non-string or empty phone values', () => {
-      expect(otpPhoneKey(undefined)).toBe('phone:unknown');
-      expect(otpPhoneKey('---')).toBe('phone:unknown');
-    });
-  });
 
   it('GET /stats returns 404 when driver profile does not exist', async () => {
     const app = buildApp();
@@ -99,28 +82,6 @@ describe('Driver Routes', () => {
     expect(res.body.truck).toBe(null);
   });
 
-  it('POST /otp/verify accepts the default driver login OTP', async () => {
-    const app = buildApp();
-
-    const res = await request(app)
-      .post('/api/drivers/otp/verify')
-      .send({ phone: '9876543210', otp: '1234' });
-
-    expect(res.status).toBe(200);
-    expect(res.body.verified).toBe(true);
-    expect(res.body.message).toBe('OTP verified successfully.');
-  });
-
-  it('POST /otp/verify rejects invalid OTP', async () => {
-    const app = buildApp();
-
-    const res = await request(app)
-      .post('/api/drivers/otp/verify')
-      .send({ phone: '9876543210', otp: '0000' });
-
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Invalid OTP. Please try again.');
-  });
 
   it('GET /stats returns truck details when truck assigned', async () => {
     m.store.driver_details.push({
@@ -426,13 +387,19 @@ describe('Driver Routes', () => {
   });
 
   describe('GET /:driverId/reputation', () => {
+    const validDriverId = 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11';
+    const validHeaders = {
+      'x-user-id': validDriverId,
+      'x-user-role': 'driver',
+    };
+
     beforeEach(() => {
       getDriverReputationMock.mockReset();
     });
 
     it('returns both platform rating and on-chain score when wallet exists and blockchain responds', async () => {
       m.store.driver_details.push({
-        user_id: 'driver-1',
+        user_id: validDriverId,
         rating: 4.8,
         polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
       });
@@ -441,12 +408,12 @@ describe('Driver Routes', () => {
 
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/driver-1/reputation')
-        .set(DRIVER_HEADERS);
+        .get(`/api/drivers/${validDriverId}/reputation`)
+        .set(validHeaders);
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        driverId: 'driver-1',
+        driverId: validDriverId,
         walletAddress: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
         onChainScore: 92,
         supabaseRating: 4.8,
@@ -456,19 +423,19 @@ describe('Driver Routes', () => {
 
     it('returns onChainScore null and walletAddress null when driver has no wallet', async () => {
       m.store.driver_details.push({
-        user_id: 'driver-1',
+        user_id: validDriverId,
         rating: 4.8,
         polygon_wallet_address: null,
       });
 
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/driver-1/reputation')
-        .set(DRIVER_HEADERS);
+        .get(`/api/drivers/${validDriverId}/reputation`)
+        .set(validHeaders);
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        driverId: 'driver-1',
+        driverId: validDriverId,
         walletAddress: null,
         onChainScore: null,
         supabaseRating: 4.8,
@@ -478,7 +445,7 @@ describe('Driver Routes', () => {
 
     it('returns onChainScore null and supabase rating when blockchain/contract fails', async () => {
       m.store.driver_details.push({
-        user_id: 'driver-1',
+        user_id: validDriverId,
         rating: 4.8,
         polygon_wallet_address: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
       });
@@ -487,12 +454,12 @@ describe('Driver Routes', () => {
 
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/driver-1/reputation')
-        .set(DRIVER_HEADERS);
+        .get(`/api/drivers/${validDriverId}/reputation`)
+        .set(validHeaders);
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
-        driverId: 'driver-1',
+        driverId: validDriverId,
         walletAddress: '0xAbcdef1234567890Abcdef1234567890Abcdef12',
         onChainScore: null,
         supabaseRating: 4.8,
@@ -503,8 +470,8 @@ describe('Driver Routes', () => {
     it('returns 404 if driver profile is not found', async () => {
       const app = buildApp();
       const res = await request(app)
-        .get('/api/drivers/driver-1/reputation')
-        .set(DRIVER_HEADERS);
+        .get(`/api/drivers/${validDriverId}/reputation`)
+        .set(validHeaders);
 
       expect(res.status).toBe(404);
     });
@@ -551,6 +518,228 @@ describe('Driver Routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.bids.map((b) => b.id)).toEqual(['bid-mine']);
+    });
+  });
+
+  describe('GET /statement & GET /earnings/report', () => {
+    beforeEach(() => {
+      m.store.orders = [];
+    });
+
+    it('returns empty list and summary when no trips exist', async () => {
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/statement')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.summary).toEqual({
+        total_trips: 0,
+        total_base_freight: 0,
+        total_platform_fees: 0,
+        total_toll_estimate: 0,
+        total_net_earnings: 0
+      });
+      expect(res.body.trips).toEqual([]);
+    });
+
+    it('filters trips and aggregates earnings for the driver on /statement', async () => {
+      m.store.orders.push(
+        {
+          id: 'order-1',
+          driver_id: 'driver-1',
+          status: 'payment_released',
+          pickup_address: 'A',
+          drop_address: 'B',
+          pickup_date: '2026-06-01',
+          base_freight: 10000,
+          platform_fee: 500,
+          toll_estimate: 1500
+        },
+        {
+          id: 'order-2',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'C',
+          drop_address: 'D',
+          pickup_date: '2026-06-05',
+          base_freight: 20000,
+          platform_fee: 1000,
+          toll_estimate: 2000
+        },
+        {
+          id: 'order-other-driver',
+          driver_id: 'other-driver',
+          status: 'payment_released',
+          pickup_address: 'E',
+          drop_address: 'F',
+          pickup_date: '2026-06-02',
+          base_freight: 15000,
+          platform_fee: 750,
+          toll_estimate: 1000
+        }
+      );
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/statement?start_date=2026-06-02')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.summary).toEqual({
+        total_trips: 1,
+        total_base_freight: 20000,
+        total_platform_fees: 1000,
+        total_toll_estimate: 2000,
+        total_net_earnings: 19000
+      });
+      expect(res.body.trips).toHaveLength(1);
+      expect(res.body.trips[0].id).toBe('order-2');
+    });
+
+    it('filters trips and aggregates earnings for the driver on /earnings/report', async () => {
+      m.store.orders.push(
+        {
+          id: 'order-1',
+          driver_id: 'driver-1',
+          status: 'payment_released',
+          pickup_address: 'A',
+          drop_address: 'B',
+          pickup_date: '2026-06-01',
+          base_freight: 10000,
+          platform_fee: 500,
+          toll_estimate: 1500
+        },
+        {
+          id: 'order-2',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'C',
+          drop_address: 'D',
+          pickup_date: '2026-06-05',
+          base_freight: 20000,
+          platform_fee: 1000,
+          toll_estimate: 2000
+        }
+      );
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/earnings/report?start_date=2026-06-02')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.summary).toEqual({
+        total_trips: 1,
+        total_base_freight: 20000,
+        total_platform_fees: 1000,
+        total_toll_estimate: 2000,
+        total_net_earnings: 19000
+      });
+      expect(res.body.trips).toHaveLength(1);
+      expect(res.body.trips[0].id).toBe('order-2');
+    });
+
+    it('returns CSV formatting and security headers when format=csv is passed', async () => {
+      m.store.orders.push({
+        id: 'order-1',
+        driver_id: 'driver-1',
+        status: 'delivered',
+        pickup_address: '=A1',
+        drop_address: 'B',
+        pickup_date: '2026-06-01',
+        base_freight: 10000,
+        platform_fee: 500,
+        toll_estimate: 1500
+      });
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/statement?format=csv')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toContain('text/csv');
+      expect(res.headers['content-type']).toContain('charset=utf-8');
+      expect(res.headers['content-disposition']).toBe('attachment; filename="statement.csv"');
+      expect(res.text).toContain('"order-1"');
+      expect(res.text).toContain('"10000"');
+      // Verify CSV Formula Injection escaping
+      expect(res.text).toContain('"' + "'=A1" + '"');
+    });
+
+    it('sorts statement trips by net earnings when sort_by=net_earnings is passed', async () => {
+      m.store.orders.push(
+        {
+          id: 'order-low-earn',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'A',
+          drop_address: 'B',
+          pickup_date: '2026-06-01',
+          base_freight: 10000,
+          platform_fee: 1000,
+          toll_estimate: 0
+        },
+        {
+          id: 'order-high-earn',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'C',
+          drop_address: 'D',
+          pickup_date: '2026-06-05',
+          base_freight: 30000,
+          platform_fee: 1000,
+          toll_estimate: 0
+        }
+      );
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/statement?sort_by=net_earnings')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.trips).toHaveLength(2);
+      expect(res.body.trips[0].id).toBe('order-high-earn');
+    });
+
+    it('sorts statement trips properly in CSV format when sort_by=net_earnings and format=csv are both passed', async () => {
+      m.store.orders.push(
+        {
+          id: 'order-low-earn',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'A',
+          drop_address: 'B',
+          pickup_date: '2026-06-01',
+          base_freight: 10000,
+          platform_fee: 1000,
+          toll_estimate: 0
+        },
+        {
+          id: 'order-high-earn',
+          driver_id: 'driver-1',
+          status: 'delivered',
+          pickup_address: 'C',
+          drop_address: 'D',
+          pickup_date: '2026-06-05',
+          base_freight: 30000,
+          platform_fee: 1000,
+          toll_estimate: 0
+        }
+      );
+
+      const app = buildApp();
+      const res = await request(app)
+        .get('/api/drivers/statement?sort_by=net_earnings&format=csv')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      const lines = res.text.split('\n');
+      // lines[0] is headers, lines[1] should be the high-earning order, lines[2] should be low-earning order
+      expect(lines[1]).toContain('"order-high-earn"');
+      expect(lines[2]).toContain('"order-low-earn"');
     });
   });
 });

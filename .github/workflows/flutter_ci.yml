@@ -1,0 +1,43 @@
+name: Flutter CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build_and_test:
+    name: Flutter Lint & Test
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        app: [apps/customer, apps/driver]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.x' # Assuming 3.22.x based on pubspec sdk constraint >=3.3.0
+          channel: 'stable'
+
+      - name: Install Dependencies
+        working-directory: ${{ matrix.app }}
+        run: flutter pub get
+
+      - name: Analyze Code
+        working-directory: ${{ matrix.app }}
+        run: flutter analyze
+
+      - name: Run Tests
+        working-directory: ${{ matrix.app }}
+        run: flutter test

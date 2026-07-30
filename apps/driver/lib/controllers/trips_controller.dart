@@ -29,8 +29,18 @@ class TripsController extends ChangeNotifier {
   }
 
   int parseEarnings(String earnings) {
-    final clean = earnings.replaceAll(RegExp(r'[^\d]'), '');
-    return int.tryParse(clean) ?? 0;
+    final cleaned = earnings
+        .replaceAll('₹', '')
+        .replaceAll(',', '')
+        .trim();
+    final match = RegExp(r'^([\d.]+)\s*([KkLlMm]?)$').firstMatch(cleaned);
+    if (match == null) return 0;
+    final value = double.tryParse(match.group(1) ?? '') ?? 0;
+    final suffix = match.group(2)?.toUpperCase() ?? '';
+    if (suffix == 'K') return (value * 1000 * 100).toInt();
+    if (suffix == 'L') return (value * 100000 * 100).toInt();
+    if (suffix == 'M') return (value * 1000000 * 100).toInt();
+    return (value * 100).toInt();
   }
 
   int totalEarningsPaise() => trips.fold(

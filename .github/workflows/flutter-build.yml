@@ -1,0 +1,54 @@
+name: Flutter CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test_and_build:
+    name: Test and Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [apps/customer, apps/driver]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.22.0'
+          channel: 'stable'
+
+      - name: Install dependencies
+        working-directory: ${{ matrix.app }}
+        run: flutter pub get
+
+      - name: Run Tests
+        working-directory: ${{ matrix.app }}
+        run: flutter test
+
+      - name: Build APK
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: ${{ matrix.app }}
+        run: flutter build apk --release
+
+      - name: Upload APK Artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app == 'apps/customer' && 'customer-app-release' || 'driver-app-release' }}
+          path: ${{ matrix.app }}/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 7

@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: truxify-grafana-dashboard
+  namespace: istio-system
+  labels:
+    grafana_dashboard: "1"
+data:
+  truxify-dashboard.json: |
+    {
+      "title": "Truxify Service Mesh",
+      "panels": [
+        {
+          "title": "Request Rate",
+          "targets": [
+            {
+              "expr": "sum(rate(istio_requests_total[5m]))"
+            }
+          ]
+        },
+        {
+          "title": "Response Time",
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.95, sum(rate(istio_request_duration_milliseconds_bucket[5m])))"
+            }
+          ]
+        },
+        {
+          "title": "Error Rate",
+          "targets": [
+            {
+              "expr": "sum(rate(istio_requests_total{response_code=~\"5..\"}[5m]))"
+            }
+          ]
+        }
+      ]
+    }

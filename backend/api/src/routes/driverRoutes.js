@@ -1,17 +1,151 @@
-import express from 'express';
-import { supabase, redisClient } from '../config/db.js';
-import { getDriverReputation } from '../services/reputation.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
-import { userLimiter, createStore } from '../middleware/rateLimiter.js';
+/**
+ * @openapi
+ * components:
+ *   schemas:
+ *     DriverStats:
+ *       type: object
+ *       properties:
+ *         stats:
+ *           type: object
+ *           properties:
+ *             rating:
+ *               type: number
+ *             total_trips:
+ *               type: integer
+ *             completion_rate:
+ *               type: number
+ *             is_online:
+ *               type: boolean
+ *             wallet_confirmed:
+ *               type: number
+ *             wallet_pending:
+ *               type: number
+ *             wallet_total:
+ *               type: number
+ *         truck:
+ *           type: object
+ *           nullable: true
+ *     DriverOnlineRequest:
+ *       type: object
+ *       required:
+ *         - is_online
+ *       properties:
+ *         is_online:
+ *           type: boolean
+ *     DriverOnlineResponse:
+ *       type: object
+ *       properties:
+ *         message:
+ *           type: string
+ *         is_online:
+ *           type: boolean
+ *     WalletHistoryResponse:
+ *       type: object
+ *       properties:
+ *         page:
+ *           type: integer
+ *         limit:
+ *           type: integer
+ *         total:
+ *           type: integer
+ *         totalPages:
+ *           type: integer
+ *         transactions:
+ *           type: array
+ *           items:
+ *             type: object
+ *     EarningsSummaryResponse:
+ *       type: array
+ *       items:
+ *         type: object
+ *         properties:
+ *           day_date:
+ *             type: string
+ *             format: date
+ *           amount:
+ *             type: number
+ *           trip_count:
+ *             type: integer
+ *           hours_driven:
+ *             type: number
+ *     DriverTripsResponse:
+ *       type: object
+ *       properties:
+ *         page:
+ *           type: integer
+ *         limit:
+ *           type: integer
+ *         total:
+ *           type: integer
+ *         totalPages:
+ *           type: integer
+ *         trips:
+ *           type: array
+ *           items:
+ *             type: object
+ *     BidListResponse:
+ *       type: object
+ *       properties:
+ *         page:
+ *           type: integer
+ *         limit:
+ *           type: integer
+ *         total:
+ *           type: integer
+ *         totalPages:
+ *           type: integer
+ *         bids:
+ *           type: array
+ *           items:
+ *             type: object
+ *     WithdrawRequest:
+ *       type: object
+ *       required:
+ *         - amount
+ *       properties:
+ *         amount:
+ *           type: number
+ *           description: Amount in paisa
+ *     WithdrawResponse:
+ *       type: object
+ *       properties:
+ *         message:
+ *           type: string
+ *     DriverReputationResponse:
+ *       type: object
+ *       properties:
+ *         driverId:
+ *           type: string
+ *         walletAddress:
+ *           type: string
+ *           nullable: true
+ *         onChainScore:
+ *           type: number
+ *           nullable: true
+ *         supabaseRating:
+ *           type: number
+ */
 
-import { validateBody, validateParams } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, otpSendSchema, uuidParamSchema } from '../validation/requestSchemas.js';
+import express from 'express';
+import { supabase, redisClient, createUserClient } from '../config/db.js';
+import { getDriverReputation } from '../services/reputation.js';
+import { predictDriverProfit } from '../services/ml.js';
+import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
+import { userLimiter, createStore } from '../middleware/rateLimiter.js';
+import { checkBypassEligibility } from '../services/weighStationService.js';
+
+import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
+import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema, driverIdParamSchema, driverStatementSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
-import { generateAndStoreOtp, verifyOtp } from '../services/otpService.js';
-
+import { auditLog } from '../middleware/auditLog.js';
 const router = express.Router();
+router.use(userLimiter);
+const hosStatusSchema = z.object({
+  status: z.enum(['off_duty', 'on_duty', 'driving', 'resting'])
+});
 
 // Driver role authorization guard middleware
 function requireDriverRole(req, res, next) {
@@ -24,58 +158,58 @@ function requireDriverRole(req, res, next) {
   next();
 }
 
-const loginOtpSchema = z.object({
-  phone: z.string().trim().min(10).max(20),
-  otp: z.string().regex(/^\d{4}$/, { message: 'OTP must be 4 digits' }),
-});
-
-export function otpPhoneKey(phone) {
-  if (typeof phone !== 'string') {
-    return 'phone:unknown';
-  }
-
-  const digits = phone.replace(/\D/g, '');
-  if (!digits) {
-    return 'phone:unknown';
-  }
-
-  const nationalDigits = digits.length === 12 && digits.startsWith('91')
-    ? digits.slice(2)
-    : digits;
-
-  return `phone:${nationalDigits}`;
+function parseIntegerQuery(value) {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(String(value))) return NaN;
+  return Number.parseInt(value, 10);
 }
 
-function perPhoneLimiter(opts) {
-  return rateLimit({
-    ...opts,
-    keyGenerator: (req) => otpPhoneKey(req.body.phone),
-  });
+function parseCoordinate(value) {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!/^-?(?:\d+|\d*\.\d+)(?:e-?\d+)?$/i.test(trimmed)) {
+    return null;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
-const sendOtpLimiter = perPhoneLimiter({
-  windowMs: 60 * 1000,
-  max: 1,
-  standardHeaders: true,
-  legacyHeaders: false,
-  store: createStore('rl:otp-send:'),
-  message: { error: 'Too many OTP requests. Please wait before requesting again.' },
-});
-
-const verifyOtpLimiter = perPhoneLimiter({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  store: createStore('rl:otp-verify:'),
-  message: { error: 'Too many OTP verification attempts. Please try again later.' },
-});
-
+function hasValidCoordinates(lat, lng) {
+  return lat !== null &&
+    lng !== null &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180;
+}
 
 // ============================================================================
 // 1. GET DRIVER STATS (DRIVER)
 // ============================================================================
-router.get('/stats', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/stats:
+ *   get:
+ *     tags: [Driver]
+ *     summary: Get driver statistics
+ *     description: Returns driver's rating, trip counts, wallet balances, and assigned truck details. Driver role required.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Driver statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DriverStats'
+ *       404:
+ *         description: Driver profile not initialized
+ */
+router.get('/stats', authenticate, userLimiter, requirePolicy('driver:view-stats'), async (req, res) => {
   try {
     const { data: details, error } = await supabase
       .from('driver_details')
@@ -116,7 +250,32 @@ router.get('/stats', authenticate, userLimiter, requireRole(['driver']), async (
 // ============================================================================
 // 2. TOGGLE ONLINE / OFFLINE STATUS (DRIVER)
 // ============================================================================
-router.put('/online', authenticate, userLimiter, requireRole(['driver']), validateBody(driverOnlineSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/online:
+ *   put:
+ *     tags: [Driver]
+ *     summary: Toggle driver online/offline status
+ *     description: Updates the driver's availability status for receiving load offers.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/DriverOnlineRequest'
+ *     responses:
+ *       200:
+ *         description: Status updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DriverOnlineResponse'
+ *       400:
+ *         description: Validation error
+ */
+router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-online'), validateBody(driverOnlineSchema), async (req, res) => {
   const { is_online } = req.body;
 
   try {
@@ -125,10 +284,13 @@ router.put('/online', authenticate, userLimiter, requireRole(['driver']), valida
       .update({ is_online, updated_at: new Date().toISOString() })
       .eq('user_id', req.user.id)
       .select('is_online')
-      .single();
+      .maybeSingle();
 
     if (error) {
       return res.status(500).json({ error: 'Failed to update online state.', details: error.message });
+    }
+    if (!details) {
+      return res.status(404).json({ error: 'Driver profile not found.' });
     }
 
     res.json({
@@ -143,12 +305,82 @@ router.put('/online', authenticate, userLimiter, requireRole(['driver']), valida
 });
 
 // ============================================================================
+// 2b. UPDATE HOURS-OF-SERVICE STATUS (DRIVER)
+// ============================================================================
+router.put('/hos/status', authenticate, userLimiter, requirePolicy('driver:update-hos'), validateBody(hosStatusSchema), async (req, res) => {
+  const { status } = req.body;
+
+  try {
+    const { data: details, error } = await supabase
+      .from('driver_details')
+      .update({
+        hos_status: status,
+        updated_at: new Date().toISOString()
+      })
+      .eq('user_id', req.user.id)
+      .select('hos_status, accumulated_driving_minutes, accumulated_on_duty_minutes, shift_start_time')
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to update HoS status.', details: error.message });
+    }
+    if (!details) {
+      return res.status(404).json({ error: 'Driver profile not found.' });
+    }
+
+    res.json({
+      message: `HoS status marked as ${details.hos_status}.`,
+      status: details.hos_status,
+      accumulated_driving_minutes: details.accumulated_driving_minutes,
+      accumulated_on_duty_minutes: details.accumulated_on_duty_minutes,
+      shift_start_time: details.shift_start_time
+    });
+  } catch (err) {
+    logger.error('Driver HoS status update error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
 // 3. FETCH WALLET TRANSACTION HISTORY (DRIVER)
 // ============================================================================
-router.get('/wallet/history', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/wallet/history:
+ *   get:
+ *     tags: [Driver]
+ *     summary: Get wallet transaction history
+ *     description: Returns paginated wallet transaction history for the authenticated driver.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         description: Page number
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 20
+ *           maximum: 100
+ *         description: Items per page
+ *     responses:
+ *       200:
+ *         description: Transaction history
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/WalletHistoryResponse'
+ *       400:
+ *         description: Invalid pagination parameters
+ */
+router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:view-wallet'), async (req, res) => {
   try {
-    const page = parseInt(req.query.page || '1', 10);
-    const limit = parseInt(req.query.limit || '20', 10);
+    const page = parseIntegerQuery(req.query.page) ?? 1;
+    const limit = parseIntegerQuery(req.query.limit) ?? 20;
 
     // Validation
     if (isNaN(page) || page < 1) {
@@ -204,7 +436,35 @@ router.get('/wallet/history', authenticate, userLimiter, requireRole(['driver'])
 // ============================================================================
 // 4. FETCH Aggregated daily/weekly earnings summaries for chart (DRIVER)
 // ============================================================================
-router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/earnings/summary:
+ *   get:
+ *     tags: [Driver]
+ *     summary: Get earnings summary for charts
+ *     description: Returns aggregated daily earnings data for the specified number of days (max 365).
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         schema:
+ *           type: integer
+ *           default: 30
+ *           minimum: 1
+ *           maximum: 365
+ *         description: Number of days to include
+ *     responses:
+ *       200:
+ *         description: Earnings data array
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/EarningsSummaryResponse'
+ *       400:
+ *         description: Invalid days parameter
+ */
+router.get('/earnings/summary', authenticate, userLimiter, requirePolicy('driver:view-earnings'), async (req, res) => {
   const daysParam = req.query.days ?? '30';
   const limitDays = typeof daysParam === 'string' ? Number(daysParam) : NaN;
 
@@ -240,12 +500,46 @@ router.get('/earnings/summary', authenticate, userLimiter, requireRole(['driver'
 // ============================================================================
 // 5. FETCH DRIVER TRIPS (DRIVER)
 // ============================================================================
-router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/trips:
+ *   get:
+ *     tags: [Driver]
+ *     summary: List driver trips
+ *     description: Returns paginated trips for the authenticated driver, optionally filtered by status.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *         description: Filter by trip status
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *           maximum: 100
+ *     responses:
+ *       200:
+ *         description: Paginated trip list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DriverTripsResponse'
+ */
+router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips'), async (req, res) => {
   const { status } = req.query;
   const rawPage = req.query.page;
   const rawLimit = req.query.limit;
-  const parsedPage = parseInt(rawPage, 10);
-  const parsedLimit = parseInt(rawLimit, 10);
+  const parsedPage = parseIntegerQuery(rawPage);
+  const parsedLimit = parseIntegerQuery(rawLimit);
   if (rawPage !== undefined && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
     return res.status(400).json({ error: 'page must be a positive integer' });
   }
@@ -285,9 +579,87 @@ router.get('/trips', authenticate, userLimiter, requireRole(['driver']), async (
 });
 
 // ============================================================================
+// 5b. FETCH SINGLE TRIP DETAILS (DRIVER)
+// ============================================================================
+/**
+ * @openapi
+ * /api/driver/trips/{tripDisplayId}:
+ *   get:
+ *     tags: [Driver]
+ *     summary: Get single trip details
+ *     description: Returns parent details for a specific trip. Driver must own the trip.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: tripDisplayId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Trip display ID
+ *     responses:
+ *       200:
+ *         description: Single trip object
+ *       404:
+ *         description: Trip not found or Access denied
+ */
+router.get('/trips/:tripDisplayId', authenticate, userLimiter, requirePolicy('driver:view-trips'), async (req, res) => {
+  const { tripDisplayId } = req.params;
+
+  try {
+    const { data: trip, error } = await supabase
+      .from('trips')
+      .select('*')
+      .eq('trip_display_id', tripDisplayId)
+      .eq('driver_id', req.user.id)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch trip details.', details: error.message });
+    }
+    if (!trip) {
+      return res.status(404).json({ error: 'Trip not found or Access Denied.' });
+    }
+
+    res.json(trip);
+  } catch (err) {
+    logger.error('Driver single trip fetch error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
 // 6. FETCH TRIP ITEMS (DRIVER)
 // ============================================================================
-router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/trips/{tripDisplayId}/items:
+ *   get:
+ *     tags: [Driver]
+ *     summary: Get trip items
+ *     description: Returns all items for a specific trip. Driver must own the trip.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: tripDisplayId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Trip display ID
+ *     responses:
+ *       200:
+ *         description: Array of trip items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *       403:
+ *         description: Access denied
+ */
+router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requirePolicy('driver:view-trip-items'), async (req, res) => {
   const { tripDisplayId } = req.params;
 
   try {
@@ -307,7 +679,29 @@ router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requireRole
 // ============================================================================
 // 7. FETCH TRIP STOPS (DRIVER)
 // ============================================================================
-router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/trips/{tripDisplayId}/stops:
+ *   get:
+ *     tags: [Driver]
+ *     summary: Get trip stops
+ *     description: Returns all stops for a specific trip, ordered by sort_order. Driver must own the trip.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: tripDisplayId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Trip display ID
+ *     responses:
+ *       200:
+ *         description: Array of trip stops
+ *       403:
+ *         description: Access denied
+ */
+router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requirePolicy('driver:view-trip-stops'), async (req, res) => {
   const { tripDisplayId } = req.params;
 
   try {
@@ -327,7 +721,29 @@ router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requireRole
 // ============================================================================
 // 8. FETCH ROUTE MAP POINTS (DRIVER)
 // ============================================================================
-router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/trips/{tripDisplayId}/route-points:
+ *   get:
+ *     tags: [Driver]
+ *     summary: Get route map points
+ *     description: Returns route geometry points for a trip's map display. Driver must own the trip.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: tripDisplayId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Trip display ID
+ *     responses:
+ *       200:
+ *         description: Array of route map points
+ *       403:
+ *         description: Access denied
+ */
+router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requirePolicy('driver:view-route-points'), async (req, res) => {
   const { tripDisplayId } = req.params;
 
   try {
@@ -345,22 +761,113 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
 });
 
 // ============================================================================
+// 8b. TOGGLE ROUTE MAP POINT CLAIMED (DRIVER)
+// ============================================================================
+router.patch(
+  '/route-points/:id/claim',
+  authenticate,
+  userLimiter,
+  requirePolicy('driver:claim-route-point'),
+  validateParams(paramIdSchema),
+  async (req, res) => {
+    const { id } = req.params;
+    const claimed = req.body?.claimed;
+
+    if (typeof claimed !== 'boolean') {
+      return res.status(400).json({ error: 'claimed must be a boolean' });
+    }
+
+    try {
+      const { data: point, error: pointError } = await supabase
+        .from('route_map_points')
+        .select('id, trip_display_id')
+        .eq('id', id)
+        .maybeSingle();
+
+      if (pointError) {
+        return res.status(500).json({ error: 'Failed to fetch route point.', details: pointError.message });
+      }
+      if (!point) {
+        return res.status(404).json({ error: 'Route map point not found.' });
+      }
+
+      const { data: trip } = await supabase
+        .from('trips')
+        .select('id')
+        .eq('trip_display_id', point.trip_display_id)
+        .eq('driver_id', req.user.id)
+        .maybeSingle();
+
+      if (!trip) {
+        return res.status(403).json({ error: 'Access Denied: Route point does not belong to your trip.' });
+      }
+
+      const { data: updated, error: updateError } = await supabase
+        .from('route_map_points')
+        .update({ claimed })
+        .eq('id', id)
+        .select('*')
+        .maybeSingle();
+
+      if (updateError) {
+        return res.status(500).json({ error: 'Failed to update route point.', details: updateError.message });
+      }
+
+      res.json({ point: updated });
+    } catch (err) {
+      logger.error('Driver route point claim error:', err);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  },
+);
+
+// ============================================================================
 // 9. FETCH DRIVER BIDS (DRIVER)
 // ============================================================================
-router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/bids:
+ *   get:
+ *     tags: [Driver]
+ *     summary: List driver's bids
+ *     description: Returns paginated bid history for the authenticated driver.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 10
+ *           maximum: 100
+ *     responses:
+ *       200:
+ *         description: Paginated bid list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/BidListResponse'
+ */
+router.get('/bids', authenticate, userLimiter, requirePolicy('driver:view-bids'), async (req, res) => {
   try {
-    const rawPage = req.query.page;
-    const rawLimit = req.query.limit;
-    const parsedPage = parseInt(rawPage, 10);
-    const parsedLimit = parseInt(rawLimit, 10);
-    if (rawPage !== undefined && (!Number.isInteger(parsedPage) || parsedPage < 1)) {
-      return res.status(400).json({ error: 'page must be a positive integer' });
+    const pageParam = req.query.page ?? '1';
+    const limitParam = req.query.limit ?? '10';
+    const page = typeof pageParam === 'string' ? Number(pageParam) : NaN;
+    const limit = typeof limitParam === 'string' ? Number(limitParam) : NaN;
+
+    if (!Number.isInteger(page) || page < 1) {
+      return res.status(400).json({ error: 'page must be greater than or equal to 1' });
     }
-    if (rawLimit !== undefined && (!Number.isInteger(parsedLimit) || parsedLimit < 1)) {
-      return res.status(400).json({ error: 'limit must be a positive integer' });
+
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      return res.status(400).json({ error: 'limit must be between 1 and 100' });
     }
-    const page = parsedPage || 1;
-    const limit = Math.min(100, Math.max(1, parsedLimit || 10));
+
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
@@ -388,7 +895,32 @@ router.get('/bids', authenticate, userLimiter, requireRole(['driver']), async (r
 // ============================================================================
 // 10. WITHDRAW FUNDS FROM WALLET (DRIVER)
 // ============================================================================
-router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver']), validateBody(withdrawSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/wallet/withdraw:
+ *   post:
+ *     tags: [Driver]
+ *     summary: Withdraw funds from wallet
+ *     description: Initiates a withdrawal from the driver's confirmed wallet balance. Amount is in paisa. Uses Supabase RPC for atomic transaction.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/WithdrawRequest'
+ *     responses:
+ *       200:
+ *         description: Withdrawal initiated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/WithdrawResponse'
+ *       400:
+ *         description: Insufficient balance or validation error
+ */
+router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver:withdraw'), auditLog({ action: 'driver:withdraw', resourceType: 'wallet_withdrawal' }), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa
 
   try {
@@ -399,7 +931,10 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver'
       .eq('user_id', req.user.id)
       .maybeSingle();
 
-    if (detailsErr || !details) {
+    if (detailsErr) {
+      return res.status(500).json({ error: 'Failed to fetch driver details.', details: detailsErr.message });
+    }
+    if (!details) {
       return res.status(404).json({ error: 'Driver profile details not found.' });
     }
 
@@ -412,7 +947,8 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver'
     }
 
     // 5.2 Execute atomically via Supabase RPC
-    const { error: rpcErr } = await supabase.rpc('withdraw_funds_tx', {
+    const userClient = req.token ? createUserClient(req.token) : supabase;
+    const { error: rpcErr } = await userClient.rpc('withdraw_funds_tx', {
       p_driver_id: req.user.id,
       p_amount:    amount
     });
@@ -437,9 +973,87 @@ router.post('/wallet/withdraw', authenticate, userLimiter, requireRole(['driver'
 });
 
 // ============================================================================
+// 10b. ML-POWERED PROFIT PREDICTION (DRIVER)
+// ============================================================================
+const predictProfitLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  message: { error: 'Too many prediction requests. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.post(
+  '/predict-profit',
+  authenticate,
+  predictProfitLimiter,
+  requirePolicy('driver:view-stats'),
+  validateBody(predictDriverProfitSchema),
+  async (req, res) => {
+    try {
+      const {
+        route_distance_km,
+        fuel_price_per_litre,
+        toll_estimate_inr,
+        truck_mileage_kml,
+        cargo_weight_kg,
+        trip_duration_hours,
+      } = req.body;
+
+      const result = await predictDriverProfit({
+        routeDistanceKm: route_distance_km,
+        fuelPricePerLitre: fuel_price_per_litre,
+        tollEstimateInr: toll_estimate_inr,
+        truckMileageKmL: truck_mileage_kml,
+        cargoWeightKg: cargo_weight_kg,
+        tripDurationHours: trip_duration_hours,
+      });
+
+      res.json({ prediction: result });
+    } catch (err) {
+      if (err.message?.includes('[ML]')) {
+        logger.warn({ err: err.message }, 'ML engine unavailable for profit prediction');
+        return res.status(503).json({ error: 'Profit prediction service is temporarily unavailable.' });
+      }
+      logger.error({ err }, 'Profit prediction failed');
+      res.status(500).json({ error: 'Profit prediction failed.' });
+    }
+  },
+);
+
+// ============================================================================
 // 11. GET DRIVER REPUTATION (DRIVER)
 // ============================================================================
-router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['driver']), validateParams(uuidParamSchema), async (req, res) => {
+/**
+ * @openapi
+ * /api/driver/{driverId}/reputation:
+ *   get:
+ *     tags: [Driver]
+ *     summary: Get driver reputation
+ *     description: Returns driver's on-chain reputation score from Polygon and off-chain rating from Supabase. Results are cached in Redis for 30 seconds.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: driverId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Driver's UUID
+ *     responses:
+ *       200:
+ *         description: Driver reputation data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/DriverReputationResponse'
+ *       403:
+ *         description: Forbidden - can only view own reputation
+ *       404:
+ *         description: Driver not found
+ */
+router.get('/:driverId/reputation', authenticate, userLimiter, requirePolicy('driver:view-reputation'), validateParams(driverIdParamSchema), async (req, res) => {
   const { driverId } = req.params;
 
   if (driverId !== req.user.id) {
@@ -510,6 +1124,447 @@ router.get('/:driverId/reputation', authenticate, userLimiter, requireRole(['dri
   } catch (err) {
     logger.error(`[reputation] Unexpected error retrieving reputation for driver ${driverId}: ${err.message}`);
     return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// Helper to sanitize CSV cells to prevent CSV Formula Injection
+function sanitizeCsvCell(value) {
+  if (value === null || value === undefined) return '""';
+  let str = String(value);
+  // Strip CR/LF to prevent injection
+  str = str.replace(/[\r\n]+/g, ' ');
+  // Neutralize leading formula/risky characters by prefixing with a single quote
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'` + str;
+  }
+  return `"${str.replace(/"/g, '""')}"`;
+}
+
+// Shared handler for statement and earnings report
+async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) {
+  const userId = req.user.id;
+  const { start_date, end_date, sort_by, format } = req.query;
+
+  try {
+    let query = supabase
+      .from('orders')
+      .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, base_freight, toll_estimate, platform_fee')
+      .eq('driver_id', userId)
+      .in('status', ['delivered', 'payment_released'])
+      .limit(1000);
+
+    if (start_date) {
+      query = query.gte('pickup_date', start_date);
+    }
+    if (end_date) {
+      query = query.lte('pickup_date', end_date);
+    }
+
+    const { data: trips, error } = await query.order('pickup_date', { ascending: false });
+
+    if (error) {
+      logger.error({ err: error }, errorLabel);
+      return res.status(500).json({ error: 'Failed to fetch statement records.' });
+    }
+
+    // Compute totals
+    let totalBaseFreight = 0;
+    let totalPlatformFees = 0;
+    let totalTollEstimate = 0;
+    let totalNetEarnings = 0;
+
+    const tripsList = (trips || []).map(trip => {
+      const baseFreight = Number(trip.base_freight) || 0;
+      const platformFee = Number(trip.platform_fee) || 0;
+      const tollEstimate = Number(trip.toll_estimate) || 0;
+      const netEarnings = baseFreight - platformFee;
+
+      totalBaseFreight += baseFreight;
+      totalPlatformFees += platformFee;
+      totalTollEstimate += tollEstimate;
+      totalNetEarnings += netEarnings;
+
+      return {
+        id: trip.id,
+        order_display_id: trip.order_display_id,
+        pickup_address: trip.pickup_address,
+        drop_address: trip.drop_address,
+        pickup_date: trip.pickup_date,
+        base_freight: baseFreight,
+        platform_fee: platformFee,
+        toll_estimate: tollEstimate,
+        net_earnings: netEarnings,
+        status: trip.status
+      };
+    });
+
+    // Apply sorting before formatting output
+    if (sort_by === 'net_earnings') {
+      tripsList.sort((a, b) => (b.net_earnings - a.net_earnings) || new Date(b.pickup_date) - new Date(a.pickup_date));
+    } else if (sort_by === 'base_freight') {
+      tripsList.sort((a, b) => (b.base_freight - a.base_freight) || new Date(b.pickup_date) - new Date(a.pickup_date));
+    }
+
+    if (format === 'csv') {
+      const headers = ['ID', 'Order Display ID', 'Pickup Address', 'Drop Address', 'Pickup Date', 'Base Freight', 'Platform Fee', 'Toll Estimate', 'Net Earnings', 'Status'];
+      let csvString = headers.map(sanitizeCsvCell).join(',') + '\n';
+      for (const t of tripsList) {
+        const row = [t.id, t.order_display_id, t.pickup_address, t.drop_address, t.pickup_date, t.base_freight, t.platform_fee, t.toll_estimate, t.net_earnings, t.status];
+        csvString += row.map(sanitizeCsvCell).join(',') + '\n';
+      }
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      return res.send(csvString.trimEnd());
+    }
+
+    res.json({
+      summary: {
+        total_trips: tripsList.length,
+        total_base_freight: totalBaseFreight,
+        total_platform_fees: totalPlatformFees,
+        total_toll_estimate: totalTollEstimate,
+        total_net_earnings: totalNetEarnings
+      },
+      trips: tripsList
+    });
+  } catch (err) {
+    logger.error({ err }, errorLabel);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+}
+
+// ============================================================================
+// 10. GET DRIVER STATEMENT (DRIVER)
+// ============================================================================
+/**
+ * @openapi
+ * /api/driver/statement:
+ *   get:
+ *     tags: [Driver]
+ *     summary: Get driver statement
+ *     description: Returns aggregated earnings and list of trips for the authenticated driver.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: start_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date filter (YYYY-MM-DD)
+ *       - in: query
+ *         name: end_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date filter (YYYY-MM-DD)
+ *       - in: query
+ *         name: sort_by
+ *         schema:
+ *           type: string
+ *           enum: [pickup_date, net_earnings, base_freight]
+ *         description: Sort field
+ *       - in: query
+ *         name: format
+ *         schema:
+ *           type: string
+ *           enum: [json, csv]
+ *         description: Output format (json or csv)
+ *     responses:
+ *       200:
+ *         description: Driver statement response
+ *       500:
+ *         description: Internal Server Error
+ */
+router.get('/statement', authenticate, requirePolicy('profile:view-statement'), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
+  await handleDriverEarningsAndStatement(req, res, 'statement.csv', '[DriverRoutes] Driver statement fetch error');
+});
+
+// ============================================================================
+// 11. GET DRIVER EARNINGS REPORT (DRIVER)
+// ============================================================================
+/**
+ * @openapi
+ * /api/driver/earnings/report:
+ *   get:
+ *     tags: [Driver]
+ *     summary: Get driver earnings report
+ *     description: Returns aggregated earnings and list of trips for the authenticated driver.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: start_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Start date filter (YYYY-MM-DD)
+ *       - in: query
+ *         name: end_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: End date filter (YYYY-MM-DD)
+ *       - in: query
+ *         name: sort_by
+ *         schema:
+ *           type: string
+ *           enum: [pickup_date, net_earnings, base_freight]
+ *         description: Sort field
+ *       - in: query
+ *         name: format
+ *         schema:
+ *           type: string
+ *           enum: [json, csv]
+ *         description: Output format (json or csv)
+ *     responses:
+ *       200:
+ *         description: Driver earnings report response
+ *       500:
+ *         description: Internal Server Error
+ */
+router.get('/earnings/report', authenticate, requirePolicy('driver:view-earnings'), userLimiter, validateQuery(driverStatementSchema), async (req, res) => {
+  await handleDriverEarningsAndStatement(req, res, 'earnings_report.csv', '[DriverRoutes] Driver earnings report fetch error');
+});
+
+
+router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const lat = parseCoordinate(req.query.lat);
+    const lng = parseCoordinate(req.query.lng);
+
+    if (!hasValidCoordinates(lat, lng)) {
+      return res.status(400).json({ error: 'lat and lng must be valid coordinates.' });
+    }
+
+    const status = await checkBypassEligibility(driverId, lat, lng);
+    return res.status(200).json(status);
+  } catch (err) {
+    logger.error(`[weigh-station] Error getting bypass status for driver ${req.user.id}: ${err.message}`);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// LTL ROUTE OPTIMIZATION (DRIVER)
+// ============================================================================
+/**
+ * @openapi
+ * /api/driver/ltl/optimize-route:
+ *   get:
+ *     tags: [Driver, LTL]
+ *     summary: Get optimized LTL route for active orders
+ *     description: Returns an optimized sequence of pickups and drop-offs for the driver's active orders.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: lat
+ *         required: true
+ *         schema:
+ *           type: number
+ *       - in: query
+ *         name: lng
+ *         required: true
+ *         schema:
+ *           type: number
+ *     responses:
+ *       200:
+ *         description: Optimized route tasks
+ */
+router.get('/ltl/optimize-route', authenticate, userLimiter, requireDriverRole, async (req, res) => {
+  try {
+    const lat = parseFloat(req.query.lat);
+    const lng = parseFloat(req.query.lng);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({ error: 'Valid lat and lng query parameters are required.' });
+    }
+
+    const { data: activeOrders, error } = await supabase
+      .from('orders')
+      .select('id, order_display_id, status, pickup_address, pickup_lat, pickup_lng, drop_address, drop_lat, drop_lng')
+      .eq('driver_id', req.user.id)
+      .in('status', ['truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving']);
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch active orders.', details: error.message });
+    }
+
+    const tasks = [];
+    for (const order of activeOrders || []) {
+      if (['truck_assigned', 'en_route_pickup', 'arrived_pickup'].includes(order.status)) {
+        tasks.push({
+          id: `pickup_${order.id}`,
+          orderId: order.id,
+          orderDisplayId: order.order_display_id,
+          type: 'pickup',
+          address: order.pickup_address,
+          lat: order.pickup_lat,
+          lng: order.pickup_lng
+        });
+      }
+      tasks.push({
+        id: `dropoff_${order.id}`,
+        orderId: order.id,
+        orderDisplayId: order.order_display_id,
+        type: 'dropoff',
+        address: order.drop_address,
+        lat: order.drop_lat,
+        lng: order.drop_lng
+      });
+    }
+
+    // Import dynamically to avoid circular dependencies
+    const { optimizeLtlRoute } = await import('../services/routingService.js');
+    const optimizedTasks = optimizeLtlRoute(lat, lng, tasks);
+
+    res.json({ optimized_route: optimizedTasks });
+  } catch (err) {
+    logger.error(`[LTL Route] Error optimizing route for driver ${req.user.id}: ${err.message}`);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// GET DRIVER ANALYTICS & EARNINGS
+// ============================================================================
+router.get('/:id/earnings', authenticate, userLimiter, requirePolicy('driver:view-earnings'), validateParams(paramIdSchema), async (req, res) => {
+  const { id } = req.params;
+  const period = req.query.period || 'week';
+
+  if (req.user.role !== 'admin' && req.user.id !== id) {
+    return res.status(403).json({ error: 'Access denied. You can only view your own earnings.' });
+  }
+
+  try {
+    let cutoff = new Date();
+    if (period === 'day') {
+      cutoff.setHours(0, 0, 0, 0);
+    } else if (period === 'week') {
+      cutoff.setDate(cutoff.getDate() - 7);
+    } else if (period === 'month') {
+      cutoff.setDate(cutoff.getDate() - 30);
+    } else {
+      return res.status(400).json({ error: 'Invalid period. Must be day, week, or month.' });
+    }
+
+    const { data: trips, error: tripsError } = await supabase
+      .from('trips')
+      .select('*')
+      .eq('driver_id', id)
+      .eq('status', 'completed')
+      .gte('trip_date', cutoff.toISOString().split('T')[0])
+      .order('trip_date', { ascending: false });
+
+    if (tripsError) {
+      return res.status(500).json({ error: 'Failed to fetch trips.', details: tripsError.message });
+    }
+
+    const { count: lifetimeTrips, error: countError } = await supabase
+      .from('trips')
+      .select('*', { count: 'exact', head: true })
+      .eq('driver_id', id)
+      .eq('status', 'completed');
+
+    if (countError) {
+      logger.warn('Failed to fetch lifetime trips count:', countError.message);
+    }
+
+    // Weekly Chart Aggregation (always shows past 7 days)
+    const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const weeklyChartMap = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dayLabel = daysOfWeek[d.getDay()];
+      weeklyChartMap[dayLabel] = 0;
+    }
+
+    trips.forEach(trip => {
+      const tripDate = new Date(trip.trip_date);
+      const dayLabel = daysOfWeek[tripDate.getDay()];
+      if (weeklyChartMap[dayLabel] !== undefined) {
+        weeklyChartMap[dayLabel] += trip.total_earnings;
+      }
+    });
+
+    const weeklyChart = Object.entries(weeklyChartMap).map(([day, earnings]) => ({
+      day,
+      earnings
+    }));
+
+    let totalKm = 0;
+    trips.forEach(trip => {
+      if (trip.distance) {
+        const distanceNum = parseInt(String(trip.distance).replace(/[^0-9]/g, '')) || 0;
+        totalKm += distanceNum;
+      }
+    });
+
+    // Deadhead Trips Saved logic
+    const { data: allCompletedTrips, error: allTripsError } = await supabase
+      .from('trips')
+      .select('route_label, trip_date')
+      .eq('driver_id', id)
+      .eq('status', 'completed')
+      .order('trip_date', { ascending: true });
+
+    let deadheadTripsSaved = 0;
+    if (allCompletedTrips && allCompletedTrips.length > 1) {
+      for (let i = 1; i < allCompletedTrips.length; i++) {
+        const prevTrip = allCompletedTrips[i - 1];
+        const currTrip = allCompletedTrips[i];
+        
+        const prevRoute = (prevTrip.route_label || '').split(' → ');
+        const currRoute = (currTrip.route_label || '').split(' → ');
+        
+        if (prevRoute.length === 2 && currRoute.length === 2) {
+          const prevDrop = prevRoute[1].trim().toLowerCase();
+          const currPickup = currRoute[0].trim().toLowerCase();
+          
+          if (prevDrop === currPickup) {
+            const prevDate = new Date(prevTrip.trip_date);
+            const currDate = new Date(currTrip.trip_date);
+            const diffDays = Math.abs(currDate - prevDate) / (1000 * 60 * 60 * 24);
+            if (diffDays <= 3) {
+              deadheadTripsSaved++;
+            }
+          }
+        }
+      }
+    }
+
+    const totalNetEarnings = trips.reduce((sum, t) => sum + t.net_earnings, 0);
+
+    res.json({
+      period,
+      gross_earnings: trips.reduce((sum, t) => sum + t.total_earnings, 0),
+      net_earnings: totalNetEarnings,
+      trips_completed: trips.length,
+      weekly_chart: weeklyChart,
+      trips: trips.map(t => ({
+        trip_display_id: t.trip_display_id,
+        route_label: t.route_label,
+        gross_earnings: t.total_earnings,
+        estimated_fuel_cost: t.fuel_deducted,
+        net_earnings: t.net_earnings,
+        blockchain_hash: t.blockchain_hash,
+        receipt_link: t.blockchain_hash ? `https://polygonscan.com/tx/${t.blockchain_hash}` : null,
+        trip_date: t.trip_date
+      })),
+      cumulative_stats: {
+        total_km: totalKm,
+        avg_earning_per_km: totalKm > 0 ? (totalNetEarnings / 100.0) / totalKm : 0,
+        lifetime_trips: lifetimeTrips || 0
+      },
+      deadhead_trips_saved: deadheadTripsSaved
+    });
+
+  } catch (err) {
+    logger.error('Driver analytics fetch error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 

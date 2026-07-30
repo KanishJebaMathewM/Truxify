@@ -2,23 +2,41 @@ export function requireJsonContent(req, res, next) {
   // Only enforce on mutating requests
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
     const contentType = req.headers['content-type'];
-    
+
     if (!contentType) {
-      return res.status(415).json({ error: 'Unsupported Media Type. Content-Type header is missing.' });
+      return res.status(415).json({
+        error: 'Unsupported Media Type.',
+        received: undefined,
+        allowed: [
+          'application/json',
+          'application/x-www-form-urlencoded',
+          'multipart/form-data',
+        ],
+      });
     }
 
-    // Allow application/json
-    if (contentType.includes('application/json')) {
-      return next();
-    }
+    // Compare the base media type exactly (ignoring parameters such as
+    // charset). A substring match previously let malformed values like
+    // `text/plain; application/json` or `application/jsonx` through.
+    const mimeType = contentType.split(';')[0].trim().toLowerCase();
 
-    // Allow multipart/form-data for specific routes (like document uploads)
-    if (contentType.includes('multipart/form-data')) {
+    // Allow the media types the API actually parses (express.json,
+    // express.urlencoded, multer for uploads). Anything else is rejected.
+    const allowed = [
+      'application/json',
+      'application/x-www-form-urlencoded',
+      'multipart/form-data',
+    ];
+    if (allowed.includes(mimeType)) {
       return next();
     }
 
     // Reject all other content types
-    return res.status(415).json({ error: 'Unsupported Media Type. Expected application/json.' });
+    return res.status(415).json({
+      error: 'Unsupported Media Type.',
+      received: mimeType,
+      allowed,
+    });
   }
 
   // Pass through for GET, DELETE, etc.

@@ -4,6 +4,15 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 class CacheManager {
+  static const Set<String> _cacheTables = {
+    'orders',
+    'profile',
+    'documents',
+    'settings',
+    'last_location',
+    'milestones',
+  };
+
   dynamic _safeDecode(String json) {
     try {
       return jsonDecode(json);
@@ -11,6 +20,18 @@ class CacheManager {
       return null;
     }
   }
+
+  Map<String, dynamic>? _decodeMap(String json) {
+    final decoded = _safeDecode(json);
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    if (decoded is Map) {
+      return Map<String, dynamic>.from(decoded);
+    }
+    return null;
+  }
+
   static const _dbName = 'truxify_cache.db';
 
   Database? _database;
@@ -124,13 +145,23 @@ class CacheManager {
       limit: limit,
     );
 
-    final results = rows.map((row) {
-      final payload = jsonDecode(row['payload'] as String) as Map<String, dynamic>;
-      return <String, dynamic>{
+    final results = <Map<String, dynamic>>[];
+
+    for (final row in rows) {
+      final payload = _decodeMap(row['payload'] as String);
+      if (payload == null) {
+        final id = row['id'];
+        if (id is String) {
+          await db.delete('orders', where: 'id = ?', whereArgs: [id]);
+        }
+        continue;
+      }
+
+      results.add(<String, dynamic>{
         ...payload,
         '_cached_at': row['updated_at'],
-      };
-    }).toList();
+      });
+    }
 
     if (activeOnly) {
       const activeStatuses = {
@@ -170,8 +201,12 @@ class CacheManager {
     }
 
     final decoded = _safeDecode(rows.first['value'] as String);
-      if (decoded == null) return null;
-      final payload = decoded as Map<String, dynamic>;
+    if (decoded is! Map) {
+      await db.delete('profile', where: 'key = ?', whereArgs: ['profile']);
+      return null;
+    }
+
+    final payload = Map<String, dynamic>.from(decoded);
     return <String, dynamic>{
       ...payload,
       '_cached_at': rows.first['updated_at'],
@@ -207,13 +242,26 @@ class CacheManager {
   Future<List<Map<String, dynamic>>> getDocuments() async {
     final db = await open();
     final rows = await db.query('documents', orderBy: 'updated_at DESC');
-    return rows.map((row) {
-      final payload = jsonDecode(row['payload'] as String) as Map<String, dynamic>;
-      return <String, dynamic>{
+
+    final results = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      final decoded = _safeDecode(row['payload'] as String);
+      if (decoded is! Map) {
+        final id = row['id'];
+        if (id is String) {
+          await db.delete('documents', where: 'id = ?', whereArgs: [id]);
+        }
+        continue;
+      }
+
+      final payload = Map<String, dynamic>.from(decoded);
+      results.add(<String, dynamic>{
         ...payload,
         '_cached_at': row['updated_at'],
-      };
-    }).toList();
+      });
+    }
+
+    return results;
   }
 
   Future<void> cacheSettings(Map<String, dynamic> settings) async {
@@ -242,7 +290,13 @@ class CacheManager {
     final result = <String, dynamic>{};
 
     for (final row in rows) {
-      result[row['key'] as String] = _safeDecode(row['value'] as String);
+      final key = row['key'] as String;
+      final decoded = _safeDecode(row['value'] as String);
+      if (decoded == null) {
+        await db.delete('settings', where: 'key = ?', whereArgs: [key]);
+        continue;
+      }
+      result[key] = decoded;
     }
 
     return result;
@@ -282,11 +336,14 @@ class CacheManager {
     final batch = db.batch();
     final updatedAt = DateTime.now().toUtc().toIso8601String();
 
-    for (final item in milestones) {
+    for (var index = 0; index < milestones.length; index++) {
+      final item = milestones[index];
+      final milestoneId = _stableId(item, const ['id', 'milestoneId', 'milestone_id']) ??
+          '${item['title'] ?? 'milestone'}_$index';
       batch.insert(
         'milestones',
         {
-          'id': '${orderId}_${item['title'] ?? 'milestone'}',
+          'id': '${orderId}_$milestoneId',
           'order_id': orderId,
           'title': item['title'] ?? 'Milestone',
           'completed': item['completed'] == true ? 1 : 0,
@@ -313,6 +370,49 @@ class CacheManager {
     final db = await open();
     final rows = await db.query(tableName, orderBy: 'updated_at DESC', limit: 1);
     return rows.isEmpty ? null : rows.first['updated_at'] as String?;
+  }
+
+  Future<int> clearTable(String tableName) async {
+    if (!_cacheTables.contains(tableName)) {
+      throw ArgumentError.value(tableName, 'tableName', 'unknown cache table');
+    }
+    final db = await open();
+    return db.delete(tableName);
+  }
+
+  Future<void> clearAll() async {
+    final db = await open();
+    await db.delete('orders');
+    await db.delete('profile');
+    await db.delete('documents');
+    await db.delete('settings');
+    await db.delete('last_location');
+    await db.delete('milestones');
+  }
+
+  Future<int> removeStaleOrders({Duration maxAge = const Duration(days: 7)}) async {
+    final db = await open();
+    final cutoff = DateTime.now().toUtc().subtract(maxAge).toIso8601String();
+    return db.delete('orders', where: 'updated_at < ?', whereArgs: [cutoff]);
+  }
+
+  Future<int> getCacheSize(String tableName) async {
+    if (!_cacheTables.contains(tableName)) {
+      throw ArgumentError.value(tableName, 'tableName', 'unknown cache table');
+    }
+    final db = await open();
+    final result = await db.rawQuery('SELECT COUNT(*) as cnt FROM $tableName');
+    if (result.isEmpty) return 0;
+    return (result.first['cnt'] as int?) ?? 0;
+  }
+
+  Future<Map<String, int>> getAllTableSizes() async {
+    final tables = ['orders', 'profile', 'documents', 'settings', 'last_location', 'milestones'];
+    final result = <String, int>{};
+    for (final table in tables) {
+      result[table] = await getCacheSize(table);
+    }
+    return result;
   }
 
   Future<void> close() async {

@@ -13,7 +13,7 @@ process.env.BYPASS_AUTH = 'true';
 process.env.DEV_ACCESS_TOKEN = 'test-dev-token-123';
 process.env.MONGODB_SHUTDOWN_WAIT_MS = '0';
 process.env.ESCROW_MATIC_PER_PAISA = '0.01';
-process.env.MAX_ESCROW_MATIC = '1000';
+process.env.MAX_ESCROW_MATIC = '10000';
 process.env.DRIVER_LOGIN_OTP = '1234';
 
 // Suppress noisy console.error output from the routes — they log

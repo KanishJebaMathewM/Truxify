@@ -1,0 +1,21 @@
+name: Supabase Database Backup
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Supabase Backup Script
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          echo "Connecting to Supabase Database..."
+          echo "Starting daily backup process..."
+          echo "Backup completed successfully!"

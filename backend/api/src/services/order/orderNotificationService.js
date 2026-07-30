@@ -41,7 +41,7 @@ export async function recordOtpFailure(orderId) {
       const lockKey = `otp_lockout:${orderId}`;
 
       const count = await redisClient.incr(countKey);
-      if (count === 1) await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
+      await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
       if (count >= OTP_MAX_FAILED_ATTEMPTS) {
         await redisClient.set(lockKey, '1', 'EX', OTP_LOCKOUT_MINUTES * 60);
       }

@@ -1,4 +1,4 @@
-import 'package:truxify/core/offline/gps/gps_delta_compressor.dart';
+import 'gps/gps_delta_compressor.dart';
 
 import 'cache/cache_manager.dart';
 import 'db/offline_event_db.dart';

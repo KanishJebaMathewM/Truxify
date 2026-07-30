@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/app_models.dart';
+import '../services/trip_service.dart';
 import '../theme/app_theme.dart';
 
 class LoadPointDetailScreen extends StatefulWidget {
@@ -13,6 +14,8 @@ class LoadPointDetailScreen extends StatefulWidget {
 
 class _LoadPointDetailScreenState extends State<LoadPointDetailScreen> {
   late RouteMapPoint _point;
+  final TripService _tripService = TripService();
+  bool _saving = false;
 
   @override
   void initState() {
@@ -49,14 +52,36 @@ class _LoadPointDetailScreenState extends State<LoadPointDetailScreen> {
                       minimumSize: const Size(120, 44),
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                     ),
-                    onPressed: () {
-                      setState(() {
-                        _point = _point.copyWith(claimed: !_point.claimed);
-                      });
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(_point.claimed ? 'Marked as claimed' : 'Marked as available')),
-                      );
-                    },
+                    onPressed: _saving
+                        ? null
+                        : () async {
+                            final nextClaimed = !_point.claimed;
+                            setState(() => _saving = true);
+                            try {
+                              await _tripService.setRoutePointClaimed(
+                                _point.id,
+                                nextClaimed,
+                              );
+                              if (!mounted) return;
+                              setState(() {
+                                _point = _point.copyWith(claimed: nextClaimed);
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    nextClaimed ? 'Marked as claimed' : 'Marked as available',
+                                  ),
+                                ),
+                              );
+                            } catch (e) {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Failed to update: $e')),
+                              );
+                            } finally {
+                              if (mounted) setState(() => _saving = false);
+                            }
+                          },
                     child: Text(_point.claimed ? 'Unclaim' : 'Claim'),
                   ),
                   const SizedBox(width: 12),

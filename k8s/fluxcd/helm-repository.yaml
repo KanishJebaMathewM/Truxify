@@ -1,0 +1,22 @@
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmRepository
+metadata:
+  name: truxify-charts
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://charts.truxify.com
+---
+apiVersion: source.toolkit.fluxcd.io/v1beta2
+kind: HelmChart
+metadata:
+  name: truxify-api
+  namespace: flux-system
+spec:
+  interval: 1h
+  chart: api
+  sourceRef:
+    kind: HelmRepository
+    name: truxify-charts
+    namespace: flux-system
+  valuesFile: values.yaml

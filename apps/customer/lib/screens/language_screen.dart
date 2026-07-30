@@ -18,10 +18,9 @@ class _LanguageScreenState extends State<LanguageScreen> {
   final List<Map<String, String>> _languages = [
     {'code': 'en', 'name': 'English', 'native': 'English'},
     {'code': 'hi', 'name': 'Hindi', 'native': 'हिंदी'},
-    {'code': 'gu', 'name': 'Gujarati', 'native': 'ગુજરાતી'},
-    {'code': 'mr', 'name': 'Marathi', 'native': 'मराठी'},
     {'code': 'ta', 'name': 'Tamil', 'native': 'தமிழ்'},
-    {'code': 'te', 'name': 'Telugu', 'native': 'తెలుగు'},
+    {'code': 'kn', 'name': 'Kannada', 'native': 'ಕನ್ನಡ'},
+    {'code': 'mr', 'name': 'Marathi', 'native': 'मराठी'},
   ];
 
   void _showLanguageChangedSnackBar() {

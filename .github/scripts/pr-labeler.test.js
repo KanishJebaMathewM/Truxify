@@ -16,6 +16,7 @@ const availableLabels = [
   'level:intermediate',
   'type:bug',
   'type:feature',
+  'type:refactor',
   'type:security',
   'type:testing',
   'customer-app',
@@ -76,7 +77,7 @@ test('selectLabels adds program label when PR declares GSSoC work', () => {
     availableLabels
   });
 
-  assert.deepEqual(labels, ['backend', 'gssoc:approved', 'type:api', 'type:bug', 'type:security']);
+  assert.deepEqual(labels, ['backend', 'gssoc:approved', 'type:api', 'type:security']);
 });
 
 test('selectLabels adds program label when PR declares ECSoC work', () => {
@@ -89,7 +90,7 @@ test('selectLabels adds program label when PR declares ECSoC work', () => {
     availableLabels
   });
 
-  assert.deepEqual(labels, ['backend', 'ECSoC26', 'type:api', 'type:bug', 'type:security']);
+  assert.deepEqual(labels, ['backend', 'ECSoC26', 'type:api', 'type:security']);
 });
 
 test('selectLabels does not add program label by default when neither GSSoC nor ECSoC is mentioned', () => {
@@ -102,7 +103,7 @@ test('selectLabels does not add program label by default when neither GSSoC nor 
     availableLabels
   });
 
-  assert.deepEqual(labels, ['backend', 'type:api', 'type:bug', 'type:security']);
+  assert.deepEqual(labels, ['backend', 'type:api', 'type:security']);
 });
 
 test('selectLabels handles case-insensitivity for GSSoC and ECSoC', () => {
@@ -469,4 +470,61 @@ test('run function detects ECSoC program signal from linked issue title/body', a
   });
 
   assert.equal(addedLabels.includes('ECSoC26'), true);
+});
+
+test('pickDominantTypeLabel picks label with highest file-change score', () => {
+  const { pickDominantTypeLabel, loadRules } = require('./pr-labeler');
+  const rules = loadRules();
+  const result = pickDominantTypeLabel({
+    candidateLabels: ['backend', 'type:bug', 'type:testing', 'type:docs'],
+    changedFiles: [
+      'backend/api/test/unit/a.test.js',
+      'backend/api/test/unit/b.test.js',
+      'backend/api/test/unit/c.test.js',
+      'docs/README.md'
+    ],
+    prTitle: 'test: add unit tests',
+    rules
+  });
+  // type:testing gets 3 files (path) + 3 (title) = 6
+  // type:docs gets 1 file (path) = 1
+  // type:bug gets 0 = 0
+  assert.deepEqual(result, ['backend', 'type:testing']);
+});
+
+test('pickDominantTypeLabel uses priority tiebreaker when scores are equal', () => {
+  const { pickDominantTypeLabel, loadRules } = require('./pr-labeler');
+  const rules = loadRules();
+  const result = pickDominantTypeLabel({
+    candidateLabels: ['type:bug', 'type:security'],
+    changedFiles: [],
+    prTitle: 'misc change',
+    rules
+  });
+  // Both score 0, security has higher priority
+  assert.deepEqual(result, ['type:security']);
+});
+
+test('pickDominantTypeLabel returns candidateLabels unchanged when 0 or 1 type labels', () => {
+  const { pickDominantTypeLabel, loadRules } = require('./pr-labeler');
+  const rules = loadRules();
+  const result = pickDominantTypeLabel({
+    candidateLabels: ['backend', 'type:bug'],
+    changedFiles: [],
+    prTitle: 'fix: something',
+    rules
+  });
+  assert.deepEqual(result, ['backend', 'type:bug']);
+});
+
+test('selectLabels skips new type labels when PR already has one', () => {
+  const labels = selectLabels({
+    prTitle: 'fix: security issue in docs',
+    changedFiles: ['docs/SECURITY.md'],
+    linkedIssueLabels: [],
+    currentLabels: ['type:bug'],
+    availableLabels
+  });
+  // type:docs and type:security would normally be added, but PR already has type:bug
+  assert.equal(labels.filter(l => l.startsWith('type:')).every(l => l === 'type:api' || !['type:bug','type:feature','type:docs','type:testing','type:security','type:performance','type:design','type:refactor','type:devops','type:accessibility'].includes(l)), true);
 });

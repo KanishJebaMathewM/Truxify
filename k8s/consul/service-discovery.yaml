@@ -1,0 +1,55 @@
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: api-service
+  namespace: truxify
+spec:
+  protocol: http
+  meshGateway:
+    mode: local
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceDefaults
+metadata:
+  name: ml-service
+  namespace: truxify
+spec:
+  protocol: http
+  meshGateway:
+    mode: local
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceResolver
+metadata:
+  name: api-service
+  namespace: truxify
+spec:
+  defaultSubset: v1
+  subsets:
+    v1:
+      filter: "Service.Meta.version == v1"
+    v2:
+      filter: "Service.Meta.version == v2"
+  failover:
+    v1:
+      targets:
+        - datacenter: dc1
+        - datacenter: dc2
+---
+apiVersion: consul.hashicorp.com/v1alpha1
+kind: ServiceResolver
+metadata:
+  name: ml-service
+  namespace: truxify
+spec:
+  defaultSubset: v1
+  subsets:
+    v1:
+      filter: "Service.Meta.version == v1"
+    v2:
+      filter: "Service.Meta.version == v2"
+  failover:
+    v1:
+      targets:
+        - datacenter: dc1
+        - datacenter: dc2

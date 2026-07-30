@@ -1,0 +1,19 @@
+{
+  "name": "truxify-otel",
+  "version": "1.0.0",
+  "description": "OpenTelemetry tracing for Truxify",
+  "dependencies": {
+    "@opentelemetry/api": "^1.7.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "^0.45.0",
+    "@opentelemetry/instrumentation": "^0.45.0",
+    "@opentelemetry/instrumentation-express": "^0.38.0",
+    "@opentelemetry/instrumentation-http": "^0.45.0",
+    "@opentelemetry/instrumentation-mongodb": "^0.44.0",
+    "@opentelemetry/instrumentation-pino": "^0.39.0",
+    "@opentelemetry/instrumentation-redis": "^0.40.0",
+    "@opentelemetry/instrumentation-winston": "^0.38.0",
+    "@opentelemetry/resources": "^1.18.0",
+    "@opentelemetry/sdk-trace-node": "^1.18.0",
+    "@opentelemetry/semantic-conventions": "^1.18.0"
+  }
+}

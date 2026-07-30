@@ -37,6 +37,17 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * c
 
 
+def _to_naive(dt: datetime) -> datetime:
+    """Strip tzinfo so all datetimes in this module compare consistently.
+
+    ``pickup_deadline`` / ``arrival_time`` strings may or may not carry a
+    UTC offset depending on the caller. Mixing an aware and a naive
+    datetime in a comparison raises TypeError, so we normalise everything
+    to naive (local-time) datetimes right after parsing.
+    """
+    return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+
 # Maximum detour threshold as a fraction of the total trip distance.
 # Loads whose detour exceeds this fraction of (distance_to_pickup + load_distance)
 # are filtered out to prevent profit-negative recommendations.
@@ -84,7 +95,7 @@ def find_return_loads(
     max_height = truck_specs.get("max_height_m", 0.0)
 
     try:
-        arrival_dt = datetime.fromisoformat(arrival_time)
+        arrival_dt = _to_naive(datetime.fromisoformat(arrival_time))
     except (ValueError, TypeError):
         logger.warning("Invalid arrival_time '%s'; using current time", arrival_time)
         arrival_dt = datetime.now()
@@ -118,7 +129,7 @@ def find_return_loads(
 
             # --- Time feasibility ---
             try:
-                deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
+                deadline_dt = _to_naive(datetime.fromisoformat(load.get("pickup_deadline", "")))
             except (ValueError, TypeError):
                 # Skip loads with unparseable deadlines
                 continue

@@ -1,0 +1,124 @@
+# ML Engine Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-engine-service
+  namespace: truxify
+  labels:
+    app: truxify
+    component: ml
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  selector:
+    app: truxify
+    component: ml
+---
+# Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: truxify
+  labels:
+    app: truxify
+    component: redis
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
+    name: redis
+  selector:
+    app: truxify
+    component: redis
+---
+# Shard Services
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-north-service
+  namespace: truxify
+  labels:
+    app: truxify
+    component: shard
+    shard: north
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+  selector:
+    app: truxify
+    component: shard
+    shard: north
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-south-service
+  namespace: truxify
+  labels:
+    app: truxify
+    component: shard
+    shard: south
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+  selector:
+    app: truxify
+    component: shard
+    shard: south
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-east-service
+  namespace: truxify
+  labels:
+    app: truxify
+    component: shard
+    shard: east
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+  selector:
+    app: truxify
+    component: shard
+    shard: east
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: shard-west-service
+  namespace: truxify
+  labels:
+    app: truxify
+    component: shard
+    shard: west
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgres
+  selector:
+    app: truxify
+    component: shard
+    shard: west

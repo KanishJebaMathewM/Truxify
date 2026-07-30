@@ -37,7 +37,18 @@ class AddressRepository {
   /// Set an address as the default, clearing all others.
   Future<void> setDefault(String addressId) async {
     final userId = SupabaseService.requireUserId();
-    await _clearDefaults(userId);
+    final existing = await SupabaseService.client
+        .from(_table)
+        .select('id')
+        .eq('id', addressId)
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    if (existing == null) {
+      throw StateError('Address not found.');
+    }
+
+    await _clearDefaults(userId, exceptId: addressId);
     await SupabaseService.client
         .from(_table)
         .update({'is_default': true})
@@ -64,5 +75,31 @@ class AddressRepository {
       query = query.neq('id', exceptId);
     }
     await query;
+  }
+}
+
+class AddressValidator {
+  static const int maxAddresses = 20;
+  static const int minLength = 5;
+  static const int maxLength = 500;
+
+  static bool isValid(String addr) {
+    final trimmed = addr.trim();
+    if (trimmed.length < minLength || trimmed.length > maxLength) return false;
+    if (!trimmed.contains(RegExp(r'[a-zA-Z]'))) return false;
+    return true;
+  }
+
+  static String normalizeLabel(String label) {
+    return label.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '_');
+  }
+
+  static bool isDuplicate(String existing, String newLabel) {
+    return normalizeLabel(existing) == normalizeLabel(newLabel);
+  }
+
+  static String truncate(String addr, int maxLen) {
+    if (addr.length <= maxLen) return addr;
+    return addr.substring(0, maxLen - 3) + '...';
   }
 }

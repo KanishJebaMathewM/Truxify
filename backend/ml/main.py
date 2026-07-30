@@ -3,7 +3,9 @@ import hmac
 import logging
 import os
 import time
-from fastapi import FastAPI, HTTPException, Header, Depends
+import numpy as np
+from datetime import datetime, timedelta
+from fastapi import FastAPI, HTTPException, Header, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -25,6 +27,7 @@ from app.models.mid_trip_reoptimiser import find_mid_trip_loads
 from app.models.base import model_exists
 from app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
 from app.models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
+from routes import register_ml_routers
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,10 +40,8 @@ loaded_models: set[str] = set()
 
 async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     ml_api_key = os.environ.get("ML_API_KEY")
-    if ml_api_key == "test_key":
-        return
     if not ml_api_key:
-        logger.warning("ML_API_KEY not set - ML engine running without authentication")
+        logger.warning("ML_API_KEY not set - ML engine is unavailable (503)")
         raise HTTPException(status_code=503, detail="ML engine not configured: missing ML_API_KEY")
     if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -55,6 +56,10 @@ app = FastAPI(
 )
 
 
+
+# Register all available ML route modules dynamically
+registered_routers = register_ml_routers(app)
+logger.info("ML routers registered: %s", registered_routers)
 
 # CORS: restrict to known origins — no wildcard "*" to prevent unauthorized cross-origin access
 app.add_middleware(
@@ -73,14 +78,16 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    from .models.base import preload_all_models
+    from app.models.base import preload_all_models
+
     logger.info("ML Engine starting, pre-loading models...")
-    loaded_models.add("demand_forecast")
-    loaded_models.add("price_prediction")
-    loaded_models.add("eta_prediction")
-    loaded_models.add("driver_profit")
-    await preload_all_models()
-    logger.info("ML Engine startup complete")
+    persisted_models = await preload_all_models()
+    loaded_models.update(persisted_models)
+    if eta_predictor.model is not None:
+        loaded_models.add("eta_prediction")
+    if traffic_pipeline.model is not None:
+        loaded_models.add("traffic_eta")
+    logger.info("ML Engine startup complete — loaded: %s", sorted(loaded_models))
 
 
 # ---------------------------------------------------------------------------
@@ -124,23 +131,6 @@ class PricePredictOutput(BaseModel):
     min_price: float
     max_price: float
     currency: str = "INR"
-
-
-# ---------------------------------------------------------------------------
-# Schemas — ETA Prediction
-# ---------------------------------------------------------------------------
-
-class ETAPredictInput(BaseModel):
-    route_distance: float = Field(..., gt=0)
-    time_of_day: int = Field(..., ge=0, le=23)
-    day_of_week: int = Field(..., ge=0, le=6)
-    route_type: str = Field(..., description="highway or city")
-    historical_speed: float = Field(..., gt=0)
-
-
-class ETAPredictOutput(BaseModel):
-    eta_minutes: float
-    confidence_interval: dict
 
 
 # ---------------------------------------------------------------------------
@@ -380,12 +370,16 @@ async def root(_auth=Depends(verify_api_key)):
 async def health():
     """Health check endpoint for Docker container orchestration."""
     models = {
-        "eta_predictor": eta_predictor.model is not None,
         "demand_forecast": model_exists(DEMAND_MODEL_NAME),
         "price_forecast": model_exists(PRICE_MODEL_NAME),
         "driver_profit": model_exists("driver_profit"),
+        "trust_scorer": model_exists("trust_scorer"),
+        "collaborative_filter": model_exists("collaborative_filter"),
+        "eta_predictor": eta_predictor.model is not None,
+        "traffic_eta": traffic_pipeline.model is not None,
     }
-    all_ready = all(models.values())
+    non_optional = {k: v for k, v in models.items() if k != 'eta_predictor'}
+    all_ready = all(non_optional.values())
     return {
         "status": "healthy" if all_ready else "degraded",
         "service": "ml-engine",
@@ -446,9 +440,7 @@ async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_
         raise HTTPException(status_code=500, detail="Price prediction failed")
 
 
-# ---------------------------------------------------------------------------
-# ETA Prediction
-# ---------------------------------------------------------------------------
+# ETA endpoints are served via routes/eta_routes.py under /eta prefix
 
 @app.post("/predict/eta", response_model=ETAPredictOutput)
 async def predict_eta_endpoint(input: ETAPredictInput, _auth=Depends(verify_api_key)):
@@ -680,3 +672,38 @@ async def list_models(_auth=Depends(verify_api_key)):
                 with open(os.path.join(MODEL_STORAGE_DIR, f)) as fh:
                     models.append(json.load(fh))
     return {"models": models}
+
+# ---------------------------------------------------------------------------
+# Predictive Fleet Maintenance
+# ---------------------------------------------------------------------------
+from app.models.predictive_maintenance import predictive_maintenance
+
+class PredictiveMaintenanceInput(BaseModel):
+    engine_temperature: float = Field(..., description="Engine temperature in Celsius")
+    tire_pressure: float = Field(..., description="Tire pressure in PSI")
+    oil_level: float = Field(..., description="Oil level percentage")
+    coolant_level: float = Field(..., description="Coolant level percentage")
+    mileage: float = Field(..., description="Total vehicle mileage")
+
+class PredictiveMaintenanceOutput(BaseModel):
+    failure_probability: float
+    is_at_risk: bool
+    anomalies_detected: List[str]
+    recommendation: str
+
+@app.post("/predict/maintenance", response_model=PredictiveMaintenanceOutput)
+async def predict_maintenance_endpoint(input: PredictiveMaintenanceInput, _auth=Depends(verify_api_key)):
+    try:
+        result = predictive_maintenance.predict(
+            engine_temperature=input.engine_temperature,
+            tire_pressure=input.tire_pressure,
+            oil_level=input.oil_level,
+            coolant_level=input.coolant_level,
+            mileage=input.mileage
+        )
+        return PredictiveMaintenanceOutput(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.error("Predictive maintenance prediction failed: %s", e)
+        raise HTTPException(status_code=500, detail="Predictive maintenance prediction failed")

@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: truxify-dev
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: truxify-staging
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: truxify-prod
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: truxify-dev-role
+  namespace: truxify-dev
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: truxify-dev-binding
+  namespace: truxify-dev
+subjects:
+  - kind: User
+    name: dev-user
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: truxify-dev-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: truxify-prod-role
+  namespace: truxify-prod
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: truxify-prod-binding
+  namespace: truxify-prod
+subjects:
+  - kind: User
+    name: prod-user
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: truxify-prod-role
+  apiGroup: rbac.authorization.k8s.io

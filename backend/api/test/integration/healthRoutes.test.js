@@ -166,6 +166,21 @@ describe('GET /api/health/ready', () => {
 
   beforeEach(() => {
     app = buildApp();
+    mockSupabase = {
+      from: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({ error: null })
+    };
+    mockMongoDb = {
+      admin: () => ({
+        ping: vi.fn().mockResolvedValue(true)
+      })
+    };
+    mockRedisClient = {
+      ping: vi.fn().mockResolvedValue('PONG')
+    };
+    mockFirebaseAdmin = {};
+    process.env.POLYGON_RPC_URL = 'http://localhost:8545';
   });
 
   it('returns ready status with services information', async () => {

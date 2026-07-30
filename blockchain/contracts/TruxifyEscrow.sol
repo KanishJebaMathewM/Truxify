@@ -38,6 +38,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         BookingStatus status;       // Current booking lifecycle status
         bool paid;                  // True after payment has been released
         uint256 createdAt;          // Block timestamp at booking creation
+        uint256 disputedAt;         // Block timestamp when dispute was raised
     }
 
     // ─── State ───────────────────────────────────────────────────────────────
@@ -47,6 +48,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     mapping(address => uint256) public pendingWithdrawals;
     mapping(address => uint256) public releaseTimestamps;
     uint256 public constant WITHDRAWAL_TIMEOUT = 30 days;
+    uint256 public constant DISPUTE_TIMEOUT = 7 days;
 
     // ─── Events ──────────────────────────────────────────────────────────────
 
@@ -88,8 +90,22 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     constructor() Ownable(msg.sender) {}
 
-    receive() external payable {}
-    fallback() external payable {}
+    receive() external payable {
+        pendingWithdrawals[msg.sender] += msg.value;
+    }
+    fallback() external {
+        revert("TruxifyEscrow: fallback not supported");
+    }
+
+    // ─── Modifiers ───────────────────────────────────────────────────────────
+
+    modifier onlyBookingParticipant(uint256 bookingId) {
+        require(
+            msg.sender == bookings[bookingId].customer || msg.sender == bookings[bookingId].driver,
+            "TruxifyEscrow: Not authorised"
+        );
+        _;
+    }
 
     // ─── External Functions ──────────────────────────────────────────────────
 
@@ -115,7 +131,8 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             amount:    msg.value,
             status:    BookingStatus.Active,
             paid:      false,
-            createdAt: block.timestamp
+            createdAt: block.timestamp,
+            disputedAt: 0
         });
 
         bookingCount++;
@@ -126,6 +143,13 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     /**
      * @dev Release payment to driver after GPS geofence + OTP confirmation.
      *      Called by the Truxify backend (owner) after both conditions are met.
+     *
+     * CRITICAL SECURITY INVARIANT: This function is restricted to onlyOwner.
+     * Neither the customer nor the driver may call this directly — all
+     * release requests MUST flow through the backend's delivery verification
+     * pipeline (OTP generation, OTP verification, GPS geofence confirmation).
+     * Any upgradeable variant of this contract MUST preserve this onlyOwner
+     * guard to prevent unauthorized fund releases.
      *
      * Security: nonReentrant + CEI pattern
      *   State is updated (paid=true, amount=0, status=Delivered) BEFORE
@@ -161,34 +185,40 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
         // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[driver] += paymentAmount;
-        releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
+
+        uint256 newDeadline = block.timestamp + WITHDRAWAL_TIMEOUT;
+        if (releaseTimestamps[driver] == 0 || newDeadline > releaseTimestamps[driver]) {
+            releaseTimestamps[driver] = newDeadline;
+        }
 
         emit WithdrawalReady(bookingId, driver, paymentAmount);
         emit PaymentReleased(bookingId, driver, paymentAmount);
     }
 
     /**
-     * @dev Refund customer when booking is cancelled before driver starts.
-     *      Also secured with nonReentrant + CEI.
+     * @dev Cancel a booking and refund the customer.
+     *      RESTRICTED to onlyOwner (backend) to ensure on-chain and off-chain
+     *      state remain synchronized. The backend's cancellation flow performs
+     *      critical checks: Redis distributed lock, idempotency guard, order
+     *      state validation, and escrow refund tracking. Allowing direct
+     *      customer cancellation desynchronizes state.
      *
      * @param bookingId The booking to cancel and refund
      */
     function cancelBooking(uint256 bookingId)
         external
+        onlyOwner
         nonReentrant
         whenNotPaused
     {
         Booking storage booking = bookings[bookingId];
 
         require(
-            booking.customer == msg.sender || owner() == msg.sender,
-            "TruxifyEscrow: Not authorised"
-        );
-        require(
-            booking.status == BookingStatus.Active,
+            booking.customer != address(0) && booking.status == BookingStatus.Active,
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
+        require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
 
         // ── EFFECTS ───────────────────────────────────────────────────────
         uint256 refundAmount    = booking.amount;
@@ -200,7 +230,11 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
         // ── INTERACTIONS: Add to pending withdrawal instead of direct transfer ──
         pendingWithdrawals[customer] += refundAmount;
-        releaseTimestamps[customer] = block.timestamp + WITHDRAWAL_TIMEOUT;
+
+        uint256 newDeadline = block.timestamp + WITHDRAWAL_TIMEOUT;
+        if (releaseTimestamps[customer] == 0 || newDeadline > releaseTimestamps[customer]) {
+            releaseTimestamps[customer] = newDeadline;
+        }
 
         emit WithdrawalReady(bookingId, customer, refundAmount);
         emit BookingCancelled(bookingId, customer, refundAmount);
@@ -208,25 +242,59 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
 
     /**
      * @dev Flag a booking as disputed. Freezes payment until resolved.
-     *      Resolution is handled by n8n automation pipeline.
+     *      RESTRICTED to onlyOwner (backend) to ensure disputes are managed
+     *      through the proper resolution pipeline (n8n automation).
+     *      Direct customer/driver disputes bypass backend tracking and
+     *      could freeze funds and block the delivery flow.
      *
      * @param bookingId The booking to flag
      */
-    function raiseDispute(uint256 bookingId) external {
+    function raiseDispute(uint256 bookingId) external onlyOwner whenNotPaused {
         Booking storage booking = bookings[bookingId];
 
         require(
-            msg.sender == booking.customer || msg.sender == booking.driver,
-            "TruxifyEscrow: Not a party to this booking"
-        );
-        require(
-            booking.status == BookingStatus.Active,
+            booking.customer != address(0) && booking.status == BookingStatus.Active,
             "TruxifyEscrow: Cannot dispute - booking not active"
         );
 
         booking.status = BookingStatus.Disputed;
+        booking.disputedAt = block.timestamp;
 
         emit BookingDisputed(bookingId, msg.sender);
+    }
+
+    /**
+     * @dev Resolve a stale dispute that has been inactive for DISPUTE_TIMEOUT.
+     *      Defaults to refunding the customer in full to prevent locked funds.
+     * @param bookingId The booking to resolve
+     */
+    function resolveDisputeTimeout(uint256 bookingId) external nonReentrant whenNotPaused {
+        Booking storage booking = bookings[bookingId];
+
+        require(
+            booking.status == BookingStatus.Disputed,
+            "TruxifyEscrow: Booking not disputed"
+        );
+        require(
+            block.timestamp > booking.disputedAt + DISPUTE_TIMEOUT,
+            "TruxifyEscrow: Dispute timeout not reached"
+        );
+        require(!booking.paid, "TruxifyEscrow: Already paid");
+
+        // ── EFFECTS: Default to refunding customer ──────────────────────────
+        uint256 refundAmount = booking.amount;
+        address payable customer = booking.customer;
+
+        booking.amount = 0;
+        booking.paid = true;
+        booking.status = BookingStatus.Cancelled;
+
+        // ── INTERACTIONS ──────────────────────────────────────────────────
+        pendingWithdrawals[customer] += refundAmount;
+        releaseTimestamps[customer] = block.timestamp + WITHDRAWAL_TIMEOUT;
+
+        emit WithdrawalReady(bookingId, customer, refundAmount);
+        emit BookingCancelled(bookingId, customer, refundAmount);
     }
 
     /**
@@ -265,6 +333,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
      */
     function emergencyRecover(address recipient, uint256 amount) external onlyOwner nonReentrant {
         require(recipient != address(0), "Invalid recipient");
+        require(releaseTimestamps[recipient] > 0, "No pending withdrawal");
         require(block.timestamp > releaseTimestamps[recipient], "Withdrawal period active");
         require(pendingWithdrawals[recipient] >= amount, "Insufficient pending");
 

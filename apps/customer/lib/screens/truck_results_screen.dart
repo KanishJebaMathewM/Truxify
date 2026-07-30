@@ -4,7 +4,8 @@ import 'package:truxify/theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../services/order_service.dart';
 import '../widgets/truck_card.dart';
-import 'package:truxify_shared/shimmer_widget.dart';
+import '../widgets/common_widgets.dart';
+import 'package:shimmer/shimmer.dart';
 
 class TruckResultsScreen extends StatefulWidget {
   const TruckResultsScreen({super.key, required this.draft});
@@ -20,6 +21,7 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
   List<TruckResultData>? _trucks;
   bool _isLoading = true;
   String? _error;
+  late RouteDraft _activeDraft;
 
   static const _sortChips = [
     'Best Match',
@@ -28,9 +30,16 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
     'Top Rated',
   ];
 
+  bool get _hasActiveFilters =>
+      _activeDraft.truckType != null ||
+      _activeDraft.minCapacity != null ||
+      _activeDraft.maxCapacity != null ||
+      _activeDraft.materialType != null;
+
   @override
   void initState() {
     super.initState();
+    _activeDraft = widget.draft;
     _fetchTrucks();
   }
 
@@ -41,7 +50,7 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
     });
 
     try {
-      final draft = widget.draft;
+      final draft = _activeDraft;
       final weight = double.tryParse(draft.weightTonnes) ?? 0;
 
       if (draft.pickupLat == null || draft.pickupLng == null ||
@@ -62,6 +71,10 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
         weightTonnes: weight,
         isFragile: draft.fragile,
         isStackable: draft.stacked,
+        truckType: draft.truckType,
+        minCapacity: draft.minCapacity,
+        maxCapacity: draft.maxCapacity,
+        materialType: draft.materialType,
       );
 
       if (!mounted) return;
@@ -80,18 +93,56 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
     }
   }
 
+  void _clearFilters() {
+    setState(() {
+      _activeDraft = RouteDraft(
+        pickup: _activeDraft.pickup,
+        drop: _activeDraft.drop,
+        dateLabel: _activeDraft.dateLabel,
+        goodsType: _activeDraft.goodsType,
+        weightTonnes: _activeDraft.weightTonnes,
+        dimensions: _activeDraft.dimensions,
+        stacked: _activeDraft.stacked,
+        fragile: _activeDraft.fragile,
+        requirements: _activeDraft.requirements,
+        pickupDate: _activeDraft.pickupDate,
+        pickupLat: _activeDraft.pickupLat,
+        pickupLng: _activeDraft.pickupLng,
+        dropLat: _activeDraft.dropLat,
+        dropLng: _activeDraft.dropLng,
+      );
+    });
+    _fetchTrucks();
+  }
+
+  List<String> get _activeFilterLabels {
+    final labels = <String>[];
+    if (_activeDraft.truckType != null) {
+      labels.add('Type: ${_activeDraft.truckType}');
+    }
+    if (_activeDraft.minCapacity != null || _activeDraft.maxCapacity != null) {
+      final min = _activeDraft.minCapacity?.toInt() ?? 0;
+      final max = _activeDraft.maxCapacity?.toInt() ?? 25;
+      labels.add('Capacity: ${min}t–${max}t');
+    }
+    if (_activeDraft.materialType != null) {
+      labels.add('Material: ${_activeDraft.materialType}');
+    }
+    return labels;
+  }
+
   int _price(String price) {
-    return int.parse(
+    return int.tryParse(
       price.replaceAll('₹', '').replaceAll(',', '').trim(),
-    );
+    ) ?? 0;
   }
 
   double _eta(String eta) {
     if (eta.contains('mins')) {
-      return double.parse(eta.replaceAll('mins', '').trim());
+      return double.tryParse(eta.replaceAll('mins', '').trim()) ?? double.infinity;
     }
     if (eta.contains('hrs')) {
-      return double.parse(eta.replaceAll('hrs', '').trim()) * 60;
+      return (double.tryParse(eta.replaceAll('hrs', '').trim()) ?? 0) * 60;
     }
     return double.infinity;
   }
@@ -135,8 +186,8 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
         ),
         body: ListView.builder(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          itemCount: 5,
-          itemBuilder: (_, __) => const ShimmerListItem(height: 140),
+          itemCount: 4,
+          itemBuilder: (_, __) => const TruckResultSkeleton(),
         ),
       );
     }
@@ -178,6 +229,7 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
     }
 
     if (_trucks == null || _trucks!.isEmpty) {
+      final hasFilters = _hasActiveFilters;
       return Scaffold(
         appBar: AppBar(
           title: const Text('No trucks found'),
@@ -196,15 +248,24 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
                     color: TruxifyColors.adaptiveSecondaryText(context)),
                 const SizedBox(height: 16),
                 Text(
-                  'No available trucks match your route and cargo. Try adjusting your search criteria.',
+                  hasFilters
+                      ? 'No trucks match your current filters. Try clearing some filters to see more results.'
+                      : 'No available trucks match your route and cargo. Try adjusting your search criteria.',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyLarge,
                 ),
                 const SizedBox(height: 24),
-                OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Adjust Search'),
-                ),
+                if (hasFilters)
+                  FilledButton.icon(
+                    onPressed: _clearFilters,
+                    icon: const Icon(Icons.filter_alt_off_rounded),
+                    label: const Text('Clear Filters'),
+                  )
+                else
+                  OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('Adjust Search'),
+                  ),
               ],
             ),
           ),
@@ -278,13 +339,49 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
             ),
           ),
           const SizedBox(height: 16),
+          if (_hasActiveFilters) ...[
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ..._activeFilterLabels.map(
+                  (label) => Chip(
+                    label: Text(label,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            )),
+                    backgroundColor: TruxifyColors.accentLight,
+                    side: BorderSide.none,
+                    padding: EdgeInsets.zero,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.close_rounded, size: 16),
+                  label: Text('Clear Filters',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: Theme.of(context).colorScheme.error,
+                          )),
+                  backgroundColor: Theme.of(context).colorScheme.errorContainer,
+                  side: BorderSide.none,
+                  onPressed: _clearFilters,
+                  padding: EdgeInsets.zero,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
           ...results.asMap().entries.map(
             (entry) {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 14),
                 child: TruckCard(
                   truck: entry.value,
-                  draft: widget.draft,
+                  draft: _activeDraft,
                   isHighlighted: entry.key == 0,
                 ),
               );
@@ -295,3 +392,79 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
     );
   }
 }
+
+class TruckResultSkeleton extends StatelessWidget {
+  const TruckResultSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: InfoCard(
+        child: Shimmer.fromColors(
+          baseColor: Theme.of(context).brightness == Brightness.dark
+              ? Colors.grey[800]!
+              : Colors.grey[300]!,
+          highlightColor: Theme.of(context).brightness == Brightness.dark
+              ? Colors.grey[700]!
+              : Colors.grey[100]!,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(width: 150, height: 20, color: Colors.white),
+                  Container(
+                      width: 80,
+                      height: 24,
+                      decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12))),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Container(width: 200, height: 16, color: Colors.white),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(width: 100, height: 14, color: Colors.white),
+                  Container(width: 50, height: 14, color: Colors.white),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Container(
+                  width: double.infinity,
+                  height: 10,
+                  decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(999))),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(width: 80, height: 24, color: Colors.white),
+                      const SizedBox(height: 4),
+                      Container(width: 120, height: 14, color: Colors.white),
+                    ],
+                  ),
+                  Container(
+                      width: 120,
+                      height: 40,
+                      decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20))),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+

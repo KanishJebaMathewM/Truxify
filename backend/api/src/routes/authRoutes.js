@@ -1,4 +1,35 @@
 /**
+ * @openapi
+ * components:
+ *   schemas:
+ *     LogoutResponse:
+ *       type: object
+ *       properties:
+ *         success:
+ *           type: boolean
+ *         message:
+ *           type: string
+ *     SessionResponse:
+ *       type: object
+ *       properties:
+ *         user:
+ *           type: object
+ *   securitySchemes:
+ *     BearerAuth:
+ *       type: http
+ *       scheme: bearer
+ *       bearerFormat: JWT
+ *     UserIdHeader:
+ *       type: apiKey
+ *       in: header
+ *       name: x-user-id
+ *     UserRoleHeader:
+ *       type: apiKey
+ *       in: header
+ *       name: x-user-role
+ */
+
+/**
  * Authentication Routes
  *
  * POST /api/auth/logout
@@ -10,12 +41,24 @@
  */
 
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { authenticate } from '../middleware/auth.js';
+import { userLimiter } from '../middleware/rateLimiter.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
 import { firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
+  message: { success: false, message: 'Too many requests from this IP, please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+router.use(authLimiter);
 
 export function withTimeout(operation, timeoutMs, message) {
   let timer;
@@ -29,9 +72,21 @@ export function withTimeout(operation, timeoutMs, message) {
 }
 
 /**
- * POST /api/auth/logout
- * Requires: Bearer token (Firebase or Supabase)
- * Response: { success: true, message: 'Logged out successfully' }
+ * @openapi
+ * /api/auth/logout:
+ *   post:
+ *     tags: [Authentication]
+ *     summary: Logout and invalidate session
+ *     description: Invalidates the authenticated user's Redis profile cache and optionally revokes Firebase refresh tokens. Both operations are bounded by timeouts so a hanging connection never blocks the response.
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Logged out successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/LogoutResponse'
  */
 router.post('/logout', authenticate, async (req, res) => {
   const { uid } = req.user;
@@ -75,12 +130,18 @@ router.post('/logout', authenticate, async (req, res) => {
  * @openapi
  * /api/auth/session:
  *   get:
- *     summary: Retrieve current authenticated session user details
+ *     tags: [Authentication]
+ *     summary: Get current authenticated session
+ *     description: Returns the current authenticated user's session details including profile, role, and cached data.
  *     security:
- *       - bearerAuth: []
+ *       - BearerAuth: []
  *     responses:
  *       200:
- *         description: Current session user
+ *         description: Session details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SessionResponse'
  */
 // GET /api/auth/session
 router.get('/session', authenticate, userLimiter, (req, res) => {

@@ -1,0 +1,18 @@
+{
+  "name": "truxify-wasm",
+  "version": "1.0.0",
+  "description": "WebAssembly Edge Computing for Truxify",
+  "scripts": {
+    "build": "wasm-pack build --target nodejs",
+    "build:release": "wasm-pack build --release --target nodejs",
+    "test": "cargo test",
+    "benchmark": "node benchmark.js"
+  },
+  "dependencies": {
+    "@wasmer/wasi": "^1.0.0",
+    "@wasmer/wasmfs": "^1.0.0"
+  },
+  "devDependencies": {
+    "wasm-pack": "^0.10.0"
+  }
+}

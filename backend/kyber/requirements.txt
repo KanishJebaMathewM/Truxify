@@ -1,0 +1,5 @@
+numpy==1.24.3
+cryptography==48.0.1
+fastapi==0.104.1
+uvicorn==0.24.0
+python-multipart==0.0.31

@@ -320,17 +320,52 @@ class ChaosService {
 
     // ============ Chaos Automation ============
 
+    _cronMatches(expression) {
+        const now = new Date();
+        const parts = expression.split(/\s+/);
+        if (parts.length !== 5) return false;
+
+        const fields = [
+            now.getMinutes(),
+            now.getHours(),
+            now.getDate(),
+            now.getMonth() + 1,
+            now.getDay()
+        ];
+
+        return parts.every((part, i) => {
+            if (part === '*') return true;
+            if (part.startsWith('*/')) {
+                const interval = parseInt(part.slice(2), 10);
+                return interval > 0 && fields[i] % interval === 0;
+            }
+            if (part.includes(',')) {
+                return part.split(',').map(Number).includes(fields[i]);
+            }
+            return parseInt(part, 10) === fields[i];
+        });
+    }
+
     async scheduleExperiments() {
-        // Schedule chaos experiments based on schedule
         const experiments = [
             { type: 'pod-kill', config: { count: 1 }, schedule: '0 */6 * * *' },
             { type: 'network-latency', config: { latency: '200ms' }, schedule: '0 */12 * * *' },
             { type: 'cpu-stress', config: { load: 70 }, schedule: '0 */8 * * *' }
         ];
 
-        for (const exp of experiments) {
-            await this.runExperiment(exp.type, exp.config);
-        }
+        logger.info('Chaos experiment scheduler started');
+
+        const tick = async () => {
+            for (const exp of experiments) {
+                if (this._cronMatches(exp.schedule)) {
+                    logger.info(`Running scheduled experiment: ${exp.type}`);
+                    await this.runExperiment(exp.type, exp.config);
+                }
+            }
+        };
+
+        await tick();
+        setInterval(tick, 60_000);
     }
 
     // ============ Statistics ============

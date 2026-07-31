@@ -169,18 +169,22 @@ export class DeliveryVerificationService {
     return measureExecution('DeliveryVerificationService.verifyDelivery', async () => {
     const { order, otpRecord } = await this.validateDeliveryOtp({ orderId, driverId, otp });
 
-    const guardResult = await this.orderRepository.updateOrderGuardStatus(
-      orderId,
-      { updated_at: new Date().toISOString() },
-      ['cancelled', 'payment_released']
-    );
+    const isRetryForStuckEscrow = order.status === 'payment_released' && ['funded', 'release_failed'].includes(order.escrow_status);
 
-    if (guardResult.error) {
-      const pgCode = guardResult.error.code;
-      if (pgCode === 'PGRST116') {
-        throw new DomainError(409, { error: 'Order was already cancelled or payment released.' });
+    if (!isRetryForStuckEscrow) {
+      const guardResult = await this.orderRepository.updateOrderGuardStatus(
+        orderId,
+        { updated_at: new Date().toISOString() },
+        ['cancelled', 'payment_released']
+      );
+
+      if (guardResult.error) {
+        const pgCode = guardResult.error.code;
+        if (pgCode === 'PGRST116') {
+          throw new DomainError(409, { error: 'Order was already cancelled or payment released.' });
+        }
+        throw new DomainError(500, { error: 'Failed to verify OTP.', details: guardResult.error.message });
       }
-      throw new DomainError(500, { error: 'Failed to verify OTP.', details: guardResult.error.message });
     }
 
     let releaseTxHash = null;
@@ -209,7 +213,6 @@ export class DeliveryVerificationService {
     }
 
     // 2. Execute Postgres RPC to complete the trip AFTER blockchain success
-    const isRetryForStuckEscrow = order.status === 'payment_released' && ['funded', 'release_failed'].includes(order.escrow_status);
 
     let verifiedOrder;
     let tripData = null;

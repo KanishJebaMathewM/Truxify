@@ -29,7 +29,7 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
     if (isRushHour) {
       // Create a deterministic pseudo-random multiplier based on coordinates
       const geoHash = Math.abs(Math.sin(pickupLat) + Math.cos(pickupLng));
-      const surgeMultiplier = 1.2 + (geoHash * 1.3); // between 1.2 and 2.5
+      const surgeMultiplier = Math.min(2.5, 1.2 + (geoHash * 1.3)); // between 1.2 and 2.5
       logger.info(`[TrafficService] Live traffic surge detected at ${pickupLat},${pickupLng}: x${surgeMultiplier.toFixed(2)}`);
       return Number(surgeMultiplier.toFixed(2));
     }

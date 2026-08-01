@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../core/app_routes.dart';
+import '../models/app_models.dart';
+
 class AvailableLoadsScreen extends StatelessWidget {
   const AvailableLoadsScreen({super.key});
 
@@ -63,6 +66,37 @@ class AvailableLoadsScreen extends StatelessWidget {
     final distance = 150 + (index * 45); // km
     final weight = 5.0 + index; // tons
     final profitMargin = 2500 + (index * 500); // INR estimated profit
+    final load = LoadOffer(
+      id: 'available-load-$index',
+      route: '$origin → $destination',
+      customer: 'Customer',
+      company: 'Marketplace',
+      goods: 'General freight',
+      pickup: origin,
+      distanceFromDriver: '—',
+      estimatedProfit: '₹$profitMargin',
+      fuelCost: '₹0',
+      tollCost: '₹0',
+      capacityUsed: 0,
+      truckFillLabel: 'Capacity',
+      sharingTruckWith: '—',
+      badgeLabel: 'Available',
+      badgeEmoji: '',
+      routeDistance: '$distance km',
+      routeDuration: '—',
+      weight: '$weight Tons',
+      dimensions: '—',
+      stackable: '—',
+      fragile: '—',
+      specialHandling: '',
+      freightValue: '₹$profitMargin',
+      netProfit: '₹$profitMargin',
+      routeNote: '',
+      extraDistance: 0,
+      extraEarnings: '₹0',
+      spaceAvailable: '—',
+      updatedTotalEarnings: '—',
+    );
 
     return Card(
       elevation: 2,
@@ -137,7 +171,10 @@ class AvailableLoadsScreen extends StatelessWidget {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: () {
-                  // TODO: Navigate to load details or accept load
+                  Navigator.of(context).pushNamed(
+                    AppRoutes.loadDetail,
+                    arguments: load,
+                  );
                 },
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 12),

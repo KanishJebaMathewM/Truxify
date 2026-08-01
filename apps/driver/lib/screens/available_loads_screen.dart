@@ -1,10 +1,21 @@
 import 'package:flutter/material.dart';
 
-class AvailableLoadsScreen extends StatelessWidget {
+enum _LoadFilter { nearMe, highPaying, matchesRoute }
+
+class AvailableLoadsScreen extends StatefulWidget {
   const AvailableLoadsScreen({super.key});
 
   @override
+  State<AvailableLoadsScreen> createState() => _AvailableLoadsScreenState();
+}
+
+class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
+  _LoadFilter _selectedFilter = _LoadFilter.nearMe;
+
+  @override
   Widget build(BuildContext context) {
+    final indexes = List<int>.generate(10, (index) => index).where(_matchesFilter).toList();
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Available Loads'),
@@ -21,20 +32,20 @@ class AvailableLoadsScreen extends StatelessWidget {
                 children: [
                   FilterChip(
                     label: const Text('Near me'),
-                    selected: true,
-                    onSelected: (bool selected) {},
+                    selected: _selectedFilter == _LoadFilter.nearMe,
+                    onSelected: (_) => _selectFilter(_LoadFilter.nearMe),
                   ),
                   const SizedBox(width: 8),
                   FilterChip(
                     label: const Text('High Paying'),
-                    selected: false,
-                    onSelected: (bool selected) {},
+                    selected: _selectedFilter == _LoadFilter.highPaying,
+                    onSelected: (_) => _selectFilter(_LoadFilter.highPaying),
                   ),
                   const SizedBox(width: 8),
                   FilterChip(
                     label: const Text('Matches Route'),
-                    selected: false,
-                    onSelected: (bool selected) {},
+                    selected: _selectedFilter == _LoadFilter.matchesRoute,
+                    onSelected: (_) => _selectFilter(_LoadFilter.matchesRoute),
                   ),
                 ],
               ),
@@ -45,15 +56,32 @@ class AvailableLoadsScreen extends StatelessWidget {
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              itemCount: 10, // Dummy count
+              itemCount: indexes.length,
               itemBuilder: (context, index) {
-                return _buildLoadCard(context, index);
+                return _buildLoadCard(context, indexes[index]);
               },
             ),
           ),
         ],
       ),
     );
+  }
+
+  void _selectFilter(_LoadFilter filter) {
+    setState(() {
+      _selectedFilter = filter;
+    });
+  }
+
+  bool _matchesFilter(int index) {
+    switch (_selectedFilter) {
+      case _LoadFilter.nearMe:
+        return index < 5;
+      case _LoadFilter.highPaying:
+        return 2500 + (index * 500) >= 5000;
+      case _LoadFilter.matchesRoute:
+        return index.isEven;
+    }
   }
 
   Widget _buildLoadCard(BuildContext context, int index) {

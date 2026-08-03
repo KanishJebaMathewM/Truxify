@@ -176,8 +176,9 @@ class KyberKEM:
         u_compressed = self._compress(u, 10)
         v_compressed = self._compress(v, 4)
         
-        # Derive shared secret
-        shared_secret = self._derive_secret(u, v)
+        # Derive shared secret from the compressed ciphertext so that
+        # decapsulate can reconstruct the exact same bytes.
+        shared_secret = self._derive_secret(u_compressed, v_compressed)
         
         ciphertext = {
             'u': u_compressed.tolist(),
@@ -208,8 +209,9 @@ class KyberKEM:
         for i in range(self.k):
             result = (result - self._poly_multiply(s[i], u_decompressed[i])) % self.q
         
-        # Derive shared secret
-        shared_secret = self._derive_secret(u_decompressed, result)
+        # Derive shared secret from the compressed ciphertext (u, v), which is
+        # byte-for-byte identical to the input used in encapsulate.
+        shared_secret = self._derive_secret(u, v)
         
         return shared_secret
 

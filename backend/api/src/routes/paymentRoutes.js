@@ -30,7 +30,7 @@ import {
   getEscrowBookingId,
   paisaToMaticWei,
   isEscrowEnabled,
-  escrowLockPayment,
+  buildDepositTx,
 } from '../services/escrow.js';
 import { sendPushNotification } from '../services/notificationService.js';
 import upiPaymentService from '../services/payment/UpiPaymentService.js';
@@ -334,18 +334,40 @@ const chargeAndLockSchema = z.object({
   customer_upi_id: z.string().min(1, 'customer_upi_id is required'),
 }).strict();
 
+/**
+ * Convert an ethers populated transaction into a JSON-serializable object
+ * (bigint fields such as `value` are emitted as decimal strings).
+ */
+function serializeDepositTx(txData) {
+  if (!txData) return null;
+  const out = {};
+  for (const [key, value] of Object.entries(txData)) {
+    out[key] = typeof value === 'bigint' ? value.toString() : value;
+  }
+  return out;
+}
+
 router.post(
   '/charge-and-lock',
   authenticate,
   lockLimiter,
+  requireIdempotency(3600),
   validateBody(chargeAndLockSchema),
+  auditLog({ action: 'payment:charge-and-lock', resourceType: 'escrow' }),
   async (req, res) => {
+    const { order_id, customer_upi_id } = req.body;
+    const lockKey = `payment_lock:${order_id}`;
+    let lockAcquired = false;
+
     try {
-      const { order_id, customer_upi_id } = req.body;
+      lockAcquired = await acquireLock(lockKey, 30);
+      if (!lockAcquired) {
+        return res.status(409).json({ error: 'Payment is already being processed for this order. Please wait.' });
+      }
 
       const { data: order, error: orderErr } = await orderRepository.findOrderByIdOrDisplayId(
         order_id,
-        'id, order_display_id, customer_id, driver_id, total_amount, escrow_status, wallet_address'
+        'id, order_display_id, customer_id, driver_id, total_amount, escrow_status, escrow_booking_id, wallet_address'
       );
 
       if (orderErr || !order) {
@@ -356,8 +378,14 @@ router.post(
         return res.status(403).json({ error: 'Access denied.' });
       }
 
-      if (order.escrow_status === 'funded') {
-        return res.status(409).json({ error: 'Escrow payment already locked.' });
+      // Status transition guard: only unfunded, unreleased, unrefunded
+      // orders may enter the funding flow.
+      const terminalStatuses = ['funded', 'released', 'refunded'];
+      if (terminalStatuses.includes(order.escrow_status)) {
+        return res.status(409).json({
+          error: `Cannot charge and lock — escrow is already in status: ${order.escrow_status}`,
+          escrow_status: order.escrow_status,
+        });
       }
 
       if (!order.driver_id) {
@@ -375,68 +403,95 @@ router.post(
         return res.status(400).json({ error: 'Assigned driver has no registered Polygon wallet on file.' });
       }
 
-      const upiOrder = await upiPaymentService.createPaymentOrder(order.id, order.total_amount);
-
-      let txHash = `mock_tx_${Math.random().toString(36).substring(2, 15)}`;
-      const bookingId = getEscrowBookingId(order.order_display_id);
-      
-      if (isEscrowEnabled()) {
-        try {
-          const amountWei = paisaToMaticWei(order.total_amount);
-          const lockResult = await escrowLockPayment(
-            order.order_display_id,
-            order.wallet_address || req.user.wallet_address || '0x0000000000000000000000000000000000000000',
-            driverWallet,
-            amountWei
-          );
-
-          if (lockResult.error) {
-            logger.error(`[payments] lockPayment failed: ${lockResult.error}`);
-            return res.status(500).json({ error: `On-chain lockPayment failed: ${lockResult.error}` });
-          }
-          txHash = lockResult.txHash;
-        } catch (chainErr) {
-          logger.error(`[payments] lockPayment chain error: ${chainErr.message}`);
-          return res.status(500).json({ error: `On-chain lockPayment call failed: ${chainErr.message}` });
-        }
-      } else {
-        logger.warn('[payments] Escrow disabled. Simulating lockPayment call.');
+      // ── Critical gate (issue #5998): the escrow may only be funded after a
+      //    real payment has been captured by a configured gateway. Without a
+      //    confirmed capture the order must never be marked 'funded'.
+      const capture = await upiPaymentService.verifyPaymentCaptured(order_id, customer_upi_id);
+      if (!capture || capture.captured !== true) {
+        const reason = capture?.reason || 'payment_capture_unverified';
+        logger.warn(`[payments] charge-and-lock refused for ${order.order_display_id}: ${reason}`);
+        return res.status(503).json({
+          error: 'Payment capture could not be verified. This order cannot be funded until a real payment is captured.',
+          reason,
+        });
       }
 
-      const { error: dbErr } = await orderRepository.updateOrder(order.id, {
-        escrow_status: 'funded',
-        escrow_booking_id: bookingId,
-        escrow_tx_hash: txHash,
-        escrow_deposited_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      if (!isEscrowEnabled()) {
+        logger.warn(`[payments] charge-and-lock refused for ${order.order_display_id}: escrow contract not configured`);
+        return res.status(503).json({
+          error: 'Escrow is not configured. Payment capture verified but escrow funding is unavailable.',
+        });
+      }
+
+      // ── No relayer-funded lockPayment. Build an unsigned createBooking()
+      //    deposit for the CUSTOMER's wallet; the customer signs and submits
+      //    it, then confirms via the existing deposit flow. The order is
+      //    moved to 'funding' — never directly to 'funded'.
+      let amountWei;
+      try {
+        amountWei = paisaToMaticWei(order.total_amount);
+      } catch (capErr) {
+        return res.status(422).json({
+          error: 'Deposit amount exceeds the escrow safety cap.',
+          details: capErr.message,
+        });
+      }
+
+      const bookingId = order.escrow_booking_id || getEscrowBookingId(order.order_display_id);
+      const { txData, error: depositErr } = await buildDepositTx(
+        order.order_display_id,
+        driverWallet,
+        amountWei
+      );
+
+      if (!txData) {
+        logger.error(`[payments] buildDepositTx failed for ${order.order_display_id}: ${depositErr || 'no tx data returned'}`);
+        return res.status(502).json({
+          error: 'Failed to build the on-chain deposit transaction.',
+          details: depositErr || 'escrow contract is unreachable or misconfigured',
+        });
+      }
+
+      const { error: dbErr } = await orderRepository.updateOrderWithFilter(
+        order.id,
+        {
+          escrow_status: 'funding',
+          escrow_booking_id: bookingId,
+          escrow_amount_wei: amountWei.toString(),
+          escrow_driver_wallet: driverWallet,
+          escrow_funding_started_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        [{ op: 'eq', column: 'escrow_status', value: order.escrow_status }],
+        'escrow_status'
+      );
 
       if (dbErr) {
-        logger.error('[payments] DB update failed:', dbErr.message);
-        return res.status(500).json({ error: 'Payment locked on-chain but database update failed.' });
+        logger.error('[payments] charge-and-lock DB update failed:', dbErr.message);
+        return res.status(409).json({
+          error: 'Order escrow state changed while processing. Please refresh and try again.',
+        });
       }
 
-      if (order.driver_id) {
-        sendPushNotification(
-          order.driver_id,
-          '💰 Payment Locked',
-          `Escrow payment for order ${order.order_display_id} is locked. Please deliver.`,
-          'payment_locked',
-          { order_display_id: order.order_display_id }
-        ).catch(err => logger.warn('[payments] Push failed:', err.message));
-      }
-
-      return res.status(201).json({
+      return res.status(200).json({
         success: true,
-        message: 'UPI payment received and locked in escrow.',
-        escrow_status: 'funded',
-        tx_hash: txHash,
-        gateway_order_id: upiOrder.gateway_order_id,
+        message: 'Payment verified. Sign and submit the deposit transaction from your wallet, then confirm it to fund the escrow.',
+        escrow_status: 'funding',
+        booking_id: bookingId,
+        deposit_tx: serializeDepositTx(txData),
       });
 
     } catch (err) {
       logger.error('[payments] charge-and-lock error:', err.message);
       return res.status(500).json({ error: 'Internal Server Error' });
+    } finally {
+      if (lockAcquired) {
+        try {
+          await releaseLock(lockKey);
+        } catch (releaseErr) {
+          logger.error({ err: releaseErr, lockKey }, 'Failed to release payment lock');
+        }
+      }
     }
   }
 );

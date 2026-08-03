@@ -2,22 +2,55 @@ import logger from '../../middleware/logger.js';
 
 class UpiPaymentService {
   constructor() {
-    this.gatewayName = process.env.UPI_GATEWAY || 'Razorpay (Mock)';
+    this.gateway = (process.env.UPI_GATEWAY || '').toLowerCase();
+    this.gatewayName = process.env.UPI_GATEWAY || 'none';
+    this.razorpayKeyId = process.env.RAZORPAY_KEY_ID || '';
+    this.razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET || '';
   }
 
   /**
-   * Mock payment collection creation (e.g. Razorpay Order)
+   * Whether a real payment gateway is configured. A mock gateway must never
+   * be used to fund escrow, because that lets an order reach
+   * escrow_status = 'funded' without collecting any payment (issue #5998).
    */
-  async createPaymentOrder(orderId, amountPaisa) {
-    logger.info(`[UPI Payment] Creating order on ${this.gatewayName} for Truxify Order ${orderId}, amount: ${amountPaisa} paisa`);
-    // Mock successful order/intent creation
-    return {
-      gateway_order_id: `pay_${Math.random().toString(36).substring(2, 15)}`,
-      amount: amountPaisa,
-      currency: 'INR',
-      status: 'created',
-      upi_deep_link: `upi://pay?pa=truxify@merchant&pn=Truxify&am=${(amountPaisa / 100).toFixed(2)}&cu=INR`
-    };
+  isGatewayConfigured() {
+    return this.gateway === 'razorpay' &&
+      Boolean(this.razorpayKeyId) &&
+      Boolean(this.razorpayKeySecret);
+  }
+
+  /**
+   * Create a payment collection order on the configured gateway.
+   *
+   * Never fabricates an order: a placeholder gateway_order_id would let
+   * downstream flows treat an unpaid order as paid. Fails loudly instead.
+   */
+  async createPaymentOrder(orderId, amountPaisa, customerUpiId) {
+    if (!this.isGatewayConfigured()) {
+      throw new Error(
+        'UPI payment gateway is not configured. Set UPI_GATEWAY=razorpay with RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.'
+      );
+    }
+    // Real integration would create an order via the gateway SDK here and
+    // return { gateway_order_id, amount, currency, status: 'created' }.
+    // Refuse to fabricate an order until that SDK is wired up.
+    throw new Error('Payment gateway SDK is not wired up; refusing to create a mock payment order.');
+  }
+
+  /**
+   * Verify that a payment for the given order was actually captured by the
+   * gateway. Returns { captured: true } ONLY for a confirmed capture.
+   *
+   * Fail closed: when no gateway is configured, or the capture cannot be
+   * confirmed, this returns { captured: false } so callers must not proceed.
+   */
+  async verifyPaymentCaptured(orderId, customerUpiId) {
+    if (!this.isGatewayConfigured()) {
+      return { captured: false, reason: 'payment_gateway_not_configured' };
+    }
+    // Real integration would query the gateway for the order status /
+    // payment capture confirmation. Never assume a payment was captured.
+    return { captured: false, reason: 'payment_capture_unverified' };
   }
 
   /**

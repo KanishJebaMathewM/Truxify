@@ -445,35 +445,6 @@ export async function confirmEscrowRefund (txHash) {
   });
 }
 
-export async function escrowLockPayment(orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
-  return measureExecution('EscrowService.escrowLockPayment', async () => {
-    const bookingId = getEscrowBookingId(orderDisplayId);
-
-    if (!escrowContract) {
-      logger.warn('[escrow] Contract not initialised — skipping lockPayment.');
-      return { txHash: null, bookingId };
-    }
-
-    try {
-      const tx = await escrowContract.lockPayment(
-        bookingId,
-        customerWalletAddress,
-        driverWalletAddress,
-        {
-          value: amountWei
-        }
-      );
-      logger.info(`[escrow] lockPayment tx submitted: ${tx.hash} for booking ${orderDisplayId}`);
-      const receipt = await tx.wait(1);
-      logger.info(`[escrow] lockPayment confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`);
-      return { txHash: receipt.hash, bookingId };
-    } catch (err) {
-      logger.error(`[escrow] lockPayment failed for booking ${orderDisplayId}: ${err.message}`);
-      return { txHash: null, bookingId, error: err.message };
-    }
-  });
-}
-
 export function bookingIdFromUuid (orderId) {
   return getEscrowBookingId(orderId)
 }

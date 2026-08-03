@@ -265,7 +265,7 @@ describe('Service-level RPC calls carry an authenticated client (issue #5737)', 
 
   it('executeRpc requires an explicit client instead of falling back to the shared anon-key client', () => {
     const orderRepositoryContent = readSource('repositories/orderRepository.js');
-    const executeRpcMethod = orderRepositoryContent.match(/async executeRpc\(name, params, client\)[\s\S]*?\n  \}/)[0];
+    const executeRpcMethod = orderRepositoryContent.match(/async executeRpc\(name, params, client\)[\s\S]*?\n\s{2}\}/)[0];
     expect(executeRpcMethod).toMatch(/if \(!client\)\s*\{\s*throw new Error/);
     expect(executeRpcMethod).not.toMatch(/client \|\| this\.supabase/);
   });

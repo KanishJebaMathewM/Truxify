@@ -80,7 +80,7 @@
  */
 
 import express from 'express';
-import { supabase, mongoDb } from '../config/db.js';
+import { supabase, mongoDb, redisClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';

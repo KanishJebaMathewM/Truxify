@@ -19,7 +19,6 @@ import { predictPrice } from '../ml.js';
 import { getLiveTrafficMultiplier } from '../trafficService.js';
 import { eventBus } from '../../core/events/index.js';
 import logger from '../../middleware/logger.js';
-import { supabaseAdmin } from '../../config/db.js';
 import { CircuitBreaker } from '../../lib/circuitBreaker.js';
 
 const osrmCircuitBreaker = new CircuitBreaker('osrmRouting', {

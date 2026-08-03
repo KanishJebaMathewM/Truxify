@@ -66,7 +66,7 @@ class KeyRotationService {
 
         this.rotationLocks.delete(lockKey);
 
-        throw new Error('Key rotation failed: ' + err.message);
+        throw new Error('Key rotation failed: ' + err.message, { cause: err });
       }
     });
   }

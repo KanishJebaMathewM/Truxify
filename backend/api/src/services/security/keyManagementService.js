@@ -71,7 +71,7 @@ class KeyManagementService {
       } catch (err) {
         logger.error('[KeyManagementService] Encryption failed:', err.message);
         Sentry.captureException(err);
-        throw new Error('Failed to encrypt private key');
+        throw new Error('Failed to encrypt private key', { cause: err });
       }
     });
   }
@@ -96,7 +96,7 @@ class KeyManagementService {
       } catch (err) {
         logger.error('[KeyManagementService] Decryption failed:', err.message);
         Sentry.captureException(err);
-        throw new Error('Failed to decrypt private key');
+        throw new Error('Failed to decrypt private key', { cause: err });
       }
     });
   }
@@ -130,7 +130,7 @@ class KeyManagementService {
       } catch (err) {
         logger.error('[KeyManagementService] Key storage failed:', err.message);
         Sentry.captureException(err);
-        throw new Error('Failed to store encrypted key');
+        throw new Error('Failed to store encrypted key', { cause: err });
       }
     });
   }
@@ -189,7 +189,7 @@ class KeyManagementService {
       } catch (err) {
         logger.error('[KeyManagementService] Key archival failed:', err.message);
         Sentry.captureException(err);
-        throw new Error('Failed to archive key');
+        throw new Error('Failed to archive key', { cause: err });
       }
     });
   }

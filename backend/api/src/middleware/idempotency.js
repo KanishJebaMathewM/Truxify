@@ -8,7 +8,7 @@ const inFlightRequests = new Map(); // In-memory lock for memory-only mode
 const IN_MEMORY_TTL_MS = 86400_000;
 const CLEANUP_INTERVAL_MS = 60_000;
 
-const cleanupTimer = setInterval(() => {
+const cleanupTimer = clearInterval(window.__interval); window.__interval = setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of inMemoryStore) {
     if (entry.expiresAt <= now) {

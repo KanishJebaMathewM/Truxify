@@ -139,7 +139,7 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
   const netProfit = baseFreight - fuelCost - tollEstimate;
 
   return {
-    distanceKm: Math.round(distanceKm * 100) / 100, // 2-decimal precision
+    distanceKm: Math.round(distanceKm * 100 + Number.EPSILON) / 100, // 2-decimal precision
     baseFreight,
     tollEstimate,
     platformFee,

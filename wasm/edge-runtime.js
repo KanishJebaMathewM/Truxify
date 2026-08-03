@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { Worker } from 'worker_threads';
 import { WASI } from 'wasi';
 import { createRequire } from 'module';
 import logger from '../backend/api/src/middleware/logger.js';
@@ -24,6 +25,7 @@ class EdgeRuntime {
             if (fs.existsSync(wasmPath)) {
                 const wasmBytes = fs.readFileSync(wasmPath);
                 const wasi = new WASI({
+                    version: 'preview1',
                     args: [],
                     env: Object.fromEntries(
                         Object.entries(process.env).filter(([k]) =>
@@ -75,6 +77,15 @@ class EdgeRuntime {
                 throw new Error(`Function ${functionName} not found`);
             }
             
+            // A synchronous WASM export cannot be aborted from the main thread:
+            // JS is single-threaded, so a runaway export blocks the event loop
+            // forever. Run it in a worker thread so it can be hard-killed once
+            // it exceeds timeoutLimit instead of taking down the process.
+            if (wasm.module) {
+                return await this._runInWorker(functionName, params);
+            }
+
+            // Native JS fallback engine (in-repo code) runs on the main thread.
             const result = func(...params);
             
             return {
@@ -90,20 +101,42 @@ class EdgeRuntime {
         }
     }
 
-    async executeWithTimeout(fn, timeout) {
-        return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => {
-                reject(new Error(`Execution timeout after ${timeout}ms`));
-            }, timeout);
-            
+    _runInWorker(functionName, params) {
+        return new Promise((resolve) => {
+            const wasmPath = process.env.WASM_MODULE_PATH || './wasm/truxify_wasm.wasm';
+            let worker;
             try {
-                const result = fn();
-                clearTimeout(timer);
-                resolve(result);
-            } catch (error) {
-                clearTimeout(timer);
-                reject(error);
+                worker = new Worker(new URL('./edge-runtime.worker.js', import.meta.url), {
+                    workerData: { wasmPath, functionName, params }
+                });
+            } catch (err) {
+                resolve({ success: false, error: `Failed to start edge function worker: ${err.message}` });
+                return;
             }
+
+            const timer = setTimeout(() => {
+                worker.terminate().catch(() => {});
+                resolve({ success: false, error: `Edge function execution timeout after ${this.timeoutLimit}ms` });
+            }, this.timeoutLimit);
+            const settled = () => clearTimeout(timer);
+
+            worker.once('message', (result) => {
+                settled();
+                worker.terminate().catch(() => {});
+                resolve(result && result.success
+                    ? { success: true, data: result.data }
+                    : { success: false, error: (result && result.error) || 'Unknown edge function error' });
+            });
+            worker.once('error', (err) => {
+                settled();
+                resolve({ success: false, error: err.message });
+            });
+            worker.once('exit', (code) => {
+                if (code !== 0) {
+                    settled();
+                    resolve({ success: false, error: `Edge function worker exited with code ${code}` });
+                }
+            });
         });
     }
 

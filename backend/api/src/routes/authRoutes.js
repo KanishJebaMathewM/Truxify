@@ -153,3 +153,5 @@ router.get('/session', authenticate, userLimiter, (req, res) => {
 export default router;
 
 // Resolves #2052: Refresh Token Rotation logic
+
+.catch(err => console.error("Promise.all failed:", err));

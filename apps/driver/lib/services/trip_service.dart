@@ -231,6 +231,30 @@ class TripService {
     }
   }
 
+  /// Confirm delivery OTP and release escrow payment.
+  Future<Map<String, dynamic>> confirmOtp({
+    required String orderId,
+    String? otp,
+    double? latitude,
+    double? longitude,
+  }) async {
+    final path = '/api/deliveries/${_encodePathSegment(orderId)}/confirm-otp';
+    try {
+      final body = await _apiClient.post(
+        path,
+        body: <String, dynamic>{
+          if (otp != null) 'otp': otp,
+          if (latitude != null) 'latitude': latitude,
+          if (longitude != null) 'longitude': longitude,
+        },
+      );
+      return body is Map<String, dynamic> ? body : <String, dynamic>{};
+    } catch (e) {
+      if (e is ApiException) throw Exception(e.message);
+      rethrow;
+    }
+  }
+
   void dispose() {
     _isDisposed = true;
     _apiClient.dispose();

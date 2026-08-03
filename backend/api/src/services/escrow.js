@@ -34,6 +34,7 @@ import { measureExecution } from '../core/performanceMetrics.js'
 
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver) external payable',
+  'function lockPayment(uint256 bookingId, address payable customer, address payable driver) external payable',
   'function releasePayment(uint256 bookingId) external',
   'function cancelBooking(uint256 bookingId) external',
   'function bookings(uint256 bookingId) external view returns (address customer, address driver, uint256 amount, uint8 status, bool paid, uint256 createdAt)'
@@ -417,4 +418,48 @@ export async function releaseEscrowFunds (orderDisplayId) {
 
 export async function escrowRefund (orderDisplayId) {
   return submitEscrowRefund(orderDisplayId)
+}
+
+/**
+ * Lock payment in escrow on behalf of the customer.
+ * Must be called by the relayer wallet (owner).
+ *
+ * @param {string} orderDisplayId
+ * @param {string} customerWalletAddress
+ * @param {string} driverWalletAddress
+ * @param {string|bigint} amountWei
+ * @returns {Promise<{txHash: string|null, bookingId: string}>}
+ */
+export async function lockPayment(orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
+  return measureExecution('EscrowService.lockPayment', async () => {
+    const bookingId = getEscrowBookingId(orderDisplayId)
+
+    if (!escrowContract) {
+      logger.warn('[escrow] Contract not initialised — skipping lockPayment.')
+      return { txHash: null, bookingId }
+    }
+
+    if (!ethers.isAddress(customerWalletAddress) || !ethers.isAddress(driverWalletAddress)) {
+      logger.error(`[escrow] Invalid wallet address(es) for lockPayment: customer=${customerWalletAddress}, driver=${driverWalletAddress}`)
+      return { txHash: null, bookingId, error: 'Invalid wallet address' }
+    }
+
+    try {
+      const tx = await escrowContract.lockPayment(
+        bookingId,
+        customerWalletAddress,
+        driverWalletAddress,
+        {
+          value: amountWei
+        }
+      )
+      logger.info(`[escrow] lockPayment tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
+      const receipt = await tx.wait(1)
+      logger.info(`[escrow] lockPayment confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`)
+      return { txHash: receipt.hash, bookingId }
+    } catch (err) {
+      logger.error(`[escrow] lockPayment failed for booking ${orderDisplayId}: ${err.message}`)
+      return { txHash: null, bookingId, error: err.message }
+    }
+  })
 }

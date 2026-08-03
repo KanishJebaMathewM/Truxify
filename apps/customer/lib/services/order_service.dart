@@ -385,4 +385,27 @@ class OrderService {
       throw StateError('Failed to fetch order route: $e');
     }
   }
+
+  /// Lock UPI payment in blockchain escrow.
+  Future<Map<String, dynamic>> lockPayment({
+    required String bookingId,
+    required String upiReference,
+    required double amountPaisa,
+  }) async {
+    try {
+      final body = await _apiClient.post(
+        '/api/payments/lock',
+        body: <String, dynamic>{
+          'bookingId': bookingId,
+          'upiReference': upiReference,
+          'amount': amountPaisa,
+        },
+      ) as Map<String, dynamic>?;
+      return body ?? <String, dynamic>{};
+    } on ApiException catch (e) {
+      throw StateError(e.message);
+    } catch (e) {
+      throw StateError('Failed to lock payment in blockchain escrow: $e');
+    }
+  }
 }

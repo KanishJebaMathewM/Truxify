@@ -241,15 +241,26 @@ class _TripsScreenState extends State<TripsScreen> {
 
     if (currentStop.isEmpty) return;
 
+    final tripRow = _trips.firstWhere(
+      (t) => t['trip_display_id']?.toString() == tripId,
+      orElse: () => <String, dynamic>{},
+    );
+    final netEarnings = tripRow.isNotEmpty && tripRow['net_earnings'] != null
+        ? ((tripRow['net_earnings'] ?? 0) / 100).toStringAsFixed(0)
+        : null;
+
     if (!mounted) return;
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (context) => ProofOfDeliveryScreen(
         tripDisplayId: currentStop['trip_display_id'].toString(),
         stopId: currentStop['id'].toString(),
+        orderId: currentStop['order_id']?.toString(),
+        earnings: netEarnings,
         onComplete: (photoPath, signPath) async {
           await SyncService.instance.queueOrSyncPoD(
             tripDisplayId: currentStop['trip_display_id'].toString(),
             stopId: currentStop['id'].toString(),
+            orderId: currentStop['order_id']?.toString(),
             photoPath: photoPath,
             signaturePath: signPath,
           );

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../services/order_service.dart';
 import '../controllers/app_controller.dart';
@@ -115,6 +116,26 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
       return;
     }
 
+    // Parse price to paisa
+    final cleanPriceStr = widget.truck.price.replaceAll('₹', '').replaceAll(',', '').trim();
+    final amountRupees = double.tryParse(cleanPriceStr) ?? 0.0;
+    final amountPaisa = (amountRupees * 100).round();
+
+    // Trigger mock UPI Payment Intent
+    final upiRef = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _UpiPaymentMockDialog(amount: widget.truck.price),
+    );
+
+    if (upiRef == null || upiRef.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment cancelled by user')),
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
 
     try {
@@ -143,6 +164,13 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
 
       _createdOrderId = orderId;
 
+      // Call backend POST /api/payments/lock to lock payment on smart contract
+      await _orderService.lockPayment(
+        bookingId: orderId,
+        upiReference: upiRef,
+        amountPaisa: amountPaisa.toDouble(),
+      );
+
       if (!mounted) return;
       setState(() => _showSuccess = true);
       await _controller.forward(from: 0);
@@ -153,12 +181,12 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
       TruxifyScope.of(context).openOrders(tabIndex: 0);
       Navigator.of(context).popUntil((route) => route.isFirst);
     } catch (e) {
-      debugPrint('Failed to create order: $e');
+      debugPrint('Failed to complete booking: $e');
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to create booking')),
+        SnackBar(content: Text('Failed to complete booking: $e')),
       );
     } finally {
       if (mounted) {
@@ -484,6 +512,162 @@ class _SuccessPanel extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _UpiPaymentMockDialog extends StatefulWidget {
+  const _UpiPaymentMockDialog({required this.amount});
+  final String amount;
+
+  @override
+  State<_UpiPaymentMockDialog> createState() => _UpiPaymentMockDialogState();
+}
+
+class _UpiPaymentMockDialogState extends State<_UpiPaymentMockDialog> {
+  String _selectedApp = 'GPay';
+  bool _isProcessing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: _isProcessing
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 20),
+                  const CircularProgressIndicator(
+                    color: TruxifyColors.accentDark,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Contacting UPI App...',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Please authorize payment in your $_selectedApp app.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.account_balance_wallet_rounded,
+                          color: TruxifyColors.accentDark, size: 28),
+                      const SizedBox(width: 12),
+                      Text(
+                        'UPI Escrow Lock',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: TruxifyColors.accent.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'AMOUNT TO LOCK',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.w700,
+                            color: TruxifyColors.adaptiveSecondaryText(context),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          widget.amount,
+                          style: theme.textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: TruxifyColors.accentDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Select UPI Application',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: _selectedApp,
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'GPay', child: Text('Google Pay (GPay)')),
+                      DropdownMenuItem(value: 'PhonePe', child: Text('PhonePe')),
+                      DropdownMenuItem(value: 'Paytm', child: Text('Paytm')),
+                      DropdownMenuItem(value: 'BHIM', child: Text('BHIM UPI')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() => _selectedApp = val);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: TruxifyColors.accentDark,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        ),
+                        onPressed: () async {
+                          setState(() => _isProcessing = true);
+                          await Future.delayed(const Duration(milliseconds: 1500));
+                          if (!mounted) return;
+                          // Generate simulated 10-digit UPI reference ID
+                          final random = math.Random();
+                          final randomVal = 1000000000 + random.nextInt(900000000);
+                          final txRef = 'UPI$randomVal';
+                          Navigator.of(context).pop(txRef);
+                        },
+                        child: const Text('Pay Now', style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ],
+                  )
+                ],
+              ),
+      ),
     );
   }
 }

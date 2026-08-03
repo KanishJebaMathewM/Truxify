@@ -75,7 +75,7 @@ export class OrderMilestoneService {
     if (milestone === 'In Transit') {
       const activeOtp = await getActiveDeliveryOtp(orderId);
       if (!activeOtp) {
-        generatedOtp = crypto.randomInt(100000, 1000000).toString();
+        generatedOtp = crypto.randomInt(1000, 10000).toString();
         const stored = await storeDeliveryOtp(orderId, generatedOtp, OTP_TTL_MINUTES);
         if (stored) {
           await clearOtpState(orderId);

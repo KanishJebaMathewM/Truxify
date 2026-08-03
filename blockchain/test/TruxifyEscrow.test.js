@@ -129,6 +129,61 @@ describe("TruxifyEscrow", function () {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // lockPayment
+  // ═══════════════════════════════════════════════════════════════════════════
+  describe("lockPayment", function () {
+    it("locks payment in escrow on behalf of a customer when called by owner", async function () {
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
+
+      const bookingId = 42;
+      const amount = ethers.parseEther("1.5");
+
+      await expect(
+        escrow.connect(owner).lockPayment(bookingId, customer.address, driver.address, {
+          value: amount,
+        })
+      )
+        .to.emit(escrow, "BookingCreated")
+        .withArgs(bookingId, customer.address, driver.address, amount);
+
+      const booking = await escrow.getBooking(bookingId);
+      expect(booking.amount).to.equal(amount);
+      expect(booking.customer).to.equal(customer.address);
+      expect(booking.driver).to.equal(driver.address);
+      expect(booking.paid).to.be.false;
+      expect(booking.status).to.equal(0); // Active
+    });
+
+    it("reverts lockPayment if called by non-owner", async function () {
+      const { escrow, customer, driver, attacker } = await loadFixture(deployEscrowFixture);
+
+      const bookingId = 1;
+      const amount = ethers.parseEther("1.0");
+
+      await expect(
+        escrow.connect(customer).lockPayment(bookingId, customer.address, driver.address, {
+          value: amount,
+        })
+      ).to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount");
+
+      await expect(
+        escrow.connect(attacker).lockPayment(bookingId, customer.address, driver.address, {
+          value: amount,
+        })
+      ).to.be.revertedWithCustomError(escrow, "OwnableUnauthorizedAccount");
+    });
+
+    it("reverts lockPayment if payment is zero", async function () {
+      const { escrow, owner, customer, driver } = await loadFixture(deployEscrowFixture);
+
+      await expect(
+        escrow.connect(owner).lockPayment(1, customer.address, driver.address, { value: 0 })
+      ).to.be.revertedWith("TruxifyEscrow: Payment required");
+    });
+  });
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // releasePayment
   // ═══════════════════════════════════════════════════════════════════════════
   describe("releasePayment", function () {

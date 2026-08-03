@@ -88,7 +88,7 @@ export class BidAcceptanceService {
 
     // Build the escrow deposit transaction
     const amountWei = paisaToMaticWei(bid.bid_amount);
-    const depositTx = await this.buildDepositTxFn(order.order_display_id, driverWallet, amountWei);
+    const depositTx = await this.buildDepositTxFn(order.order_display_id, customerWallet, driverWallet, amountWei);
     const bookingId = depositTx?.bookingId || `escrow:${order.order_display_id}`;
 
     // Guard against silent escrow disable: if buildDepositTx returned

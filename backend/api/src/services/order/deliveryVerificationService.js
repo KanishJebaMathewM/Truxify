@@ -108,7 +108,7 @@ export class DeliveryVerificationService {
       return { generated: false, otp: null };
     }
 
-    const otp = crypto.randomInt(100000, 1000000).toString();
+    const otp = crypto.randomInt(1000, 10000).toString();
     const stored = await this.notificationService.storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
     if (!stored) {
       throw new Error('Failed to generate delivery OTP.');
@@ -128,7 +128,7 @@ export class DeliveryVerificationService {
       throw new DomainError(409, { error: 'Delivery OTP can only be sent after the shipment reaches the delivery location.' });
     }
 
-    const otp = crypto.randomInt(100000, 1000000).toString();
+    const otp = crypto.randomInt(1000, 10000).toString();
     const stored = await this.notificationService.storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
     if (!stored) {
       throw new Error('Failed to generate delivery OTP.');

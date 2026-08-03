@@ -21,6 +21,8 @@ import { validateEscrowSetup } from './services/escrow.js'
 
 // Load REST routes
 import orderRoutes from './routes/orderRoutes.js'
+import paymentRoutes from './routes/paymentRoutes.js'
+import deliveryRoutes from './routes/deliveryRoutes.js'
 import driverRoutes from './routes/driverRoutes.js'
 import supportRoutes from './routes/supportRoutes.js'
 import profileRoutes from './routes/profileRoutes.js'
@@ -390,6 +392,8 @@ app.use('/api', requestCacheMiddleware)
 // REST API ROUTING
 // ============================================================================
 app.use('/api/orders', orderRoutes)
+app.use('/api/payments', paymentRoutes)
+app.use('/api/deliveries', deliveryRoutes)
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)

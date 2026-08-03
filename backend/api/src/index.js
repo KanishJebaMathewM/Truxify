@@ -35,6 +35,7 @@ import adminRoutes from './routes/adminRoutes.js'
 import lookupRoutes from './routes/lookupRoutes.js'
 import webhookRoutes from './routes/webhookRoutes.js'
 import auditRoutes from './routes/auditRoutes.js'
+import mlRoutes from './routes/mlRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -395,6 +396,7 @@ app.use('/api/orders', orderRoutes)
 app.use('/api/payments', paymentRoutes)
 app.use('/api/deliveries', deliveryRoutes)
 app.use('/api/driver', deadheadRoutes)
+app.use('/api/ml', mlRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)
 app.use('/api/loads', loadRoutes)

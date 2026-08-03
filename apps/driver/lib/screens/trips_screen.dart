@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
@@ -433,10 +434,30 @@ class _TripsScreenState extends State<TripsScreen> {
       setState(() => _marketplaceError = null);
     }
 
+    double? lat;
+    double? lng;
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.always || permission == LocationPermission.whileInUse) {
+        final position = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high,
+          timeLimit: const Duration(seconds: 4),
+        );
+        lat = position.latitude;
+        lng = position.longitude;
+      }
+    } catch (e) {
+      debugPrint('Geolocator error in trips_screen: $e');
+    }
+
     try {
       final results = await Future.wait([
         _marketplaceRepository.fetchLoadOffers(),
-        _marketplaceRepository.fetchEnRouteLoads(),
+        _marketplaceRepository.fetchEnRouteLoads(
+          driverId: DriverSession.driverId,
+          latitude: lat,
+          longitude: lng,
+        ),
         _marketplaceRepository.fetchDriverBids(),
       ]);
 

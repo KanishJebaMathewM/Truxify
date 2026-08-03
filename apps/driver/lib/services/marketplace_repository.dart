@@ -75,8 +75,17 @@ class MarketplaceRepository {
     }
   }
 
-  Future<List<LoadOffer>> fetchEnRouteLoads() async {
-    final path = '/api/orders/load-offers/en-route';
+  Future<List<LoadOffer>> fetchEnRouteLoads({
+    required String driverId,
+    double? latitude,
+    double? longitude,
+  }) async {
+    final queryParams = [
+      'driverId=$driverId',
+      if (latitude != null) 'currentLat=$latitude',
+      if (longitude != null) 'currentLng=$longitude',
+    ].join('&');
+    final path = '/api/ml/en-route-loads?$queryParams';
     try {
       final decoded = await _apiClient.get(path);
       if (decoded is! List) throw StateError('Unexpected response type');

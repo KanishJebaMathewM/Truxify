@@ -1392,7 +1392,15 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   const { txHash } = req.body;
 
   const lockKey = `escrow_lock:${orderId}`;
-  const lockValue = await acquireLock(lockKey, 120000);
+  let lockValue;
+  try {
+    lockValue = await acquireLock(lockKey, 120000);
+  } catch (err) {
+    if (err?.name === 'LockAcquisitionError') {
+      return res.status(503).json({ error: 'Lock service is unavailable. Please retry.' });
+    }
+    throw err;
+  }
   if (!lockValue) {
     return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
   }

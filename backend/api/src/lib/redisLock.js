@@ -19,12 +19,13 @@ export class LockAcquisitionError extends Error {
  * Acquires a distributed lock using Redis.
  * @param {string} resourceKey - The unique key identifying the resource to lock (e.g. `escrow_lock:123`)
  * @param {number} ttlMs - Time to live in milliseconds
- * @returns {Promise<string|null>} lockValue if acquired, null if not acquired or Redis unavailable
+ * @returns {Promise<string|null>} lockValue if acquired, null if the lock is held by another process
+ * @throws {LockAcquisitionError} when the lock cannot be acquired due to Redis being unavailable,
+ *  so callers fail closed instead of proceeding without mutual exclusion
  */
 export async function acquireLock(resourceKey, ttlMs = 10000) {
   if (!redisClient) {
-    logger.warn('[RedisLock] redisClient not available, cannot acquire lock for', resourceKey);
-    return null;
+    throw new LockAcquisitionError(resourceKey, 'redisClient is not available');
   }
 
   const lockValue = crypto.randomUUID();
@@ -36,7 +37,7 @@ export async function acquireLock(resourceKey, ttlMs = 10000) {
     return null;
   } catch (err) {
     logger.error({ err }, '[RedisLock] Error acquiring lock for key', resourceKey);
-    return null;
+    throw new LockAcquisitionError(resourceKey, err.message);
   }
 }
 

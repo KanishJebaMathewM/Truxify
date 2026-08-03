@@ -2,10 +2,10 @@
  * Unit tests for backend/api/src/lib/redisLock.js
  *
  * Coverage:
- *   - acquireLock: returns null when redisClient is unavailable (no fake locks)
+ *   - acquireLock: throws LockAcquisitionError when redisClient is unavailable (fail closed)
  *   - acquireLock: returns a lock value when lock is successfully acquired
  *   - acquireLock: returns null when lock is already held by another process
- *   - acquireLock: returns null and logs error when redisClient.set throws
+ *   - acquireLock: throws LockAcquisitionError when redisClient.set throws (fail closed)
  *   - acquireLock: uses default TTL of 10000ms when ttlMs is not provided
  *   - renewLock: returns false when redisClient is unavailable
  *   - renewLock: returns false when lockValue is null or undefined
@@ -67,13 +67,8 @@ describe('redisLock — acquireLock', () => {
     vi.clearAllMocks();
   });
 
-  it('returns null when redisClient is unavailable (no fake lock)', async () => {
-    const result = await acquireLock('resource-1', 5000);
-    expect(result).toBeNull();
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      '[RedisLock] redisClient not available, cannot acquire lock for',
-      'resource-1'
-    );
+  it('throws LockAcquisitionError when redisClient is unavailable (fail closed)', async () => {
+    await expect(acquireLock('resource-1', 5000)).rejects.toThrow(LockAcquisitionError);
   });
 
   it('returns a lock value when lock is successfully acquired', async () => {
@@ -95,10 +90,9 @@ describe('redisLock — acquireLock', () => {
     expect(result).toBeNull();
   });
 
-  it('returns null and logs error when redisClient.set throws', async () => {
+  it('throws LockAcquisitionError when redisClient.set throws (fail closed)', async () => {
     mockRedisClient.set.mockRejectedValueOnce(new Error('Redis connection lost'));
-    const result = await acquireLock('resource-error', 10000);
-    expect(result).toBeNull();
+    await expect(acquireLock('resource-error', 10000)).rejects.toThrow(LockAcquisitionError);
     expect(mockLogger.error).toHaveBeenCalledWith(
       expect.objectContaining({ err: expect.any(Error) }),
       '[RedisLock] Error acquiring lock for key',

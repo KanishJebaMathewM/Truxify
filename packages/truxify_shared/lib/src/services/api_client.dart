@@ -259,7 +259,7 @@ class ApiClient {
     // rather than a generic error.
     if (response.statusCode == 429 && !isRetry && _retryPolicy.retryOnRateLimit) {
       final waitSeconds = _retryPolicy.parseRetryAfter(response.headers);
-      final clampedWait = waitSeconds.clamp(0, _retryPolicy.maxRetryAfterSeconds);
+      final clampedWait = waitSeconds.clamp(0, _retryPolicy.maxRetryAfterSeconds).toInt();
 
       if (kDebugMode) {
         developer.log(

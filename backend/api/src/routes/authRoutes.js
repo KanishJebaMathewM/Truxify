@@ -51,7 +51,7 @@ import {
   invalidateCachedProfile,
   invalidateCachedSupabaseProfile,
 } from "../lib/profileCache.js";
-import { firebaseAdmin } from "../config/db.js";
+import { firebaseAdmin, supabase } from "../config/db.js";
 import logger from "../middleware/logger.js";
 
 const router = express.Router();
@@ -166,7 +166,7 @@ router.get("/session", authenticate, userLimiter, (req, res) => {
 });
 
 import crypto from "crypto";
-import { supabase } from "../config/db.js";
+
 import { otpSendSchema } from "../validation/requestSchemas.js";
 import { z } from "zod";
 

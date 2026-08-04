@@ -101,6 +101,9 @@ const POLICIES = {
   'webrtc:view-nearby':        { roles: [ROLES.DRIVER, ROLES.ADMIN] },
   'webrtc:view-offline':       { roles: [ROLES.DRIVER, ROLES.ADMIN] },
   'webrtc:sync-offline':       { roles: [ROLES.DRIVER, ROLES.ADMIN] },
+
+  'liquibase:migrate':         { roles: [ROLES.ADMIN] },
+  'liquibase:rollback':        { roles: [ROLES.ADMIN] },
 };
 
 export class PolicyEngine {

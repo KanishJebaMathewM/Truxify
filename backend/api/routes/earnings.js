@@ -1,4 +1,4 @@
-const express = require('express');
+import express from 'express';
 const router = express.Router();
 
 // Helper: returns start of period (defaults to current month)
@@ -80,4 +80,4 @@ router.get('/summary', async (req, res) => {
   }
 });
 
-module.exports = router;
+export default router;

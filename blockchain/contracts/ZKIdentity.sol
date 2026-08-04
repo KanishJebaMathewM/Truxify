@@ -257,10 +257,17 @@ contract ZKIdentity is Ownable, ReentrancyGuard, Pausable {
     }
 
     function revokeSelectiveDisclosure(bytes32 disclosureId) external {
-        require(selectiveDisclosures[disclosureId].identityHash != bytes32(0), "Disclosure not found");
-        require(selectiveDisclosures[disclosureId].active, "Already revoked");
+        SelectiveDisclosure storage disclosure = selectiveDisclosures[disclosureId];
+        require(disclosure.identityHash != bytes32(0), "Disclosure not found");
+        require(disclosure.active, "Already revoked");
+        require(
+            msg.sender == identities[disclosure.identityHash].owner ||
+                msg.sender == disclosure.recipient ||
+                msg.sender == owner(),
+            "Not authorized"
+        );
 
-        selectiveDisclosures[disclosureId].active = false;
+        disclosure.active = false;
 
         emit SelectiveDisclosureRevoked(disclosureId);
     }

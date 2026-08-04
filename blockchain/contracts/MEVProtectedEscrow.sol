@@ -74,15 +74,24 @@ contract MEVProtectedEscrow is Ownable, ReentrancyGuard, Pausable {
         emit CommitmentCreated(msg.sender, secretHash);
     }
 
-    function revealCommitment(bytes32 secret) external whenNotPaused {
-        bytes32 commitHash = keccak256(abi.encodePacked(secret, msg.sender));
-        require(userCommitments[msg.sender] == commitHash, "Invalid commit");
-        require(!revealedCommits[commitHash], "Already revealed");
+    function revealCommitment(bytes32 secret, uint256 escrowId) external whenNotPaused {
+    bytes32 commitHash = keccak256(abi.encodePacked(secret, msg.sender));
+    require(userCommitments[msg.sender] == commitHash, "Invalid commit");
+    require(!revealedCommits[commitHash], "Already revealed");
 
-        revealedCommits[commitHash] = true;
-        
-        emit CommitmentRevealed(msg.sender, secret);
-    }
+    Escrow storage escrow = escrows[escrowId];
+    require(escrow.customer == msg.sender, "Not escrow owner");
+    require(escrow.commitHash == commitHash, "Commit does not match escrow");
+    require(!escrow.revealed, "Already revealed");
+    require(block.number >= escrow.revealDeadline - commitRevealPeriod, "Reveal too early");
+    require(block.number <= escrow.revealDeadline, "Reveal deadline passed");
+
+    revealedCommits[commitHash] = true;
+    escrow.revealed = true;
+    escrow.secret = secret;
+
+    emit CommitmentRevealed(msg.sender, secret);
+}
 
     // ============ MEV Protected Escrow ============
 

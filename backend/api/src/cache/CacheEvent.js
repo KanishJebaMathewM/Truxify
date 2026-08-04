@@ -14,6 +14,7 @@
  */
 
 import crypto from 'crypto';
+import logger from '../middleware/logger.js';
 
 export const CacheEventType = Object.freeze({
   INVALIDATE_KEY: 'INVALIDATE_KEY',
@@ -73,7 +74,8 @@ export function deserializeCacheEvent(json) {
     const event = JSON.parse(json);
     if (!event || !event.type || !event.namespace) return null;
     return event;
-  } catch {
+  } catch (err) {
+    logger.warn('[CacheEvent] Deserialization failed:', err?.message);
     return null;
   }
 }

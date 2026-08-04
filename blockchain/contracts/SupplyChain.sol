@@ -146,6 +146,7 @@ contract SupplyChain is Ownable, Pausable, ReentrancyGuard {
     ) external whenNotPaused returns (uint256) {
         require(products[productId].isActive, "Product not active");
         require(receiver != address(0), "Invalid receiver");
+        require(products[productId].manufacturer == msg.sender || msg.sender == owner(), "Not authorized");
 
         _shipmentCounter++;
         uint256 shipmentId = _shipmentCounter;

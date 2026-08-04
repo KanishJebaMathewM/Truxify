@@ -45,7 +45,9 @@ function isCacheable(statusCode) {
 
 function cacheKey(req, idempotencyKey) {
   const identity = req.user?.id || 'anonymous';
-  return `idempotency:${identity}:${idempotencyKey}`;
+  // Scope by method + originalUrl so two endpoints (or verbs) sharing a user
+  // and key cannot collide (fixes #2915).
+  return `idempotency:${identity}:${req.method}:${req.originalUrl}:${idempotencyKey}`;
 }
 
 function readAndParse(str) {
@@ -127,7 +129,12 @@ export function requireIdempotency(ttlSeconds = 3600) {
         const releaseLock = () => {
           if (lockReleased) return;
           lockReleased = true;
-          redisClient.del(lockKey).catch(() => { });
+          redisClient.del(lockKey).catch((err) => {
+            logger.error(
+              { err, lockKey },
+              '[Idempotency] Failed to release Redis lock.'
+            );
+          });
         };
 
         // Ensure lock is reliably released when response terminates

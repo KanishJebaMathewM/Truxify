@@ -67,6 +67,17 @@ begin
     raise exception 'Order has already been delivered';
   end if;
 
+  -- Fail closed (restored from 20260802130000_complete_trip_tx_require_funded_escrow.sql):
+  -- credit the driver wallet ONLY when the escrow was actually funded and released
+  -- on-chain (`escrow_status = 'released'` or a release tx hash is supplied), or
+  -- when the order is explicitly marked `escrow_disabled`. Any ambiguous/unfunded
+  -- state raises instead of crediting.
+  if not v_order.escrow_disabled
+     and coalesce(v_order.escrow_status, '') <> 'released'
+     and p_release_tx_hash is null then
+    raise exception 'Blockchain escrow release must complete before crediting driver wallet';
+  end if;
+
   -- Safe lookup for the driver's active trip
   select count(*) into v_active_trip_count
   from trips
@@ -102,16 +113,29 @@ begin
     where trip_display_id = v_trip_display_id;
   end if;
 
-  -- Update order status and escrow details
-  update orders
-  set status = 'payment_released',
-      escrow_status = 'released',
-      escrow_released_at = now(),
-      blockchain_tx_hash = coalesce(p_release_tx_hash, blockchain_tx_hash),
-      updated_at = now()
-  where id = p_order_id
-    and status != 'cancelled'
-    and status != 'payment_released';
+  -- Update order status and escrow details. Escrow fields are only synced for
+  -- escrow-backed orders (the fail-closed guard above guarantees the escrow was
+  -- released on-chain); escrow-disabled orders never enter the escrow lifecycle,
+  -- so their escrow_status must not be rewritten to 'released'.
+  if v_order.escrow_disabled then
+    update orders
+    set status = 'payment_released',
+        blockchain_tx_hash = coalesce(p_release_tx_hash, blockchain_tx_hash),
+        updated_at = now()
+    where id = p_order_id
+      and status != 'cancelled'
+      and status != 'payment_released';
+  else
+    update orders
+    set status = 'payment_released',
+        escrow_status = 'released',
+        escrow_released_at = now(),
+        blockchain_tx_hash = coalesce(p_release_tx_hash, blockchain_tx_hash),
+        updated_at = now()
+    where id = p_order_id
+      and status != 'cancelled'
+      and status != 'payment_released';
+  end if;
 
   -- Verify the update actually affected a row
   get diagnostics v_updated_count = row_count;

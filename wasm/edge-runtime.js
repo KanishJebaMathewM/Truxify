@@ -12,13 +12,13 @@ class EdgeRuntime {
         this.isInitialized = false;
         this.memoryLimit = 128 * 1024 * 1024; // 128MB
         this.timeoutLimit = 5000; // 5 seconds
-        
+
         logger.info('✅ Edge Runtime initialized');
     }
 
     async initialize() {
         if (this.isInitialized) return;
-        
+
         try {
             const wasmPath = process.env.WASM_MODULE_PATH || './wasm/truxify_wasm.wasm';
             if (fs.existsSync(wasmPath)) {
@@ -55,39 +55,73 @@ class EdgeRuntime {
         } catch (err) {
             logger.error(`WASM initialization warning: ${err.message}`);
         }
-        
+
         this.isInitialized = true;
     }
 
     async executeEdgeFunction(functionName, params) {
-        try {
-            await this.initialize();
-            
-            const wasm = this.wasmModules.get('default');
-            if (!wasm) {
-                throw new Error('WASM module not loaded');
+        return new Promise((resolve) => {
+            const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
+
+            if (!isMainThread) return;
+
+            const workerCode = `
+            const { parentPort, workerData } = require('worker_threads');
+            const { functionName, params, wasmPath } = workerData;
+            try {
+                const fs = require('fs');
+                const { WASI } = require('wasi');
+                const wasmBytes = fs.readFileSync(wasmPath);
+                const wasi = new WASI({ args: [], env: {}, preopens: {} });
+                const importObject = { wasi_snapshot_preview1: wasi.wasiImport };
+                const { instance } = new WebAssembly.Instance(
+                    new WebAssembly.Module(wasmBytes), importObject
+                );
+                const func = instance.exports[functionName];
+                if (!func) throw new Error('Function ' + functionName + ' not found');
+                const result = func(...params);
+                parentPort.postMessage({ success: true, data: result });
+            } catch (err) {
+                parentPort.postMessage({ success: false, error: err.message });
             }
-            
-            // Execute function - sync WASM cannot be aborted by timeout
-            // Use Promise.race for async functions; sync calls will block
-            const func = wasm.exports[functionName];
-            if (!func) {
-                throw new Error(`Function ${functionName} not found`);
-            }
-            
-            const result = func(...params);
-            
-            return {
-                success: true,
-                data: result
-            };
-        } catch (error) {
-            logger.error(`Edge function execution error: ${error.message}`);
-            return {
-                success: false,
-                error: error.message
-            };
-        }
+        `;
+
+            const wasmPath = process.env.WASM_MODULE_PATH || './wasm/truxify_wasm.wasm';
+
+            const worker = new Worker(workerCode, {
+                eval: true,
+                workerData: { functionName, params, wasmPath },
+                resourceLimits: {
+                    maxOldGenerationSizeMb: 64,
+                    maxYoungGenerationSizeMb: 16,
+                    stackSizeMb: 2,
+                },
+            });
+
+            const timer = setTimeout(() => {
+                worker.terminate();
+                logger.error(`Edge function '${functionName}' timed out after ${this.timeoutLimit}ms`);
+                resolve({ success: false, error: `Execution timed out after ${this.timeoutLimit}ms` });
+            }, this.timeoutLimit);
+
+            worker.on('message', (result) => {
+                clearTimeout(timer);
+                resolve(result);
+            });
+
+            worker.on('error', (err) => {
+                clearTimeout(timer);
+                logger.error(`Edge function worker error: ${err.message}`);
+                resolve({ success: false, error: err.message });
+            });
+
+            worker.on('exit', (code) => {
+                if (code !== 0) {
+                    clearTimeout(timer);
+                    resolve({ success: false, error: `Worker exited with code ${code}` });
+                }
+            });
+        });
     }
 
     async executeWithTimeout(fn, timeout) {
@@ -95,7 +129,7 @@ class EdgeRuntime {
             const timer = setTimeout(() => {
                 reject(new Error(`Execution timeout after ${timeout}ms`));
             }, timeout);
-            
+
             try {
                 const result = fn();
                 clearTimeout(timer);

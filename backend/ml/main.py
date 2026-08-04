@@ -4,11 +4,12 @@ import os
 import time
 import numpy as np
 from datetime import datetime, timedelta
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from app.models.eta_prediction import eta_predictor
+from fastapi import HTTPException
 
 from app.models.demand_forecast import (
     predict_demand,
@@ -27,6 +28,7 @@ from app.models.collaborative_filter import collaborative_filter
 from app.models.trust_scorer import trust_scorer
 from app.models.deadhead_eliminator import find_return_loads
 from app.models.mid_trip_reoptimiser import find_mid_trip_loads
+from app.models.ocr_verifier import ocr_verifier
 from app.models.base import model_exists
 from app.models.demand_forecast import MODEL_NAME as DEMAND_MODEL_NAME
 from app.models.price_prediction import MODEL_NAME as PRICE_MODEL_NAME
@@ -515,7 +517,6 @@ async def recommend_loads_endpoint(input: RecommendLoadsInput, _auth=Depends(ver
         result = collaborative_filter.recommend_loads(
             user_id=input.user_id,
             booking_history=input.booking_history,
-            rated_drivers=input.rated_drivers,
             top_n=input.top_n,
         )
         return RecommendOutput(**result)
@@ -534,7 +535,6 @@ async def recommend_trucks_endpoint(input: RecommendTrucksInput, _auth=Depends(v
         result = collaborative_filter.recommend_trucks(
             user_id=input.user_id,
             booking_history=input.booking_history,
-            rated_loads=input.rated_loads,
             top_n=input.top_n,
         )
         return RecommendOutput(**result)
@@ -695,3 +695,54 @@ async def predict_maintenance_endpoint(input: PredictiveMaintenanceInput, _auth=
     except Exception as e:
         logger.error("Predictive maintenance prediction failed: %s", e)
         raise HTTPException(status_code=500, detail="Predictive maintenance prediction failed")
+
+# ---------------------------------------------------------------------------
+# KYC Document OCR Verification
+# ---------------------------------------------------------------------------
+@app.post("/verify/kyc", response_model=KYCVerificationOutput)
+async def verify_kyc_endpoint(
+    file: UploadFile = File(...),
+    _auth=Depends(verify_api_key)
+):
+    try:
+        allowed_types = {
+            "image/jpeg",
+            "image/png",
+            "image/jpg",
+            "image/webp",
+            "application/pdf",
+        }
+
+        if file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=400,
+                detail="Only image and PDF files are allowed."
+            )
+
+        image_bytes = await file.read()
+
+        MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+
+        if len(image_bytes) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail="File size exceeds the 5 MB limit."
+            )
+
+        text = ocr_verifier.extract_text(image_bytes)
+        result = ocr_verifier.verify_license(text)
+
+        return KYCVerificationOutput(**result)
+
+    except HTTPException:
+        raise
+
+    except Exception as e:
+        logger.error("KYC OCR verification failed: %s", e)
+
+        return KYCVerificationOutput(
+            verified=False,
+            document_type="Unknown",
+            extracted_number=None,
+            raw_text=""
+        )

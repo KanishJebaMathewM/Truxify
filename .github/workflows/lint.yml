@@ -19,16 +19,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: backend/api/package-lock.json
       - name: Install dependencies
         working-directory: backend/api
-        run: npm ci --workspaces=false --legacy-peer-deps
+        run: npm install --workspaces=false --legacy-peer-deps --ignore-scripts
       - name: Run ESLint
         working-directory: backend/api
         run: npm run lint
@@ -38,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -62,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -80,3 +78,16 @@ jobs:
       - name: Run Dart Format
         working-directory: apps/driver
         run: dart format --output=none --set-exit-if-changed .
+
+  sonarcloud:
+    name: SonarCloud Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

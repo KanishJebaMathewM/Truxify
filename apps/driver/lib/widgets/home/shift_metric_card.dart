@@ -9,12 +9,17 @@ class ShiftMetricCard extends StatelessWidget {
     required this.value,
     required this.label,
     this.labelKey,
+    this.subLabel,
   });
 
   final IconData icon;
   final String value;
   final String label;
   final Key? labelKey;
+
+  /// Optional muted sub-label shown below the main label.
+  /// Used for net-after-fuel estimate (e.g. "Net ≈ ₹2,300").
+  final String? subLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -47,6 +52,17 @@ class ShiftMetricCard extends StatelessWidget {
               color: TruxifyColors.adaptiveSecondaryText(context),
             ),
           ),
+          if (subLabel != null) ...[ 
+            const SizedBox(height: 2),
+            Text(
+              subLabel!,
+              style: GoogleFonts.dmSans(
+                fontSize: 8,
+                color: TruxifyColors.success,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ],
       ),
     );

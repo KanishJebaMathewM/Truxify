@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
 
+import { acquireLock, releaseLock } from '../api/src/lib/redisLock.js';
+
 class ZKPService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
@@ -64,8 +66,31 @@ class ZKPService {
     }
 
     async processPrivateTransaction(data) {
+        let lockValue = null;
+        const lockKey = `zkp:nullifier:${data.nullifier}`;
+
         try {
             const { nullifier, commitment, recipient, amount, proof } = data;
+
+            // Attempt to acquire distributed lock
+            lockValue = await acquireLock(lockKey, 30000);
+            if (!lockValue) {
+                throw new Error('Concurrent transaction processing detected for this payload. Please try again later.');
+            }
+
+            // Check if nullifier is already processed in DB
+            const { data: existingTx, error: checkError } = await supabase
+                .from('zkp_transactions')
+                .select('tx_id')
+                .eq('nullifier', nullifier)
+                .maybeSingle();
+
+            if (existingTx) {
+                throw new Error('Transaction with this nullifier has already been processed.');
+            }
+            if (checkError) {
+                throw checkError;
+            }
 
             const tx = await this.zkp.processPrivateTransaction(
                 nullifier,
@@ -97,6 +122,10 @@ class ZKPService {
         } catch (error) {
             logger.error('Private transaction failed:', error);
             throw error;
+        } finally {
+            if (lockValue) {
+                await releaseLock(lockKey, lockValue);
+            }
         }
     }
 

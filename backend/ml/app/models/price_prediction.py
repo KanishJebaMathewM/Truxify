@@ -1,5 +1,7 @@
 import logging
 import math
+import os
+import requests
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -247,6 +249,27 @@ def _parse_trip_row(row: dict) -> Optional[dict]:
     }
 
 
+def _get_weather_multiplier(city: str) -> float:
+    """Fetch weather for a city and return a price multiplier."""
+    if not city:
+        return 1.0
+    api_key = os.environ.get("OPENWEATHERMAP_API_KEY")
+    if not api_key:
+        return 1.0
+    try:
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}"
+        response = requests.get(url, timeout=2.0)
+        if response.status_code == 200:
+            weather_main = response.json().get("weather", [{}])[0].get("main", "").lower()
+            if weather_main in ["rain", "snow", "thunderstorm", "extreme", "squall", "tornado"]:
+                return 1.2
+            elif weather_main in ["drizzle", "mist", "fog", "haze", "dust", "sand", "ash"]:
+                return 1.1
+    except Exception as e:
+        logger.warning("Weather API failed for %s: %s", city, e)
+    return 1.0
+
+
 def _build_city_encoder(samples: List[dict]) -> Dict[str, int]:
     """Ordinal city encoder fitted on training origins/destinations."""
     counts: Dict[str, int] = {}
@@ -423,6 +446,14 @@ def predict_price(
     features_scaled = scaler.transform(features)
     predicted = float(model.predict(features_scaled)[0])
     predicted = max(predicted, 500.0)
+
+    origin_city = _city_from_address(route_origin)
+    destination_city = _city_from_address(route_destination)
+    weather_multiplier = max(
+        _get_weather_multiplier(origin_city),
+        _get_weather_multiplier(destination_city)
+    )
+    predicted *= weather_multiplier
 
     return {
         "estimated_price": round(predicted, 2),

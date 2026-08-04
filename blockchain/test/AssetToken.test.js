@@ -142,4 +142,66 @@ describe("AssetToken", function () {
     assert.equal(buyer2Assets.length, 1);
     assert.equal(buyer2Assets[0], 1n);
   });
+
+  it("should accrue a claimable payout on sellFraction and pay it via claimPayout", async function () {
+    const { assetToken, owner, buyer1 } = await deployAssetToken();
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      ethers.parseEther("100"),
+      "ipfs://..."
+    );
+
+    // tokenPrice = 1 ETH/token
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("10"), {
+      value: ethers.parseEther("10")
+    });
+
+    // Sell 4 tokens back to the treasury -> 4 ETH claimable, tokens burned
+    await assetToken.connect(buyer1).sellFraction(1, ethers.parseEther("4"));
+    assert.equal(await assetToken.getClaimableBalance(buyer1.address), ethers.parseEther("4"));
+    assert.equal(await assetToken.balanceOf(buyer1.address), ethers.parseEther("6"));
+
+    const balanceBefore = await ethers.provider.getBalance(buyer1.address);
+    await assetToken.connect(buyer1).claimPayout();
+    assert.equal(await assetToken.getClaimableBalance(buyer1.address), 0n);
+    const balanceAfter = await ethers.provider.getBalance(buyer1.address);
+    assert.equal(balanceAfter - balanceBefore, ethers.parseEther("4"));
+  });
+
+  it("should return sold fractions to the available pool and not double count ownership", async function () {
+    const { assetToken, owner, buyer1, buyer2 } = await deployAssetToken();
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      ethers.parseEther("100"),
+      "ipfs://..."
+    );
+
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("10"), {
+      value: ethers.parseEther("10")
+    });
+    await assetToken.connect(buyer1).sellFraction(1, ethers.parseEther("6"));
+
+    // 6 fractions are back in the pool and can be purchased again
+    const asset = await assetToken.getAsset(1);
+    assert.equal(asset.availableTokens, ethers.parseEther("96"));
+
+    await assetToken.connect(buyer2).purchaseFraction(1, ethers.parseEther("6"), {
+      value: ethers.parseEther("6")
+    });
+    assert.equal(await assetToken.balanceOf(buyer2.address), ethers.parseEther("6"));
+  });
+
+  it("should revert claimPayout when there is nothing to claim", async function () {
+    const { assetToken, buyer1 } = await deployAssetToken();
+    await assert.rejects(
+      assetToken.connect(buyer1).claimPayout(),
+      /No claimable balance/
+    );
+  });
 });

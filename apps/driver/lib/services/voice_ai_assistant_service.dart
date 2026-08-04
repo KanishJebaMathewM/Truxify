@@ -1,7 +1,64 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../models/voice_command_model.dart';
 
 class VoiceAiAssistantService {
+  RTCPeerConnection? _peerConnection;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  int _reconnectAttempts = 0;
+  static const int _maxReconnectAttempts = 3;
+
+  /// Initializes the WebRTC connection and monitors iceConnectionState for auto-reconnect
+  Future<void> initializeWebRTC() async {
+    try {
+      _peerConnection = await createPeerConnection({});
+      
+      _peerConnection?.onIceConnectionState = (RTCIceConnectionState state) {
+        if (state == RTCIceConnectionState.RTCIceConnectionStateDisconnected ||
+            state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+          _handleDisconnect();
+        } else if (state == RTCIceConnectionState.RTCIceConnectionStateConnected) {
+          _reconnectAttempts = 0;
+          debugPrint('WebRTC Connection established.');
+        }
+      };
+    } catch (e) {
+      debugPrint('Failed to initialize WebRTC: $e');
+    }
+  }
+
+  Future<void> _handleDisconnect() async {
+    if (_reconnectAttempts >= _maxReconnectAttempts) {
+      debugPrint('Max reconnection attempts reached. Voice AI disconnected.');
+      return;
+    }
+
+    _reconnectAttempts++;
+    debugPrint('Connection lost. Reconnecting to Assistant... Attempt $_reconnectAttempts');
+    
+    try {
+      // Play local audio prompt
+      await _audioPlayer.play(AssetSource('audio/reconnecting.mp3'));
+    } catch (e) {
+      debugPrint('Could not play audio prompt: $e');
+    }
+
+    // Wait before reconnecting
+    await Future.delayed(const Duration(seconds: 2));
+    
+    // Attempt to restore the connection
+    try {
+      await _peerConnection?.close();
+      await initializeWebRTC();
+      // In a real application, SDP negotiation would follow here
+    } catch (e) {
+      debugPrint('Reconnection attempt failed: $e');
+      _handleDisconnect();
+    }
+  }
+
   /// Simulates processing a voice audio stream into an actionable intent
   Future<VoiceCommand> processVoiceInput(String transcribedText) async {
     await Future.delayed(const Duration(seconds: 1)); // Simulate NLP processing

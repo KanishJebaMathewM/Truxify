@@ -68,6 +68,7 @@ vi.mock('../../src/config/db.js', () => ({
   supabase: {
     from: vi.fn(makeBuilder),
   },
+  supabaseAdmin: null,
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({

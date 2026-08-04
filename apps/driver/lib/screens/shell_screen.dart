@@ -77,6 +77,9 @@ class _ShellScreenState extends State<ShellScreen> {
           marketplaceRepo: widget.marketplaceRepo ?? MarketplaceRepository(),
           earningsService: widget.earningsService ?? DriverEarningsService(),
           mockLocationText: widget.mockLocationText,
+          // Navigate to Trips tab (index 1) which hosts both loads and active trips.
+          onNavigateToLoads: () => _openTab(1),
+          onNavigateToActiveTrip: () => _openTab(1),
         ),
       ),
       // Tab 1 — Active Trip

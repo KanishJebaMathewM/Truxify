@@ -1,4 +1,16 @@
 services:
+  gateway:
+    image: nginx:alpine
+    container_name: truxify-gateway
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+      - ml-engine
+    restart: unless-stopped
+
   api:
     build:
       context: ./backend/api
@@ -276,6 +288,30 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
+
+  backup:
+    build:
+      context: ./infrastructure/backup
+    container_name: truxify-backup
+    env_file:
+      - .env
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      SHARD_PASSWORD: ${SHARD_PASSWORD:?SHARD_PASSWORD is required}
+      MONGO_ROOT_USER: ${MONGO_ROOT_USER:?MONGO_ROOT_USER is required}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD is required}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:?AWS_S3_BUCKET is required}
+    depends_on:
+      - db
+      - shard-north
+      - shard-south
+      - shard-east
+      - shard-west
+      - mongo
+    restart: unless-stopped
 
 volumes:
   mongo_data:

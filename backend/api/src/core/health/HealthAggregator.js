@@ -1,5 +1,5 @@
-import logger from '../../middleware/logger.js';
-import { HealthStatus } from './HealthCheck.js';
+import logger from "../../middleware/logger.js";
+import { HealthStatus } from "./HealthCheck.js";
 
 /**
  * @typedef {object} ServiceHealthResult
@@ -59,7 +59,9 @@ export class HealthAggregator {
         try {
           return await checkFn();
         } catch (err) {
-          logger.error(`[health] Aggregator check "${name}" threw: ${err.message}`);
+          logger.error(
+            `[health] Aggregator check "${name}" threw: ${err.message}`,
+          );
           return {
             name,
             status: HealthStatus.UNHEALTHY,
@@ -69,7 +71,7 @@ export class HealthAggregator {
             timestamp: new Date().toISOString(),
           };
         }
-      })
+      }),
     );
 
     /** @type {Record<string, ServiceHealthResult>} */
@@ -99,7 +101,7 @@ export class HealthAggregator {
       uptime: process.uptime(),
       version: {
         node: process.version,
-        api: process.env.npm_package_version || '1.0.0',
+        api: process.env.npm_package_version || "1.0.0",
       },
       memory: this._formatMemory(process.memoryUsage()),
       services,
@@ -114,12 +116,14 @@ export class HealthAggregator {
    */
   _determineOverallStatus(results) {
     const criticalUnhealthy = results.some(
-      (r) => r.critical && r.status === HealthStatus.UNHEALTHY
+      (r) => r.critical && r.status === HealthStatus.UNHEALTHY,
     );
     if (criticalUnhealthy) return HealthStatus.UNHEALTHY;
 
     const hasDegraded = results.some(
-      (r) => r.status === HealthStatus.DEGRADED || r.status === HealthStatus.UNHEALTHY
+      (r) =>
+        r.status === HealthStatus.DEGRADED ||
+        r.status === HealthStatus.UNHEALTHY,
     );
     if (hasDegraded) return HealthStatus.DEGRADED;
 
@@ -130,8 +134,10 @@ export class HealthAggregator {
     return {
       total: results.length,
       healthy: results.filter((r) => r.status === HealthStatus.HEALTHY).length,
-      degraded: results.filter((r) => r.status === HealthStatus.DEGRADED).length,
-      unhealthy: results.filter((r) => r.status === HealthStatus.UNHEALTHY).length,
+      degraded: results.filter((r) => r.status === HealthStatus.DEGRADED)
+        .length,
+      unhealthy: results.filter((r) => r.status === HealthStatus.UNHEALTHY)
+        .length,
     };
   }
 
@@ -141,9 +147,7 @@ export class HealthAggregator {
       heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
       heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
       external: Math.round(mem.external / 1024 / 1024),
-      unit: 'MB',
+      unit: "MB",
     };
   }
 }
-
-.catch(err => console.error("Promise.all failed:", err));

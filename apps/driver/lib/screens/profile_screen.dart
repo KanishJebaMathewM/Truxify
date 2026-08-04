@@ -12,6 +12,7 @@ import '../widgets/common_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/fcm_service.dart';
 import '../services/secure_storage.dart';
+import '../services/truck_repository.dart';
 import '../core/supabase_config.dart';
 import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen, FcmService;
 import 'notifications_screen.dart';
@@ -102,6 +103,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             .select('polygon_wallet_address, full_name, phone, email, is_digilocker_verified')
             .eq('id', userId)
             .maybeSingle();
+        final truck = await TruckRepository().fetchTruckForDriver(userId);
         if (data != null && mounted) {
           setState(() {
             _walletAddress = data['polygon_wallet_address']?.toString() ?? '';
@@ -109,6 +111,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _driverPhone = data['phone']?.toString() ?? '';
             _driverEmail = data['email']?.toString() ?? '';
             _isDigilockerVerified = data['is_digilocker_verified'] as bool? ?? false;
+            _truckNumber = truck?.numberPlate ?? '';
           });
         }
       }
@@ -318,22 +321,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 20),
               PrimaryButton(
                 label: AppLocalizations.of(context)!.saveChanges,
-                onPressed: () {
+                onPressed: () async {
                   if (formKey.currentState?.validate() ?? false) {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final navigator = Navigator.of(context);
+                    final successMessage =
+                        AppLocalizations.of(context)!.profileUpdatedSuccessfully;
+                    final apiClient =
+                        ApiClient(timeout: AppConfig.profileUpdateTimeout);
+                    try {
+                      await apiClient.put(
+                        '/api/profile',
+                        body: <String, String>{
+                          'full_name': nameController.text.trim(),
+                          'phone': phoneController.text.trim(),
+                          'email': emailController.text.trim(),
+                          'number_plate': truckNumberController.text.trim(),
+                        },
+                      );
+                    } on ApiException catch (e) {
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(e.message),
+                          backgroundColor: TruxifyColors.errorRed,
+                        ),
+                      );
+                      return;
+                    } catch (e) {
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text('Failed to save profile: $e'),
+                          backgroundColor: TruxifyColors.errorRed,
+                        ),
+                      );
+                      return;
+                    } finally {
+                      apiClient.dispose();
+                    }
+                    if (!mounted) return;
                     setState(() {
                       _driverName = nameController.text.trim();
                       _driverPhone = phoneController.text.trim();
                       _driverEmail = emailController.text.trim();
                       _truckNumber = truckNumberController.text.trim();
                     });
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(AppLocalizations.of(context)!.profileUpdatedSuccessfully),
-                      backgroundColor: TruxifyColors.success,
-                    ),
-                  );
-                }
+                    navigator.pop();
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(successMessage),
+                        backgroundColor: TruxifyColors.success,
+                      ),
+                    );
+                  }
                 },
               ),
             ],

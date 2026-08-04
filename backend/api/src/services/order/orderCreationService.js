@@ -8,6 +8,131 @@ import logger from '../../middleware/logger.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 import { generateOrderDisplayId, ORDER_DISPLAY_ID_MAX_RETRIES } from '../../lib/orderDisplayId.js';
 
+// Targeting knobs for the new-trip driver broadcast. Env-configurable so a
+// burst of order creations can never trigger an unbounded notification fan-out.
+const NEW_TRIP_NOTIFY_RADIUS_KM = Number(process.env.NEW_TRIP_NOTIFY_RADIUS_KM) > 0
+  ? Number(process.env.NEW_TRIP_NOTIFY_RADIUS_KM)
+  : 50;
+const NEW_TRIP_NOTIFY_MAX_DRIVERS = Number(process.env.NEW_TRIP_NOTIFY_MAX_DRIVERS) > 0
+  ? Number(process.env.NEW_TRIP_NOTIFY_MAX_DRIVERS)
+  : 50;
+const NEW_TRIP_NOTIFY_BATCH_SIZE = Number(process.env.NEW_TRIP_NOTIFY_BATCH_SIZE) > 0
+  ? Number(process.env.NEW_TRIP_NOTIFY_BATCH_SIZE)
+  : 25;
+const DRIVER_LOCATION_FRESHNESS_MS = 15 * 60 * 1000;
+
+function haversineDistanceKm(lat1, lng1, lat2, lng2) {
+  const toRad = deg => (deg * Math.PI) / 180;
+  const R = 6371;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+/**
+ * Find drivers that should be notified about a new trip: those online and
+ * located within the configured radius of the pickup, whose truck can carry
+ * the load (by weight capacity). Falls back to in-memory filtering when the
+ * drivers are not filterable in a single SQL query.
+ *
+ * @param {{pickupLat: number, pickupLng: number, weightTonnes: number}} args
+ * @returns {Promise<string[]>} driver ids, bounded by NEW_TRIP_NOTIFY_MAX_DRIVERS
+ */
+async function findTargetDrivers({ pickupLat, pickupLng, weightTonnes }) {
+  const { data: locations } = await supabase
+    .from('driver_locations')
+    .select('driver_id, latitude, longitude')
+    .eq('is_active', true)
+    .gte('last_updated_at', new Date(Date.now() - DRIVER_LOCATION_FRESHNESS_MS).toISOString())
+    .not('latitude', 'is', null);
+
+  if (!locations || locations.length === 0) return [];
+
+  const nearbyDriverIds = locations
+    .filter(loc => {
+      if (!Number.isFinite(Number(loc.latitude)) || !Number.isFinite(Number(loc.longitude))) return false;
+      return haversineDistanceKm(pickupLat, pickupLng, Number(loc.latitude), Number(loc.longitude)) <= NEW_TRIP_NOTIFY_RADIUS_KM;
+    })
+    .map(loc => loc.driver_id);
+
+  if (nearbyDriverIds.length === 0) return [];
+
+  const { data: driverDetails } = await supabase
+    .from('driver_details')
+    .select('user_id, truck_id')
+    .eq('is_online', true)
+    .not('truck_id', 'is', null)
+    .in('user_id', nearbyDriverIds);
+
+  if (!driverDetails || driverDetails.length === 0) return [];
+
+  const truckIds = driverDetails.map(d => d.truck_id).filter(Boolean);
+  if (truckIds.length === 0) return [];
+
+  const { data: trucks } = await supabase
+    .from('trucks')
+    .select('id, max_capacity_tons')
+    .in('id', truckIds);
+
+  const capacityByTruck = new Map((trucks ?? []).map(t => [t.id, t.max_capacity_tons]));
+  const truckByDriver = new Map(driverDetails.map(d => [d.user_id, d.truck_id]));
+
+  const canCarryLoad = driverId => {
+    const capacity = capacityByTruck.get(truckByDriver.get(driverId));
+    if (capacity == null) return false;
+    return Number(capacity) >= weightTonnes;
+  };
+
+  return [...new Set(driverDetails.map(d => d.user_id).filter(canCarryLoad))]
+    .slice(0, NEW_TRIP_NOTIFY_MAX_DRIVERS);
+}
+
+/**
+ * Push a targeted new-trip notification to nearby, capacity-matching drivers.
+ * Sends in bounded batches, logs per-driver failures, and reports aggregate
+ * send stats instead of swallowing errors silently.
+ */
+async function sendNewTripNotifications({ pickupLat, pickupLng, weightTonnes, pickupAddress, dropAddress, orderDisplayId }) {
+  const { sendFcmNotification } = await import('../notificationService.js');
+
+  const driverIds = await findTargetDrivers({ pickupLat, pickupLng, weightTonnes });
+  if (driverIds.length === 0) {
+    logger.info(`[orders] No targeted drivers within ${NEW_TRIP_NOTIFY_RADIUS_KM}km of pickup for order ${orderDisplayId} — skipping push.`);
+    return;
+  }
+
+  const notification = {
+    title: 'New Trip Available',
+    body: `A new trip from ${String(pickupAddress).split(',')[0]} to ${String(dropAddress).split(',')[0]} is available.`,
+  };
+  const payload = {
+    type: 'new_trip',
+    orderId: orderDisplayId,
+  };
+
+  let sent = 0;
+  let failed = 0;
+  for (let i = 0; i < driverIds.length; i += NEW_TRIP_NOTIFY_BATCH_SIZE) {
+    const batch = driverIds.slice(i, i + NEW_TRIP_NOTIFY_BATCH_SIZE);
+    const results = await Promise.allSettled(batch.map(driverId => sendFcmNotification(driverId, notification, payload)));
+    results.forEach((result, idx) => {
+      if (result.status === 'fulfilled' && result.value?.success) {
+        sent += 1;
+      } else {
+        failed += 1;
+        const error = result.status === 'rejected'
+          ? result.reason?.message
+          : result.value?.error;
+        logger.error(`[orders] Push notification failed for driver ${batch[idx]}: ${error || 'unknown error'}`);
+      }
+    });
+  }
+
+  logger.info(`[orders] New trip notifications sent to ${sent}/${driverIds.length} targeted drivers for order ${orderDisplayId} (${failed} failed).`);
+}
+
 export async function createOrder({ orderData, userId, user }) {
   return measureExecution('OrderCreationService.createOrder', async () => {
   const {
@@ -126,27 +251,14 @@ export async function createOrder({ orderData, userId, user }) {
   }
 
   try {
-    const { sendFcmNotification } = await import('../notificationService.js');
-    const { data: drivers } = await supabase
-      .from('profiles')
-      .select('id, fcm_token')
-      .eq('role', 'driver')
-      .not('fcm_token', 'is', null);
-
-    if (drivers && drivers.length > 0) {
-      const notification = {
-        title: 'New Trip Available',
-        body: `A new trip from ${pickup_address.split(',')[0]} to ${drop_address.split(',')[0]} is available.`,
-      };
-      const payload = {
-        type: 'new_trip',
-        orderId: orderDisplayId,
-      };
-      // Fire and forget notifications
-      Promise.all(drivers.map(driver => sendFcmNotification(driver.id, notification, payload))).catch(e => {
-        logger.error('Error in batch push notification:', e.message);
-      });
-    }
+    await sendNewTripNotifications({
+      pickupLat: Number(pickup_lat),
+      pickupLng: Number(pickup_lng),
+      weightTonnes: Number(weight_tonnes),
+      pickupAddress: pickup_address,
+      dropAddress: drop_address,
+      orderDisplayId,
+    });
   } catch (pushErr) {
     logger.error('Failed to send push notifications to drivers:', pushErr.message);
   }

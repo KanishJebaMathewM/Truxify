@@ -40,20 +40,29 @@
  *   connection never blocks the logout response.
  */
 
-import express from 'express';
-import rateLimit from 'express-rate-limit';
-import { authenticate } from '../middleware/auth.js';
-import { userLimiter, otpVerificationLimiter } from '../middleware/rateLimiter.js';
-import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
-import { firebaseAdmin } from '../config/db.js';
-import logger from '../middleware/logger.js';
+import express from "express";
+import rateLimit from "express-rate-limit";
+import { authenticate } from "../middleware/auth.js";
+import {
+  userLimiter,
+  otpVerificationLimiter,
+} from "../middleware/rateLimiter.js";
+import {
+  invalidateCachedProfile,
+  invalidateCachedSupabaseProfile,
+} from "../lib/profileCache.js";
+import { firebaseAdmin } from "../config/db.js";
+import logger from "../middleware/logger.js";
 
 const router = express.Router();
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
-  message: { success: false, message: 'Too many requests from this IP, please try again later.' },
+  message: {
+    success: false,
+    message: "Too many requests from this IP, please try again later.",
+  },
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -88,7 +97,7 @@ export function withTimeout(operation, timeoutMs, message) {
  *             schema:
  *               $ref: '#/components/schemas/LogoutResponse'
  */
-router.post('/logout', authenticate, async (req, res) => {
+router.post("/logout", authenticate, async (req, res) => {
   const { uid } = req.user;
 
   // ── 1. Invalidate Redis profile cache ──────────────────────────────
@@ -97,13 +106,17 @@ router.post('/logout', authenticate, async (req, res) => {
     await withTimeout(
       Promise.all([
         uid ? invalidateCachedProfile(uid) : Promise.resolve(),
-        req.user && req.user.id ? invalidateCachedSupabaseProfile(req.user.id) : Promise.resolve(),
+        req.user && req.user.id
+          ? invalidateCachedSupabaseProfile(req.user.id)
+          : Promise.resolve(),
       ]),
       2000,
-      'Redis invalidation timeout'
+      "Redis invalidation timeout",
     );
   } catch (err) {
-    logger.warn(`[auth/logout] Cache invalidation skipped for uid=${uid}: ${err?.message}`);
+    logger.warn(
+      `[auth/logout] Cache invalidation skipped for uid=${uid}: ${err?.message}`,
+    );
   }
 
   // ── 2. Firebase refresh token revocation (optional) ────────────────
@@ -113,16 +126,18 @@ router.post('/logout', authenticate, async (req, res) => {
       await withTimeout(
         firebaseAdmin.auth().revokeRefreshTokens(uid),
         3000,
-        'Firebase revocation timeout'
+        "Firebase revocation timeout",
       );
     } catch (err) {
-      logger.error(`[auth/logout] Firebase token revocation failed for uid=${uid}: ${err?.message}`);
+      logger.error(
+        `[auth/logout] Firebase token revocation failed for uid=${uid}: ${err?.message}`,
+      );
     }
   }
 
   return res.status(200).json({
     success: true,
-    message: 'Logged out successfully',
+    message: "Logged out successfully",
   });
 });
 
@@ -144,11 +159,21 @@ router.post('/logout', authenticate, async (req, res) => {
  *               $ref: '#/components/schemas/SessionResponse'
  */
 // GET /api/auth/session
-router.get('/session', authenticate, userLimiter, (req, res) => {
+router.get("/session", authenticate, userLimiter, (req, res) => {
   return res.json({
-    user: req.user
+    user: req.user,
   });
 });
+
+import crypto from "crypto";
+import { supabase } from "../config/db.js";
+import { otpSendSchema } from "../validation/requestSchemas.js";
+import { z } from "zod";
+
+const verifyOtpSchema = z.object({
+  phone: z.string().min(10).max(20),
+  otp: z.string().regex(/^\d{6}$/, "OTP must be 6 digits"),
+}).strict();
 
 /**
  * @openapi
@@ -156,24 +181,82 @@ router.get('/session', authenticate, userLimiter, (req, res) => {
  *   post:
  *     tags: [Authentication]
  *     summary: Verify OTP
- *     description: Endpoint for verifying OTPs. Protected by strict rate limiting to prevent brute-forcing.
+ *     description: Verifies a 6-digit OTP submitted for a given phone number. Timing-safe comparison. OTP is consumed on success.
  *     responses:
- *       501:
- *         description: Not Implemented
+ *       200:
+ *         description: OTP verified successfully
+ *       400:
+ *         description: Invalid or expired OTP
+ *       429:
+ *         description: Too many attempts
  */
-router.post('/verify-otp', otpVerificationLimiter, async (req, res) => {
-  // To be implemented: backend OTP verification logic.
-  // This endpoint serves as a rate-limited proxy/placeholder to satisfy
-  // security requirements preventing OTP brute forcing.
-  return res.status(501).json({
-    success: false,
-    error: 'Not Implemented',
-    message: 'OTP verification logic should be executed here.'
-  });
+router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
+  const parsed = verifyOtpSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Validation failed",
+      details: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const { phone, otp } = parsed.data;
+
+  try {
+    // Look up the latest unused, unexpired OTP for this phone number
+    const { data: otpRecord, error: fetchErr } = await supabase
+      .from("phone_otps")
+      .select("id, otp_hash, expires_at, verified")
+      .eq("phone", phone)
+      .eq("verified", false)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (fetchErr) {
+      logger.error("[auth/verify-otp] DB fetch error:", fetchErr.message);
+      return res.status(500).json({ success: false, error: "Internal server error." });
+    }
+
+    if (!otpRecord) {
+      return res.status(400).json({ success: false, error: "OTP not found or has expired." });
+    }
+
+    // Timing-safe comparison to prevent timing attacks
+    const submittedHash = crypto.createHash("sha256").update(String(otp)).digest("hex");
+    const storedHash = otpRecord.otp_hash;
+
+    const isMatch =
+      submittedHash.length === storedHash.length &&
+      crypto.timingSafeEqual(
+        Buffer.from(submittedHash, "hex"),
+        Buffer.from(storedHash, "hex"),
+      );
+
+    if (!isMatch) {
+      return res.status(400).json({ success: false, error: "Invalid OTP." });
+    }
+
+    // Consume the OTP so it cannot be reused
+    const { error: updateErr } = await supabase
+      .from("phone_otps")
+      .update({ verified: true, verified_at: new Date().toISOString() })
+      .eq("id", otpRecord.id);
+
+    if (updateErr) {
+      logger.error("[auth/verify-otp] Failed to mark OTP as verified:", updateErr.message);
+      return res.status(500).json({ success: false, error: "Internal server error." });
+    }
+
+    logger.info(`[auth/verify-otp] OTP verified for phone: ${phone}`);
+    return res.status(200).json({ success: true, message: "OTP verified successfully." });
+  } catch (err) {
+    logger.error("[auth/verify-otp] Unexpected error:", err.message);
+    return res.status(500).json({ success: false, error: "Internal server error." });
+  }
 });
 
 export default router;
 
 // Resolves #2052: Refresh Token Rotation logic
-
-.catch(err => console.error("Promise.all failed:", err));

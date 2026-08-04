@@ -1,6 +1,6 @@
 import { Kafka } from 'kafkajs';
 import { context, propagation } from '@opentelemetry/api';
-import logger from '../api/src/middleware/logger.js';
+import logger from '../../api/src/middleware/logger.js';
 
 const kafka = new Kafka({
   clientId: 'truxify',

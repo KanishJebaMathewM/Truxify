@@ -123,7 +123,8 @@ export async function getVersion(namespace, entityId, subKey) {
   try {
     const raw = await redisClient.get(key);
     return raw ? parseInt(raw, 10) : 1;
-  } catch {
+  } catch (err) {
+    logger.error({ err, key }, '[CacheManager] GET version error');
     return 1;
   }
 }

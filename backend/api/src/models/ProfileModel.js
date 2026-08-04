@@ -50,6 +50,8 @@ export class ProfileModel {
             walletConfirmed: details.wallet_confirmed ?? 0,
             walletPending: details.wallet_pending ?? 0,
             walletTotal: details.wallet_total ?? 0,
+            kycStatus: details.kyc_status ?? 'Unverified',
+            kycDocNumber: details.kyc_doc_number ?? null,
         };
     }
 

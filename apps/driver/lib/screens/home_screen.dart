@@ -44,11 +44,21 @@ class HomeScreen extends StatefulWidget {
     required this.marketplaceRepo,
     required this.earningsService,
     this.mockLocationText,
+    this.onNavigateToLoads,
+    this.onNavigateToActiveTrip,
   });
 
   final MarketplaceRepository marketplaceRepo;
   final DriverEarningsService earningsService;
   final String? mockLocationText;
+
+  /// Called when the driver taps "Find New Load" CTA.
+  /// Typically navigates to the loads marketplace tab.
+  final VoidCallback? onNavigateToLoads;
+
+  /// Called when the driver taps "View Active Trip" CTA.
+  /// Typically navigates to the trips tab.
+  final VoidCallback? onNavigateToActiveTrip;
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -140,18 +150,10 @@ class _HomeScreenState extends State<HomeScreen> {
   String _activeTripDistance = '';
   String _activeTripDuration = '';
   String _activeTripPayout = '';
-
-  // ── New: current-trip card fields (issue #5708) ──────────────────────────
-  /// Human-readable ETA string shown on the current trip card, e.g. "~35 min".
-  String _activeTripEta = '';
-
-  /// Trip completion fraction [0.0 – 1.0] for the progress bar.
-  double _activeTripProgress = 0.0;
-
-  /// Status badge text, e.g. 'EN-ROUTE', 'LOADING', 'ASSIGNED LOAD'.
-  String _activeTripStatus = '';
-  // ─────────────────────────────────────────────────────────────────────────
-
+  /// Number of stops not yet completed on the active trip.
+  int _activeTripStopsRemaining = 0;
+  /// Current milestone of the active trip (e.g. 'en_route_pickup').
+  String _activeTripMilestone = '';
   bool _isLoadingLocation = true;
   String? _locationError;
   late final MarketplaceRepository _marketplaceRepo;
@@ -767,13 +769,11 @@ class _HomeScreenState extends State<HomeScreen> {
         );
         await prefs.setBool('cached_is_started', isTripStarted);
 
-        // ── Compute ETA and progress for the Current Trip card ──────────
-        final eta = _computeEtaFromDuration(durationStr);
-        final progress = _computeProgressFromStops(
-          stops.whereType<Map<String, dynamic>>().toList(),
-        );
-        final status = isTripStarted ? 'EN-ROUTE' : 'ASSIGNED LOAD';
-        // ────────────────────────────────────────────────────────────────
+        // Compute stops remaining and current milestone for the home card.
+        final pendingStops = stops.where((s) => s['is_completed'] != true).length;
+        final currentStop = stops.where((s) => s['is_current'] == true).firstOrNull;
+        final milestone = (currentStop?['status'] as String?) ??
+            (currentStop?['milestone'] as String?) ?? '';
 
         setState(() {
           _isOffline = false;
@@ -783,9 +783,8 @@ class _HomeScreenState extends State<HomeScreen> {
           _activeTripDuration = durationStr;
           _activeTripPayout = payoutStr;
           _isTripStarted = isTripStarted;
-          _activeTripEta = eta;
-          _activeTripProgress = progress;
-          _activeTripStatus = status;
+          _activeTripStopsRemaining = pendingStops;
+          _activeTripMilestone = milestone;
         });
 
         if (stops.isNotEmpty) {
@@ -1151,9 +1150,21 @@ class _HomeScreenState extends State<HomeScreen> {
                         isCritical: _batteryLevel <= 10,
                       ),
                     _isTripStarted
-                        ? ActiveNavigationHeader(
+                        ? ActiveTripSheet(
+                            isTripStarted: _isTripStarted,
+                            truckLabel: _activeTruckLabel,
+                            currentLocationLabel: _currentLocationLabel,
                             destinationAddress:
                                 _destination?.address ?? 'Destination',
+                            distance: _activeTripDistance,
+                            duration: _activeTripDuration,
+                            payout: _activeTripPayout,
+                            stopsRemaining: _activeTripStopsRemaining > 0
+                                ? _activeTripStopsRemaining
+                                : null,
+                            currentMilestone: _activeTripMilestone.isNotEmpty
+                                ? _activeTripMilestone
+                                : null,
                           )
                         : SearchDestinationCard(
                             currentLocationText: _currentLocationText,
@@ -1346,7 +1357,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-            // ── Recenter FAB ──────────────────────────────────────────────
+            // Heatmap legend — shown bottom-left when heatmap data is loaded
+            if (_heatmapData != null)
+              AnimatedPositioned(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                left: 16,
+                bottom:
+                    _showStatusCard ? (_destination == null ? 228 : 278) : 40,
+                child: _buildHeatmapLegend(context),
+              ),
+
+            // Recenter FAB
             if (_currentLocation != null)
               AnimatedPositioned(
                 duration: const Duration(milliseconds: 300),
@@ -1395,6 +1417,11 @@ class _HomeScreenState extends State<HomeScreen> {
                             onToggleOnline: _toggleOnlineState,
                             batteryLevel: _batteryLevel,
                             isCharging: _isCharging,
+                            hasActiveTrip: _activeTripId != null,
+                            onFindLoad: widget.onNavigateToLoads,
+                            onViewTrip: _activeTripId != null
+                                ? widget.onNavigateToActiveTrip
+                                : null,
                           )
                         : ActiveTripSheet(
                             isTripStarted: _isTripStarted,
@@ -1406,11 +1433,12 @@ class _HomeScreenState extends State<HomeScreen> {
                             distance: _activeTripDistance,
                             duration: _activeTripDuration,
                             payout: _activeTripPayout,
-                            // ── New fields (issue #5708) ──────────────
-                            statusLabel: _activeTripStatus,
-                            eta: _activeTripEta,
-                            progressPercent: _activeTripProgress,
-                            // ─────────────────────────────────────────
+                            stopsRemaining: _activeTripStopsRemaining > 0
+                                ? _activeTripStopsRemaining
+                                : null,
+                            currentMilestone: _activeTripMilestone.isNotEmpty
+                                ? _activeTripMilestone
+                                : null,
                             onStartTrip: () async {
                               if (_activeTripId == null) {
                                 setState(() => _isTripStarted = true);
@@ -1611,6 +1639,640 @@ class _HomeScreenState extends State<HomeScreen> {
       indexes.add(
           ((totalSegments * step) / 4).round().clamp(1, totalSegments - 1));
     }
-    return indexes.map((i) => routePoints[i]).toList(growable: false);
+
+    return indexes.map((index) => routePoints[index]).toList(growable: false);
+  }
+
+  Widget _buildSearchCard(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: TruxifyColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 12, 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const PulsingLocationDot(),
+                Container(width: 1, height: 12, color: TruxifyColors.border),
+                const Icon(Icons.location_on_rounded,
+                    size: 14, color: TruxifyColors.errorRed),
+              ],
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  GestureDetector(
+                    onTap: _fetchCurrentLocation,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _isLoadingLocation
+                                ? Text(
+                                    AppLocalizations.of(context)!.fetchingLocation,
+                                    style: GoogleFonts.dmSans(
+                                      fontSize: 13,
+                                      color:
+                                          TruxifyColors.adaptiveSecondaryText(
+                                              context),
+                                    ),
+                                  )
+                                : _locationError != null
+                                    ? Text(
+                                        _locationError!,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.dmSans(
+                                          fontSize: 13,
+                                          color: TruxifyColors.errorRed,
+                                        ),
+                                      )
+                                    : Text(
+                                        _currentLocationText ??
+                                            AppLocalizations.of(context)!.tapToRefresh,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: GoogleFonts.dmSans(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurface,
+                                        ),
+                                      ),
+                          ),
+                          _isRefreshingLocation || _isLoadingLocation
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: Padding(
+                                    padding: EdgeInsets.all(4.0),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.0,
+                                      color: TruxifyColors.accent,
+                                    ),
+                                  ),
+                                )
+                              : Icon(
+                                  _locationError != null
+                                      ? Icons.error_outline_rounded
+                                      : Icons.refresh_rounded,
+                                  size: 16,
+                                  color: _locationError != null
+                                      ? TruxifyColors.errorRed
+                                      : TruxifyColors.adaptiveSecondaryText(
+                                          context),
+                                ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 12, color: TruxifyColors.border),
+                  GestureDetector(
+                    onTap: _openDestinationPicker,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Text(
+                        _destination?.address ?? AppLocalizations.of(context)!.whereAreYouHeading,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          fontWeight: _destination == null
+                              ? FontWeight.normal
+                              : FontWeight.w600,
+                          color: _destination == null
+                              ? TruxifyColors.hintText
+                              : TruxifyColors.primaryText,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomSheet(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border.all(color: TruxifyColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: _isOnline ? TruxifyColors.success : TruxifyColors.secondaryText,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: (_isOnline ? TruxifyColors.success : TruxifyColors.secondaryText).withValues(alpha: 0.4),
+                          blurRadius: 6,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isOnline ? AppLocalizations.of(context)!.onlineAndReady : AppLocalizations.of(context)!.offline,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+              Switch(
+                value: _isOnline,
+                onChanged: (_) => _toggleOnlineState(),
+                activeThumbColor: TruxifyColors.success,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            !_isOnline
+                ? AppLocalizations.of(context)!.offlineGoOnline
+                : _isLoadingLocation
+                    ? AppLocalizations.of(context)!.radarActiveFetching
+                    : '${AppLocalizations.of(context)!.radarActiveLooking} ${_currentLocationLabel(context)}...',
+            style: GoogleFonts.dmSans(
+              fontSize: 11,
+              color: TruxifyColors.adaptiveSecondaryText(context),
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (_isLoadingMetrics)
+            const SummaryCardsShimmer()
+          else if (_metricsError != null)
+            _buildErrorMetrics()
+          else
+            _buildMetricsRow(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricsRow() {
+    final payValue = _todayEarnings != null
+        ? '₹${_todayEarnings!.amount.toStringAsFixed(0)}'
+        : '—';
+    final hoursValue = _todayEarnings != null
+        ? '${_todayEarnings!.hoursDriven.toStringAsFixed(1)} hrs'
+        : '—';
+    final ratingValue = _driverRating != null
+        ? _driverRating!.toStringAsFixed(2)
+        : '—';
+
+    return Row(
+      children: [
+        Expanded(
+          child: _buildShiftMetric(
+            icon: Icons.account_balance_wallet_outlined,
+            value: payValue,
+            label: AppLocalizations.of(context)!.todayPay,
+            labelKey: const Key('today_pay_label'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildShiftMetric(
+            icon: Icons.timer_outlined,
+            value: hoursValue,
+            label: AppLocalizations.of(context)!.shiftHours,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _buildShiftMetric(
+            icon: Icons.star_border_rounded,
+            value: ratingValue,
+            label: AppLocalizations.of(context)!.rating,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildErrorMetrics() {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.surfaceContainerHighest
+            : TruxifyColors.background,
+        border: Border.all(color: TruxifyColors.border),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error_outline_rounded,
+              size: 14, color: TruxifyColors.errorRed),
+          const SizedBox(width: 6),
+          Text(
+            AppLocalizations.of(context)!.metricsUnavailable,
+            style: GoogleFonts.dmSans(
+              fontSize: 11,
+              color: TruxifyColors.errorRed,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildShiftMetric(
+      {required IconData icon,
+      required String value,
+      required String label,
+      Key? labelKey}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.surfaceContainerHighest
+            : TruxifyColors.background,
+        border: Border.all(color: TruxifyColors.border),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 16, color: TruxifyColors.accent),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: GoogleFonts.dmSans(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          Text(
+            label,
+            key: labelKey,
+            style: GoogleFonts.dmSans(
+              fontSize: 9,
+              color: TruxifyColors.adaptiveSecondaryText(context),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Maps an intensity value [0–1] to a demand zone colour.
+  ///
+  /// - ≥ 0.7 → red   (high demand)
+  /// - ≥ 0.4 → orange (medium demand)
+  /// -  < 0.4 → green  (low demand)
+  Color _heatmapZoneColor(double intensity) {
+    if (intensity >= 0.7) return Colors.red;
+    if (intensity >= 0.4) return Colors.orange;
+    return Colors.green;
+  }
+
+  Widget? _buildHeatmapLayer() {
+    if (_heatmapData == null) return null;
+    final features = _heatmapData!['features'] as List?;
+    if (features == null || features.isEmpty) return null;
+
+    final circles = <CircleMarker>[];
+    for (final feature in features) {
+      try {
+        final geom = feature['geometry'];
+        final coords = geom['coordinates'] as List;
+        final props = feature['properties'] ?? {};
+        final intensity = (props['intensity'] as num?)?.toDouble() ?? 0.5;
+        final zoneColor = _heatmapZoneColor(intensity);
+
+        circles.add(CircleMarker(
+          point: ll.LatLng(coords[1], coords[0]),
+          // Fill: zone colour with intensity-scaled alpha for depth effect
+          color: zoneColor.withValues(alpha: (intensity * 0.45).clamp(0.08, 0.45)),
+          borderColor: zoneColor.withValues(alpha: 0.6),
+          borderStrokeWidth: 1.0,
+          useRadiusInMeter: true,
+          radius: 2000,
+        ));
+      } catch (e) {
+        // Ignore invalid features
+      }
+    }
+
+    if (circles.isEmpty) return null;
+
+    return CircleLayer(circles: circles);
+  }
+
+  /// Compact demand-heatmap legend shown in the bottom-left of the map.
+  Widget _buildHeatmapLegend(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark
+        ? Colors.black.withValues(alpha: 0.72)
+        : Colors.white.withValues(alpha: 0.88);
+
+    Widget _dot(Color c) => Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: c, shape: BoxShape.circle),
+        );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'DEMAND',
+            style: GoogleFonts.dmSans(
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white70 : TruxifyColors.secondaryText,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Row(children: [_dot(Colors.red), const SizedBox(width: 5), Text('High', style: GoogleFonts.dmSans(fontSize: 9, color: isDark ? Colors.white : TruxifyColors.primaryText))]),
+          const SizedBox(height: 3),
+          Row(children: [_dot(Colors.orange), const SizedBox(width: 5), Text('Med', style: GoogleFonts.dmSans(fontSize: 9, color: isDark ? Colors.white : TruxifyColors.primaryText))]),
+          const SizedBox(height: 3),
+          Row(children: [_dot(Colors.green), const SizedBox(width: 5), Text('Low', style: GoogleFonts.dmSans(fontSize: 9, color: isDark ? Colors.white : TruxifyColors.primaryText))]),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openGoogleMapsRoute() async {
+    if (_destination == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLocalizations.of(context)!.noDestinationAvailable)),
+      );
+      return;
+    }
+
+    if (_currentLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(AppLocalizations.of(context)!.currentLocationUnavailable)),
+      );
+      return;
+    }
+
+    try {
+      final destination = _destination!.point;
+
+      final routePoints = await (_routeFuture ??
+          Future.value([_currentLocation!, destination]));
+
+      final checkpoints = _buildCheckpointPoints(routePoints);
+
+      final waypointString =
+          checkpoints.map((p) => '${p.latitude},${p.longitude}').join('|');
+
+      final url = 'https://www.google.com/maps/dir/?api=1'
+          '&origin=${_currentLocation!.latitude},${_currentLocation!.longitude}'
+          '&destination=${destination.latitude},${destination.longitude}'
+          '${waypointString.isNotEmpty ? '&waypoints=$waypointString' : ''}'
+          '&travelmode=driving';
+
+      final uri = Uri.parse(url);
+      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppLocalizations.of(context)!.unableToOpenGoogleMaps)),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(AppLocalizations.of(context)!.failedToGenerateRoute)),
+        );
+      }
+    }
+  }
+
+  Widget _buildActiveTripSheet(BuildContext context) {
+    final routeStr = _destination?.address ?? 'Destination';
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: TruxifyColors.border),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _isTripStarted
+                      ? TruxifyColors.successLight
+                      : TruxifyColors.accentLight,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  _isTripStarted ? AppLocalizations.of(context)!.enRoute : AppLocalizations.of(context)!.assignedLoad,
+                  style: GoogleFonts.dmSans(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: _isTripStarted
+                        ? TruxifyColors.success
+                        : TruxifyColors.accent,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _activeTruckLabel,
+                  style: GoogleFonts.dmSans(
+                    fontSize: 11,
+                    color: TruxifyColors.adaptiveSecondaryText(context),
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.navigation_rounded),
+                color: TruxifyColors.accent,
+                onPressed: _openGoogleMapsRoute,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${_currentLocationLabel(context)} → $routeStr',
+            style: GoogleFonts.dmSans(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildTripSpec(AppLocalizations.of(context)!.distance, _activeTripDistance.isNotEmpty ? _activeTripDistance : '--'),
+              _buildTripSpec(AppLocalizations.of(context)!.estDuration, _activeTripDuration.isNotEmpty ? _activeTripDuration : '--'),
+              _buildTripSpec(AppLocalizations.of(context)!.estPayout, _activeTripPayout.isNotEmpty ? _activeTripPayout : '--'),
+            ],
+          ),
+            const SizedBox(height: 16),
+            if (_isTripStarted && _activeTripId != null) ...[
+              ElevatedButton.icon(
+                onPressed: () async {
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => PodCaptureScreen(orderId: _activeTripId!)));
+                  _checkPendingPods();
+                },
+                icon: const Icon(Icons.camera_alt),
+                label: const Text('Capture Proof of Delivery'),
+                style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_isTripStarted) ...[
+            SlideToConfirmButton(
+              label: AppLocalizations.of(context)!.slideToCompleteTrip,
+              backgroundColor: TruxifyColors.success,
+              onConfirmed: () async {
+              await _completeRide();
+              },
+            ),
+          ] else ...[
+            SlideToConfirmButton(
+              label: AppLocalizations.of(context)!.slideToStartTrip,
+              backgroundColor: TruxifyColors.accent,
+              onConfirmed: () async {
+                if (_activeTripId == null) {
+                  setState(() => _isTripStarted = true);
+                  return;
+                }
+                try {
+                  await _tripService.startTrip(_activeTripId!);
+                  if (mounted) {
+                    setState(() => _isTripStarted = true);
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(AppLocalizations.of(context)!.failedToStartTrip)),
+                    );
+                  }
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            Center(
+              child: InkWell(
+                onTap: _clearDestination,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    AppLocalizations.of(context)!.cancelAssignment,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTripSpec(String label, String value) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.dmSans(
+            fontSize: 10,
+            color: TruxifyColors.adaptiveSecondaryText(context),
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: GoogleFonts.dmSans(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: Theme.of(context).colorScheme.onSurface,
+          ),
+        ),
+      ],
+    );
   }
 }

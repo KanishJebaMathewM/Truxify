@@ -662,12 +662,8 @@ class _ThemeModeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = TruxifyScope.of(context);
-    final currentTheme = controller.themeMode;
+    final selectedTheme = controller.themeMode;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    final selectedTheme = currentTheme == ThemeMode.system
-        ? (isDark ? ThemeMode.dark : ThemeMode.light)
-        : currentTheme;
 
     final iconBg =
         isDark ? TruxifyColors.darkAccentLight : TruxifyColors.accentLight;
@@ -713,6 +709,10 @@ class _ThemeModeTile extends StatelessWidget {
                   ),
                 ),
                 segments: [
+                  const ButtonSegment<ThemeMode>(
+                    value: ThemeMode.system,
+                    label: Text('System'),
+                  ),
                   ButtonSegment<ThemeMode>(
                     value: ThemeMode.light,
                     label: Text(AppLocalizations.of(context)!.lightTheme),

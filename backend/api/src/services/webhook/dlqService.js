@@ -1,8 +1,16 @@
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
 
 // Retries in minutes
-const RETRY_BACKOFF = [1, 5, 15, 60]; 
+const RETRY_BACKOFF = [1, 5, 15, 60];
+
+// webhook_failures RLS grants access only to service_role (internal DLQ table).
+// Use the service-role client so enqueue/claim/retry operations are not
+// silently denied for the sessionless anon role; fall back to the anon client
+// in environments where the service key is not configured (tests/dev).
+function dlqDb() {
+  return supabaseAdmin || supabase;
+}
 
 export const dlqService = {
   /**
@@ -10,7 +18,7 @@ export const dlqService = {
    */
   async enqueueFailure(provider, eventType, payload, error) {
     try {
-      const { error: insertErr } = await supabase
+      const { error: insertErr } = await dlqDb()
         .from('webhook_failures')
         .insert({
           provider,
@@ -23,11 +31,14 @@ export const dlqService = {
 
       if (insertErr) {
         logger.error(`[DLQ] Failed to enqueue webhook failure: ${insertErr.message}`);
-      } else {
-        logger.info(`[DLQ] Webhook failure enqueued successfully for ${provider} - ${eventType}`);
+        return false;
       }
+
+      logger.info(`[DLQ] Webhook failure enqueued successfully for ${provider} - ${eventType}`);
+      return true;
     } catch (err) {
       logger.error(`[DLQ] Critical error enqueueing webhook failure: ${err.message}`);
+      return false;
     }
   },
 
@@ -40,7 +51,7 @@ export const dlqService = {
       const now = new Date().toISOString();
 
       // 1. Fetch up to 50 pending events safely without modifying them yet
-      const { data: pendingEvents, error: fetchErr } = await supabase
+      const { data: pendingEvents, error: fetchErr } = await dlqDb()
         .from('webhook_failures')
         .select('id')
         .eq('status', 'pending')
@@ -60,7 +71,7 @@ export const dlqService = {
       const eventIds = pendingEvents.map(e => e.id);
 
       // 2. Atomically claim only those specific events using CAS
-      const { data: claimedEvents, error: claimErr } = await supabase
+      const { data: claimedEvents, error: claimErr } = await dlqDb()
         .from('webhook_failures')
         .update({ status: 'processing', updated_at: now })
         .eq('status', 'pending')
@@ -87,7 +98,7 @@ export const dlqService = {
           await handler(event.event_type, event.payload);
 
           // Success, mark as resolved
-          await supabase
+          await dlqDb()
             .from('webhook_failures')
             .update({ status: 'resolved', updated_at: new Date().toISOString() })
             .eq('id', event.id);
@@ -102,7 +113,7 @@ export const dlqService = {
 
           if (nextBackoffMin === -1) {
             // Failed permanently
-            await supabase
+            await dlqDb()
               .from('webhook_failures')
               .update({ 
                 status: 'failed_permanently', 
@@ -114,7 +125,7 @@ export const dlqService = {
           } else {
             // Schedule next retry
             const nextRetryAt = new Date(Date.now() + nextBackoffMin * 60000).toISOString();
-            await supabase
+            await dlqDb()
               .from('webhook_failures')
               .update({ 
                 retry_count: newRetryCount,

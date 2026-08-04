@@ -197,11 +197,13 @@ func (rn *RaftNode) stepDownLocked(term uint64) {
 	rn.lastLeaderSeen = time.Now()
 }
 
-// startElectionLocked campaigns for leadership: bump term, vote for self, and
-// request votes from peers. A candidate with a majority becomes leader.
-func (rn *RaftNode) startElectionLocked() {
+// startElection campaigns for leadership: bump term, vote for self, and
+// request votes from peers outside the mutex lock to prevent deadlock.
+func (rn *RaftNode) startElection() {
+	rn.mu.Lock()
 	rn.Role = Candidate
 	rn.CurrentTerm++
+	term := rn.CurrentTerm
 	rn.VotedFor = rn.NodeID
 	rn.LeaderID = ""
 	rn.electionStarted = time.Now()
@@ -213,8 +215,18 @@ func (rn *RaftNode) startElectionLocked() {
 		LastLogIndex: rn.lastLogIndex(),
 		LastLogTerm:  rn.lastLogTerm(),
 	}
+	rn.mu.Unlock()
 
+	// Perform outbound HTTP RPC requests without holding rn.mu to avoid deadlocks
 	responses := rn.requestVotes(req)
+
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+
+	// Verify the node is still a candidate in the same term
+	if rn.Role != Candidate || rn.CurrentTerm != term {
+		return
+	}
 
 	votes := 1 // self vote
 	for _, resp := range responses {
@@ -303,9 +315,15 @@ func (rn *RaftNode) callAppend(peerURL string, req AppendEntriesRequest) (Append
 	return resp, err
 }
 
-// sendHeartbeatsLocked replicates AppendEntries RPCs to peers and records which
-// peers acknowledge the current leadership.
-func (rn *RaftNode) sendHeartbeatsLocked() {
+// sendHeartbeats replicates AppendEntries RPCs to peers and records which
+// peers acknowledge the current leadership, performing HTTP calls outside rn.mu.
+func (rn *RaftNode) sendHeartbeats() {
+	rn.mu.Lock()
+	if rn.Role != Leader {
+		rn.mu.Unlock()
+		return
+	}
+	term := rn.CurrentTerm
 	req := AppendEntriesRequest{
 		Term:         rn.CurrentTerm,
 		LeaderID:     rn.NodeID,
@@ -313,16 +331,16 @@ func (rn *RaftNode) sendHeartbeatsLocked() {
 		PrevLogTerm:  rn.lastLogTerm(),
 		LeaderCommit: rn.CommitIndex,
 	}
-
 	rn.peerHeartbeats = make(map[string]bool, len(rn.PeerURLs))
+	rn.mu.Unlock()
 
-	var wg sync.WaitGroup
-	var mu sync.Mutex
 	type result struct {
 		url  string
 		resp AppendEntriesResponse
 		err  error
 	}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 	results := make([]result, 0, len(rn.PeerURLs))
 
 	for _, url := range rn.PeerURLs {
@@ -336,6 +354,13 @@ func (rn *RaftNode) sendHeartbeatsLocked() {
 		}(url)
 	}
 	wg.Wait()
+
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
+
+	if rn.Role != Leader || rn.CurrentTerm != term {
+		return
+	}
 
 	for _, res := range results {
 		if res.err != nil {
@@ -385,24 +410,31 @@ func (rn *RaftNode) clusterStatusLocked() string {
 func (rn *RaftNode) run() {
 	for {
 		var delay time.Duration
+		var action string
 
 		rn.mu.Lock()
 		switch rn.Role {
 		case Leader:
-			rn.sendHeartbeatsLocked()
+			action = "heartbeat"
 			delay = rn.heartbeatInterval
 		case Candidate:
 			if time.Since(rn.electionStarted) > rn.electionTimeout {
-				rn.startElectionLocked()
+				action = "election"
 			}
 			delay = 50 * time.Millisecond
 		default:
 			if time.Since(rn.lastLeaderSeen) > rn.electionTimeout {
-				rn.startElectionLocked()
+				action = "election"
 			}
 			delay = 50 * time.Millisecond
 		}
 		rn.mu.Unlock()
+
+		if action == "heartbeat" {
+			rn.sendHeartbeats()
+		} else if action == "election" {
+			rn.startElection()
+		}
 
 		time.Sleep(delay)
 	}

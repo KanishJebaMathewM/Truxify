@@ -194,7 +194,7 @@ contract DAO is Ownable, ReentrancyGuard, Pausable {
         uint256 proposalId,
         bool support
     ) external onlyMember onlyActiveProposal(proposalId) {
-        uint256 votingPower = members[msg.sender].votingPower;
+        uint256 votingPower = IERC20(governanceToken).balanceOf(msg.sender);
         require(votingPower > 0, "No voting power");
         require(!hasVoted[proposalId][msg.sender], "Already voted");
         require(getProposalState(proposalId) == ProposalState.ACTIVE, "Proposal not active");
@@ -329,7 +329,7 @@ contract DAO is Ownable, ReentrancyGuard, Pausable {
         return members[member];
     }
 
-    function getProposalState(uint256 proposalId) external view returns (ProposalState) {
+    function getProposalState(uint256 proposalId) public view returns (ProposalState) {
         Proposal storage proposal = proposals[proposalId];
         if (proposal.state == ProposalState.EXECUTED) return ProposalState.EXECUTED;
         if (proposal.state == ProposalState.CANCELLED) return ProposalState.CANCELLED;

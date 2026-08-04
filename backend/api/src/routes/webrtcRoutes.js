@@ -112,7 +112,7 @@ router.get('/webrtc/offline/:peerId', authenticate, userLimiter, requirePolicy('
       });
     }
 
-    const data = await signaling.getOfflineGPSData(peerId, since);
+    const data = await signaling.getOfflineGPSData(peerId, since, req.user);
     res.json({
       success: true,
       data
@@ -145,7 +145,7 @@ router.post('/webrtc/sync/:peerId', authenticate, userLimiter, requirePolicy('we
       });
     }
 
-    await signaling.syncOfflineData(peerId);
+    await signaling.syncOfflineData(peerId, req.user);
     res.json({
       success: true,
       message: 'Offline data synced'

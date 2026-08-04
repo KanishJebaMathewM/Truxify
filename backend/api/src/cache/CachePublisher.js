@@ -132,11 +132,18 @@ export function subscribeToInvalidation(namespace, handler) {
 
   const unsubscribe = () => {
     const handlers = listeners.get(namespace);
+
     if (handlers) {
       handlers.delete(handler);
+
       if (handlers.size === 0) {
         listeners.delete(namespace);
-        subscriber.unsubscribe(channel).catch(() => {});
+        subscriber.unsubscribe(channel).catch((err) => {
+          logger.warn(
+            { err, channel, namespace },
+            'Failed to unsubscribe from Redis channel'
+          );
+        });        
       }
     }
   };

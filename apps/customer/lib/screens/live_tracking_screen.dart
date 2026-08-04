@@ -130,32 +130,30 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     wsPath = '$wsPath/ws/tracking';
 
     String buildUrl() {
-      final session = SupabaseService.client.auth.currentSession;
-      final token = session?.accessToken ?? '';
       final wsUri = Uri(
         scheme: wsScheme,
         host: baseUri.host,
         port: baseUri.hasPort ? baseUri.port : null,
         path: wsPath,
-        queryParameters: token.isNotEmpty ? {'token': token} : null,
       );
       return wsUri.toString();
     }
 
     final initialWsUrl = buildUrl();
-    final redactedUrl = initialWsUrl.replaceAll(RegExp(r'token=[^&]+'), 'token=[REDACTED]');
-    debugPrint('Connecting to tracking WebSocket at: $redactedUrl');
+    debugPrint('Connecting to tracking WebSocket at: $initialWsUrl');
 
     _trackingWebSocket = ResilientWebSocket(
       initialWsUrl,
       urlFactory: buildUrl,
       onConnect: () {
-        debugPrint('WebSocket connected, subscribing to order updates...');
+        debugPrint('WebSocket connected, authenticating...');
         if (mounted) setState(() => _wsConnected = true);
+        final session = SupabaseService.client.auth.currentSession;
+        final token = session?.accessToken ?? '';
         _trackingWebSocket?.send({
-          'event': 'subscribe_tracking',
+          'event': 'auth',
           'data': {
-            'order_display_id': widget.orderId,
+            'token': token,
           },
         });
       },
@@ -168,7 +166,15 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
         if (message == 'pong') return;
         final payload = jsonDecode(message) as Map<String, dynamic>;
 
-        if (payload['event'] == 'location_update') {
+        if (payload['status'] == 'authenticated') {
+          // First-frame auth succeeded; now register for order updates.
+          _trackingWebSocket?.send({
+            'event': 'subscribe_tracking',
+            'data': {
+              'order_display_id': widget.orderId,
+            },
+          });
+        } else if (payload['event'] == 'location_update') {
           final data = payload['data'] as Map<String, dynamic>?;
           if (data != null) {
             final lat = (data['latitude'] as num?)?.toDouble();

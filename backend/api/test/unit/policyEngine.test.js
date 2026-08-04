@@ -137,6 +137,14 @@ describe('PolicyEngine', () => {
         expect(() => policy.authorize(user('admin'), 'admin:invalidate-cache')).not.toThrow();
       });
 
+      it('allows admin to run liquibase migrations', () => {
+        expect(() => policy.authorize(user('admin'), 'liquibase:migrate')).not.toThrow();
+      });
+
+      it('allows admin to roll back liquibase migrations', () => {
+        expect(() => policy.authorize(user('admin'), 'liquibase:rollback')).not.toThrow();
+      });
+
       it('allows admin to view any order', () => {
         const order = { customer_id: 'other-user', driver_id: null };
         expect(() => policy.authorize(user('admin'), 'order:view', { order })).not.toThrow();
@@ -166,6 +174,14 @@ describe('PolicyEngine', () => {
 
       it('denies customer viewing admin dashboard', () => {
         expect(() => policy.authorize(user('customer'), 'admin:view-dashboard')).toThrow(PolicyError);
+      });
+
+      it('denies customer running liquibase migrations', () => {
+        expect(() => policy.authorize(user('customer'), 'liquibase:migrate')).toThrow(PolicyError);
+      });
+
+      it('denies driver rolling back liquibase migrations', () => {
+        expect(() => policy.authorize(user('driver'), 'liquibase:rollback')).toThrow(PolicyError);
       });
 
       it('denies driver viewing admin dashboard', () => {

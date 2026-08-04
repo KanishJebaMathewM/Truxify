@@ -27,10 +27,8 @@ class ActiveTripSheet extends StatelessWidget {
     required this.onCompleteTrip,
     required this.onCancel,
     required this.onOpenMaps,
-    // ── New fields for issue #5708 ──────────────────────────────────────
-    this.statusLabel,
-    this.eta,
-    this.progressPercent,
+    this.stopsRemaining,
+    this.currentMilestone,
   });
 
   final bool isTripStarted;
@@ -47,6 +45,10 @@ class ActiveTripSheet extends StatelessWidget {
   final VoidCallback onCompleteTrip;
   final VoidCallback onCancel;
   final VoidCallback onOpenMaps;
+  /// Number of stops not yet completed (null = unknown).
+  final int? stopsRemaining;
+  /// Human-readable current milestone label (e.g. "arrived_pickup").
+  final String? currentMilestone;
 
   /// Explicit status badge text (e.g. 'EN-ROUTE', 'LOADING', 'ASSIGNED LOAD').
   /// Falls back to the old isTripStarted logic when null.
@@ -212,38 +214,78 @@ class ActiveTripSheet extends StatelessWidget {
               color: Theme.of(context).colorScheme.onSurface,
             ),
           ),
-
-          // ── Progress bar (% complete) ──────────────────────────────────
-          if (showProgress) ...[
-            const SizedBox(height: 10),
+          // ── Milestone chip row (shown only when data is available) ──
+          if (stopsRemaining != null || (currentMilestone != null && currentMilestone!.isNotEmpty)) ...[
+            const SizedBox(height: 6),
             Row(
               children: [
-                Expanded(
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: LinearProgressIndicator(
-                      value: clampedProgress,
-                      minHeight: 6,
-                      backgroundColor: TruxifyColors.border,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        TruxifyColors.success,
+                if (currentMilestone != null && currentMilestone!.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1A73E8).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFF1A73E8).withValues(alpha: 0.3),
                       ),
                     ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.flag_rounded,
+                          size: 10,
+                          color: Color(0xFF1A73E8),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          currentMilestone!.replaceAll('_', ' ').toUpperCase(),
+                          style: GoogleFonts.dmSans(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFF1A73E8),
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '$progressPct%',
-                  style: GoogleFonts.dmSans(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: TruxifyColors.success,
+                if (stopsRemaining != null) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF59E0B).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: const Color(0xFFF59E0B).withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.pin_drop_outlined,
+                          size: 10,
+                          color: Color(0xFFF59E0B),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '$stopsRemaining ${stopsRemaining == 1 ? 'stop' : 'stops'} left',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: const Color(0xFFF59E0B),
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ],
-
           const SizedBox(height: 12),
 
           // ── Row 3: Distance / Duration / Payout specs ─────────────────

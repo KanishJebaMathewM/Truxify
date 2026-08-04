@@ -4,6 +4,7 @@ pragma solidity ^0.8.19;
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 
 
@@ -20,6 +21,12 @@ contract TruxifyUpgradeable is
     /// @notice Minimum delay before an emergency upgrade can be executed (2 days).
     ///         Gives the DAO time to detect and potentially block malicious upgrades.
     uint256 public constant EMERGENCY_UPGRADE_TIMELOCK = 2 days;
+
+    /// @notice Mandatory delay between a DAO proposal passing its vote and the
+    ///         actual implementation swap being executed. Gives token holders
+    ///         and admins time to notice and pause/react to a malicious but
+    ///         technically-passed proposal before it takes effect.
+    uint256 public constant UPGRADE_EXECUTION_DELAY = 2 days;
 
     // Escrow struct
     struct Escrow {
@@ -83,18 +90,39 @@ contract TruxifyUpgradeable is
     ///         Zero means no pending request.
     mapping(address => uint256) public emergencyUpgradeRequests;
 
+    /// @notice Implementations pre-approved by DEFAULT_ADMIN_ROLE as safe to
+    ///         propose for an upgrade. createProposal reverts for any
+    ///         implementation not in this allowlist, so a compromised or
+    ///         Sybil-controlled DAO_ROLE account cannot even put an arbitrary
+    ///         attacker-chosen implementation up for a vote.
+    mapping(address => bool) public approvedImplementations;
+
     uint256 public daoVotingPeriod;
-    uint256 public daoQuorum;
+
+    /// @notice Quorum required to execute a proposal, expressed in basis
+    ///         points (1/100 of a percent) of governanceToken's totalSupply().
+    ///         E.g. 1000 = 10% of supply must have voted (for or against)
+    ///         before a proposal can be executed. Replaces the old
+    ///         one-address-one-vote raw vote count, which any Sybil attacker
+    ///         could reach by creating throwaway addresses.
+    uint256 public daoQuorumBps;
+
     uint256 public daoThreshold;
 
     address public daoMultiSig;
+
+    /// @notice ERC20 token used to weight DAO votes. Voting power for an
+    ///         address is its current token balance — an address holding no
+    ///         tokens has no voting power, regardless of how many addresses
+    ///         it controls.
+    IERC20 public governanceToken;
 
     // Events
     event EscrowCreated(uint256 indexed escrowId, address customer, address driver, uint256 amount);
     event EscrowReleased(uint256 indexed escrowId, address driver, uint256 amount);
     event EscrowDisputed(uint256 indexed escrowId, address customer);
     event ProposalCreated(uint256 indexed proposalId, address proposer, address implementation);
-    event VoteCast(uint256 indexed proposalId, address voter, bool support);
+    event VoteCast(uint256 indexed proposalId, address voter, bool support, uint256 weight);
     event ProposalExecuted(uint256 indexed proposalId, bool passed);
     event ContractUpgraded(address indexed implementation, uint256 timestamp);
     event ContractPaused(address indexed pauser);
@@ -110,6 +138,22 @@ contract TruxifyUpgradeable is
     /// @notice Emitted when a pending emergency upgrade request is cancelled.
     event EmergencyUpgradeCancelled(address indexed implementation);
 
+    /// @notice Emitted when the governance token used to weight votes is set/changed.
+    event GovernanceTokenUpdated(address indexed token);
+
+    /// @notice Emitted when an implementation's allowlist status changes.
+    event ImplementationApprovalUpdated(address indexed implementation, bool approved);
+
+    // ============ Constructor ============
+
+    /// @notice The implementation contract is never used directly, only behind a
+    ///         UUPS proxy. Locking initialization here prevents an attacker from
+    ///         calling initialize() on the implementation itself and seizing the
+    ///         DEFAULT_ADMIN_ROLE (and thereby upgrade rights).
+    constructor() {
+        _disableInitializers();
+    }
+
     // ============ Initializer ============
     function initialize() public initializer {
         __AccessControl_init();
@@ -120,10 +164,38 @@ contract TruxifyUpgradeable is
         _grantRole(PAUSER_ROLE, msg.sender);
 
         daoVotingPeriod = 3 days;
-        daoQuorum = 1000; // 1000 votes required
+        daoQuorumBps = 1000; // 10% of governance token supply required
         daoThreshold = 60; // 60% approval required
 
         daoMultiSig = msg.sender;
+    }
+
+    // ============ Governance Configuration ============
+
+    /// @notice Sets the ERC20 token whose balances weight DAO votes. Until
+    ///         this is set, vote() and executeProposal() cannot be used —
+    ///         there is deliberately no unweighted fallback.
+    function setGovernanceToken(address token) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(token != address(0), "Invalid token");
+        governanceToken = IERC20(token);
+        emit GovernanceTokenUpdated(token);
+    }
+
+    /// @notice Sets the DAO execution quorum as basis points of the
+    ///         governance token's totalSupply() (10000 = 100%).
+    function setDAOQuorumBps(uint256 newQuorumBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newQuorumBps > 0 && newQuorumBps <= 10000, "Quorum bps must be 1-10000");
+        daoQuorumBps = newQuorumBps;
+    }
+
+    /// @notice Adds or removes an implementation from the trusted-implementation
+    ///         allowlist. createProposal() reverts for any implementation not
+    ///         on this list, so a passing vote can never install arbitrary,
+    ///         unvetted bytecode.
+    function setApprovedImplementation(address implementation, bool approved) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(implementation != address(0), "Invalid implementation");
+        approvedImplementations[implementation] = approved;
+        emit ImplementationApprovalUpdated(implementation, approved);
     }
 
     // ============ UUPS Upgrade ============
@@ -206,31 +278,30 @@ contract TruxifyUpgradeable is
         return escrowId;
     }
 
-    function releaseEscrow(uint256 escrowId) external nonReentrant whenNotPaused {
-        Escrow storage escrow = escrows[escrowId];
-        require(escrow.customer != address(0), "Escrow not found");
-        require(!escrow.released, "Already released");
-        require(msg.sender == escrow.driver || msg.sender == escrow.customer, "Not authorized");
-        require(!escrow.disputed, "Escrow disputed");
+    function releaseEscrow(uint256 escrowId) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant whenNotPaused {
+    Escrow storage escrow = escrows[escrowId];
+    require(escrow.customer != address(0), "Escrow not found");
+    require(!escrow.released, "Already released");
+    require(!escrow.disputed, "Escrow disputed");
 
-        escrow.released = true;
-        escrow.releasedAt = block.timestamp;
+    escrow.released = true;
+    escrow.releasedAt = block.timestamp;
 
-        (bool success, ) = payable(escrow.driver).call{value: escrow.amount}("");
-        require(success, "Transfer failed");
+    (bool success, ) = payable(escrow.driver).call{value: escrow.amount}("");
+    require(success, "Transfer failed");
 
-        emit EscrowReleased(escrowId, escrow.driver, escrow.amount);
-    }
+    emit EscrowReleased(escrowId, escrow.driver, escrow.amount);
+}
 
-    function disputeEscrow(uint256 escrowId) external whenNotPaused {
-        Escrow storage escrow = escrows[escrowId];
-        require(escrow.customer != address(0), "Escrow not found");
-        require(msg.sender == escrow.customer, "Only customer can dispute");
-        require(!escrow.disputed, "Already disputed");
+function disputeEscrow(uint256 escrowId) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant whenNotPaused {
+    Escrow storage escrow = escrows[escrowId];
+    require(escrow.customer != address(0), "Escrow not found");
+    require(!escrow.disputed, "Already disputed");
+    require(!escrow.released, "Already released");
 
-        escrow.disputed = true;
-        emit EscrowDisputed(escrowId, msg.sender);
-    }
+    escrow.disputed = true;
+    emit EscrowDisputed(escrowId, msg.sender);
+}
 
     // ============ DAO Governance ============
     function createProposal(
@@ -239,6 +310,7 @@ contract TruxifyUpgradeable is
     ) external onlyRole(DAO_ROLE) returns (uint256) {
         require(newImplementation != address(0), "Invalid implementation");
         require(bytes(reason).length > 0, "Reason required");
+        require(approvedImplementations[newImplementation], "Implementation not approved");
 
         _proposalIdCounter += 1;
         uint256 proposalId = _proposalIdCounter;
@@ -264,28 +336,50 @@ contract TruxifyUpgradeable is
         require(proposal.proposer != address(0), "Proposal not found");
         require(block.timestamp < proposal.votingEndsAt, "Voting ended");
         require(!hasVoted[proposalId][msg.sender], "Already voted");
+        require(address(governanceToken) != address(0), "Governance token not configured");
+
+        // Voting power comes from token balance, not address count. An
+        // attacker who spins up 1000 empty addresses gets zero extra votes —
+        // they'd need to actually acquire 1000 addresses' worth of tokens.
+        uint256 weight = governanceToken.balanceOf(msg.sender);
+        require(weight > 0, "No voting power");
 
         hasVoted[proposalId][msg.sender] = true;
 
         if (support) {
-            proposal.votesFor++;
+            proposal.votesFor += weight;
         } else {
-            proposal.votesAgainst++;
+            proposal.votesAgainst += weight;
         }
 
-        emit VoteCast(proposalId, msg.sender, support);
+        emit VoteCast(proposalId, msg.sender, support, weight);
     }
 
-    function executeProposal(uint256 proposalId) external returns (bool) {
+    function executeProposal(uint256 proposalId) external onlyRole(UPGRADER_ROLE) returns (bool) {
         Proposal storage proposal = proposals[proposalId];
         require(proposal.proposer != address(0), "Proposal not found");
         require(block.timestamp >= proposal.votingEndsAt, "Voting not ended");
         require(!proposal.executed, "Already executed");
+        require(address(governanceToken) != address(0), "Governance token not configured");
 
         uint256 totalVotes = proposal.votesFor + proposal.votesAgainst;
-        require(totalVotes >= daoQuorum, "Quorum not reached");
+        uint256 requiredQuorum = (governanceToken.totalSupply() * daoQuorumBps) / 10000;
+        require(totalVotes >= requiredQuorum, "Quorum not reached");
 
         bool passed = (proposal.votesFor * 100) / totalVotes >= daoThreshold;
+
+        if (passed) {
+            // The mandatory delay only applies to proposals that actually
+            // passed and are about to install new bytecode — this gives
+            // token holders/admins a final window to notice and react
+            // (e.g. pause, or revoke the implementation's allowlist entry)
+            // before the upgrade takes effect.
+            require(
+                block.timestamp >= proposal.votingEndsAt + UPGRADE_EXECUTION_DELAY,
+                "Execution timelock not elapsed"
+            );
+        }
+
         proposal.passed = passed;
         proposal.executed = true;
 
@@ -303,7 +397,7 @@ contract TruxifyUpgradeable is
 
             _upgradeHistoryCounter += 1;
             uint256 historyId = _upgradeHistoryCounter;
-            
+
             upgradeHistory[historyId] = UpgradeRecord({
                 implementation: proposal.newImplementation,
                 timestamp: block.timestamp,
@@ -419,11 +513,6 @@ contract TruxifyUpgradeable is
     function setDAOVotingPeriod(uint256 newPeriod) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newPeriod >= 1 days, "Period too short");
         daoVotingPeriod = newPeriod;
-    }
-
-    function setDAOQuorum(uint256 newQuorum) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(newQuorum > 0, "Quorum must be > 0");
-        daoQuorum = newQuorum;
     }
 
     function setDAOThreshold(uint256 newThreshold) external onlyRole(DEFAULT_ADMIN_ROLE) {

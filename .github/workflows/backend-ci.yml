@@ -1,5 +1,4 @@
 name: Backend CI
-name: Backend Parallel Vitest CI
 
 on:
   pull_request:
@@ -14,14 +13,6 @@ on:
       - ".github/workflows/backend-ci.yml"
 
 concurrency:
-  group: backend-ci-${{ github.ref }}
-      - 'backend/api/**'
-      - '.github/workflows/backend-ci.yml'
-  push:
-    branches:
-      - main
-
-concurrency:
   group: truxify-backend-ci-${{ github.ref }}
   cancel-in-progress: true
 
@@ -30,43 +21,34 @@ permissions:
 
 jobs:
   unit-tests:
-    name: Unit tests (shard ${{ matrix.shard }}/4)
+    name: Backend Unit Tests (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
-
-    name: Backend Unit Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: backend/api/package-lock.json
 
       - name: Install dependencies
         working-directory: backend/api
-        run: npm ci --workspaces=false --legacy-peer-deps
+        run: npm install --workspaces=false --legacy-peer-deps --ignore-scripts
 
       - name: Run unit tests (shard ${{ matrix.shard }}/4)
         working-directory: backend/api
         run: npx vitest run test/unit --shard=${{ matrix.shard }}/4
 
   integration-tests:
-    name: Integration tests
+    name: Backend Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: unit-tests
-
     services:
       postgres:
         image: postgres:16
@@ -90,32 +72,20 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/truxify_test
       REDIS_URL: redis://localhost:6379
-      - name: Run unit tests
-        working-directory: backend/api
-        run: npm run test:unit
-
-  integration-tests:
-    name: Backend Integration Tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: backend/api/package-lock.json
 
       - name: Install dependencies
         working-directory: backend/api
-        run: npm ci --workspaces=false --legacy-peer-deps
+        run: npm install --workspaces=false --legacy-peer-deps --ignore-scripts
 
       - name: Run integration tests
         working-directory: backend/api

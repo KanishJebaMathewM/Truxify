@@ -66,14 +66,22 @@ router.post('/escrow', verifyWebhookSignature, async (req, res) => {
     return res.status(200).json({ received: true });
   } catch (error) {
     logger.error(`[Webhook] Failed to process escrow webhook for order ${orderId}: ${error.message}`);
-    
+
     // Enqueue to Dead Letter Queue for background retries
-    await dlqService.enqueueFailure('escrow', eventType, req.body, error);
+    const enqueued = await dlqService.enqueueFailure('escrow', eventType, req.body, error);
+
+    // Fail closed: if the event cannot be persisted to the DLQ, return 500 so
+    // the provider retries. Returning 202 would silently drop the event forever.
+    if (!enqueued) {
+      return res.status(500).json({
+        error: 'Webhook processing failed and the event could not be queued for retry',
+      });
+    }
 
     // Return 202 Accepted so the provider stops retrying - we now own the retry logic via our DLQ
-    return res.status(202).json({ 
-      received: true, 
-      status: 'queued_for_retry'
+    return res.status(202).json({
+      received: true,
+      status: 'queued_for_retry',
     });
   }
 });

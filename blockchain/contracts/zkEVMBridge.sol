@@ -13,6 +13,7 @@ interface IzkEVM {
 contract zkEVMBridge is Ownable, ReentrancyGuard {
     IzkEVM public zkEVM;
     mapping(address => uint256) public pendingWithdrawals;
+    mapping(address => uint256) public depositedAmount;
     uint256 public bridgeFee = 0.001 ether;
 
     event BridgeDeposit(address indexed user, uint256 amount, uint256 fee);
@@ -27,23 +28,36 @@ contract zkEVMBridge is Ownable, ReentrancyGuard {
         require(msg.value > bridgeFee, "Amount must be > fee");
         uint256 amount = msg.value - bridgeFee;
 
+        depositedAmount[msg.sender] += amount;
+
         // Deposit to L2
         zkEVM.depositToL2{value: amount}();
 
         emit BridgeDeposit(msg.sender, amount, bridgeFee);
     }
 
-    function withdrawFromL2(
-        uint256 amount,
-        bytes calldata proof
-    ) external nonReentrant {
-        require(proof.length > 0, "Empty proof");
-        // Withdraw from L2
-        zkEVM.withdrawFromL2(amount, proof);
-        pendingWithdrawals[msg.sender] += amount;
+    mapping(bytes32 => bool) public usedProofs;
 
-        emit BridgeWithdraw(msg.sender, amount);
-    }
+function withdrawFromL2(
+    uint256 amount,
+    bytes calldata proof
+) external nonReentrant {
+    require(proof.length > 0, "Empty proof");
+    require(amount > 0, "Amount must be > 0");
+    require(depositedAmount[msg.sender] >= amount, "Exceeds deposited amount");
+
+    bytes32 proofHash = keccak256(proof);
+    require(!usedProofs[proofHash], "Proof already used");
+    usedProofs[proofHash] = true;
+
+    // Withdraw from L2 — proof is verified inside zkEVM.withdrawFromL2
+    zkEVM.withdrawFromL2(amount, proof);
+
+    depositedAmount[msg.sender] -= amount;
+    pendingWithdrawals[msg.sender] += amount;
+
+    emit BridgeWithdraw(msg.sender, amount);
+}
 
     function claimWithdrawal() external nonReentrant {
         uint256 amount = pendingWithdrawals[msg.sender];
@@ -61,4 +75,6 @@ contract zkEVMBridge is Ownable, ReentrancyGuard {
     function withdrawFees() external onlyOwner {
         payable(owner()).transfer(address(this).balance);
     }
+
+    receive() external payable {}
 }

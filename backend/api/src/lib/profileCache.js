@@ -16,7 +16,12 @@ async function _publishProfileInvalidation(eventOpts) {
     }
   }
   if (_publishFn) {
-    _publishFn('profile', eventOpts).catch(() => {});
+    _publishFn('profile', eventOpts).catch((err) => {
+      logger.warn(
+        { err, eventOpts },
+        'Failed to publish profile invalidation event'
+      );
+    });
   }
 }
 
@@ -71,7 +76,7 @@ function logCacheError(operation, error) {
 function getRedisClient() {
   try {
     return db.redisClient ?? null;
-  } catch {
+code -g backend/api/src/routes/lookupRoutes.js:50  } catch {
     return null;
   }
 }

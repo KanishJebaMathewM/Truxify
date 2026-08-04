@@ -21,6 +21,9 @@ class DriverStatusSheet extends StatelessWidget {
     required this.onToggleOnline,
     this.batteryLevel,
     this.isCharging = false,
+    this.hasActiveTrip = false,
+    this.onFindLoad,
+    this.onViewTrip,
   });
 
   final bool isOnline;
@@ -34,6 +37,16 @@ class DriverStatusSheet extends StatelessWidget {
   final int? batteryLevel;
   final bool isCharging;
 
+  /// Whether the driver currently has an active trip.
+  /// Controls visibility of the "View Active Trip" CTA.
+  final bool hasActiveTrip;
+
+  /// Called when the driver taps "Find New Load".
+  final VoidCallback? onFindLoad;
+
+  /// Called when the driver taps "View Active Trip".
+  final VoidCallback? onViewTrip;
+
   @override
   Widget build(BuildContext context) {
     final gross = todayEarnings != null
@@ -42,7 +55,13 @@ class DriverStatusSheet extends StatelessWidget {
     final net = todayEarnings != null
         ? '₹${todayEarnings!.netAmount.toStringAsFixed(0)}'
         : '—';
-    final trips = todayEarnings != null ? '${todayEarnings!.tripCount}' : '—';
+    final tripCountValue = todayEarnings != null
+        ? '${todayEarnings!.tripCount}'
+        : null;
+    // Net estimate: gross × 0.85 (accounts for ~15% fuel/toll costs).
+    final netValue = todayEarnings != null && todayEarnings!.amount > 0
+        ? 'Net ≈ ₹${(todayEarnings!.amount * 0.85).toStringAsFixed(0)}'
+        : null;
 
     return Container(
       decoration: BoxDecoration(
@@ -152,45 +171,59 @@ class DriverStatusSheet extends StatelessWidget {
             const SummaryCardsShimmer()
           else if (metricsError != null)
             MetricsErrorCard(errorMessage: metricsError)
-          else ...[
-            Text(
-              "Today's Earnings",
-              style: GoogleFonts.dmSans(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: TruxifyColors.adaptiveSecondaryText(context),
-                letterSpacing: 0.4,
-              ),
+          else
+            ShiftMetricsRow(
+              payValue: payValue,
+              hoursValue: hoursValue,
+              ratingValue: ratingValue,
+              tripCountValue: tripCountValue,
+              netValue: netValue,
             ),
-            const SizedBox(height: 8),
+          // ── Quick CTA Buttons ─────────────────────────────────────────────
+          if (isOnline && (onFindLoad != null || (hasActiveTrip && onViewTrip != null))) ...[
+            const SizedBox(height: 12),
             Row(
               children: [
-                Expanded(
-                  child: _EarningsMetricCard(
-                    icon: Icons.account_balance_wallet_outlined,
-                    value: gross,
-                    label: 'Gross',
-                    valueKey: const Key('today_gross_label'),
+                if (onFindLoad != null)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('find_new_load_button'),
+                      onPressed: onFindLoad,
+                      icon: const Icon(Icons.search_rounded, size: 16),
+                      label: const Text('Find New Load'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        textStyle: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _EarningsMetricCard(
-                    icon: Icons.local_gas_station_outlined,
-                    value: net,
-                    label: 'Net (est.)',
-                    valueKey: const Key('today_net_label'),
+                if (hasActiveTrip && onViewTrip != null) ...[
+                  if (onFindLoad != null) const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      key: const Key('view_active_trip_button'),
+                      onPressed: onViewTrip,
+                      icon: const Icon(Icons.route_rounded, size: 16),
+                      label: const Text('Active Trip'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        textStyle: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _EarningsMetricCard(
-                    icon: Icons.local_shipping_outlined,
-                    value: trips,
-                    label: 'Trips',
-                    valueKey: const Key('today_trips_label'),
-                  ),
-                ),
+                ],
               ],
             ),
           ],

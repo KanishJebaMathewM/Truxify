@@ -44,6 +44,30 @@ async function main() {
   await truxify.grantPauserRole(pauserAddress);
   console.log(`⏸️ Pauser role granted to: ${pauserAddress}`);
 
+  // Wire up the governance token used to weight DAO votes. vote() and
+  // executeProposal() both revert until this is set — there is deliberately
+  // no unweighted (one-address-one-vote) fallback.
+  const governanceTokenAddress = process.env.GOVERNANCE_TOKEN_ADDRESS;
+  if (governanceTokenAddress) {
+    await truxify.setGovernanceToken(governanceTokenAddress);
+    console.log(`🗳️  Governance token set to: ${governanceTokenAddress}`);
+  } else {
+    console.warn(
+      "⚠️  GOVERNANCE_TOKEN_ADDRESS not set — DAO voting/execution will revert until setGovernanceToken() is called."
+    );
+  }
+
+  // Pre-approve any known-good implementations for the upgrade allowlist.
+  // Accepts a comma-separated list of addresses.
+  const approvedImplementations = (process.env.APPROVED_IMPLEMENTATIONS || "")
+    .split(",")
+    .map((addr) => addr.trim())
+    .filter(Boolean);
+  for (const addr of approvedImplementations) {
+    await truxify.setApprovedImplementation(addr, true);
+    console.log(`✅ Implementation approved for DAO proposals: ${addr}`);
+  }
+
   // Verify setup
   console.log("\n📊 Deployment Summary:");
   console.log(`Implementation: ${implementationAddress}`);
@@ -51,6 +75,7 @@ async function main() {
   console.log(`DAO Address: ${daoAddress}`);
   console.log(`Upgrader: ${upgraderAddress}`);
   console.log(`Pauser: ${pauserAddress}`);
+  console.log(`Governance Token: ${governanceTokenAddress || "(not set)"}`);
 
   // Save deployment info
   const deploymentInfo = {
@@ -59,6 +84,8 @@ async function main() {
     daoAddress: daoAddress,
     upgraderAddress: upgraderAddress,
     pauserAddress: pauserAddress,
+    governanceTokenAddress: governanceTokenAddress || null,
+    approvedImplementations: approvedImplementations,
     timestamp: new Date().toISOString(),
     network: hre.network.name
   };

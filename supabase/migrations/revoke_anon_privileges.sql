@@ -34,6 +34,7 @@ REVOKE ALL ON TABLE public.driver_documents FROM anon;
 REVOKE ALL ON TABLE public.vehicle_types FROM anon;
 REVOKE ALL ON TABLE public.regions FROM anon;
 REVOKE ALL ON TABLE public.webhook_failures FROM anon;
+REVOKE ALL ON TABLE public.reputation_failures FROM anon;
 REVOKE ALL ON TABLE public.tracking_tokens FROM anon;
 REVOKE ALL ON TABLE public.temperature_telemetry FROM anon;
 

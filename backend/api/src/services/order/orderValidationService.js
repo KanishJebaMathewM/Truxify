@@ -66,7 +66,6 @@ export class OrderValidationService {
 
   async assertLoadOfferAvailable(loadOfferId) {
     const { data: offer, error } = await this.supabase.from('load_offers').select('id, status, customer_id').eq('id', loadOfferId).maybeSingle();
-    console.log('assertLoadOfferAvailable:', loadOfferId, 'offer:', offer, 'error:', error);
     if (error || !offer) {
       throw new DomainError(404, { error: 'Load offer not found.' });
     }
@@ -159,7 +158,8 @@ export class OrderValidationService {
 
   assertChangeDropAllowed(order) {
     const escrowInFlight = order.escrow_status === 'funding' || order.escrow_status === 'funded';
-    if (escrowInFlight || order.status !== 'pending') {
+    const escrowPending = order.escrow_status === 'pending' || order.escrow_status === null;
+    if (!escrowPending || order.status !== 'pending') {
       const reason = escrowInFlight
         ? `after escrow ${order.escrow_status === 'funding' ? 'funding has been initiated' : 'has been funded'}`
         : `after order status is '${order.status}'`;
@@ -192,7 +192,7 @@ export class OrderValidationService {
       const onDutyHours = (driver.accumulated_on_duty_minutes || 0) / 60;
 
       if (drivingHours >= 11 || onDutyHours >= 14) {
-        throw new DomainError(403, { 
+        throw new DomainError(403, {
           error: 'HoS Limit Exceeded: You have reached your maximum legal driving or on-duty hours for this shift. You must take a mandatory rest break before bidding on new loads.'
         });
       }

@@ -1,4 +1,5 @@
 import express from 'express';
+import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import { verificationService } from '../core/container.js';
 import { supabase } from '../config/db.js';
@@ -146,6 +147,75 @@ router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, r
     res.status(200).json({
       success: true,
       data: verificationResult
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+const upload = multer({ storage: multer.memoryStorage() });
+
+router.post('/kyc/upload', upload.single('image'), authenticate, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No image uploaded' });
+    }
+
+    // Set status to pending
+    const { error: updateError } = await supabase
+      .from('driver_details')
+      .update({ kyc_status: 'Pending KYC' })
+      .eq('driver_id', userId);
+
+    if (updateError) {
+      console.warn("Failed to set pending status, but continuing with OCR", updateError);
+    }
+
+    const formData = new FormData();
+    const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
+    formData.append('file', blob, req.file.originalname);
+
+    const mlResponse = await fetch('http://127.0.0.1:8000/verify/kyc', {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'X-API-Key': process.env.ML_API_KEY || 'truxify_ml_dev_key',
+      },
+    });
+
+    if (!mlResponse.ok) {
+      const text = await mlResponse.text();
+      return res.status(500).json({ success: false, error: 'OCR verification failed: ' + text });
+    }
+
+    const ocrData = await mlResponse.json();
+
+    if (ocrData.verified) {
+      const { error: verifyError } = await supabase
+        .from('driver_details')
+        .update({ 
+          kyc_status: 'Verified',
+          kyc_doc_number: ocrData.extracted_number
+        })
+        .eq('driver_id', userId);
+
+      if (verifyError) throw verifyError;
+    } else {
+       const { error: rejectError } = await supabase
+        .from('driver_details')
+        .update({ kyc_status: 'Rejected' })
+        .eq('driver_id', userId);
+
+      if (rejectError) throw rejectError;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: ocrData
     });
   } catch (error) {
     res.status(500).json({

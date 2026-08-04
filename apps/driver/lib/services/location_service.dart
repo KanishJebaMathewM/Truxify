@@ -352,9 +352,6 @@ class LocationService {
       host: baseUri.host,
       port: baseUri.hasPort ? baseUri.port : null,
       path: wsPath,
-      queryParameters: {
-        'driver_id': driverId,
-      },
     );
 
     try {

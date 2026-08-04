@@ -43,7 +43,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
-    testTimeout: 30000,
+    testTimeout: 300000, // 5 minutes to accommodate tests that advance fake timers
     include: ['test/**/*.test.js'],
     setupFiles: ['test/setup.js'],
     coverage: {

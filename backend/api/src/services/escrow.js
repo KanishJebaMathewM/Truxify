@@ -214,23 +214,29 @@ export function getEscrowBookingId (orderDisplayId) {
  */
 export async function getEscrowBooking(escrowBookingId) {
   if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — cannot read booking.')
-    return null
-  }
-  if (!escrowBookingId) {
-    logger.warn('[escrow] Cannot read booking without a booking id.')
-    return null
+    logger.warn('[escrow] Contract not initialised — cannot query bookings.');
+    return null;
   }
 
-  const booking = await escrowContract.bookings(escrowBookingId)
-  return {
-    customer: booking.customer,
-    driver: booking.driver,
-    amount: booking.amount,
-    status: Number(booking.status),
-    paid: booking.paid,
-    started: booking.started,
-    createdAt: booking.createdAt,
+  if (!ethers.isHexString(escrowBookingId, 32)) {
+    logger.warn('[escrow] Invalid escrowBookingId format — cannot query bookings.');
+    return null;
+  }
+
+  try {
+    const booking = await escrowContract.bookings(escrowBookingId)
+    return {
+      customer: booking.customer,
+      driver: booking.driver,
+      amount: booking.amount,
+      status: Number(booking.status),
+      paid: booking.paid,
+      started: booking.started,
+      createdAt: booking.createdAt,
+    }
+  } catch (err) {
+    logger.error(`[escrow] getEscrowBooking failed: ${err.message}`)
+    return null
   }
 }
 

@@ -1160,12 +1160,12 @@ router.post(
       );
 
       // Fetch the released amount to include in the response
-      const { data: order } = await orderRepository.findOrderByIdOrDisplayId(
+      const { data: orderData } = await orderRepository.findOrderByIdOrDisplayId(
         req.params.id,
         'total_amount, order_display_id'
       );
-      const amountInr = order?.total_amount
-        ? (order.total_amount / 100).toFixed(0)
+      const amountInr = orderData?.total_amount
+        ? (orderData.total_amount / 100).toFixed(0)
         : null;
 
       if (escrowUpdateFailed) {

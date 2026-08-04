@@ -9,6 +9,8 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
+const { attachLocationServer } = require("./websocket/locationServer");
+
 dotenv.config({ path: path.resolve(__dirname, '../.env') })
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') })
 import hppProtection from './middleware/hppProtection.js';
@@ -293,6 +295,7 @@ validateEscrowSetup().then((valid) => {
 
 const app = express()
 const server = http.createServer(app)
+attachLocationServer(server);
 app.use(headerSizeMonitor);
 // Trust proxy required for rate-limiting behind load balancers/Docker.
 // TRUST_PROXY env var allows each deployment to set the correct proxy count:

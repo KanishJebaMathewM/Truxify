@@ -2,8 +2,9 @@
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { buildSubgraphSchema } from '@apollo/federation';
 import { gql } from 'graphql-tag';
-import { supabase } from '../../api/src/config/db.js';
-import logger from '../../api/src/middleware/logger.js';
+import DataLoader from 'dataloader';
+import { supabase } from '../api/src/config/db.js';
+import logger from '../api/src/middleware/logger.js';
 
 const ADMIN_ROLES = new Set(['ADMIN', 'admin']);
 
@@ -29,6 +30,43 @@ function mapOrder(row) {
         createdAt: row.createdAt ?? row.created_at,
         updatedAt: row.updatedAt ?? row.updated_at,
     };
+}
+
+// DataLoaders for N+1 query fix
+function createLoaders() {
+    const paymentLoader = new DataLoader(async (orderIds) => {
+        const { data: payments, error } = await supabase
+            .from('payments')
+            .select('*')
+            .in('order_id', orderIds);
+        
+        if (error) {
+            logger.error('[N+1 FIX] Failed to batch fetch payments:', error);
+            return orderIds.map(() => null);
+        }
+        
+        const paymentsByOrder = new Map();
+        payments?.forEach(payment => paymentsByOrder.set(payment.order_id, payment));
+        return orderIds.map(orderId => paymentsByOrder.get(orderId) || null);
+    });
+
+    const tripLoader = new DataLoader(async (orderIds) => {
+        const { data: trips, error } = await supabase
+            .from('trips')
+            .select('*')
+            .in('order_id', orderIds);
+        
+        if (error) {
+            logger.error('[N+1 FIX] Failed to batch fetch trips:', error);
+            return orderIds.map(() => null);
+        }
+        
+        const tripsByOrder = new Map();
+        trips?.forEach(trip => tripsByOrder.set(trip.order_id, trip));
+        return orderIds.map(orderId => tripsByOrder.get(orderId) || null);
+    });
+
+    return { paymentLoader, tripLoader };
 }
 
 const typeDefs = gql`
@@ -247,30 +285,17 @@ const resolvers = {
     Order: {
         driver: async (order) => {
             if (!order.driverId) return null;
-            // Fetch driver from driver service
             return { id: order.driverId };
         },
-        payment: async (order) => {
-            // Fetch payment from payment service
-            const { data, error } = await supabase
-                .from('payments')
-                .select('*')
-                .eq('order_id', order.id)
-                .single();
-            
-            if (error) return null;
-            return data;
+        payment: async (order, _, { loaders }) => {
+            // Use DataLoader to batch fetch (N+1 fix)
+            if (!order.id) return null;
+            return loaders.paymentLoader.load(order.id);
         },
-        trip: async (order) => {
-            // Fetch trip from trip service
-            const { data, error } = await supabase
-                .from('trips')
-                .select('*')
-                .eq('order_id', order.id)
-                .single();
-            
-            if (error) return null;
-            return data;
+        trip: async (order, _, { loaders }) => {
+            // Use DataLoader to batch fetch (N+1 fix)
+            if (!order.id) return null;
+            return loaders.tripLoader.load(order.id);
         }
     }
 };
@@ -282,10 +307,15 @@ async function startOrderService() {
     });
 
     const { url } = await startStandaloneServer(server, {
-        listen: { port: 4001 }
+        listen: { port: 4001 },
+        context: async () => {
+            const loaders = createLoaders();
+            return { loaders };
+        }
     });
 
-    logger.info(`âœ… Order GraphQL service running at ${url}`);
+    logger.info(`✅ Order GraphQL service running at ${url}`);
+    logger.info('[N+1 FIX] DataLoader pattern implemented for payment and trip queries');
     return { url };
 }
 

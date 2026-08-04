@@ -126,6 +126,7 @@ describe('ProfileModel', () => {
       expect(ProfileModel.fromDriverDetails(undefined)).toEqual({
         truckId: null, rating: 0, totalTrips: 0, completionRate: 0,
         isOnline: false, walletConfirmed: 0, walletPending: 0, walletTotal: 0,
+        kycDocNumber: null, kycStatus: 'Unverified',
       });
     });
 
@@ -164,6 +165,8 @@ describe('ProfileModel', () => {
       expect(result.walletConfirmed).toBe(0);
       expect(result.walletPending).toBe(0);
       expect(result.walletTotal).toBe(0);
+      expect(result.kycDocNumber).toBe(null);
+      expect(result.kycStatus).toBe('Unverified');
     });
   });
 

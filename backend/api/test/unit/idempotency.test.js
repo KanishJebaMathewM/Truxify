@@ -302,7 +302,7 @@ describe('requireIdempotency middleware', () => {
       const next = makeNext();
 
       const duplicate = middleware(req, res, next);
-      await vi.advanceTimersByTimeAsync(200 * 50 + 10);
+      await vi.advanceTimersByTimeAsync(200 * 600 + 10);
       await duplicate;
 
       expect(res.status).toHaveBeenCalledWith(409);

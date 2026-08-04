@@ -7,7 +7,7 @@
  * (or via: npm test -- --testPathPattern=redisLock)
  */
 
-import { jest } from '@jest/globals';
+import { vi as jest } from 'vitest';
 
 // ─── Mock the Redis client ────────────────────────────────────────────────────
 

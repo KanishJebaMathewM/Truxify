@@ -38,19 +38,21 @@ vi.mock('../../src/config/db.js', () => ({
 import OracleService from '../../src/oracle/OracleService.js';
 
 function makeQueryChain(mockReturn) {
-  const q = { select: vi.fn(), eq: vi.fn(), limit: vi.fn(), maybeSingle: vi.fn() };
+  const q = { select: vi.fn(), eq: vi.fn(), limit: vi.fn(), order: vi.fn(), maybeSingle: vi.fn() };
   q.select.mockReturnThis();
   q.eq.mockReturnThis();
   q.limit.mockReturnThis();
+  q.order.mockReturnThis();
   q.maybeSingle.mockResolvedValue(mockReturn);
   return q;
 }
 
 function makeOtpQuery(mockReturn) {
-  const q = { select: vi.fn(), eq: vi.fn(), limit: vi.fn(), maybeSingle: vi.fn() };
+  const q = { select: vi.fn(), eq: vi.fn(), limit: vi.fn(), order: vi.fn(), maybeSingle: vi.fn() };
   q.select.mockReturnThis();
   q.eq.mockReturnThis();
   q.limit.mockReturnThis();
+  q.order.mockReturnThis();
   q.maybeSingle.mockResolvedValue(mockReturn);
   return q;
 }

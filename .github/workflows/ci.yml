@@ -44,7 +44,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: backend/api
-        run: npm ci --workspaces=false --legacy-peer-deps
+        run: |
+          cp ../package-lock.json ./
+          npm ci --workspaces=false --legacy-peer-deps
 
       - name: Run unit tests
         working-directory: backend/api

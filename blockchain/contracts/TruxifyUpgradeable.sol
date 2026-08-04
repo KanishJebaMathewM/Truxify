@@ -144,6 +144,16 @@ contract TruxifyUpgradeable is
     /// @notice Emitted when an implementation's allowlist status changes.
     event ImplementationApprovalUpdated(address indexed implementation, bool approved);
 
+    // ============ Constructor ============
+
+    /// @notice The implementation contract is never used directly, only behind a
+    ///         UUPS proxy. Locking initialization here prevents an attacker from
+    ///         calling initialize() on the implementation itself and seizing the
+    ///         DEFAULT_ADMIN_ROLE (and thereby upgrade rights).
+    constructor() {
+        _disableInitializers();
+    }
+
     // ============ Initializer ============
     function initialize() public initializer {
         __AccessControl_init();

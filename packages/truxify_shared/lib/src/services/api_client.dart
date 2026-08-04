@@ -120,6 +120,10 @@ class ApiClient {
   /// Falls back to Supabase session token if no Firebase user is signed in.
   String? _cachedFirebaseToken;
 
+  /// In-flight token refresh shared by concurrent callers so only one
+  /// refresh executes at a time (fixes #2919).
+  Completer<String?>? _pendingTokenRefresh;
+
   Future<String?> get _accessTokenAsync async {
     try {
       final firebaseUser = FirebaseAuth.instance.currentUser;
@@ -154,31 +158,46 @@ class ApiClient {
   }
 
   Future<String?> _refreshedToken() async {
-    try {
-      final firebaseUser = FirebaseAuth.instance.currentUser;
-      if (firebaseUser != null) {
-        final token = await firebaseUser.getIdToken(true);
-        _cachedFirebaseToken = token;
-        return token;
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        developer.log(
-          '[ApiClient] Firebase token refresh failed: $e',
-          name: 'ApiClient',
-        );
-      }
+    // Deduplicate concurrent refresh attempts: only one caller performs
+    // the refresh; others await the same result.
+    if (_pendingTokenRefresh != null) {
+      return _pendingTokenRefresh!.future;
     }
-
+    final completer = Completer<String?>();
+    _pendingTokenRefresh = completer;
     try {
-      // Fall back to Supabase session refresh.
-      final res = await _supabase.auth.refreshSession();
-      return res.session?.accessToken;
-    } catch (e) {
-      if (kDebugMode) {
-        developer.log('[ApiClient] Token refresh failed: $e', name: 'ApiClient');
+      try {
+        final firebaseUser = FirebaseAuth.instance.currentUser;
+        if (firebaseUser != null) {
+          final token = await firebaseUser.getIdToken(true);
+          _cachedFirebaseToken = token;
+          completer.complete(token);
+          return token;
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          developer.log(
+            '[ApiClient] Firebase token refresh failed: $e',
+            name: 'ApiClient',
+          );
+        }
       }
-      return null;
+
+      try {
+        // Fall back to Supabase session refresh.
+        final res = await _supabase.auth.refreshSession();
+        final token = res.session?.accessToken;
+        completer.complete(token);
+        return token;
+      } catch (e) {
+        if (kDebugMode) {
+          developer.log('[ApiClient] Token refresh failed: $e', name: 'ApiClient');
+        }
+        if (!completer.isCompleted) completer.complete(null);
+        return null;
+      }
+    } finally {
+      _pendingTokenRefresh = null;
     }
   }
 

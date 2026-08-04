@@ -51,6 +51,11 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     super.initState();
     _routeFuture = _loadRouteForTrip(widget.trip.route);
     _maybeStartGpsTracking();
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+      final offline = results.every((result) => result == ConnectivityResult.none);
+      if (mounted) setState(() => _isOffline = offline);
+    });
   }
 
   @override

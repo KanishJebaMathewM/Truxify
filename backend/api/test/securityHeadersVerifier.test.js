@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
@@ -10,7 +10,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
   },
 }));
 
-import securityHeadersVerifier from '../../src/middleware/securityHeadersVerifier.js';
+import securityHeadersVerifier from '../src/middleware/securityHeadersVerifier.js';
 
 function createApp(setHeaders = true) {
   const app = express();

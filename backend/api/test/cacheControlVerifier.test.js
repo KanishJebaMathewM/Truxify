@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
@@ -10,7 +10,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
   },
 }));
 
-import cacheControlVerifier from '../../src/middleware/cacheControlVerifier.js';
+import cacheControlVerifier from '../src/middleware/cacheControlVerifier.js';
 
 function createApp(headers = {}) {
   const app = express();

@@ -1,10 +1,10 @@
-import { ApolloGateway, IntrospectAndCompose } from '@apollo/gateway';
+﻿import { ApolloGateway, IntrospectAndCompose } from '@apollo/gateway';
 import { RemoteGraphQLDataSource } from '@apollo/gateway';
 import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { InMemoryLRUCache } from '@apollo/utils.keyvaluecache';
-import logger from '../api/src/middleware/logger.js';
-import { supabase } from '../api/src/config/db.js';
+import logger from '../../api/src/middleware/logger.js';
+import { supabase } from '../../api/src/config/db.js';
 
 class GraphQLGateway {
     constructor() {
@@ -324,10 +324,10 @@ class GraphQLGateway {
                 }
             });
 
-            logger.info(`✅ GraphQL Gateway running at ${url}`);
+            logger.info(`âœ… GraphQL Gateway running at ${url}`);
             return { url };
         } catch (error) {
-            logger.error('❌ GraphQL Gateway startup failed:', error);
+            logger.error('âŒ GraphQL Gateway startup failed:', error);
             throw error;
         }
     }
@@ -352,7 +352,7 @@ class GraphQLGateway {
     async stop() {
         if (this.server) {
             await this.server.stop();
-            logger.info('✅ GraphQL Gateway stopped');
+            logger.info('âœ… GraphQL Gateway stopped');
         }
     }
 }

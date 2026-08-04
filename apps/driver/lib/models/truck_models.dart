@@ -9,6 +9,9 @@ class Truck {
     required this.insuranceExpiry,
     required this.pucExpiry,
     required this.permitExpiry,
+    this.cargoLengthFt = 0,
+    this.cargoWidthFt = 0,
+    this.cargoHeightFt = 0,
   });
 
   final String id;
@@ -20,6 +23,9 @@ class Truck {
   final DateTime? insuranceExpiry;
   final DateTime? pucExpiry;
   final DateTime? permitExpiry;
+  final double cargoLengthFt;
+  final double cargoWidthFt;
+  final double cargoHeightFt;
 
   factory Truck.fromJson(Map<String, dynamic> json) {
     return Truck(
@@ -38,6 +44,9 @@ class Truck {
       permitExpiry: json['permit_expiry'] != null
           ? DateTime.tryParse(json['permit_expiry'] as String)
           : null,
+      cargoLengthFt: (json['cargo_length_ft'] as num?)?.toDouble() ?? 0.0,
+      cargoWidthFt: (json['cargo_width_ft'] as num?)?.toDouble() ?? 0.0,
+      cargoHeightFt: (json['cargo_height_ft'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
@@ -52,6 +61,9 @@ class Truck {
       'insurance_expiry': insuranceExpiry?.toIso8601String(),
       'puc_expiry': pucExpiry?.toIso8601String(),
       'permit_expiry': permitExpiry?.toIso8601String(),
+      'cargo_length_ft': cargoLengthFt,
+      'cargo_width_ft': cargoWidthFt,
+      'cargo_height_ft': cargoHeightFt,
     };
   }
 }

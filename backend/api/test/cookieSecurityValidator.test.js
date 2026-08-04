@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
@@ -10,7 +10,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
   },
 }));
 
-import cookieSecurityValidator from '../../src/middleware/cookieSecurityValidator.js';
+import cookieSecurityValidator from '../src/middleware/cookieSecurityValidator.js';
 
 function createApp(setCookieValue) {
   const app = express();

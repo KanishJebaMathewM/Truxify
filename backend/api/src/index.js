@@ -41,6 +41,7 @@ import orderRoutes from './routes/orderRoutes.js'
 import driverRoutes from './routes/driverRoutes.js'
 import supportRoutes from './routes/supportRoutes.js'
 import profileRoutes from './routes/profileRoutes.js'
+import shipmentRoutes from './routes/shipmentRoutes.js'
 import loadRoutes from './routes/loadRoutes.js'
 import deadheadRoutes from './routes/deadheadRoutes.js'
 import truckRoutes from './routes/truckRoutes.js'
@@ -81,11 +82,11 @@ import webrtcRoutes from './routes/webrtcRoutes.js'
 // ============================================================================
 // 🆕 ROOT SUBSYSTEM ROUTES (eBPF, WASI, WASM, Snyk, Liquibase)
 // ============================================================================
-import ebpfRoutes from '../../ebpf/routes.js'
-import wasiRoutes from '../../wasi/routes.js'
-import wasmRoutes from '../../wasm/routes.js'
-import snykRoutes from '../../snyk/routes.js'
-import liquibaseRoutes from '../../database/liquibase/routes.js'
+import ebpfRoutes from '../../../ebpf/routes.js'
+import wasiRoutes from '../../../wasi/routes.js'
+import wasmRoutes from '../../../wasm/routes.js'
+import snykRoutes from '../../../snyk/routes.js'
+import liquibaseRoutes from '../../../database/liquibase/routes.js'
 import earningsRouter from '../routes/earnings.js'
 import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 
@@ -136,6 +137,10 @@ import {
   stopDlqWorker,
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
+import {
+  startWithdrawalSettlementWorker,
+  stopWithdrawalSettlementWorker
+} from './workers/withdrawalSettlementWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -447,6 +452,7 @@ app.use('/api/payments', paymentRoutes)
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)
+app.use('/api/v1/shipment', shipmentRoutes)
 app.use('/api/loads', loadRoutes)
 app.use('/api/support', supportRoutes)
 app.use('/api/profile', profileRoutes)
@@ -648,6 +654,7 @@ server.listen(PORT, () => {
   startDlqWorker()
   startStaleOrderWorker()
   startDocumentExpiryWorker()
+  startWithdrawalSettlementWorker()
 
   // Register worker states for health aggregation
   globalThis.__truxify_workers = {
@@ -658,6 +665,7 @@ server.listen(PORT, () => {
     dlqWorker: true,
     staleOrderWorker: true,
     documentExpiryWorker: true,
+    withdrawalSettlementWorker: true,
   }
 })
 
@@ -687,6 +695,7 @@ async function shutdown (signal) {
   stopReputationReconciliation()
   stopDlqWorker()
   stopDocumentExpiryWorker()
+  stopWithdrawalSettlementWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()
 

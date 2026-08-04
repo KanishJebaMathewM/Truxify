@@ -1,9 +1,9 @@
-import { ApolloServer } from '@apollo/server';
+﻿import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { buildSubgraphSchema } from '@apollo/federation';
 import { gql } from 'graphql-tag';
-import { supabase } from '../api/src/config/db.js';
-import logger from '../api/src/middleware/logger.js';
+import { supabase } from '../../api/src/config/db.js';
+import logger from '../../api/src/middleware/logger.js';
 
 const ADMIN_ROLES = new Set(['ADMIN', 'admin']);
 
@@ -285,7 +285,7 @@ async function startOrderService() {
         listen: { port: 4001 }
     });
 
-    logger.info(`✅ Order GraphQL service running at ${url}`);
+    logger.info(`âœ… Order GraphQL service running at ${url}`);
     return { url };
 }
 

@@ -827,19 +827,19 @@ router.get('/:id/bids', authenticate, userLimiter, requirePolicy('order:view-bid
     ]);
 
     const profiles = profilesRes.data || [];
-    const details  = detailsRes.data || [];
+    const details = detailsRes.data || [];
     const truckIds = details.map(d => d.truck_id).filter(Boolean);
     const trucksRes = truckIds.length > 0 ? await orderRepository.findTrucksByIds(truckIds) : { data: [] };
     const trucks = trucksRes.data || [];
 
     const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
-    const detailMap  = Object.fromEntries(details.map(d => [d.user_id, d]));
-    const truckMap   = Object.fromEntries(trucks.map(t => [t.id, t]));
+    const detailMap = Object.fromEntries(details.map(d => [d.user_id, d]));
+    const truckMap = Object.fromEntries(trucks.map(t => [t.id, t]));
 
     const enrichedBids = bids.map(bid => {
       const profile = profileMap[bid.driver_id] || {};
-      const detail  = detailMap[bid.driver_id]  || {};
-      const truck   = detail.truck_id ? truckMap[detail.truck_id] : null;
+      const detail = detailMap[bid.driver_id] || {};
+      const truck = detail.truck_id ? truckMap[detail.truck_id] : null;
 
       return {
         id: bid.id, bid_amount: bid.bid_amount, created_at: bid.created_at,
@@ -940,9 +940,15 @@ router.post('/:id/bids/:bidId/accept', authenticate, userLimiter, requirePolicy(
  *       429:
  *         description: Rate limited
  */
-router.put('/:id/milestones', authenticate, userLimiter, requirePolicy('milestone:update'), milestoneLimiter, validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
+router.put('/:id/milestones', authenticate, userLimiter, requirePolicy('milestone:update'), milestoneLimiter, requireIdempotency(3600), validateParams(paramIdSchema), validateBody(updateMilestoneSchema), async (req, res) => {
   const orderId = req.params.id;
   const { milestone } = req.body;
+
+  const lockKey = `milestone_lock:${orderId}`;
+  const lockValue = await acquireLock(lockKey, 10000);
+  if (!lockValue) {
+    return res.status(409).json({ error: 'Another milestone update is in progress for this order. Please try again.' });
+  }
 
   try {
     if (milestone === 'Delivered') {
@@ -957,6 +963,8 @@ router.put('/:id/milestones', authenticate, userLimiter, requirePolicy('mileston
     }
     logger.error(err, "[orderRoutes] Milestone update error:");
     res.status(500).json({ error: 'Internal Server Error' });
+  } finally {
+    await releaseLock(lockKey, lockValue);
   }
 });
 
@@ -1132,10 +1140,12 @@ router.post(
         : null;
 
       if (escrowUpdateFailed) {
+        logger.warn(`[confirm-otp] escrowUpdateFailed for order ${req.params.id} — reconciliation required`);
         return res.status(202).json({
-          message: 'Delivery confirmed. Escrow payout requires reconciliation.',
-          payment_released: true,
-          escrow_status: 'released',
+          message: 'Delivery confirmed. Escrow payout is pending reconciliation — your payment will be credited shortly.',
+          payment_released: false,
+          reconciliation_required: true,
+          escrow_status: 'release_pending_reconciliation',
           amount_inr: amountInr,
         });
       }
@@ -1255,13 +1265,13 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
       });
 
       pricing = computeOrderPricing({
-        pickupLat:  Number(order.pickup_lat),
-        pickupLng:  Number(order.pickup_lng),
-        dropLat:    Number(drop_lat),
-        dropLng:    Number(drop_lng),
+        pickupLat: Number(order.pickup_lat),
+        pickupLng: Number(order.pickup_lng),
+        dropLat: Number(drop_lat),
+        dropLng: Number(drop_lng),
         weightTonnes: Number(order.weight_tonnes),
         roadDistanceKm: routeEstimate?.distanceKm,
-        isFragile:   Boolean(order.is_fragile),
+        isFragile: Boolean(order.is_fragile),
         isStackable: Boolean(order.is_stackable),
       });
     } catch (pricingErr) {
@@ -1683,7 +1693,7 @@ router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requirePol
       const destLng = Number(order.drop_lng);
 
       if (!Number.isFinite(originLat) || !Number.isFinite(originLng) ||
-          !Number.isFinite(destLat) || !Number.isFinite(destLng)) {
+        !Number.isFinite(destLat) || !Number.isFinite(destLng)) {
         return res.status(500).json({ error: 'Order has invalid coordinates.' });
       }
 

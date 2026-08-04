@@ -22,7 +22,6 @@ import {
 import { escrowRelease as defaultEscrowRelease } from "../escrow.js";
 import logger from "../../middleware/logger.js";
 import { OrderTimelineService } from "./orderTimelineService.js";
-import upiPaymentService from "../payment/UpiPaymentService.js";
 
 const orderTimelineService = new OrderTimelineService({ supabase, logger });
 
@@ -419,12 +418,12 @@ export class DeliveryVerificationService {
       });
     }
 
-    const distanceM = _haversineM(
+    const distanceM = haversineKm(
       lat,
       lng,
       Number(order.drop_lat),
       Number(order.drop_lng),
-    );
+    ) * 1000;
     if (distanceM > DELIVERY_GEOFENCE_RADIUS_KM * 1000) {
       throw new DomainError(409, {
         error: `Driver is ${(distanceM / 1000).toFixed(2)}km from the drop-off location. Must be within ${DELIVERY_GEOFENCE_RADIUS_KM * 1000}m to confirm delivery.`,
@@ -472,39 +471,6 @@ export class DeliveryVerificationService {
               escrowAlreadyReleased = true;
             } else {
               throw new Error("Escrow release returned no transaction hash");
-            }
-
-            // Trigger UPI Payout to the Driver
-            try {
-              const driverId = order.driver_id;
-              const { data: driverProfile } = await supabase
-                .from("profiles")
-                .select("full_name")
-                .eq("id", driverId)
-                .maybeSingle();
-
-              const { data: driverPaymentMethod } = await supabase
-                .from("payment_methods")
-                .select("display_label")
-                .eq("user_id", driverId)
-                .eq("method_type", "upi")
-                .maybeSingle();
-
-              const driverUpiId =
-                driverPaymentMethod?.display_label ||
-                `${(driverProfile?.full_name || "driver").toLowerCase().replace(/[^a-z0-9]/g, "")}@okaxis`;
-
-              const payoutResult = await upiPaymentService.processDriverPayout(
-                driverUpiId,
-                order.total_amount,
-              );
-              logger.info(
-                `[payments] UPI Payout processed successfully for driver: ${driverUpiId}, payoutId: ${payoutResult.payout_id}`,
-              );
-            } catch (payoutErr) {
-              logger.error(
-                `[payments] UPI payout to driver failed: ${payoutErr.message}`,
-              );
             }
           } catch (releaseErr) {
             logger.error(

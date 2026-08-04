@@ -332,7 +332,14 @@ class WebRTCSignalingServer {
       this._discoveryInterval = null;
     }
     for (const [peerId, peer] of this.peers) {
-      try { peer.ws.close(1001, 'Server shutting down'); } catch {}
+      try {
+        peer.ws.close(1001, 'Server shutting down');
+      } catch (err) {
+        logger.warn(
+          { err },
+          '[WebRTC] Failed to close peer WebSocket during shutdown.'
+        );
+      }
     }
     this.peers.clear();
     this.meshes.clear();

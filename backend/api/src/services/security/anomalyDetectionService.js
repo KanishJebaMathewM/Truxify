@@ -5,7 +5,7 @@ import { measureExecution } from '../../core/performanceMetrics.js';
 
 const ANOMALY_THRESHOLDS = {
   LARGE_WITHDRAWAL: 1000, // Threshold in MATIC
-  UNUSUAL_TIME: { startHour: 0, endHour: 6 }, // Unusual hours
+  UNUSUAL_TIME: { startHour: 0, endHour: 6 }, // Unusual hours (UTC)
   MULTIPLE_TRANSFERS: 5, // Number of transfers in 10 minutes
   UNUSUAL_DESTINATION: true, // New wallet destination
 };
@@ -130,7 +130,11 @@ class AnomalyDetectionService {
 
   detectUnusualTime(transaction) {
     const txTime = new Date(transaction.timestamp);
-    const hour = txTime.getHours();
+    // Fix (#6127): use getUTCHours() so the window comparison is consistent
+    // with the UTC ISO timestamp stored in transaction.timestamp and reported
+    // in the message. getHours() returns server-local wall-clock time, which
+    // produces wrong results on any server not running at UTC offset 0.
+    const hour = txTime.getUTCHours();
 
     if (hour >= ANOMALY_THRESHOLDS.UNUSUAL_TIME.startHour &&
         hour < ANOMALY_THRESHOLDS.UNUSUAL_TIME.endHour) {

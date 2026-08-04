@@ -76,7 +76,7 @@ function logCacheError(operation, error) {
 function getRedisClient() {
   try {
     return db.redisClient ?? null;
-  } catch {
+code -g backend/api/src/routes/lookupRoutes.js:50  } catch {
     return null;
   }
 }

@@ -17,6 +17,8 @@ vi.mock('../../src/middleware/logger.js', () => ({
 function makeReq(overrides = {}) {
   return {
     headers: {},
+    method: 'POST',
+    originalUrl: '/orders',
     user: { id: 'user-1' },
     ...overrides,
   };
@@ -114,7 +116,7 @@ describe('requireIdempotency middleware', () => {
 
     expect(mockRedisRef.mock.set).toHaveBeenCalled();
     const [cacheKey, cacheData] = mockRedisRef.mock.set.mock.calls[1];
-    expect(cacheKey).toBe('idempotency:user-1:key-def');
+    expect(cacheKey).toBe('idempotency:user-1:POST:/orders:key-def');
     const parsed = JSON.parse(cacheData);
     expect(parsed.statusCode).toBe(200);
     expect(parsed.body).toEqual(responseBody);
@@ -192,7 +194,7 @@ describe('requireIdempotency middleware', () => {
     expect(() => res.json({ success: true })).not.toThrow();
   });
 
-  it('uses correct cache key format idempotency:{userId}:{key}', async () => {
+  it('uses cache key scoped by user, method, and URL', async () => {
     const middleware = requireIdempotency();
     mockRedisRef.mock.get.mockResolvedValue(null);
     mockRedisRef.mock.set.mockResolvedValue('OK');
@@ -208,7 +210,7 @@ describe('requireIdempotency middleware', () => {
     res.json({ result: 'done' });
 
     const [cacheKey] = mockRedisRef.mock.set.mock.calls[1];
-    expect(cacheKey).toBe('idempotency:driver-42:my-unique-key-123');
+    expect(cacheKey).toBe('idempotency:driver-42:POST:/orders:my-unique-key-123');
   });
 
   it('uses anonymous cache key when req.user is not present', async () => {
@@ -227,7 +229,7 @@ describe('requireIdempotency middleware', () => {
     res.json({ result: 'done' });
 
     const [cacheKey] = mockRedisRef.mock.set.mock.calls[1];
-    expect(cacheKey).toBe('idempotency:anonymous:anon-key');
+    expect(cacheKey).toBe('idempotency:anonymous:POST:/orders:anon-key');
   });
 
   it('falls back to in-memory store when redisClient is null', async () => {

@@ -186,7 +186,9 @@ const verifyOtpSchema = z.object({
  *       200:
  *         description: OTP verified successfully
  *       400:
- *         description: Invalid or expired OTP
+ *         description: Invalid request or OTP not found/expired
+ *       401:
+ *         description: Invalid OTP
  *       429:
  *         description: Too many attempts
  */
@@ -256,6 +258,16 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
     return res.status(500).json({ success: false, error: "Internal server error." });
   }
 });
+
+function generateVerificationToken(identifier) {
+  const payload = {
+    identifier,
+    type: "otp_verification",
+    iat: Math.floor(Date.now() / 1000),
+    exp: Math.floor(Date.now() / 1000) + 300,
+  };
+  return Buffer.from(JSON.stringify(payload)).toString("base64");
+}
 
 export default router;
 

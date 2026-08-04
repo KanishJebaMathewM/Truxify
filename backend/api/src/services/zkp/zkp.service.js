@@ -1,4 +1,4 @@
-import { ethers } from 'ethers';
+﻿import { ethers } from 'ethers';
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import { supabase } from '../../config/db.js';
@@ -106,7 +106,7 @@ class ZKPService {
 
   async getUserAddress(userId) {
     const { data, error } = await supabase
-      .from('users')
+      .from('profiles')
       .select('wallet_address')
       .eq('id', userId)
       .single();
@@ -128,7 +128,7 @@ class ZKPService {
 
   async updateVerificationStatus(userId, verified, txHash) {
     const { error } = await supabase
-      .from('users')
+      .from('profiles')
       .update({
         kyc_verified: verified,
         kyc_verified_at: new Date().toISOString(),
@@ -156,7 +156,7 @@ class ZKPService {
    */
   async isVerifiedInDb(userId) {
     const { data, error } = await supabase
-      .from('users')
+      .from('profiles')
       .select('kyc_verified')
       .eq('id', userId)
       .single();
@@ -185,21 +185,21 @@ class ZKPService {
    *   before any processing begins. This guarantees at-most-one execution
    *   even under concurrent duplicate requests:
    *
-   *   - LockAcquisitionError (Redis unavailable) → propagated to caller → 503
-   *   - lockValue === null (lock held by another request) → propagated → 409
+   *   - LockAcquisitionError (Redis unavailable) â†’ propagated to caller â†’ 503
+   *   - lockValue === null (lock held by another request) â†’ propagated â†’ 409
    *   - After acquiring the lock, re-check `kyc_verified` in the DB; if the
    *     first request already completed, return early without re-running the
    *     blockchain transaction or inserting duplicate audit rows.
    *
    * @param {object} driverData
-   * @throws {LockAcquisitionError} When Redis is unavailable — caller must return 503.
+   * @throws {LockAcquisitionError} When Redis is unavailable â€” caller must return 503.
    * @returns {{ success: boolean, alreadyVerified?: boolean, proof?, onChain?, verified? }}
    */
   async verifyDriver(driverData) {
     const lockKey = `zkp:verify:${driverData.userId}`;
     let lockValue = null;
 
-    // Throws LockAcquisitionError if Redis is down — propagate to route handler.
+    // Throws LockAcquisitionError if Redis is down â€” propagate to route handler.
     lockValue = await acquireLock(lockKey, ZKP_LOCK_TTL_MS);
 
     if (lockValue === null) {
@@ -218,7 +218,7 @@ class ZKPService {
       // exits without re-running the expensive blockchain transaction.
       const alreadyVerified = await this.isVerifiedInDb(driverData.userId);
       if (alreadyVerified) {
-        logger.info(`[ZKP] User ${driverData.userId} is already KYC-verified — skipping duplicate processing`);
+        logger.info(`[ZKP] User ${driverData.userId} is already KYC-verified â€” skipping duplicate processing`);
         return {
           success: true,
           alreadyVerified: true,
@@ -276,8 +276,8 @@ class ZKPService {
 
   async getVerificationStats() {
     const [verifiedResult, unverifiedResult] = await Promise.all([
-      supabase.from('users').select('id', { count: 'exact', head: true }).eq('kyc_verified', true),
-      supabase.from('users').select('id', { count: 'exact', head: true }).eq('kyc_verified', false),
+      supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('kyc_verified', true),
+      supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('kyc_verified', false),
     ]);
     if (verifiedResult.error) throw verifiedResult.error;
     if (unverifiedResult.error) throw unverifiedResult.error;

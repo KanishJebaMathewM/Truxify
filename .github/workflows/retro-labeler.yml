@@ -7,7 +7,7 @@ on:
         description: 'Dry Run (only log modifications, do not apply changes)'
         type: boolean
         required: false
-        default: true
+        default: false
       pr_state:
         description: 'PR state to process (open, closed, or all)'
         type: choice

@@ -158,17 +158,43 @@ function deduplicateTypeLabels({ currentLabels, changedFiles, prTitle, rules }) 
   return { toKeep: winnerLabel, toRemove };
 }
 
+function isRateLimitError(error) {
+  if (!error) return false;
+  if (error.status === 429) return true;
+  if (error.status === 403) {
+    const msg = String(error.message || '').toLowerCase();
+    if (msg.includes('rate limit') || msg.includes('secondary rate limit') || msg.includes('exceeded')) {
+      return true;
+    }
+    const resMsg = String(error.response?.data?.message || '').toLowerCase();
+    if (resMsg.includes('rate limit') || resMsg.includes('exceeded')) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function run({ github, context, core, dryRun = false, prState = 'closed' }) {
   const { owner, repo } = context.repo;
 
   core.info(`Starting retrospective PR labeler (dryRun = ${dryRun})...`);
 
   // Fetch available labels in repo to check if we need to create them
-  const repoLabels = await github.paginate(github.rest.issues.listLabelsForRepo, {
-    owner,
-    repo,
-    per_page: 100
-  });
+  let repoLabels = [];
+  try {
+    repoLabels = await github.paginate(github.rest.issues.listLabelsForRepo, {
+      owner,
+      repo,
+      per_page: 100
+    });
+  } catch (error) {
+    if (isRateLimitError(error)) {
+      core.warning(`API rate limit exceeded while listing repository labels: ${error.message}. Stopping retrospective PR labeler.`);
+      return 0;
+    }
+    throw error;
+  }
+
   const availableLabelsLower = repoLabels.map(l => l.name.toLowerCase());
 
   async function ensureLabelExists(name, color, description) {
@@ -191,6 +217,10 @@ async function run({ github, context, core, dryRun = false, prState = 'closed' }
       });
       availableLabelsLower.push(normalized);
     } catch (error) {
+      if (isRateLimitError(error)) {
+        core.warning(`API rate limit exceeded while creating label "${name}": ${error.message}`);
+        throw error;
+      }
       if (error.status !== 422) {
         throw error;
       }
@@ -198,17 +228,34 @@ async function run({ github, context, core, dryRun = false, prState = 'closed' }
   }
 
   // Ensure gssoc:approved and level:beginner exist
-  await ensureLabelExists('gssoc:approved', '0052cc', 'GSSoC approved contribution');
-  await ensureLabelExists('level:beginner', '0e8a16', 'Beginner level task/PR');
+  try {
+    await ensureLabelExists('gssoc:approved', '0052cc', 'GSSoC approved contribution');
+    await ensureLabelExists('level:beginner', '0e8a16', 'Beginner level task/PR');
+  } catch (error) {
+    if (isRateLimitError(error)) {
+      core.warning(`API rate limit exceeded while setting up initial labels. Stopping retrospective PR labeler.`);
+      return 0;
+    }
+    throw error;
+  }
 
   // Fetch pull requests
   core.info(`Fetching ${prState} pull requests...`);
-  const pullRequests = await github.paginate(github.rest.pulls.list, {
-    owner,
-    repo,
-    state: prState,
-    per_page: 100
-  });
+  let pullRequests = [];
+  try {
+    pullRequests = await github.paginate(github.rest.pulls.list, {
+      owner,
+      repo,
+      state: prState,
+      per_page: 100
+    });
+  } catch (error) {
+    if (isRateLimitError(error)) {
+      core.warning(`API rate limit exceeded while fetching pull requests: ${error.message}. Stopping retrospective PR labeler.`);
+      return 0;
+    }
+    throw error;
+  }
 
   core.info(`Found ${pullRequests.length} ${prState} pull requests. Processing...`);
 
@@ -216,89 +263,109 @@ async function run({ github, context, core, dryRun = false, prState = 'closed' }
 
   let updatedCount = 0;
   for (const pr of pullRequests) {
-    const { toAdd, toRemove } = checkRetroChanges(pr);
+    try {
+      const { toAdd, toRemove } = checkRetroChanges(pr);
 
-    // Type label deduplication
-    const currentLabelNames = (pr.labels || []).map(l => typeof l === 'string' ? l : l.name);
-    const projectedLabels = [...new Set([...currentLabelNames, ...toAdd])].filter(
-      l => !toRemove.includes(l)
-    );
-    const contestedOnPR = projectedLabels.filter(l =>
-      CONTESTED_TYPE_LABELS_LOWER.includes(normalizeLabel(l))
-    );
+      // Type label deduplication
+      const currentLabelNames = (pr.labels || []).map(l => typeof l === 'string' ? l : l.name);
+      const projectedLabels = [...new Set([...currentLabelNames, ...toAdd])].filter(
+        l => !toRemove.includes(l)
+      );
+      const contestedOnPR = projectedLabels.filter(l =>
+        CONTESTED_TYPE_LABELS_LOWER.includes(normalizeLabel(l))
+      );
 
-    if (contestedOnPR.length > 1) {
-      let changedFiles = [];
-      try {
-        const files = await github.paginate(github.rest.pulls.listFiles, {
-          owner,
-          repo,
-          pull_number: pr.number,
-          per_page: 100
+      if (contestedOnPR.length > 1) {
+        let changedFiles = [];
+        try {
+          const files = await github.paginate(github.rest.pulls.listFiles, {
+            owner,
+            repo,
+            pull_number: pr.number,
+            per_page: 100
+          });
+          changedFiles = files.map(f => f.filename);
+        } catch (error) {
+          if (isRateLimitError(error)) {
+            core.warning(`API rate limit exceeded while fetching files for PR #${pr.number}: ${error.message}. Stopping further PR processing.`);
+            break;
+          }
+          core.warning(`Failed to fetch files for PR #${pr.number}: ${error.message}`);
+        }
+
+        const dedup = deduplicateTypeLabels({
+          currentLabels: projectedLabels.map(l => ({ name: l })),
+          changedFiles,
+          prTitle: pr.title,
+          rules
         });
-        changedFiles = files.map(f => f.filename);
-      } catch (error) {
-        core.warning(`Failed to fetch files for PR #${pr.number}: ${error.message}`);
-      }
 
-      const dedup = deduplicateTypeLabels({
-        currentLabels: projectedLabels.map(l => ({ name: l })),
-        changedFiles,
-        prTitle: pr.title,
-        rules
-      });
-
-      for (const label of dedup.toRemove) {
-        if (!toRemove.includes(label)) {
-          toRemove.push(label);
-        }
-        // Also remove from toAdd if it was about to be added
-        const addIdx = toAdd.indexOf(label);
-        if (addIdx !== -1) {
-          toAdd.splice(addIdx, 1);
-        }
-      }
-    }
-
-    if (toAdd.length > 0 || toRemove.length > 0) {
-      updatedCount++;
-      const actionStr = [];
-      if (toAdd.length > 0) actionStr.push(`add: ${toAdd.join(', ')}`);
-      if (toRemove.length > 0) actionStr.push(`remove: ${toRemove.join(', ')}`);
-
-      if (dryRun) {
-        core.info(`[Dry Run] PR #${pr.number} (${pr.title}): Would ${actionStr.join(' & ')}`);
-      } else {
-        core.info(`PR #${pr.number} (${pr.title}): Performing actions: ${actionStr.join(' & ')}`);
-        
-        // Remove labels
-        for (const label of toRemove) {
-          try {
-            await github.rest.issues.removeLabel({
-              owner,
-              repo,
-              issue_number: pr.number,
-              name: label
-            });
-          } catch (error) {
-            core.error(`Failed to remove label "${label}" from PR #${pr.number}: ${error.message}`);
+        for (const label of dedup.toRemove) {
+          if (!toRemove.includes(label)) {
+            toRemove.push(label);
           }
-        }
-
-        // Add labels
-        if (toAdd.length > 0) {
-          try {
-            await github.rest.issues.addLabels({
-              owner,
-              repo,
-              issue_number: pr.number,
-              labels: toAdd
-            });
-          } catch (error) {
-            core.error(`Failed to add labels to PR #${pr.number}: ${error.message}`);
+          // Also remove from toAdd if it was about to be added
+          const addIdx = toAdd.indexOf(label);
+          if (addIdx !== -1) {
+            toAdd.splice(addIdx, 1);
           }
         }
       }
+
+      if (toAdd.length > 0 || toRemove.length > 0) {
+        updatedCount++;
+        const actionStr = [];
+        if (toAdd.length > 0) actionStr.push(`add: ${toAdd.join(', ')}`);
+        if (toRemove.length > 0) actionStr.push(`remove: ${toRemove.join(', ')}`);
+
+        if (dryRun) {
+          core.info(`[Dry Run] PR #${pr.number} (${pr.title}): Would ${actionStr.join(' & ')}`);
+        } else {
+          core.info(`PR #${pr.number} (${pr.title}): Performing actions: ${actionStr.join(' & ')}`);
+
+          // Remove labels
+          for (const label of toRemove) {
+            try {
+              await github.rest.issues.removeLabel({
+                owner,
+                repo,
+                issue_number: pr.number,
+                name: label
+              });
+            } catch (error) {
+              if (isRateLimitError(error)) {
+                core.warning(`API rate limit exceeded while removing label "${label}" from PR #${pr.number}: ${error.message}`);
+                throw error;
+              }
+              core.error(`Failed to remove label "${label}" from PR #${pr.number}: ${error.message}`);
+            }
+          }
+
+          // Add labels
+          if (toAdd.length > 0) {
+            try {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: pr.number,
+                labels: toAdd
+              });
+            } catch (error) {
+              if (isRateLimitError(error)) {
+                core.warning(`API rate limit exceeded while adding labels to PR #${pr.number}: ${error.message}`);
+                throw error;
+              }
+              core.error(`Failed to add labels to PR #${pr.number}: ${error.message}`);
+            }
+          }
+        }
+      }
+    } catch (error) {
+      if (isRateLimitError(error)) {
+        core.warning(`API rate limit exceeded processing PR #${pr.number}: ${error.message}. Halting retrospective PR labeler gracefully.`);
+        break;
+      }
+      core.error(`Error processing PR #${pr.number}: ${error.message}`);
     }
   }
 
@@ -309,5 +376,7 @@ async function run({ github, context, core, dryRun = false, prState = 'closed' }
 module.exports = {
   checkRetroChanges,
   deduplicateTypeLabels,
+  isRateLimitError,
   run
 };
+

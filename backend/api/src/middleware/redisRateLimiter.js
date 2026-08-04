@@ -6,19 +6,21 @@ import logger from './logger.js';
  * rate limit using a Redis sorted set.
  *
  * Key: `rl:{routeKey}:{userId}`
- * Members: random UUIDs (values don't matter; uniqueness prevents ZADD dedup)
  * Score: request timestamp in ms
  *
  * On each request:
  *   1. Remove members older than the window (ZREMRANGEBYSCORE)
  *   2. Count remaining members (ZCARD)
- *   3. If count >= limit → 429
+ *   3. If count >= limit → 429, do NOT record the request
  *   4. Otherwise → ZADD the new request, set key TTL, next()
  *
+ * Recording blocked requests is intentionally skipped so that a client
+ * retrying after a 429 does not keep pushing the oldest-entry timestamp
+ * forward and extend their own ban indefinitely.
+ *
  * Failure semantics — fail open:
- *   Unlike redisLock (which fails closed), rate limiting fails open so that
- *   a Redis outage does not block all user traffic. A warning is logged so
- *   ops is aware that rate limiting is temporarily inactive.
+ *   A Redis outage does not block all user traffic. A warning is logged
+ *   so ops is aware that rate limiting is temporarily inactive.
  *
  * @param {object} options
  * @param {string} options.routeKey   Unique name for the route, e.g. 'zkp_verify'
@@ -28,7 +30,7 @@ import logger from './logger.js';
 export function redisRateLimiter({ routeKey, limit, windowMs }) {
   return async (req, res, next) => {
     if (!redisClient) {
-      logger.warn('[RateLimiter] Redis unavailable — rate limiting bypassed for', routeKey);
+      logger.warn({ routeKey }, '[RateLimiter] Redis unavailable — rate limiting bypassed');
       return next();
     }
 
@@ -38,17 +40,22 @@ export function redisRateLimiter({ routeKey, limit, windowMs }) {
     const windowStart = now - windowMs;
 
     try {
+      // Phase 1: evict stale entries and count current window — no write yet.
       const pipeline = redisClient.pipeline();
-      pipeline.zremrangebyscore(key, '-inf', windowStart); // evict old entries
-      pipeline.zcard(key);                                  // count remaining
-      pipeline.zadd(key, now, `${now}-${Math.random()}`);  // record this request
-      pipeline.pexpire(key, windowMs);                      // auto-clean key
-
+      pipeline.zremrangebyscore(key, '-inf', windowStart);
+      pipeline.zcard(key);
       const results = await pipeline.exec();
-      // results[1][1] is the ZCARD result (before adding the new entry)
-      const requestCount = results[1][1];
+
+      // Validate ZCARD result tuple [error, value].
+      const zcardTuple = results[1];
+      if (!zcardTuple || zcardTuple[0]) {
+        logger.warn({ routeKey, err: zcardTuple?.[0] }, '[RateLimiter] ZCARD failed — failing open');
+        return next();
+      }
+      const requestCount = zcardTuple[1];
 
       if (requestCount >= limit) {
+        // Compute Retry-After from the oldest entry still in the window.
         const oldestScore = await redisClient.zrange(key, 0, 0, 'WITHSCORES');
         const retryAfterMs =
           oldestScore.length >= 2
@@ -63,10 +70,16 @@ export function redisRateLimiter({ routeKey, limit, windowMs }) {
         });
       }
 
+      // Phase 2: request is within limit — record it now.
+      await redisClient.pipeline()
+        .zadd(key, now, `${now}-${Math.random()}`)
+        .pexpire(key, windowMs)
+        .exec();
+
       next();
     } catch (err) {
-      logger.error({ err }, '[RateLimiter] Redis error — failing open for', routeKey);
-      next(); // fail open
+      logger.error({ err, routeKey }, '[RateLimiter] Redis error — failing open');
+      next();
     }
   };
 }

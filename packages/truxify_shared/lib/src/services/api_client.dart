@@ -30,6 +30,20 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $message';
 }
 
+class RateLimitException extends ApiException {
+  const RateLimitException(
+    super.statusCode,
+    super.message, {
+    super.body,
+    required this.retryAfter,
+  });
+
+  final Duration retryAfter;
+
+  @override
+  String toString() =>
+      'RateLimitException($statusCode): $message (retry after ${retryAfter.inSeconds}s)';
+}
 /// Describes a single file to include in a multipart request.
 class MultipartFileInfo {
   const MultipartFileInfo({
@@ -210,92 +224,72 @@ class ApiClient {
 
   // ── Core request execution ────────────────────────────────────────
 
-  Future<http.Response> _execute(
-    Future<http.Response> Function(Map<String, String> headers) fn, {
-    Map<String, String>? additionalHeaders,
-    bool isRetry = false,
-  }) async {
-    // Ensure we have a fresh Firebase token before making the request.
-    if (!isRetry) {
-      await _accessTokenAsync;
-    }
-    final response = await fn(_headers(additionalHeaders: additionalHeaders)).timeout(_timeout);
-
-    // ── 401 Unauthorised — attempt token refresh and retry once ──────
-    if (response.statusCode == 401 && !isRetry) {
-      if (kDebugMode) {
-        developer.log(
-          '[ApiClient] 401 received — attempting token refresh',
-          name: 'ApiClient',
-        );
-      }
-
-      final newToken = await _refreshedToken();
-      if (newToken == null) {
-        throw const ApiAuthException(
-          'Session expired and token refresh failed. Please log in again.',
-        );
-      }
-
-      final retryResponse = await fn(
-        _headers(token: newToken, additionalHeaders: additionalHeaders),
-      ).timeout(_timeout);
-
-      if (retryResponse.statusCode == 401) {
-        throw const ApiAuthException(
-          'Authentication failed after token refresh. Please log in again.',
-        );
-      }
-      return retryResponse;
-    }
-
-    // ── 429 Too Many Requests — honour Retry-After and retry once ────
-    //
-    // The backend sets `Retry-After: <seconds>` on rate-limited responses
-    // (e.g. POST /zkp/verify allows 5 attempts/hour). We wait the specified
-    // duration (capped by RetryPolicy.maxRetryAfterSeconds), then retry.
-    // If the retry is also rate-limited, we throw [RateLimitException] so
-    // the UI can surface a meaningful "Try again in X minutes" message
-    // rather than a generic error.
-    if (response.statusCode == 429 && !isRetry && _retryPolicy.retryOnRateLimit) {
-      final waitSeconds = _retryPolicy.parseRetryAfter(response.headers);
-      final clampedWait = waitSeconds.clamp(0, _retryPolicy.maxRetryAfterSeconds).toInt();
-
-      if (kDebugMode) {
-        developer.log(
-          '[ApiClient] 429 received — waiting ${clampedWait}s then retrying',
-          name: 'ApiClient',
-        );
-      }
-
-      if (clampedWait > 0) {
-        await Future<void>.delayed(Duration(seconds: clampedWait));
-      }
-
-      final retryResponse = await fn(
-        _headers(additionalHeaders: additionalHeaders),
-      ).timeout(_timeout);
-
-      if (retryResponse.statusCode == 429) {
-        final retryAfter = _retryPolicy.parseRetryAfter(retryResponse.headers);
-        String? userMessage;
-        try {
-          final decoded = jsonDecode(retryResponse.body);
-          if (decoded is Map<String, dynamic>) {
-            userMessage = (decoded['error'] ?? decoded['message'])?.toString();
-          }
-        } catch (_) {}
-        throw RateLimitException(
-          retryAfterSeconds: retryAfter,
-          message: userMessage,
-        );
-      }
-      return retryResponse;
-    }
-
-    return response;
+Future<http.Response> _execute(
+  Future<http.Response> Function(Map<String, String> headers) fn, {
+  Map<String, String>? additionalHeaders,
+  bool isRetry = false,
+}) async {
+  // Ensure we have a fresh Firebase token before making the request.
+  if (!isRetry) {
+    await _accessTokenAsync;
   }
 
+  final response = await fn(
+    _headers(additionalHeaders: additionalHeaders),
+  ).timeout(_timeout);
+
+  // Existing 401 handling (KEEP THIS)
+  if (response.statusCode == 401 && !isRetry) {
+    if (kDebugMode) {
+      developer.log(
+        '[ApiClient] 401 received — attempting token refresh',
+        name: 'ApiClient',
+      );
+    }
+
+    final newToken = await _refreshedToken();
+    if (newToken == null) {
+      throw const ApiAuthException(
+        'Session expired and token refresh failed. Please log in again.',
+      );
+    }
+
+    final retryResponse = await fn(
+      _headers(
+        token: newToken,
+        additionalHeaders: additionalHeaders,
+      ),
+    ).timeout(_timeout);
+
+    if (retryResponse.statusCode == 401) {
+      throw const ApiAuthException(
+        'Authentication failed after token refresh. Please log in again.',
+      );
+    }
+
+    return retryResponse;
+  }
+
+  // Handle rate limiting (429)
+  if (response.statusCode == 429 && !isRetry) {
+    final retryAfterHeader = response.headers['retry-after'];
+
+    int retrySeconds = int.tryParse(retryAfterHeader ?? '') ?? 1;
+
+    // Cap maximum wait time to 30 seconds
+    retrySeconds = retrySeconds.clamp(1, 30);
+
+    await Future.delayed(Duration(seconds: retrySeconds));
+
+    return await _execute(
+      fn,
+      additionalHeaders: additionalHeaders,
+      isRetry: true,
+    );
+  }
+
+  return response;
+}
   // ── URI building and path normalization ───────────────────────────
 
   Uri _buildUri(String path) {
@@ -528,6 +522,19 @@ class ApiClient {
       message = response.reasonPhrase ?? 'Unknown error';
     }
 
+    if (response.statusCode == 429) {
+        final retryAfterHeader = response.headers['retry-after'];
+
+        final retryAfterSeconds =
+            int.tryParse(retryAfterHeader ?? '') ?? 0;
+
+        throw RateLimitException(
+            response.statusCode,
+            message,
+            body: response.body,
+            retryAfter: Duration(seconds: retryAfterSeconds),
+        );
+    }
     throw ApiException(response.statusCode, message, body: response.body);
   }
 }

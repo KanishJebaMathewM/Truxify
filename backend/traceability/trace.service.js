@@ -357,6 +357,55 @@ class TraceabilityService {
         if (error) throw error;
     }
 
+    // ============ Authorization ============
+
+    /**
+     * Verify that a user has ownership/access rights to a shipment
+     * Prevents IDOR (Insecure Direct Object Reference) attacks
+     * @param {string} shipmentId - The shipment ID to check
+     * @param {string} userId - The user ID requesting access
+     * @returns {Promise<boolean>} - True if user has access, false otherwise
+     */
+    async verifyShipmentOwnership(shipmentId, userId) {
+        try {
+            // First, get the shipment to find the sender
+            const shipment = await this.getShipment(shipmentId);
+            
+            if (!shipment) {
+                logger.warn(`[AUTH] Shipment not found: ${shipmentId}`);
+                return false;
+            }
+            
+            // Check if the user is either the sender or receiver
+            const isSender = shipment.sender.toLowerCase() === userId.toLowerCase();
+            const isReceiver = shipment.receiver.toLowerCase() === userId.toLowerCase();
+            
+            // Also check database for additional ownership records
+            const { data: dbShipment } = await supabase
+                .from('trace_shipments')
+                .select('user_id, owner_id')
+                .eq('shipment_id', shipmentId)
+                .single();
+            
+            const isOwner = dbShipment && (
+                dbShipment.user_id === userId || 
+                dbShipment.owner_id === userId
+            );
+            
+            const hasAccess = isSender || isReceiver || isOwner;
+            
+            if (!hasAccess) {
+                logger.info(`[AUTH] Access denied for user ${userId} to shipment ${shipmentId}`);
+            }
+            
+            return hasAccess;
+        } catch (error) {
+            logger.error(`[AUTH] Error verifying shipment ownership: ${error.message}`);
+            // Fail securely - deny access on error
+            return false;
+        }
+    }
+
     // ============ Statistics ============
 
     async getTraceabilityStats() {

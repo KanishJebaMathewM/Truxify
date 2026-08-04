@@ -4,6 +4,42 @@ import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 
+// Security: Validate user authorization for accessing shipments
+// Implements ownership check to prevent IDOR attacks (CWE-639)
+const validateShipmentAccess = async (req, res, next) => {
+    try {
+        const { shipmentId } = req.params;
+        const userId = req.headers['x-user-id'];
+        
+        if (!userId) {
+            logger.warn(`[IDOR-PREVENTION] Missing user ID for shipment access: ${shipmentId}`);
+            return res.status(401).json({
+                success: false,
+                error: 'Authentication required'
+            });
+        }
+        
+        // Verify shipment ownership via database
+        const isOwner = await traceService.verifyShipmentOwnership(shipmentId, userId);
+        
+        if (!isOwner) {
+            logger.warn(`[IDOR-PREVENTION] Unauthorized access attempt: User ${userId} tried to access shipment ${shipmentId}`);
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied. You do not have permission to access this shipment.'
+            });
+        }
+        
+        next();
+    } catch (error) {
+        logger.error('[IDOR-PREVENTION] Error validating shipment access:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Internal server error during authorization'
+        });
+    }
+};
+
 // Create product
 router.post('/trace/product', async (req, res) => {
     try {
@@ -115,8 +151,8 @@ router.get('/trace/product/:productId', async (req, res) => {
     }
 });
 
-// Get shipment
-router.get('/trace/shipment/:shipmentId', async (req, res) => {
+// Get shipment (Protected with IDOR prevention)
+router.get('/trace/shipment/:shipmentId', validateShipmentAccess, async (req, res) => {
     try {
         const { shipmentId } = req.params;
         const shipment = await traceService.getShipment(shipmentId);

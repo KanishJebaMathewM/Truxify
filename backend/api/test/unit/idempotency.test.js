@@ -301,9 +301,11 @@ describe('requireIdempotency middleware', () => {
       const res = makeRes();
       const next = makeNext();
 
-      const duplicate = middleware(req, res, next);
-      await vi.advanceTimersByTimeAsync(200 * 50 + 10);
-      await duplicate;
+      // Start the middleware and advance time while it runs
+      // Middleware polls up to 600 times with 200ms intervals (120s total)
+      const duplicatePromise = middleware(req, res, next);
+      await vi.advanceTimersByTimeAsync(200 * 600 + 100);
+      await duplicatePromise;
 
       expect(res.status).toHaveBeenCalledWith(409);
       expect(res.json).toHaveBeenCalledWith({ error: 'Duplicate request being processed' });

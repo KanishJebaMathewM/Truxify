@@ -142,12 +142,22 @@ flutter run
 
 ### 3. Set Up the Backend API
 
-The main API requires Node.js `20.x` or higher.
+The main API requires Node.js `20.x` or `22.x`. Newer majors are not yet
+supported — `opossum` declares `node: ^26 || ^24 || ^22` and emits an
+`EBADENGINE` warning outside that range.
+
+Install from the **repository root**, not from `backend/api`. The root
+`package.json` declares npm workspaces (`backend/api` and `blockchain`), so a
+root install is what wires the workspace dependencies together:
 
 ```bash
-cd backend/api
 npm install
 ```
+
+This should complete without any flags. If you find yourself reaching for
+`--legacy-peer-deps` or `--force`, the dependency tree is broken — please open
+an issue rather than working around it, since those flags install a tree npm
+has explicitly flagged as incorrect.
 
 #### Configure Environment Variables
 Copy the example environment file and update the variables (Supabase, Firebase, Redis, MongoDB configs):

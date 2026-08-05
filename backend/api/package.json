@@ -52,9 +52,9 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.39.0",
     "@vitest/coverage-v8": "^4.1.9",
-    "eslint": "^10.6.0",
+    "eslint": "^9.39.5",
     "eslint-plugin-import": "^2.29.1",
     "globals": "^17.7.0",
     "nodemon": "^3.1.2",

@@ -4,15 +4,23 @@
  * to check carrier credentials and safety scores against the specific weigh station.
  */
 
+import { createHash } from 'crypto';
+
+const hashValue = (input) => {
+  const hex = createHash('sha256').update(input).digest('hex');
+  return parseInt(hex.slice(0, 8), 16);
+};
+
 const checkBypassEligibility = async (driverId, lat, lng) => {
   // Simulate network delay
   await new Promise(resolve => setTimeout(resolve, 800));
 
-  // Determine bypass (80% chance) vs pull in (20% chance)
-  const isBypass = Math.random() > 0.2;
-  
-  // Randomly assign an ID for the station for logging
-  const stationId = 'WS-' + Math.floor(Math.random() * 1000);
+  // Deterministically decide bypass (80%) vs pull in (20%) from the driver and station,
+  // so the same driver/station pair always produces the same reproducible outcome.
+  const isBypass = hashValue(`${driverId}:${lat}:${lng}`) % 100 < 80;
+
+  // Stable station ID derived from the station coordinates for logging
+  const stationId = 'WS-' + (hashValue(`${lat}:${lng}`) % 1000);
 
   return {
     action: isBypass ? 'BYPASS' : 'PULL_IN',

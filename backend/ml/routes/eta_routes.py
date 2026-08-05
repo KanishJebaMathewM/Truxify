@@ -1,7 +1,7 @@
 import hmac
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -87,13 +87,15 @@ async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
         )
 
         if traffic_data:
+            # Use UTC consistently with how timestamps are stored
+            now_utc = datetime.now(timezone.utc)
             # Get prediction
             features = np.array([[
                 traffic_data.traffic_speed,
                 traffic_data.free_flow_speed,
                 traffic_data.congestion_level,
-                datetime.now().hour,
-                datetime.now().weekday()
+                now_utc.hour,
+                now_utc.weekday()
             ]])
 
             eta_seconds = traffic_pipeline.predict_eta(features)
@@ -106,7 +108,7 @@ async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
                     eta_string=str(timedelta(seconds=int(eta_seconds))),
                     traffic_speed=traffic_data.traffic_speed,
                     congestion_level=traffic_data.congestion_level,
-                    timestamp=datetime.now().isoformat()
+                    timestamp=now_utc.isoformat()
                 )
 
         raise HTTPException(status_code=500, detail="ETA prediction failed")

@@ -162,7 +162,8 @@ export function setupMessageHandler(cacheInvalidator) {
     const event = (() => {
       try {
         return JSON.parse(message);
-      } catch {
+      } catch (err) {
+        logger.warn({ channel, err: err?.message, message: String(message).slice(0, 100) }, '[CachePublisher] Failed to parse message from pub/sub channel.');
         return null;
       }
     })();

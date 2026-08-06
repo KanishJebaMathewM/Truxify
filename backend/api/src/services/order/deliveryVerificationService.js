@@ -383,6 +383,14 @@ export class DeliveryVerificationService {
       });
     }
 
+    // Guard against NaN/Infinity: NaN ?? fallback still evaluates to NaN in JS,
+    // making distanceM > NaN always false and bypassing the proximity check.
+    if (radiusM !== undefined && (!Number.isFinite(radiusM) || radiusM <= 0)) {
+      throw new DomainError(400, {
+        error: "geofence_radius_m must be a positive number.",
+      });
+    }
+
     if (!mongoDb) {
       throw new DomainError(503, {
         error: "Telemetry database not available.",

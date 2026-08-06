@@ -41,6 +41,7 @@ describe('Driver Routes', () => {
     m.store.wallet_transactions = [];
     m.store.earnings_daily = [];
     m.store.trucks = [];
+    m.store.orders = [];
     m.calls.length = 0;
   });
 
@@ -109,6 +110,46 @@ describe('Driver Routes', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.truck.id).toBe('truck-1');
+  });
+
+  it('GET /ltl/optimize-route excludes active orders with invalid coordinates', async () => {
+    m.store.orders.push(
+      {
+        id: 'order-valid',
+        order_display_id: 'ORD-VALID',
+        driver_id: 'driver-1',
+        status: 'truck_assigned',
+        pickup_address: 'Warehouse',
+        pickup_lat: '12.9716',
+        pickup_lng: '77.5946',
+        drop_address: 'Customer',
+        drop_lat: '13.0827',
+        drop_lng: '80.2707',
+      },
+      {
+        id: 'order-invalid',
+        order_display_id: 'ORD-INVALID',
+        driver_id: 'driver-1',
+        status: 'truck_assigned',
+        pickup_address: 'Bad pickup',
+        pickup_lat: null,
+        pickup_lng: '77.5946',
+        drop_address: 'Bad drop',
+        drop_lat: '13abc',
+        drop_lng: '80.2707',
+      }
+    );
+
+    const res = await request(buildApp())
+      .get('/api/drivers/ltl/optimize-route?lat=12.9&lng=77.5')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body.optimized_route.map((task) => task.orderId)).toEqual([
+      'order-valid',
+      'order-valid',
+    ]);
+    expect(res.body.optimized_route.every((task) => typeof task.lat === 'number' && typeof task.lng === 'number')).toBe(true);
   });
 
   it('GET /trips enriches escrow_status from the underlying order', async () => {

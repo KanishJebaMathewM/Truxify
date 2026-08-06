@@ -156,6 +156,10 @@ function parseIntegerQuery(value) {
 }
 
 function parseCoordinate(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
   if (typeof value !== 'string' || value.trim().length === 0) {
     return null;
   }
@@ -1465,9 +1469,13 @@ router.get('/ltl/optimize-route', authenticate, userLimiter, requirePolicy('driv
     const tasks = [];
     for (const order of activeOrders || []) {
       const needsPickup = ['truck_assigned', 'en_route_pickup', 'arrived_pickup'].includes(order.status);
-      
-      const hasPickupCoords = hasValidCoordinates(order.pickup_lat, order.pickup_lng);
-      const hasDropCoords = hasValidCoordinates(order.drop_lat, order.drop_lng);
+
+      const pickupLat = parseCoordinate(order.pickup_lat);
+      const pickupLng = parseCoordinate(order.pickup_lng);
+      const dropLat = parseCoordinate(order.drop_lat);
+      const dropLng = parseCoordinate(order.drop_lng);
+      const hasPickupCoords = hasValidCoordinates(pickupLat, pickupLng);
+      const hasDropCoords = hasValidCoordinates(dropLat, dropLng);
 
       if (needsPickup && (!hasPickupCoords || !hasDropCoords)) {
         logger.warn(`[LTL Route] Excluding active order ${order.id} due to missing/invalid coordinates (requires both pickup and dropoff).`);
@@ -1486,8 +1494,8 @@ router.get('/ltl/optimize-route', authenticate, userLimiter, requirePolicy('driv
           orderDisplayId: order.order_display_id,
           type: 'pickup',
           address: order.pickup_address,
-          lat: order.pickup_lat,
-          lng: order.pickup_lng
+          lat: pickupLat,
+          lng: pickupLng
         });
       }
       tasks.push({
@@ -1496,8 +1504,8 @@ router.get('/ltl/optimize-route', authenticate, userLimiter, requirePolicy('driv
         orderDisplayId: order.order_display_id,
         type: 'dropoff',
         address: order.drop_address,
-        lat: order.drop_lat,
-        lng: order.drop_lng
+        lat: dropLat,
+        lng: dropLng
       });
     }
 

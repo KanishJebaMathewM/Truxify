@@ -174,11 +174,23 @@ class OrderConsumer {
 
     for (const entry of pending) {
       const topicHandlers = this.handlers.get(entry.topic) || [];
-      const parsedMessage = entry.message;
+      // entry.message is the serialized original event (stored as-is in kafka_dead_letters.message).
+      // Parse it to recover the original event before replaying.
+      let originalEvent;
+      try {
+        originalEvent = typeof entry.message === 'string'
+          ? JSON.parse(entry.message)
+          : entry.message;
+      } catch (parseErr) {
+        logger.warn({ entryId: entry.id }, 'Failed to parse dead letter message during replay — skipping');
+        await deadLetterRepository.markStatus(entry.id, 'failed');
+        results.failed += 1;
+        continue;
+      }
 
       try {
         for (const handler of topicHandlers) {
-          await handler(parsedMessage, { value: parsedMessage?.message });
+          await handler(originalEvent);
         }
         await deadLetterRepository.markStatus(entry.id, 'replayed');
         results.succeeded += 1;

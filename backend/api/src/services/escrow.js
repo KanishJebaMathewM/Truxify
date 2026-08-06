@@ -693,3 +693,5 @@ export async function submitEscrowResolveDisputeTimeout (orderDisplayId) {
     }
   })
 }
+export const lockPayment = escrowLockPayment;
+

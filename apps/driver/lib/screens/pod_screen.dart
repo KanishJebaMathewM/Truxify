@@ -4,14 +4,16 @@ import 'package:camera/camera.dart';
 import 'package:signature/signature.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 import '../services/sync_service.dart';
-import '../theme/app_theme.dart';
+import '../services/trip_service.dart';
 
 class ProofOfDeliveryScreen extends StatefulWidget {
   final String tripDisplayId;
   final String stopId;
   final String? orderId;
+  final String? earnings;
   final Future<void> Function(String? photoPath, String? signaturePath)? onComplete;
 
   const ProofOfDeliveryScreen({
@@ -19,6 +21,7 @@ class ProofOfDeliveryScreen extends StatefulWidget {
     required this.tripDisplayId,
     required this.stopId,
     this.orderId,
+    this.earnings,
     this.onComplete,
   }) : super(key: key);
 
@@ -97,8 +100,137 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
     }
 
     setState(() => _isProcessing = true);
+    final tripService = TripService();
 
     try {
+      // 1. If orderId is provided, attempt payment release via geofence or OTP manual entry
+      if (widget.orderId != null) {
+        _updateStatus('Checking GPS Geofence status...');
+        double? lat;
+        double? lng;
+        try {
+          final position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+            timeLimit: const Duration(seconds: 4),
+          );
+          lat = position.latitude;
+          lng = position.longitude;
+        } catch (e) {
+          debugPrint('Geolocator error: $e');
+        }
+
+        bool paymentReleased = false;
+        String? successMsg;
+
+        // Try geofence auto-release first
+        try {
+          final res = await tripService.confirmOtp(
+            orderId: widget.orderId!,
+            latitude: lat,
+            longitude: lng,
+          );
+          if (res['payment_released'] == true) {
+            paymentReleased = true;
+            successMsg = res['message'] ?? 'Delivery auto-confirmed via GPS Geofence!';
+          }
+        } catch (e) {
+          debugPrint('Geofence auto-confirm failed: $e');
+        }
+
+        // If geofence failed, request manual OTP
+        if (!paymentReleased) {
+          _updateStatus('Awaiting OTP verification...');
+          final enteredOtp = await showDialog<String>(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => const _DriverOtpEntryDialog(),
+          );
+
+          if (enteredOtp == null || enteredOtp.isEmpty) {
+            setState(() => _isProcessing = false);
+            _updateStatus('');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Delivery confirmation cancelled. OTP required.')),
+              );
+            }
+            return;
+          }
+
+          _updateStatus('Verifying OTP and releasing funds...');
+          try {
+            final res = await tripService.confirmOtp(
+              orderId: widget.orderId!,
+              otp: enteredOtp,
+            );
+            if (res['payment_released'] == true) {
+              paymentReleased = true;
+              successMsg = res['message'] ?? 'OTP Verified!';
+            }
+          } catch (e) {
+            setState(() => _isProcessing = false);
+            _updateStatus('');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('OTP verification failed: $e')),
+              );
+            }
+            return;
+          }
+        }
+
+        // Show successful release notification
+        if (paymentReleased && mounted) {
+          final displayEarnings = widget.earnings ?? 'payout';
+          await showDialog<void>(
+            context: context,
+            builder: (context) => Dialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.verified_user_rounded, color: Colors.green, size: 64),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Payment Released! ✓',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '₹$displayEarnings has been credited to your wallet.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 15,
+                        color: TruxifyColors.hintText,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('OK'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+      }
+
       final signBytes = await _signatureController.toPngBytes();
       String? signPath;
       if (signBytes != null) {
@@ -144,6 +276,8 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
         );
         Navigator.of(context).pop();
       }
+    } finally {
+      tripService.dispose();
     }
   }
 
@@ -235,9 +369,9 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _isProcessing ? null : _submit,
+                      onPressed: _submit,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: TruxifyColors.accent,
+                        backgroundColor: TruxifyColors.primary,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
                       child: Text('Complete Delivery', style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -249,3 +383,132 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
     );
   }
 }
+
+class _DriverOtpEntryDialog extends StatefulWidget {
+  const _DriverOtpEntryDialog();
+
+  @override
+  State<_DriverOtpEntryDialog> createState() => _DriverOtpEntryDialogState();
+}
+
+class _DriverOtpEntryDialogState extends State<_DriverOtpEntryDialog> {
+  final List<TextEditingController> _controllers = List.generate(4, (_) => TextEditingController());
+  final List<FocusNode> _focusNodes = List.generate(4, (_) => FocusNode());
+
+  @override
+  void dispose() {
+    for (final controller in _controllers) {
+      controller.dispose();
+    }
+    for (final node in _focusNodes) {
+      node.dispose();
+    }
+    super.dispose();
+  }
+
+  String _getOtp() {
+    return _controllers.map((c) => c.text).join();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.lock_person_rounded, color: TruxifyColors.accent, size: 28),
+                const SizedBox(width: 12),
+                Text(
+                  'Enter Delivery OTP',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Please enter the 4-digit OTP provided by the customer to release payment.',
+              style: GoogleFonts.dmSans(
+                fontSize: 14,
+                color: TruxifyColors.hintText,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: List.generate(4, (index) {
+                return SizedBox(
+                  width: 50,
+                  child: TextField(
+                    controller: _controllers[index],
+                    focusNode: _focusNodes[index],
+                    autofocus: index == 0,
+                    keyboardType: TextInputType.number,
+                    textAlign: TextAlign.center,
+                    maxLength: 1,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    decoration: InputDecoration(
+                      counterText: '',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: TruxifyColors.accent, width: 2),
+                      ),
+                    ),
+                    onChanged: (value) {
+                      if (value.isNotEmpty && index < 3) {
+                        _focusNodes[index + 1].requestFocus();
+                      } else if (value.isEmpty && index > 0) {
+                        _focusNodes[index - 1].requestFocus();
+                      }
+                      if (_getOtp().length == 4) {
+                        // Submit automatically when 4 digits are entered
+                        Navigator.of(context).pop(_getOtp());
+                      }
+                    },
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 28),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                ),
+                const SizedBox(width: 12),
+                FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: TruxifyColors.accent,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).pop(_getOtp());
+                  },
+                  child: const Text('Verify', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}
+

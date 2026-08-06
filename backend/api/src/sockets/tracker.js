@@ -773,6 +773,17 @@ export async function handleLocationPing(ws, data, req) {
   if (validationErrors) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload', details: validationErrors }));
   }
+
+  // Cross-field validation: require at least one complete coordinate pair.
+  const hasLatLng = data.lat !== undefined && data.lng !== undefined;
+  const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;
+  if (!hasLatLng && !hasLatLong) {
+    return ws.send(JSON.stringify({
+      error: 'Invalid telemetry payload',
+      details: ['At least one coordinate pair (lat+lng or latitude+longitude) is required.']
+    }));
+  }
+
   const sanitized = sanitizeTelemetryData(data);
   Object.assign(data, sanitized);
 

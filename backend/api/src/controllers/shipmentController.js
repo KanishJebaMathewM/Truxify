@@ -21,8 +21,10 @@ export const getShipmentDetails = async (req, res) => {
 
     // Authorization check: Verify if the authenticated user is the owner (customer) or driver
     // The issue states: "matches the ownerId of the requested shipment"
-    // In our context, customer_id represents the owner.
-    if (shipment.customer_id !== req.user.id) {
+    // In our context, customer_id represents the owner, and driver_id is the assigned driver.
+    const isOwner = shipment.customer_id === req.user.id;
+    const isAssignedDriver = shipment.driver_id === req.user.id;
+    if (!isOwner && !isAssignedDriver) {
       logger.warn({ userId: req.user.id, shipmentId }, 'Unauthorized access attempt to shipment details');
       return res.status(403).json({ error: 'Forbidden: You do not have access to this shipment.' });
     }

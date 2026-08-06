@@ -241,23 +241,33 @@ class _TripsScreenState extends State<TripsScreen> {
 
     if (currentStop.isEmpty) return;
 
+    final tripRow = _trips.firstWhere(
+      (t) => t['trip_display_id']?.toString() == tripId,
+      orElse: () => <String, dynamic>{},
+    );
+    final netEarnings = tripRow.isNotEmpty && tripRow['net_earnings'] != null
+        ? ((tripRow['net_earnings'] ?? 0) / 100).toStringAsFixed(0)
+        : null;
+
     if (!mounted) return;
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (context) => ProofOfDeliveryScreen(
         tripDisplayId: currentStop['trip_display_id'].toString(),
         stopId: currentStop['id'].toString(),
+        orderId: currentStop['order_id']?.toString(),
+        earnings: netEarnings,
         onComplete: (photoPath, signPath) async {
           await SyncService.instance.queueOrSyncPoD(
             tripDisplayId: currentStop['trip_display_id'].toString(),
             stopId: currentStop['id'].toString(),
+            orderId: currentStop['order_id']?.toString(),
             photoPath: photoPath,
             signaturePath: signPath,
           );
         },
       ),
     ));
-
-    if (!mounted) return;
+    
     await _loadTrips();
   }
 
@@ -282,7 +292,7 @@ class _TripsScreenState extends State<TripsScreen> {
         customerName: item['customer_name']?.toString() ?? 'Unknown',
         goods: item['goods']?.toString() ?? '',
         destination: item['destination']?.toString() ?? '',
-        earnings: '₹${((item['earnings'] as num? ?? 0) / 100).toStringAsFixed(0)}',
+        earnings: '₹${((item['earnings'] ?? 0) / 100).toStringAsFixed(0)}',
         delivered: item['is_delivered'] as bool? ?? false,
         isFragile: item['is_fragile'] as bool? ?? false,
         isStackable: item['is_stackable'] as bool? ?? true,
@@ -298,21 +308,20 @@ class _TripsScreenState extends State<TripsScreen> {
       items: tripItems.map((i) => i.goods).toList(),
       itemCount: '${tripItems.length} item${tripItems.length == 1 ? '' : 's'} · ${row['distance']?.toString() ?? ''}',
       distance: row['distance']?.toString() ?? '',
-      earnings: '₹${((row['net_earnings'] as num? ?? 0) / 100).toStringAsFixed(0)}',
+      earnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
       status: _mapStatus(row['status']?.toString()),
       tripId: tripId,
       hash: '',
       duration: row['duration']?.toString() ?? '',
       endTime: '',
       paymentBreakdown: PaymentBreakdown(
-        baseFreight: '₹${((row['total_earnings'] as num? ?? 0) / 100).toStringAsFixed(0)}',
+        baseFreight: '₹${((row['total_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
         fuelDeducted: '₹0',
         tollDeducted: '₹0',
         platformFee: '₹0',
         netEarnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
       ),
       tripItems: tripItems,
-      escrowStatus: row['escrow_status']?.toString(),
     );
   }).toList();
 }
@@ -425,30 +434,9 @@ class _TripsScreenState extends State<TripsScreen> {
     }
 
     try {
-      // Resolve driver's current GPS from the active trip's last known route
-      // point so the ML engine can compute detour distances accurately.
-      double? currentLat;
-      double? currentLng;
-      final activeTrip = _trips.cast<Map<String, dynamic>?>().firstWhere(
-        (t) => t?['status'] == 'active',
-        orElse: () => null,
-      );
-      if (activeTrip != null) {
-        final tripId = activeTrip['trip_display_id']?.toString();
-        final routePoints = tripId != null ? (_routePointsByTripId[tripId] ?? []) : [];
-        if (routePoints.isNotEmpty) {
-          final lastPoint = routePoints.last;
-          currentLat = (lastPoint['latitude'] as num?)?.toDouble();
-          currentLng = (lastPoint['longitude'] as num?)?.toDouble();
-        }
-      }
-
       final results = await Future.wait([
         _marketplaceRepository.fetchLoadOffers(),
-        _marketplaceRepository.fetchEnRouteLoads(
-          currentLat: currentLat,
-          currentLng: currentLng,
-        ),
+        _marketplaceRepository.fetchEnRouteLoads(),
         _marketplaceRepository.fetchDriverBids(),
       ]);
 
@@ -1553,11 +1541,10 @@ class _TripsScreenState extends State<TripsScreen> {
       );
     }).toList();
 
-    return RepaintBoundary(
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: FlutterMap(
-          options: MapOptions(
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: FlutterMap(
+        options: MapOptions(
           initialCenter: points.first,
           initialZoom: 6.0,
           interactionOptions: const InteractionOptions(
@@ -1583,7 +1570,7 @@ class _TripsScreenState extends State<TripsScreen> {
               p == routePoints.first ||
               p == routePoints.last ||
               p['is_claimed'] == true
-            ).map<Marker>((point) {
+            ).map((point) {
               return Marker(
                 point: ll.LatLng(
                   (point['latitude'] as num).toDouble(),
@@ -1591,32 +1578,30 @@ class _TripsScreenState extends State<TripsScreen> {
                 ),
                 width: 12,
                 height: 12,
-                child: GestureDetector(
-                  onTap: () {
-                    final mapPoint = RouteMapPoint(
-                      id: point['id']?.toString() ?? '',
-                      title: (point['label'] ?? point['title'] ?? 'Stop').toString(),
-                      subtitle: (point['address'] ?? point['subtitle'] ?? '').toString(),
-                      details: (point['details'] ?? '').toString(),
-                      progress: (point['progress'] as num?)?.toDouble() ?? 0.0,
-                      claimed: point['is_claimed'] == true,
-                      icon: Icons.place,
-                      latitude: (point['latitude'] as num).toDouble(),
-                      longitude: (point['longitude'] as num).toDouble(),
-                      loadOfferId: point['load_offer_id']?.toString(),
-                    );
-                    Navigator.of(context).pushNamed(
-                      AppRoutes.loadPointDetail,
-                      arguments: mapPoint,
-                    );
-                  },
-                  child: Container(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: point['is_claimed'] == true
-                          ? TruxifyColors.success
-                          : TruxifyColors.accent,
-                    ),
+                onTap: () {
+                  final mapPoint = RouteMapPoint(
+                    id: point['id']?.toString() ?? '',
+                    title: (point['label'] ?? point['title'] ?? 'Stop').toString(),
+                    subtitle: (point['address'] ?? point['subtitle'] ?? '').toString(),
+                    details: (point['details'] ?? '').toString(),
+                    progress: (point['progress'] as num?)?.toDouble() ?? 0.0,
+                    claimed: point['is_claimed'] == true,
+                    icon: Icons.place,
+                    latitude: (point['latitude'] as num).toDouble(),
+                    longitude: (point['longitude'] as num).toDouble(),
+                    loadOfferId: point['load_offer_id']?.toString(),
+                  );
+                  Navigator.of(context).pushNamed(
+                    AppRoutes.loadPointDetail,
+                    arguments: mapPoint,
+                  );
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: point['is_claimed'] == true
+                        ? TruxifyColors.success
+                        : TruxifyColors.accent,
                   ),
                 ),
               );
@@ -1624,7 +1609,7 @@ class _TripsScreenState extends State<TripsScreen> {
           ),
         ],
       ),
-    ));
+    );
   }
 }
 

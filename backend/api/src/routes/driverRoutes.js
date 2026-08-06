@@ -567,20 +567,34 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
 
     if (error) return res.status(500).json({ error: 'Failed to fetch trips.', details: error.message });
 
-    // Enrich trips with escrow_status from orders
+    // Enrich trips with escrow_status from orders and stars from ratings
     const tripDisplayIds = (trips || []).map(t => t.trip_display_id).filter(Boolean);
     let escrowMap = {};
+    let ratingsMap = {};
     if (tripDisplayIds.length > 0) {
-      const { data: orders } = await supabase
-        .from('orders')
-        .select('order_display_id, escrow_status')
-        .in('order_display_id', tripDisplayIds);
-      escrowMap = Object.fromEntries((orders || []).map(o => [o.order_display_id, o.escrow_status]));
+      const [ordersRes, ratingsRes] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('order_display_id, escrow_status')
+          .in('order_display_id', tripDisplayIds),
+        supabase
+          .from('ratings')
+          .select('order_display_id, stars')
+          .in('order_display_id', tripDisplayIds)
+      ]);
+
+      if (ordersRes.data) {
+        escrowMap = Object.fromEntries(ordersRes.data.map(o => [o.order_display_id, o.escrow_status]));
+      }
+      if (ratingsRes.data) {
+        ratingsMap = Object.fromEntries(ratingsRes.data.map(r => [r.order_display_id, r.stars]));
+      }
     }
 
     const enrichedTrips = (trips || []).map(t => ({
       ...t,
-      escrow_status: escrowMap[t.trip_display_id] || 'pending'
+      escrow_status: escrowMap[t.trip_display_id] || 'pending',
+      stars: ratingsMap[t.trip_display_id] || null
     }));
 
     res.json({

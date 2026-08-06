@@ -998,6 +998,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
+                    'Past Trips',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'View completed trip history and earnings breakdown',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+                  ),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                  onTap: () => Navigator.of(context).pushNamed(AppRoutes.pastTrips),
+                ),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  title: Text(
                     AppLocalizations.of(context)!.documents,
                     style: GoogleFonts.dmSans(
                       fontSize: 14,

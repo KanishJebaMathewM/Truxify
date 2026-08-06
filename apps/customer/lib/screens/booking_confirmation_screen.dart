@@ -1,7 +1,5 @@
-import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../services/order_service.dart';
 import '../controllers/app_controller.dart';
 import '../models/app_models.dart';
@@ -11,15 +9,7 @@ import '../repositories/address_repository.dart';
 import '../repositories/payment_repository.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
-import '../core/api_client.dart';
 
-/// Payment pipeline:
-///   1. createOrder()  → orderId returned
-///   2. GET /api/payments/:orderId/status  → confirm escrow state
-///   3. POST /api/payments/upi-intent      → get UPI deep-link
-///   4. url_launcher opens UPI app         → user completes payment
-///   5. POST /api/payments/lock { tx_hash } → backend verifies on-chain
-///   6. Show "Payment Locked in Escrow 🔒" confirmation
 class BookingConfirmationScreen extends StatefulWidget {
   const BookingConfirmationScreen(
       {super.key, required this.draft, required this.truck});
@@ -36,25 +26,16 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     with SingleTickerProviderStateMixin {
   final _paymentRepo = PaymentRepository();
   final _addressRepo = AddressRepository();
-  final _apiClient = ApiClient();
-
   bool _showSuccess = false;
   bool _isLoading = true;
   bool _isSubmitting = false;
-  bool _isAwaitingUpi = false;
-
   String? _createdOrderId;
-  String? _createdOrderDisplayId;
-  String? _upiDeepLink;
-  String? _amountInr;
-
   late final AnimationController _controller;
   late final OrderService _orderService;
   List<PaymentMethod> _paymentMethods = [];
   List<SavedAddress> _addresses = [];
   PaymentMethod? _selectedPayment;
   SavedAddress? _selectedAddress;
-  bool _isPassengerMode = false;
 
   @override
   void initState() {
@@ -109,8 +90,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     }
   }
 
-  // ── Step 1: Create order ───────────────────────────────────────────────────
-  Future<void> _createOrderAndInitiatePayment() async {
+  Future<void> _pay() async {
     final finalDropLat = _selectedAddress?.latitude ?? widget.draft.dropLat;
     final finalDropLng = _selectedAddress?.longitude ?? widget.draft.dropLng;
 
@@ -122,9 +102,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         finalDropLng == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'Missing pickup or drop coordinates. Please go back and select valid locations.')),
+        const SnackBar(content: Text('Missing pickup or drop coordinates. Please go back and select valid locations.')),
       );
       return;
     }
@@ -133,8 +111,27 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     if (weight == null || weight <= 0) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Invalid weight. Please enter a valid weight.')),
+        const SnackBar(content: Text('Invalid weight. Please enter a valid weight.')),
+      );
+      return;
+    }
+
+    // Parse price to paisa
+    final cleanPriceStr = widget.truck.price.replaceAll('₹', '').replaceAll(',', '').trim();
+    final amountRupees = double.tryParse(cleanPriceStr) ?? 0.0;
+    final amountPaisa = (amountRupees * 100).round();
+
+    // Trigger mock UPI Payment Intent
+    final upiRef = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _UpiPaymentMockDialog(amount: widget.truck.price),
+    );
+
+    if (upiRef == null || upiRef.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Payment cancelled by user')),
       );
       return;
     }
@@ -142,6 +139,12 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     setState(() => _isSubmitting = true);
 
     try {
+      final pickupDate = widget.draft.pickupDate;
+      final pickupTime = pickupDate != null
+          ? '${pickupDate.hour.toString().padLeft(2, '0')}:'
+              '${pickupDate.minute.toString().padLeft(2, '0')}'
+          : widget.draft.dateLabel;
+
       final orderId = await _orderService.createOrder(
         pickupAddress: widget.draft.pickup,
         dropAddress: _selectedAddress?.fullAddress ?? widget.draft.drop,
@@ -149,118 +152,47 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         pickupLng: widget.draft.pickupLng!,
         dropLat: finalDropLat,
         dropLng: finalDropLng,
-        pickupTime: widget.draft.dateLabel,
-        goodsType: widget.draft.goodsType + (_isPassengerMode ? ' + Passenger' : ''),
-        weightTonnes: double.tryParse(widget.draft.weightTonnes) ?? 0,
+        pickupTime: pickupTime,
+        pickupDate: pickupDate,
+        goodsType: widget.draft.goodsType,
+        weightTonnes: weight,
         paymentMethodId: _selectedPayment?.id,
-        requiresRefrigeration: widget.draft.requiresRefrigeration ?? false,
+        requiresRefrigeration: widget.draft.requiresRefrigeration,
         targetTemperatureMin: widget.draft.targetTemperatureMin,
         targetTemperatureMax: widget.draft.targetTemperatureMax,
       );
 
       _createdOrderId = orderId;
 
-      // ── Step 2: Fetch UPI intent ──────────────────────────────────────────
-      await _fetchUpiIntent(orderId);
-    } catch (e) {
-      debugPrint('Failed to create order: $e');
+      // Call backend POST /api/payments/lock to lock payment on smart contract
+      await _orderService.lockPayment(
+        bookingId: orderId,
+        upiReference: upiRef,
+        amountPaisa: amountPaisa.toDouble(),
+      );
+
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to create booking')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isSubmitting = false);
-      }
-    }
-  }
+      setState(() => _showSuccess = true);
+      await _controller.forward(from: 0);
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
 
-  // ── Step 2: Get UPI intent ────────────────────────────────────────────────
-  Future<void> _fetchUpiIntent(String orderId) async {
-    try {
-      final body = await _apiClient.post(
-        '/api/payments/upi-intent',
-        body: {'order_id': orderId},
-      );
-      if (body is Map<String, dynamic>) {
-        setState(() {
-          _upiDeepLink = body['deep_link'] as String?;
-          _amountInr = body['amount_inr'] as String?;
-          _createdOrderDisplayId = body['order_ref'] as String?;
-          _isAwaitingUpi = true;
-        });
-      }
-    } catch (e) {
-      debugPrint('UPI intent failed: $e');
-      // Fallback: show success even without escrow
-      _showSuccessPanel();
-    }
-  }
-
-  // ── Step 3: Open UPI deep-link ────────────────────────────────────────────
-  Future<void> _launchUpi() async {
-    if (_upiDeepLink == null) return;
-    final uri = Uri.parse(_upiDeepLink!);
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-        // After returning from UPI app, user taps "I've Paid" button
-      } else {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'No UPI app found. Please install GPay, PhonePe, or Paytm.')),
-        );
-      }
-    } catch (e) {
-      debugPrint('Failed to launch UPI: $e');
-    }
-  }
-
-  // ── Step 4: Lock payment after UPI success ────────────────────────────────
-  Future<void> _confirmPaymentLocked() async {
-    if (_createdOrderId == null) return;
-    setState(() => _isSubmitting = true);
-
-    try {
-      // In mock UPI mode, generate a placeholder tx_hash
-      // In production, the wallet SDK would provide the real on-chain hash
-      final mockTxHash =
-          '0x${_createdOrderId!.replaceAll('-', '').padRight(64, '0').substring(0, 64)}';
-
-      await _apiClient.post(
-        '/api/payments/lock',
-        body: {
-          'order_id': _createdOrderId,
-          'tx_hash': mockTxHash,
-        },
-      );
-
-      _showSuccessPanel();
-    } catch (e) {
-      debugPrint('Payment lock failed: $e');
-      // Even if lock fails, show booking success — reconciliation will handle it
-      _showSuccessPanel();
-    } finally {
-      if (mounted) {
-        setState(() => _isSubmitting = false);
-      }
-    }
-  }
-
-  void _showSuccessPanel() {
-    if (!mounted) return;
-    setState(() {
-      _showSuccess = true;
-      _isAwaitingUpi = false;
-    });
-    _controller.forward(from: 0).then((_) async {
-      await Future<void>.delayed(const Duration(milliseconds: 1200));
       if (!mounted) return;
+
       TruxifyScope.of(context).openOrders(tabIndex: 0);
       Navigator.of(context).popUntil((route) => route.isFirst);
-    });
+    } catch (e) {
+      debugPrint('Failed to complete booking: $e');
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to complete booking: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
   }
 
   @override
@@ -298,9 +230,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                     label: 'Driver',
                     value:
                         '${widget.truck.driver} ⭐ ${widget.truck.rating.toStringAsFixed(1)}'),
-                _SummaryRow(
-                    label: 'Truck',
-                    value: widget.truck.truckNumber ?? widget.truck.truck),
+                _SummaryRow(label: 'Truck', value: widget.truck.truckNumber ?? widget.truck.truck),
               ],
             ),
           ),
@@ -316,26 +246,14 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                         ?.copyWith(fontWeight: FontWeight.w800)),
                 const SizedBox(height: 14),
                 if (widget.truck.baseFreight != null) ...[
-                  _PriceLineRow(
-                      label: 'Base freight',
-                      amount: widget.truck.baseFreight!),
+                  _PriceLineRow(label: 'Base freight', amount: widget.truck.baseFreight!),
                   if (widget.truck.tollEstimate != null)
-                    _PriceLineRow(
-                        label: 'Toll estimate',
-                        amount: widget.truck.tollEstimate!),
+                    _PriceLineRow(label: 'Toll estimate', amount: widget.truck.tollEstimate!),
                   if (widget.truck.platformFee != null)
-                    _PriceLineRow(
-                        label: 'Platform fee',
-                        amount: widget.truck.platformFee!),
-                  _PriceLineRow(
-                      label: 'Total',
-                      amount: widget.truck.price,
-                      isTotal: true),
+                    _PriceLineRow(label: 'Platform fee', amount: widget.truck.platformFee!),
+                  _PriceLineRow(label: 'Total', amount: widget.truck.price, isTotal: true),
                 ] else
-                  _PriceLineRow(
-                      label: 'Total',
-                      amount: widget.truck.price,
-                      isTotal: true),
+                  _PriceLineRow(label: 'Total', amount: widget.truck.price, isTotal: true),
                 if (widget.truck.isAiEstimate) ...[
                   const SizedBox(height: 4),
                   const Divider(),
@@ -379,37 +297,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                 const SizedBox(height: 6),
                 Text('Released only on delivery',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color:
-                            TruxifyColors.adaptiveSecondaryText(context))),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          InfoCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text('Passenger Mode 🚌',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w800)),
-                    const Spacer(),
-                    Switch(
-                      value: _isPassengerMode,
-                      onChanged: (val) => setState(() => _isPassengerMode = val),
-                      activeColor: TruxifyColors.accent,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Book a space in the back of the trailer for cheap cross-country travel. (No seatbelts provided).',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: TruxifyColors.adaptiveSecondaryText(context)),
-                ),
+                        color: TruxifyColors.adaptiveSecondaryText(context))),
               ],
             ),
           ),
@@ -483,24 +371,14 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                   child: _showSuccess
                       ? _SuccessPanel(
                           controller: _controller,
-                          orderId: _createdOrderDisplayId ?? _createdOrderId ?? '',
-                          amountInr: _amountInr,
+                          orderId: _createdOrderId ?? '',
                         )
-                      : _isAwaitingUpi
-                          ? _UpiPaymentSheet(
-                              amountInr: _amountInr ?? widget.truck.price,
-                              isSubmitting: _isSubmitting,
-                              onLaunchUpi: _launchUpi,
-                              onConfirmPaid: _confirmPaymentLocked,
-                            )
-                          : PrimaryButton(
-                              label: _isSubmitting
-                                  ? 'Creating booking...'
-                                  : (_isLoading ? 'Loading...' : 'Pay & Confirm'),
-                              onPressed: _isLoading || _isSubmitting
-                                  ? null
-                                  : _createOrderAndInitiatePayment,
-                            ),
+                      : PrimaryButton(
+                          label: _isSubmitting
+                              ? 'Submitting...'
+                              : (_isLoading ? 'Loading...' : 'Pay & Confirm'),
+                          onPressed: _isLoading || _isSubmitting ? null : _pay,
+                        ),
                 ),
               ],
             ),
@@ -510,160 +388,6 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
     );
   }
 }
-
-// ── UPI Payment Sheet ─────────────────────────────────────────────────────────
-
-class _UpiPaymentSheet extends StatelessWidget {
-  const _UpiPaymentSheet({
-    required this.amountInr,
-    required this.isSubmitting,
-    required this.onLaunchUpi,
-    required this.onConfirmPaid,
-  });
-
-  final String amountInr;
-  final bool isSubmitting;
-  final VoidCallback onLaunchUpi;
-  final VoidCallback onConfirmPaid;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            TruxifyColors.accent.withValues(alpha: 0.12),
-            TruxifyColors.accentDark.withValues(alpha: 0.06),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-            color: TruxifyColors.accent.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: TruxifyColors.accent.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.lock_outline_rounded,
-                    color: TruxifyColors.accentDark, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Booking created!',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall
-                            ?.copyWith(fontWeight: FontWeight.w800)),
-                    Text('Now secure your booking via UPI',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: TruxifyColors.adaptiveSecondaryText(
-                                context))),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-            decoration: BoxDecoration(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? TruxifyColors.darkAccentLight
-                  : Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                  color: TruxifyColors.accent.withValues(alpha: 0.2)),
-            ),
-            child: Column(
-              children: [
-                Text('Amount to Pay',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color:
-                            TruxifyColors.adaptiveSecondaryText(context))),
-                const SizedBox(height: 4),
-                Text('₹$amountInr',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: TruxifyColors.accentDark)),
-                const SizedBox(height: 4),
-                Text('Locked in blockchain escrow until delivery',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color:
-                            TruxifyColors.adaptiveSecondaryText(context)),
-                    textAlign: TextAlign.center),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              id: 'btn_open_upi_app',
-              onPressed: onLaunchUpi,
-              icon: const Icon(Icons.open_in_new_rounded, size: 18),
-              label: const Text('Open UPI App to Pay'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: TruxifyColors.accentDark,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              id: 'btn_confirm_paid',
-              onPressed: isSubmitting ? null : onConfirmPaid,
-              icon: isSubmitting
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.check_circle_outline_rounded, size: 18),
-              label:
-                  Text(isSubmitting ? 'Confirming...' : "I've Paid — Lock Escrow"),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-                side: BorderSide(
-                    color: TruxifyColors.accent.withValues(alpha: 0.5)),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              '🔒 Your payment is locked on Polygon blockchain\nuntil GPS + OTP confirms delivery',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: TruxifyColors.adaptiveSecondaryText(context)),
-              textAlign: TextAlign.center,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Existing widgets (unchanged) ──────────────────────────────────────────────
 
 class _SummaryRow extends StatelessWidget {
   const _SummaryRow({required this.label, required this.value});
@@ -714,14 +438,22 @@ class _PriceLineRow extends StatelessWidget {
       child: Row(
         children: [
           Text(label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight:
-                      isTotal ? FontWeight.w800 : FontWeight.w500)),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(
+                      fontWeight: isTotal
+                          ? FontWeight.w800
+                          : FontWeight.w500)),
           const Spacer(),
           Text(amount,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight:
-                      isTotal ? FontWeight.w800 : FontWeight.w600)),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium
+                  ?.copyWith(
+                      fontWeight: isTotal
+                          ? FontWeight.w800
+                          : FontWeight.w600)),
         ],
       ),
     );
@@ -732,12 +464,10 @@ class _SuccessPanel extends StatelessWidget {
   const _SuccessPanel({
     required this.controller,
     required this.orderId,
-    this.amountInr,
   });
 
   final AnimationController controller;
   final String orderId;
-  final String? amountInr;
 
   @override
   Widget build(BuildContext context) {
@@ -776,39 +506,168 @@ class _SuccessPanel extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text('Order ID: $orderId',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color:
-                            TruxifyColors.adaptiveSecondaryText(context))),
-                if (amountInr != null) ...[
-                  const SizedBox(height: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: TruxifyColors.accentDark.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.lock_rounded,
-                            size: 14, color: TruxifyColors.accentDark),
-                        const SizedBox(width: 6),
-                        Text('₹$amountInr locked in escrow',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                    color: TruxifyColors.accentDark)),
-                      ],
-                    ),
-                  ),
-                ],
+                        color: TruxifyColors.adaptiveSecondaryText(context))),
               ],
             ),
           ),
         );
       },
+    );
+  }
+}
+
+class _UpiPaymentMockDialog extends StatefulWidget {
+  const _UpiPaymentMockDialog({required this.amount});
+  final String amount;
+
+  @override
+  State<_UpiPaymentMockDialog> createState() => _UpiPaymentMockDialogState();
+}
+
+class _UpiPaymentMockDialogState extends State<_UpiPaymentMockDialog> {
+  String _selectedApp = 'GPay';
+  bool _isProcessing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: _isProcessing
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 20),
+                  const CircularProgressIndicator(
+                    color: TruxifyColors.accentDark,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'Contacting UPI App...',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Please authorize payment in your $_selectedApp app.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                ],
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.account_balance_wallet_rounded,
+                          color: TruxifyColors.accentDark, size: 28),
+                      const SizedBox(width: 12),
+                      Text(
+                        'UPI Escrow Lock',
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: TruxifyColors.accent.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          'AMOUNT TO LOCK',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            letterSpacing: 1.2,
+                            fontWeight: FontWeight.w700,
+                            color: TruxifyColors.adaptiveSecondaryText(context),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          widget.amount,
+                          style: theme.textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: TruxifyColors.accentDark,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Select UPI Application',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: _selectedApp,
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'GPay', child: Text('Google Pay (GPay)')),
+                      DropdownMenuItem(value: 'PhonePe', child: Text('PhonePe')),
+                      DropdownMenuItem(value: 'Paytm', child: Text('Paytm')),
+                      DropdownMenuItem(value: 'BHIM', child: Text('BHIM UPI')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) {
+                        setState(() => _selectedApp = val);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: TruxifyColors.accentDark,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        ),
+                        onPressed: () async {
+                          setState(() => _isProcessing = true);
+                          await Future.delayed(const Duration(milliseconds: 1500));
+                          if (!mounted) return;
+                          // Generate simulated 10-digit UPI reference ID
+                          final random = math.Random();
+                          final randomVal = 1000000000 + random.nextInt(900000000);
+                          final txRef = 'UPI$randomVal';
+                          Navigator.of(context).pop(txRef);
+                        },
+                        child: const Text('Pay Now', style: TextStyle(fontWeight: FontWeight.w700)),
+                      ),
+                    ],
+                  )
+                ],
+              ),
+      ),
     );
   }
 }

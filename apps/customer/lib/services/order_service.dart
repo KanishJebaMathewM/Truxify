@@ -246,9 +246,7 @@ class OrderService {
         throw StateError('Unexpected truck search response type');
       }
       final listBody = body;
-      return listBody
-          .map((e) => e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{})
-          .toList(growable: false);
+      return listBody.cast<Map<String, dynamic>>();
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -385,6 +383,29 @@ class OrderService {
       throw StateError(e.message);
     } catch (e) {
       throw StateError('Failed to fetch order route: $e');
+    }
+  }
+
+  /// Lock UPI payment in blockchain escrow.
+  Future<Map<String, dynamic>> lockPayment({
+    required String bookingId,
+    required String upiReference,
+    required double amountPaisa,
+  }) async {
+    try {
+      final body = await _apiClient.post(
+        '/api/payments/lock',
+        body: <String, dynamic>{
+          'bookingId': bookingId,
+          'upiReference': upiReference,
+          'amount': amountPaisa,
+        },
+      ) as Map<String, dynamic>?;
+      return body ?? <String, dynamic>{};
+    } on ApiException catch (e) {
+      throw StateError(e.message);
+    } catch (e) {
+      throw StateError('Failed to lock payment in blockchain escrow: $e');
     }
   }
 }

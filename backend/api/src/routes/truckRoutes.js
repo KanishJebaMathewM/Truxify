@@ -80,7 +80,7 @@
  */
 
 import express from 'express';
-import { supabase, mongoDb, redisClient } from '../config/db.js';
+import { supabase, supabaseAdmin, mongoDb, redisClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -576,7 +576,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
               $maxDistance: maxDistanceMeters
             }
           }
-        }).toArray();
+        }).limit(200).toArray();
 
         nearbyDriverIds = [...new Set(nearbyTelemetry.map(t => t.driver_id))];
       } catch (mongoErr) {
@@ -588,7 +588,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       return res.json([]);
     }
 
-    const { data: drivers, error: driversErr } = await supabase
+    const { data: drivers, error: driversErr } = await supabaseAdmin
       .from('driver_details')
       .select('user_id, rating, total_trips, completion_rate, truck_id')
       .eq('is_online', true)
@@ -608,8 +608,8 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     const driverIds = drivers.map(d => d.user_id);
 
     const [trucksRes, profilesRes] = await Promise.all([
-      supabase.from('trucks').select('id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
-      supabase.from('profiles').select('id, full_name, avatar_url, is_digilocker_verified').in('id', driverIds),
+      supabaseAdmin.from('trucks').select('id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
+      supabaseAdmin.from('profiles').select('id, full_name, avatar_url, is_digilocker_verified').in('id', driverIds),
     ]);
 
     if (trucksRes.error) {

@@ -229,14 +229,28 @@ CREATE POLICY "Service role full access on load_bids"
 
 DROP POLICY IF EXISTS "Drivers access own bids" ON load_bids;
 CREATE POLICY "Drivers access own bids"
-  ON load_bids FOR ALL TO authenticated
-  USING (driver_id = get_profile_id())
-  WITH CHECK (driver_id = get_profile_id());
+  ON load_bids FOR SELECT TO authenticated
+  USING (driver_id = get_profile_id());
 
 DROP POLICY IF EXISTS "Customers view bids on own load offers" ON load_bids;
 CREATE POLICY "Customers view bids on own load offers"
   ON load_bids FOR SELECT TO authenticated
   USING (load_id IN (SELECT id FROM load_offers WHERE customer_id = get_profile_id()));
+
+-- Drivers may only READ their own bids. Bid creation/status/amount writes are
+-- performed exclusively by the backend (service_role / accept_bid_tx) so a
+-- driver can never inflate bid_amount or flip status (e.g. self-accept) via
+-- PostgREST. A driver may not submit more than one pending bid per load, and
+-- bid amounts must always be positive (paisa).
+CREATE UNIQUE INDEX IF NOT EXISTS load_bids_one_pending_per_driver_per_load
+  ON load_bids (load_id, driver_id)
+  WHERE status = 'pending';
+
+ALTER TABLE load_bids
+  DROP CONSTRAINT IF EXISTS load_bids_bid_amount_positive;
+
+ALTER TABLE load_bids
+  ADD CONSTRAINT load_bids_bid_amount_positive CHECK (bid_amount > 0);
 
 
 -- ─── TRIPS ───

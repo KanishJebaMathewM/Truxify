@@ -11,7 +11,7 @@ import { z } from 'zod';
 const router = express.Router();
 
 const telemetrySchema = z.object({
-  temperature: z.number()
+  temperature: z.number().finite().min(-100).max(200)
 });
 const telemetryHistoryLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,

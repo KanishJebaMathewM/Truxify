@@ -4,6 +4,31 @@ from typing import Tuple, Dict, Any
 import numpy as np
 from dataclasses import dataclass
 
+
+def _shake_bytes(seed: bytes, counter: int, length: int) -> bytes:
+    """SHAKE256 expansion of ``seed`` with a 64-bit counter (FIPS 202)."""
+    return hashlib.shake_256(seed + counter.to_bytes(8, 'big')).digest(length)
+
+
+def _rejection_sample_uniform(q: int, count: int, *, seed: bytes, counter: int = 0) -> np.ndarray:
+    """Uniform coefficients in [0, q) via rejection sampling from a SHAKE256 stream.
+
+    Used to expand the public matrix ``A`` deterministically from a public seed
+    (FIPS 203/204 ``rej_uniform``). 16-bit values are rejected unless below ``q``.
+    """
+    samples = []
+    while len(samples) < count:
+        buf = _shake_bytes(seed, counter, 4096)
+        counter += 1
+        for i in range(0, len(buf) - 1, 2):
+            value = buf[i] | (buf[i + 1] << 8)
+            if value < q:
+                samples.append(value)
+                if len(samples) >= count:
+                    break
+    return np.array(samples[:count], dtype=np.int64)
+
+
 @dataclass
 class KyberParams:
     """Kyber KEM Parameters"""
@@ -32,14 +57,36 @@ class KyberKEM:
         return (c_padded[:n] - c_padded[n:]) % q
         
     def _sample_cbd(self, eta: int, size: int) -> np.ndarray:
-        """Sample from centered binomial distribution"""
-        # Simulate CBD sampling
-        samples = np.random.binomial(eta, 0.5, size) - np.random.binomial(eta, 0.5, size)
-        return samples % self.q
+        """Sample from the centered binomial distribution (FIPS 203 Sec 4.1).
+
+        Each coefficient consumes ``2*eta`` uniform bits drawn from ``secrets``
+        (an ``os.urandom``-backed CSPRNG) and is computed as
+        sum(bits[:eta]) - sum(bits[eta:]).
+        """
+        total = size if isinstance(size, int) else int(np.prod(size))
+        samples = np.empty(total, dtype=np.int64)
+        for idx in range(total):
+            bits = secrets.randbits(2 * eta)
+            value = 0
+            for i in range(eta):
+                value += (bits >> i) & 1
+                value -= (bits >> (eta + i)) & 1
+            samples[idx] = value % self.q
+        return samples.reshape(size)
     
     def _sample_uniform(self, size: int) -> np.ndarray:
-        """Sample uniformly from Z_q"""
-        return np.random.randint(0, self.q, size)
+        """Sample uniformly from Z_q via rejection sampling (FIPS 203 Sec 4.1).
+
+        16-bit values are drawn from ``secrets`` and rejected unless they fall
+        below the modulus ``q``.
+        """
+        total = size if isinstance(size, int) else int(np.prod(size))
+        samples = []
+        while len(samples) < total:
+            value = secrets.randbits(16)
+            if value < self.q:
+                samples.append(value)
+        return np.array(samples[:total], dtype=np.int64).reshape(size)
     
     def _compress(self, x: np.ndarray, d: int) -> np.ndarray:
         """Compress coefficients"""
@@ -51,10 +98,18 @@ class KyberKEM:
     
     def keygen(self) -> Tuple[Dict, Dict]:
         """Generate Kyber key pair"""
-        # Sample random matrix A
-        A = self._sample_uniform((self.k, self.k, self.n))
-        
-        # Sample secret s and error e
+        # Public seed for the matrix A (public material, reproducible per spec).
+        rho = secrets.token_bytes(32)
+
+        # Sample the random public matrix A deterministically from rho.
+        A = np.empty((self.k, self.k, self.n), dtype=np.int64)
+        counter = 0
+        for i in range(self.k):
+            for j in range(self.k):
+                A[i][j] = _rejection_sample_uniform(self.q, self.n, seed=rho, counter=counter)
+                counter += 1
+
+        # Sample secret s and error e from a CSPRNG (FIPS 203 CBD).
         s = self._sample_cbd(self.params.eta1, (self.k, self.n))
         e = self._sample_cbd(self.params.eta1, (self.k, self.n))
         
@@ -70,13 +125,15 @@ class KyberKEM:
         
         public_key = {
             't': t_compressed,
-            'A': A  # In production: generate from seed
+            'A': A,
+            'rho': rho
         }
         
         secret_key = {
             's': s,
             't': t,
-            'A': A
+            'A': A,
+            'rho': rho
         }
         
         return public_key, secret_key
@@ -156,6 +213,7 @@ class DilithiumSignature:
             'q': 8380417,
             'd': 13,
             'tau': 39,
+            'eta': 2,
             'gamma1': 131072,
             'gamma2': 95232
         }
@@ -163,27 +221,55 @@ class DilithiumSignature:
         self.public_key = None
     
     def keygen(self) -> Tuple[Dict, Dict]:
-        """Generate Dilithium key pair"""
-        # Simplified key generation
+        """Generate Dilithium key pair (FIPS 204 conformant sampling)"""
+        n = self.params['n']
+        q = self.params['q']
+        eta = self.params['eta']
+
+        # Eta-bounded secret coefficients drawn from a CSPRNG with rejection
+        # sampling, uniform over [-eta, eta] (FIPS 204, Algorithm 1).
+        def _sample_eta_bounded(rows: int) -> np.ndarray:
+            total = rows * n
+            span = 2 * eta + 1
+            bits = span.bit_length()
+            values = np.empty(total, dtype=np.int64)
+            idx = 0
+            while idx < total:
+                candidate = secrets.randbits(bits)
+                if candidate < span:
+                    values[idx] = (candidate - eta) % q
+                    idx += 1
+            return values.reshape((rows, n))
+
+        # Public seed for the matrix A (public material, reproducible per spec).
+        rho = secrets.token_bytes(32)
+
         private_key = {
-            's1': np.random.randint(0, self.params['q'], (self.params['l'], self.params['n'])),
-            's2': np.random.randint(0, self.params['q'], (self.params['k'], self.params['n'])),
+            's1': _sample_eta_bounded(self.params['l']),
+            's2': _sample_eta_bounded(self.params['k']),
             'seed': secrets.token_bytes(32)
         }
         
-        # Compute public key
-        A = np.random.randint(0, self.params['q'], (self.params['k'], self.params['l'], self.params['n']))
+        # Expand the public matrix A deterministically from the public seed rho.
+        A = np.empty((self.params['k'], self.params['l'], n), dtype=np.int64)
+        counter = 0
+        for i in range(self.params['k']):
+            for j in range(self.params['l']):
+                A[i][j] = _rejection_sample_uniform(q, n, seed=rho, counter=counter)
+                counter += 1
+
         t = np.zeros((self.params['k'], self.params['n']))
         
         for i in range(self.params['k']):
             for j in range(self.params['l']):
-                t[i] = (t[i] + KyberKEM._negacyclic_convolve(A[i][j], private_key['s1'][j], self.params['n'], self.params['q'])) % self.params['q']
-            t[i] = (t[i] + private_key['s2'][i]) % self.params['q']
+                t[i] = (t[i] + KyberKEM._negacyclic_convolve(A[i][j], private_key['s1'][j], n, q)) % q
+            t[i] = (t[i] + private_key['s2'][i]) % q
         
         public_key = {
             'A': A,
             't': t,
-            'seed': private_key['seed']
+            'seed': private_key['seed'],
+            'rho': rho
         }
         
         self.private_key = private_key

@@ -29,6 +29,20 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $message';
 }
 
+class RateLimitException extends ApiException {
+  const RateLimitException(
+    super.statusCode,
+    super.message, {
+    super.body,
+    required this.retryAfter,
+  });
+
+  final Duration retryAfter;
+
+  @override
+  String toString() =>
+      'RateLimitException($statusCode): $message (retry after ${retryAfter.inSeconds}s)';
+}
 /// Describes a single file to include in a multipart request.
 class MultipartFileInfo {
   const MultipartFileInfo({
@@ -120,6 +134,10 @@ class ApiClient {
   /// Falls back to Supabase session token if no Firebase user is signed in.
   String? _cachedFirebaseToken;
 
+  /// In-flight token refresh shared by concurrent callers so only one
+  /// refresh executes at a time (fixes #2919).
+  Completer<String?>? _pendingTokenRefresh;
+
   Future<String?> get _accessTokenAsync async {
     try {
       final firebaseUser = FirebaseAuth.instance.currentUser;
@@ -154,74 +172,117 @@ class ApiClient {
   }
 
   Future<String?> _refreshedToken() async {
-    try {
-      final firebaseUser = FirebaseAuth.instance.currentUser;
-      if (firebaseUser != null) {
-        final token = await firebaseUser.getIdToken(true);
-        _cachedFirebaseToken = token;
-        return token;
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        developer.log(
-          '[ApiClient] Firebase token refresh failed: $e',
-          name: 'ApiClient',
-        );
-      }
+    // Deduplicate concurrent refresh attempts: only one caller performs
+    // the refresh; others await the same result.
+    if (_pendingTokenRefresh != null) {
+      return _pendingTokenRefresh!.future;
     }
-
+    final completer = Completer<String?>();
+    _pendingTokenRefresh = completer;
     try {
-      // Fall back to Supabase session refresh.
-      final res = await _supabase.auth.refreshSession();
-      return res.session?.accessToken;
-    } catch (e) {
-      if (kDebugMode) {
-        developer.log('[ApiClient] Token refresh failed: $e', name: 'ApiClient');
+      try {
+        final firebaseUser = FirebaseAuth.instance.currentUser;
+        if (firebaseUser != null) {
+          final token = await firebaseUser.getIdToken(true);
+          _cachedFirebaseToken = token;
+          completer.complete(token);
+          return token;
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          developer.log(
+            '[ApiClient] Firebase token refresh failed: $e',
+            name: 'ApiClient',
+          );
+        }
       }
-      return null;
+
+      try {
+        // Fall back to Supabase session refresh.
+        final res = await _supabase.auth.refreshSession();
+        final token = res.session?.accessToken;
+        completer.complete(token);
+        return token;
+      } catch (e) {
+        if (kDebugMode) {
+          developer.log('[ApiClient] Token refresh failed: $e', name: 'ApiClient');
+        }
+        if (!completer.isCompleted) completer.complete(null);
+        return null;
+      }
+    } finally {
+      _pendingTokenRefresh = null;
     }
   }
 
   // ── Core request execution ────────────────────────────────────────
 
-  Future<http.Response> _execute(
-    Future<http.Response> Function(Map<String, String> headers) fn, {
-    Map<String, String>? additionalHeaders,
-    bool isRetry = false,
-  }) async {
-    // Ensure we have a fresh Firebase token before making the request.
-    if (!isRetry) {
-      await _accessTokenAsync;
-    }
-    final response = await fn(_headers(additionalHeaders: additionalHeaders)).timeout(_timeout);
-
-    if (response.statusCode == 401 && !isRetry) {
-      if (kDebugMode) {
-        developer.log(
-          '[ApiClient] 401 received — attempting token refresh',
-          name: 'ApiClient',
-        );
-      }
-
-      final newToken = await _refreshedToken();
-      if (newToken == null) {
-        throw const ApiAuthException(
-          'Session expired and token refresh failed. Please log in again.',
-        );
-      }
-
-      final retryResponse = await fn(_headers(token: newToken, additionalHeaders: additionalHeaders)).timeout(_timeout);
-      if (retryResponse.statusCode == 401) {
-        throw const ApiAuthException(
-          'Authentication failed after token refresh. Please log in again.',
-        );
-      }
-      return retryResponse;
-    }
-
-    return response;
+Future<http.Response> _execute(
+  Future<http.Response> Function(Map<String, String> headers) fn, {
+  Map<String, String>? additionalHeaders,
+  bool isRetry = false,
+}) async {
+  // Ensure we have a fresh Firebase token before making the request.
+  if (!isRetry) {
+    await _accessTokenAsync;
   }
 
+  final response = await fn(
+    _headers(additionalHeaders: additionalHeaders),
+  ).timeout(_timeout);
+
+  // Existing 401 handling (KEEP THIS)
+  if (response.statusCode == 401 && !isRetry) {
+    if (kDebugMode) {
+      developer.log(
+        '[ApiClient] 401 received — attempting token refresh',
+        name: 'ApiClient',
+      );
+    }
+
+    final newToken = await _refreshedToken();
+    if (newToken == null) {
+      throw const ApiAuthException(
+        'Session expired and token refresh failed. Please log in again.',
+      );
+    }
+
+    final retryResponse = await fn(
+      _headers(
+        token: newToken,
+        additionalHeaders: additionalHeaders,
+      ),
+    ).timeout(_timeout);
+
+    if (retryResponse.statusCode == 401) {
+      throw const ApiAuthException(
+        'Authentication failed after token refresh. Please log in again.',
+      );
+    }
+
+    return retryResponse;
+  }
+
+  // Handle rate limiting (429)
+  if (response.statusCode == 429 && !isRetry) {
+    final retryAfterHeader = response.headers['retry-after'];
+
+    int retrySeconds = int.tryParse(retryAfterHeader ?? '') ?? 1;
+
+    // Cap maximum wait time to 30 seconds
+    retrySeconds = retrySeconds.clamp(1, 30);
+
+    await Future.delayed(Duration(seconds: retrySeconds));
+
+    return await _execute(
+      fn,
+      additionalHeaders: additionalHeaders,
+      isRetry: true,
+    );
+  }
+
+  return response;
+}
   // ── URI building and path normalization ───────────────────────────
 
   Uri _buildUri(String path) {
@@ -454,6 +515,19 @@ class ApiClient {
       message = response.reasonPhrase ?? 'Unknown error';
     }
 
+    if (response.statusCode == 429) {
+        final retryAfterHeader = response.headers['retry-after'];
+
+        final retryAfterSeconds =
+            int.tryParse(retryAfterHeader ?? '') ?? 0;
+
+        throw RateLimitException(
+            response.statusCode,
+            message,
+            body: response.body,
+            retryAfter: Duration(seconds: retryAfterSeconds),
+        );
+    }
     throw ApiException(response.statusCode, message, body: response.body);
   }
 }

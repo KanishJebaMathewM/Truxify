@@ -83,6 +83,7 @@ class SupabaseQueryBuilder {
   ilike(col, p) { this._filters.push({ col, op: 'ilike', val: p }); return this; }
   is(col, val)  { this._filters.push({ col, op: 'is', val }); return this; }
   not(col, op, val) { this._filters.push({ col, op: `not:${op}`, val }); return this; }
+  or(spec) { this._filters.push({ col: null, op: 'or', val: spec }); return this; }
   order(col, opts = {}) {
     this._order = { col, ascending: opts.ascending !== false };
     return this;
@@ -100,6 +101,47 @@ class SupabaseQueryBuilder {
   }
   catch(reject) { return this._exec().catch(reject); }
 
+  // Split a PostgREST-style OR spec on top-level commas, respecting and(...)
+  // groups so an inner comma does not break the group.
+  _splitOr(spec) {
+    const parts = [];
+    let depth = 0;
+    let current = '';
+    for (const ch of spec) {
+      if (ch === '(') depth++;
+      if (ch === ')') depth--;
+      if (ch === ',' && depth === 0) {
+        parts.push(current);
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    if (current) parts.push(current);
+    return parts;
+  }
+
+  // Parse a single `col.op.value` condition into a { col, op, val } filter.
+  _parseCond(cond) {
+    let opPrefix = '';
+    let rest = cond;
+    if (rest.startsWith('not.')) {
+      opPrefix = 'not:';
+      rest = rest.substring(4);
+    }
+    const firstDot = rest.indexOf('.');
+    const secondDot = rest.indexOf('.', firstDot + 1);
+    const col = rest.slice(0, firstDot);
+    const op = rest.slice(firstDot + 1, secondDot);
+    let val = rest.slice(secondDot + 1);
+    if (op === 'is') {
+      if (val === 'null') val = null;
+      if (val === 'true') val = true;
+      if (val === 'false') val = false;
+    }
+    return { col, op: opPrefix + op, val };
+  }
+
   _matches(row, f) {
     const v = row[f.col];
     let op = f.op;
@@ -112,9 +154,23 @@ class SupabaseQueryBuilder {
     let res;
     switch (op) {
       case 'eq':
-      case 'is':
         isMatched = v === f.val;
         break;
+      case 'is':
+        // Postgres returns NULL for missing/undefined fields; a row without
+        // the column should satisfy an `is null` filter.
+        isMatched = f.val === null ? (v === null || v === undefined) : v === f.val;
+        break;
+      case 'or': {
+        const topLevel = this._splitOr(String(f.val));
+        isMatched = topLevel.some(cond => {
+          if (cond.startsWith('and(') && cond.endsWith(')')) {
+            return this._splitOr(cond.slice(4, -1)).every(part => this._matches(row, this._parseCond(part)));
+          }
+          return this._matches(row, this._parseCond(cond));
+        });
+        break;
+      }
       case 'neq':
         isMatched = v !== f.val;
         break;

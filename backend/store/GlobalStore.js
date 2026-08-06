@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 
 class StoreTransaction {
@@ -10,7 +11,7 @@ class StoreTransaction {
         this.error = null;
         this.startTime = null;
         this.endTime = null;
-        this.id = `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        this.id = `tx_${crypto.randomBytes(16).toString('hex')}`;
     }
     
     begin() {

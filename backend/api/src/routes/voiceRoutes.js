@@ -3,10 +3,27 @@ import multer from 'multer';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { processVoiceQuery, audioCache } from '../services/voiceService.js';
+import {
+  ALLOWED_AUDIO_MIME_TYPES,
+  AudioValidationError,
+  validateAudioBuffer,
+} from '../lib/audioValidation.js';
+import { sanitizeUploadFilename } from '../lib/uploadFilename.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
-const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB file limit
+
+const VOICE_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB file limit
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: VOICE_MAX_FILE_SIZE },
+  // First gate: reject on the declared type. Cheap, but client-supplied and
+  // therefore advisory — the magic-byte check below is the authority.
+  fileFilter: (_req, file, cb) => {
+    cb(null, ALLOWED_AUDIO_MIME_TYPES.includes(file.mimetype));
+  },
+});
 
 router.post('/query', authenticate, userLimiter, upload.single('file'), async (req, res) => {
   try {
@@ -14,14 +31,36 @@ router.post('/query', authenticate, userLimiter, upload.single('file'), async (r
     const file = req.file;
 
     if (!file) {
-      return res.status(400).json({ error: 'Audio file is required.' });
+      // Covers both a missing field and a file the fileFilter rejected —
+      // multer silently drops the latter rather than raising.
+      return res.status(400).json({
+        error: 'A valid audio file is required.',
+        hint: 'Accepted formats: WAV, MP3, M4A/AAC, OGG, WebM.',
+      });
     }
 
     if (!bookingId) {
       return res.status(400).json({ error: 'Booking ID is required.' });
     }
 
-    const result = await processVoiceQuery(req.user.id, bookingId, file.buffer, file.originalname);
+    // Second gate: inspect the actual bytes. The declared MIME type and the
+    // filename are both attacker-controlled, so content is what decides.
+    try {
+      validateAudioBuffer(file.buffer);
+    } catch (validationErr) {
+      if (validationErr instanceof AudioValidationError) {
+        logger.warn(
+          { userId: req.user.id, bookingId, declaredType: file.mimetype },
+          `[voice] Rejected upload: ${validationErr.message}`
+        );
+        return res.status(400).json({ error: validationErr.message });
+      }
+      throw validationErr;
+    }
+
+    const safeFilename = sanitizeUploadFilename(file.originalname, 'voice-query.wav');
+
+    const result = await processVoiceQuery(req.user.id, bookingId, file.buffer, safeFilename);
     
     // Prefix the audio_url with host if relative path
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;

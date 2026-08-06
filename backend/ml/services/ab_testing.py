@@ -156,7 +156,7 @@ class ABTestModel:
         session = self.Session()
         try:
             recent = session.query(ABTestMetrics).filter(
-                ABTestMetrics.timestamp >= datetime.utcnow()
+                ABTestMetrics.timestamp <= datetime.utcnow()
             ).order_by(ABTestMetrics.timestamp.desc()).first()
 
             if recent:

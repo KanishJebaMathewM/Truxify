@@ -353,47 +353,56 @@ class LocationService {
       port: baseUri.hasPort ? baseUri.port : null,
       path: wsPath,
     );
+  }
 
-    try {
-      debugPrint('[LocationService] Connecting to WebSocket at: ${wsUri.toString()}');
-      _channel = WebSocketChannel.connect(wsUri);
-      _reconnectAttempts = 0;
-      _lastCloseCode = null;
-      _emitStatus(WsConnectionStatus.connected);
-      _startHeartbeat();
+  /// Establishes the WebSocket connection for live GPS tracking.
+  ///
+  /// Uses [ResilientWebSocket] which handles reconnection, exponential
+  /// backoff and heartbeat pings automatically. A fresh instance is created
+  /// on demand so reconnects always re-run [_buildWsUri] for a current URL.
+  Future<void> _connectWebSocket() async {
+    _socketSubscription?.cancel();
+    _socketSubscription = null;
+    _lastCloseCode = null;
 
-      _socketSubscription = _channel!.stream.listen(
-        (message) {
-          if (message == 'pong') return;
-          debugPrint('[LocationService] Received WebSocket message: $message');
-          try {
-            final parsed = jsonDecode(message.toString());
-            if (parsed is Map && parsed['code'] != null) {
-              _lastCloseCode = parsed['code'] as int;
+    final ws = ResilientWebSocket(
+      _buildWsUri().toString(),
+      onConnect: () => _emitStatus(WsConnectionStatus.connected),
+      urlFactory: () => _buildWsUri().toString(),
+    );
+    _resilientWs = ws;
+
+    _socketSubscription = ws.stream.listen(
+      (message) {
+        if (message == 'pong') return;
+        debugPrint('[LocationService] Received WebSocket message: $message');
+        try {
+          final parsed = jsonDecode(message.toString());
+          if (parsed is Map && parsed['code'] != null) {
+            _lastCloseCode = parsed['code'] as int;
+            if (_lastCloseCode == 4001 || _lastCloseCode == 4003) {
+              debugPrint(
+                '[LocationService] Auth rejected (code $_lastCloseCode) — stopping tracking',
+              );
+              ws.close();
+              _resilientWs = null;
+              stopTracking();
+              return;
             }
-          } catch (_) {}
-        },
-        onDone: () {
-          debugPrint('[LocationService] WebSocket closed (code: $_lastCloseCode)');
-          _emitStatus(WsConnectionStatus.disconnected);
-          if (_lastCloseCode == 4001 || _lastCloseCode == 4003) {
-            debugPrint('[LocationService] Auth rejected (code $_lastCloseCode) — not reconnecting');
-            _isTracking = false;
-            return;
           }
-          _scheduleReconnect();
-        },
-        onError: (error) {
-          debugPrint('[LocationService] WebSocket error: $error');
-          _emitStatus(WsConnectionStatus.disconnected);
-          _scheduleReconnect();
-        },
-      );
-    } catch (e) {
-      debugPrint('[LocationService] Error connecting to WebSocket: $e');
-      _emitStatus(WsConnectionStatus.disconnected);
-      _scheduleReconnect();
-    }
+        } catch (_) {}
+      },
+      onError: (error) {
+        debugPrint('[LocationService] WebSocket error: $error');
+        // If the error is terminal (e.g. max reconnect attempts reached),
+        // clear the instance so the next _sendLocationPing will create
+        // a fresh ResilientWebSocket.
+        _resilientWs = null;
+      },
+    );
+
+    _emitStatus(WsConnectionStatus.connecting);
+    await ws.connect();
   }
 
   /// Resolves the auth token used for the WS handshake, preferring the live
@@ -407,47 +416,6 @@ class LocationService {
       return token;
     }
     return AuthTokenStore.read();
-  }
-
-    _emitStatus(WsConnectionStatus.reconnecting);
-    final delay = Duration(seconds: _reconnectAttempts == 0 ? 2 : 2 * _reconnectAttempts);
-    final capped = delay > const Duration(seconds: 30) ? const Duration(seconds: 30) : delay;
-    _reconnectAttempts++;
-
-    _socketSubscription = _resilientWs!.stream.listen(
-      (message) {
-        if (message == 'pong') return;
-        debugPrint('[LocationService] Received WebSocket message: $message');
-        try {
-          final parsed = jsonDecode(message.toString());
-          if (parsed is Map && parsed['code'] != null) {
-            _lastCloseCode = parsed['code'] as int;
-            if (_lastCloseCode == 4001 || _lastCloseCode == 4003) {
-              debugPrint(
-                '[LocationService] Auth rejected (code $_lastCloseCode) — stopping tracking',
-              );
-              _resilientWs?.close();
-              _resilientWs = null;
-              stopTracking();
-              return;
-            }
-          }
-        } catch (_) {}
-      },
-      onDone: () {
-        // Reconnection is handled automatically by ResilientWebSocket.
-        debugPrint('[LocationService] WebSocket stream ended');
-      },
-      onError: (error) {
-        debugPrint('[LocationService] WebSocket error: $error');
-        // If the error is terminal (e.g. max reconnect attempts reached),
-        // clear the instance so the next _sendLocationPing will create
-        // a fresh ResilientWebSocket.
-        _resilientWs = null;
-      },
-    );
-
-    await _resilientWs!.connect();
   }
 
   void _closeWebSocket() {

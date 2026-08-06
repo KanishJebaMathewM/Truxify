@@ -75,7 +75,8 @@ async function hasExistingNotification(userId, documentId, daysRemaining) {
       (n) => n.metadata?.documentId === documentId &&
              String(n.metadata?.daysRemaining) === String(daysRemaining),
     );
-  } catch {
+  } catch (err) {
+    logger.error({ err, userId, documentId }, '[document-expiry] hasExistingNotification query failed');
     return false;
   }
 }

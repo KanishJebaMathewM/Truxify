@@ -55,6 +55,9 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     mapping(address => uint256[]) public userAssets;
     mapping(uint256 => TradeOrder[]) public tradeOrders;
     mapping(uint256 => bool) public assetExists;
+    // ETH accrued to each user from treasury buy-backs (sellFraction); the
+    // funds are held by the contract and released via claimPayout().
+    mapping(address => uint256) public claimableBalances;
 
     uint256 private _assetCounter;
     uint256 private _tradeOrderCounter;
@@ -72,6 +75,8 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     event TradeOrderExecuted(uint256 indexed orderId, uint256 tokenId, address indexed buyer);
     event AssetTraded(uint256 indexed assetId, address indexed from, address indexed to, uint256 amount);
     event ComplianceCheck(address indexed user, bool verified);
+    event PayoutAccrued(uint256 indexed assetId, address indexed user, uint256 amount);
+    event PayoutClaimed(address indexed user, uint256 amount);
 
     // ============ Constructor ============
 
@@ -192,20 +197,48 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         FractionalOwnership storage ownership = fractionalOwnership[assetId][msg.sender];
         require(ownership.amount >= amount, "Insufficient balance");
 
+        Asset storage asset = assets[assetId];
+        uint256 payout = (amount * asset.tokenPrice) / 1e18;
+
         // Burn tokens
         _burn(msg.sender, amount);
 
         // Update ownership
         ownership.amount -= amount;
 
-        // Update asset
+        // Update asset — returned fractions re-enter the available pool
         assets[assetId].availableTokens += amount;
 
         if (ownership.amount == 0) {
             _removeUserAsset(msg.sender, assetId);
         }
 
+        // Accrue the buy-back payout; the seller claims it with claimPayout().
+        // The contract's ETH balance is backed by purchase proceeds, so a
+        // failing claim is guarded in claimPayout() with a fail-closed require.
+        claimableBalances[msg.sender] += payout;
+
+        emit PayoutAccrued(assetId, msg.sender, payout);
         emit FractionalSale(assetId, msg.sender, amount);
+    }
+
+    /// @notice Releases the caller's accrued buy-back payouts. The contract
+    ///         holds the ETH from fraction purchases until sellers claim it.
+    function claimPayout() external nonReentrant whenNotPaused {
+        uint256 amount = claimableBalances[msg.sender];
+        require(amount > 0, "No claimable balance");
+
+        claimableBalances[msg.sender] = 0;
+
+        (bool paid, ) = payable(msg.sender).call{value: amount}("");
+        require(paid, "Payout transfer failed");
+
+        emit PayoutClaimed(msg.sender, amount);
+    }
+
+    /// @notice View the accrued buy-back balance claimable by *user*.
+    function getClaimableBalance(address user) external view returns (uint256) {
+        return claimableBalances[user];
     }
 
     // ============ Trading ============

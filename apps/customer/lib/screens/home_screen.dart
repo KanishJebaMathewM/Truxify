@@ -5,7 +5,6 @@ import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
 
 import '../controllers/app_controller.dart';
 import '../core/offline/cache/cache_manager.dart';
-import '../data/mock_data.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_logo.dart';

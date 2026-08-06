@@ -1,4 +1,4 @@
-import { firebaseAdmin, supabase } from "../config/db.js";
+import { firebaseAdmin, supabase, createUserClient } from "../config/db.js";
 import jwt from "jsonwebtoken";
 import {
   getCachedProfile,
@@ -53,7 +53,11 @@ export async function verifyAuthToken(token) {
     }
     supabaseUserId = user.id;
 
-    const { data: profile, error } = await supabase
+    // Profile lookups must run as the authenticated user (RLS is enforced on
+    // profiles: anon has no read privileges). The user-bound client carries the
+    // caller's JWT so PostgREST resolves the authenticated role for this query.
+    const userClient = createUserClient?.(token) || supabase;
+    const { data: profile, error } = await userClient
       .from("profiles")
       .select("id, firebase_uid, role, full_name, phone")
       .eq("id", user.id)
@@ -77,7 +81,8 @@ export async function verifyAuthToken(token) {
       throw new Error("Supabase client is not configured on this server.");
     }
 
-    const { data: profile, error } = await supabase
+    const userClient = createUserClient?.(token) || supabase;
+    const { data: profile, error } = await userClient
       .from("profiles")
       .select("id, firebase_uid, role, full_name, phone")
       .eq("firebase_uid", firebaseUid)
@@ -218,6 +223,7 @@ export async function authenticate(req, res, next) {
     let userProfile = null;
     let firebaseUid = null;
     let supabaseUserId = null;
+    let userClient = null;
 
     let decoded;
     try {
@@ -250,6 +256,10 @@ export async function authenticate(req, res, next) {
           });
       }
       supabaseUserId = user.id;
+      // Bind the profile lookup to the caller's JWT: profiles RLS grants reads
+      // only to the authenticated owner, so a sessionless anon client cannot
+      // resolve the profile.
+      userClient = createUserClient?.(token) || supabase;
 
       // Token is verified above; the cache only skips the profile lookup, keyed
       // by the verified user id. Cache entries are bounded by the token's own
@@ -270,7 +280,7 @@ export async function authenticate(req, res, next) {
       }
 
       // Fetch corresponding profile from Supabase by user.id
-      const { data: profile, error } = await supabase
+      const { data: profile, error } = await userClient
         .from("profiles")
         .select("id, firebase_uid, role, full_name, phone")
         .eq("id", user.id)
@@ -334,7 +344,8 @@ export async function authenticate(req, res, next) {
       }
 
       // Fetch corresponding profile from Supabase by firebase_uid
-      const { data: profile, error } = await supabase
+      userClient = createUserClient?.(token) || supabase;
+      const { data: profile, error } = await userClient
         .from("profiles")
         .select("id, firebase_uid, role, full_name, phone")
         .eq("firebase_uid", firebaseUid)
@@ -357,16 +368,16 @@ export async function authenticate(req, res, next) {
       // The main queries above filter on is_active=true, so null could mean
       // missing OR deactivated. We distinguish here to give accurate errors.
       let profileIsDeactivated = false;
-      if (supabaseUserId) {
-        const { data: inactive } = await supabase
+      if (supabaseUserId && userClient) {
+        const { data: inactive } = await userClient
           .from("profiles")
           .select("id")
           .eq("id", supabaseUserId)
           .eq("is_active", false)
           .maybeSingle();
         profileIsDeactivated = !!inactive;
-      } else if (firebaseUid && supabase) {
-        const { data: inactive } = await supabase
+      } else if (firebaseUid && userClient) {
+        const { data: inactive } = await userClient
           .from("profiles")
           .select("id")
           .eq("firebase_uid", firebaseUid)
@@ -448,6 +459,10 @@ export async function authenticate(req, res, next) {
 /**
  * Middleware to restrict route access to specific roles.
  * Must be used after authenticate middleware.
+ *
+ * This middleware delegates to the centralized authorization logging system
+ * for consistent audit trails. For new routes, prefer using requirePolicy()
+ * with named actions instead of requireRole() for better maintainability.
  */
 export function requireRole(allowedRoles) {
   if (!Array.isArray(allowedRoles) || allowedRoles.length === 0) {
@@ -464,9 +479,19 @@ export function requireRole(allowedRoles) {
     }
 
     if (!allowedRoles.includes(req.user.role)) {
+      const requestId = req.requestId || req.id;
+      logger.warn({
+        event: 'AUTH_DENIAL',
+        action: `requireRole(${allowedRoles.join(',')})`,
+        userId: req.user.id,
+        userRole: req.user.role,
+        allowedRoles,
+        requestId,
+      }, `[Auth] Role denied: user=${req.user.id} role=${req.user.role} not in [${allowedRoles}]`);
+
       return res.status(403).json({
-        error: "Forbidden: Insufficient privileges.",
-        details: `Your account role '${req.user.role}' is not authorized to access this resource.`,
+        error: 'Forbidden: Insufficient privileges.',
+        details: `Your account role '${req.user.role}' is not authorized to access this resource.`
       });
     }
 

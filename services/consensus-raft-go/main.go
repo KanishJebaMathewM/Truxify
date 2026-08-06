@@ -111,26 +111,28 @@ type AppendEntriesResponse struct {
 }
 
 type RaftNode struct {
-	mu                sync.Mutex
-	NodeID            string     `json:"node_id"`
-	CurrentTerm       uint64     `json:"current_term"`
-	VotedFor          string     `json:"voted_for"`
-	Role              NodeRole   `json:"role"`
-	Log               []LogEntry `json:"log"`
-	CommitIndex       uint64     `json:"commit_index"`
-	LastApplied       uint64     `json:"last_applied"`
-	Peers             []string   `json:"peers"`
-	PeerURLs          []string   `json:"peer_urls"`
-	LeaderID          string     `json:"leader_id"`
+	mu          sync.Mutex
+	NodeID      string     `json:"node_id"`
+	CurrentTerm uint64     `json:"current_term"`
+	VotedFor    string     `json:"voted_for"`
+	Role        NodeRole   `json:"role"`
+	Log         []LogEntry `json:"log"`
+	CommitIndex uint64     `json:"commit_index"`
+	LastApplied uint64     `json:"last_applied"`
+	Peers       []string   `json:"peers"`
+	PeerURLs    []string   `json:"peer_urls"`
+	LeaderID    string     `json:"leader_id"`
 
-	lastLeaderSeen    time.Time
-	electionStarted   time.Time
-	electionTimeout   time.Duration
+	lastLeaderSeen     time.Time
+	electionStarted    time.Time
+	electionTimeout    time.Duration
 	electionTimeoutMin time.Duration
 	electionTimeoutMax time.Duration
-	heartbeatInterval time.Duration
-	peerHeartbeats    map[string]bool
-	httpClient        *http.Client
+	heartbeatInterval  time.Duration
+	peerHeartbeats     map[string]bool
+	nextIndex          map[string]uint64
+	matchIndex         map[string]uint64
+	httpClient         *http.Client
 }
 
 // rng is a source of randomness for election timeouts.
@@ -158,6 +160,8 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		electionTimeoutMax: time.Duration(electionMaxMs) * time.Millisecond,
 		electionTimeout:    time.Duration(electionMinMs) * time.Millisecond,
 		peerHeartbeats:     make(map[string]bool),
+		nextIndex:          make(map[string]uint64),
+		matchIndex:         make(map[string]uint64),
 		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
 	}
 }
@@ -243,6 +247,14 @@ func (rn *RaftNode) startElection() {
 		rn.Role = Leader
 		rn.LeaderID = rn.NodeID
 		rn.peerHeartbeats = make(map[string]bool, len(rn.PeerURLs))
+		// Per-follower replication state (Raft §5.3): the leader assumes each
+		// follower's log matches its own and works backward from the end.
+		rn.nextIndex = make(map[string]uint64, len(rn.PeerURLs))
+		rn.matchIndex = make(map[string]uint64, len(rn.PeerURLs))
+		for _, url := range rn.PeerURLs {
+			rn.nextIndex[url] = rn.lastLogIndex() + 1
+			rn.matchIndex[url] = 0
+		}
 		log.Printf("🌐 node [%s] elected leader for term %d", rn.NodeID, rn.CurrentTerm)
 	}
 }
@@ -315,8 +327,11 @@ func (rn *RaftNode) callAppend(peerURL string, req AppendEntriesRequest) (Append
 	return resp, err
 }
 
-// sendHeartbeats replicates AppendEntries RPCs to peers and records which
-// peers acknowledge the current leadership, performing HTTP calls outside rn.mu.
+// sendHeartbeats replicates the leader's log to followers and advances
+// CommitIndex once a quorum acknowledges the replicated entries. Each heartbeat
+// sends AppendEntries with the entries a follower is still missing (based on
+// nextIndex), updates matchIndex/nextIndex from the responses, and only then
+// moves CommitIndex/LastApplied forward. HTTP calls run outside rn.mu.
 func (rn *RaftNode) sendHeartbeats() {
 	rn.mu.Lock()
 	if rn.Role != Leader {
@@ -324,34 +339,56 @@ func (rn *RaftNode) sendHeartbeats() {
 		return
 	}
 	term := rn.CurrentTerm
-	req := AppendEntriesRequest{
-		Term:         rn.CurrentTerm,
-		LeaderID:     rn.NodeID,
-		PrevLogIndex: rn.lastLogIndex(),
-		PrevLogTerm:  rn.lastLogTerm(),
-		LeaderCommit: rn.CommitIndex,
-	}
 	rn.peerHeartbeats = make(map[string]bool, len(rn.PeerURLs))
+
+	type peerState struct {
+		url     string
+		request AppendEntriesRequest
+	}
+	states := make([]peerState, 0, len(rn.PeerURLs))
+	for _, url := range rn.PeerURLs {
+		next := rn.nextIndex[url]
+		if next == 0 {
+			next = 1
+		}
+		prevLogIndex := next - 1
+		prevLogTerm := uint64(0)
+		if prevLogIndex > 0 && prevLogIndex <= uint64(len(rn.Log)) {
+			prevLogTerm = rn.Log[prevLogIndex-1].Term
+		}
+		req := AppendEntriesRequest{
+			Term:         term,
+			LeaderID:     rn.NodeID,
+			PrevLogIndex: prevLogIndex,
+			PrevLogTerm:  prevLogTerm,
+			LeaderCommit: rn.CommitIndex,
+		}
+		if next <= uint64(len(rn.Log)) {
+			req.Entries = append(req.Entries, rn.Log[next-1:]...)
+		}
+		states = append(states, peerState{url: url, request: req})
+	}
 	rn.mu.Unlock()
 
 	type result struct {
-		url  string
-		resp AppendEntriesResponse
-		err  error
+		url     string
+		request AppendEntriesRequest
+		resp    AppendEntriesResponse
+		err     error
 	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	results := make([]result, 0, len(rn.PeerURLs))
+	results := make([]result, 0, len(states))
 
-	for _, url := range rn.PeerURLs {
+	for _, st := range states {
 		wg.Add(1)
-		go func(peerURL string) {
+		go func(url string, req AppendEntriesRequest) {
 			defer wg.Done()
-			resp, err := rn.callAppend(peerURL, req)
+			resp, err := rn.callAppend(url, req)
 			mu.Lock()
-			results = append(results, result{url: peerURL, resp: resp, err: err})
+			results = append(results, result{url: url, request: req, resp: resp, err: err})
 			mu.Unlock()
-		}(url)
+		}(st.url, st.request)
 	}
 	wg.Wait()
 
@@ -371,8 +408,43 @@ func (rn *RaftNode) sendHeartbeats() {
 			return
 		}
 		if res.resp.Success {
+			// Follower accepted the prefix; record the highest matching index.
+			rn.matchIndex[res.url] = res.request.PrevLogIndex + uint64(len(res.request.Entries))
+			rn.nextIndex[res.url] = rn.matchIndex[res.url] + 1
 			rn.peerHeartbeats[res.url] = true
+		} else if rn.nextIndex[res.url] > 1 {
+			// Log inconsistency: back off and retry from an earlier prefix.
+			rn.nextIndex[res.url]--
 		}
+	}
+
+	rn.advanceCommitIndexLocked()
+}
+
+// advanceCommitIndexLocked advances CommitIndex to the highest index replicated
+// to a quorum of the cluster (including the leader itself) in the current term,
+// then applies committed entries by moving LastApplied forward. Entries from
+// previous terms are only committed indirectly once a current-term entry commits
+// (Raft §5.4.2).
+func (rn *RaftNode) advanceCommitIndexLocked() {
+	last := rn.lastLogIndex()
+	for n := rn.CommitIndex + 1; n <= last; n++ {
+		if rn.Log[n-1].Term != rn.CurrentTerm {
+			continue
+		}
+		acked := 1 // the leader's own log always matches
+		for _, m := range rn.matchIndex {
+			if m >= n {
+				acked++
+			}
+		}
+		if acked < rn.quorum() {
+			break
+		}
+		rn.CommitIndex = n
+	}
+	if rn.CommitIndex > rn.LastApplied {
+		rn.LastApplied = rn.CommitIndex
 	}
 }
 
@@ -614,9 +686,9 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rn.mu.Lock()
-	defer rn.mu.Unlock()
 
 	if rn.Role != Leader {
+		rn.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -628,6 +700,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !rn.leaderHasQuorumLocked() {
+		rn.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -645,9 +718,59 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now(),
 	}
 
+	// Append to the local log first. CommitIndex is NOT advanced here: the entry
+	// must first be replicated to a quorum of followers (Raft §5.3).
 	rn.Log = append(rn.Log, entry)
-	rn.CommitIndex = entry.Index
-	rn.LastApplied = entry.Index
+	rn.mu.Unlock()
+
+	// Replicate to followers and wait for a quorum acknowledgement before
+	// treating the entry as committed.
+	rn.sendHeartbeats()
+
+	rn.mu.Lock()
+	if rn.Role != Leader {
+		rn.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":   false,
+			"error":     "stepped down while replicating entry",
+			"leader_id": rn.LeaderID,
+		})
+		return
+	}
+	committed := rn.CommitIndex >= entry.Index
+	rn.mu.Unlock()
+
+	if !committed {
+		rn.mu.Lock()
+		defer rn.mu.Unlock()
+		if rn.Role != Leader {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success":   false,
+				"error":     "stepped down while replicating entry",
+				"leader_id": rn.LeaderID,
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":    false,
+			"error":      "entry not yet committed to a quorum of followers",
+			"raft_index": entry.Index,
+		})
+		return
+	}
+
+	// Propagate the updated LeaderCommit to followers so they apply the entry
+	// before the client observes success.
+	rn.sendHeartbeats()
+
+	rn.mu.Lock()
+	defer rn.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{

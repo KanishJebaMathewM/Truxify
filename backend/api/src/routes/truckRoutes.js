@@ -478,7 +478,20 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     return res.status(400).json({ error: 'min_capacity must be less than or equal to max_capacity' });
   }
 
-  const cacheKey = `truck_search:${numPickupLat},${numPickupLng}:${numDropLat},${numDropLng}:${numWeightTonnes}:${parseBoolean(is_fragile)}:${parseBoolean(is_stackable)}`;
+  const searchCacheFilters = {
+    pickupLat: numPickupLat,
+    pickupLng: numPickupLng,
+    dropLat: numDropLat,
+    dropLng: numDropLng,
+    weightTonnes: numWeightTonnes,
+    isFragile: fragileFilter.value,
+    isStackable: stackableFilter.value,
+    truckType: truck_type || '',
+    minCapacity: minCapFilter.value ?? '',
+    maxCapacity: maxCapFilter.value ?? '',
+    materialType: material_type || '',
+  };
+  const cacheKey = `truck_search:${JSON.stringify(searchCacheFilters)}`;
 
   if (redisClient) {
     try {
@@ -587,7 +600,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     const driverIds = drivers.map(d => d.user_id);
 
     const [trucksRes, profilesRes] = await Promise.all([
-      supabase.from('trucks').select('id, name, number_plate, max_capacity_tons').in('id', truckIds),
+      supabase.from('trucks').select('id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
       supabase.from('profiles').select('id, full_name, avatar_url, is_digilocker_verified').in('id', driverIds),
     ]);
 
@@ -646,6 +659,14 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     });
 
     const responseResults = filteredResults.map(({ capacityTons, truckType, ...rest }) => rest);
+
+    if (redisClient) {
+      try {
+        await redisClient.set(cacheKey, JSON.stringify(responseResults), 'EX', 60);
+      } catch (err) {
+        logger.warn({ err: err.message }, 'Redis cache write error during search');
+      }
+    }
 
     res.json(responseResults);
   } catch (err) {

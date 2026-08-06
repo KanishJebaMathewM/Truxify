@@ -1,143 +1,124 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
 import zkpService from '../services/zkp/zkp.service.js';
+import { LockAcquisitionError } from '../lib/redisLock.js';
+import { redisRateLimiter } from '../middleware/redisRateLimiter.js';
 import logger from '../middleware/logger.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
-import { userLimiter, safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
-const zkpRegulatorLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: safeIpKeyGenerator,
-  store: createStore('rl:zkp-regulator:'),
-  message: { error: 'Rate limit exceeded', retryAfter: 900 },
+
+/**
+ * Rate limiter for POST /zkp/verify.
+ *
+ * KYC verification triggers ZK proof generation + a Polygon blockchain
+ * transaction (gas cost, several seconds). We cap each authenticated user
+ * to 5 attempts per hour to prevent gas-draining abuse and DoS of the
+ * proof-generation pipeline.
+ *
+ * Window / limit are overridable via env vars:
+ *   ZKP_RATE_LIMIT_WINDOW_MS   (default 3 600 000 — 1 hour)
+ *   ZKP_RATE_LIMIT_MAX          (default 5)
+ */
+const zkpVerifyLimiter = redisRateLimiter({
+  routeKey: 'zkp_verify',
+  limit: Number(process.env.ZKP_RATE_LIMIT_MAX) || 5,
+  windowMs: Number(process.env.ZKP_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000,
 });
 
-// Verify driver KYC using ZK-SNARK
-router.post('/zkp/verify', authenticate, userLimiter, async (req, res) => {
+/**
+ * POST /zkp/verify
+ *
+ * Submits a driver's KYC documents for ZK-SNARK proof generation and
+ * on-chain verification.
+ *
+ * Race-condition protection (issue #5729):
+ *   zkpService.verifyDriver() now holds a per-user Redis distributed lock
+ *   for the duration of the verification. This route handles the two extra
+ *   error cases that can surface:
+ *
+ *   - LockAcquisitionError → Redis unavailable              → 503
+ *   - result.conflict === true → lock held (duplicate req)  → 409
+ *   - result.alreadyVerified === true → already done        → 200
+ *
+ * Rate limiting (new):
+ *   zkpVerifyLimiter caps each user to 5 attempts/hour (sliding window).
+ *   Excess requests receive 429 before reaching the blockchain layer.
+ */
+router.post('/verify', zkpVerifyLimiter, async (req, res) => {
   try {
-    const { userId, name, licenseNumber, rcNumber, insuranceNumber, issueDate, expiryDate } = req.body;
-    
-    if (userId !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'regulator') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access Denied: You can only verify your own account.'
-      });
+    const {
+      userId,
+      name,
+      licenseNumber,
+      rcNumber,
+      insuranceNumber,
+      issueDate,
+      expiryDate,
+    } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, error: 'userId is required' });
     }
 
-    if (!userId || !name || !licenseNumber) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: userId, name, licenseNumber'
-      });
-    }
-    
     const result = await zkpService.verifyDriver({
       userId,
       name,
       licenseNumber,
-      rcNumber: rcNumber || '',
-      insuranceNumber: insuranceNumber || '',
-      issueDate: issueDate || new Date().toISOString(),
-      expiryDate: expiryDate || new Date(Date.now() + 5 * 365 * 24 * 60 * 60 * 1000).toISOString()
+      rcNumber,
+      insuranceNumber,
+      issueDate,
+      expiryDate,
     });
-    
-    if (result.success) {
-      res.json({
-        success: true,
-        data: result,
-        message: 'KYC verification successful',
-        timestamp: new Date().toISOString()
-      });
-    } else {
-      res.status(400).json({
+
+    // Duplicate request while first is still in flight
+    if (result.conflict) {
+      return res.status(409).json({
         success: false,
         error: result.error,
-        message: 'KYC verification failed'
       });
     }
+
+    return res.status(200).json(result);
   } catch (error) {
-    logger.error('ZK verification route error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Check verification status
-router.get('/zkp/status/:userId', authenticate, userLimiter, async (req, res) => {
-  try {
-    const { userId } = req.params;
-
-    if (userId !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'regulator') {
-      return res.status(403).json({
+    // Redis unavailable — the lock could not be acquired at all
+    if (error instanceof LockAcquisitionError) {
+      logger.error({ err: error }, '[ZKP] Redis unavailable — verification lock could not be acquired');
+      return res.status(503).json({
         success: false,
-        error: 'Access Denied: You can only view your own status.'
+        error: 'Verification service temporarily unavailable. Please try again shortly.',
       });
     }
 
-    const verified = await zkpService.isVerified(userId);
-    
-    res.json({
-      success: true,
-      data: {
-        userId,
-        verified,
-        timestamp: new Date().toISOString()
-      }
-    });
-  } catch (error) {
-    logger.error('Status check error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    logger.error({ err: error }, '[ZKP] Unexpected error in /zkp/verify');
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Get document hash (regulator only)
-router.get('/zkp/document-hash/:userId', zkpRegulatorLimiter, authenticate, requireRole(['regulator']), async (req, res) => {
+/**
+ * GET /zkp/status/:userId
+ * Returns the KYC verification status for a driver.
+ */
+router.get('/status/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const hash = await zkpService.getDocumentHash(userId);
-    
-    res.json({
-      success: true,
-      data: {
-        userId,
-        documentHash: hash,
-        timestamp: new Date().toISOString()
-      }
-    });
+    const verified = await zkpService.isVerified(userId);
+    return res.status(200).json({ success: true, verified });
   } catch (error) {
-    logger.error('Document hash fetch error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    logger.error({ err: error }, '[ZKP] Error in /zkp/status');
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// Get verification stats
-router.get('/zkp/stats', zkpRegulatorLimiter, authenticate, requireRole(['regulator']), async (req, res) => {
+/**
+ * GET /zkp/stats
+ * Returns aggregate KYC verification counts.
+ */
+router.get('/stats', async (req, res) => {
   try {
     const stats = await zkpService.getVerificationStats();
-    
-    res.json({
-      success: true,
-      data: stats,
-      timestamp: new Date().toISOString()
-    });
+    return res.status(200).json({ success: true, ...stats });
   } catch (error) {
-    logger.error('Stats fetch error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    logger.error({ err: error }, '[ZKP] Error in /zkp/stats');
+    return res.status(500).json({ success: false, error: error.message });
   }
 });
 

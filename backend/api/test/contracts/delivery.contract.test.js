@@ -279,6 +279,41 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
     expect(m.calls.find((c) => c.rpc === "complete_trip_tx")).toBeTruthy();
   });
 
+  it("200: confirm-otp returns numeric amount_inr and non-null order_display_id", async () => {
+    escrowReleaseMock.mockResolvedValue({ txHash: "0xrelease" });
+
+    m.store.orders.push({
+      id: "order-cotp-1",
+      driver_id: DRIVER["x-user-id"],
+      order_display_id: "ORD-COTP",
+      status: "arriving",
+      total_amount: 500000,
+      escrow_status: "funded",
+      drop_lat: DROP_LAT,
+      drop_lng: DROP_LNG,
+    });
+    m.store.delivery_otps.push(makeOtpRecord("otp-cotp-1", "order-cotp-1"));
+    seedDriverAtDropOff("order-cotp-1", DRIVER["x-user-id"]);
+    m.store.order_timeline.push({
+      order_display_id: "ORD-COTP",
+      milestone: "Delivered",
+      completed: false,
+    });
+
+    const res = await request(buildApp())
+      .post("/api/orders/order-cotp-1/confirm-otp")
+      .set("X-Idempotency-Key", "cotp-test-1")
+      .set(DRIVER)
+      .send({ otp: "123456" });
+
+    expectContract(res, 200);
+    expect(res.body.payment_released).toBe(true);
+    expect(typeof res.body.amount_inr).toBe("string");
+    expect(Number.isNaN(Number(res.body.amount_inr))).toBe(false);
+    expect(res.body.amount_inr).toBe("5000");
+    expect(res.body.order_display_id).toBe("ORD-COTP");
+  });
+
   it("400: validation error when OTP missing", async () => {
     const res = await request(buildApp())
       .post("/api/orders/order-dv-1/verify-delivery")

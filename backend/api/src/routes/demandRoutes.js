@@ -1,6 +1,7 @@
 import express from 'express';
 import { supabase } from '../config/db.js';
-import { authenticate, requireRole } from '../middleware/auth.js';
+import { authenticate } from '../middleware/auth.js';
+import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { predictDemand } from '../services/ml.js';
@@ -11,7 +12,7 @@ const router = express.Router();
 // 1. GET DEMAND HEATMAP
 // GET /api/demand-heatmap
 // ============================================================================
-router.get('/', authenticate, userLimiter, requireRole(['driver', 'admin']), async (req, res) => {
+router.get('/', authenticate, userLimiter, requirePolicy('demand:view-heatmap'), async (req, res) => {
   try {
     // 1. Fetch recent load offers (historical/current volume)
     const { data: loads, error } = await supabase

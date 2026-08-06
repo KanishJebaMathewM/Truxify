@@ -6,6 +6,13 @@ const supabaseInsertMock = vi.fn().mockResolvedValue({ error: null });
 const supabaseSelectMock = vi.fn();
 const firebaseSendMock = vi.fn();
 
+// Service-role (delivery_otps) mocks — delivery_otps is service-role-write, so
+// all OTP lifecycle calls must flow through supabaseAdmin, never the anon key.
+const adminDeliveryOtpInsertMock = vi.fn().mockResolvedValue({ data: { id: 'otp-uuid-1' }, error: null });
+const adminNotificationInsertMock = vi.fn().mockResolvedValue({ error: null });
+const adminDeliveryOtpSelectMock = vi.fn().mockResolvedValue({ data: null, error: null });
+const adminDeliveryOtpUpdateMock = vi.fn().mockResolvedValue({ data: null, error: null });
+
 vi.mock('../../src/config/db.js', () => ({
   supabase: {
     from: table => {
@@ -41,6 +48,59 @@ vi.mock('../../src/config/db.js', () => ({
       }
     }
   },
+  supabaseAdmin: {
+    from: table => {
+      if (table === 'notifications') {
+        return {
+          insert: data => adminNotificationInsertMock(table, data)
+        };
+      }
+      if (table === 'delivery_otps') {
+        return {
+          insert: data => ({
+            select: fields => ({
+              single: () => adminDeliveryOtpInsertMock(table, data, fields)
+            })
+          }),
+          select: fields => ({
+            eq: (col, val) => ({
+              eq: (col2, val2) => ({
+                gte: (col3, val3) => ({
+                  order: (col4, opts) => ({
+                    limit: n => ({
+                      maybeSingle: () => adminDeliveryOtpSelectMock(table, fields, col, val, col2, val2, col3, val3, col4, opts, n)
+                    })
+                  })
+                })
+              })
+            })
+          }),
+          update: data => ({
+            eq: (col, val) => ({
+              eq: (col2, val2) => {
+                // Thenable so the no-.select path (expireDeliveryOtps) can be
+                // awaited directly, while verifyDeliveryOtp can keep chaining.
+                const tail = {
+                  select: fields => ({
+                    maybeSingle: () => adminDeliveryOtpUpdateMock(table, data, col, val, col2, val2, fields)
+                  })
+                };
+                tail.then = resolve => {
+                  adminDeliveryOtpUpdateMock(table, data, col, val, col2, val2, null);
+                  resolve({ error: null });
+                };
+                return tail;
+              },
+              select: fields => ({
+                maybeSingle: () => adminDeliveryOtpUpdateMock(table, data, col, val, null, null, fields)
+              })
+            })
+          })
+        };
+      }
+      return {};
+    }
+  },
   firebaseAdmin: {
     messaging: () => ({
       send: firebaseSendMock
@@ -52,7 +112,10 @@ const {
   sendDeliveryOtpNotification,
   sendPushNotification,
   sendFcmNotification,
+  storeDeliveryOtp,
+  getActiveDeliveryOtp,
   verifyDeliveryOtp,
+  expireDeliveryOtps,
   hashDeliveryOtp,
   verifyDeliveryOtpHash
 } = await import('../../src/services/notificationService.js');
@@ -81,8 +144,8 @@ describe('notificationService', () => {
       expect(result.fcm.success).toBe(true);
       expect(result.fcm.messageId).toBe('msg_id_abc');
 
-      expect(supabaseInsertMock).toHaveBeenCalledOnce();
-      const insertArgs = supabaseInsertMock.mock.calls[0][1];
+      expect(adminNotificationInsertMock).toHaveBeenCalledOnce();
+      const insertArgs = adminNotificationInsertMock.mock.calls[0][1];
       expect(insertArgs.user_id).toBe(customerId);
       // OTP is NOT included in the notification body (security fix)
       expect(insertArgs.body).not.toContain(otp);
@@ -103,7 +166,7 @@ describe('notificationService', () => {
         error: null
       });
 
-      supabaseInsertMock.mockResolvedValue({ error: { message: 'DB error' } });
+      adminNotificationInsertMock.mockResolvedValue({ error: { message: 'DB error' } });
       const fcmError = new Error('Firebase error');
       fcmError.code = 'messaging/internal-error';
       firebaseSendMock.mockRejectedValue(fcmError);
@@ -129,8 +192,8 @@ describe('notificationService', () => {
   });
 
   describe('verifyDeliveryOtp', () => {
-    it('marks a specific OTP record as verified by ID', async () => {
-      supabaseUpdateMock.mockResolvedValue({
+    it('marks a specific OTP record as verified by ID via the service-role client', async () => {
+      adminDeliveryOtpUpdateMock.mockResolvedValue({
         data: { id: 'otp-uuid-123' },
         error: null
       });
@@ -138,9 +201,9 @@ describe('notificationService', () => {
       const result = await verifyDeliveryOtp('otp-uuid-123');
 
       expect(result).toBe(true);
-      expect(supabaseUpdateMock).toHaveBeenCalledOnce();
+      expect(adminDeliveryOtpUpdateMock).toHaveBeenCalledOnce();
 
-      const [table, data, col, val] = supabaseUpdateMock.mock.calls[0];
+      const [table, data, col, val] = adminDeliveryOtpUpdateMock.mock.calls[0];
       expect(table).toBe('delivery_otps');
       expect(data.verified).toBe(true);
       expect(data.verified_at).toBeDefined();
@@ -149,7 +212,7 @@ describe('notificationService', () => {
     });
 
     it('returns false when Supabase update fails', async () => {
-      supabaseUpdateMock.mockResolvedValue({
+      adminDeliveryOtpUpdateMock.mockResolvedValue({
         data: null,
         error: { message: 'DB error' }
       });
@@ -159,13 +222,67 @@ describe('notificationService', () => {
     });
 
     it('returns false when no OTP record is found or already verified', async () => {
-      supabaseUpdateMock.mockResolvedValue({
+      adminDeliveryOtpUpdateMock.mockResolvedValue({
         data: null,
         error: null
       });
 
       const result = await verifyDeliveryOtp('nonexistent-otp-id');
       expect(result).toBe(false);
+    });
+  });
+
+  describe('delivery OTP lifecycle (service-role writes, issue #6326)', () => {
+    it('stores, reads, and consumes an OTP row end-to-end through the service-role client', async () => {
+      adminDeliveryOtpInsertMock.mockResolvedValue({
+        data: { id: 'otp-uuid-endtoend' },
+        error: null
+      });
+      adminDeliveryOtpSelectMock.mockResolvedValue({
+        data: { id: 'otp-uuid-endtoend', otp_hash: 'a'.repeat(128), otp_salt: 'b'.repeat(32), expires_at: '2099-01-01T00:00:00.000Z' },
+        error: null
+      });
+      adminDeliveryOtpUpdateMock.mockResolvedValue({
+        data: { id: 'otp-uuid-endtoend' },
+        error: null
+      });
+
+      const stored = await storeDeliveryOtp('order-uuid-1', '654321', 15);
+      expect(stored).toEqual({ id: 'otp-uuid-endtoend' });
+      expect(adminDeliveryOtpInsertMock).toHaveBeenCalledOnce();
+      const insertArgs = adminDeliveryOtpInsertMock.mock.calls[0][1];
+      expect(insertArgs.order_id).toBe('order-uuid-1');
+      expect(insertArgs.otp_hash).toMatch(/^[a-f0-9]{128}$/);
+      expect(insertArgs.otp_salt).toMatch(/^[a-f0-9]{32}$/);
+      expect(insertArgs.verified).toBe(false);
+      // The raw OTP is never persisted — only the salted digest.
+      expect(JSON.stringify(insertArgs)).not.toContain('654321');
+
+      const active = await getActiveDeliveryOtp('order-uuid-1');
+      expect(active?.id).toBe('otp-uuid-endtoend');
+      expect(adminDeliveryOtpSelectMock).toHaveBeenCalledOnce();
+      const [table, fields, col, val] = adminDeliveryOtpSelectMock.mock.calls[0];
+      expect(table).toBe('delivery_otps');
+      expect(col).toBe('order_id');
+      expect(val).toBe('order-uuid-1');
+
+      const consumed = await verifyDeliveryOtp('otp-uuid-endtoend');
+      expect(consumed).toBe(true);
+      expect(adminDeliveryOtpUpdateMock).toHaveBeenCalledOnce();
+      const [, updateData, upCol, upVal] = adminDeliveryOtpUpdateMock.mock.calls[0];
+      expect(updateData.verified).toBe(true);
+      expect(upCol).toBe('id');
+      expect(upVal).toBe('otp-uuid-endtoend');
+    });
+
+    it('expires unverified OTPs for an order via the service-role client', async () => {
+      await expireDeliveryOtps('order-uuid-2');
+      expect(adminDeliveryOtpUpdateMock).toHaveBeenCalledOnce();
+      const [table, data, col, val] = adminDeliveryOtpUpdateMock.mock.calls[0];
+      expect(table).toBe('delivery_otps');
+      expect(data.expires_at).toBeDefined();
+      expect(col).toBe('order_id');
+      expect(val).toBe('order-uuid-2');
     });
   });
 
@@ -247,7 +364,7 @@ describe('notificationService', () => {
 
       expect(result.success).toBe(true);
       expect(result.fcm.messageId).toBe('msg_id_xyz');
-      expect(supabaseInsertMock).toHaveBeenCalledOnce();
+      expect(adminNotificationInsertMock).toHaveBeenCalledOnce();
     });
 
     it('classifies transient errors and retries', async () => {

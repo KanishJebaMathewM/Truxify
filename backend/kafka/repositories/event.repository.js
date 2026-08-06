@@ -1,5 +1,5 @@
-import { supabase } from '../api/src/config/db.js';
-import logger from '../api/src/middleware/logger.js';
+import { supabase } from '../../api/src/config/db.js';
+import logger from '../../api/src/middleware/logger.js';
 
 class EventRepository {
   async saveEvent(event) {

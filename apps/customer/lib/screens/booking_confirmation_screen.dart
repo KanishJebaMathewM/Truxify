@@ -671,3 +671,95 @@ class _UpiPaymentMockDialogState extends State<_UpiPaymentMockDialog> {
     );
   }
 }
+
+// ── UPI Intent Error Sheet ────────────────────────────────────────────────────
+
+class _UpiIntentErrorSheet extends StatelessWidget {
+  const _UpiIntentErrorSheet({
+    required this.message,
+    required this.isRetrying,
+    required this.onRetry,
+  });
+
+  final String message;
+  final bool isRetrying;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: TruxifyColors.errorRed.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+            color: TruxifyColors.errorRed.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: TruxifyColors.errorRed.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.error_outline_rounded,
+                    color: TruxifyColors.errorRed, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Payment setup failed',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                    Text(
+                        'Your booking was created, but the payment could not '
+                        'be secured. Please retry.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: TruxifyColors.adaptiveSecondaryText(
+                                context))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(message,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: TruxifyColors.errorRed)),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              id: 'btn_retry_payment',
+              onPressed: isRetrying ? null : onRetry,
+              icon: isRetrying
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(isRetrying ? 'Retrying...' : 'Retry payment'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: TruxifyColors.accentDark,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

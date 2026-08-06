@@ -81,6 +81,10 @@ export class OrderRepository {
     return this.findOrderByDisplayId(id, columns);
   }
 
+  async findOrderByIdOrDisplayId(id, columns = '*') {
+    return this.findOrderByAnyId(id, columns);
+  }
+
   async findOrdersByCustomer(customerId, columns, statuses, orderColumn, ascending, pagination) {
     return this._retryableQuery(() => {
       let query = this.supabase
@@ -486,8 +490,8 @@ export class OrderRepository {
   // DELIVERY OTPS
   // ===================================================================
 
-  async findVerifiedDeliveryOtp(orderId) {
-    return this._retryableQuery(() => this.supabase
+  async findVerifiedDeliveryOtp(orderId, client) {
+    return this._retryableQuery(() => (client ?? this.supabase)
       .from('delivery_otps')
       .select('id')
       .eq('order_id', orderId)
@@ -515,15 +519,29 @@ export class OrderRepository {
   // ESCROW
   // ===================================================================
 
-  async updateEscrowBooking(orderId, bookingId, escrowStatus, extra = {}) {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .update({
-        escrow_booking_id: bookingId,
-        escrow_status: escrowStatus,
-        ...extra,
-      })
-      .eq('id', orderId), 'updateEscrowBooking');
+  async updateEscrowBooking(orderId, bookingId, escrowStatus, extra = {}, filters) {
+    return this._retryableQuery(() => {
+      let query = this.supabase
+        .from('orders')
+        .update({
+          escrow_booking_id: bookingId,
+          escrow_status: escrowStatus,
+          ...extra,
+        })
+        .eq('id', orderId);
+      if (filters) {
+        for (const f of filters) {
+          if (f.op === 'eq') {
+            query = query.eq(f.column, f.value);
+          } else if (f.op === 'is') {
+            query = query.is(f.column, f.value);
+          } else if (f.op === 'or') {
+            query = query.or(f.value);
+          }
+        }
+      }
+      return query.select('id, escrow_status, pending_bid_acceptance').single();
+    }, 'updateEscrowBooking');
   }
 
   async revertEscrowStatus(orderId) {
@@ -562,7 +580,7 @@ export class OrderRepository {
   async findPendingEscrowRefunds() {
     return this._retryableQuery(() => this.supabase
       .from('orders')
-      .select('id, order_display_id, refund_tx_hash, escrow_status, escrow_refund_retry_count, updated_at')
+      .select('id, order_display_id, refund_tx_hash, escrow_status, escrow_refund_attempts, updated_at')
       .in('escrow_status', ['refund_pending', 'refund_failed'])
       .limit(50), 'findPendingEscrowRefunds');
   }

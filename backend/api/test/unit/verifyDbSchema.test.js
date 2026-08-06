@@ -6,6 +6,7 @@ import {
   buildSummary,
   parseOpenApiRpcFunctions,
   parseRequiredTables,
+  verifyIndexes,
 } from '../../scripts/verify-db-schema.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,9 +60,149 @@ erDiagram
       missingTables: 1,
       functionsChecked: 2,
       missingFunctions: 1,
+      indexesChecked: 0,
+      missingIndexes: 0,
     });
   });
+
+  it('summarizes missing indexes when provided', () => {
+    const summary = buildSummary(
+      [{ name: 'trips', ok: true }],
+      [{ name: 'accept_bid_tx', ok: true }],
+      [
+        { name: 'idx_trips_driver_status_date', ok: true },
+        { name: 'idx_trips_driver_display', ok: false },
+      ]
+    );
+
+    expect(summary.indexesChecked).toBe(2);
+    expect(summary.missingIndexes).toBe(1);
+  });
 });
+
+// ---------------------------------------------------------------------------
+// Composite index migration tests
+// ---------------------------------------------------------------------------
+
+describe('trips composite index migration', () => {
+  const migrationPath = path.resolve(
+    __dirname,
+    '../../../../supabase/migrations/20260805000000_add_trips_composite_indexes.sql'
+  );
+
+  it('migration file exists', async () => {
+    await expect(fs.stat(migrationPath)).resolves.toBeDefined();
+  });
+
+  it('creates the (driver_id, status, trip_date DESC) composite index', async () => {
+    const sql = await fs.readFile(migrationPath, 'utf8');
+    expect(sql).toMatch(
+      /create\s+index\s+if\s+not\s+exists\s+idx_trips_driver_status_date\s+on\s+trips\s*\(\s*driver_id\s*,\s*status\s*,\s*trip_date\s+desc\s*\)/i
+    );
+  });
+
+  it('creates the (driver_id, trip_display_id) composite index', async () => {
+    const sql = await fs.readFile(migrationPath, 'utf8');
+    expect(sql).toMatch(
+      /create\s+index\s+if\s+not\s+exists\s+idx_trips_driver_display\s+on\s+trips\s*\(\s*driver_id\s*,\s*trip_display_id\s*\)/i
+    );
+  });
+
+  it('drops the redundant single-column idx_trips_driver index', async () => {
+    const sql = await fs.readFile(migrationPath, 'utf8');
+    expect(sql).toMatch(/drop\s+index\s+if\s+exists\s+idx_trips_driver/i);
+  });
+
+  it('does NOT drop the remaining single-column indexes', async () => {
+    const sql = await fs.readFile(migrationPath, 'utf8');
+    // Only idx_trips_driver should be dropped — status and date indexes are
+    // still useful for non-driver queries.
+    expect(sql).not.toMatch(/drop\s+index\s+if\s+exists\s+idx_trips_status/i);
+    expect(sql).not.toMatch(/drop\s+index\s+if\s+exists\s+idx_trips_date/i);
+  });
+
+  it('wraps statements in a transaction', async () => {
+    const sql = await fs.readFile(migrationPath, 'utf8');
+    expect(sql).toMatch(/^\s*begin\s*;/im);
+    expect(sql).toMatch(/^\s*commit\s*;/im);
+  });
+
+  it('uses IF NOT EXISTS on CREATE INDEX statements (idempotent)', async () => {
+    const sql = await fs.readFile(migrationPath, 'utf8');
+    const createMatches = [...sql.matchAll(/create\s+index/gi)];
+    const idempotentMatches = [...sql.matchAll(/create\s+index\s+if\s+not\s+exists/gi)];
+    expect(idempotentMatches.length).toBe(createMatches.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// verifyIndexes unit test (offline — mocks fetch)
+// ---------------------------------------------------------------------------
+
+describe('verifyIndexes', () => {
+  it('marks indexes present when pg_indexes returns matching rows', async () => {
+    // Patch global fetch to return a mock pg_indexes response.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      json: async () => [
+        { indexname: 'idx_trips_driver_status_date' },
+        { indexname: 'idx_trips_driver_display' },
+        { indexname: 'load_offers_status_idx' },
+        { indexname: 'profiles_role_idx' },
+        { indexname: 'orders_customer_idx' },
+        { indexname: 'orders_driver_idx' },
+        { indexname: 'trucks_owner_idx' },
+      ],
+    });
+
+    try {
+      const results = await verifyIndexes('https://fake.supabase.co', 'fake-key');
+      const missing = results.filter((r) => !r.ok);
+      expect(missing).toHaveLength(0);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('marks idx_trips_driver_status_date absent when not returned by pg_indexes', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({
+      ok: true,
+      // Deliberately omit idx_trips_driver_status_date
+      json: async () => [
+        { indexname: 'idx_trips_driver_display' },
+        { indexname: 'load_offers_status_idx' },
+      ],
+    });
+
+    try {
+      const results = await verifyIndexes('https://fake.supabase.co', 'fake-key');
+      const absent = results.find((r) => r.name === 'idx_trips_driver_status_date');
+      expect(absent).toBeDefined();
+      expect(absent.ok).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('marks all indexes as not-ok when pg_indexes is inaccessible (HTTP 403)', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: false, status: 403 });
+
+    try {
+      const results = await verifyIndexes('https://fake.supabase.co', 'anon-key');
+      expect(results.every((r) => !r.ok)).toBe(true);
+      expect(results[0].message).toMatch(/pg_indexes not accessible/i);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Existing tests (unchanged)
+// ---------------------------------------------------------------------------
 
 describe('Database Schema Constraints and RPC Upsert validation in supabase_setup.sql', () => {
   it('includes durable escrow refund reconciliation fields', async () => {
@@ -93,14 +234,11 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
     expect(sqlContent).toMatch(/orders_driver_id_fkey[\s\S]*references\s+profiles\s*\(\s*id\s*\)[\s\S]*on delete set null/i);
     expect(sqlContent).toMatch(/load_bids_load_id_fkey[\s\S]*references\s+load_offers\s*\(\s*id\s*\)[\s\S]*on delete cascade/i);
     expect(sqlContent).toMatch(/wallet_transactions_trip_display_id_fkey[\s\S]*references\s+trips\s*\(\s*trip_display_id\s*\)[\s\S]*on delete restrict/i);
-    
-    // Validate operational/compliance foreign key constraints
     expect(sqlContent).toMatch(/order_timeline_order_display_id_fkey[\s\S]*references\s+orders\s*\(\s*order_display_id\s*\)[\s\S]*on delete cascade/i);
     expect(sqlContent).toMatch(/trip_items_trip_display_id_fkey[\s\S]*references\s+trips\s*\(\s*trip_display_id\s*\)[\s\S]*on delete cascade/i);
     expect(sqlContent).toMatch(/documents_user_id_fkey[\s\S]*references\s+profiles\s*\(\s*id\s*\)[\s\S]*on delete cascade/i);
     expect(sqlContent).toMatch(/driver_details_truck_id_fkey[\s\S]*references\s+trucks\s*\(\s*id\s*\)[\s\S]*on delete set null/i);
 
-    // Validate indexes
     expect(sqlContent).toContain('idx_wallet_txn_order');
     expect(sqlContent).toContain('idx_wallet_txn_trip');
     expect(sqlContent).toContain('idx_maint_tickets_driver');
@@ -110,8 +248,6 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
   it('contains the unique constraint on earnings_daily(driver_id, day_date)', async () => {
     const setupSqlPath = path.resolve(__dirname, '../../../../docs/supabase_setup.sql');
     const sqlContent = await fs.readFile(setupSqlPath, 'utf8');
-    
-    // Check for table creation unique constraint
     const hasUniqueConstraint = /constraint\s+earnings_daily_driver_day_unique\s+unique\s*\(\s*driver_id\s*,\s*day_date\s*\)/i.test(sqlContent);
     expect(hasUniqueConstraint).toBe(true);
   });
@@ -119,12 +255,7 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
   it('verifies that complete_trip_tx uses UPSERT behavior with ON CONFLICT', async () => {
     const setupSqlPath = path.resolve(__dirname, '../../../../docs/supabase_setup.sql');
     const sqlContent = await fs.readFile(setupSqlPath, 'utf8');
-
-    // Find all insert statements into earnings_daily in complete_trip_tx function definitions
-    // and ensure they have ON CONFLICT (driver_id, day_date) DO UPDATE
     const insertMatches = [...sqlContent.matchAll(/insert\s+into\s+earnings_daily[\s\S]*?on\s+conflict\s*\(\s*driver_id\s*,\s*day_date\s*\)\s*do\s+update/gi)];
-    
-    // There should be at least two such insert statements matching the upsert behavior across the RPC overloads
     expect(insertMatches.length).toBeGreaterThanOrEqual(2);
   });
 
@@ -136,31 +267,22 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
     const migrationSql = await fs.readFile(migrationSqlPath, 'utf8');
 
     for (const [name, sqlContent] of [['supabase_setup.sql', setupSql], ['migration_complete_trip_update.sql', migrationSql]]) {
-      // 1. Check for order-linked trip lookup query
       expect(
         /select\s+trip_display_id\s+into\s+v_trip_display_id\s+from\s+trips\s+where\s+order_id\s*=\s*p_order_id/i.test(sqlContent),
         `Order-linked trip lookup not found in ${name}`
       ).toBe(true);
-
-      // 1b. Check that completion raises when no trip exists for the order
       expect(
         /if\s+v_trip_display_id\s+is\s+null[\s\S]*raise\s+exception[\s\S]*no\s+active\s+trip\s+found/i.test(sqlContent),
         `No-trip raise guard not found in ${name}`
       ).toBe(true);
-
-      // 2. Check for trips status update to completed
       expect(
         /update\s+trips\s+set\s+status\s*=\s*'completed'/i.test(sqlContent),
         `Trips status update to completed not found in ${name}`
       ).toBe(true);
-
-      // 3. Check for trip_items delivered update
       expect(
         /update\s+trip_items\s+set\s+is_delivered\s*=\s*true/i.test(sqlContent),
         `Trip items update to is_delivered = true not found in ${name}`
       ).toBe(true);
-
-      // 4. Check for trip_stops completed update
       expect(
         /update\s+trip_stops\s+set\s+is_completed\s*=\s*true/i.test(sqlContent),
         `Trip stops update to is_completed = true not found in ${name}`
@@ -177,17 +299,13 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
 
     for (const [name, sqlContent] of [['supabase_setup.sql', setupSql], ['atomic OTP migration', migrationSql]]) {
       expect(
-        // Signature may carry additional optional parameters after p_otp_id
-        // (e.g. p_release_tx_hash added by the escrow payout migration).
         /complete_trip_tx\s*\(\s*p_order_id\s+uuid\s*,\s*p_otp_id\s+uuid\s*[,)]/i.test(sqlContent),
         `OTP-aware complete_trip_tx signature not found in ${name}`
       ).toBe(true);
-
       expect(
         /update\s+delivery_otps\s+set\s+verified\s*=\s*true[\s\S]*where\s+id\s*=\s*p_otp_id[\s\S]*and\s+order_id\s*=\s*p_order_id/i.test(sqlContent),
         `Atomic delivery OTP update not found in ${name}`
       ).toBe(true);
-
       expect(
         /get\s+diagnostics\s+v_otp_updated\s*=\s*row_count/i.test(sqlContent),
         `Delivery OTP row-count guard not found in ${name}`
@@ -203,34 +321,11 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
     const migrationSql = await fs.readFile(migrationSqlPath, 'utf8');
 
     for (const [name, sqlContent] of [['supabase_setup.sql', setupSql], ['migration_add_processed_batches.sql', migrationSql]]) {
-      // 1. Table creation check
-      expect(
-        /create\s+table\s+if\s+not\s+exists\s+processed_batches/i.test(sqlContent),
-        `Table creation not found in ${name}`
-      ).toBe(true);
-
-      // 2. User-scoped composite unique constraint (user_id, idempotency_key)
-      expect(
-        /unique\s*\(\s*user_id\s*,\s*idempotency_key\s*\)/i.test(sqlContent),
-        `Composite unique constraint (user_id, idempotency_key) not found in ${name}`
-      ).toBe(true);
-
-      // 3. Row Level Security enablement
-      expect(
-        /alter\s+table\s+processed_batches\s+enable\s+row\s+level\s+security/i.test(sqlContent),
-        `RLS enablement not found in ${name}`
-      ).toBe(true);
-
-      // 4. Service role and authenticated user policies
-      expect(
-        /create\s+policy\s+"Service role full access on processed_batches"\s+on\s+processed_batches/i.test(sqlContent),
-        `Service role policy not found in ${name}`
-      ).toBe(true);
-
-      expect(
-        /create\s+policy\s+"Users view own processed batches"\s+on\s+processed_batches/i.test(sqlContent),
-        `Users view own processed batches policy not found in ${name}`
-      ).toBe(true);
+      expect(/create\s+table\s+if\s+not\s+exists\s+processed_batches/i.test(sqlContent), `Table creation not found in ${name}`).toBe(true);
+      expect(/unique\s*\(\s*user_id\s*,\s*idempotency_key\s*\)/i.test(sqlContent), `Composite unique constraint not found in ${name}`).toBe(true);
+      expect(/alter\s+table\s+processed_batches\s+enable\s+row\s+level\s+security/i.test(sqlContent), `RLS enablement not found in ${name}`).toBe(true);
+      expect(/create\s+policy\s+"Service role full access on processed_batches"\s+on\s+processed_batches/i.test(sqlContent), `Service role policy not found in ${name}`).toBe(true);
+      expect(/create\s+policy\s+"Users view own processed batches"\s+on\s+processed_batches/i.test(sqlContent), `Users view own processed batches policy not found in ${name}`).toBe(true);
     }
   });
 
@@ -254,7 +349,6 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
       '../../../../supabase/migrations/20260802150000_drop_orphaned_bids_table.sql'
     );
     const sqlContent = await fs.readFile(migrationSqlPath, 'utf8');
-
     expect(sqlContent).toMatch(/drop\s+table\s+if\s+exists\s+public\.bids/i);
     expect(sqlContent).toMatch(/drop\s+type\s+if\s+exists\s+public\.bid_status/i);
   });
@@ -266,12 +360,9 @@ describe('Database Schema Constraints and RPC Upsert validation in supabase_setu
     const setupSql = await fs.readFile(setupSqlPath, 'utf8');
     const schemaMd = await fs.readFile(schemaMdPath, 'utf8');
 
-    // supabase_setup.sql counts
     expect(setupSql).toContain('All 28 tables');
     expect(setupSql).toContain('PART 1: TABLE DEFINITIONS (28 tables)');
     expect(setupSql).toContain('26 tables with indexes');
-
-    // schema.md counts
     expect(schemaMd).toContain('28 tables · 4 RPC functions');
     expect(schemaMd).not.toContain('0 foreign keys');
   });

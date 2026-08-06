@@ -302,15 +302,26 @@ describe('Truck Routes', () => {
       expect(res.body.length).toBe(0);
     });
 
-    it('filters by truck_type using name match', async () => {
-      seedSearchData();
+    it('filters by truck_type using the stored truck type', async () => {
+      mockTelemetryResults = [{ driver_id: 'driver-uuid-456' }];
+      m.store.trucks = [
+        { id: 'truck-reefer', name: 'Tata 407', truck_type: 'Refrigerated', number_plate: 'MH12AB0001', max_capacity_tons: 10, owner_id: 'driver-uuid-456' },
+      ];
+      m.store.driver_details = [
+        { user_id: 'driver-uuid-456', is_online: true, truck_id: 'truck-reefer', rating: 4.5, total_trips: 100, completion_rate: 95 },
+      ];
+      m.store.profiles = [
+        { id: 'driver-uuid-456', full_name: 'Ravi Kumar' },
+      ];
+
       const res = await request(buildApp())
         .get(`/api/trucks/search?${SEARCH_PARAMS}&truck_type=Refrigerated`)
         .set(CUSTOMER_HEADERS);
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
-      expect(res.body.length).toBe(0);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].truck).toBe('Tata 407');
     });
 
     it('accepts valid optional filters without errors', async () => {

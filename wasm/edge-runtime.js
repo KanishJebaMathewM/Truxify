@@ -47,7 +47,6 @@ class EdgeRuntime {
                     exports: {
                         calculate_route: (params) => ({ distance_km: params.distance || 15.4, eta_mins: 28, cost: 450 }),
                         calculate_eta: (dist, speed, traffic) => (dist / (speed || 40)) * 60 * (traffic || 1.1),
-                        validate_otp: (input, correct) => input === correct,
                         get_stats: () => ({ memory_used_mb: 4.2, active_functions: 6 })
                     }
                 });
@@ -80,7 +79,7 @@ class EdgeRuntime {
                 const func = instance.exports[functionName];
                 if (!func) throw new Error('Function ' + functionName + ' not found');
                 const result = func(...params);
-                parentPort.postMessage({ success: true, data: result });
+                parentPort.postMessage({ success: true, result });
             } catch (err) {
                 parentPort.postMessage({ success: false, error: err.message });
             }
@@ -173,13 +172,10 @@ class EdgeRuntime {
         return null;
     }
 
-    async validateOTP(inputOTP, correctOTP) {
-        const result = await this.executeEdgeFunction('validate_otp', [inputOTP, correctOTP]);
-        if (result.success) {
-            return result.result;
-        }
-        return null;
-    }
+    // validateOTP removed (#6331): the endpoint passed the client-supplied
+    // reference value straight into the sandbox (input === correct), making
+    // it a trivially bypassable OTP validator on the public API. OTP
+    // validation lives server-side against stored, hashed OTPs instead.
 
     async filterDrivers(drivers, minRating) {
         const result = await this.executeEdgeFunction('filter_drivers', [drivers, minRating]);

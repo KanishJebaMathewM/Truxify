@@ -14,8 +14,10 @@ export const requireApiKey = (req, res, next) => {
   const validKeys = validKeysStr.split(',').map(k => k.trim()).filter(Boolean);
 
   if (validKeys.length === 0) {
-    // If no keys configured, skip verification to avoid breaking local dev
-    return next();
+    logger.error({ ip: req.ip, path: req.originalUrl }, 'API key auth unavailable: VALID_API_KEYS is not configured');
+    return res.status(503).json({
+      error: 'Service Unavailable: API key authentication is not configured.',
+    });
   }
 
   if (!apiKey || !validKeys.includes(apiKey)) {

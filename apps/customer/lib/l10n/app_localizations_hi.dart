@@ -9,459 +9,478 @@ class AppLocalizationsHi extends AppLocalizations {
   AppLocalizationsHi([String locale = 'hi']) : super(locale);
 
   @override
-  String get appTitle => '\u091F\u094D\u0930\u0915\u094D\u0938\u093F\u092B\u093E\u0908';
+  String get appTitle => 'ट्रक्सिफाई';
 
   @override
-  String get loginTitle => '\u091F\u094D\u0930\u0915\u094D\u0938\u093F\u092B\u093E\u0908 \u092E\u0947\u0902 \u0906\u092A\u0915\u093E \u0938\u094D\u0935\u093E\u0917\u0924 \u0939\u0948';
+  String get loginTitle => 'ट्रक्सिफाई में आपका स्वागत है';
 
   @override
-  String get bookLoadButton => '\u0932\u094B\u0921 \u092C\u0941\u0915 \u0915\u0930\u0947\u0902';
+  String get bookLoadButton => 'लोड बुक करें';
 
   @override
-  String get loadingText => '\u0932\u094B\u0921 \u0939\u094B \u0930\u0939\u093E \u0939\u0948...';
+  String get loadingText => 'लोड हो रहा है...';
 
   @override
-  String comingSoon(String title) => '$title \u091C\u0932\u094D\u0926 \u0906 \u0930\u0939\u093E \u0939\u0948';
+  String comingSoon(String title) {
+    return '$title जल्द आ रहा है';
+  }
 
   @override
-  String greetingMessage(String greeting, String displayName) => '$greeting, $displayName \u{1F44B}';
+  String greetingMessage(String greeting, String displayName) {
+    return '$greeting, $displayName 👋';
+  }
 
   @override
-  String get noActiveShipments => '\u0915\u094B\u0908 \u0938\u0915\u094D\u0930\u093F\u092F \u0936\u093F\u092A\u092E\u0947\u0902\u091F \u0928\u0939\u0940\u0902';
+  String get noActiveShipments => 'कोई सक्रिय शिपमेंट नहीं';
 
   @override
-  String get routeHistoryComingSoon => '\u0930\u0942\u091F \u0907\u0924\u093F\u0939\u093E\u0938 \u091C\u0932\u094D\u0926 \u0906 \u0930\u0939\u093E \u0939\u0948';
+  String get routeHistoryComingSoon => 'रूट इतिहास जल्द आ रहा है';
 
   @override
-  String get walletAddressUpdated => '\u0935\u0949\u0932\u0947\u091F \u092A\u0924\u093E \u0905\u092A\u0921\u0947\u091F \u0915\u093F\u092F\u093E \u0917\u092F\u093E';
+  String get walletAddressUpdated => 'वॉलेट पता अपडेट किया गया';
 
   @override
-  String get polygonWalletAddress => '\u092A\u0949\u0932\u0940\u0917\u0949\u0928 \u0935\u0949\u0932\u0947\u091F \u092A\u0924\u093E';
+  String get polygonWalletAddress => 'पॉलीगॉन वॉलेट पता';
 
   @override
-  String get saveWalletAddress => '\u0935\u0949\u0932\u0947\u091F \u092A\u0924\u093E \u0938\u0939\u0947\u091C\u0947\u0902';
+  String get saveWalletAddress => 'वॉलेट पता सहेजें';
 
   @override
-  String error(String errorMsg) => '\u0924\u094D\u0930\u0941\u091F\u093F: $errorMsg';
+  String error(String errorMsg) {
+    return 'त्रुटि: $errorMsg';
+  }
 
   @override
-  String get lightTheme => '\u0939\u0932\u094D\u0915\u093E';
+  String get lightTheme => 'हल्का';
 
   @override
-  String get darkTheme => '\u0917\u0939\u0930\u093E';
+  String get darkTheme => 'गहरा';
 
   @override
-  String get retry => '\u092A\u0941\u0928\u093E\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902';
+  String get retry => 'पुनः प्रयास करें';
 
   @override
-  String get cancel => '\u0930\u0926\u094D\u0926 \u0915\u0930\u0947\u0902';
+  String get cancel => 'रद्द करें';
 
   @override
-  String get save => '\u0938\u0939\u0947\u091C\u0947\u0902';
+  String get save => 'सहेजें';
 
   @override
-  String get close => '\u092C\u0902\u0926 \u0915\u0930\u0947\u0902';
+  String get close => 'बंद करें';
 
   @override
-  String get apply => '\u0932\u093E\u0917\u0942 \u0915\u0930\u0947\u0902';
+  String get apply => 'लागू करें';
 
   @override
-  String get reset => '\u0930\u0940\u0938\u0947\u091F \u0915\u0930\u0947\u0902';
+  String get reset => 'रीसेट करें';
 
   @override
-  String get search => '\u0916\u094B\u091C\u0947\u0902';
+  String get search => 'खोजें';
 
   @override
-  String get welcomeBack => '\u0935\u093E\u092A\u0938\u0940 \u092A\u0930 \u0938\u094D\u0935\u093E\u0917\u0924 \u0939\u0948';
+  String get welcomeBack => 'वापसी पर स्वागत है';
 
   @override
-  String get signInSubtitle => '\u091C\u093E\u0930\u0940 \u0930\u0916\u0928\u0947 \u0915\u0947 \u0932\u093F\u092F\u0947 \u0938\u093E\u0907\u0928 \u0907\u0928 \u0915\u0930\u0947\u0902';
+  String get signInSubtitle => 'जारी रखने के लिए साइन इन करें';
 
   @override
-  String get phoneNumber => '\u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930';
+  String get phoneNumber => 'फ़ोन नंबर';
 
   @override
-  String get sendOtp => 'OTP \u092D\u0947\u091C\u0947\u0902';
+  String get sendOtp => 'OTP भेजें';
 
   @override
-  String get sendingOtp => 'OTP \u092D\u0947\u091C\u093E \u091C\u093E \u0930\u0939\u093E \u0939\u0948...';
+  String get sendingOtp => 'OTP भेजा जा रहा है...';
 
   @override
-  String get verifyingOtp => '\u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0939\u094B \u0930\u0939\u093E \u0939\u0948...';
+  String get verifyingOtp => 'सत्यापन हो रहा है...';
 
   @override
-  String get verifyOtp => 'OTP \u0938\u0924\u094D\u092F\u093E\u092A\u093F\u0924 \u0915\u0930\u0947\u0902';
+  String get verifyOtp => 'OTP सत्यापित करें';
 
   @override
-  String get loginWithBiometrics => '\u092C\u093E\u092F\u094B\u092E\u0947\u091F\u094D\u0930\u093F\u0915\u094D\u0938 \u0938\u0947 \u0932\u0949\u0917\u093F\u0928 \u0915\u0930\u0947\u0902';
+  String get loginWithBiometrics => 'बायोमेट्रिक्स से लॉगिन करें';
 
   @override
-  String get biometricsNotSupported => '\u0907\u0938 \u0921\u093F\u0935\u093E\u0907\u0938 \u092A\u0930 \u092C\u093E\u092F\u094B\u092E\u0947\u091F\u094D\u0930\u093F\u0915\u094D\u0938 \u0938\u092E\u0930\u094D\u0925\u093F\u0924 \u0928\u0939\u0940\u0902 \u0939\u0948';
+  String get biometricsNotSupported => 'इस डिवाइस पर बायोमेट्रिक्स समर्थित नहीं है';
 
   @override
-  String get biometricAuthSuccessful => '\u092C\u093E\u092F\u094B\u092E\u0947\u091F\u094D\u0930\u093F\u0915 \u092A\u094D\u0930\u092E\u093E\u0923\u0940\u0915\u0930\u0923 \u0938\u092B\u0932';
+  String get biometricAuthSuccessful => 'बायोमेट्रिक प्रमाणीकरण सफल';
 
   @override
-  String get pleaseEnterPhone => '\u0915\u0943\u092A\u092F\u093E \u0905\u092A\u0928\u093E \u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+  String get pleaseEnterPhone => 'कृपया अपना फ़ोन नंबर दर्ज करें';
 
   @override
-  String get phoneDigitsOnly => '\u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u092E\u0947\u0902 \u0915\u0947\u0935\u0932 \u0905\u0902\u0915 \u0939\u094B\u0928\u0947 \u091A\u093E\u0939\u093F\u090F';
+  String get phoneDigitsOnly => 'फ़ोन नंबर में केवल अंक होने चाहिए';
 
   @override
-  String phoneMustBeExactDigits(int digitCount) => '\u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u0920\u0940\u0915 $digitCount \u0905\u0902\u0915\u094B\u0902 \u0915\u093E \u0939\u094B\u0928\u093E \u091A\u093E\u0939\u093F\u090F';
+  String phoneMustBeExactDigits(int digitCount) {
+    return 'फ़ोन नंबर ठीक $digitCount अंकों का होना चाहिए';
+  }
 
   @override
-  String get phoneMustBeDigits => '\u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u092E\u0947\u0902 \u0915\u0947\u0935\u0932 \u0905\u0902\u0915 \u0939\u094B\u0928\u0947 \u091A\u093E\u0939\u093F\u090F';
+  String get phoneMustBeDigits => 'फ़ोन नंबर में केवल अंक होने चाहिए';
 
   @override
-  String get verificationFailed => '\u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0905\u0938\u092B\u0932\u0964 \u0915\u0943\u092A\u092F\u093E \u092A\u0941\u0928\u093E\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902\u0964';
+  String get verificationFailed => 'सत्यापन असफल। कृपया पुनः प्रयास करें।';
 
   @override
-  String get phoneVerificationFailed => '\u092B\u093C\u094B\u0928 \u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0905\u0938\u092B\u0932\u0964 \u0915\u0943\u092A\u092F\u093E \u092A\u0941\u0928\u093E\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902\u0964';
+  String get phoneVerificationFailed => 'फ़ोन सत्यापन असफल। कृपया पुनः प्रयास करें।';
 
   @override
-  String get autoVerificationFailed => '\u0938\u094D\u0935\u091A\u093E\u0932\u093F\u0924 \u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0905\u0938\u092B\u0932\u0964 \u0915\u0943\u092A\u092F\u093E OTP \u092E\u0948\u0928\u094D\u092F\u0941\u0905\u0932 \u0930\u0942\u092A \u0938\u0947 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902\u0964';
+  String get autoVerificationFailed => 'स्वचालित सत्यापन असफल। कृपया OTP मैन्युअल रूप से दर्ज करें।';
 
   @override
-  String get failedToSendOtp => 'OTP \u092D\u0947\u091C\u0928\u0947 \u092E\u0947\u0902 \u0905\u0938\u092B\u0932\u0964 \u0915\u0943\u092A\u092F\u093E \u092A\u0941\u0928\u093E\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902\u0964';
+  String get failedToSendOtp => 'OTP भेजने में असफल। कृपया पुनः प्रयास करें।';
 
   @override
-  String get enterOtp => 'OTP \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+  String get enterOtp => 'OTP दर्ज करें';
 
   @override
-  String sentTo(String phoneNumber) => '$phoneNumber \u092A\u0930 \u092D\u0947\u091C\u093E \u0917\u092F\u093E';
+  String sentTo(String phoneNumber) {
+    return '$phoneNumber पर भेजा गया';
+  }
 
   @override
-  String get invalidOtp => '\u0905\u092E\u093E\u0928\u094D\u092F OTP\u0964 \u0915\u0943\u092A\u092F\u093E \u091C\u093E\u0902\u091A\u0947\u0902 \u0914\u0930 \u092A\u0941\u0928\u093E\u0903 \u092A\u094D\u0930\u092F\u093E\u0938 \u0915\u0930\u0947\u0902\u0964';
+  String get invalidOtp => 'अमान्य OTP। कृपया जांचें और पुनः प्रयास करें।';
 
   @override
-  String get verificationSessionExpired => '\u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0938\u0924\u094D\u0930 \u0938\u092E\u093E\u092A\u094D\u0924 \u0939\u094B \u0917\u092F\u093E \u0939\u0948\u0964 \u0915\u0943\u092A\u092F\u093E \u0928\u092F\u093E OTP \u0905\u0928\u0941\u0930\u094B\u0927 \u0915\u0930\u0947\u0902\u0964';
+  String get verificationSessionExpired => 'सत्यापन सत्र समाप्त हो गया है। कृपया नया OTP अनुरोध करें।';
 
   @override
-  String get invalidVerificationCode => '\u0905\u092E\u093E\u0928\u094D\u092F \u0938\u0924\u094D\u092F\u093E\u092A\u0928 \u0915\u094B\u0921\u0964';
+  String get invalidVerificationCode => 'अमान्य सत्यापन कोड।';
 
   @override
-  String get otpExpired => 'OTP \u0915\u0940 \u0938\u092E\u092F \u0938\u0940\u092E\u093E \u0938\u092E\u093E\u092A\u094D\u0924 \u0939\u094B \u0917\u0908 \u0939\u0948\u0964 \u0915\u0943\u092A\u092F\u093E \u0928\u092F\u093E \u0905\u0928\u0941\u0930\u094B\u0927 \u0915\u0930\u0947\u0902\u0964';
+  String get otpExpired => 'OTP की समय सीमा समाप्त हो गई है। कृपया नया अनुरोध करें।';
 
   @override
-  String get home => '\u0939\u094B\u092E';
+  String get home => 'होम';
 
   @override
-  String get findTrucks => '\u091F\u094D\u0930\u0915 \u0916\u094B\u091C\u0947\u0902';
+  String get findTrucks => 'ट्रक खोजें';
 
   @override
-  String get orders => '\u0911\u0930\u094D\u0921\u0930';
+  String get orders => 'ऑर्डर';
 
   @override
-  String get profile => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932';
+  String get profile => 'प्रोफ़ाइल';
 
   @override
-  String get activeShipments => '\u0938\u0915\u094D\u0930\u093F\u092F \u0936\u093F\u092A\u092E\u0947\u0902\u091F';
+  String get activeShipments => 'सक्रिय शिपमेंट';
 
   @override
-  String get seeAll => '\u0938\u092D\u0940 \u0926\u0947\u0916\u0947\u0902';
+  String get seeAll => 'सभी देखें';
 
   @override
-  String get bookATruck => '\u091F\u094D\u0930\u0915 \u092C\u0941\u0915 \u0915\u0930\u0947\u0902';
+  String get bookATruck => 'ट्रक बुक करें';
 
   @override
-  String get active => '\u0938\u0915\u094D\u0930\u093F\u092F';
+  String get active => 'सक्रिय';
 
   @override
-  String get moreStats => '\u0914\u0930 \u0906\u0902\u0915\u0921\u0947';
+  String get moreStats => 'और आंकड़े';
 
   @override
-  String get savings => '\u092C\u091A\u0924';
+  String get savings => 'बचत';
 
   @override
-  String get totalShipments => '\u0915\u0941\u0932 \u0936\u093F\u092A\u092E\u0947\u0902\u091F';
+  String get totalShipments => 'कुल शिपमेंट';
 
   @override
-  String get yourUsualRoutes => '\u0906\u092A\u0915\u0947 \u0928\u093F\u092F\u092E\u093F\u0924 \u092E\u093E\u0930\u094D\u0917';
+  String get yourUsualRoutes => 'आपके नियमित मार्ग';
 
   @override
-  String get lastTruckLocation => '\u0905\u0902\u0924\u093F\u092E \u091F\u094D\u0930\u0915 \u0938\u094D\u0925\u093E\u0928';
+  String get lastTruckLocation => 'अंतिम ट्रक स्थान';
 
   @override
-  String get couldNotLoadData => '\u0921\u0947\u091F\u093E \u0932\u094B\u0921 \u0928\u0939\u0940\u0902 \u0939\u094B \u0938\u0915\u093E';
+  String get couldNotLoadData => 'डेटा लोड नहीं हो सका';
 
   @override
-  String get mlPoweredMatching => 'ML-\u0938\u0902\u091A\u093E\u0932\u093F\u0924 \u092E\u0948\u091A\u093F\u0902\u0917';
+  String get mlPoweredMatching => 'ML-संचालित मैचिंग';
 
   @override
-  String get route => '\u092E\u093E\u0930\u094D\u0917';
+  String get route => 'मार्ग';
 
   @override
-  String get pickupLocation => '\u092A\u093F\u0915\u0905\u092A \u0938\u094D\u0925\u093E\u0928';
+  String get pickupLocation => 'पिकअप स्थान';
 
   @override
-  String get dropLocation => '\u0921\u094D\u0930\u0949\u092A \u0938\u094D\u0925\u093E\u0928';
+  String get dropLocation => 'ड्रॉप स्थान';
 
   @override
-  String get date => '\u0924\u093E\u0930\u0940\u0916';
+  String get date => 'तारीख';
 
   @override
-  String get time => '\u0938\u092E\u092F';
+  String get time => 'समय';
 
   @override
-  String get goodsDetails => '\u092E\u093E\u0932 \u0935\u093F\u0935\u0930\u0923';
+  String get goodsDetails => 'माल विवरण';
 
   @override
-  String get goodsType => '\u092E\u093E\u0932 \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930';
+  String get goodsType => 'माल का प्रकार';
 
   @override
-  String get weightTonnes => '\u0935\u091C\u093C\u0928 (\u091F\u0928)';
+  String get weightTonnes => 'वज़न (टन)';
 
   @override
-  String get lengthFt => '\u0932\u0902\u092C\u093E\u0908 (\u092B\u093C\u0940\u091F)';
+  String get lengthFt => 'लंबाई (फ़ीट)';
 
   @override
-  String get widthFt => '\u091A\u094C\u0921\u093E\u0908 (\u092B\u093C\u0940\u091F)';
+  String get widthFt => 'चौड़ाई (फ़ीट)';
 
   @override
-  String get heightFt => '\u090A\u0902\u091A\u093E\u0908 (\u092B\u093C\u0940\u091F)';
+  String get heightFt => 'ऊंचाई (फ़ीट)';
 
   @override
-  String get stackable => '\u0938\u094D\u091F\u0948\u0915\u0947\u092C\u0932';
+  String get stackable => 'स्टैकेबल';
 
   @override
-  String get fragile => '\u0928\u093E\u091C\u093C\u0941\u0915';
+  String get fragile => 'नाज़ुक';
 
   @override
-  String get specialRequirements => '\u0935\u093F\u0936\u0947\u0937 \u0906\u0935\u0936\u094D\u092F\u0915\u0924\u093E\u090F\u0902';
+  String get specialRequirements => 'विशेष आवश्यकताएं';
 
   @override
-  String get estimatedPriceRange => '\u0905\u0928\u0941\u092E\u093E\u0928\u093F\u0924 \u092E\u0942\u0932\u094D\u092F \u0938\u0940\u092E\u093E';
+  String get estimatedPriceRange => 'अनुमानित मूल्य सीमा';
 
   @override
-  String get stableThisWeek => '\u0907\u0938 \u0938\u092A\u094D\u0924\u093E\u0939 \u0938\u094D\u0925\u093F\u0930';
+  String get stableThisWeek => 'इस सप्ताह स्थिर';
 
   @override
-  String get estimatingPrice => '\u092E\u0942\u0932\u094D\u092F \u0905\u0928\u0941\u092E\u093E\u0928 \u0932\u0917\u093E\u092F\u093E \u091C\u093E \u0930\u0939\u093E \u0939\u0948...';
+  String get estimatingPrice => 'मूल्य अनुमान लगाया जा रहा है...';
 
   @override
-  String get estimateUnavailable => '\u0905\u0928\u0941\u092E\u093E\u0928 \u0909\u092A\u0932\u092C\u094D\u0927 \u0928\u0939\u0940\u0902 \u0939\u0948';
+  String get estimateUnavailable => 'अनुमान उपलब्ध नहीं है';
 
   @override
-  String get enterRouteDetails => '\u0936\u0941\u0930\u0942 \u0915\u0930\u0928\u0947 \u0915\u0947 \u0932\u093F\u092F\u0947 \u092E\u093E\u0930\u094D\u0917 \u0935\u093F\u0935\u0930\u0923 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+  String get enterRouteDetails => 'शुरू करने के लिए मार्ग विवरण दर्ज करें';
 
   @override
-  String get basedOnCurrentDemand => '\u0935\u0930\u094D\u0924\u092E\u093E\u0928 \u092E\u093E\u0902\u0917 \u0915\u0947 \u0906\u0927\u093E\u0930 \u092A\u0930';
+  String get basedOnCurrentDemand => 'वर्तमान मांग के आधार पर';
 
   @override
-  String get filterTrucks => '\u091F\u094D\u0930\u0915 \u092B\u093C\u093F\u0932\u094D\u091F\u0930 \u0915\u0930\u0947\u0902';
+  String get filterTrucks => 'ट्रक फ़िल्टर करें';
 
   @override
-  String get truckType => '\u091F\u094D\u0930\u0915 \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930';
+  String get truckType => 'ट्रक का प्रकार';
 
   @override
-  String get capacityTonnes => '\u0915\u094D\u0937\u092E\u0924\u093E (\u091F\u0928)';
+  String get capacityTonnes => 'क्षमता (टन)';
 
   @override
-  String get materialType => '\u0938\u093E\u092E\u0917\u094D\u0930\u0940 \u0915\u093E \u092A\u094D\u0930\u0915\u093E\u0930';
+  String get materialType => 'सामग्री का प्रकार';
 
   @override
-  String get today => '\u0906\u091C';
+  String get today => 'आज';
 
   @override
-  String get tomorrow => '\u0915\u0932';
+  String get tomorrow => 'कल';
 
   @override
-  String get selectPickupOnMap => '\u092E\u093E\u0928\u091A\u093F\u0924\u094D\u0930 \u092A\u0930 \u092A\u093F\u0915\u0905\u092A \u091A\u0941\u0928\u0947\u0902';
+  String get selectPickupOnMap => 'मानचित्र पर पिकअप चुनें';
 
   @override
-  String get selectDropOnMap => '\u092E\u093E\u0928\u091A\u093F\u0924\u094D\u0930 \u092A\u0930 \u0921\u094D\u0930\u0949\u092A \u091A\u0941\u0928\u0947\u0902';
+  String get selectDropOnMap => 'मानचित्र पर ड्रॉप चुनें';
 
   @override
-  String get temperatureControl => '\u0924\u093E\u092A\u092E\u093E\u0928 \u0928\u093F\u092F\u0902\u0924\u094D\u0930\u0923';
+  String get temperatureControl => 'तापमान नियंत्रण';
 
   @override
-  String get waterproofCover => '\u091C\u0932\u0930\u094B\u0927\u0915 \u0915\u0935\u0930';
+  String get waterproofCover => 'जलरोधक कवर';
 
   @override
-  String get loadingHelp => '\u0932\u094B\u0921\u093F\u0902\u0917 \u0938\u0939\u093E\u092F\u0924\u093E';
+  String get loadingHelp => 'लोडिंग सहायता';
 
   @override
-  String get loadingHelpNeeded => '\u0932\u094B\u0921\u093F\u0902\u0917 \u0938\u0939\u093E\u092F\u0924\u093E \u0906\u0935\u0936\u094D\u092F\u0915';
+  String get loadingHelpNeeded => 'लोडिंग सहायता आवश्यक';
 
   @override
-  String get other => '\u0905\u0928\u094D\u092F';
+  String get other => 'अन्य';
 
   @override
-  String get describeYourGoods => '\u0905\u092A\u0928\u0947 \u092E\u093E\u0932 \u0915\u093E \u0935\u0930\u094D\u0923 \u0915\u0930\u0947\u0902...';
+  String get describeYourGoods => 'अपने माल का वर्णन करें...';
 
   @override
-  String get activeTab => '\u0938\u0915\u094D\u0930\u093F\u092F';
+  String get activeTab => 'सक्रिय';
 
   @override
-  String get historyTab => '\u0907\u0924\u093F\u0939\u093E\u0938';
+  String get historyTab => 'इतिहास';
 
   @override
-  String get searchOrdersHint => '\u0911\u0930\u094D\u0921\u0930 \u0916\u094B\u091C\u0947\u0902...';
+  String get searchOrdersHint => 'ऑर्डर खोजें...';
 
   @override
-  String get noActiveOrders => '\u0915\u094B\u0908 \u0938\u0915\u094D\u0930\u093F\u092F \u0911\u0930\u094D\u0921\u0930 \u0928\u0939\u0940\u0902';
+  String get noActiveOrders => 'कोई सक्रिय ऑर्डर नहीं';
 
   @override
-  String get noHistoryOrders => '\u0915\u094B\u0908 \u0911\u0930\u094D\u0921\u0930 \u0907\u0924\u093F\u0939\u093E\u0938 \u0928\u0939\u0940\u0902';
+  String get noHistoryOrders => 'कोई ऑर्डर इतिहास नहीं';
 
   @override
-  String get offlineMode => '\u0911\u092B\u093C\u0932\u093E\u0907\u0928 \u092E\u094B\u0921';
+  String get offlineMode => 'ऑफ़लाइन मोड';
 
   @override
-  String lastUpdated(String timeAgo) => '\u0905\u0902\u0924\u093F\u092E \u0905\u092A\u0921\u0947\u091F $timeAgo';
+  String lastUpdated(String timeAgo) {
+    return 'अंतिम अपडेट $timeAgo';
+  }
 
   @override
-  String get driverAssigned => '\u0921\u094D\u0930\u093E\u0907\u0935\u0930 \u0928\u093F\u092F\u0941\u0915\u094D\u0924';
+  String get driverAssigned => 'ड्राइवर नियुक्त';
 
   @override
-  String get inTransit => '\u0930\u093E\u0938\u094D\u0924\u0947 \u092E\u0947\u0902';
+  String get inTransit => 'रास्ते में';
 
   @override
-  String get paymentReleased => '\u092D\u0941\u0917\u0924\u093E\u0928 \u091C\u093E\u0930\u0940';
+  String get paymentReleased => 'भुगतान जारी';
 
   @override
-  String get delivered => '\u0935\u093F\u0924\u0930\u093F\u0924';
+  String get delivered => 'वितरित';
 
   @override
-  String get cancelled => '\u0930\u0926\u094D\u0926';
+  String get cancelled => 'रद्द';
 
   @override
-  String get pending => '\u0932\u0902\u092C\u093F\u0924';
+  String get pending => 'लंबित';
 
   @override
-  String get account => '\u0916\u093E\u0924\u093E';
+  String get account => 'खाता';
 
   @override
-  String get preferences => '\u0935\u0930\u0940\u092F\u0924\u093E\u090F\u0902';
+  String get preferences => 'वरीयताएं';
 
   @override
-  String get paymentMethods => '\u092D\u0941\u0917\u0924\u093E\u0928 \u0915\u0947 \u0924\u0930\u0940\u0915\u0947';
+  String get paymentMethods => 'भुगतान के तरीके';
 
   @override
-  String get myDocuments => '\u092E\u0947\u0930\u0947 \u0926\u0938\u094D\u0924\u093E\u0935\u0947\u091C\u093C';
+  String get myDocuments => 'मेरे दस्तावेज़';
 
   @override
-  String get savedAddresses => '\u0938\u0939\u0947\u091C\u0947 \u0917\u092F\u0947 \u092A\u0924\u0947';
+  String get savedAddresses => 'सहेजे गए पते';
 
   @override
-  String get walletAddressLabel => '\u0935\u0949\u0932\u0947\u091F \u092A\u0924\u093E';
+  String get walletAddressLabel => 'वॉलेट पता';
 
   @override
-  String get notSet => '\u0938\u0947\u091F \u0928\u0939\u0940\u0902 \u0939\u0948';
+  String get notSet => 'सेट नहीं है';
 
   @override
-  String get language => '\u092D\u093E\u0937\u093E';
+  String get language => 'भाषा';
 
   @override
-  String get helpSupport => '\u0938\u0939\u093E\u092F\u0924\u093E \u0914\u0930 \u0938\u092E\u0930\u094D\u0925\u0928';
+  String get helpSupport => 'सहायता और समर्थन';
 
   @override
-  String get aboutTruxify => '\u091F\u094D\u0930\u0915\u094D\u0938\u093F\u092B\u093E\u0908 \u0915\u0947 \u092C\u093E\u0930\u0947 \u092E\u0947\u0902';
+  String get aboutTruxify => 'ट्रक्सिफाई के बारे में';
 
   @override
-  String get logout => '\u0932\u0949\u0917\u0906\u0909\u091F';
+  String get logout => 'लॉगआउट';
 
   @override
-  String offlineModeLabel(String timeAgo) => '\u0911\u092B\u093C\u0932\u093E\u0908\u0928 \u092E\u094B\u0921 (\u0905\u0902\u0924\u093F\u092E \u0905\u092A\u0921\u0947\u091F $timeAgo)';
+  String offlineModeLabel(String timeAgo) {
+    return 'ऑफ़लाइन मोड (अंतिम अपडेट $timeAgo)';
+  }
 
   @override
-  String get ordersLabel => '\u0911\u0930\u094D\u0921\u0930';
+  String get ordersLabel => 'ऑर्डर';
 
   @override
-  String get savedLabel => '\u0938\u0939\u0947\u091C\u093E \u0917\u092F\u093E';
+  String get savedLabel => 'सहेजा गया';
 
   @override
-  String get co2Label => 'CO\u2082 \u092C\u091A\u093E\u092F\u093E';
+  String get co2Label => 'CO₂ बचाया';
 
   @override
-  String get editProfile => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932 \u0938\u0902\u092A\u093E\u0926\u093F\u0924 \u0915\u0930\u0947\u0902';
+  String get editProfile => 'प्रोफ़ाइल संपादित करें';
 
   @override
-  String get fullName => '\u092A\u0942\u0930\u093E \u0928\u093E\u092E';
+  String get fullName => 'पूरा नाम';
 
   @override
-  String get companyName => '\u0915\u0902\u092A\u0928\u0940 \u0915\u093E \u0928\u093E\u092E';
+  String get companyName => 'कंपनी का नाम';
 
   @override
-  String get phone => '\u092B\u093C\u094B\u0928';
+  String get phone => 'फ़ोन';
 
   @override
-  String get enterFullName => '\u0905\u092A\u0928\u093E \u092A\u0942\u0930\u093E \u0928\u093E\u092E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+  String get enterFullName => 'अपना पूरा नाम दर्ज करें';
 
   @override
-  String get enterCompanyName => '\u0905\u092A\u0928\u0940 \u0915\u0902\u092A\u0928\u0940 \u0915\u093E \u0928\u093E\u092E \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+  String get enterCompanyName => 'अपनी कंपनी का नाम दर्ज करें';
 
   @override
-  String get enterPhoneNumber => '\u0905\u092A\u0928\u093E \u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u0926\u0930\u094D\u091C \u0915\u0930\u0947\u0902';
+  String get enterPhoneNumber => 'अपना फ़ोन नंबर दर्ज करें';
 
   @override
-  String get nameIsRequired => '\u0928\u093E\u092E \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948';
+  String get nameIsRequired => 'नाम आवश्यक है';
 
   @override
-  String get companyNameIsRequired => '\u0915\u0902\u092A\u0928\u0940 \u0915\u093E \u0928\u093E\u092E \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948';
+  String get companyNameIsRequired => 'कंपनी का नाम आवश्यक है';
 
   @override
-  String get phoneNumberIsRequired => '\u092B\u093C\u094B\u0928 \u0928\u0902\u092C\u0930 \u0906\u0935\u0936\u094D\u092F\u0915 \u0939\u0948';
+  String get phoneNumberIsRequired => 'फ़ोन नंबर आवश्यक है';
 
   @override
-  String get saving => '\u0938\u0939\u0947\u091C\u093E \u091C\u093E \u0930\u0939\u093E \u0939\u0948...';
+  String get saving => 'सहेजा जा रहा है...';
 
   @override
-  String get saveChanges => '\u092A\u0930\u093F\u0935\u0930\u094D\u0924\u093E\u0928 \u0938\u0939\u0947\u091C\u0947\u0902';
+  String get saveChanges => 'परिवर्तन सहेजें';
 
   @override
-  String get profileUpdatedSuccessfully => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932 \u0938\u092B\u0932\u0924\u093E\u092A\u0942\u0930\u094D\u0935\u0915 \u0905\u092A\u0921\u0947\u091F \u0939\u094B \u0917\u0908';
+  String get profileUpdatedSuccessfully => 'प्रोफ़ाइल सफलतापूर्वक अपडेट हो गई';
 
   @override
-  String get failedToLoadProfile => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932 \u0932\u094B\u0921 \u0915\u0930\u0928\u0947 \u092E\u0947\u0902 \u0905\u0938\u092B\u0932';
+  String get failedToLoadProfile => 'प्रोफ़ाइल लोड करने में असफल';
 
   @override
-  String get failedToUpdateProfile => '\u092A\u094D\u0930\u094B\u092B\u093C\u093E\u0907\u0932 \u0905\u092A\u0921\u0947\u091F \u0915\u0930\u0928\u0947 \u092E\u0947\u0902 \u0905\u0938\u092B\u0932';
+  String get failedToUpdateProfile => 'प्रोफ़ाइल अपडेट करने में असफल';
 
   @override
-  String get orderNotFound => '\u0911\u0930\u094D\u0921\u0930 \u0928\u0939\u0940\u0902 \u092E\u093F\u0932\u093E';
+  String get shareTracking => 'ट्रैकिंग शेयर करें';
 
   @override
-  String get notification => '\u0938\u0942\u091A\u0928\u093E';
+  String get trackingLinkGenerated => 'ट्रैकिंग लिंक बनाया गया';
 
   @override
-  String get unableToOpen => '\u0938\u0942\u091A\u0928\u093E \u0916\u094B\u0932\u0928\u0947 \u092E\u0947\u0902 \u0905\u0938\u092E\u0930\u094D\u0925';
-  String get downloadInvoice => '\u0907\u0928\u0935\u0949\u0907\u0938 \u0921\u093E\u0909\u0928\u0932\u094B\u0921 \u0915\u0930\u0947\u0902';
+  String get unableToShare => 'शेयर करने में असमर्थ';
 
   @override
-  String get generatingInvoice => '\u0907\u0928\u0935\u0949\u0907\u0938 \u092C\u0928\u093E \u0930\u0939\u0947 \u0939\u0948\u0964...';
+  String get linkExpired => 'यह ट्रैकिंग लिंक समाप्त हो गया है या अब मान्य नहीं है।';
 
   @override
-  String get invoiceReady => '\u0907\u0928\u0935\u0949\u0907\u0938 \u0924\u0948\u092F\u093E\u0930 \u0939\u0948';
+  String get trackingRevoked => 'सभी ट्रैकिंग लिंक रद्द कर दिए गए हैं।';
 
   @override
-  String get shareInvoice => '\u0907\u0928\u0935\u0949\u0907\u0938 \u0938\u093E\u092E\u093E \u0915\u0930\u0947\u0902';
+  String get copyLink => 'लिंक कॉपी करें';
 
   @override
-  String get printInvoice => '\u0907\u0928\u0935\u0949\u0907\u0938 \u092A\u094D\u0930\u093F\u0902\u091F \u0915\u0930\u0947\u0902';
+  String get shareMessage => 'Truxify पर अपनी शिपमेंट ट्रैक करें';
 
   @override
-  String get downloadFailed => '\u0921\u093E\u0909\u0928\u0932\u094B\u0921 \u0905\u0938\u092B\u0932';
+  String get orderNotFound => 'ऑर्डर नहीं मिला';
 
   @override
-  String get noRoutesFound => '\u0915\u094B\u0908 \u092E\u093E\u0930\u094D\u0917 \u0928\u0939\u0940\u0902 \u092E\u093F\u0932\u093E';
+  String get notification => 'सूचना';
 
   @override
-  String get bookAgain => '\u092B\u093C\u0930 \u0938\u0947 \u092C\u0941\u0915 \u0915\u0930\u0947\u0902';
+  String get unableToOpen => 'सूचना खोलने में असमर्थ';
 
   @override
-  String get viewAllOrders => '\u0938\u092D\u0940 \u0911\u0930\u094D\u0921\u0930 \u0926\u0947\u0916\u0947\u0902';
+  String get downloadInvoice => 'इनवॉइस डाउनलोड करें';
 
   @override
-  String get recentRoutes => '\u0939\u093E\u0932 \u0915\u093E \u092E\u093E\u0930\u094D\u0917';
+  String get generatingInvoice => 'इनवॉइस बना रहे हैं...';
 
   @override
-  String get allTrips => '\u0938\u092D\u0940 \u091F\u094D\u0930\u093F\u092A';
+  String get invoiceReady => 'इनवॉइस तैयार है';
 
   @override
-  String get filterStatus => '\u0938\u094D\u0925\u093F\u0924\u093F \u0915\u0947 \u0905\u0928\u0941\u0938\u093E\u0930 \u092B\u093C\u093F\u0932\u094D\u091F\u0930 \u0915\u0930\u0947\u0902';
+  String get shareInvoice => 'इनवॉइस साझा करें';
 
   @override
-  String get noMatchingTrips => '\u091A\u092F\u0928\u093F\u0924 \u092B\u093C\u093F\u0932\u094D\u091F\u0930 \u0938\u0947 \u0915\u094B\u0908 \u091F\u094D\u0930\u093F\u092A \u092E\u0947\u0932 \u0928\u0939\u0940\u0902 \u0916\u093E\u0924\u0940';
+  String get printInvoice => 'इनवॉइस प्रिंट करें';
+
+  @override
+  String get downloadFailed => 'डाउनलोड असफल';
+
+  @override
+  String get networkError => 'Network error. Please check your connection.';
 }

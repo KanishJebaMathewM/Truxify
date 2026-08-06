@@ -47,8 +47,8 @@ async function getCachedOrFetch(key, fetchFn) {
               setL1(key, data, now + L1_TTL_MS);
               return data;
             }
-          } catch {
-            // fall through to fetch on malformed cached payload
+          } catch (err) {
+            logger.warn({ err, key }, 'Malformed cached payload in lookupRoutes; refetching from source');
           }
         }
       } catch (err) {

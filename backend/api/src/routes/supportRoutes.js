@@ -501,7 +501,14 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
  *       404:
  *         description: Ticket not found
  */
-router.get('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
+router.get('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:view', async (req) => {
+  const { data: ticket } = await supabase
+    .from('support_tickets')
+    .select('id, user_id')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  return { ticket };
+}), validateParams(uuidParamSchema), async (req, res) => {
   const ticketId = req.params.id;
 
   try {
@@ -520,10 +527,6 @@ router.get('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSc
 
     if (!ticket) {
       return res.status(404).json({ error: 'Support ticket not found.' });
-    }
-
-    if (ticket.user_id !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Access Denied: You do not own this ticket.' });
     }
 
     res.json(ticket);
@@ -571,7 +574,14 @@ router.get('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSc
  *       404:
  *         description: Ticket not found
  */
-router.patch('/tickets/:id', authenticate, userLimiter, validateParams(uuidParamSchema), validateBody(updateTicketSchema), async (req, res) => {
+router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:update', async (req) => {
+  const { data: ticket } = await supabase
+    .from('support_tickets')
+    .select('id, user_id, status')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  return { ticket };
+}), validateParams(uuidParamSchema), validateBody(updateTicketSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { subject, description, category, status } = req.body;
 
@@ -591,10 +601,6 @@ router.patch('/tickets/:id', authenticate, userLimiter, validateParams(uuidParam
 
     if (!ticket) {
       return res.status(404).json({ error: 'Support ticket not found.' });
-    }
-
-    if (ticket.user_id !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Access Denied: You do not own this ticket.' });
     }
 
     if (ticket.status === 'closed') {
@@ -826,7 +832,14 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
  * @returns {object} 409 - Cannot comment on a closed ticket
  * @returns {object} 500 - Internal server error
  */
-router.post('/tickets/:id/comments', authenticate, userLimiter, validateParams(uuidParamSchema), validateBody(createTicketCommentSchema), async (req, res) => {
+router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ticket:add-comment', async (req) => {
+  const { data: ticket } = await supabase
+    .from('support_tickets')
+    .select('id, user_id, status')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  return { ticket };
+}), validateParams(uuidParamSchema), validateBody(createTicketCommentSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { message } = req.body;
 
@@ -846,10 +859,6 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, validateParams(u
 
     if (!ticket) {
       return res.status(404).json({ error: 'Support ticket not found.' });
-    }
-
-    if (ticket.user_id !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Access Denied: You do not own this ticket.' });
     }
 
     if (ticket.status === 'closed') {
@@ -927,7 +936,14 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, validateParams(u
  *       404:
  *         description: Ticket not found
  */
-router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(paramIdSchema), async (req, res) => {
+router.get('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ticket:view-comments', async (req) => {
+  const { data: ticket } = await supabase
+    .from('support_tickets')
+    .select('id, user_id')
+    .eq('id', req.params.id)
+    .maybeSingle();
+  return { ticket };
+}), validateParams(paramIdSchema), async (req, res) => {
   const ticketId = req.params.id;
   const { sort } = req.query;
   if (sort !== undefined && sort !== 'asc' && sort !== 'desc') {
@@ -951,10 +967,6 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, validateParams(pa
 
     if (!ticket) {
       return res.status(404).json({ error: 'Support ticket not found.' });
-    }
-
-    if (ticket.user_id !== req.user.id && req.user.role !== 'admin') {
-      return res.status(403).json({ error: 'Access Denied: You do not own this ticket.' });
     }
 
     const parsedLimit = parsePositiveInteger(req.query.limit, 100, 'limit');

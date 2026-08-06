@@ -51,7 +51,7 @@ import {
   invalidateCachedProfile,
   invalidateCachedSupabaseProfile,
 } from "../lib/profileCache.js";
-import { firebaseAdmin } from "../config/db.js";
+import { firebaseAdmin, supabase } from "../config/db.js";
 import logger from "../middleware/logger.js";
 
 const router = express.Router();
@@ -165,26 +165,88 @@ router.get("/session", authenticate, userLimiter, (req, res) => {
   });
 });
 
+import crypto from "crypto";
+import { otpSendSchema } from "../validation/requestSchemas.js";
+import { z } from "zod";
+import { verifyOtpHash } from "../lib/otpHashing.js";
+
+const verifyOtpSchema = z.object({
+  phone: z.string().min(10).max(20),
+  otp: z.string().regex(/^\d{6}$/, "OTP must be 6 digits"),
+}).strict();
+
 /**
  * @openapi
  * /api/auth/verify-otp:
  *   post:
  *     tags: [Authentication]
  *     summary: Verify OTP
- *     description: Endpoint for verifying OTPs. Protected by strict rate limiting to prevent brute-forcing.
+ *     description: Verifies a 6-digit OTP submitted for a given phone number. Timing-safe comparison. OTP is consumed on success.
  *     responses:
- *       501:
- *         description: Not Implemented
+ *       200:
+ *         description: OTP verified successfully
+ *       400:
+ *         description: Invalid or expired OTP
+ *       429:
+ *         description: Too many attempts
  */
 router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
-  // To be implemented: backend OTP verification logic.
-  // This endpoint serves as a rate-limited proxy/placeholder to satisfy
-  // security requirements preventing OTP brute forcing.
-  return res.status(501).json({
-    success: false,
-    error: "Not Implemented",
-    message: "OTP verification logic should be executed here.",
-  });
+  const parsed = verifyOtpSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Validation failed",
+      details: parsed.error.flatten().fieldErrors,
+    });
+  }
+
+  const { phone, otp } = parsed.data;
+
+  try {
+    // Look up the latest unused, unexpired OTP for this phone number
+    const { data: otpRecord, error: fetchErr } = await supabase
+      .from("phone_otps")
+      .select("id, otp_hash, otp_salt, expires_at, verified")
+      .eq("phone", phone)
+      .eq("verified", false)
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (fetchErr) {
+      logger.error("[auth/verify-otp] DB fetch error:", fetchErr.message);
+      return res.status(500).json({ success: false, error: "Internal server error." });
+    }
+
+    if (!otpRecord) {
+      return res.status(400).json({ success: false, error: "OTP not found or has expired." });
+    }
+
+    // Timing-safe comparison to prevent timing attacks
+    const isMatch = verifyOtpHash(otp, otpRecord);
+
+    if (!isMatch) {
+      return res.status(400).json({ success: false, error: "Invalid OTP." });
+    }
+
+    // Consume the OTP so it cannot be reused
+    const { error: updateErr } = await supabase
+      .from("phone_otps")
+      .update({ verified: true, verified_at: new Date().toISOString() })
+      .eq("id", otpRecord.id);
+
+    if (updateErr) {
+      logger.error("[auth/verify-otp] Failed to mark OTP as verified:", updateErr.message);
+      return res.status(500).json({ success: false, error: "Internal server error." });
+    }
+
+    logger.info(`[auth/verify-otp] OTP verified for phone: ${phone}`);
+    return res.status(200).json({ success: true, message: "OTP verified successfully." });
+  } catch (err) {
+    logger.error("[auth/verify-otp] Unexpected error:", err.message);
+    return res.status(500).json({ success: false, error: "Internal server error." });
+  }
 });
 
 export default router;

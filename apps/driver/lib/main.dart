@@ -20,6 +20,8 @@ Future<void> main() async {
   await CrashReportingService.init(appName: 'Driver');
 
   BackgroundSyncService.initialize();
+  BackgroundSyncService.registerSyncTask();
+  BackgroundSyncService.listenForConnectivity();
   FcmService.initialize();
   Firebase.initializeApp();
   FcmService.registerTokenForUser(userId);

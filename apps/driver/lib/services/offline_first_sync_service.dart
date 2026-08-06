@@ -26,7 +26,7 @@ class OfflineFirstSyncService {
     final dbPath = p.join(dir.path, 'offline_sync.db');
     _db = await openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE sync_events (
@@ -35,9 +35,17 @@ class OfflineFirstSyncService {
             payload TEXT NOT NULL,
             queued_at INTEGER NOT NULL,
             is_synced INTEGER NOT NULL DEFAULT 0,
-            synced_at INTEGER
+            synced_at INTEGER,
+            retry_count INTEGER NOT NULL DEFAULT 0
           )
         ''');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute(
+            'ALTER TABLE sync_events ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0',
+          );
+        }
       },
     );
     _emitDbSnapshot();

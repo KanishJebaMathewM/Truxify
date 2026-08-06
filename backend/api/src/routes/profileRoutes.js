@@ -35,6 +35,12 @@
  *       properties:
  *         full_name:
  *           type: string
+ *         phone:
+ *           type: string
+ *         email:
+ *           type: string
+ *         number_plate:
+ *           type: string
  *         language:
  *           type: string
  *         dark_mode:
@@ -104,6 +110,11 @@ import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCac
 import { auditLog } from '../middleware/auditLog.js';
 
 const router = express.Router();
+
+function sanitizeNumberPlate(plate) {
+  if (!plate || typeof plate !== 'string') return '';
+  return plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
 
 
 // Cache control middleware for profile endpoints
@@ -332,7 +343,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
  *   put:
  *     tags: [Profile]
  *     summary: Update profile
- *     description: Updates basic profile fields (full_name, language, dark_mode) and optionally driver online status. Invalidates Redis cache.
+ *     description: Updates basic profile fields (full_name, phone, email, language, dark_mode) and, for drivers, the online status and the truck number plate. Invalidates Redis cache.
  *     security:
  *       - BearerAuth: []
  *     requestBody:
@@ -354,30 +365,52 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
 router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), async (req, res) => {
   try {
     const userId = req.user.id;
-    const { full_name, language, dark_mode, is_online } = req.body;
+    const { full_name, language, dark_mode, is_online, phone, email, number_plate } = req.body;
     const role = req.user.role;
+
+    const profileUpdate = {};
+    if (full_name !== undefined) profileUpdate.full_name = full_name;
+    if (language !== undefined) profileUpdate.language = language;
+    if (dark_mode !== undefined) profileUpdate.dark_mode = dark_mode;
+    if (phone !== undefined) profileUpdate.phone = phone;
+    if (email !== undefined) profileUpdate.email = email;
 
     const { data, error } = await supabase
       .from('profiles')
-      .update({
-        full_name,
-        language,
-        dark_mode
-      })
+      .update(profileUpdate)
       .eq('id', userId)
       .select()
       .single();
 
     if (error) throw error;
-    if (role === 'driver' && typeof is_online === 'boolean') {
-      const { error: driverError } = await supabase
-      .from('driver_details')
-      .update({
-        is_online
-      })
-      .eq('user_id', userId);
+    if (role === 'driver') {
+      if (typeof is_online === 'boolean') {
+        const { error: driverError } = await supabase
+        .from('driver_details')
+        .update({
+          is_online
+        })
+        .eq('user_id', userId);
 
-      if (driverError) throw driverError;
+        if (driverError) throw driverError;
+      }
+
+      if (number_plate !== undefined) {
+        const normalizedPlate = sanitizeNumberPlate(number_plate);
+        const { error: truckError } = await supabase
+          .from('trucks')
+          .update({
+            number_plate: normalizedPlate
+          })
+          .eq('driver_id', userId);
+
+        if (truckError) {
+          if (truckError.code === '23505') {
+            return res.status(409).json({ error: 'A truck with this number plate is already registered.' });
+          }
+          throw truckError;
+        }
+      }
     }
 
     // Invalidate the profile cache so that the next request retrieves fresh profile data.

@@ -6,7 +6,7 @@ echo "🚀 Running Liquibase Migrations..."
 if ! command -v liquibase &> /dev/null; then
     echo "Installing Liquibase..."
     curl -L https://github.com/liquibase/liquibase/releases/download/v4.23.0/liquibase-4.23.0.tar.gz | tar xz
-    export PATH=$PWD/liquibase-4.23.0:$PATH
+    export PATH=$PWD/liquibase:$PATH
 fi
 
 # Run migrations

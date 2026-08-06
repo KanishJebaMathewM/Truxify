@@ -111,6 +111,31 @@ describe('Driver Routes', () => {
     expect(res.body.truck.id).toBe('truck-1');
   });
 
+  it('GET /trips enriches escrow_status from the underlying order', async () => {
+    m.store.trips = [{
+      trip_display_id: 'TX-ORD-100',
+      driver_id: 'driver-1',
+      route_label: 'A → B',
+      status: 'active',
+      trip_date: '2026-08-05',
+    }];
+    m.store.orders = [{
+      order_display_id: 'ORD-100',
+      escrow_status: 'funded',
+    }];
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .get('/api/drivers/trips')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body.trips).toHaveLength(1);
+    expect(res.body.trips[0].trip_display_id).toBe('TX-ORD-100');
+    expect(res.body.trips[0].escrow_status).toBe('funded');
+  });
+
   it('PUT /online rejects invalid status', async () => {
     const app = buildApp();
 
@@ -247,6 +272,66 @@ describe('Driver Routes', () => {
       expect(res.body.error).toBe(
         'days must be an integer between 1 and 365'
       );
+    }
+  });
+
+  it('GET /earnings/summary with start_date/end_date returns only that window', async () => {
+    m.store.earnings_daily.push(
+      { driver_id: 'driver-1', day_date: '2026-05-31', amount: 1000, trip_count: 1 },
+      { driver_id: 'driver-1', day_date: '2026-06-01', amount: 2000, trip_count: 2 },
+      { driver_id: 'driver-1', day_date: '2026-06-15', amount: 3000, trip_count: 3 },
+      { driver_id: 'driver-1', day_date: '2026-07-01', amount: 4000, trip_count: 4 }
+    );
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .get('/api/drivers/earnings/summary?start_date=2026-06-01&end_date=2026-07-01')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+    expect(res.body[0].day_date).toBe('2026-06-01');
+    expect(res.body[1].day_date).toBe('2026-06-15');
+  });
+
+  it('GET /earnings/summary with a historical month window returns that month only', async () => {
+    m.store.earnings_daily.push(
+      { driver_id: 'driver-1', day_date: '2019-12-31', amount: 100, trip_count: 1 },
+      { driver_id: 'driver-1', day_date: '2020-01-10', amount: 2500, trip_count: 2 },
+      { driver_id: 'driver-1', day_date: '2020-01-31', amount: 1500, trip_count: 1 },
+      { driver_id: 'driver-1', day_date: '2020-02-01', amount: 200, trip_count: 1 }
+    );
+
+    const app = buildApp();
+
+    const res = await request(app)
+      .get('/api/drivers/earnings/summary?start_date=2020-01-01&end_date=2020-02-01')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+    expect(res.body[0].day_date).toBe('2020-01-10');
+    expect(res.body[1].day_date).toBe('2020-01-31');
+  });
+
+  it('GET /earnings/summary rejects malformed or single-sided date ranges', async () => {
+    const app = buildApp();
+
+    const badQueries = [
+      'start_date=2026-06-01',
+      'end_date=2026-07-01',
+      'start_date=2026-06-01&end_date=not-a-date',
+      'start_date=not-a-date&end_date=2026-07-01',
+      'start_date=2026-07-01&end_date=2026-06-01',
+    ];
+
+    for (const qs of badQueries) {
+      const res = await request(app)
+        .get(`/api/drivers/earnings/summary?${qs}`)
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(400);
     }
   });
 

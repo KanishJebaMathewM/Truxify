@@ -211,7 +211,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
 
   } catch (err) {
     logger.error('[osrm] Fetch error (geometry):', err.message);
-    if (err.message?.includes('Circuit open')) return null;
+    if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) return null;
     return null;
   } finally {
     clearTimeout(timeout);

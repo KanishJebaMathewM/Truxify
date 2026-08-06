@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'utils/support_ticket_parser.dart';
 
 /// Backend connection settings, injected at build time via --dart-define.
 class AdminApiConfig {
@@ -157,8 +158,10 @@ class _SupportTicketsViewState extends State<SupportTicketsView> {
       };
       final response = await http.get(uri, headers: headers);
       if (response.statusCode == 200) {
+        final ticketsList = parseSupportTicketsResponse(response.body);
+
         setState(() {
-          _tickets = json.decode(response.body);
+          _tickets = ticketsList;
           _isLoading = false;
         });
       } else {

@@ -5,13 +5,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../controllers/app_controller.dart';
 import '../core/app_routes.dart';
 import '../core/config.dart';
-import '../data/mock_data.dart';
+import '../services/driver_earnings_service.dart';
 import '../l10n/app_localizations.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/fcm_service.dart';
 import '../services/secure_storage.dart';
+import '../services/truck_repository.dart';
 import '../core/supabase_config.dart';
 import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen, FcmService;
 import 'notifications_screen.dart';
@@ -39,6 +40,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _walletAddress = '';
   String _truckNumber = '';
 
+  double _driverRating = 0;
+  int _driverTrips = 0;
+  double _driverCompletionRate = 0;
+  num _driverEarnings = 0;
+
   bool _isLoadingReputation = true;
   double? _platformRating;
   int? _onChainScore;
@@ -48,6 +54,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadWalletAddress();
+    _loadDriverStats();
     _fetchReputation();
   }
 
@@ -90,6 +97,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.dispose();
   }
 
+  Future<void> _loadDriverStats() async {
+    try {
+      final stats = await DriverEarningsService().fetchDriverStats();
+      if (!mounted) return;
+      setState(() {
+        _driverRating = (stats['rating'] as num?)?.toDouble() ?? 0;
+        _driverTrips = (stats['total_trips'] as num?)?.toInt() ?? 0;
+        _driverCompletionRate = (stats['completion_rate'] as num?)?.toDouble() ?? 0;
+        _driverEarnings = (stats['wallet_total'] as num?) ?? 0;
+      });
+    } catch (e) {
+      debugPrint('Failed to load driver stats: $e');
+    }
+  }
+
+  String _formatInr(num rupees) {
+    final value = rupees.toDouble();
+    if (value >= 100000) {
+      return '₹${(value / 100000).toStringAsFixed(1)}L';
+    } else if (value >= 1000) {
+      return '₹${(value / 1000).toStringAsFixed(1)}K';
+    }
+    return '₹${value.toStringAsFixed(0)}';
+  }
+
   bool _isDigilockerVerified = false;
 
   Future<void> _loadWalletAddress() async {
@@ -102,6 +134,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             .select('polygon_wallet_address, full_name, phone, email, is_digilocker_verified')
             .eq('id', userId)
             .maybeSingle();
+        final truck = await TruckRepository().fetchTruckForDriver(userId);
         if (data != null && mounted) {
           setState(() {
             _walletAddress = data['polygon_wallet_address']?.toString() ?? '';
@@ -109,6 +142,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _driverPhone = data['phone']?.toString() ?? '';
             _driverEmail = data['email']?.toString() ?? '';
             _isDigilockerVerified = data['is_digilocker_verified'] as bool? ?? false;
+            _truckNumber = truck?.numberPlate ?? '';
           });
         }
       }
@@ -318,22 +352,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 20),
               PrimaryButton(
                 label: AppLocalizations.of(context)!.saveChanges,
-                onPressed: () {
+                onPressed: () async {
                   if (formKey.currentState?.validate() ?? false) {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final navigator = Navigator.of(context);
+                    final successMessage =
+                        AppLocalizations.of(context)!.profileUpdatedSuccessfully;
+                    final apiClient =
+                        ApiClient(timeout: AppConfig.profileUpdateTimeout);
+                    try {
+                      await apiClient.put(
+                        '/api/profile',
+                        body: <String, String>{
+                          'full_name': nameController.text.trim(),
+                          'phone': phoneController.text.trim(),
+                          'email': emailController.text.trim(),
+                          'number_plate': truckNumberController.text.trim(),
+                        },
+                      );
+                    } on ApiException catch (e) {
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text(e.message),
+                          backgroundColor: TruxifyColors.errorRed,
+                        ),
+                      );
+                      return;
+                    } catch (e) {
+                      messenger.showSnackBar(
+                        SnackBar(
+                          content: Text('Failed to save profile: $e'),
+                          backgroundColor: TruxifyColors.errorRed,
+                        ),
+                      );
+                      return;
+                    } finally {
+                      apiClient.dispose();
+                    }
+                    if (!mounted) return;
                     setState(() {
                       _driverName = nameController.text.trim();
                       _driverPhone = phoneController.text.trim();
                       _driverEmail = emailController.text.trim();
                       _truckNumber = truckNumberController.text.trim();
                     });
-                    Navigator.of(context).pop();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(AppLocalizations.of(context)!.profileUpdatedSuccessfully),
-                      backgroundColor: TruxifyColors.success,
-                    ),
-                  );
-                }
+                    navigator.pop();
+                    messenger.showSnackBar(
+                      SnackBar(
+                        content: Text(successMessage),
+                        backgroundColor: TruxifyColors.success,
+                      ),
+                    );
+                  }
                 },
               ),
             ],
@@ -830,7 +900,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        '$driverTruck · $_truckNumber',
+                        '$_truckNumber',
                         style: GoogleFonts.dmSans(
                           fontSize: 12,
                           color: Colors.white.withValues(alpha: 0.85),
@@ -851,7 +921,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 color: Colors.amber, size: 14),
                             const SizedBox(width: 4),
                             Text(
-                              '$driverRating · $driverTrips trips',
+                              '${_driverRating.toStringAsFixed(1)} · $_driverTrips trips',
                               style: GoogleFonts.dmSans(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
@@ -883,7 +953,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Expanded(
                   child: _MetricColumn(
                     label: 'Earned',
-                    value: driverEarningsMonth,
+                    value: _formatInr(_driverEarnings),
                   ),
                 ),
                 Container(
@@ -894,7 +964,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Expanded(
                   child: _MetricColumn(
                     label: 'Total Trips',
-                    value: driverTrips,
+                    value: '$_driverTrips',
                   ),
                 ),
                 Container(
@@ -905,7 +975,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 Expanded(
                   child: _MetricColumn(
                     label: 'Completion Rate',
-                    value: driverCompletion,
+                    value: '${_driverCompletionRate.round()}%',
                   ),
                 ),
               ],

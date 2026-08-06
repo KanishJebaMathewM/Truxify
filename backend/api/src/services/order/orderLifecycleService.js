@@ -636,7 +636,7 @@ export class OrderLifecycleService {
     });
   }
 
-  async cancelOrder(orderId, customerId, reason) {
+  async cancelOrder(orderId, customerId, reason, userClient) {
     return measureExecution('OrderLifecycleService.cancelOrder', async () => {
       const { data: order, error: orderErr } = await this.orderRepository.findOrderByAnyId(orderId, '*');
       if (orderErr) throw new DomainError(500, { error: 'Failed to fetch order.', details: orderErr.message });
@@ -655,7 +655,11 @@ export class OrderLifecycleService {
         if (currentOrderErr) throw new DomainError(500, { error: 'Failed to fetch order.', details: currentOrderErr.message });
         if (!currentOrder) throw new DomainError(404, { error: 'Order not found.' });
 
-        const { data: otpCheck } = await this.orderRepository.findVerifiedDeliveryOtp(currentOrder.id);
+        // Runs under the caller's identity so RLS resolves get_profile_id() to
+        // the customer; the shared anon-key client always returns null here
+        // (drivers cannot read delivery_otps, and unauthenticated RLS yields
+        // no rows), which would silently disable the guard below.
+        const { data: otpCheck } = await this.orderRepository.findVerifiedDeliveryOtp(currentOrder.id, userClient);
         if (otpCheck) {
           throw new DomainError(409, { error: 'Cannot cancel: delivery OTP has already been verified.' });
         }

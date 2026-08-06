@@ -663,8 +663,8 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                               );
 
                               final pricing = resp['pricing'];
-                              final total = pricing != null ? pricing['total_amount'] : null;
-                              setModalState(() => pricingText = total != null ? 'New estimated price: ₹${total.toString()}' : 'Price updated');
+                              final total = pricing != null ? pricing['total_amount'] as num? : null;
+                              setModalState(() => pricingText = total != null ? 'New estimated price: ₹${(total / 100).toStringAsFixed(0)}' : 'Price updated');
 
                               // refresh outer order state
                               await _loadOrder();

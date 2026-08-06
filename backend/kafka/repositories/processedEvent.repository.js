@@ -1,5 +1,5 @@
-import { supabase } from '../api/src/config/db.js';
-import logger from '../api/src/middleware/logger.js';
+import { supabaseAdmin } from '../../api/src/config/db.js';
+import logger from '../../api/src/middleware/logger.js';
 
 class ProcessedEventRepository {
   /**
@@ -13,7 +13,7 @@ class ProcessedEventRepository {
    */
   async claimProcessed(topic, eventId, orderId = null) {
     try {
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('kafka_processed_events')
         .upsert({
           topic,

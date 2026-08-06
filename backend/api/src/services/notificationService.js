@@ -1,7 +1,8 @@
-import { supabase, firebaseAdmin } from '../config/db.js';
+import { supabase, supabaseAdmin, firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
 import { measureExecution } from '../core/performanceMetrics.js';
+import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 
 const TRANSIENT_ERROR_CODES = new Set([
   'messaging/too-many-topics',
@@ -121,55 +122,19 @@ export async function sendFcmNotification(userId, notification, data = {}) {
   };
 }
 
-/**
- * Hash a delivery OTP with scrypt and a per-OTP random salt. The salt is
- * stored alongside the digest, so the stored value cannot be brute-forced
- * offline the way an unsalted SHA-256 of a 6-digit code can be.
- *
- * @param {string|number} otp
- * @param {string} [saltHex] - existing salt (for verification), or undefined
- *   to generate a fresh 16-byte salt.
- * @returns {{hash: string, salt: string}} hex-encoded scrypt digest (64 bytes)
- *   and hex-encoded salt.
- */
-export function hashDeliveryOtp(otp, saltHex) {
-  const salt = saltHex || crypto.randomBytes(16).toString('hex');
-  const key = crypto.scryptSync(String(otp), salt, 64);
-  return { hash: key.toString('hex'), salt };
-}
-
-/**
- * Timing-safe comparison of a submitted OTP against a stored record.
- *
- * Records written after the salted-hash migration carry an `otp_salt`; those
- * are compared with scrypt. Pre-migration rows (no salt) are compared with
- * SHA-256 so in-flight OTPs keep working for their remaining TTL window.
- *
- * @param {string|number} otp
- * @param {{otp_hash?: string, otp_salt?: string}|null} otpRecord
- * @returns {boolean}
- */
-export function verifyDeliveryOtpHash(otp, otpRecord) {
-  if (!otpRecord) return false;
-  if (otpRecord.otp_salt) {
-    const { hash: submittedHash } = hashDeliveryOtp(otp, otpRecord.otp_salt);
-    const expected = String(otpRecord.otp_hash || '');
-    if (!/^[a-f0-9]{128}$/.test(expected)) return false;
-    return crypto.timingSafeEqual(Buffer.from(submittedHash, 'hex'), Buffer.from(expected, 'hex'));
-  }
-  if (otpRecord.otp_hash && /^[a-f0-9]{64}$/.test(otpRecord.otp_hash)) {
-    const submittedHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(submittedHash, 'hex'), Buffer.from(otpRecord.otp_hash, 'hex'));
-  }
-  return false;
-}
+export const hashDeliveryOtp = hashOtp;
+export const verifyDeliveryOtpHash = verifyOtpHash;
 
 export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
   return measureExecution('NotificationService.storeDeliveryOtp', async () => {
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot store OTP.');
+      return null;
+    }
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
     const { hash: otpHash, salt: otpSalt } = hashDeliveryOtp(otp);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('delivery_otps')
       .insert({
         order_id: orderId,
@@ -193,7 +158,11 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
 
 export async function getActiveDeliveryOtp(orderId) {
   return measureExecution('NotificationService.getActiveDeliveryOtp', async () => {
-    const { data, error } = await supabase
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot read OTP.');
+      return null;
+    }
+    const { data, error } = await supabaseAdmin
       .from('delivery_otps')
       .select('id, otp_hash, otp_salt, expires_at')
       .eq('order_id', orderId)
@@ -218,7 +187,11 @@ export async function verifyDeliveryOtp(otpId) {
     // unverified OTPs for an order. This ensures only the matched OTP
     // (which was validated by the caller via timing-safe hash comparison)
     // is consumed, preventing any future caller from bypassing verification.
-    const { data, error } = await supabase
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot verify OTP.');
+      return false;
+    }
+    const { data, error } = await supabaseAdmin
       .from('delivery_otps')
       .update({
         verified: true,
@@ -245,7 +218,11 @@ export async function verifyDeliveryOtp(otpId) {
 
 export async function expireDeliveryOtps(orderId) {
   return measureExecution('NotificationService.expireDeliveryOtps', async () => {
-    const { error } = await supabase
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot expire OTPs.');
+      return;
+    }
+    const { error } = await supabaseAdmin
       .from('delivery_otps')
       .update({ expires_at: new Date().toISOString() })
       .eq('order_id', orderId)
@@ -265,7 +242,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
 
   let dbSuccess = false;
   try {
-    const { error } = await supabase.from('notifications').insert({
+    const { error } = await supabaseAdmin.from('notifications').insert({
       user_id: customerId,
       title,
       body,
@@ -309,9 +286,9 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
 
 export async function sendPushNotification(userId, title, body, notifType, metadata = {}) {
   return measureExecution('NotificationService.sendPushNotification', async () => {
-    if (supabase) {
+    if (supabaseAdmin) {
       try {
-        const { error } = await supabase.from('notifications').insert({
+        const { error } = await supabaseAdmin.from('notifications').insert({
           user_id: userId,
           title,
           body,

@@ -12,9 +12,24 @@ permissions:
   contents: read
 
 jobs:
+  l10n_consistency:
+    name: Localization Consistency
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      # Runs without a Flutter SDK, so it fails fast and cheaply. Catches the
+      # two failure modes that made both apps unbuildable: an ARB file that is
+      # not valid JSON, and committed generated delegates that do not match
+      # the ARB files they were supposedly generated from.
+      - name: Validate ARB files and generated delegates
+        run: python3 scripts/gen_l10n.py --check
+
   build_and_test:
     name: Flutter Lint & Test
     runs-on: ubuntu-latest
+    needs: l10n_consistency
 
     strategy:
       matrix:
@@ -22,7 +37,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -33,6 +48,16 @@ jobs:
       - name: Install Dependencies
         working-directory: ${{ matrix.app }}
         run: flutter pub get
+
+      # Regenerate with the canonical tool and fail if the committed output
+      # differs. Generated code is committed in this repo, so this is what
+      # keeps it honest.
+      - name: Verify generated localizations are current
+        working-directory: ${{ matrix.app }}
+        run: |
+          flutter gen-l10n
+          git diff --exit-code -- lib/l10n \
+            || (echo "::error::flutter gen-l10n produced changes. Commit the regenerated files." && exit 1)
 
       - name: Analyze Code
         working-directory: ${{ matrix.app }}

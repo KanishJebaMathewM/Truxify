@@ -49,8 +49,10 @@ DECLARE
   v_day_total  INT;
   v_daily_cap  CONSTANT INT := 10000000;  -- ₹1,00,000 in paisa per UTC calendar day
 BEGIN
-  -- Verify the caller IS the driver
-  IF auth.uid() <> p_driver_id THEN
+  -- Verify the caller IS the driver.
+  -- auth.uid() is the Firebase UID; get_profile_id() maps it to profiles.id
+  -- which is what p_driver_id stores, so compare via get_profile_id().
+  IF auth.uid() IS NOT NULL AND get_profile_id() <> p_driver_id THEN
     RAISE EXCEPTION 'Unauthorized: you can only withdraw your own funds';
   END IF;
 
@@ -61,11 +63,14 @@ BEGIN
   END IF;
 
   -- Enforce the per-driver per-day withdrawal cap.
+  -- Only count withdrawals that actually left the wallet; failed withdrawals
+  -- have their amount restored to wallet_confirmed and must not consume cap.
   SELECT COALESCE(SUM(amount), 0)
     INTO v_day_total
     FROM wallet_transactions
    WHERE driver_id  = p_driver_id
      AND txn_type   = 'withdrawal'
+     AND status    <> 'failed'
      AND created_at >= date_trunc('day', now());
 
   IF v_day_total + p_amount > v_daily_cap THEN

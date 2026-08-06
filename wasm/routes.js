@@ -102,28 +102,10 @@ router.post('/wasm/eta', async (req, res) => {
     }
 });
 
-// Validate OTP
-router.post('/wasm/otp', async (req, res) => {
-    try {
-        const { inputOTP, correctOTP } = req.body;
-        if (!inputOTP || !correctOTP) {
-            return res.status(400).json({
-                success: false,
-                error: 'inputOTP and correctOTP required'
-            });
-        }
-        
-        const result = await edgeRuntime.validateOTP(inputOTP, correctOTP);
-        res.json({
-            success: true,
-            data: result,
-            timestamp: new Date().toISOString()
-        });
-    } catch (error) {
-        logger.error('OTP validation error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
+// Validate OTP removed (#6331): it accepted the reference value from the
+// client (validate_otp => input === correct), a trivially bypassable OTP
+// validator on the public API. OTP validation must happen server-side
+// against a stored, hashed OTP — never a client-supplied reference.
 
 // Get stats
 router.get('/wasm/stats', async (req, res) => {

@@ -3,6 +3,8 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import rateLimit from 'express-rate-limit';
 import logger from '../backend/api/src/middleware/logger.js';
+import { authenticate } from '../backend/api/src/middleware/auth.js';
+import { requirePolicy } from '../backend/api/src/middleware/requirePolicy.js';
 
 const execAsync = promisify(exec);
 const router = express.Router();
@@ -182,8 +184,8 @@ router.get('/ebpf/profile', ebpfMetricsLimiter, async (req, res) => {
 
 // ============ eBPF Load/Unload with Rate Limiting ============
 
-// Load eBPF programs (with rate limiting)
-router.post('/ebpf/load', ebpfActionLimiter, async (req, res) => {
+// Load eBPF programs (admin only, with rate limiting)
+router.post('/ebpf/load', authenticate, requirePolicy('ebpf:manage'), ebpfActionLimiter, async (req, res) => {
     try {
         // Validate request
         const { program } = req.body;
@@ -217,8 +219,8 @@ router.post('/ebpf/load', ebpfActionLimiter, async (req, res) => {
     }
 });
 
-// Unload eBPF programs (with rate limiting)
-router.post('/ebpf/unload', ebpfActionLimiter, async (req, res) => {
+// Unload eBPF programs (admin only, with rate limiting)
+router.post('/ebpf/unload', authenticate, requirePolicy('ebpf:manage'), ebpfActionLimiter, async (req, res) => {
     try {
         // Validate request
         const { program } = req.body;
@@ -252,8 +254,8 @@ router.post('/ebpf/unload', ebpfActionLimiter, async (req, res) => {
     }
 });
 
-// Unload all eBPF programs (with rate limiting)
-router.post('/ebpf/unload-all', ebpfActionLimiter, async (req, res) => {
+// Unload all eBPF programs (admin only, with rate limiting)
+router.post('/ebpf/unload-all', authenticate, requirePolicy('ebpf:manage'), ebpfActionLimiter, async (req, res) => {
     try {
         await execAsync('sudo rm -f /sys/fs/bpf/truxify_*');
         

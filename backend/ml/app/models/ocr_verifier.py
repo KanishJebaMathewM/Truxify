@@ -3,6 +3,7 @@ from PIL import Image
 import io
 import logging
 import re
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -12,35 +13,46 @@ class OCRVerifier:
         # pytesseract.pytesseract.tesseract_cmd = r'/usr/bin/tesseract'
         pass
 
-    def extract_text(self, image_bytes: bytes) -> str:
+    def extract_text(self, image_bytes: bytes) -> Optional[str]:
         """
         Extracts text from an image using Tesseract OCR.
-        If Tesseract is not installed or fails, falls back to a simulated response.
+
+        Returns the extracted text, or None if the image cannot be decoded or
+        OCR fails. There is deliberately NO simulated fallback: fabricating a
+        "SIMULATED_DL_NUMBER" would let a KYC check pass on a licence that was
+        never actually read.
         """
         try:
             image = Image.open(io.BytesIO(image_bytes))
             text = pytesseract.image_to_string(image)
             return text
         except Exception as e:
-            logger.warning(f"OCR Extraction failed (possibly Tesseract not installed): {e}")
-            logger.warning("Falling back to simulated OCR response for testing.")
-            return "SIMULATED_DL_NUMBER: DL-1234567890123"
+            logger.warning(f"OCR extraction failed: {e}")
+            return None
 
-    def verify_license(self, text: str) -> dict:
+    def verify_license(self, text: Optional[str]) -> dict:
         """
-        Searches for a typical Indian Driving License pattern or simulated pattern.
+        Searches for a typical Indian Driving License pattern.
+
+        Returns verified: False when no licence number is found (including when
+        OCR failed and text is None, or when the input contains a simulated
+        DL-... string, which is never accepted).
         """
+        if not text:
+            return {
+                "verified": False,
+                "document_type": "Unknown",
+                "extracted_number": None,
+                "raw_text": ""
+            }
+
         # Common pattern: two letters, two digits, year, followed by 7 digits
         # DL-1420110012345
         dl_pattern = r"([A-Z]{2}[-\s]?\d{2}[-\s]?\d{4}[-\s]?\d{7})"
-        simulated_pattern = r"(DL-\d{13})"
-        
+
         dl_match = re.search(dl_pattern, text)
-        sim_match = re.search(simulated_pattern, text)
 
         found_dl = dl_match.group(1) if dl_match else None
-        if not found_dl:
-            found_dl = sim_match.group(1) if sim_match else None
 
         if found_dl:
             return {
@@ -49,7 +61,7 @@ class OCRVerifier:
                 "extracted_number": found_dl,
                 "raw_text": text.strip()[:200] # Return first 200 chars for logging
             }
-        
+
         return {
             "verified": False,
             "document_type": "Unknown",

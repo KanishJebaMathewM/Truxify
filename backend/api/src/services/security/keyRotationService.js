@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
 import { supabase } from '../../config/db.js';
@@ -73,7 +74,7 @@ class KeyRotationService {
 
   async createRotationRecord(userId, walletAddress, reason) {
     try {
-      const rotationId = `rot_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const rotationId = `rot_${crypto.randomBytes(16).toString('hex')}`;
 
       const { data, error } = await supabase
         .from('key_rotations')

@@ -15,7 +15,6 @@ as $$
 declare
   v_order record;
   v_trip_display_id text;
-  v_active_trip_count int;
   v_updated_count int;
   v_otp_updated int;
 begin
@@ -67,51 +66,75 @@ begin
     raise exception 'Order has already been delivered';
   end if;
 
-  -- Safe lookup for the driver's active trip
-  select count(*) into v_active_trip_count
+  -- Fail closed (restored from 20260802130000_complete_trip_tx_require_funded_escrow.sql):
+  -- credit the driver wallet ONLY when the escrow was actually funded and released
+  -- on-chain (`escrow_status = 'released'` or a release tx hash is supplied), or
+  -- when the order is explicitly marked `escrow_disabled`. Any ambiguous/unfunded
+  -- state raises instead of crediting.
+  if not v_order.escrow_disabled
+     and coalesce(v_order.escrow_status, '') <> 'released'
+     and p_release_tx_hash is null then
+    raise exception 'Blockchain escrow release must complete before crediting driver wallet';
+  end if;
+
+  -- Finalize the active trip that actually served THIS order (restored from
+  -- 20260802060000_link_trips_to_orders.sql: selecting by driver_id could
+  -- complete the wrong trip when a driver has several active trips, and it
+  -- silently skipped trip finalization when the driver had no active trip).
+  select trip_display_id into v_trip_display_id
   from trips
-  where driver_id = v_order.driver_id and status = 'active';
+  where order_id = p_order_id
+    and status = 'active'
+  order by created_at
+  limit 1;
 
-  if v_active_trip_count > 1 then
-    raise exception 'Multiple active trips found for driver %', v_order.driver_id;
+  if v_trip_display_id is null then
+    raise exception 'No active trip found for this order — cannot complete trip';
   end if;
 
-  if v_active_trip_count = 1 then
-    select trip_display_id into v_trip_display_id
-    from trips
-    where driver_id = v_order.driver_id and status = 'active';
-
-    -- Update trip record
-    update trips
-    set status = 'completed',
-        end_time = to_char(now(), 'HH24:MI'),
-        updated_at = now()
-    where trip_display_id = v_trip_display_id;
-
-    -- Update trip items to delivered
-    update trip_items
-    set is_delivered = true
-    where trip_display_id = v_trip_display_id;
-
-    -- Update trip stops to completed/delivered
-    update trip_stops
-    set is_completed = true,
-        is_current = false,
-        status_label = 'Delivered',
-        updated_at = now()
-    where trip_display_id = v_trip_display_id;
-  end if;
-
-  -- Update order status and escrow details
-  update orders
-  set status = 'payment_released',
-      escrow_status = 'released',
-      escrow_released_at = now(),
-      blockchain_tx_hash = coalesce(p_release_tx_hash, blockchain_tx_hash),
+  -- Update trip record
+  update trips
+  set status = 'completed',
+      end_time = to_char(now(), 'HH24:MI'),
       updated_at = now()
-  where id = p_order_id
-    and status != 'cancelled'
-    and status != 'payment_released';
+  where trip_display_id = v_trip_display_id;
+
+  -- Update trip items to delivered
+  update trip_items
+  set is_delivered = true
+  where trip_display_id = v_trip_display_id;
+
+  -- Update trip stops to completed/delivered
+  update trip_stops
+  set is_completed = true,
+      is_current = false,
+      status_label = 'Delivered',
+      updated_at = now()
+  where trip_display_id = v_trip_display_id;
+
+  -- Update order status and escrow details. Escrow fields are only synced for
+  -- escrow-backed orders (the fail-closed guard above guarantees the escrow was
+  -- released on-chain); escrow-disabled orders never enter the escrow lifecycle,
+  -- so their escrow_status must not be rewritten to 'released'.
+  if v_order.escrow_disabled then
+    update orders
+    set status = 'payment_released',
+        blockchain_tx_hash = coalesce(p_release_tx_hash, blockchain_tx_hash),
+        updated_at = now()
+    where id = p_order_id
+      and status != 'cancelled'
+      and status != 'payment_released';
+  else
+    update orders
+    set status = 'payment_released',
+        escrow_status = 'released',
+        escrow_released_at = now(),
+        blockchain_tx_hash = coalesce(p_release_tx_hash, blockchain_tx_hash),
+        updated_at = now()
+    where id = p_order_id
+      and status != 'cancelled'
+      and status != 'payment_released';
+  end if;
 
   -- Verify the update actually affected a row
   get diagnostics v_updated_count = row_count;

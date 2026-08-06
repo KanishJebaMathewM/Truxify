@@ -7,16 +7,21 @@ on:
         description: 'Dry Run (only log modifications, do not apply changes)'
         type: boolean
         required: false
-        default: true
+        default: false
       pr_state:
         description: 'PR state to process (open, closed, or all)'
         type: choice
         options:
-          - all
           - closed
           - open
+          - all
         required: false
-        default: all
+        default: closed
+      since_hours:
+        description: 'Only process PRs updated/closed within last N hours (0 for all)'
+        type: string
+        required: false
+        default: '12'
 
 permissions:
   contents: read
@@ -30,13 +35,14 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Run retrospective PR labeler
         uses: actions/github-script@v7
         env:
           DRY_RUN: ${{ inputs.dry_run }}
-          PR_STATE: ${{ inputs.pr_state || 'all' }}
+          PR_STATE: ${{ inputs.pr_state || 'closed' }}
+          SINCE_HOURS: ${{ inputs.since_hours || '12' }}
         with:
           script: |
             const labeler = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/retro-labeler.js`);
@@ -45,5 +51,6 @@ jobs:
               context,
               core,
               dryRun: process.env.DRY_RUN === 'true',
-              prState: process.env.PR_STATE || 'all'
+              prState: process.env.PR_STATE || 'closed',
+              sinceHours: parseFloat(process.env.SINCE_HOURS || '12')
             });

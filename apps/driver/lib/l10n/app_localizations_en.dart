@@ -165,7 +165,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get radarActiveLooking => 'Radar active — looking for loads near you.';
 
   @override
-  String get todayPay => "Today's Pay";
+  String get todayPay => 'Today\'s Pay';
 
   @override
   String get shiftHours => 'Shift Hours';
@@ -474,7 +474,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get enterValidBid => 'Enter a valid bid amount';
+
+  @override
   String get unableToOpen => 'Unable to open notification';
+
+  @override
   String get withdraw => 'Withdraw';
 
   @override
@@ -503,4 +507,30 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get withdrawalSuccessful => 'Withdrawal successful';
+
+  @override
+  String get networkError => 'Network error. Please check your connection.';
+
+  @override
+  String get theme => 'Theme';
+
+  @override
+  String get system => 'System';
+
+  @override
+  String get light => 'Light';
+
+  @override
+  String get dark => 'Dark';
+
+  @override
+  String get otpResent => 'OTP resent successfully';
+
+  @override
+  String resendOtpIn(int seconds) {
+    return 'Resend in $secondss';
+  }
+
+  @override
+  String get resendOtp => 'Resend OTP';
 }

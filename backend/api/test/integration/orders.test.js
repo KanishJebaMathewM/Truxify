@@ -2364,6 +2364,11 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     expect(stored.drop_address).toBe('New Drop Place');
     expect(stored.drop_lat).toBe(22.22);
     expect(stored.drop_lng).toBe(88.88);
+
+    const dropChanged = m.store.order_timeline.filter(
+      t => t.order_display_id === 'OD-CHANGE-1' && t.milestone === 'Drop Changed'
+    );
+    expect(dropChanged).toHaveLength(1);
   });
 
   it('blocks change-drop with 409 when escrow is already funded', async () => {

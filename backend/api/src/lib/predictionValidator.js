@@ -44,6 +44,7 @@ const MAX_PRICE_INR = 500_000;
  * The ML model currently returns ±15% bands, so 3× is a generous ceiling.
  */
 const MAX_BAND_RATIO = 3;
+const DEFAULT_PRICE_BAND_RATIO = 0.15;
 
 /**
  * Validate an ML price prediction response.
@@ -136,8 +137,8 @@ export function validatePricePrediction(raw) {
     ok: true,
     validated: {
       estimated_price: roundPrice(price),
-      min_price: 'min_price' in raw ? roundPrice(raw.min_price) : roundPrice(price * 0.85),
-      max_price: 'max_price' in raw ? roundPrice(raw.max_price) : roundPrice(price * 1.15),
+      min_price: 'min_price' in raw ? roundPrice(raw.min_price) : roundPrice(price * (1 - DEFAULT_PRICE_BAND_RATIO)),
+      max_price: 'max_price' in raw ? roundPrice(raw.max_price) : roundPrice(price * (1 + DEFAULT_PRICE_BAND_RATIO)),
       currency: raw.currency,
       confidence: 'confidence' in raw ? raw.confidence : null,
     },

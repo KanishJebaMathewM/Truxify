@@ -193,26 +193,26 @@ class KyberKEM:
         return hashlib.sha256(data.tobytes()).digest()
     
     def decapsulate(self, ciphertext: bytes, secret_key: Dict) -> bytes:
-    """Decapsulate shared secret"""
-    ciphertext_dict = json.loads(ciphertext.decode())
-    u = np.array(ciphertext_dict['u'])
-    v = np.array(ciphertext_dict['v'])
-    s = np.array(secret_key['s'])
-    
-    # Decompress ciphertext
-    u_decompressed = self._decompress(u, self.params.du)
-    v_decompressed = self._decompress(v, self.params.dv)
-    
-    # Compute v - s^T * u
-    result = v_decompressed.copy()
-    for i in range(self.k):
-        result = (result - self._poly_multiply(s[i], u_decompressed[i])) % self.q
-    
-    # Derive shared secret from the same representation as encapsulate:
-    # use raw compressed u and v (not decompressed), matching encapsulate's _derive_secret(u, v)
-    shared_secret = self._derive_secret(u, v)
-    
-    return shared_secret
+        """Decapsulate shared secret"""
+        ciphertext_dict = json.loads(ciphertext.decode())
+        u = np.array(ciphertext_dict['u'])
+        v = np.array(ciphertext_dict['v'])
+        s = np.array(secret_key['s'])
+        
+        # Decompress ciphertext
+        u_decompressed = self._decompress(u, self.params.du)
+        v_decompressed = self._decompress(v, self.params.dv)
+        
+        # Compute v - s^T * u
+        result = v_decompressed.copy()
+        for i in range(self.k):
+            result = (result - self._poly_multiply(s[i], u_decompressed[i])) % self.q
+        
+        # Derive shared secret from the same representation as encapsulate:
+        # use raw compressed u and v (not decompressed), matching encapsulate's _derive_secret(u, v)
+        shared_secret = self._derive_secret(u, v)
+        
+        return shared_secret
 
 class QuantumSafeKeyExchange:
     """Quantum-safe key exchange using Kyber"""

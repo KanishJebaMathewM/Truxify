@@ -36,14 +36,9 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
   final GpsTrackingService _gpsTracking = GpsTrackingService();
   WsConnectionStatus _wsStatus = WsConnectionStatus.disconnected;
 
-  /// Statuses that require live GPS emission (matches LocationService list).
+  /// Statuses that require live GPS emission.
   static const _activeStatuses = {
-    'truck_assigned',
-    'en_route_pickup',
-    'arrived_pickup',
-    'picked_up',
-    'in_transit',
-    'arriving',
+    TripStatusType.active,
   };
 
   @override
@@ -51,6 +46,11 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
     super.initState();
     _routeFuture = _loadRouteForTrip(widget.trip.route);
     _maybeStartGpsTracking();
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+      final offline = results.every((result) => result == ConnectivityResult.none);
+      if (mounted) setState(() => _isOffline = offline);
+    });
   }
 
   @override
@@ -64,9 +64,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
 
   /// Start GPS emission only if this trip is in an active status.
   void _maybeStartGpsTracking() {
-    // TripStatusType is an enum — map to its string key.
-    final statusName = widget.trip.status.name;
-    if (!_activeStatuses.contains(statusName)) return;
+    if (!_activeStatuses.contains(widget.trip.status)) return;
 
     _gpsTracking.connectionStatus.listen((status) {
       if (mounted) setState(() => _wsStatus = status);

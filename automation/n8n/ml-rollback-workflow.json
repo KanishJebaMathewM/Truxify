@@ -103,7 +103,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://ml-engine:8000/ab-testing/rollback/={{$node[\"Decision\"].json.test_id}}",
+        "url": "http://ml-engine:8000/ab-testing/rollback/{{$node[\"Decision\"].json.test_id}}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

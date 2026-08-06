@@ -1,0 +1,90 @@
+/**
+ * Driver earnings aggregation logic.
+ */
+
+export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeTrips) => {
+  // Weekly Chart Aggregation (always shows past 7 days)
+  const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const weeklyChartMap = {};
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const dayLabel = daysOfWeek[d.getDay()];
+    weeklyChartMap[dayLabel] = 0;
+  }
+
+  let totalKm = 0;
+  let totalNetEarnings = 0;
+  let gross_earnings = 0;
+
+  (trips || []).forEach(trip => {
+    if (trip.trip_date) {
+      const tripDate = new Date(trip.trip_date);
+      // Only add to weekly chart if within the last 7 days
+      const diffMs = new Date() - tripDate;
+      const diffDays = diffMs / (1000 * 60 * 60 * 24);
+      if (diffDays <= 7) {
+        const dayLabel = daysOfWeek[tripDate.getDay()];
+        if (weeklyChartMap[dayLabel] !== undefined) {
+          weeklyChartMap[dayLabel] += trip.total_earnings || 0;
+        }
+      }
+    }
+
+    if (trip.distance) {
+      // Parse decimal distance values correctly
+      const match = String(trip.distance).match(/[0-9.]+/);
+      const parsed = match ? parseFloat(match[0]) : 0;
+      const distanceNum = isNaN(parsed) ? 0 : parsed;
+      totalKm += distanceNum;
+    }
+
+    totalNetEarnings += trip.net_earnings || 0;
+    gross_earnings += trip.total_earnings || 0;
+  });
+
+  const weeklyChart = Object.entries(weeklyChartMap).map(([day, earnings]) => ({
+    day,
+    earnings
+  }));
+
+  let deadheadTripsSaved = 0;
+  if (allCompletedTrips && allCompletedTrips.length > 1) {
+    for (let i = 1; i < allCompletedTrips.length; i++) {
+      const prevTrip = allCompletedTrips[i - 1];
+      const currTrip = allCompletedTrips[i];
+      
+      const prevRoute = (prevTrip.route_label || '').split(' → ');
+      const currRoute = (currTrip.route_label || '').split(' → ');
+      
+      if (prevRoute.length === 2 && currRoute.length === 2) {
+        const prevDrop = prevRoute[1].trim().toLowerCase();
+        const currPickup = currRoute[0].trim().toLowerCase();
+        
+        if (prevDrop === currPickup) {
+          const prevDate = new Date(prevTrip.trip_date);
+          const currDate = new Date(currTrip.trip_date);
+          if (!isNaN(prevDate) && !isNaN(currDate)) {
+            const diffDays = Math.abs(currDate - prevDate) / (1000 * 60 * 60 * 24);
+            if (diffDays <= 3) {
+              deadheadTripsSaved++;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    gross_earnings,
+    net_earnings: totalNetEarnings,
+    trips_completed: (trips || []).length,
+    weekly_chart: weeklyChart,
+    cumulative_stats: {
+      total_km: totalKm,
+      avg_earning_per_km: totalKm > 0 ? (totalNetEarnings / 100.0) / totalKm : 0,
+      lifetime_trips: lifetimeTrips !== null ? lifetimeTrips : null
+    },
+    deadhead_trips_saved: deadheadTripsSaved
+  };
+};

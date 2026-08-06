@@ -127,65 +127,65 @@ class WASIRuntime {
         }
     }
 
-    async readFile(path) {
+    async readFile(instanceId, path) {
         this.validatePath(path);
-        const result = await this.executeFunction('wasi_read_file', path);
+        const result = await this.executeFunction(instanceId, 'wasi_read_file', path);
         return result;
     }
 
-    async writeFile(path, content) {
+    async writeFile(instanceId, path, content) {
         this.validatePath(path);
-        const result = await this.executeFunction('wasi_write_file', path, content);
+        const result = await this.executeFunction(instanceId, 'wasi_write_file', path, content);
         return result;
     }
 
-    async listDirectory(path) {
+    async listDirectory(instanceId, path) {
         this.validatePath(path);
-        const result = await this.executeFunction('wasi_list_directory', path);
+        const result = await this.executeFunction(instanceId, 'wasi_list_directory', path);
         return JSON.parse(result);
     }
 
-    async createDirectory(path) {
+    async createDirectory(instanceId, path) {
         this.validatePath(path);
-        const result = await this.executeFunction('wasi_create_directory', path);
+        const result = await this.executeFunction(instanceId, 'wasi_create_directory', path);
         return result;
     }
 
-    async deleteFile(path) {
+    async deleteFile(instanceId, path) {
         this.validatePath(path);
-        const result = await this.executeFunction('wasi_delete_file', path);
+        const result = await this.executeFunction(instanceId, 'wasi_delete_file', path);
         return result;
     }
 
-    async httpRequest(url, method, headers, body) {
+    async httpRequest(instanceId, url, method, headers, body) {
         this.validateUrl(url);
         const request = JSON.stringify({ url, method, headers, body });
-        const result = await this.executeFunction('wasi_http_request', request);
+        const result = await this.executeFunction(instanceId, 'wasi_http_request', request);
         return JSON.parse(result);
     }
 
-    async getTime() {
-        return await this.executeFunction('wasi_get_time');
+    async getTime(instanceId) {
+        return await this.executeFunction(instanceId, 'wasi_get_time');
     }
 
-    async getTimeMs() {
-        return await this.executeFunction('wasi_get_time_ms');
+    async getTimeMs(instanceId) {
+        return await this.executeFunction(instanceId, 'wasi_get_time_ms');
     }
 
-    async sleep(ms) {
-        return await this.executeFunction('wasi_sleep', ms);
+    async sleep(instanceId, ms) {
+        return await this.executeFunction(instanceId, 'wasi_sleep', ms);
     }
 
-    async getProcessId() {
-        return await this.executeFunction('wasi_get_process_id');
+    async getProcessId(instanceId) {
+        return await this.executeFunction(instanceId, 'wasi_get_process_id');
     }
 
-    async getEnvVar(name) {
-        return await this.executeFunction('wasi_get_env_var', name);
+    async getEnvVar(instanceId, name) {
+        return await this.executeFunction(instanceId, 'wasi_get_env_var', name);
     }
 
-    async getCurrentDir() {
-        return await this.executeFunction('wasi_get_current_dir');
+    async getCurrentDir(instanceId) {
+        return await this.executeFunction(instanceId, 'wasi_get_current_dir');
     }
 
     validatePath(path) {

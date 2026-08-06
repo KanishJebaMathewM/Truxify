@@ -7,6 +7,8 @@ const inMemoryStore = new Map();
 const inFlightRequests = new Map(); // In-memory lock for memory-only mode
 const IN_MEMORY_TTL_MS = 86400_000;
 const CLEANUP_INTERVAL_MS = 60_000;
+const MAX_IN_MEMORY_ENTRIES = 10000;
+const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1); // evict 10% at a time
 
 // The Redis lock must outlive the longest guarded handler or a slow request's
 // lock can expire mid-execution and let a duplicate re-acquire it. Escrow flows
@@ -36,6 +38,16 @@ function getFromMemory(key) {
 }
 
 function setInMemory(key, data, ttlMs) {
+  if (inMemoryStore.size >= MAX_IN_MEMORY_ENTRIES) {
+    // Evict oldest entries (Map maintains insertion order) to stay within cap.
+    // Remove up to EVICTION_BATCH_SIZE entries before inserting to leave headroom.
+    let evicted = 0;
+    for (const k of inMemoryStore.keys()) {
+      if (evicted >= EVICTION_BATCH_SIZE) break;
+      inMemoryStore.delete(k);
+      evicted++;
+    }
+  }
   inMemoryStore.set(key, { data, expiresAt: Date.now() + ttlMs });
 }
 
@@ -45,13 +57,16 @@ function isCacheable(statusCode) {
 
 function cacheKey(req, idempotencyKey) {
   const identity = req.user?.id || 'anonymous';
-  return `idempotency:${identity}:${idempotencyKey}`;
+  // Scope by method + originalUrl so two endpoints (or verbs) sharing a user
+  // and key cannot collide (fixes #2915).
+  return `idempotency:${identity}:${req.method}:${req.originalUrl}:${idempotencyKey}`;
 }
 
 function readAndParse(str) {
   try {
     return JSON.parse(str);
-  } catch {
+  } catch (err) {
+    logger.warn({ err }, 'Malformed idempotency cached payload');
     return null;
   }
 }
@@ -127,7 +142,12 @@ export function requireIdempotency(ttlSeconds = 3600) {
         const releaseLock = () => {
           if (lockReleased) return;
           lockReleased = true;
-          redisClient.del(lockKey).catch(() => { });
+          redisClient.del(lockKey).catch((err) => {
+            logger.error(
+              { err, lockKey },
+              '[Idempotency] Failed to release Redis lock.'
+            );
+          });
         };
 
         // Ensure lock is reliably released when response terminates

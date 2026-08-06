@@ -8,6 +8,15 @@ const priceCache = new LRUCache(100, 15 * 60 * 1000);
 // Single source of truth for ML engine base URL
 const DEFAULT_ML_ENGINE_URL = 'http://localhost:8001';
 
+const ML_HTTP_TIMEOUT_MS = 5000;
+const ML_HTTP_TIMEOUT_MS_HEAVY = 10000;
+const ML_HTTP_TIMEOUT_MS_LONG = 300000;
+const ML_DEFAULT_PICKUP_LEAD_MS = 8 * 60 * 60 * 1000;
+const DEFAULT_TRUCK_MAX_WEIGHT_KG = 25000;
+const DEFAULT_TRUCK_MAX_LENGTH_M = 12;
+const DEFAULT_TRUCK_MAX_WIDTH_M = 2.5;
+const DEFAULT_TRUCK_MAX_HEIGHT_M = 4;
+
 // Startup validation
 if (!process.env.ML_API_KEY) {
     logger.warn('[ML] WARNING: ML_API_KEY is not set. All ML API endpoints will return 503. Set ML_API_KEY in your environment.');
@@ -78,7 +87,7 @@ export async function predictDemand(features = {}) {
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify(features),
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
   const result = await handleResponse(response);
@@ -126,7 +135,7 @@ export async function predictPrice({
       method: 'POST',
       headers: getHeaders(),
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
   const raw = await handleResponse(response);
@@ -189,7 +198,7 @@ export async function predictEta({
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
   const result = await handleResponse(response);
@@ -227,7 +236,7 @@ export async function matchBilateral({ loads, drivers }) {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
   });
 
   return handleResponse(response);
@@ -270,7 +279,7 @@ export async function predictDriverProfit({
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
   const result = await handleResponse(response);
@@ -321,7 +330,7 @@ export async function optimisePacking({ packages, truck, deliveryAddresses }) {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
   });
 
   return handleResponse(response);
@@ -353,7 +362,7 @@ export async function recommendLoads({ userId, bookingHistory = [], ratedDrivers
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
   return handleResponse(response);
@@ -385,7 +394,7 @@ export async function recommendTrucks({ userId, bookingHistory = [], ratedLoads 
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
   return handleResponse(response);
@@ -419,7 +428,7 @@ export async function scoreTrust({ cancellationRate, onTimePct, avgRating, dispu
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
 
   return handleResponse(response);
@@ -447,7 +456,7 @@ export async function matchDeadhead({ driverDestination, truckSpecs, arrivalTime
       arrival_time: arrivalTime,
       available_loads: availableLoads,
     }),
-    signal: AbortSignal.timeout(10000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_HEAVY),
   });
   return handleResponse(response);
 }
@@ -465,7 +474,7 @@ export async function optimiseMidTrip(routeData) {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify(routeData),
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
   return handleResponse(response);
 }
@@ -483,7 +492,7 @@ export async function trainDemandModel(force = false) {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify({ force }),
-    signal: AbortSignal.timeout(300000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_LONG),
   });
   return handleResponse(response);
 }
@@ -501,7 +510,7 @@ export async function trainPriceModel(force = false) {
     method: 'POST',
     headers: getHeaders(),
     body: JSON.stringify({ force }),
-    signal: AbortSignal.timeout(300000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS_LONG),
   });
   return handleResponse(response);
 }
@@ -517,7 +526,7 @@ export async function listModels() {
   const response = await fetch(url, {
     method: 'GET',
     headers: getHeaders(),
-    signal: AbortSignal.timeout(5000),
+    signal: AbortSignal.timeout(ML_HTTP_TIMEOUT_MS),
   });
   return handleResponse(response);
 }
@@ -558,15 +567,15 @@ export async function matchEnRouteLoads({
       length_m: Number(o.length_m || 1),
       width_m: Number(o.width_m || 1),
       height_m: Number(o.height_m || 1),
-      pickup_deadline: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
+      pickup_deadline: new Date(Date.now() + ML_DEFAULT_PICKUP_LEAD_MS).toISOString(),
       payment_inr: Number(o.payment_inr || (o.freight_value ? o.freight_value / 100 : 0)),
     }));
 
   const specs = truckSpecs || {
-    max_weight_kg: 25000,
-    max_length_m: 12,
-    max_width_m: 2.5,
-    max_height_m: 4,
+    max_weight_kg: DEFAULT_TRUCK_MAX_WEIGHT_KG,
+    max_length_m: DEFAULT_TRUCK_MAX_LENGTH_M,
+    max_width_m: DEFAULT_TRUCK_MAX_WIDTH_M,
+    max_height_m: DEFAULT_TRUCK_MAX_HEIGHT_M,
   };
 
   let recommendations = [];
@@ -578,7 +587,7 @@ export async function matchEnRouteLoads({
       const result = await matchDeadhead({
         driverDestination: { lat: currentLat, lng: currentLng },
         truckSpecs: specs,
-        arrivalTime: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
+        arrivalTime: new Date(Date.now() + ML_DEFAULT_PICKUP_LEAD_MS).toISOString(),
         availableLoads,
       });
       recommendations = result.recommendations || [];

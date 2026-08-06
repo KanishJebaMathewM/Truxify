@@ -98,6 +98,8 @@ initReputationContract();
  */
 const REPUTATION_RETRY_MAX = 3;
 const REPUTATION_RETRY_DELAY_MS = 2000;
+const REPUTATION_RPC_TIMEOUT_MS = 5000;
+const REPUTATION_TX_CONFIRM_TIMEOUT_MS = 60000;
 
 async function retryWithBackoff(fn, maxRetries, baseDelayMs) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -105,8 +107,11 @@ async function retryWithBackoff(fn, maxRetries, baseDelayMs) {
       return await fn();
     } catch (err) {
       if (attempt === maxRetries) throw err;
-      logger.warn(`[reputation] Retry ${attempt}/${maxRetries} after ${baseDelayMs * attempt}ms: ${err.message}`);
-      await new Promise(resolve => setTimeout(resolve, baseDelayMs * attempt));
+      // Add ±25% jitter to spread out concurrent retries and prevent thundering herd.
+      const jitter = 0.75 + Math.random() * 0.5; // [0.75, 1.25]
+      const delayMs = Math.round(baseDelayMs * attempt * jitter);
+      logger.warn(`[reputation] Retry ${attempt}/${maxRetries} after ${delayMs}ms (jitter applied): ${err.message}`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
 }
@@ -133,7 +138,7 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
     logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
     await retryWithBackoff(async () => {
       const provider = reputationContract.provider || reputationContract.runner?.provider;
-      const receipt = provider ? await provider.waitForTransaction(tx.hash, 1, 60_000) : await tx?.wait?.(1);
+      const receipt = provider ? await provider.waitForTransaction(tx.hash, 1, REPUTATION_TX_CONFIRM_TIMEOUT_MS) : await tx?.wait?.(1);
       if (!receipt || receipt.status === 0) {
         throw new Error(`increaseReputation transaction ${tx.hash} reverted or was not found on chain.`);
       }
@@ -167,7 +172,7 @@ export async function getDriverReputation(walletAddress) {
     const score = await Promise.race([
       reputationContract.getReputation(walletAddress),
       new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('RPC timeout')), 5000);
+        timeoutId = setTimeout(() => reject(new Error('RPC timeout')), REPUTATION_RPC_TIMEOUT_MS);
       }),
     ]);
     clearTimeout(timeoutId);

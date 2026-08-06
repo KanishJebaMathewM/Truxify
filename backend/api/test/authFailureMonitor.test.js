@@ -1,16 +1,16 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+﻿import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
 const warnMock = vi.fn();
 
-vi.mock('../../src/middleware/logger.js', () => ({
+vi.mock('../src/middleware/logger.js', () => ({
   default: {
     warn: warnMock,
   },
 }));
 
-import authFailureMonitor from '../../src/middleware/authFailureMonitor.js';
+import authFailureMonitor from '../src/middleware/authFailureMonitor.js';
 
 function createApp(statusCode = 401) {
   const app = express();

@@ -7,6 +7,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { GpsLog } from '../models/GpsLog.js';
+import { ebpfLoader } from '../../../../ebpf/loader.js';
 
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: false, min: -90, max: 90 },
@@ -290,6 +291,8 @@ function getClientIp(request) {
   return request.socket?.remoteAddress || request.connection?.remoteAddress || 'unknown';
 }
 
+export { getClientIp };
+
 // Process-local fallback counter for the per-IP upgrade limit, used when Redis
 // is unavailable so the limit is still enforced instead of failing open.
 const wsUpgradeMemoryLimits = new Map();
@@ -345,6 +348,33 @@ export function rejectWebSocketUpgrade(socket) {
     '\r\n'
   );
   socket.destroy();
+}
+
+/**
+ * Reject a WebSocket connection whose URL carries a `token` query parameter.
+ *
+ * Tokens must only ever arrive via the first-frame `auth` event; a token in
+ * the URL leaks through proxies, CDN/access logs and web analytics. When the
+ * client supplies one, the connection is refused with close code 4001 so the
+ * leak is impossible rather than merely discouraged (issue #5826).
+ *
+ * @param {object} ws     The raw WebSocket connection.
+ * @param {URL}    reqUrl Parsed request URL.
+ * @returns {boolean} true when the connection was rejected (caller should return).
+ */
+export function rejectConnectionWithTokenInUrl(ws, reqUrl) {
+  const urlToken = reqUrl.searchParams.get('token');
+  if (!urlToken) return false;
+  logger.warn(
+    { event: 'WS_TOKEN_IN_URL' },
+    'WebSocket auth token present in URL query string; refusing connection',
+  );
+  ws.send(JSON.stringify({
+    error: 'Unauthorized: auth token must not be sent in the URL query string',
+    code: 4001,
+  }));
+  ws.close(4001, 'Auth token must not be sent in the URL query string');
+  return true;
 }
 
 /**
@@ -486,6 +516,7 @@ export function initWebSocketServer(server, orderRepository) {
 
   wss.on('connection', async (ws, req) => {
     ws._request = req;
+    ws.socketId = ws.socketId || crypto.randomUUID();
     const reqUrl = new URL(req.url, 'http://localhost');
     const bypassAuth = process.env.BYPASS_AUTH === 'true';
 
@@ -514,6 +545,14 @@ export function initWebSocketServer(server, orderRepository) {
         await removeClientFromAllSubscriptions(ws);
       })();
     });
+
+    // A bearer token in the URL query string is a client bug and a credential
+    // leak (issue #5826): it would be written to proxies, CDN/access logs and
+    // web analytics. Refuse the connection loudly instead of silently ignoring
+    // the credential so a future client change cannot reintroduce the leak.
+    if (rejectConnectionWithTokenInUrl(ws, reqUrl)) {
+      return;
+    }
 
     if (bypassAuth) {
       if (process.env.NODE_ENV === 'production') {
@@ -578,7 +617,7 @@ export function initWebSocketServer(server, orderRepository) {
   logger.info('🚀 WebSocket tracking router initialized.');
 }
 
-function isMessageRateLimited(ws) {
+function isMessageRateLimitedInMemory(ws) {
   const now = Date.now();
   let state = messageRateTracker.get(ws);
   if (!state || now - state.windowStart >= 1000) {
@@ -589,8 +628,34 @@ function isMessageRateLimited(ws) {
   return state.count > MAX_MSG_PER_SECOND;
 }
 
+/**
+ * Per-socket message rate limiter (issue #986). Counts messages in a Redis
+ * keyed by socket + 1-second window so the cap holds cluster-wide across all
+ * API instances, and falls back to the in-memory limiter when Redis is down
+ * so the cap is still enforced on this node.
+ */
+export async function isMessageRateLimited(ws) {
+  if (redisClient && redisClient.status === 'ready') {
+    try {
+      const bucket = Math.floor(Date.now() / 1000);
+      const key = `ws:msg:${ws.socketId || ws.driverId || 'anon'}:${bucket}`;
+      const count = await redisClient.incr(key);
+      if (count === 1) {
+        await redisClient.expire(key, 2);
+      }
+      return count > MAX_MSG_PER_SECOND;
+    } catch (err) {
+      logger.warn(
+        'Redis WS message rate limit failed, falling back to in-memory:',
+        err.message,
+      );
+    }
+  }
+  return isMessageRateLimitedInMemory(ws);
+}
+
 export async function handleTrackingMessage(ws, message, req) {
-  if (isMessageRateLimited(ws)) {
+  if (await isMessageRateLimited(ws)) {
     return;
   }
 

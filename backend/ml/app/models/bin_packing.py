@@ -52,22 +52,41 @@ class _Shelf:
         self.row_width = 0.0           # max width used by any row so far
         self.items: List[dict] = []
 
-    def try_place(self, length: float, width: float, height: float) -> dict | None:
+    def try_place(
+        self,
+        length: float,
+        width: float,
+        height: float,
+        max_height_limit: float | None = None,
+    ) -> dict | None:
         """Attempt to place an item; return position dict or *None*."""
         # Try both orientations (rotate length ↔ width)
         for rotated, l, w in [(False, length, width), (True, width, length)]:
-            pos = self._fit(l, w, height, rotated)
+            pos = self._fit(l, w, height, rotated, max_height_limit)
             if pos is not None:
                 return pos
         return None
 
-    def _fit(self, l: float, w: float, h: float, rotated: bool) -> dict | None:
+    def _fit(
+        self,
+        l: float,
+        w: float,
+        h: float,
+        rotated: bool,
+        max_height_limit: float | None = None,
+    ) -> dict | None:
+        # Determine effective vertical clearance. If an upper shelf exists above
+        # this shelf, max_height_limit specifies the clearance between this shelf
+        # and the upper shelf's z_bottom. Otherwise, self.max_height (truck ceiling clearance) is used.
+        effective_max_height = (
+            max_height_limit if max_height_limit is not None else self.max_height
+        )
+
         # An item taller than the shelf's remaining vertical clearance can
-        # never be placed here, regardless of how it fits in x/y — checking
-        # this first prevents placements that would overflow the truck's
-        # ceiling (or the shelf above) once shelf_height grows past
-        # max_height.
-        if h > self.max_height:
+        # never be placed here. Furthermore, if expanding self.shelf_height to fit
+        # this item would exceed effective_max_height, reject placement to prevent
+        # lower shelves from expanding vertically past upper shelves.
+        if h > effective_max_height or max(self.shelf_height, h) > effective_max_height:
             return None
 
         # Does it fit in the remaining row?
@@ -141,8 +160,15 @@ def _pack_packages(
             continue
 
         placed = False
-        for shelf in shelves:
-            pos = shelf.try_place(pkg_length, pkg_width, pkg_height)
+        for i, shelf in enumerate(shelves):
+            # Compute maximum vertical clearance available for shelf i to prevent
+            # lower shelves from expanding past upper shelves' z_bottom boundaries.
+            if i + 1 < len(shelves):
+                clearance = shelves[i + 1].z_bottom - shelf.z_bottom
+            else:
+                clearance = truck_h - shelf.z_bottom
+
+            pos = shelf.try_place(pkg_length, pkg_width, pkg_height, max_height_limit=clearance)
             if pos is not None:
                 arrangements[idx] = {
                     "package_index": idx,

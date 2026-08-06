@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import {
   sendDeliveryOtpNotification,
   storeDeliveryOtp,
@@ -244,7 +244,7 @@ export class OrderMilestoneService {
           p_otp_id: otpRecord.id,
           p_release_tx_hash: releaseTxHash
         },
-        userClient
+        supabaseAdmin
       );
       if (rpcErr) {
         logger.error('complete_trip_tx RPC failed:', rpcErr.message);

@@ -1,7 +1,7 @@
 import hmac
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -87,13 +87,17 @@ async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
         )
 
         if traffic_data:
-            # Get prediction
+            # Use a single UTC-aware datetime so hour, weekday, and response
+            # timestamp are all derived from the same instant. datetime.now()
+            # (naive local time) can straddle a day boundary between the hour
+            # and weekday calls, and produces timezone-dependent features.
+            utc_now = datetime.now(timezone.utc)
             features = np.array([[
                 traffic_data.traffic_speed,
                 traffic_data.free_flow_speed,
                 traffic_data.congestion_level,
-                datetime.now().hour,
-                datetime.now().weekday()
+                utc_now.hour,
+                utc_now.weekday()
             ]])
 
             eta_seconds = traffic_pipeline.predict_eta(features)
@@ -106,7 +110,7 @@ async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
                     eta_string=str(timedelta(seconds=int(eta_seconds))),
                     traffic_speed=traffic_data.traffic_speed,
                     congestion_level=traffic_data.congestion_level,
-                    timestamp=datetime.now().isoformat()
+                    timestamp=utc_now.isoformat()
                 )
 
         raise HTTPException(status_code=500, detail="ETA prediction failed")
@@ -133,10 +137,11 @@ async def update_eta(order_id: str, request: ETAUpdateRequest, _auth=Depends(ver
     )
 
     if result:
+        utc_now = datetime.now(timezone.utc)
         return {
             'order_id': order_id,
             'data': result,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': utc_now.isoformat()
         }
 
     raise HTTPException(status_code=500, detail="ETA update failed")
@@ -147,16 +152,18 @@ async def get_traffic(route_id: str, _auth=Depends(verify_api_key)):
     """Get real-time traffic data"""
     try:
         traffic = await traffic_pipeline.get_real_time_traffic(route_id)
+        utc_now = datetime.now(timezone.utc)
         if traffic:
             return {
                 'route_id': route_id,
                 'data': traffic,
-                'timestamp': datetime.now().isoformat()
+                'timestamp': utc_now.isoformat()
             }
         return {
             'route_id': route_id,
             'data': None,
-            'message': 'No traffic data available'
+            'message': 'No traffic data available',
+            'timestamp': utc_now.isoformat()
         }
     except Exception as e:
         logger.error(f"Internal error: {e}")
@@ -169,10 +176,11 @@ async def get_forecast(route_id: str, hours: int = Query(1, ge=1, le=24), _auth=
     """Get traffic forecast"""
     try:
         forecast = await traffic_pipeline.get_traffic_forecast(route_id, hours)
+        utc_now = datetime.now(timezone.utc)
         return {
             'route_id': route_id,
             'data': forecast,
-            'timestamp': datetime.now().isoformat()
+            'timestamp': utc_now.isoformat()
         }
     except Exception as e:
         logger.error(f"Internal error: {e}")
@@ -185,10 +193,11 @@ async def train_model(_auth=Depends(verify_api_key)):
     """Trigger model retraining"""
     try:
         traffic_pipeline.train_model(epochs=50)
+        utc_now = datetime.now(timezone.utc)
         return {
             'status': 'success',
             'message': 'Model trained successfully',
-            'timestamp': datetime.now().isoformat()
+            'timestamp': utc_now.isoformat()
         }
     except Exception as e:
         logger.error(f"Internal error: {e}")

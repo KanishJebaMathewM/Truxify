@@ -474,7 +474,11 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get enterValidBid => 'एक मान्य बोली राशि दर्ज करें';
+
+  @override
   String get unableToOpen => 'सूचना खोलने में असमर्थ';
+
+  @override
   String get withdraw => 'निकालें';
 
   @override
@@ -503,4 +507,30 @@ class AppLocalizationsHi extends AppLocalizations {
 
   @override
   String get withdrawalSuccessful => 'निकासी सफल';
+
+  @override
+  String get networkError => 'Network error. Please check your connection.';
+
+  @override
+  String get theme => 'Theme';
+
+  @override
+  String get system => 'System';
+
+  @override
+  String get light => 'Light';
+
+  @override
+  String get dark => 'Dark';
+
+  @override
+  String get otpResent => 'OTP resent successfully';
+
+  @override
+  String resendOtpIn(int seconds) {
+    return 'Resend in $secondss';
+  }
+
+  @override
+  String get resendOtp => 'Resend OTP';
 }

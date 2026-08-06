@@ -2,7 +2,7 @@
 
 import kafka from '../config/kafka.config.js';
 import { TOPICS } from '../config/kafka.config.js';
-import logger from '../api/src/middleware/logger.js';
+import logger from '../../api/src/middleware/logger.js';
 
 async function initKafka() {
   try {

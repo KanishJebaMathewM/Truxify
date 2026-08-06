@@ -250,6 +250,49 @@ describe('PolicyEngine', () => {
       });
     });
 
+    describe('New policies (demand, upload-pod, view-earnings)', () => {
+      it('allows driver to view demand heatmap', () => {
+        expect(() => policy.authorize(user('driver'), 'demand:view-heatmap')).not.toThrow();
+      });
+
+      it('allows admin to view demand heatmap', () => {
+        expect(() => policy.authorize(user('admin'), 'demand:view-heatmap')).not.toThrow();
+      });
+
+      it('denies customer viewing demand heatmap', () => {
+        expect(() => policy.authorize(user('customer'), 'demand:view-heatmap')).toThrow(PolicyError);
+      });
+
+      it('allows driver to upload POD on assigned order', () => {
+        const order = { driver_id: 'driver-1' };
+        expect(() => policy.authorize(user('driver', 'driver-1'), 'order:upload-pod', { order })).not.toThrow();
+      });
+
+      it('denies driver uploading POD on non-assigned order', () => {
+        const order = { driver_id: 'other-driver' };
+        expect(() => policy.authorize(user('driver', 'driver-1'), 'order:upload-pod', { order })).toThrow(PolicyError);
+      });
+
+      it('denies customer uploading POD', () => {
+        expect(() => policy.authorize(user('customer'), 'order:upload-pod')).toThrow(PolicyError);
+      });
+
+      it('allows driver to view own earnings', () => {
+        const profile = { id: 'driver-1' };
+        expect(() => policy.authorize(user('driver', 'driver-1'), 'driver:view-earnings', { profile })).not.toThrow();
+      });
+
+      it('allows admin to view any driver earnings', () => {
+        const profile = { id: 'other-driver' };
+        expect(() => policy.authorize(user('admin'), 'driver:view-earnings', { profile })).not.toThrow();
+      });
+
+      it('denies driver viewing other driver earnings', () => {
+        const profile = { id: 'other-driver' };
+        expect(() => policy.authorize(user('driver', 'driver-1'), 'driver:view-earnings', { profile })).toThrow(PolicyError);
+      });
+    });
+
     describe('Support ticket ownership', () => {
       it('allows ticket owner to view ticket', () => {
         const ticket = { user_id: 'user-1' };
@@ -276,6 +319,37 @@ describe('PolicyEngine', () => {
 
     it('singleton is an instance of PolicyEngine', () => {
       expect(policy).toBeInstanceOf(PolicyEngine);
+    });
+
+    it('isRoleAllowed checks role without ownership', () => {
+      expect(policy.isRoleAllowed('order:create', 'customer')).toBe(true);
+      expect(policy.isRoleAllowed('order:create', 'driver')).toBe(false);
+      expect(policy.isRoleAllowed('admin:view-dashboard', 'admin')).toBe(true);
+      expect(policy.isRoleAllowed('admin:view-dashboard', 'customer')).toBe(false);
+      expect(policy.isRoleAllowed('nonexistent:action', 'admin')).toBe(false);
+    });
+
+    it('getRegisteredActions returns sorted action names', () => {
+      const actions = policy.getRegisteredActions();
+      expect(Array.isArray(actions)).toBe(true);
+      expect(actions.length).toBeGreaterThan(0);
+      expect(actions).toContain('order:create');
+      expect(actions).toContain('driver:view-stats');
+      expect(actions).toContain('demand:view-heatmap');
+      expect(actions).toEqual([...actions].sort());
+    });
+
+    it('getPolicySnapshot returns all policies with metadata', () => {
+      const snap = policy.getPolicySnapshot();
+      expect(snap.totalPolicies).toBeGreaterThan(0);
+      expect(snap.policies['order:create']).toBeDefined();
+      expect(snap.policies['order:create'].roles).toEqual(['customer']);
+      expect(snap.policies['order:view'].hasOwnershipCheck).toBe(true);
+    });
+
+    it('authorize accepts optional opts with requestId', () => {
+      expect(() => policy.authorize(user('customer'), 'order:create', undefined, { requestId: 'req-123' }))
+        .not.toThrow();
     });
   });
 });

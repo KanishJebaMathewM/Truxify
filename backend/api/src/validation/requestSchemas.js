@@ -241,6 +241,16 @@ export const driverStatementSchema = z.object({
   sort_by: z.enum(['pickup_date', 'net_earnings', 'base_freight']).optional(),
 }).strict();
 
+/**
+ * Reporting window for the driver earnings summary.
+ *
+ * `.strict()` rejects unknown query keys so a typo surfaces as a 400 rather
+ * than silently falling back to the default period.
+ */
+export const earningsSummarySchema = z.object({
+  period: z.enum(['weekly', 'monthly']).optional(),
+}).strict();
+
 // Indian vehicle registration plate: 2 letters, 2 digits, up to 3 letters, up to 4 digits
 // e.g. MH12AB1234 or DL01C1234
 const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
@@ -272,6 +282,8 @@ export const updateProfileSchema = z.object({
   full_name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name must be 100 characters or fewer').optional(),
   company_name: z.string().trim().min(1, 'Company name cannot be empty').max(200, 'Company name must be 200 characters or fewer').optional(),
   phone: z.string().trim().refine(isValidPhone, { message: 'Phone must be a valid number (digits, optional +, spaces/dashes/parens)' }).optional(),
+  email: z.string().trim().email('Invalid email address').optional(),
+  number_plate: z.string().trim().optional(),
   language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').refine((v) => VALID_LANGUAGES.includes(v), { message: 'Unsupported language code' }).optional(),
   dark_mode: z.boolean().optional(),
   is_online: z.boolean().optional(),

@@ -12,7 +12,7 @@ const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
  * @returns {Promise<string|null>} Formatted location string or null if failed
  */
 export async function reverseGeocode(lat, lon) {
-  if (!lat || !lon) return null;
+  if (lat == null || lon == null || Number.isNaN(Number(lat)) || Number.isNaN(Number(lon))) return null;
 
   // Round coordinates to ~100m precision (3 decimal places) to maximize cache hits
   const roundedLat = Number(lat).toFixed(3);

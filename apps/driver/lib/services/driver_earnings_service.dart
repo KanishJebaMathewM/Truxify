@@ -119,34 +119,13 @@ class DriverEarningsService {
 
     final start = DateTime(month.year, month.month, 1);
     final end = DateTime(month.year, month.month + 1, 1);
-    final today = DateTime.now();
+    final startDate = start.toIso8601String().split('T').first;
+    final endDate = end.toIso8601String().split('T').first;
 
-    final daysSinceMonthStart = today.difference(start).inDays + 1;
-
-    // Fallback: If we query a historical month > 365 days ago,
-    // the backend API will reject it or return incomplete data.
-    // We fetch directly from the Supabase client for these older months.
-    if (daysSinceMonthStart > 365) {
-      final response = await _client
-          .from('earnings_daily')
-          .select()
-          .eq('driver_id', driverId!)
-          .gte('day_date', start.toIso8601String().split('T').first)
-          .lt('day_date', end.toIso8601String().split('T').first)
-          .order('day_date');
-      if (response is! List) {
-        throw StateError('Unexpected monthly earnings response type');
-      }
-      return response.map((item) {
-        if (item is Map<String, dynamic>) return item;
-        if (item is Map) return Map<String, dynamic>.from(item);
-        throw StateError('Unexpected monthly earnings item type');
-      }).toList(growable: false);
-    }
-
-    final days = daysSinceMonthStart.clamp(1, 365);
-
-    final path = '/api/driver/earnings/summary?days=$days';
+    // Request exactly the selected month's window through the API for both the
+    // current and historical months (including > 365 days ago) so a single,
+    // consistent code path is always used.
+    final path = '/api/driver/earnings/summary?start_date=$startDate&end_date=$endDate';
 
     try {
       final decoded = await _apiClient.get(path);

@@ -88,6 +88,8 @@ class _LoginScreenState extends State<LoginScreen> {
               'phone': phone,
               'verificationId': verificationId,
               'countryCode': _selectedCode,
+              if (resendToken != null)
+            'resendToken': resendToken.toString(),
             },
           );
         },

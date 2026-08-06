@@ -240,7 +240,8 @@ export async function closeCachePublisher() {
   if (subscriber) {
     try {
       await subscriber.quit();
-    } catch {
+    } catch (err) {
+      logger.warn({ err }, '[CachePublisher] subscriber.quit failed, falling back to disconnect');
       subscriber.disconnect();
     }
     subscriber = null;

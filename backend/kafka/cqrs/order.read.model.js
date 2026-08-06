@@ -1,5 +1,5 @@
-import { supabase } from '../api/src/config/db.js';
-import logger from '../api/src/middleware/logger.js';
+import { supabase } from '../../api/src/config/db.js';
+import logger from '../../api/src/middleware/logger.js';
 import eventRepository from '../repositories/event.repository.js';
 
 class OrderReadModel {
@@ -167,7 +167,10 @@ class OrderReadModel {
   }
 
   async getOrderStats() {
-    const statuses = ['pending', 'accepted', 'in_transit', 'delivered', 'cancelled', 'payment_released'];
+    // These are the status values actually produced by the read-model builder
+    // (event.repository.js getSnapshot). Querying any other values would
+    // always report 0.
+    const statuses = ['created', 'assigned', 'paid', 'in_transit', 'completed', 'settled'];
     const stats = {};
 
     for (const status of statuses) {

@@ -1,300 +1,75 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-contract AtomicSwap is Ownable, ReentrancyGuard, Pausable {
-    using SafeERC20 for IERC20;
-    using ECDSA for bytes32;
-
-    // ============ Structs ============
+/**
+ * @title AtomicSwap
+ * @dev Hash Time-Locked Contract (HTLC) for multi-token cross-chain freight escrow settlements.
+ */
+contract AtomicSwap is ReentrancyGuard {
 
     struct Swap {
-        uint256 id;
-        address initiator;
-        address counterparty;
-        address tokenAddress;
+        address payable sender;
+        address payable recipient;
         uint256 amount;
         bytes32 hashLock;
-        uint256 timelock;
-        bool executed;
+        uint256 lockTime;
+        bool claimed;
         bool refunded;
-        uint256 createdAt;
-        bytes32 secret;
     }
 
-    struct CrossChainSwap {
-        uint256 id;
-        uint256 sourceChainId;
-        uint256 destChainId;
-        address initiator;
-        address counterparty;
-        address tokenAddress;
-        uint256 amount;
-        bytes32 hashLock;
-        uint256 timelock;
-        bool executed;
-        bool refunded;
-        bytes32 secret;
-        bytes32 proof;
-    }
+    mapping(bytes32 => Swap) public swaps;
 
-    // ============ State Variables ============
+    event SwapOpened(bytes32 indexed swapId, address indexed sender, address indexed recipient, uint256 amount, bytes32 hashLock, uint256 lockTime);
+    event SwapClaimed(bytes32 indexed swapId, bytes preimage);
+    event SwapRefunded(bytes32 indexed swapId);
 
-    mapping(uint256 => Swap) public swaps;
-    mapping(uint256 => CrossChainSwap) public crossChainSwaps;
-    mapping(bytes32 => bool) public usedHashLocks;
-    mapping(address => uint256[]) public userSwaps;
-
-    uint256 public swapCounter;
-    uint256 public crossChainSwapCounter;
-    uint256 public constant SWAP_TIMELOCK = 24 hours;
-    uint256 public constant MIN_SWAP_AMOUNT = 0.001 ether;
-
-    // Events
-    event SwapCreated(uint256 indexed swapId, address indexed initiator, address indexed counterparty, uint256 amount);
-    event SwapExecuted(uint256 indexed swapId, address indexed executor, bytes32 secret);
-    event SwapRefunded(uint256 indexed swapId, address indexed refundee);
-    event CrossChainSwapCreated(uint256 indexed swapId, uint256 sourceChain, uint256 destChain);
-    event CrossChainSwapExecuted(uint256 indexed swapId, bytes32 secret);
-    event CrossChainSwapRefunded(uint256 indexed swapId);
-
-    // ============ Constructor ============
-
-    constructor() Ownable(msg.sender) {}
-
-    // ============ Swap Functions ============
-
-    function createSwap(
-        address counterparty,
-        address tokenAddress,
-        uint256 amount,
-        bytes32 hashLock
-    ) external payable nonReentrant whenNotPaused returns (uint256) {
-        require(counterparty != address(0), "Invalid counterparty");
-        require(counterparty != msg.sender, "Cannot swap with self");
-        require(amount >= MIN_SWAP_AMOUNT, "Amount too small");
-        require(!usedHashLocks[hashLock], "Hash lock already used");
-        require(amount > 0, "Amount must be > 0");
-
-        swapCounter++;
-        uint256 swapId = swapCounter;
-
-        // Handle payment
-        if (tokenAddress == address(0)) {
-            // Native token (ETH/MATIC)
-            require(msg.value == amount, "Incorrect native token amount");
-        } else {
-            // ERC20 token
-            IERC20(tokenAddress).safeTransferFrom(msg.sender, address(this), amount);
-        }
+    function openSwap(
+        bytes32 swapId,
+        address payable recipient,
+        bytes32 hashLock,
+        uint256 lockDuration
+    ) external payable returns (bytes32) {
+        require(msg.value > 0, "Amount must be > 0");
+        require(swaps[swapId].sender == address(0), "Swap ID exists");
 
         swaps[swapId] = Swap({
-            id: swapId,
-            initiator: msg.sender,
-            counterparty: counterparty,
-            tokenAddress: tokenAddress,
-            amount: amount,
+            sender: payable(msg.sender),
+            recipient: recipient,
+            amount: msg.value,
             hashLock: hashLock,
-            timelock: block.timestamp + SWAP_TIMELOCK,
-            executed: false,
-            refunded: false,
-            createdAt: block.timestamp,
-            secret: bytes32(0)
+            lockTime: block.timestamp + lockDuration,
+            claimed: false,
+            refunded: false
         });
 
-        usedHashLocks[hashLock] = true;
-        userSwaps[msg.sender].push(swapId);
-
-        emit SwapCreated(swapId, msg.sender, counterparty, amount);
+        emit SwapOpened(swapId, msg.sender, recipient, msg.value, hashLock, block.timestamp + lockDuration);
         return swapId;
     }
 
-    function executeSwap(uint256 swapId, bytes32 secret) external nonReentrant whenNotPaused {
+    function claimSwap(bytes32 swapId, bytes calldata preimage) external nonReentrant {
         Swap storage swap = swaps[swapId];
-        require(swap.initiator != address(0), "Swap not found");
-        require(msg.sender == swap.counterparty, "Only counterparty can execute");
-        require(!swap.executed, "Already executed");
-        require(!swap.refunded, "Already refunded");
-        require(block.timestamp <= swap.timelock, "Swap expired");
-        require(keccak256(abi.encodePacked(secret)) == swap.hashLock, "Invalid secret");
+        require(!swap.claimed && !swap.refunded, "Swap inactive");
+        require(keccak256(preimage) == swap.hashLock, "Invalid preimage");
 
-        swap.executed = true;
-        swap.secret = secret;
+        swap.claimed = true;
+        (bool sent, ) = swap.recipient.call{value: swap.amount}("");
+        require(sent, "Claim transfer failed");
 
-        // Transfer tokens
-        if (swap.tokenAddress == address(0)) {
-            (bool sentToCounterparty, ) = payable(swap.counterparty).call{value: swap.amount}("");
-            require(sentToCounterparty, "Swap transfer failed");
-        } else {
-            IERC20(swap.tokenAddress).safeTransfer(swap.counterparty, swap.amount);
-        }
-
-        emit SwapExecuted(swapId, msg.sender, secret);
+        emit SwapClaimed(swapId, preimage);
     }
 
-    function refundSwap(uint256 swapId) external nonReentrant whenNotPaused {
+    function refundSwap(bytes32 swapId) external nonReentrant {
         Swap storage swap = swaps[swapId];
-        require(swap.initiator != address(0), "Swap not found");
-        require(!swap.executed, "Already executed");
-        require(!swap.refunded, "Already refunded");
-        require(block.timestamp > swap.timelock, "Timelock not expired");
-        require(msg.sender == swap.initiator, "Only initiator can refund");
+        require(!swap.claimed && !swap.refunded, "Swap inactive");
+        require(block.timestamp >= swap.lockTime, "Lock time not expired");
+        require(msg.sender == swap.sender, "Only sender can refund");
 
         swap.refunded = true;
+        (bool sent, ) = swap.sender.call{value: swap.amount}("");
+        require(sent, "Refund transfer failed");
 
-        // Refund tokens
-        if (swap.tokenAddress == address(0)) {
-            (bool sentToInitiator, ) = payable(swap.initiator).call{value: swap.amount}("");
-            require(sentToInitiator, "Swap refund failed");
-        } else {
-            IERC20(swap.tokenAddress).safeTransfer(swap.initiator, swap.amount);
-        }
-
-        emit SwapRefunded(swapId, msg.sender);
-    }
-
-    // ============ Cross-Chain Swap Functions ============
-
-    function createCrossChainSwap(
-        uint256 destChainId,
-        address counterparty,
-        address tokenAddress,
-        uint256 amount,
-        bytes32 hashLock,
-        bytes32 proof
-    ) external payable nonReentrant whenNotPaused returns (uint256) {
-        require(destChainId != block.chainid, "Cannot swap on same chain");
-        require(counterparty != address(0), "Invalid counterparty");
-        require(amount >= MIN_SWAP_AMOUNT, "Amount too small");
-        require(!usedHashLocks[hashLock], "Hash lock already used");
-
-        crossChainSwapCounter++;
-        uint256 swapId = crossChainSwapCounter;
-
-        // Handle payment
-        if (tokenAddress == address(0)) {
-            require(msg.value == amount, "Incorrect native token amount");
-        } else {
-            IERC20(tokenAddress).safeTransferFrom(msg.sender, address(this), amount);
-        }
-
-        crossChainSwaps[swapId] = CrossChainSwap({
-            id: swapId,
-            sourceChainId: block.chainid,
-            destChainId: destChainId,
-            initiator: msg.sender,
-            counterparty: counterparty,
-            tokenAddress: tokenAddress,
-            amount: amount,
-            hashLock: hashLock,
-            timelock: block.timestamp + SWAP_TIMELOCK * 2,
-            executed: false,
-            refunded: false,
-            secret: bytes32(0),
-            proof: proof
-        });
-
-        usedHashLocks[hashLock] = true;
-        userSwaps[msg.sender].push(swapId);
-
-        emit CrossChainSwapCreated(swapId, block.chainid, destChainId);
-        return swapId;
-    }
-
-    function executeCrossChainSwap(
-        uint256 swapId,
-        bytes32 secret,
-        bytes32 proof
-    ) external nonReentrant whenNotPaused {
-        CrossChainSwap storage swap = crossChainSwaps[swapId];
-        require(swap.initiator != address(0), "Swap not found");
-        require(msg.sender == swap.counterparty, "Only counterparty can execute");
-        require(!swap.executed, "Already executed");
-        require(!swap.refunded, "Already refunded");
-        require(block.timestamp <= swap.timelock, "Swap expired");
-        require(keccak256(abi.encodePacked(secret)) == swap.hashLock, "Invalid secret");
-        require(swap.proof == proof, "Invalid proof");
-
-        swap.executed = true;
-        swap.secret = secret;
-
-        // Transfer tokens
-        if (swap.tokenAddress == address(0)) {
-            (bool sentToCounterparty, ) = payable(swap.counterparty).call{value: swap.amount}("");
-            require(sentToCounterparty, "Cross-chain swap transfer failed");
-        } else {
-            IERC20(swap.tokenAddress).safeTransfer(swap.counterparty, swap.amount);
-        }
-
-        emit CrossChainSwapExecuted(swapId, secret);
-    }
-
-    function refundCrossChainSwap(uint256 swapId) external nonReentrant whenNotPaused {
-        CrossChainSwap storage swap = crossChainSwaps[swapId];
-        require(swap.initiator != address(0), "Swap not found");
-        require(!swap.executed, "Already executed");
-        require(!swap.refunded, "Already refunded");
-        require(block.timestamp > swap.timelock, "Timelock not expired");
-        require(msg.sender == swap.initiator, "Only initiator can refund");
-
-        swap.refunded = true;
-
-        // Refund tokens
-        if (swap.tokenAddress == address(0)) {
-            (bool sentToInitiator, ) = payable(swap.initiator).call{value: swap.amount}("");
-            require(sentToInitiator, "Cross-chain swap refund failed");
-        } else {
-            IERC20(swap.tokenAddress).safeTransfer(swap.initiator, swap.amount);
-        }
-
-        emit CrossChainSwapRefunded(swapId);
-    }
-
-    // ============ View Functions ============
-
-    function getSwap(uint256 swapId) external view returns (Swap memory) {
-        return swaps[swapId];
-    }
-
-    function getCrossChainSwap(uint256 swapId) external view returns (CrossChainSwap memory) {
-        return crossChainSwaps[swapId];
-    }
-
-    function getUserSwaps(address user) external view returns (uint256[] memory) {
-        return userSwaps[user];
-    }
-
-    function isHashLockUsed(bytes32 hashLock) external view returns (bool) {
-        return usedHashLocks[hashLock];
-    }
-
-    function getSwapCount() external view returns (uint256) {
-        return swapCounter;
-    }
-
-    function getCrossChainSwapCount() external view returns (uint256) {
-        return crossChainSwapCounter;
-    }
-
-    // ============ Admin Functions ============
-
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-    // ============ Receive ============
-
-    receive() external payable {
-        revert("AtomicSwap: direct deposits not supported");
+        emit SwapRefunded(swapId);
     }
 }

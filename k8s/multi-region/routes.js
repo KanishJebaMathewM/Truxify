@@ -1,5 +1,5 @@
 import express from 'express';
-import regionService from './region.service.js';
+import regionService from './region-service.js';
 import logger from '../../backend/api/src/middleware/logger.js';
 
 const router = express.Router();

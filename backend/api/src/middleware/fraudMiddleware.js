@@ -1,6 +1,9 @@
 import fraudDetection from '../services/fraud/FraudDetectionService.js';
 import logger from './logger.js';
 
+const RISK_REVIEW_THRESHOLD = 0.7;
+const RISK_BLOCK_THRESHOLD = 0.9;
+
 export const fraudDetectionMiddleware = async (req, res, next) => {
   try {
     const userId = req.user?.id;
@@ -15,13 +18,8 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
     const isCritical = criticalEndpoints.some(endpoint => req.path.startsWith(endpoint));
 
     if (!userId) {
-      if (isCritical) {
-        logger.warn('[Fraud] Blocking unauthenticated request to critical endpoint');
-        return res.status(401).json({
-          error: 'Authentication required for this endpoint',
-        });
-      }
-      logger.warn('[Fraud] Skipping fraud check — no userId on request');
+      // Authentication has not run yet or this is a public endpoint.
+      // Never block — just skip fraud checks and let authenticate() handle authz.
       return next();
     }
 
@@ -44,7 +42,7 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
         deviceChanged: req.deviceChanged || false
       });
 
-      if (risk && risk.riskScore > 0.7) {
+      if (risk && risk.riskScore > RISK_REVIEW_THRESHOLD) {
         // Flag for review
         await fraudDetection.addToReviewQueue(
           userId,
@@ -53,7 +51,7 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
         );
 
         // Block high-risk transactions
-        if (risk.riskScore > 0.9) {
+        if (risk.riskScore > RISK_BLOCK_THRESHOLD) {
           return res.status(403).json({
             error: 'Transaction blocked due to suspicious activity',
             riskScore: risk.riskScore,

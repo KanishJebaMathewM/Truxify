@@ -213,6 +213,29 @@ describe('Webhook Routes — HMAC Signature Verification', () => {
         expect.any(Error)
       );
     });
+
+    it('returns 500 instead of 202 when the DLQ enqueue fails', async () => {
+      mockEnqueueFailure.mockResolvedValueOnce(false);
+
+      const payload = {
+        eventType: 'EscrowReleased',
+        orderId: 'order-999',
+        txHash: '0xdef',
+        simulateFailure: true
+      };
+      const signature = signPayload(payload);
+
+      const res = await request(app)
+        .post('/api/webhooks/escrow')
+        .set('X-Webhook-Signature', signature)
+        .send(payload);
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe(
+        'Webhook processing failed and the event could not be queued for retry'
+      );
+      expect(mockEnqueueFailure).toHaveBeenCalledTimes(1);
+    });
   });
 });
 

@@ -76,6 +76,7 @@ type rateEntry struct {
 type jwtClaims struct {
 	Sub  string `json:"sub"`
 	Role string `json:"role"`
+	Exp  int64  `json:"exp"`
 }
 
 // operatorRoles are roles allowed to query a driver's location. Drivers may
@@ -148,6 +149,12 @@ func parseDriverToken(token string) (jwtClaims, error) {
 	}
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return claims, fmt.Errorf("malformed token")
+	}
+
+	// Reject expired tokens. JWT `exp` is a NumericDate (seconds since the
+	// epoch); a token without an expiry is left to the signature check.
+	if claims.Exp != 0 && time.Now().Unix() >= claims.Exp {
+		return claims, fmt.Errorf("token expired")
 	}
 
 	return claims, nil
@@ -367,7 +374,7 @@ func storePing(driverID string, ping TelemetryPing) bool {
 }
 
 // sweepDrivers removes drivers whose last ping is older than the TTL and drops
-// empty rate-limit entries.
+// stale rate-limit entries.
 func sweepDrivers() {
 	now := time.Now()
 
@@ -381,9 +388,15 @@ func sweepDrivers() {
 	pingRateLimit.Range(func(key, value interface{}) bool {
 		e := value.(*rateEntry)
 		e.mu.Lock()
-		empty := len(e.stamps) == 0
+		// Stamps are appended in order and pruned oldest-first, so the last
+		// stamp is the driver's most recent activity. Entries are aged out
+		// once they go quiet for a full driverTTL, not only when empty.
+		stale := true
+		if len(e.stamps) > 0 {
+			stale = now.Sub(e.stamps[len(e.stamps)-1]) > driverTTL
+		}
 		e.mu.Unlock()
-		if empty {
+		if stale {
 			pingRateLimit.Delete(key)
 		}
 		return true

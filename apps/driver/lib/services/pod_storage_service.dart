@@ -105,4 +105,5 @@ class PodStorageService {
   }
 }
 
-final podStorageService = PodStorageService();
+// Mutable (not final) so tests can inject a fake instance.
+PodStorageService podStorageService = PodStorageService();

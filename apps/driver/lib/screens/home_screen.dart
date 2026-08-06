@@ -146,9 +146,15 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _showStatusCard = true;
   final TripService _tripService = TripService();
   String? _activeTripId;
+  /// Order id (orders.id UUID) served by the active trip, used for
+  /// order-scoped uploads such as proof of delivery.
+  String? _activeOrderId;
   String _activeTruckLabel = '';
   String _activeTripDistance = '';
   String _activeTripDuration = '';
+  String _activeTripEta = '';
+  double _activeTripProgress = 0.0;
+  String _activeTripStatus = '';
   String _activeTripPayout = '';
   /// Number of stops not yet completed on the active trip.
   int _activeTripStopsRemaining = 0;
@@ -239,68 +245,6 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       debugPrint('Failed to load heatmap data: $e');
     }
-  }
-
-  /// Builds a [MarkerLayer] with colour-coded circles for each demand zone.
-  ///
-  /// Expected backend shape (from [MarketplaceRepository.fetchDemandHeatmap]):
-  /// ```json
-  /// {
-  ///   "zones": [
-  ///     { "lat": 28.6, "lng": 77.2, "demand": 0.85 },
-  ///     ...
-  ///   ]
-  /// }
-  /// ```
-  /// `demand` is a normalised value in [0.0, 1.0]:
-  ///   ≥ 0.70  → red   (high demand)
-  ///   ≥ 0.40  → orange (medium demand)
-  ///   < 0.40  → green  (low demand)
-  Widget? _buildHeatmapLayer() {
-    final data = _heatmapData;
-    if (data == null) return null;
-
-    final rawZones = data['zones'];
-    if (rawZones == null || rawZones is! List || rawZones.isEmpty) return null;
-
-    final markers = <Marker>[];
-    for (final zone in rawZones) {
-      if (zone is! Map) continue;
-      final lat = (zone['lat'] as num?)?.toDouble();
-      final lng = (zone['lng'] as num?)?.toDouble();
-      final demand = (zone['demand'] as num?)?.toDouble() ?? 0.0;
-      if (lat == null || lng == null) continue;
-
-      final Color fillColor;
-      if (demand >= 0.70) {
-        fillColor = Colors.red.withValues(alpha: 0.45);
-      } else if (demand >= 0.40) {
-        fillColor = Colors.orange.withValues(alpha: 0.40);
-      } else {
-        fillColor = Colors.green.withValues(alpha: 0.35);
-      }
-
-      markers.add(
-        Marker(
-          point: ll.LatLng(lat, lng),
-          width: 64,
-          height: 64,
-          child: Container(
-            decoration: BoxDecoration(
-              color: fillColor,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: fillColor.withValues(alpha: 0.7),
-                width: 1.5,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (markers.isEmpty) return null;
-    return MarkerLayer(markers: markers);
   }
 
   // ── Battery monitoring ─────────────────────────────────────────────────────
@@ -759,6 +703,7 @@ class _HomeScreenState extends State<HomeScreen> {
             '';
 
         await prefs.setString('cached_trip_id', tripId);
+        await prefs.setString('cached_order_id', activeTrip['order_id']?.toString() ?? '');
         await prefs.setString('cached_truck_label', truckLabel);
         await prefs.setString('cached_distance', distanceStr);
         await prefs.setString('cached_duration', durationStr);
@@ -778,6 +723,7 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _isOffline = false;
           _activeTripId = tripId;
+          _activeOrderId = activeTrip['order_id']?.toString();
           _activeTruckLabel = truckLabel;
           _activeTripDistance = distanceStr;
           _activeTripDuration = durationStr;
@@ -814,10 +760,12 @@ class _HomeScreenState extends State<HomeScreen> {
       } else {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('cached_trip_id');
+        await prefs.remove('cached_order_id');
         if (mounted) {
           setState(() {
             _isOffline = false;
             _activeTripId = null;
+            _activeOrderId = null;
             _isTripStarted = false;
             _destination = null;
             _routeFuture = null;
@@ -834,6 +782,7 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _isOffline = true;
           _activeTripId = prefs.getString('cached_trip_id');
+          _activeOrderId = prefs.getString('cached_order_id');
           _activeTruckLabel = prefs.getString('cached_truck_label') ?? '';
           _activeTripDistance = prefs.getString('cached_distance') ?? '';
           _activeTripDuration = prefs.getString('cached_duration') ?? '';
@@ -870,6 +819,7 @@ class _HomeScreenState extends State<HomeScreen> {
         if (mounted) {
           setState(() {
             _activeTripId = null;
+            _activeOrderId = null;
             _isTripStarted = false;
             _destination = null;
             _routeFuture = null;
@@ -1007,21 +957,6 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       debugPrint('Error checking pending PoDs: $e');
-    }
-  }
-
-  // ── Google Maps deep-link ──────────────────────────────────────────────────
-
-  Future<void> _openGoogleMapsRoute() async {
-    final dest = _destination;
-    if (dest == null) return;
-    final uri = Uri.parse(
-      'https://www.google.com/maps/dir/?api=1'
-      '&destination=${dest.point.latitude},${dest.point.longitude}'
-      '&travelmode=driving',
-    );
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -2189,7 +2124,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (_isTripStarted && _activeTripId != null) ...[
               ElevatedButton.icon(
                 onPressed: () async {
-                  await Navigator.push(context, MaterialPageRoute(builder: (_) => PodCaptureScreen(orderId: _activeTripId!)));
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => PodCaptureScreen(orderId: _activeOrderId ?? _activeTripId!)));
                   _checkPendingPods();
                 },
                 icon: const Icon(Icons.camera_alt),

@@ -239,6 +239,73 @@ describe("DeliveryVerificationService.assertDriverAtDropoff", () => {
   });
 });
 
+describe("DeliveryVerificationService.geofenceAutoConfirm radius override", () => {
+  // 0.004 deg lng at this latitude ≈ 390m east of the drop; inside the env
+  // default (500m) but outside a 200m override.
+  it("rejects a driver just outside a small per-request radius override", async () => {
+    mockTelemetryRecords = [makeTelemetry(28.6139, 77.213)];
+    const { service } = makeService();
+    const err = await captureDomainError(
+      service.geofenceAutoConfirm({
+        orderId: "order-geo-1",
+        driverId: "driver-1",
+        driverLat: 28.6139,
+        driverLng: 77.213,
+        geofenceRadiusM: 200,
+      }),
+    );
+    expect(err).toBeInstanceOf(DomainError);
+    expect(err.status).toBe(409);
+    expect(err.payload.error).toMatch(/must be within 200m/i);
+  });
+
+  it("passes the same position when no override is given (env default applies)", async () => {
+    mockTelemetryRecords = [makeTelemetry(28.6139, 77.213)];
+    const { service, repo } = makeService();
+    const result = await service.geofenceAutoConfirm({
+      orderId: "order-geo-1",
+      driverId: "driver-1",
+      driverLat: 28.6139,
+      driverLng: 77.213,
+    });
+    expect(result.autoConfirmed).toBe(true);
+    expect(repo.updateOrder).toHaveBeenCalledWith(
+      "order-geo-1",
+      expect.objectContaining({ geofence_confirmed: true }),
+    );
+  });
+
+  // 0.007 deg lng at this latitude ≈ 685m east of the drop; outside the env
+  // default (500m) but inside a 1000m override.
+  it("accepts a driver outside the env radius when a larger override is provided", async () => {
+    mockTelemetryRecords = [makeTelemetry(28.6139, 77.216)];
+    const { service } = makeService();
+    const result = await service.geofenceAutoConfirm({
+      orderId: "order-geo-1",
+      driverId: "driver-1",
+      driverLat: 28.6139,
+      driverLng: 77.216,
+      geofenceRadiusM: 1000,
+    });
+    expect(result.autoConfirmed).toBe(true);
+  });
+
+  it("rejects the same driver without the larger override", async () => {
+    mockTelemetryRecords = [makeTelemetry(28.6139, 77.216)];
+    const { service } = makeService();
+    const err = await captureDomainError(
+      service.geofenceAutoConfirm({
+        orderId: "order-geo-1",
+        driverId: "driver-1",
+        driverLat: 28.6139,
+        driverLng: 77.216,
+      }),
+    );
+    expect(err).toBeInstanceOf(DomainError);
+    expect(err.status).toBe(409);
+  });
+});
+
 describe("DeliveryVerificationService.verifyDelivery geofence gating", () => {
   it("releases escrow only after the geofence check passes", async () => {
     mockTelemetryRecords = [makeTelemetry(DROP_LAT, DROP_LNG)];

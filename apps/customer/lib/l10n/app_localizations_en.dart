@@ -21,10 +21,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get loadingText => 'Loading...';
 
   @override
-  String comingSoon(String title) => '$title coming soon';
+  String comingSoon(String title) {
+    return '$title coming soon';
+  }
 
   @override
-  String greetingMessage(String greeting, String displayName) => '$greeting, $displayName \u{1F44B}';
+  String greetingMessage(String greeting, String displayName) {
+    return '$greeting, $displayName 👋';
+  }
 
   @override
   String get noActiveShipments => 'No active shipments';
@@ -42,7 +46,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get saveWalletAddress => 'Save Wallet Address';
 
   @override
-  String error(String errorMsg) => 'Error: $errorMsg';
+  String error(String errorMsg) {
+    return 'Error: $errorMsg';
+  }
 
   @override
   String get lightTheme => 'Light';
@@ -108,7 +114,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get phoneDigitsOnly => 'Phone number must contain digits only';
 
   @override
-  String phoneMustBeExactDigits(int digitCount) => 'Phone number must be exactly $digitCount digits';
+  String phoneMustBeExactDigits(int digitCount) {
+    return 'Phone number must be exactly $digitCount digits';
+  }
 
   @override
   String get phoneMustBeDigits => 'Phone number must contain only digits';
@@ -129,7 +137,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get enterOtp => 'Enter OTP';
 
   @override
-  String sentTo(String phoneNumber) => 'Sent to $phoneNumber';
+  String sentTo(String phoneNumber) {
+    return 'Sent to $phoneNumber';
+  }
 
   @override
   String get invalidOtp => 'Invalid OTP. Please check and try again.';
@@ -309,7 +319,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get offlineMode => 'Offline Mode';
 
   @override
-  String lastUpdated(String timeAgo) => 'Last updated $timeAgo';
+  String lastUpdated(String timeAgo) {
+    return 'Last updated $timeAgo';
+  }
 
   @override
   String get driverAssigned => 'Driver Assigned';
@@ -363,7 +375,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get logout => 'Logout';
 
   @override
-  String offlineModeLabel(String timeAgo) => 'Offline Mode (last updated $timeAgo)';
+  String offlineModeLabel(String timeAgo) {
+    return 'Offline Mode (last updated $timeAgo)';
+  }
 
   @override
   String get ordersLabel => 'Orders';
@@ -372,7 +386,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get savedLabel => 'Saved';
 
   @override
-  String get co2Label => 'CO\u2082 Saved';
+  String get co2Label => 'CO₂ Saved';
 
   @override
   String get editProfile => 'Edit Profile';
@@ -420,6 +434,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String get failedToUpdateProfile => 'Failed to update profile';
 
   @override
+  String get shareTracking => 'Share Tracking';
+
+  @override
+  String get trackingLinkGenerated => 'Tracking link generated';
+
+  @override
+  String get unableToShare => 'Unable to share';
+
+  @override
+  String get linkExpired => 'This tracking link has expired or is no longer valid.';
+
+  @override
+  String get trackingRevoked => 'All tracking links have been revoked.';
+
+  @override
+  String get copyLink => 'Copy Link';
+
+  @override
+  String get shareMessage => 'Track your shipment on Truxify';
+
+  @override
   String get orderNotFound => 'Order not found';
 
   @override
@@ -427,6 +462,8 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get unableToOpen => 'Unable to open notification';
+
+  @override
   String get downloadInvoice => 'Download Invoice';
 
   @override
@@ -445,23 +482,5 @@ class AppLocalizationsEn extends AppLocalizations {
   String get downloadFailed => 'Download failed';
 
   @override
-  String get noRoutesFound => 'No routes found';
-
-  @override
-  String get bookAgain => 'Book Again';
-
-  @override
-  String get viewAllOrders => 'View All Orders';
-
-  @override
-  String get recentRoutes => 'Recent Routes';
-
-  @override
-  String get allTrips => 'All Trips';
-
-  @override
-  String get filterStatus => 'Filter by Status';
-
-  @override
-  String get noMatchingTrips => 'No trips match the selected filter';
+  String get networkError => 'Network error. Please check your connection.';
 }

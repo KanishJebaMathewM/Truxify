@@ -1,9 +1,9 @@
-import { ApolloServer } from '@apollo/server';
+﻿import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { buildSubgraphSchema } from '@apollo/federation';
 import { gql } from 'graphql-tag';
-import { supabase } from '../api/src/config/db.js';
-import logger from '../api/src/middleware/logger.js';
+import { supabase } from '../../api/src/config/db.js';
+import logger from '../../api/src/middleware/logger.js';
 
 const DISPATCH_ROLES = new Set(['ADMIN', 'admin', 'DISPATCHER', 'dispatcher']);
 
@@ -212,7 +212,7 @@ async function startDriverService() {
         listen: { port: 4002 }
     });
 
-    logger.info(`✅ Driver GraphQL service running at ${url}`);
+    logger.info(`âœ… Driver GraphQL service running at ${url}`);
     return { url };
 }
 

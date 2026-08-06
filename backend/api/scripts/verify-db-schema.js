@@ -21,7 +21,13 @@ const REQUIRED_INDEXES = [
   'orders_customer_idx',
   'orders_driver_idx',
   'trucks_owner_idx',
-  'trips_driver_idx',
+  // Composite index: (driver_id, status, trip_date DESC) — replaces the
+  // redundant single-column idx_trips_driver and serves all three hot
+  // query shapes in driverRoutes.js (lines 1477, 1489, 1531).
+  'idx_trips_driver_status_date',
+  // Composite index: (driver_id, trip_display_id) — serves ownership-check
+  // lookups at driverRoutes.js lines 629, 684, 726, 768.
+  'idx_trips_driver_display',
   'load_offers_status_idx',
 ];
 
@@ -83,12 +89,14 @@ export function parseOpenApiRpcFunctions(openApiDocument) {
   );
 }
 
-export function buildSummary(tableResults, functionResults) {
+export function buildSummary(tableResults, functionResults, indexResults = []) {
   return {
     tablesChecked: tableResults.length,
     missingTables: tableResults.filter((result) => !result.ok).length,
     functionsChecked: functionResults.length,
     missingFunctions: functionResults.filter((result) => !result.ok).length,
+    indexesChecked: indexResults.length,
+    missingIndexes: indexResults.filter((result) => !result.ok).length,
   };
 }
 
@@ -109,7 +117,10 @@ function printSection(title, results, useColor) {
 }
 
 function printSummary(summary, useColor) {
-  const hasWarnings = summary.missingTables > 0 || summary.missingFunctions > 0;
+  const hasWarnings =
+    summary.missingTables > 0 ||
+    summary.missingFunctions > 0 ||
+    summary.missingIndexes > 0;
 
   console.log(`\n${colorize('Schema Verification Summary', 'bold', useColor)}\n`);
   console.log(`Tables Checked: ${summary.tablesChecked}`);
@@ -117,6 +128,9 @@ function printSummary(summary, useColor) {
   console.log('');
   console.log(`Functions Checked: ${summary.functionsChecked}`);
   console.log(`Missing Functions: ${summary.missingFunctions}`);
+  console.log('');
+  console.log(`Indexes Checked: ${summary.indexesChecked}`);
+  console.log(`Missing Indexes: ${summary.missingIndexes}`);
   console.log('');
 
   if (hasWarnings) {
@@ -199,6 +213,58 @@ async function verifyRpcFunctions(supabaseUrl, supabaseKey) {
   }
 }
 
+/**
+ * Verify that every index in REQUIRED_INDEXES exists in pg_indexes.
+ *
+ * Uses the Supabase service-role key to query the pg_catalog.pg_indexes
+ * view via the REST API. If the catalog view is not accessible (e.g. the
+ * anon key is used instead of service role), the function returns a
+ * skipped-with-warning result for each index rather than a hard failure,
+ * so the script exits with a non-zero code only when indexes are
+ * definitively absent.
+ *
+ * @param {string} supabaseUrl
+ * @param {string} supabaseKey  Must be the service-role key to read pg_catalog.
+ * @returns {Promise<Array<{name: string, ok: boolean, message?: string}>>}
+ */
+export async function verifyIndexes(supabaseUrl, supabaseKey) {
+  try {
+    // Fetch the list of index names for the trips table from pg_catalog.
+    const endpoint = `${supabaseUrl.replace(/\/+$/, '')}/rest/v1/pg_indexes?select=indexname&tablename=eq.trips`;
+    const response = await fetch(endpoint, {
+      headers: {
+        apikey: supabaseKey,
+        Authorization: `Bearer ${supabaseKey}`,
+        Accept: 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      // Catalog not exposed — degrade gracefully.
+      return REQUIRED_INDEXES.map((name) => ({
+        name,
+        ok: false,
+        message: `pg_indexes not accessible (HTTP ${response.status}) — run migration and verify manually`,
+      }));
+    }
+
+    const rows = await response.json();
+    const present = new Set(rows.map((r) => r.indexname));
+
+    return REQUIRED_INDEXES.map((name) => ({
+      name,
+      ok: present.has(name),
+      message: present.has(name) ? undefined : 'index not found in pg_indexes — migration may not have run',
+    }));
+  } catch (error) {
+    return REQUIRED_INDEXES.map((name) => ({
+      name,
+      ok: false,
+      message: `could not verify indexes: ${error.message}`,
+    }));
+  }
+}
+
 async function main() {
   const useColor = process.stdout.isTTY && process.env.NO_COLOR === null;
   loadEnvironment();
@@ -236,14 +302,20 @@ async function main() {
   }
 
   const functionResults = await verifyRpcFunctions(supabaseUrl, supabaseKey);
+  const indexResults = await verifyIndexes(supabaseUrl, supabaseKey);
 
   printSection('Table Verification', tableResults, useColor);
   printSection('RPC Verification', functionResults, useColor);
+  printSection('Index Verification', indexResults, useColor);
 
-  const summary = buildSummary(tableResults, functionResults);
+  const summary = buildSummary(tableResults, functionResults, indexResults);
   printSummary(summary, useColor);
 
-  return summary.missingTables === 0 && summary.missingFunctions === 0 ? 0 : 1;
+  return summary.missingTables === 0 &&
+    summary.missingFunctions === 0 &&
+    summary.missingIndexes === 0
+    ? 0
+    : 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

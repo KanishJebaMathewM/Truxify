@@ -178,15 +178,28 @@ class CausalImpact:
     
     def measure_impact(self, pre_data: np.ndarray, post_data: np.ndarray, intervention_point: int) -> Dict:
         """Measure impact of intervention"""
+        # The causalimpact library expects a single full data series with
+        # period indices that point into it, so the pre- and post-intervention
+        # arrays are combined into one series before analysis.
+        data = np.concatenate([pre_data, post_data])
+
+        # Reject intervention points outside the combined pre/post series so
+        # callers get an explicit error instead of a silently-null result.
+        if intervention_point < 0 or intervention_point >= len(data):
+            raise ValueError(
+                f"intervention_point {intervention_point} is outside the "
+                f"combined pre/post series of length {len(data)}"
+            )
+
         try:
             # Pre-intervention period
             pre_period = [0, intervention_point - 1]
-            post_period = [intervention_point, len(post_data) - 1]
+            post_period = [intervention_point, len(data) - 1]
             
             # Calculate counterfactual
             from causalimpact import CausalImpact
             
-            impact = CausalImpact(post_data, pre_period, post_period)
+            impact = CausalImpact(data, pre_period, post_period)
             impact.run()
             
             summary = impact.summary()

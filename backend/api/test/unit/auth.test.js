@@ -9,6 +9,7 @@ describe('authenticate middleware - non bypass flow', () => {
 
   it('returns 401 when authorization header missing', async () => {
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -29,6 +30,7 @@ describe('authenticate middleware - non bypass flow', () => {
   it('returns 500 when supabase missing for supabase token', async () => {
     const token = jwt.sign({ iss: 'https://test.supabase.co/auth/v1' }, 'secret');
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: {},
       supabase: null,
     }));
@@ -63,6 +65,7 @@ describe('authenticate middleware - non bypass flow', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: {},
       supabase,
     }));
@@ -118,6 +121,7 @@ describe('authenticate middleware - non bypass flow', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: {},
       supabase,
     }));
@@ -146,6 +150,7 @@ describe('authenticate middleware - non bypass flow', () => {
 
   it('returns 500 when firebase admin missing', async () => {
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -178,6 +183,7 @@ describe('authenticate middleware - non bypass flow', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin,
       supabase: null,
     }));
@@ -226,6 +232,7 @@ describe('authenticate middleware - non bypass flow', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin,
       supabase,
     }));
@@ -276,6 +283,7 @@ describe('authenticate middleware - non bypass flow', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin,
       supabase,
     }));
@@ -330,6 +338,7 @@ describe('authenticate middleware - non bypass flow', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin,
       supabase,
     }));
@@ -365,6 +374,7 @@ describe('authenticate middleware - non bypass flow', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin,
       supabase: {},
     }));
@@ -408,6 +418,7 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
     process.env.NODE_ENV = 'production';
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -430,6 +441,7 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
     process.env.NODE_ENV = 'production';
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -459,6 +471,7 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
 
   it('returns 401 when BYPASS_AUTH is enabled but x-user-id header is missing', async () => {
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -481,6 +494,7 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
 
   it('sets req.user and calls next when x-user-id is provided', async () => {
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -516,6 +530,7 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
     delete process.env.ENABLE_TEST_AUTH;
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -547,6 +562,7 @@ describe('authenticate middleware - BYPASS_AUTH flow', () => {
 
   it('defaults role to customer and name to Test User when headers are absent', async () => {
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -580,6 +596,7 @@ describe('requireRole middleware', () => {
 
   it('returns 401 when req.user is not set', async () => {
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -600,6 +617,7 @@ describe('requireRole middleware', () => {
 
   it('throws an error on initialization if allowedRoles is missing or empty', async () => {
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -613,6 +631,7 @@ describe('requireRole middleware', () => {
 
   it('returns 403 when user role is not in allowedRoles', async () => {
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -638,6 +657,7 @@ describe('requireRole middleware', () => {
 
   it('calls next when user role is in allowedRoles', async () => {
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -659,6 +679,7 @@ describe('requireRole middleware', () => {
 
   it('allows access when multiple roles are allowed and user matches one', async () => {
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: null,
       supabase: null,
     }));
@@ -724,6 +745,7 @@ describe('authenticate middleware - Redis caching', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: firebaseAdminMock,
       supabase: supabaseMock,
       redisClient: redisClientMock,
@@ -792,6 +814,7 @@ describe('authenticate middleware - Redis caching', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: firebaseAdminMock,
       supabase: supabaseMock,
       redisClient: redisClientMock,
@@ -846,6 +869,7 @@ describe('authenticate middleware - Redis caching', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: firebaseAdminMock,
       supabase: supabaseMock,
       redisClient: redisClientMock,
@@ -917,6 +941,7 @@ describe('authenticate middleware - Redis caching', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: firebaseAdminMock,
       supabase: supabaseMock,
       redisClient: redisClientMock,
@@ -1004,6 +1029,7 @@ describe('authenticate middleware - Redis caching', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: firebaseAdminMock,
       supabase: supabaseMock,
       redisClient: redisClientMock,
@@ -1073,6 +1099,7 @@ describe('authenticate middleware - Redis caching', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: {},
       supabase: supabaseMock,
       redisClient: redisClientMock,
@@ -1132,6 +1159,7 @@ describe('authenticate middleware - Redis caching', () => {
     };
 
     vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
       firebaseAdmin: {},
       supabase: supabaseMock,
       redisClient: redisClientMock,

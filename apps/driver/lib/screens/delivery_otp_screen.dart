@@ -618,7 +618,11 @@ class _GeofenceBadge extends StatelessWidget {
         ? 'You are ${distanceM!.toInt()}m away — Auto-confirm available'
         : 'You are ${distanceM!.toInt()}m away (need <500m for auto-confirm)';
 
-    return GestureDetector(
+    return Semantics(
+  button: true,
+  enabled: true,
+  label: "Action button",
+  child: GestureDetector(
       onTap: withinGeofence && !isConfirming ? onAutoConfirm : null,
       child: AnimatedBuilder(
         animation: pulseController,

@@ -82,12 +82,12 @@ export function createCacheEvent(type, opts = {}) {
     id: crypto.randomUUID(),
     type,
     namespace: opts.namespace,
-    key: opts.key || null,
-    pattern: opts.pattern || null,
-    entityId: opts.entityId || null,
-    subKey: opts.subKey || null,
-    originInstanceId: opts.originInstanceId || null,
-    timestamp: opts.timestamp || Date.now(),
+    key: opts.key ?? null,
+    pattern: opts.pattern ?? null,
+    entityId: opts.entityId ?? null,
+    subKey: opts.subKey ?? null,
+    originInstanceId: opts.originInstanceId ?? null,
+    timestamp: opts.timestamp ?? Date.now(),
   };
 }
 

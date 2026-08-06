@@ -202,6 +202,13 @@ describe('serializeCacheEvent', () => {
     expect(roundTrip.pattern).toBe(event.pattern);
     expect(roundTrip.originInstanceId).toBe(event.originInstanceId);
   });
+
+  it('throws TypeError when input is undefined, null, or non-object', () => {
+    expect(() => serializeCacheEvent(undefined)).toThrow(TypeError);
+    expect(() => serializeCacheEvent(null)).toThrow(TypeError);
+    expect(() => serializeCacheEvent('not-an-object')).toThrow(TypeError);
+    expect(() => serializeCacheEvent(123)).toThrow(TypeError);
+  });
 });
 
 describe('deserializeCacheEvent', () => {

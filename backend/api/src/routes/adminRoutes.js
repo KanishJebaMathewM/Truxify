@@ -84,7 +84,7 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
       return res.status(500).json({ error: 'Failed to fetch revenue.' });
     }
     
-    const totalRevenue = todayOrders.reduce((sum, order) => sum + (order.total_amount || 0), 0);
+    const totalRevenue = (todayOrders || []).reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0);
 
     res.json({
       active_drivers: activeDrivers || 0,

@@ -179,14 +179,16 @@ class CausalImpact:
     def measure_impact(self, pre_data: np.ndarray, post_data: np.ndarray, intervention_point: int) -> Dict:
         """Measure impact of intervention"""
         try:
-            # Pre-intervention period
-            pre_period = [0, intervention_point - 1]
-            post_period = [intervention_point, len(post_data) - 1]
-            
+            # Concatenate pre and post data into a single series for the causalimpact library.
+            # The library expects a single array and period indices that point into it.
+            full_data = np.concatenate([pre_data, post_data])
+            pre_period = [0, len(pre_data) - 1]
+            post_period = [len(pre_data), len(full_data) - 1]
+
             # Calculate counterfactual
             from causalimpact import CausalImpact
-            
-            impact = CausalImpact(post_data, pre_period, post_period)
+
+            impact = CausalImpact(full_data, pre_period, post_period)
             impact.run()
             
             summary = impact.summary()

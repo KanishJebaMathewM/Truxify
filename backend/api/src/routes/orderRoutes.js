@@ -1128,7 +1128,7 @@ router.post(
         'total_amount, order_display_id'
       );
       const amountInr = order?.total_amount
-        ? (order.total_amount / 100).toFixed(0)
+        ? Math.round(order.total_amount / 100)
         : null;
 
       if (escrowUpdateFailed) {

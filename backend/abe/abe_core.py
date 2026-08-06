@@ -14,6 +14,14 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+def _derive_attribute_mask(attributes: List[str]) -> bytes:
+    """Derive a deterministic 32-byte mask from the given attribute names."""
+    combined = b'\x00' * 32
+    for attr in sorted(attributes):
+        attr_hash = hashlib.sha256(attr.encode()).digest()
+        combined = hashlib.sha256(combined + attr_hash).digest()
+    return combined
+
 @dataclass
 class Attribute:
     name: str
@@ -102,7 +110,7 @@ class CPABE:
             # Decrypt symmetric key
             symmetric_key = self._decrypt_key_with_policy(
                 encrypted_data['encrypted_key'],
-                user_attributes
+                required_attrs
             )
             
             # Decrypt data
@@ -145,20 +153,18 @@ class CPABE:
     def _encrypt_key_with_policy(self, key: bytes, attributes: List[str]) -> str:
         """Encrypt symmetric key with attribute policy"""
         # In production: use ABE encryption
-        # For now: combine key with attribute hashes
-        combined = key
-        for attr in sorted(attributes):
-            attr_hash = hashlib.sha256(attr.encode()).digest()
-            combined = hashlib.sha256(combined + attr_hash).digest()
-        
-        return base64.b64encode(combined).decode()
+        # For now: XOR key with a mask derived from the policy attributes
+        mask = _derive_attribute_mask(attributes)
+        encrypted = bytes([k ^ m for k, m in zip(key, mask)])
+        return base64.b64encode(encrypted).decode()
     
-    def _decrypt_key_with_policy(self, encrypted_key: str, user_attributes: List[Attribute]) -> bytes:
+    def _decrypt_key_with_policy(self, encrypted_key: str, attributes: List[str]) -> bytes:
         """Decrypt symmetric key if user has required attributes"""
         # In production: use ABE decryption
-        # For now: reconstruct key from attributes
+        # For now: XOR key back using the same attribute-derived mask
         key_bytes = base64.b64decode(encrypted_key)
-        return key_bytes[:32]  # Return first 32 bytes as key
+        mask = _derive_attribute_mask(attributes)
+        return bytes([k ^ m for k, m in zip(key_bytes, mask)])
     
     def _check_attributes(self, user_attributes: List[Attribute], required_attrs: List[str]) -> bool:
         """Check if user has all required attributes"""
@@ -278,16 +284,15 @@ class KPABE:
     
     def _encrypt_key_with_attributes(self, key: bytes, attributes: List[str]) -> str:
         """Encrypt key with attributes"""
-        combined = key
-        for attr in sorted(attributes):
-            attr_hash = hashlib.sha256(attr.encode()).digest()
-            combined = hashlib.sha256(combined + attr_hash).digest()
-        return base64.b64encode(combined).decode()
+        mask = _derive_attribute_mask(attributes)
+        encrypted = bytes([k ^ m for k, m in zip(key, mask)])
+        return base64.b64encode(encrypted).decode()
     
     def _decrypt_key_with_policy(self, encrypted_key: str, policy: AccessPolicy) -> bytes:
         """Decrypt key if policy satisfied"""
         key_bytes = base64.b64decode(encrypted_key)
-        return key_bytes[:32]
+        mask = _derive_attribute_mask(policy.attributes)
+        return bytes([k ^ m for k, m in zip(key_bytes, mask)])
     
     def _check_policy(self, policy: AccessPolicy, attributes: List[str]) -> bool:
         """Check if attributes satisfy policy"""
@@ -377,7 +382,7 @@ class DecentralizedABE:
             # Decrypt key
             symmetric_key = self._decrypt_key_multi_authority(
                 encrypted_data['encrypted_key'],
-                user_attributes
+                encrypted_data.get('authorities', [])
             )
             
             # Decrypt data
@@ -413,16 +418,15 @@ class DecentralizedABE:
     
     def _encrypt_key_multi_authority(self, key: bytes, policy: AccessPolicy, authorities: List[str]) -> str:
         """Encrypt key with multi-authority policy"""
-        combined = key
-        for auth in sorted(authorities):
-            auth_hash = hashlib.sha256(auth.encode()).digest()
-            combined = hashlib.sha256(combined + auth_hash).digest()
-        return base64.b64encode(combined).decode()
+        mask = _derive_attribute_mask(authorities)
+        encrypted = bytes([k ^ m for k, m in zip(key, mask)])
+        return base64.b64encode(encrypted).decode()
     
-    def _decrypt_key_multi_authority(self, encrypted_key: str, user_attributes: Dict) -> bytes:
+    def _decrypt_key_multi_authority(self, encrypted_key: str, authorities: List[str]) -> bytes:
         """Decrypt key with multi-authority attributes"""
         key_bytes = base64.b64decode(encrypted_key)
-        return key_bytes[:32]
+        mask = _derive_attribute_mask(authorities)
+        return bytes([k ^ m for k, m in zip(key_bytes, mask)])
     
     def _check_multi_authority_attributes(self, user_attributes: Dict, policy: str) -> bool:
         """Check if user has required attributes from all authorities"""

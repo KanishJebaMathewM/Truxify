@@ -329,10 +329,16 @@ export class DeliveryVerificationService {
         // The release gate must never be satisfied by self-reported coordinates.
         // assertDriverAtDropoff() proves physical presence using only telemetry
         // that was authenticated at ingestion and bound to this driver/order.
-        await this.assertDriverAtDropoff(
-          order,
-          geofenceRadiusM ?? DELIVERY_GEOFENCE_RADIUS_KM * 1000,
-        );
+        // The radius is clamped to the server default so a client-supplied
+        // NaN/negative/oversized value can never bypass the distance check.
+        const maxRadiusM = DELIVERY_GEOFENCE_RADIUS_KM * 1000;
+        const radiusM =
+          geofenceRadiusM != null &&
+          Number.isFinite(geofenceRadiusM) &&
+          geofenceRadiusM > 0
+            ? Math.min(geofenceRadiusM, maxRadiusM)
+            : maxRadiusM;
+        await this.assertDriverAtDropoff(order, radiusM);
 
         // Record the geofence confirmation and the (non-authoritative) claimed
         // position for audit. This is a flag only — escrow is not released here.

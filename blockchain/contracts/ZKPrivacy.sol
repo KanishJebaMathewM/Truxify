@@ -136,9 +136,20 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         require(recipient != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be > 0");
 
+        // Verify zk-SNARK proof inputs match transaction parameters
+        require(proof.input.length >= 4, "Invalid proof public inputs length");
+        require(proof.input[0] == uint256(nullifier), "Nullifier mismatch in proof input");
+        require(proof.input[1] == uint256(commitment), "Commitment mismatch in proof input");
+        require(proof.input[2] == uint256(uint160(recipient)), "Recipient mismatch in proof input");
+        require(proof.input[3] == amount, "Amount mismatch in proof input");
+
         // Verify zk-SNARK proof
         bool isValid = IVerifier(verifier).verifyProof(proof.a, proof.b, proof.c, proof.input);
         require(isValid, "Invalid proof");
+
+        // Transfer payout to recipient
+        (bool success, ) = recipient.call{value: amount}("");
+        require(success, "Transfer failed");
 
         // Store transaction
         transactionCounter++;

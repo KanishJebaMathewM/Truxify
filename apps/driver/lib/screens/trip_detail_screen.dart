@@ -951,8 +951,8 @@ Widget _cargoBadge({
                           builder: (_) => DeliveryOtpScreen(
                             orderId: trip.tripId,
                             orderDisplayId: trip.tripId,
-                            dropLat: null,
-                            dropLng: null,
+                            dropLat: trip.dropLat,
+                            dropLng: trip.dropLng,
                             amountInr: trip.earnings.replaceAll('₹', '').trim(),
                           ),
                         ),

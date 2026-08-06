@@ -2,6 +2,24 @@ import asyncio
 import logging
 import os
 import time
+
+# Initialize Sentry as early as possible
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+
+sentry_dsn = os.environ.get("SENTRY_DSN")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        environment=os.environ.get("ENVIRONMENT", "development"),
+        integrations=[
+            FastApiIntegration(
+                transaction_style="endpoint"
+            ),
+        ],
+        traces_sample_rate=1.0,
+    )
+
 import numpy as np
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Depends, Query, UploadFile, File
@@ -71,6 +89,11 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["X-API-Key", "Content-Type"],
 )
+
+
+@app.get("/sentry-debug")
+async def trigger_error():
+    division_by_zero = 1 / 0
 
 
 @app.on_event("startup")

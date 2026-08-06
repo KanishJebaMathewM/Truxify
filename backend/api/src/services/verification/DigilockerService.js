@@ -5,6 +5,7 @@ import logger from '../../middleware/logger.js';
 
 class DigilockerService {
   constructor() {
+    this.isMock = process.env.DIGILOCKER_MOCK === 'true';
     this.providerUrl = process.env.POLYGON_RPC_URL || 'http://localhost:8545';
     this.privateKey = process.env.RELAYER_WALLET_PRIVATE_KEY || process.env.PRIVATE_KEY;
     this.verifierAddress = process.env.KYC_VERIFIER_CONTRACT_ADDRESS || '0x0000000000000000000000000000000000000000';
@@ -14,6 +15,10 @@ class DigilockerService {
   }
 
   async exchangeCode(code) {
+    if (!this.isMock) {
+      logger.warn('[DigilockerService] DigiLocker integration not configured; refusing to fabricate an identity');
+      return { success: false, error: 'DigiLocker verification is not configured' };
+    }
     logger.info(`[DigilockerService] Exchanging OAuth code: ${code}`);
     // Mock the OAuth flow exchange response
     return {
@@ -24,6 +29,10 @@ class DigilockerService {
   }
 
   async verifyDocuments(userId, accessToken) {
+    if (!this.isMock) {
+      logger.warn('[DigilockerService] DigiLocker integration not configured; refusing to auto-approve KYC with fabricated documents');
+      return { success: false, error: 'DigiLocker verification is not configured', is_digilocker_verified: false };
+    }
     logger.info(`[DigilockerService] Verifying documents for user ${userId} with token ${accessToken}`);
 
     // Mock Digilocker API retrieval of Driving Licence, RC Book, and Insurance Certificate

@@ -44,9 +44,21 @@ export const startStaleOrderWorker = () => {
         'stale_orders.count': staleOrders.length,
       });
 
-      for (const order of staleOrders) {
-        await cancelStaleOrder(order);
+      // Process stale orders with bounded concurrency (e.g. 5 concurrent operations) to avoid lock contention and speed up execution
+      const CONCURRENCY_LIMIT = 5;
+      let index = 0;
+      async function workerPool() {
+        while (index < staleOrders.length) {
+          const currentIndex = index++;
+          const order = staleOrders[currentIndex];
+          if (order) {
+            await cancelStaleOrder(order);
+          }
+        }
       }
+
+      const poolSize = Math.min(CONCURRENCY_LIMIT, staleOrders.length);
+      await Promise.all(Array.from({ length: poolSize }, () => workerPool()));
 
       logger.info('[StaleOrderWorker] Cleanup of stale pending orders completed.');
     } catch (err) {

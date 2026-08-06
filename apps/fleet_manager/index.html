@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Truxify | Fleet Manager</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="logo">
+                <h2>Truxify Fleet</h2>
+            </div>
+            <ul class="nav-links">
+                <li class="active"><a href="#">Dashboard</a></li>
+                <li><a href="#">Fleet Tracking</a></li>
+                <li><a href="#">Driver Management</a></li>
+                <li><a href="#">Earnings & Reports</a></li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header>
+                <h1>Fleet Overview</h1>
+                <button class="primary-btn" id="inviteDriverBtn">+ Invite Driver</button>
+            </header>
+
+            <!-- KPI Cards -->
+            <section class="kpi-grid">
+                <div class="card glass">
+                    <h3>Active Drivers</h3>
+                    <p class="kpi-value">24 <span class="trend up">↑ 3 today</span></p>
+                </div>
+                <div class="card glass">
+                    <h3>Total Earnings</h3>
+                    <p class="kpi-value">$14,250 <span class="trend up">↑ 12%</span></p>
+                </div>
+                <div class="card glass">
+                    <h3>Fleet Utilization</h3>
+                    <p class="kpi-value">86% <span class="trend down">↓ 2%</span></p>
+                </div>
+            </section>
+
+            <!-- Map and Drivers Split -->
+            <section class="content-split">
+                <!-- Live Map Mock -->
+                <div class="map-container glass">
+                    <h3>Live Tracking</h3>
+                    <div class="map-placeholder">
+                        <div class="pulse-marker" style="top: 30%; left: 45%;"></div>
+                        <div class="pulse-marker" style="top: 60%; left: 20%;"></div>
+                        <div class="pulse-marker" style="top: 40%; left: 80%;"></div>
+                        <p class="map-text">Interactive Map Loading...</p>
+                    </div>
+                </div>
+
+                <!-- Driver List -->
+                <div class="driver-list glass">
+                    <h3>Recent Activity</h3>
+                    <ul id="driverList">
+                        <li>
+                            <div class="driver-info">
+                                <strong>John Doe</strong>
+                                <span>En route to Chicago, IL</span>
+                            </div>
+                            <div class="status active">Active</div>
+                        </li>
+                        <li>
+                            <div class="driver-info">
+                                <strong>Jane Smith</strong>
+                                <span>Resting - 3h remaining</span>
+                            </div>
+                            <div class="status resting">Resting</div>
+                        </li>
+                    </ul>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Invite Modal -->
+    <div class="modal" id="inviteModal">
+        <div class="modal-content glass">
+            <span class="close-btn">&times;</span>
+            <h2>Invite New Driver</h2>
+            <form id="inviteForm">
+                <div class="input-group">
+                    <label for="driverEmail">Driver Email</label>
+                    <input type="email" id="driverEmail" required placeholder="driver@example.com">
+                </div>
+                <div class="input-group">
+                    <label for="truckId">Assign Truck ID (Optional)</label>
+                    <input type="text" id="truckId" placeholder="e.g. TRK-492">
+                </div>
+                <button type="submit" class="primary-btn">Send Invite</button>
+            </form>
+        </div>
+    </div>
+    
+    <script type="module" src="/main.js"></script>
+</body>
+</html>

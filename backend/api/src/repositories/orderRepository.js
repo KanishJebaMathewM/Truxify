@@ -511,7 +511,7 @@ export class OrderRepository {
       .eq('driver_id', driverId)
       .eq('order_display_id', orderDisplayId)
       .eq('txn_type', 'credit')
-      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .limit(1), 'updateWalletTransaction');
   }
 

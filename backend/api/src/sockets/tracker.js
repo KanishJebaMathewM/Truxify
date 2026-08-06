@@ -896,7 +896,7 @@ export async function handleLocationPing(ws, data, req) {
     coordinates: [sanitized.lng, sanitized.lat]
   },
   speed_kmh: sanitized.speed ?? 0,
-  bearing_deg: sanitized.heading ?? 0,
+  bearing_deg: sanitized.bearing ?? 0,
     timestamp: deviceTime || new Date(),
     pinged_at: deviceTime || new Date(),
     buffered_at: new Date(),
@@ -916,7 +916,7 @@ export async function handleLocationPing(ws, data, req) {
       const redisKey = `driver:location:${driver_id}`;
       await redisClient.set(
         redisKey,
-        JSON.stringify({ latitude: sanitized.lat, longitude: sanitized.lng, speed: sanitized.speed ?? 0, bearing: sanitized.heading ?? 0, updated_at: new Date(serverNow) }),
+        JSON.stringify({ latitude: sanitized.lat, longitude: sanitized.lng, speed: sanitized.speed ?? 0, bearing: sanitized.bearing ?? 0, updated_at: new Date(serverNow) }),
         'EX',
         120
       );
@@ -936,7 +936,7 @@ export async function handleLocationPing(ws, data, req) {
       lat,
       lng,
       speed: speed || 0,
-      heading: bearing || 0,
+      heading: sanitized.bearing ?? 0,
       timestamp: deviceTime || new Date(serverNow),
       metadata: {
         order_id: orderUUID || null,
@@ -956,7 +956,7 @@ export async function handleLocationPing(ws, data, req) {
       latitude: sanitized.lat,
       longitude: sanitized.lng,
       speed: sanitized.speed ?? 0,
-      bearing: sanitized.heading ?? 0,
+      bearing: sanitized.bearing ?? 0,
       timestamp: new Date(serverNow)
     }
   });

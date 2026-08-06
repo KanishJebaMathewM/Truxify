@@ -86,11 +86,11 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       // For MVP, we'll insert a notification immediately if it's not already spammed.
       // We can use the existing notifications table or system if one exists, but for now we'll just log.
       
-      await supabase.from('notifications').insert({
+      await (supabaseAdmin ?? supabase).from('notifications').insert({
         user_id: load.customer_id,
         title: 'Temperature Alert',
         body: `Your cargo (Load ${loadId}) is out of the safe temperature range. Current temp: ${temperature}°C.`,
-        notif_type: 'cold_chain_alert',
+        notif_type: 'system',
         metadata: {
           load_id: loadId,
           temperature,
@@ -117,7 +117,7 @@ router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePara
   try {
     const { data: load, error: loadErr } = await supabase
       .from('load_offers')
-      .select('customer_id')
+      .select('customer_id, order_display_id')
       .eq('id', loadId)
       .maybeSingle();
 
@@ -133,12 +133,12 @@ router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePara
     if (req.user.role !== 'admin') {
       let isAuthorized = load.customer_id === req.user.id;
 
-      if (!isAuthorized) {
+      if (!isAuthorized && load.order_display_id) {
         const { data: order } = await supabase
           .from('orders')
           .select('driver_id')
-          .eq('load_offer_id', loadId)
-          .in('status', ['assigned', 'in_progress', 'picked_up', 'delivered'])
+          .eq('order_display_id', load.order_display_id)
+          .in('status', ['truck_assigned', 'en_route_pickup', 'picked_up', 'in_transit'])
           .maybeSingle();
 
         isAuthorized = order?.driver_id === req.user.id;

@@ -115,7 +115,6 @@ func TestLeaderReplicatesEntryToFollowersBeforeCommit(t *testing.T) {
 	node1.CurrentTerm = 1
 	node1.nextIndex = map[string]uint64{s2.URL: 1, s3.URL: 1}
 	node1.matchIndex = map[string]uint64{s2.URL: 0, s3.URL: 0}
-	node1.peerHeartbeats = map[string]bool{s2.URL: true, s3.URL: true}
 	node1.mu.Unlock()
 
 	body := strings.NewReader(`{"order_id":"ord-repl-1","command":"CREATED"}`)
@@ -183,15 +182,15 @@ func TestCommitDoesNotReturnSuccessWithoutQuorumReplication(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Fake acknowledged heartbeats so the liveness pre-check passes, while the
-	// peers themselves remain unreachable for AppendEntries replication.
+	// Seed matchIndex up to the current commit level (0) so the liveness
+	// pre-check passes, while the peers themselves remain unreachable for
+	// AppendEntries replication.
 	node.mu.Lock()
 	node.Role = Leader
 	node.LeaderID = "node1"
 	node.CurrentTerm = 1
 	node.nextIndex = map[string]uint64{unreachable[0]: 1, unreachable[1]: 1}
 	node.matchIndex = map[string]uint64{unreachable[0]: 0, unreachable[1]: 0}
-	node.peerHeartbeats = map[string]bool{unreachable[0]: true, unreachable[1]: true}
 	node.mu.Unlock()
 
 	body := strings.NewReader(`{"order_id":"ord-lost-1","command":"CREATED"}`)
@@ -250,7 +249,6 @@ func TestHeartbeatBackfillsLaggingFollower(t *testing.T) {
 	leader.CommitIndex = 2
 	leader.nextIndex = map[string]uint64{server.URL: 2}
 	leader.matchIndex = map[string]uint64{server.URL: 1}
-	leader.peerHeartbeats = map[string]bool{server.URL: true}
 	leader.mu.Unlock()
 
 	leader.sendHeartbeats()

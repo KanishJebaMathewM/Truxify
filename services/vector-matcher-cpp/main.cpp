@@ -6,6 +6,23 @@
 #include <sstream>
 #include <thread>
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
+
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+typedef int socklen_t;
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#define SOCKET int
+#define INVALID_SOCKET -1
+#define SOCKET_ERROR -1
+#define closesocket close
+#endif
 
 // Vector Embedding Matcher Structure (64-dimensional latent representation)
 constexpr int EMBEDDING_DIM = 64;
@@ -18,13 +35,16 @@ struct DriverEmbedding {
     std::vector<float> vector;
 };
 
-// Compute Cosine Similarity between two 64-D vectors
+// Compute Cosine Similarity between two vectors. The loop is bounded by the
+// actual vector lengths so shorter embeddings cannot cause an out-of-bounds
+// read.
 float cosine_similarity(const std::vector<float>& v1, const std::vector<float>& v2) {
     float dot = 0.0f;
     float norm_a = 0.0f;
     float norm_b = 0.0f;
 
-    for (int i = 0; i < EMBEDDING_DIM; ++i) {
+    const size_t dim = std::min<size_t>(EMBEDDING_DIM, std::min(v1.size(), v2.size()));
+    for (size_t i = 0; i < dim; ++i) {
         dot += v1[i] * v2[i];
         norm_a += v1[i] * v1[i];
         norm_b += v2[i] * v2[i];
@@ -63,23 +83,36 @@ std::string search_top_k(const std::vector<DriverEmbedding>& pool, const std::ve
     double micros = std::chrono::duration<double, std::micro>(elapsed).count();
 
     std::stringstream ss;
-    ss << "{\n";
-    ss << "  \"engine\": \"Truxify C++20 SIMD Vector Matcher v1.0\",\n";
-    ss << "  \"total_scanned\": " << pool.size() << ",\n";
-    ss << "  \"latency_micros\": " << micros << ",\n";
-    ss << "  \"top_matches\": [\n";
+    ss << "{
+";
+    ss << "  "engine": "Truxify C++20 SIMD Vector Matcher v1.0",
+";
+    ss << "  "total_scanned": " << pool.size() << ",
+";
+    ss << "  "latency_micros": " << micros << ",
+";
+    ss << "  "top_matches": [
+";
 
     int limit = std::min<int>(k, results.size());
     for (int i = 0; i < limit; ++i) {
-        ss << "    {\n";
-        ss << "      \"rank\": " << (i + 1) << ",\n";
-        ss << "      \"driver_id\": \"" << results[i].driver_id << "\",\n";
-        ss << "      \"match_score\": " << results[i].score << ",\n";
-        ss << "      \"latitude\": " << results[i].lat << ",\n";
-        ss << "      \"longitude\": " << results[i].lng << "\n";
-        ss << "    }" << (i < limit - 1 ? "," : "") << "\n";
+        ss << "    {
+";
+        ss << "      "rank": " << (i + 1) << ",
+";
+        ss << "      "driver_id": "" << results[i].driver_id << "",
+";
+        ss << "      "match_score": " << results[i].score << ",
+";
+        ss << "      "latitude": " << results[i].lat << ",
+";
+        ss << "      "longitude": " << results[i].lng << "
+";
+        ss << "    }" << (i < limit - 1 ? "," : "") << "
+";
     }
-    ss << "  ]\n";
+    ss << "  ]
+";
     ss << "}";
 
     return ss.str();
@@ -106,15 +139,75 @@ int main() {
         });
     }
 
-    // Query Vector
-    std::vector<float> load_query(EMBEDDING_DIM);
-    for (int d = 0; d < EMBEDDING_DIM; ++d) {
-        load_query[d] = static_cast<float>(rand()) / RAND_MAX;
+    int port = 8088;
+    if (const char* env_p = std::getenv("PORT")) {
+        port = std::atoi(env_p);
     }
 
-    std::string result = search_top_k(driver_pool, load_query, 5);
-    std::cout << "✅ Vector Search Results:\n" << result << "\n";
-    std::cout << "C++20 Vector Matcher Engine ready." << std::endl;
+#if defined(_WIN32)
+    WSADATA wsaData;
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+#endif
 
+    SOCKET server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == INVALID_SOCKET) {
+        std::cerr << "Failed to create socket." << std::endl;
+        return 1;
+    }
+
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port);
+
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) == SOCKET_ERROR) {
+        std::cerr << "Bind failed on port " << port << std::endl;
+        closesocket(server_fd);
+        return 1;
+    }
+
+    if (listen(server_fd, 10) == SOCKET_ERROR) {
+        std::cerr << "Listen failed." << std::endl;
+        closesocket(server_fd);
+        return 1;
+    }
+
+    std::cout << "✅ Vector Matcher HTTP Server listening on port " << port << std::endl;
+
+    while (true) {
+        sockaddr_in client_addr{};
+        socklen_t client_len = sizeof(client_addr);
+        SOCKET client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
+        if (client_fd == INVALID_SOCKET) continue;
+
+        char buffer[1024] = {0};
+        recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+
+        std::vector<float> load_query(EMBEDDING_DIM);
+        for (int d = 0; d < EMBEDDING_DIM; ++d) {
+            load_query[d] = static_cast<float>(rand()) / RAND_MAX;
+        }
+
+        std::string json_body = search_top_k(driver_pool, load_query, 5);
+
+        std::stringstream response_ss;
+        response_ss << "HTTP/1.1 200 OK\r\n"
+                    << "Content-Type: application/json\r\n"
+                    << "Content-Length: " << json_body.length() << "\r\n"
+                    << "Connection: close\r\n\r\n"
+                    << json_body;
+
+        std::string response = response_ss.str();
+        send(client_fd, response.c_str(), static_cast<int>(response.length()), 0);
+        closesocket(client_fd);
+    }
+
+    closesocket(server_fd);
+#if defined(_WIN32)
+    WSACleanup();
+#endif
     return 0;
 }

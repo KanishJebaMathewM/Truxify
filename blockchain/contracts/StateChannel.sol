@@ -55,16 +55,20 @@ contract StateChannel is ReentrancyGuard {
         uint256 sequence,
         uint256 balanceA,
         uint256 balanceB,
-        bytes memory sigA,
-        bytes memory sigB
+        bytes memory sig
     ) external nonReentrant {
         Channel storage channel = channels[channelId];
         require(!channel.isClosed, "Channel closed");
-        require(sequence > channel.sequence, "Stale sequence");
+        require(msg.sender == channel.userA || msg.sender == channel.userB, "Not participant");
+        require(sequence >= channel.sequence, "Stale sequence");
 
         bytes32 stateHash = keccak256(abi.encodePacked(channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
-        require(stateHash.recover(sigA) == channel.userA, "Invalid sig A");
-        require(stateHash.recover(sigB) == channel.userB, "Invalid sig B");
+        
+        if (msg.sender == channel.userA) {
+            require(stateHash.recover(sig) == channel.userB, "Invalid signature from userB");
+        } else {
+            require(stateHash.recover(sig) == channel.userA, "Invalid signature from userA");
+        }
 
         channel.sequence = sequence;
         channel.balanceA = balanceA;
@@ -73,6 +77,32 @@ contract StateChannel is ReentrancyGuard {
         channel.challengeExpiry = block.timestamp + CHALLENGE_PERIOD;
 
         emit DisputeInitiated(channelId, sequence, channel.challengeExpiry);
+    }
+
+    function cooperativeClose(
+        bytes32 channelId,
+        uint256 balanceA,
+        uint256 balanceB,
+        bytes memory sigA,
+        bytes memory sigB
+    ) external nonReentrant {
+        Channel storage channel = channels[channelId];
+        require(!channel.isClosed, "Channel already closed");
+        require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
+
+        bytes32 stateHash = keccak256(abi.encodePacked(channelId, channel.sequence + 1, balanceA, balanceB)).toEthSignedMessageHash();
+        require(stateHash.recover(sigA) == channel.userA, "Invalid sig A");
+        require(stateHash.recover(sigB) == channel.userB, "Invalid sig B");
+
+        channel.isClosed = true;
+
+        (bool sentA, ) = channel.userA.call{value: balanceA}("");
+        require(sentA, "Transfer A failed");
+
+        (bool sentB, ) = channel.userB.call{value: balanceB}("");
+        require(sentB, "Transfer B failed");
+
+        emit ChannelClosed(channelId, balanceA, balanceB);
     }
 
     function finalizeExit(bytes32 channelId) external nonReentrant {

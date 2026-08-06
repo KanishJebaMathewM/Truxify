@@ -189,3 +189,16 @@ describe('GET /api/health/ready', () => {
     expect(res.body.status).toBe('ready');
   });
 });
+
+describe('GET /api/health/sentry-debug', () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+  });
+
+  it('triggers a Sentry debug error and returns 500', async () => {
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(500);
+  });
+});

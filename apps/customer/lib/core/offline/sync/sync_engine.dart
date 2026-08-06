@@ -168,7 +168,7 @@ class SyncEngine {
   }
 
   Duration _backoffDelay(int retryCount) {
-    final delayMs = 250 * (1 << (retryCount.clamp(0, 5)));
+    final delayMs = 250 * (1 << (retryCount.clamp(0, 5).toInt()));
     return Duration(milliseconds: delayMs > 8000 ? 8000 : delayMs);
   }
 }

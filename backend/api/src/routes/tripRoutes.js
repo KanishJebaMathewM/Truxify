@@ -529,7 +529,7 @@ function canAccessTrip(user, trip) {
 async function findTripContext(ref) {
   let { data: trip, error: tripErr } = await supabaseAdmin
     .from('trips')
-    .select('*')
+    .select('id, trip_display_id, driver_id, order_id, status')
     .eq('trip_display_id', ref)
     .maybeSingle();
 
@@ -539,7 +539,7 @@ async function findTripContext(ref) {
   if (UUID_REGEX.test(ref)) {
     const { data: tripById, error: tripByIdErr } = await supabaseAdmin
       .from('trips')
-      .select('*')
+      .select('id, trip_display_id, driver_id, order_id, status')
       .eq('id', ref)
       .maybeSingle();
     if (tripByIdErr) return { error: tripByIdErr };
@@ -548,7 +548,7 @@ async function findTripContext(ref) {
 
   const { data: order, error: orderErr } = await supabaseAdmin
     .from('orders')
-    .select('*')
+    .select('id, order_display_id, driver_id, customer_id, status, total_amount, pickup_address, drop_address, pickup_date, base_freight, goods_type, weight_tonnes')
     .eq('order_display_id', ref)
     .maybeSingle();
 
@@ -558,7 +558,7 @@ async function findTripContext(ref) {
   if (UUID_REGEX.test(ref)) {
     const { data: orderById, error: orderByIdErr } = await supabaseAdmin
       .from('orders')
-      .select('*')
+      .select('id, order_display_id, driver_id, customer_id, status, total_amount, pickup_address, drop_address, pickup_date, base_freight, goods_type, weight_tonnes')
       .eq('id', ref)
       .maybeSingle();
     if (orderByIdErr) return { error: orderByIdErr };
@@ -575,7 +575,7 @@ async function requireOwnedTrip(req, res, ctx) {
   if (!trip && order) {
     const { data: linkedTrip, error: linkedErr } = await supabaseAdmin
       .from('trips')
-      .select('*')
+      .select('id, trip_display_id, driver_id, order_id, status')
       .eq('order_id', order.id)
       .eq('status', 'active')
       .order('created_at', { ascending: true })

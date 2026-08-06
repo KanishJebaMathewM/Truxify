@@ -1927,7 +1927,7 @@ class _HomeScreenState extends State<HomeScreen> {
         circles.add(CircleMarker(
           point: ll.LatLng(coords[1], coords[0]),
           // Fill: zone colour with intensity-scaled alpha for depth effect
-          color: zoneColor.withValues(alpha: (intensity * 0.45).clamp(0.08, 0.45)),
+          color: zoneColor.withValues(alpha: (intensity * 0.45).clamp(0.08, 0.45).toDouble()),
           borderColor: zoneColor.withValues(alpha: 0.6),
           borderStrokeWidth: 1.0,
           useRadiusInMeter: true,

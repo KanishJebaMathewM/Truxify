@@ -22,6 +22,40 @@ if (!process.env.ML_API_KEY) {
     logger.warn('[ML] WARNING: ML_API_KEY is not set. All ML API endpoints will return 503. Set ML_API_KEY in your environment.');
 }
 
+/**
+ * Parse the free-text `weight` column of load_offers (e.g. '3 tonnes') into
+ * kilograms. Returns NaN when the value cannot be interpreted.
+ */
+function parseWeightKg(weight) {
+  if (typeof weight !== 'string') {
+    const num = Number(weight);
+    return Number.isFinite(num) ? num : NaN;
+  }
+  const match = weight.toLowerCase().match(/([\d.]+)\s*(kg|ton|tonne|t)\b/);
+  if (!match) return NaN;
+  const value = Number(match[1]);
+  return match[2] === 'kg' ? value : value * 1000;
+}
+
+/**
+ * Parse the free-text `dimensions` column of load_offers (e.g. '12 X 6 X 6 ft')
+ * into length/width/height in meters. Falls back to 1 m per dimension when
+ * fewer than three values are present.
+ */
+function parseDimensions(dimensions) {
+  const fallback = { length: 1, width: 1, height: 1 };
+  if (typeof dimensions !== 'string') return fallback;
+  const numbers = (dimensions.match(/\d+(?:\.\d+)?/g) || []).map(Number);
+  if (numbers.length < 3) return fallback;
+  const ftToM = dimensions.toLowerCase().includes('ft') ? 0.3048 : 1;
+  const [length, width, height] = numbers;
+  return {
+    length: Number((length * ftToM).toFixed(2)),
+    width: Number((width * ftToM).toFixed(2)),
+    height: Number((height * ftToM).toFixed(2)),
+  };
+}
+
 function guardMlApiKey() {
   if (!process.env.ML_API_KEY) {
     throw new Error("[ML] ML_API_KEY is not configured. All ML endpoints will return 503. Set ML_API_KEY to enable ML features.");
@@ -554,22 +588,29 @@ export async function matchEnRouteLoads({
 }) {
   if (!offers || offers.length === 0) return [];
 
-  // Build the available_loads list the ML model expects
+  // Build the available_loads list the ML model expects. load_offers stores
+  // coordinates as pickup_*/drop_*, weight as text ('3 tonnes') and dimensions
+  // as text ('12 X 6 X 6 ft'), so normalize those to the numeric fields the
+  // model consumes.
   const availableLoads = offers
-    .filter(o => o.origin_lat && o.origin_lng && o.dest_lat && o.dest_lng && o.weight_kg)
-    .map(o => ({
-      load_id: o.id,
-      origin_lat: Number(o.origin_lat),
-      origin_lng: Number(o.origin_lng),
-      dest_lat: Number(o.dest_lat),
-      dest_lng: Number(o.dest_lng),
-      weight_kg: Number(o.weight_kg),
-      length_m: Number(o.length_m || 1),
-      width_m: Number(o.width_m || 1),
-      height_m: Number(o.height_m || 1),
-      pickup_deadline: new Date(Date.now() + ML_DEFAULT_PICKUP_LEAD_MS).toISOString(),
-      payment_inr: Number(o.payment_inr || (o.freight_value ? o.freight_value / 100 : 0)),
-    }));
+    .filter(o => o.pickup_lat && o.pickup_lng && o.drop_lat && o.drop_lng)
+    .map(o => {
+      const dims = parseDimensions(o.dimensions);
+      return {
+        load_id: o.id,
+        origin_lat: Number(o.pickup_lat),
+        origin_lng: Number(o.pickup_lng),
+        dest_lat: Number(o.drop_lat),
+        dest_lng: Number(o.drop_lng),
+        weight_kg: parseWeightKg(o.weight),
+        length_m: dims.length,
+        width_m: dims.width,
+        height_m: dims.height,
+        pickup_deadline: new Date(Date.now() + ML_DEFAULT_PICKUP_LEAD_MS).toISOString(),
+        payment_inr: Number(o.payment_inr || (o.freight_value ? o.freight_value / 100 : 0)),
+      };
+    })
+    .filter(l => Number.isFinite(l.weight_kg) && l.weight_kg > 0);
 
   const specs = truckSpecs || {
     max_weight_kg: DEFAULT_TRUCK_MAX_WEIGHT_KG,
@@ -600,9 +641,9 @@ export async function matchEnRouteLoads({
   // Haversine fallback — score by distance to pickup
   if (!mlUsed) {
     recommendations = offers
-      .filter(o => o.origin_lat && o.origin_lng)
+      .filter(o => o.pickup_lat && o.pickup_lng)
       .map(o => {
-        const dtKm = _haversineKm(currentLat, currentLng, Number(o.origin_lat), Number(o.origin_lng));
+        const dtKm = _haversineKm(currentLat, currentLng, Number(o.pickup_lat), Number(o.pickup_lng));
         return {
           load_id: o.id,
           detour_km: dtKm,

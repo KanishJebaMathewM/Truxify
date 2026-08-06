@@ -10,8 +10,8 @@ export class DivergenceDetector {
   processIncomingFrame(driverId, sequenceNumber, payload) {
     const lastSeq = this.driverSequences.get(driverId) || 0;
 
-    if (sequenceNumber !== lastSeq + 1) {
-      // Divergence detected (gap or out-of-order frame)
+    if (sequenceNumber > lastSeq && sequenceNumber !== lastSeq + 1) {
+      // Divergence detected (gap in the sequence)
       const divergenceEvent = {
         driverId,
         expectedSeq: lastSeq + 1,
@@ -23,7 +23,8 @@ export class DivergenceDetector {
       console.warn(`[DivergenceDetector] Gap detected for ${driverId}: expected ${lastSeq + 1}, got ${sequenceNumber}`);
     }
 
-    this.driverSequences.set(driverId, sequenceNumber);
+    // Never regress the watermark on out-of-order or duplicate frames
+    this.driverSequences.set(driverId, Math.max(lastSeq, sequenceNumber));
     return {
       driverId,
       isDivergent: sequenceNumber !== lastSeq + 1,

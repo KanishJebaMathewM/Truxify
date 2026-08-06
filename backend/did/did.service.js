@@ -21,7 +21,8 @@ class DIDService {
             'function verifyCredential(bytes32 credentialId) external view returns (bool)',
             'function getDID(string memory did) external view returns (address, string, bool, uint256, uint256)',
             'function getCredential(bytes32 credentialId) external view returns (tuple(bytes32, address, address, string, bytes32, uint256, uint256, bool, bytes32))',
-            'function isDIDActive(string memory did) external view returns (bool)'
+            'function isDIDActive(string memory did) external view returns (bool)',
+            'event CredentialIssued(bytes32 indexed credentialId, address issuer, address subject)'
         ];
 
         this.identityWalletABI = [
@@ -117,9 +118,32 @@ class DIDService {
             );
             const receipt = await tx.wait();
 
-            const credentialId = ethers.keccak256(
-                ethers.toUtf8Bytes(`${Date.now()}:${this.wallet.address}:${subject}:${credentialType}`)
-            );
+            // Read the exact on-chain credentialId from the CredentialIssued
+            // event so it always matches the contract's own derivation.
+            let credentialId = null;
+            for (const log of receipt.logs) {
+                try {
+                    const parsed = this.didRegistry.interface.parseLog(log);
+                    if (parsed && parsed.name === 'CredentialIssued') {
+                        credentialId = parsed.args[0];
+                        break;
+                    }
+                } catch {
+                    // Not a DIDRegistry log; keep scanning.
+                }
+            }
+
+            if (!credentialId) {
+                // Fallback: reproduce abi.encodePacked(block.timestamp, msg.sender,
+                // subject, credentialType) using the actual block timestamp.
+                const block = await this.provider.getBlock(receipt.blockNumber);
+                credentialId = ethers.keccak256(
+                    ethers.solidityPacked(
+                        ["uint256", "address", "address", "string"],
+                        [block.timestamp, this.wallet.address, subject, credentialType]
+                    )
+                );
+            }
 
             await this.identityWallet.addCredential(credentialId);
 

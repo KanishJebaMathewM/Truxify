@@ -1,15 +1,13 @@
 class VoiceCommand {
-  final String rawText;
-  final String intent; // e.g., 'UPDATE_STATUS', 'CHECK_NEXT_STOP', 'SEND_MESSAGE'
+  final String transcript;
+  final String intent; // 'update_eta', 'report_delay', 'read_messages'
   final Map<String, dynamic> entities;
-  final double confidenceScore;
-  final DateTime timestamp;
+  final String assistantResponse;
 
   VoiceCommand({
-    required this.rawText,
+    required this.transcript,
     required this.intent,
     required this.entities,
-    required this.confidenceScore,
-    required this.timestamp,
+    required this.assistantResponse,
   });
 }

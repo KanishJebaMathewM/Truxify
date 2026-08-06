@@ -195,10 +195,7 @@ class SMPCProtocol:
             raise
 
     def _sum_shares(self, shares: List[Tuple[int, int]]) -> int:
-        total = 0
-        for x, y in shares:
-            total = (total + y) % self.secret_sharing.prime
-        return total
+        return self.secret_sharing.reconstruct_secret(shares)
 
     def secure_aggregate(self, data_list: List[Any], operation: str = 'sum') -> Any:
         try:

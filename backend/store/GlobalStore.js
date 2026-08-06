@@ -210,7 +210,9 @@ class GlobalStore extends EventEmitter {
                         return res;
                     })
                     .catch(async (error) => {
-                        await transaction.rollback();
+                        if (transaction.isActive) {
+                            await transaction.rollback();
+                        }
                         this.activeTransaction = null;
                         this.transactionHistory.push({
                             id: transaction.id,
@@ -234,7 +236,9 @@ class GlobalStore extends EventEmitter {
             return result;
             
         } catch (error) {
-            await transaction.rollback();
+            if (transaction.isActive) {
+                await transaction.rollback();
+            }
             this.activeTransaction = null;
             this.transactionHistory.push({
                 id: transaction.id,

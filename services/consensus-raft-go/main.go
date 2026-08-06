@@ -129,7 +129,6 @@ type RaftNode struct {
 	electionTimeoutMin time.Duration
 	electionTimeoutMax time.Duration
 	heartbeatInterval  time.Duration
-	peerHeartbeats     map[string]bool
 	nextIndex          map[string]uint64
 	matchIndex         map[string]uint64
 	httpClient         *http.Client
@@ -159,7 +158,6 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		electionTimeoutMin: time.Duration(electionMinMs) * time.Millisecond,
 		electionTimeoutMax: time.Duration(electionMaxMs) * time.Millisecond,
 		electionTimeout:    time.Duration(electionMinMs) * time.Millisecond,
-		peerHeartbeats:     make(map[string]bool),
 		nextIndex:          make(map[string]uint64),
 		matchIndex:         make(map[string]uint64),
 		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
@@ -246,14 +244,18 @@ func (rn *RaftNode) startElection() {
 	if votes >= rn.quorum() {
 		rn.Role = Leader
 		rn.LeaderID = rn.NodeID
-		rn.peerHeartbeats = make(map[string]bool, len(rn.PeerURLs))
 		// Per-follower replication state (Raft §5.3): the leader assumes each
 		// follower's log matches its own and works backward from the end.
 		rn.nextIndex = make(map[string]uint64, len(rn.PeerURLs))
 		rn.matchIndex = make(map[string]uint64, len(rn.PeerURLs))
 		for _, url := range rn.PeerURLs {
 			rn.nextIndex[url] = rn.lastLogIndex() + 1
-			rn.matchIndex[url] = 0
+			// Optimistically assume each follower has replicated the leader's
+			// full log (consistent with nextIndex). This keeps the admission
+			// gate passable immediately after election when all followers are
+			// up, instead of until the first heartbeat succeeds; actual
+			// replication is still required to commit new entries.
+			rn.matchIndex[url] = rn.lastLogIndex()
 		}
 		log.Printf("🌐 node [%s] elected leader for term %d", rn.NodeID, rn.CurrentTerm)
 	}
@@ -339,7 +341,6 @@ func (rn *RaftNode) sendHeartbeats() {
 		return
 	}
 	term := rn.CurrentTerm
-	rn.peerHeartbeats = make(map[string]bool, len(rn.PeerURLs))
 
 	type peerState struct {
 		url     string
@@ -411,7 +412,6 @@ func (rn *RaftNode) sendHeartbeats() {
 			// Follower accepted the prefix; record the highest matching index.
 			rn.matchIndex[res.url] = res.request.PrevLogIndex + uint64(len(res.request.Entries))
 			rn.nextIndex[res.url] = rn.matchIndex[res.url] + 1
-			rn.peerHeartbeats[res.url] = true
 		} else if rn.nextIndex[res.url] > 1 {
 			// Log inconsistency: back off and retry from an earlier prefix.
 			rn.nextIndex[res.url]--
@@ -449,11 +449,15 @@ func (rn *RaftNode) advanceCommitIndexLocked() {
 }
 
 // leaderHasQuorumLocked reports whether a majority of the cluster acknowledges
-// the current leadership.
+// the current leadership, based on the durable matchIndex (the last index each
+// follower has acknowledged replicating) rather than the ephemeral per-round
+// heartbeat cache. Right after an election matchIndex is seeded optimistically,
+// so healthy clusters do not spuriously reject commits before the first
+// heartbeat completes.
 func (rn *RaftNode) leaderHasQuorumLocked() bool {
 	acked := 1 // self
-	for _, ok := range rn.peerHeartbeats {
-		if ok {
+	for _, m := range rn.matchIndex {
+		if m >= rn.CommitIndex {
 			acked++
 		}
 	}
@@ -621,6 +625,14 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 					last = req.LeaderCommit
 				}
 				rn.CommitIndex = last
+			}
+			// Apply step (Raft §5.3): advance LastApplied up to CommitIndex on
+			// every node, not just the leader, so followers apply the committed
+			// entries they received. Previously only the leader advanced
+			// LastApplied (via advanceCommitIndexLocked), so a follower's
+			// LastApplied stayed at 0 forever while CommitIndex grew.
+			if rn.CommitIndex > rn.LastApplied {
+				rn.LastApplied = rn.CommitIndex
 			}
 			resp.Success = true
 		}

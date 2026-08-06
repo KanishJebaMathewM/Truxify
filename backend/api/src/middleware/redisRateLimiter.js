@@ -27,9 +27,16 @@ import logger from './logger.js';
  * @param {number} options.limit      Max requests per window
  * @param {number} options.windowMs   Window size in milliseconds
  */
-export function redisRateLimiter({ routeKey, limit, windowMs }) {
+export function redisRateLimiter({ routeKey, limit, windowMs, failClosed = false }) {
   return async (req, res, next) => {
     if (!redisClient) {
+      if (failClosed) {
+        logger.error({ routeKey }, '[RateLimiter] Redis unavailable — failing closed for protected route');
+        return res.status(503).json({
+          success: false,
+          error: 'Service temporarily unavailable. Please try again shortly.',
+        });
+      }
       logger.warn({ routeKey }, '[RateLimiter] Redis unavailable — rate limiting bypassed');
       return next();
     }
@@ -49,6 +56,13 @@ export function redisRateLimiter({ routeKey, limit, windowMs }) {
       // Validate ZCARD result tuple [error, value].
       const zcardTuple = results[1];
       if (!zcardTuple || zcardTuple[0]) {
+        if (failClosed) {
+          logger.error({ routeKey, err: zcardTuple?.[0] }, '[RateLimiter] ZCARD failed — failing closed');
+          return res.status(503).json({
+            success: false,
+            error: 'Service temporarily unavailable. Please try again shortly.',
+          });
+        }
         logger.warn({ routeKey, err: zcardTuple?.[0] }, '[RateLimiter] ZCARD failed — failing open');
         return next();
       }
@@ -78,6 +92,13 @@ export function redisRateLimiter({ routeKey, limit, windowMs }) {
 
       next();
     } catch (err) {
+      if (failClosed) {
+        logger.error({ err, routeKey }, '[RateLimiter] Redis error — failing closed for protected route');
+        return res.status(503).json({
+          success: false,
+          error: 'Service temporarily unavailable. Please try again shortly.',
+        });
+      }
       logger.error({ err, routeKey }, '[RateLimiter] Redis error — failing open');
       next();
     }

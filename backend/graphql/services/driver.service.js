@@ -170,7 +170,7 @@ const resolvers = {
                 .from('orders')
                 .update({
                     driver_id: driverId,
-                    status: 'ASSIGNED',
+                    status: 'truck_assigned',
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', orderId)

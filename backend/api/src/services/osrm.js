@@ -210,8 +210,11 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
     return feature;
 
   } catch (err) {
-    logger.error('[osrm] Fetch error (geometry):', err.message);
-    if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) return null;
+    if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
+      logger.warn('[OSRM] Circuit is open during geometry fetch. Falling back.');
+      return null;
+    }
+    logger.error({ errMessage: err.message, stack: err.stack }, '[OSRM] Failed to fetch route geometry');
     return null;
   } finally {
     clearTimeout(timeout);

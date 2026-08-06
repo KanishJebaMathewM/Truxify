@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/notification_item.dart';
@@ -200,10 +201,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 : _items.isEmpty
                     ? ListView(
                         physics: const AlwaysScrollableScrollPhysics(),
-                        children: const [
-                          SizedBox(height: 250),
-                          Center(child: Text('No notifications yet')),
-                        ],
+                          children: [
+                            const SizedBox(height: 150),
+                            Lottie.asset('assets/lottie/no_notifications.json', width: 200, height: 200),
+                            const Center(child: Text('No notifications yet', style: TextStyle(color: Colors.grey, fontSize: 16))),
+                          ],
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.all(16),

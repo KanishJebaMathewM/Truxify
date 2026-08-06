@@ -424,9 +424,8 @@ def predict_price(
     model, scaler, city_encoder = loaded
     unknown = len(city_encoder)
 
-    truck_encoded = TRUCK_TYPE_ENCODING.get(
-        truck_type.lower().replace(" ", "_"), 1
-    )
+    norm_truck = _normalize_truck_type(truck_type)
+    truck_encoded = TRUCK_TYPE_ENCODING.get(norm_truck, 1)
     cargo_encoded = CARGO_TYPE_ENCODING.get(
         cargo_type.lower().replace(" ", "_"), 0
     )

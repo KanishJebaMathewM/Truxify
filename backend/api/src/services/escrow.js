@@ -206,33 +206,6 @@ export function getEscrowBookingId (orderDisplayId) {
 }
 
 /**
- * Query the escrow contract's bookings mapping for a given booking ID.
- * Used by escrowFundingReconciliation to check on-chain booking state.
- *
- * @param {string} escrowBookingId — bytes32 hash (result of getEscrowBookingId)
- * @returns {Promise<{customer: string, driver: string, amount: bigint, status: number, paid: boolean, started: boolean, createdAt: bigint} | null>}
- */
-export async function getEscrowBooking(escrowBookingId) {
-  if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — cannot query bookings.');
-    return null;
-  }
-
-  if (!ethers.isHexString(escrowBookingId, 32)) {
-    logger.warn('[escrow] Invalid escrowBookingId format — cannot query bookings.');
-    return null;
-  }
-
-  try {
-    const booking = await escrowContract.bookings(escrowBookingId);
-    return booking;
-  } catch (err) {
-    logger.error(`[escrow] getEscrowBooking failed: ${err.message}`);
-    return null;
-  }
-}
-
-/**
  * Build an unsigned deposit transaction for the customer's wallet to sign.
  * Called when a bid is accepted and the order moves to in_progress.
  *
@@ -278,6 +251,16 @@ export async function buildDepositTx (orderDisplayId, driverWalletAddress, amoun
   });
 }
 
+/**
+ * Wait for an on-chain deposit transaction to be confirmed and verify its details.
+ *
+ * @param {string} bookingId
+ * @param {string} txHash
+ * @param {string|null} expectedSenderAddress
+ * @param {string|null} expectedDriverAddress
+ * @param {string|null} expectedAmountWei
+ * @returns {Promise<{txHash?: string, bookingId?: string, error?: string, alreadyFunded?: boolean}>}
+ */
 export async function recordDepositTx (bookingId, txHash, expectedSenderAddress = null, expectedDriverAddress = null, expectedAmountWei = null) {
   return measureExecution('EscrowService.recordDepositTx', async () => {
   if (!escrowContract) {
@@ -371,45 +354,6 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
 
   logger.info(`[escrow] deposit confirmed for booking ${bookingId} in block ${receipt.blockNumber}`)
   return { txHash: receipt.hash, bookingId }
-  });
-}
-
-/**
- * Mark a booking as started on-chain after the goods are loaded (picked_up).
- * This is required so cancelBooking / cancelWithPenalty revert for a full
- * refund once the trip has begun.
- *
- * @param {string} orderDisplayId
- * @returns {Promise<{txHash: string|null, bookingId: string, waitForConfirmation?: Function, error?: string}>}
- */
-export async function markEscrowBookingStarted (orderDisplayId) {
-  return measureExecution('EscrowService.markEscrowBookingStarted', async () => {
-  const bookingId = getEscrowBookingId(orderDisplayId)
-
-  if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — skipping markBookingStarted.')
-    return { txHash: null, bookingId }
-  }
-
-  try {
-    const tx = await escrowContract.markBookingStarted(bookingId)
-    logger.info(`[escrow] markBookingStarted tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
-    return {
-      txHash: tx.hash,
-      bookingId,
-      waitForConfirmation: async () => {
-        const receipt = await tx.wait(1)
-        if (!receipt || receipt.status === 0) {
-          throw new Error('Escrow markBookingStarted transaction reverted or was not found.')
-        }
-        logger.info(`[escrow] markBookingStarted confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`)
-        return receipt
-      },
-    }
-  } catch (err) {
-    logger.error(`[escrow] markBookingStarted failed for booking ${orderDisplayId}: ${err.message}`)
-    return { txHash: null, bookingId, error: err.message }
-  }
   });
 }
 
@@ -511,6 +455,15 @@ export async function confirmEscrowRefund (txHash) {
   });
 }
 
+/**
+ * Lock payment in escrow for a specific booking.
+ *
+ * @param {string} orderDisplayId
+ * @param {string} customerWalletAddress
+ * @param {string} driverWalletAddress
+ * @param {string} amountWei
+ * @returns {Promise<{txHash: string|null, bookingId: string, error?: string}>}
+ */
 export async function escrowLockPayment(orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
   return measureExecution('EscrowService.escrowLockPayment', async () => {
     const bookingId = getEscrowBookingId(orderDisplayId);
@@ -540,10 +493,14 @@ export async function escrowLockPayment(orderDisplayId, customerWalletAddress, d
   });
 }
 
-export function bookingIdFromUuid (orderId) {
-  return getEscrowBookingId(orderId)
-}
 
+/**
+ * Submit an escrow cancellation with a penalty fee awarded to the driver.
+ *
+ * @param {string} orderDisplayId
+ * @param {string|bigint} driverFeeWei
+ * @returns {Promise<{txHash: string|null, bookingId: string, error?: string, waitForConfirmation?: Function}>}
+ */
 export async function submitEscrowCancelWithPenalty (orderDisplayId, driverFeeWei) {
   return measureExecution('EscrowService.submitEscrowCancelWithPenalty', async () => {
     const bookingId = getEscrowBookingId(orderDisplayId)
@@ -574,13 +531,6 @@ export async function submitEscrowCancelWithPenalty (orderDisplayId, driverFeeWe
   })
 }
 
-export async function releaseEscrowFunds (orderDisplayId) {
-  return escrowRelease(orderDisplayId)
-}
-
-export async function escrowRefund (orderDisplayId) {
-  return submitEscrowRefund(orderDisplayId)
-}
 
 /**
  * Submit an escrow dispute raise and return its hash before confirmation.
@@ -693,3 +643,5 @@ export async function submitEscrowResolveDisputeTimeout (orderDisplayId) {
     }
   })
 }
+export const lockPayment = escrowLockPayment;
+

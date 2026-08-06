@@ -122,15 +122,24 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
 
         if (!refundTxHash) {
           const submitted = await submitEscrowRefund(order.order_display_id);
-          if (submitted.waitForConfirmation) {
-            receipt = await submitted.waitForConfirmation();
-          } else {
-            logger.warn(`[escrow-reconciliation] waitForConfirmation unavailable for ${order.order_display_id} — escrow contract may not be initialized.`);
-            receipt = { hash: submitted.txHash };
+          if (!submitted.waitForConfirmation || !submitted.txHash) {
+            // The on-chain refund was not actually submitted/confirmed
+            // (cancelBooking threw or the contract is not configured). Never
+            // finalize the order as refunded in that case — keep it in
+            // refund_pending/refund_failed so the retry loop can heal it.
+            throw new Error(
+              submitted.error ||
+              `Escrow refund for ${order.order_display_id} could not be submitted on-chain (no confirmation available).`
+            );
           }
+          receipt = await submitted.waitForConfirmation();
           refundTxHash = receipt.hash ?? submitted.txHash;
         } else {
           receipt = await confirmEscrowRefund(refundTxHash);
+        }
+
+        if (!refundTxHash) {
+          throw new Error(`Escrow refund for ${order.order_display_id} has no confirmed on-chain refund transaction hash.`);
         }
 
         const refundedAt = new Date().toISOString();

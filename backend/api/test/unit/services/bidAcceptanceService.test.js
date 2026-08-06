@@ -10,7 +10,7 @@ vi.mock('../../../src/services/escrow.js', async (importOriginal) => {
   return {
     ...actual,
     escrowDeposit: vi.fn(),
-    escrowRefund: vi.fn(),
+    submitEscrowRefund: vi.fn(),
   };
 });
 
@@ -19,18 +19,18 @@ describe('BidAcceptanceService', () => {
   let orderRepository;
   let service;
   let escrowDeposit;
-  let escrowRefund;
+  let submitEscrowRefund;
 
   beforeEach(async () => {
     supabaseMock = createSupabaseMock();
-    const { escrowDeposit: escrowDepositFn, escrowRefund: escrowRefundFn } = await import('../../../src/services/escrow.js');
+    const { escrowDeposit: escrowDepositFn, submitEscrowRefund: submitEscrowRefundFn } = await import('../../../src/services/escrow.js');
     escrowDeposit = escrowDepositFn;
-    escrowRefund = escrowRefundFn;
+    submitEscrowRefund = submitEscrowRefundFn;
 
     escrowDeposit.mockResolvedValue({ txData: { to: '0xcontract', data: '0xabcd' }, bookingId: 'escrow:ORDER-001' });
-    escrowRefund.mockResolvedValue({ txHash: '0x456' });
+    submitEscrowRefund.mockResolvedValue({ txHash: '0x456' });
     escrowDeposit.mockClear();
-    escrowRefund.mockClear();
+    submitEscrowRefund.mockClear();
 
     orderRepository = new OrderRepository(supabaseMock.supabase);
 
@@ -38,7 +38,7 @@ describe('BidAcceptanceService', () => {
       orderRepository,
       supabase: supabaseMock.supabase,
       escrowDepositFn: escrowDeposit,
-      escrowRefundFn: escrowRefund,
+      escrowRefundFn: submitEscrowRefund,
       logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
       notificationDispatcher: vi.fn().mockResolvedValue(undefined),
     });

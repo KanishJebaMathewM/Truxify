@@ -145,7 +145,10 @@ class ConsulService {
         }
 
         // Round-robin load balancing
-        const service = services[Math.floor(Math.random() * services.length)];
+        if (this._rrIndex == null) {
+            this._rrIndex = 0;
+        }
+        const service = services[this._rrIndex++ % services.length];
         return `${service.address}:${service.port}`;
     }
 

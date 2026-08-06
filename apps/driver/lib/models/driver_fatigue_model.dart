@@ -1,19 +1,17 @@
-class DriverFatigueProfile {
-  final String driverId;
-  final double currentFatigueScore; // 0 (rested) to 100 (critical exhaustion)
-  final int totalSleepMinutesLast24h;
-  final String sleepQuality; // 'POOR', 'FAIR', 'GOOD', 'EXCELLENT'
-  final int averageHeartRateBpm;
-  final bool isLegallyAllowedToDrive; // HoS compliance
-  final bool isPhysicallySafeToDrive; // Fatigue compliance
+class FatigueMetrics {
+  final double eyeClosurePercentage; // 0.0 to 1.0
+  final double blinkRatePerMinute;
+  final int headNodsDetected;
+  final bool isMicroSleepDetected;
+  final String fatigueLevel; // 'Awake', 'Drowsy', 'Critical'
+  final DateTime timestamp;
 
-  DriverFatigueProfile({
-    required this.driverId,
-    required this.currentFatigueScore,
-    required this.totalSleepMinutesLast24h,
-    required this.sleepQuality,
-    required this.averageHeartRateBpm,
-    required this.isLegallyAllowedToDrive,
-    required this.isPhysicallySafeToDrive,
+  FatigueMetrics({
+    required this.eyeClosurePercentage,
+    required this.blinkRatePerMinute,
+    required this.headNodsDetected,
+    required this.isMicroSleepDetected,
+    required this.fatigueLevel,
+    required this.timestamp,
   });
 }

@@ -134,7 +134,7 @@ class ResilientWebSocket {
     }
 
     // Exponential backoff: 2^attempt seconds, capped at maxDelay
-    final delayMs = initialDelay.inMilliseconds * (1 << _attempt.clamp(0, 5));
+    final delayMs = initialDelay.inMilliseconds * (1 << _attempt.clamp(0, 5).toInt());
     final capped = Duration(
       milliseconds:
           delayMs > maxDelay.inMilliseconds ? maxDelay.inMilliseconds : delayMs,

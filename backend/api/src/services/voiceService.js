@@ -31,12 +31,16 @@ function trimCache() {
   }
 }
 
-function cacheAudio(id, buffer) {
-  audioCache.set(id, { buffer, timestamp: Date.now() });
+function cacheAudio(id, buffer, userId) {
+  audioCache.set(id, { buffer, userId, timestamp: Date.now() });
   trimCache();
 }
 
 async function getBookingContext(bookingId, userId) {
+  if (!userId) {
+    return null;
+  }
+
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const isUuid = uuidRegex.test(bookingId);
 
@@ -49,11 +53,14 @@ async function getBookingContext(bookingId, userId) {
       orderQuery = orderQuery.eq('order_display_id', bookingId);
     }
     
-    if (userId) {
-      orderQuery = orderQuery.or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
+    orderQuery = orderQuery.or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
+
+    const { data: order, error } = await orderQuery.maybeSingle();
+    if (error) {
+      logger.warn('Orders table check failed in voiceService:', error.message);
+      return null;
     }
 
-    const { data: order } = await orderQuery.maybeSingle();
     return order;
   } catch (err) {
     logger.warn('Orders table check failed in voiceService:', err.message);
@@ -94,7 +101,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     // Generate a dummy silent mp3
     const mockAudio = Buffer.alloc(1000);
     const audioId = crypto.randomUUID();
-    cacheAudio(audioId, mockAudio);
+    cacheAudio(audioId, mockAudio, userId);
 
     return {
       transcript: selected.transcript,
@@ -170,7 +177,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
 
     const audioId = crypto.randomUUID();
-    cacheAudio(audioId, Buffer.from(ttsResponse.data));
+    cacheAudio(audioId, Buffer.from(ttsResponse.data), userId);
     audioUrl = `/api/voice/audio/${audioId}`;
   } catch (err) {
     logger.error('ElevenLabs TTS failed:', err.message);

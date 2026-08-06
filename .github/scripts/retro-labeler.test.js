@@ -273,8 +273,8 @@ test('run function filters PRs by sinceHours cutoff time', async () => {
       pulls: {
         list: async () => ({
           data: [
-            { number: 201, title: 'Recent PR', labels: [], merged_at: recentDate, closed_at: recentDate, user: { login: 'human' } },
-            { number: 202, title: 'Old PR', labels: [], merged_at: oldDate, closed_at: oldDate, user: { login: 'human' } }
+            { number: 201, title: 'Recent PR', labels: [], merged_at: recentDate, closed_at: recentDate, updated_at: recentDate, user: { login: 'human' } },
+            { number: 202, title: 'Old PR', labels: [], merged_at: oldDate, closed_at: oldDate, updated_at: oldDate, user: { login: 'human' } }
           ]
         })
       }

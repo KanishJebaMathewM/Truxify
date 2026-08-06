@@ -219,9 +219,7 @@ export const updateTicketSchema = z.object({
   subject: z.string().min(1, 'Subject cannot be empty').max(200, 'Subject must be 200 characters or fewer').optional(),
   category: z.string().min(1, 'Category cannot be empty').max(50, 'Category must be 50 characters or fewer').optional(),
   description: z.string().max(5000, 'Description must be 5000 characters or fewer').optional(),
-  status: z.enum(['open', 'in_progress', 'resolved', 'closed'], {
-    invalid_type_error: "Status must be one of: open, in_progress, resolved, closed",
-  }).optional(),
+  status: z.string().min(1, 'Status cannot be empty').max(50, 'Status must be 50 characters or fewer').optional(),
 }).strict();
 
 export const createTicketCommentSchema = z.object({

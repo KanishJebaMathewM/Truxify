@@ -165,22 +165,40 @@ class DigilockerService {
         logger.error(`Storage upload failed for ${doc.type}:`, uploadError.message);
       }
 
-      // Upsert into driver_documents table
+      // Sync/upsert into driver_documents table
       let record;
       try {
-        const { data, error: upsertError } = await supabase
+        const docPayload = {
+          driver_id: driverId,
+          document_type: doc.type,
+          storage_path: storagePath,
+          mime_type: 'application/json',
+          status: isMock ? 'pending_review' : 'approved',
+          is_govt_verified: !isMock,
+          blockchain_tx_hash: txHash
+        };
+
+        const { data: existing, error: findError } = await supabase
           .from('driver_documents')
-          .upsert({
-            driver_id: driverId,
-            document_type: doc.type,
-            storage_path: storagePath,
-            mime_type: 'application/json',
-            status: isMock ? 'pending' : 'approved',
-            is_govt_verified: !isMock,
-            blockchain_tx_hash: txHash
-          }, { onConflict: 'driver_id,document_type' })
-          .select('id, document_type, status, is_govt_verified, blockchain_tx_hash')
-          .single();
+          .select('id')
+          .eq('driver_id', driverId)
+          .eq('document_type', doc.type)
+          .maybeSingle();
+
+        if (findError) {
+          logger.error(`Find driver_documents failed for ${doc.type}:`, findError.message);
+        }
+
+        const { data, error: upsertError } = existing
+          ? await supabase.from('driver_documents')
+              .update(docPayload)
+              .eq('id', existing.id)
+              .select('id, document_type, status, is_govt_verified, blockchain_tx_hash')
+              .single()
+          : await supabase.from('driver_documents')
+              .insert(docPayload)
+              .select('id, document_type, status, is_govt_verified, blockchain_tx_hash')
+              .single();
 
         if (upsertError) {
           logger.error(`Upsert driver_documents failed for ${doc.type}:`, upsertError.message);
@@ -193,17 +211,30 @@ class DigilockerService {
 
       // Sync/upsert into documents table (legacy/Flutter-facing)
       try {
-        const { error: syncError } = await supabase
+        const docPayload = {
+          user_id: driverId,
+          doc_type: doc.type,
+          storage_path: storagePath,
+          status: isMock ? 'pending' : 'verified',
+          is_govt_verified: !isMock,
+          blockchain_tx_hash: txHash,
+          last_verified_at: new Date().toISOString()
+        };
+
+        const { data: existingDoc, error: findDocError } = await supabase
           .from('documents')
-          .upsert({
-            user_id: driverId,
-            doc_type: doc.type,
-            storage_path: storagePath,
-            status: isMock ? 'pending' : 'verified',
-            is_govt_verified: !isMock,
-            blockchain_tx_hash: txHash,
-            last_verified_at: new Date().toISOString()
-          }, { onConflict: 'user_id,doc_type' });
+          .select('id')
+          .eq('user_id', driverId)
+          .eq('doc_type', doc.type)
+          .maybeSingle();
+
+        if (findDocError) {
+          logger.error(`Find documents failed for ${doc.type}:`, findDocError.message);
+        }
+
+        const { error: syncError } = existingDoc
+          ? await supabase.from('documents').update(docPayload).eq('id', existingDoc.id)
+          : await supabase.from('documents').insert(docPayload);
 
         if (syncError) {
           logger.error(`Sync to documents table failed for ${doc.type}:`, syncError.message);
@@ -217,7 +248,7 @@ class DigilockerService {
       } else {
         syncedResults.push({
           document_type: doc.type,
-          status: isMock ? 'pending' : 'approved',
+          status: isMock ? 'pending_review' : 'approved',
           is_govt_verified: !isMock,
           blockchain_tx_hash: txHash
         });

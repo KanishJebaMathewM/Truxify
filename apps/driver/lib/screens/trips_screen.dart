@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
@@ -1810,7 +1811,8 @@ class _MarketplaceBody extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           SizedBox(height: 80),
-          Center(child: Text(AppLocalizations.of(context)!.noLoadsAvailable)),
+          Lottie.asset('packages/truxify_shared/assets/lottie/no_trips.json', width: 200, height: 200),
+          Center(child: Text(AppLocalizations.of(context)!.noLoadsAvailable, style: TextStyle(color: Colors.grey, fontSize: 16))),
         ],
       );
     }

@@ -15,7 +15,7 @@ class TokenizationService {
             'function createTradeOrder(uint256 assetId, uint256 amount, uint256 price, string memory orderType) external',
             'function executeTradeOrder(uint256 assetId, uint256 orderIndex) external payable',
             'function cancelTradeOrder(uint256 assetId, uint256 orderIndex) external',
-            'function getTradeOrder(uint256 assetId, uint256 orderIndex) external view returns (tuple(address,uint256,uint256,uint256,bool))',
+            'function getTradeOrders(uint256 assetId) external view returns (tuple(uint256,uint256,address,address,uint256,uint256,string,bool,uint256,uint256)[])',
             'function getAsset(uint256 assetId) external view returns (tuple(uint256,string,string,string,uint256,uint256,uint256,uint256,address,bool,string,uint256,uint256))',
             'function getFractionalOwnership(uint256 assetId, address owner) external view returns (tuple(address,uint256,uint256,uint256))',
             'function getTotalAssets() external view returns (uint256)',
@@ -174,13 +174,20 @@ class TokenizationService {
 
     async getTradeOrder(assetId, orderIndex) {
         try {
-            const order = await this.token.getTradeOrder(assetId, orderIndex);
+            const orders = await this.token.getTradeOrders(assetId);
+            const order = orders[orderIndex];
+            if (!order) {
+                return null;
+            }
             return {
-                maker: order.maker,
-                price: ethers.formatEther(order.price),
-                amount: ethers.formatEther(order.amount),
-                filled: order.filled,
-                orderId: order.orderId
+                orderId: order[0].toString(),
+                tokenId: order[1].toString(),
+                seller: order[2],
+                buyer: order[3],
+                amount: ethers.formatEther(order[4]),
+                price: ethers.formatEther(order[5]),
+                orderType: order[6],
+                isActive: order[7]
             };
         } catch (error) {
             logger.error('Failed to get trade order:', error);

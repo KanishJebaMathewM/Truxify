@@ -16,9 +16,6 @@ import '../theme/app_theme.dart';
 import '../constants/supabase_config.dart';
 import '../services/supabase_service.dart';
 import '../widgets/common_widgets.dart';
-import '../widgets/timeline_connector.dart';
-import '../widgets/timeline_milestone.dart';
-
 class LiveTrackingScreen extends StatefulWidget {
   final String orderId;
   final OrderService? orderService;
@@ -856,40 +853,100 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     ];
   }
 
-  List<Widget> _buildTimelineWidgets() {
-    if (_timeline.isEmpty) {
-      return const [
-        TimelineMilestone(label: 'Order Placed', done: true),
-        TimelineConnector(),
-        TimelineMilestone(label: 'In Transit', done: true, current: true),
-        TimelineConnector(),
-        TimelineMilestone(label: 'Delivered', done: false),
-      ];
+  Widget _buildVerticalTimeline() {
+    final timelineData = _timeline.isNotEmpty
+        ? _timeline
+        : [
+            {'milestone': 'Booking Confirmed', 'completed': true},
+            {'milestone': 'Driver Assigned', 'completed': true},
+            {'milestone': 'Pickup Completed', 'completed': _currentPosition != null},
+            {'milestone': 'In Transit', 'completed': false},
+            {'milestone': 'Near Destination', 'completed': false},
+            {'milestone': 'Delivered', 'completed': false},
+          ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: List.generate(timelineData.length, (i) {
+        final step = timelineData[i];
+        final completed = step['completed'] == true;
+        final isCurrent = completed &&
+            (i == timelineData.length - 1 || timelineData[i + 1]['completed'] != true);
+        final isLast = i == timelineData.length - 1;
+        
+        final color = isCurrent ? TruxifyColors.accent : completed ? TruxifyColors.accentDark : TruxifyColors.border;
+        final timestamp = step['timestamp']?.toString();
+
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Column(
+                children: [
+                  Container(
+                    width: 16,
+                    height: 16,
+                    margin: const EdgeInsets.only(top: 4),
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                      boxShadow: isCurrent
+                          ? [BoxShadow(color: TruxifyColors.accent.withValues(alpha: 0.3), blurRadius: 8, spreadRadius: 1)]
+                          : const [],
+                    ),
+                  ),
+                  if (!isLast)
+                    Expanded(
+                      child: Container(
+                        width: 2,
+                        color: completed ? TruxifyColors.accentDark : TruxifyColors.border,
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 24.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        step['milestone']?.toString() ?? '',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w600,
+                          color: isCurrent || completed ? null : TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                      ),
+                      if (timestamp != null && timestamp.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          _formatTimestamp(timestamp),
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: TruxifyColors.adaptiveSecondaryText(context),
+                          ),
+                        ),
+                      ]
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      }),
+    );
+  }
+
+  String _formatTimestamp(String ts) {
+    try {
+      final dt = DateTime.parse(ts).toLocal();
+      // Returns a nicely formatted manual timestamp: "05/08/2026 14:30"
+      return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+    } catch (_) {
+      return ts;
     }
-
-    final widgets = <Widget>[];
-
-    for (int i = 0; i < _timeline.length; i++) {
-      final step = _timeline[i];
-      final completed = step['completed'] == true;
-
-      final isCurrent = completed &&
-          (i == _timeline.length - 1 || _timeline[i + 1]['completed'] != true);
-
-      widgets.add(
-        TimelineMilestone(
-          label: step['milestone']?.toString() ?? '',
-          done: completed,
-          current: isCurrent,
-        ),
-      );
-
-      if (i != _timeline.length - 1) {
-        widgets.add(const TimelineConnector());
-      }
-    }
-
-    return widgets;
   }
 
   @override
@@ -1171,12 +1228,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                                     color: TruxifyColors.adaptiveSecondaryText(
                                         context))),
                         const SizedBox(height: 18),
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: _buildTimelineWidgets(),
-                          ),
-                        ),
+                        _buildVerticalTimeline(),
                         const SizedBox(height: 18),
                         GridView.count(
                           crossAxisCount: 2,

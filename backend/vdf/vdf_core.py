@@ -143,18 +143,22 @@ class VDF:
             # Parse proof
             proof_json = json.loads(proof_data.decode())
             
-            # Verify proof
-            # In production: implement proper verification
-            # For demo: verify hash matches
-            
+            # Recompute the VDF output: y' = x^(2^T) mod N
             x = self._hash_to_point(input_data)
-            y = int(proof_json['output'], 16)
-            
-            # Verify elapsed time
-            elapsed_time = proof_json.get('elapsed_time', 0)
-            if elapsed_time < 0.1:  # Minimum time
+            modulus = int(proof_json['modulus'], 16)
+            iterations = int(proof_json.get('iterations', self.iterations))
+            y = x
+            for _ in range(iterations):
+                y = self._square_mod(y, modulus)
+
+            # The recomputed output must match the claimed output in the proof
+            if int(proof_json['output'], 16) != y:
                 return False
-            
+
+            # And the caller-provided expected output, when given
+            if output_data and output_data != y.to_bytes(32, 'big'):
+                return False
+
             return True
             
         except Exception as e:

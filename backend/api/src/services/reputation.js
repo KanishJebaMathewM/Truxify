@@ -19,9 +19,9 @@
  *   RELAYER_WALLET_PRIVATE_KEY  — Private key of the authorised relayer wallet
  */
 
-import { ethers } from 'ethers';
-import logger from '../middleware/logger.js';
-import { measureExecution } from '../core/performanceMetrics.js';
+import { ethers } from "ethers";
+import logger from "../middleware/logger.js";
+import { measureExecution } from "../core/performanceMetrics.js";
 
 // Safe math utilities for reputation calculations.
 // Boundary clamping (0–MAX_REPUTATION) is handled by clampReputation.
@@ -38,15 +38,15 @@ function safeSubtract(a, b) {
 /** @type {number} Must match Reputation.sol MAX_REPUTATION constant */
 const MAX_REPUTATION = 10000;
 
-function clampReputation(value) {
+export function clampReputation(value) {
   return Math.max(0, Math.min(MAX_REPUTATION, Number(value) || 0));
 }
 
 // Minimal ABI — only the subset the backend needs to call.
 const REPUTATION_ABI = [
-  'function increaseReputation(address driver, uint256 points) external',
-  'function decreaseReputation(address driver, uint256 points) external',
-  'function getReputation(address driver) external view returns (uint256)',
+  "function increaseReputation(address driver, uint256 points) external",
+  "function decreaseReputation(address driver, uint256 points) external",
+  "function getReputation(address driver) external view returns (uint256)",
 ];
 /** @type {ethers.Contract | null} */
 export let reputationContract = null;
@@ -56,25 +56,32 @@ export let reputationContract = null;
  * Exposed for testing and runtime reconfiguration.
  */
 export function initReputationContract() {
-  const rpcUrl             = process.env.POLYGON_RPC_URL;
-  const contractAddress    = process.env.REPUTATION_CONTRACT_ADDRESS;
-  const relayerPrivateKey  = process.env.RELAYER_WALLET_PRIVATE_KEY;
+  const rpcUrl = process.env.POLYGON_RPC_URL;
+  const contractAddress = process.env.REPUTATION_CONTRACT_ADDRESS;
+  const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
 
   if (rpcUrl && contractAddress && relayerPrivateKey) {
     try {
       const provider = new ethers.JsonRpcProvider(rpcUrl);
-      const relayer  = new ethers.Wallet(relayerPrivateKey, provider);
-      reputationContract = new ethers.Contract(contractAddress, REPUTATION_ABI, relayer);
-      logger.info('✅ Polygon Reputation contract client initialised.');
+      const relayer = new ethers.Wallet(relayerPrivateKey, provider);
+      reputationContract = new ethers.Contract(
+        contractAddress,
+        REPUTATION_ABI,
+        relayer,
+      );
+      logger.info("✅ Polygon Reputation contract client initialised.");
     } catch (err) {
       reputationContract = null;
-      logger.error('❌ Failed to initialise Reputation contract client:', err.message);
+      logger.error(
+        "❌ Failed to initialise Reputation contract client:",
+        err.message,
+      );
     }
   } else {
     reputationContract = null;
     logger.warn(
-      '⚠️  POLYGON_RPC_URL / REPUTATION_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY ' +
-      'not set. On-chain reputation updates disabled.'
+      "⚠️  POLYGON_RPC_URL / REPUTATION_CONTRACT_ADDRESS / RELAYER_WALLET_PRIVATE_KEY " +
+        "not set. On-chain reputation updates disabled.",
     );
   }
 }
@@ -110,45 +117,77 @@ async function retryWithBackoff(fn, maxRetries, baseDelayMs) {
       // Add ±25% jitter to spread out concurrent retries and prevent thundering herd.
       const jitter = 0.75 + Math.random() * 0.5; // [0.75, 1.25]
       const delayMs = Math.round(baseDelayMs * attempt * jitter);
-      logger.warn(`[reputation] Retry ${attempt}/${maxRetries} after ${delayMs}ms (jitter applied): ${err.message}`);
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+      logger.warn(
+        `[reputation] Retry ${attempt}/${maxRetries} after ${delayMs}ms (jitter applied): ${err.message}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
   }
 }
 
 export async function awardReputationPoints(driverWalletAddress, stars) {
-  return measureExecution('ReputationService.awardReputationPoints', async () => {
-  if (!reputationContract) {
-    logger.warn('[reputation] Contract not initialised — skipping on-chain update.');
-    return;
-  }
-  if (!ethers.isAddress(driverWalletAddress)) {
-    logger.warn(`[reputation] Invalid driver wallet address "${driverWalletAddress}" — skipping.`);
-    return;
-  }
-  if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
-    logger.warn(`[reputation] Invalid stars value ${stars} — must be 1-5. Skipping on-chain update.`);
-    return;
-  }
-  try {
-    // Submit the transaction ONCE — retrying submission would re-award the
-    // points if a previous tx was already mined but its confirmation wait timed
-    // out. Only the confirmation wait is retried below.
-    const tx = await reputationContract.increaseReputation(driverWalletAddress, stars);
-    logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
-    await retryWithBackoff(async () => {
-      const provider = reputationContract.provider || reputationContract.runner?.provider;
-      const receipt = provider ? await provider.waitForTransaction(tx.hash, 1, REPUTATION_TX_CONFIRM_TIMEOUT_MS) : await tx?.wait?.(1);
-      if (!receipt || receipt.status === 0) {
-        throw new Error(`increaseReputation transaction ${tx.hash} reverted or was not found on chain.`);
+  return measureExecution(
+    "ReputationService.awardReputationPoints",
+    async () => {
+      if (!reputationContract) {
+        logger.warn(
+          "[reputation] Contract not initialised — skipping on-chain update.",
+        );
+        return;
       }
-      logger.info(`[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`);
-    }, REPUTATION_RETRY_MAX, REPUTATION_RETRY_DELAY_MS);
-  } catch (err) {
-    logger.error(`[reputation] increaseReputation failed for driver ${driverWalletAddress} after ${REPUTATION_RETRY_MAX} retries: ${err.message}`);
-    throw err;
-  }
-  });
+      if (!ethers.isAddress(driverWalletAddress)) {
+        logger.warn(
+          `[reputation] Invalid driver wallet address "${driverWalletAddress}" — skipping.`,
+        );
+        return;
+      }
+      if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+        logger.warn(
+          `[reputation] Invalid stars value ${stars} — must be 1-5. Skipping on-chain update.`,
+        );
+        return;
+      }
+      try {
+        // Submit the transaction ONCE — retrying submission would re-award the
+        // points if a previous tx was already mined but its confirmation wait timed
+        // out. Only the confirmation wait is retried below.
+        const tx = await reputationContract.increaseReputation(
+          driverWalletAddress,
+          stars,
+        );
+        logger.info(`[reputation] increaseReputation tx submitted: ${tx.hash}`);
+        await retryWithBackoff(
+          async () => {
+            const provider =
+              reputationContract.provider ||
+              reputationContract.runner?.provider;
+            const receipt = provider
+              ? await provider.waitForTransaction(
+                  tx.hash,
+                  1,
+                  REPUTATION_TX_CONFIRM_TIMEOUT_MS,
+                )
+              : await tx?.wait?.(1);
+            if (!receipt || receipt.status === 0) {
+              throw new Error(
+                `increaseReputation transaction ${tx.hash} reverted or was not found on chain.`,
+              );
+            }
+            logger.info(
+              `[reputation] increaseReputation confirmed for driver ${driverWalletAddress} (+${stars} pts).`,
+            );
+          },
+          REPUTATION_RETRY_MAX,
+          REPUTATION_RETRY_DELAY_MS,
+        );
+      } catch (err) {
+        logger.error(
+          `[reputation] increaseReputation failed for driver ${driverWalletAddress} after ${REPUTATION_RETRY_MAX} retries: ${err.message}`,
+        );
+        throw err;
+      }
+    },
+  );
 }
 
 /**
@@ -158,29 +197,38 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
  * @returns {Promise<number|null>}
  */
 export async function getDriverReputation(walletAddress) {
-  return measureExecution('ReputationService.getDriverReputation', async () => {
-  if (!reputationContract) {
-    logger.warn('[reputation] Contract not initialised — skipping on-chain retrieval.');
-    return null;
-  }
-  if (!ethers.isAddress(walletAddress)) {
-    logger.warn(`[reputation] Invalid wallet address "${walletAddress}" — skipping.`);
-    return null;
-  }
-  let timeoutId;
-  try {
-    const score = await Promise.race([
-      reputationContract.getReputation(walletAddress),
-      new Promise((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error('RPC timeout')), REPUTATION_RPC_TIMEOUT_MS);
-      }),
-    ]);
-    clearTimeout(timeoutId);
-    return Number(score);
-  } catch (err) {
-    clearTimeout(timeoutId);
-    logger.error(`[reputation] Failed to fetch on-chain reputation for ${walletAddress}: ${err.message}`);
-    return null;
-  }
+  return measureExecution("ReputationService.getDriverReputation", async () => {
+    if (!reputationContract) {
+      logger.warn(
+        "[reputation] Contract not initialised — skipping on-chain retrieval.",
+      );
+      return null;
+    }
+    if (!ethers.isAddress(walletAddress)) {
+      logger.warn(
+        `[reputation] Invalid wallet address "${walletAddress}" — skipping.`,
+      );
+      return null;
+    }
+    let timeoutId;
+    try {
+      const score = await Promise.race([
+        reputationContract.getReputation(walletAddress),
+        new Promise((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error("RPC timeout")),
+            REPUTATION_RPC_TIMEOUT_MS,
+          );
+        }),
+      ]);
+      clearTimeout(timeoutId);
+      return Number(score);
+    } catch (err) {
+      clearTimeout(timeoutId);
+      logger.error(
+        `[reputation] Failed to fetch on-chain reputation for ${walletAddress}: ${err.message}`,
+      );
+      return null;
+    }
   });
 }

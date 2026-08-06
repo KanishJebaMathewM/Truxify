@@ -242,21 +242,25 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
 
   let dbSuccess = false;
   try {
-    const { error } = await supabaseAdmin.from('notifications').insert({
-      user_id: customerId,
-      title,
-      body,
-      notif_type: 'order_update',
-      // No OTP or OTP-derived value is persisted here: an unsalted digest of
-      // a 6-digit code is offline-brute-forceable if the table leaks.
-      metadata: { order_display_id: orderDisplayId }
-    });
-
-    if (error) {
-      logger.error({ err: error }, '[NotificationService] Database insert failed');
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot persist notification.');
     } else {
-      logger.info('[NotificationService] Notification inserted successfully');
-      dbSuccess = true;
+      const { error } = await supabaseAdmin.from('notifications').insert({
+        user_id: customerId,
+        title,
+        body,
+        notif_type: 'order_update',
+        // No OTP or OTP-derived value is persisted here: an unsalted digest of
+        // a 6-digit code is offline-brute-forceable if the table leaks.
+        metadata: { order_display_id: orderDisplayId }
+      });
+
+      if (error) {
+        logger.error({ err: error }, '[NotificationService] Database insert failed');
+      } else {
+        logger.info('[NotificationService] Notification inserted successfully');
+        dbSuccess = true;
+      }
     }
   } catch (dbErr) {
     logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');

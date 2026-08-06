@@ -308,9 +308,24 @@ export async function closeDbConnections() {
  * Logs warnings for missing optional vars, throws for missing required vars.
  */
 export function validateConfig() {
-  const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY'];
-  const recommended = ['REDIS_URL', 'MONGODB_URI', 'FIREBASE_SERVICE_ACCOUNT_JSON', 'SUPABASE_SERVICE_ROLE_KEY'];
-  const missing = required.filter((key) => !process.env[key]);
+  // Required: core runtime dependencies. App cannot function without these.
+  const required = [
+    'SUPABASE_URL',
+    'SUPABASE_ANON_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
+  ];
+  // Recommended: optional services that enhance functionality.
+  const recommended = [
+    'REDIS_URL',
+    'MONGODB_URI',
+    'FIREBASE_SERVICE_ACCOUNT_JSON',
+    'JWT_SECRET',
+    'SENTRY_DSN',
+  ];
+  const missing = required.filter((key) => {
+    const val = process.env[key];
+    return !val || val.trim().length === 0;
+  });
   const missingRecommended = recommended.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {

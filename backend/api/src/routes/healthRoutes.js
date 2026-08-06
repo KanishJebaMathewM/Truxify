@@ -295,9 +295,13 @@ router.get('/full', healthLimiter, async (_req, res) => {
     return res.status(500).json({
       status: 'unhealthy',
       timestamp: new Date().toISOString(),
-      error: 'Health aggregation failed',
+      error: 'health aggregation failed',
     });
   }
+});
+
+router.get('/sentry-debug', healthLimiter, (req, res) => {
+  throw new Error('Sentry Test Error from Node.js Backend');
 });
 
 export default router;

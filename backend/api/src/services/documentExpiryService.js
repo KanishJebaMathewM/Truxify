@@ -66,7 +66,7 @@ async function hasExistingNotification(userId, documentId, daysRemaining) {
       .from('notifications')
       .select('id, metadata')
       .eq('user_id', userId)
-      .eq('notif_type', 'document_expiry')
+      .eq('notif_type', 'document')
       .gte('created_at', cutoff);
 
     if (error || !data || data.length === 0) return false;
@@ -183,7 +183,7 @@ export async function processDocumentExpiryBatch() {
         };
 
         try {
-          await sendPushNotification(doc.user_id, title, body, 'document_expiry', metadata);
+          await sendPushNotification(doc.user_id, title, body, 'document', metadata);
           totalNotificationsSent++;
           logger.info(`[document-expiry] Sent ${window.label} expiry alert for ${docLabel} (doc: ${doc.id}) to user ${doc.user_id}`);
         } catch (err) {

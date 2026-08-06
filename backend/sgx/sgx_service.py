@@ -207,9 +207,9 @@ class SGXService:
                 return {'success': False, 'error': 'Enclave not initialized'}
             
             # In production: call ecall_secure_random
-            # For demo: generate random
-            import random
-            random_num = random.randint(0, 2**32 - 1)
+            # For demo: use a CSPRNG instead of the predictable Mersenne Twister
+            import secrets
+            random_num = secrets.randbits(32)
             
             return {
                 'success': True,

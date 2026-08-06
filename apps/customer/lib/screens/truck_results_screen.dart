@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import 'package:truxify/theme/app_theme.dart';
 
 import '../models/app_models.dart';
@@ -244,8 +245,7 @@ class _TruckResultsScreenState extends State<TruckResultsScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.local_shipping_rounded, size: 48,
-                    color: TruxifyColors.adaptiveSecondaryText(context)),
+                Lottie.asset('packages/truxify_shared/assets/lottie/searching_trucks.json', width: 200, height: 200),
                 const SizedBox(height: 16),
                 Text(
                   hasFilters

@@ -19,7 +19,7 @@ class OracleService {
     const otpResult = await this._verifyOTP(orderId, otp);
     providerResults.push(otpResult);
 
-    const gpsResult = this._verifyGPS(gpsCoordinates);
+    const gpsResult = await this._verifyGPS(orderId, gpsCoordinates);
     providerResults.push(gpsResult);
 
     const statusResult = await this._verifyOrderStatus(orderId);
@@ -77,18 +77,37 @@ class OracleService {
     }
   }
 
-  _verifyGPS(gpsCoordinates) {
+  async _verifyGPS(orderId, gpsCoordinates) {
     const hasValidCoords = gpsCoordinates &&
       typeof gpsCoordinates.lat === 'number' &&
       typeof gpsCoordinates.lng === 'number' &&
       gpsCoordinates.lat >= -90 && gpsCoordinates.lat <= 90 &&
       gpsCoordinates.lng >= -180 && gpsCoordinates.lng <= 180;
 
-    return {
-      confirmed: hasValidCoords === true,
-      provider: 'GPSVerifier',
-      timestamp: new Date().toISOString(),
-    };
+    if (!hasValidCoords) {
+      return {
+        confirmed: false,
+        provider: 'GPSVerifier',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    try {
+      const verification = await DeliveryVerificationService.assertDriverAtDropoff(orderId, gpsCoordinates);
+      return {
+        confirmed: verification.success || verification.isValid === true,
+        provider: 'GPSVerifier',
+        reason: verification.reason || null,
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        confirmed: false,
+        provider: 'GPSVerifier',
+        reason: error.message,
+        timestamp: new Date().toISOString(),
+      };
+    }
   }
 
   async _verifyOrderStatus(orderId) {

@@ -10,8 +10,8 @@ add_library(vector_matcher
     src/matcher.cpp
 )
 
-add_executable(matcher_test
-    src/matcher.cpp
+add_executable(vector-matcher-cpp
+    main.cpp
 )
 
-target_compile_options(vector_matcher PRIVATE -O3 -mavx2)
+target_compile_options(vector-matcher-cpp PRIVATE -O3)

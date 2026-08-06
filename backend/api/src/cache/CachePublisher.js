@@ -162,7 +162,8 @@ export function setupMessageHandler(cacheInvalidator) {
     const event = (() => {
       try {
         return JSON.parse(message);
-      } catch {
+      } catch (err) {
+        logger.warn({ err, channel, messagePreview: message.slice(0, 100) }, '[CachePublisher] Failed to parse event from Redis channel.');
         return null;
       }
     })();

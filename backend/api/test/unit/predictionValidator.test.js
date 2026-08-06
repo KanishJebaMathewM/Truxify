@@ -444,3 +444,45 @@ describe('RejectionReason constants', () => {
     expect(RejectionReason.UNEXPECTED_TYPE).toBe('unexpected_type');
   });
 });
+
+describe('validatePricePrediction — confidence edge cases', () => {
+  it('rejects NaN confidence', () => {
+    const result = validatePricePrediction({
+      estimated_price: 5000,
+      currency: 'INR',
+      confidence: NaN,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe(RejectionReason.NAN);
+  });
+
+  it('rejects Infinity confidence', () => {
+    const result = validatePricePrediction({
+      estimated_price: 5000,
+      currency: 'INR',
+      confidence: Infinity,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe(RejectionReason.INFINITY);
+  });
+
+  it('rejects zero confidence', () => {
+    const result = validatePricePrediction({
+      estimated_price: 5000,
+      currency: 'INR',
+      confidence: 0,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe(RejectionReason.ZERO);
+  });
+
+  it('accepts valid confidence at boundary (1.0)', () => {
+    const result = validatePricePrediction({
+      estimated_price: 5000,
+      currency: 'INR',
+      confidence: 1.0,
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+

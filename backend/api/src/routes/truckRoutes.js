@@ -336,6 +336,14 @@ function isLongitude(value) {
   return Number.isFinite(value) && value >= -180 && value <= 180;
 }
 
+const MATERIAL_TRUCK_COMPATIBILITY = Object.freeze({
+  Textile: ['Open Body', 'Closed Body', 'Container'],
+  Electronics: ['Closed Body', 'Container'],
+  Food: ['Closed Body', 'Container', 'Refrigerated'],
+  Machinery: ['Open Body', 'Container'],
+  Furniture: ['Closed Body', 'Container'],
+});
+
 async function canViewTruckNumber(user, truck) {
   if (user.role === 'admin' || truck.driver_id === user.id) {
     return { allowed: true };
@@ -652,6 +660,12 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       }
       if (truck_type && truck_type !== '') {
         if (truck.truckType !== truck_type) {
+          return false;
+        }
+      }
+      if (material_type && material_type !== '') {
+        const compatibleTypes = MATERIAL_TRUCK_COMPATIBILITY[material_type] || [];
+        if (!compatibleTypes.includes(truck.truckType)) {
           return false;
         }
       }

@@ -18,6 +18,16 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
   let gross_earnings = 0;
 
   (trips || []).forEach(trip => {
+    let tEarnings = Number(trip.total_earnings);
+    if (Number.isNaN(tEarnings)) {
+      tEarnings = 0;
+    }
+
+    let nEarnings = Number(trip.net_earnings);
+    if (Number.isNaN(nEarnings)) {
+      nEarnings = 0;
+    }
+
     if (trip.trip_date) {
       const tripDate = new Date(trip.trip_date);
       // Only add to weekly chart if within the last 7 days
@@ -26,7 +36,7 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
       if (diffDays <= 7) {
         const dayLabel = daysOfWeek[tripDate.getDay()];
         if (weeklyChartMap[dayLabel] !== undefined) {
-          weeklyChartMap[dayLabel] += trip.total_earnings || 0;
+          weeklyChartMap[dayLabel] += tEarnings;
         }
       }
     }
@@ -39,8 +49,8 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
       totalKm += distanceNum;
     }
 
-    totalNetEarnings += trip.net_earnings || 0;
-    gross_earnings += trip.total_earnings || 0;
+    totalNetEarnings += nEarnings;
+    gross_earnings += tEarnings;
   });
 
   const weeklyChart = Object.entries(weeklyChartMap).map(([day, earnings]) => ({

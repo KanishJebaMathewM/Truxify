@@ -140,3 +140,21 @@ describe('Pagination Middleware', () => {
     expect(req.query.offset).toBe(40); // (3-1) * 20
   });
 });
+
+describe('pagination — NaN and edge case handling', () => {
+  it('buildPagination handles NaN page by defaulting to 1', () => {
+    const result = buildPagination({ page: NaN });
+    expect(result.page).toBe(1);
+    expect(result.offset).toBe(0);
+  });
+
+  it('buildPagination handles NaN limit by defaulting to 20', () => {
+    const result = buildPagination({ limit: NaN });
+    expect(result.limit).toBe(20);
+  });
+
+  it('buildPagination handles Infinity page by defaulting to 1', () => {
+    const result = buildPagination({ page: Infinity });
+    expect(result.page).toBe(1);
+  });
+});

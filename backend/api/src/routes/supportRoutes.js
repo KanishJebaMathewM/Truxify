@@ -607,6 +607,14 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
       return res.status(400).json({ error: 'Cannot update a closed ticket.' });
     }
 
+    const isAdmin = req.user.role === 'admin';
+    const hasRestrictedOwnerUpdate = [subject, description, category].some((value) => value !== undefined);
+    if (!isAdmin && hasRestrictedOwnerUpdate) {
+      return res.status(403).json({
+        error: 'Access Denied: Only admins can update ticket content or category.',
+      });
+    }
+
     const updates = { updated_at: new Date().toISOString() };
 
     if (subject !== undefined) {
@@ -629,9 +637,14 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
     }
 
     if (status !== undefined) {
-      const normalizedStatus = status.toLowerCase().trim();
+      const statusResult = parseTicketStatus(status);
+      if (statusResult.error) {
+        return res.status(400).json({ error: statusResult.error });
+      }
+
+      const normalizedStatus = statusResult.value;
       const USER_ALLOWED_STATUSES = ['closed'];
-      if (req.user.role !== 'admin' && normalizedStatus !== ticket.status) {
+      if (!isAdmin && normalizedStatus !== ticket.status) {
         if (!USER_ALLOWED_STATUSES.includes(normalizedStatus)) {
           return res.status(403).json({
             error: 'Access Denied: Only admins can change ticket status.',

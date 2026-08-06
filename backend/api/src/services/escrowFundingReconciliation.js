@@ -1,6 +1,6 @@
 import { redisClient, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { escrowRefund, getEscrowBooking } from './escrow.js';
+import { submitEscrowRefund, getEscrowBooking } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
 
@@ -88,7 +88,7 @@ async function finalizeOrRevert(order, orderRepository) {
     // Deposit never landed (or booking could not be read). Release the driver.
     let refundError = null;
     try {
-      await escrowRefund(order.order_display_id);
+      await submitEscrowRefund(order.order_display_id);
     } catch (err) {
       refundError = err.message;
       logger.error(`[escrow-funding] Refund failed for ${order.order_display_id}: ${err.message}`);

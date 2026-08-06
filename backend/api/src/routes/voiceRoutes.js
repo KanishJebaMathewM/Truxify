@@ -81,6 +81,11 @@ router.get('/audio/:id', authenticate, userLimiter, (req, res) => {
   if (!entry) {
     return res.status(404).json({ error: 'Audio not found' });
   }
+
+  if (!entry.userId || (entry.userId !== req.user.id && req.user.role !== 'admin')) {
+    return res.status(403).json({ error: 'Access Denied: You do not have permission to access this audio.' });
+  }
+
   res.set('Content-Type', 'audio/mpeg');
   res.send(entry.buffer);
 });

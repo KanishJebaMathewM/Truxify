@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import '../models/ar_pallet_model.dart';
-import '../services/ar_loading_engine.dart';
+import '../models/ar_cargo_model.dart';
+import '../services/ar_loading_service.dart';
 
 class ArLoadingAssistantScreen extends StatefulWidget {
   const ArLoadingAssistantScreen({super.key});
@@ -10,154 +10,191 @@ class ArLoadingAssistantScreen extends StatefulWidget {
 }
 
 class _ArLoadingAssistantScreenState extends State<ArLoadingAssistantScreen> {
-  final ArLoadingEngine _engine = ArLoadingEngine();
-  List<ArPallet> _plan = [];
-  bool _isInitializing = true;
-  String _arStatusText = 'Scanning empty trailer geometry...';
+  final ArLoadingService _arService = ArLoadingService();
+  List<ArPallet> _pallets = [];
+  bool _isArActive = false;
+  ArPallet? _focusedPallet;
 
   @override
   void initState() {
     super.initState();
-    _initializeAR();
+    _loadPlan();
   }
 
-  Future<void> _initializeAR() async {
-    // Simulate LiDAR scan and calculation
-    final plan = await _engine.calculateOptimalLoadingPlan('53-FOOT-DRY-VAN', []);
+  void _loadPlan() async {
+    final pallets = await _arService.getLoadPlan();
     if (mounted) {
       setState(() {
-        _plan = plan;
-        _isInitializing = false;
-        _arStatusText = 'Point camera at the nose of the trailer';
+        _pallets = pallets;
       });
     }
   }
 
-  Future<void> _confirmPalletPlacement(int index) async {
-    final success = await _engine.verifyPlacementInAR(_plan[index].palletId);
-    if (success && mounted) {
-      setState(() {
-        _plan[index] = ArPallet(
-          palletId: _plan[index].palletId,
-          weightLbs: _plan[index].weightLbs,
-          dimensions: _plan[index].dimensions,
-          optimalX: _plan[index].optimalX,
-          optimalY: _plan[index].optimalY,
-          optimalZ: _plan[index].optimalZ,
-          isPlaced: true,
-        );
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${_plan[index].palletId} verified in optimal position.')),
+  void _toggleArMode() {
+    setState(() {
+      _isArActive = !_isArActive;
+      if (_isArActive && _pallets.isNotEmpty) {
+        _focusedPallet = _pallets.firstWhere((p) => !p.isPlaced, orElse: () => _pallets.first);
+      }
+    });
+  }
+
+  void _markPlaced(ArPallet pallet) {
+    setState(() {
+      final index = _pallets.indexOf(pallet);
+      _pallets[index] = ArPallet(
+        palletId: pallet.palletId,
+        destination: pallet.destination,
+        weightLbs: pallet.weightLbs,
+        isFragile: pallet.isFragile,
+        suggestedPosition: pallet.suggestedPosition,
+        colorCode: pallet.colorCode,
+        isPlaced: true,
       );
-    }
+      
+      try {
+        _focusedPallet = _pallets.firstWhere((p) => !p.isPlaced);
+      } catch (e) {
+        _focusedPallet = null; // All done
+        _isArActive = false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Loading Complete! Weight distribution optimized.'), backgroundColor: Colors.green)
+        );
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black, // Simulates background of a camera view
       appBar: AppBar(
-        title: const Text('AR Loading Assistant'),
-        backgroundColor: Colors.black.withOpacity(0.5),
-        elevation: 0,
+        title: const Text('AR Cargo Loading Assistant'),
+        backgroundColor: Colors.teal[900],
       ),
-      extendBodyBehindAppBar: true,
-      body: Stack(
-        children: [
-          // Simulated AR Camera Viewfinder
-          Center(
-            child: _isInitializing 
-              ? const CircularProgressIndicator(color: Colors.cyanAccent)
-              : Icon(Icons.view_in_ar, size: 120, color: Colors.cyan.withOpacity(0.3)),
-          ),
-          
-          // AR Target Overlays (Mocked as UI elements for scaffolding)
-          if (!_isInitializing)
-            Positioned(
-              top: MediaQuery.of(context).size.height * 0.4,
-              left: MediaQuery.of(context).size.width * 0.2,
-              child: _buildArBoundingBox(_plan.firstWhere((p) => !p.isPlaced, orElse: () => _plan[0])),
-            ),
-
-          // Heads Up Display (HUD)
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: const EdgeInsets.all(24.0),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.bottomCenter,
-                  end: Alignment.topCenter,
-                  colors: [Colors.black.withOpacity(0.9), Colors.transparent],
-                )
-              ),
-              child: Column(
-                children: [
-                  Text(_arStatusText, style: const TextStyle(color: Colors.cyanAccent, fontSize: 18, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 16),
-                  if (!_isInitializing)
-                    SizedBox(
-                      height: 120,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: _plan.length,
-                        itemBuilder: (context, index) {
-                          final pallet = _plan[index];
-                          return GestureDetector(
-                            onTap: () => _confirmPalletPlacement(index),
-                            child: Container(
-                              width: 100,
-                              margin: const EdgeInsets.only(right: 12),
-                              decoration: BoxDecoration(
-                                color: pallet.isPlaced ? Colors.green.withOpacity(0.8) : Colors.grey[900],
-                                border: Border.all(color: pallet.isPlaced ? Colors.greenAccent : Colors.cyanAccent),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(pallet.isPlaced ? Icons.check_circle : Icons.inventory_2, color: Colors.white),
-                                  const SizedBox(height: 8),
-                                  Text(pallet.palletId, style: const TextStyle(color: Colors.white, fontSize: 12)),
-                                  Text('${pallet.weightLbs} lbs', style: const TextStyle(color: Colors.white70, fontSize: 10)),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    )
-                ],
-              ),
-            ),
-          )
-        ],
+      body: _isArActive ? _buildArView() : _buildLoadPlanList(),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _toggleArMode,
+        backgroundColor: _isArActive ? Colors.red : Colors.teal[900],
+        icon: Icon(_isArActive ? Icons.close : Icons.view_in_ar),
+        label: Text(_isArActive ? 'EXIT AR' : 'LAUNCH AR GUIDE'),
       ),
     );
   }
 
-  Widget _buildArBoundingBox(ArPallet targetPallet) {
-    if (targetPallet.isPlaced) return const SizedBox();
-    
-    return Container(
-      width: 200,
-      height: 150,
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.cyanAccent, width: 3),
-        color: Colors.cyan.withOpacity(0.1),
-      ),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.arrow_downward, color: Colors.cyanAccent, size: 40),
-            Text('Place ${targetPallet.palletId} Here', style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.bold)),
-          ],
+  Widget _buildLoadPlanList() {
+    if (_pallets.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: Colors.teal[50],
+          child: const Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.teal),
+              SizedBox(width: 8),
+              Expanded(child: Text('Launch AR Guide inside the trailer to project virtual placement boxes for LIFO and weight optimization.')),
+            ],
+          ),
         ),
-      ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: _pallets.length,
+            itemBuilder: (context, index) {
+              final pallet = _pallets[index];
+              return ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: pallet.colorCode == 'BLUE' ? Colors.blue : Colors.orange,
+                  child: Icon(pallet.isPlaced ? Icons.check : Icons.inventory_2, color: Colors.white),
+                ),
+                title: Text(pallet.palletId, style: TextStyle(decoration: pallet.isPlaced ? TextDecoration.lineThrough : null)),
+                subtitle: Text('${pallet.destination} • ${pallet.weightLbs} lbs\nTarget: ${pallet.suggestedPosition}'),
+                trailing: pallet.isFragile ? const Icon(Icons.wine_bar, color: Colors.red) : null,
+                isThreeLine: true,
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildArView() {
+    return Stack(
+      children: [
+        // Simulated Camera Feed
+        Container(
+          width: double.infinity,
+          height: double.infinity,
+          color: Colors.black,
+          child: const Opacity(
+            opacity: 0.3,
+            child: Icon(Icons.camera, size: 200, color: Colors.white),
+          ),
+        ),
+        
+        // AR Overlay Elements
+        if (_focusedPallet != null) ...[
+          // Simulated AR Projected Box
+          Center(
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: _focusedPallet!.colorCode == 'BLUE' ? Colors.blueAccent : Colors.orangeAccent,
+                  width: 4,
+                  style: BorderStyle.solid, // Dash usually requires custom painter, solid is fine for mock
+                ),
+                color: (_focusedPallet!.colorCode == 'BLUE' ? Colors.blueAccent : Colors.orangeAccent).withOpacity(0.2),
+              ),
+              child: const Center(
+                child: Text('PLACE HERE', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 24)),
+              ),
+            ),
+          ),
+          
+          // HUD Info Panel
+          Positioned(
+            top: 24,
+            left: 16,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(12)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('NEXT PALLET', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                  Text('${_focusedPallet!.palletId} - ${_focusedPallet!.weightLbs} lbs', style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text('Destination: ${_focusedPallet!.destination}', style: const TextStyle(color: Colors.white70)),
+                  Text('Target: ${_focusedPallet!.suggestedPosition}', style: const TextStyle(color: Colors.tealAccent, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ),
+          ),
+          
+          // Placement Confirmation
+          Positioned(
+            bottom: 100,
+            left: 50,
+            right: 50,
+            child: ElevatedButton.icon(
+              onPressed: () => _markPlaced(_focusedPallet!),
+              icon: const Icon(Icons.check_circle),
+              label: const Text('CONFIRM PLACEMENT'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+              ),
+            ),
+          )
+        ]
+      ],
     );
   }
 }

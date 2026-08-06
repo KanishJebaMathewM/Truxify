@@ -21,11 +21,11 @@ const ESCROW_RESET_GUARD_FILTERS = [
 ];
 
 export class BidAcceptanceService {
-  constructor({ orderRepository, buildDepositTxFn, escrowDepositFn, recordDepositTxFn, escrowRefundFn, logger, notificationDispatcher }) {
+  constructor({ orderRepository, buildDepositTxFn, escrowDepositFn, recordDepositTxFn, submitEscrowRefundFn, logger, notificationDispatcher }) {
     this.orderRepository = orderRepository;
     this.buildDepositTxFn = buildDepositTxFn || escrowDepositFn || (async () => ({ bookingId: 'mock-booking-id' }));
     this.recordDepositTxFn = recordDepositTxFn;
-    this.escrowRefundFn = escrowRefundFn;
+    this.submitEscrowRefundFn = submitEscrowRefundFn;
     this.logger = logger;
     this.notificationDispatcher = notificationDispatcher;
   }

@@ -38,6 +38,37 @@ vi.mock('../../src/middleware/requirePolicy.js', () => ({
   requirePolicy: () => (req, res, next) => next()
 }));
 
+// Shared mock trip data
+const mockTrips = [
+  {
+    trip_date: new Date().toISOString(),
+    total_earnings: 1000,
+    net_earnings: 800,
+    distance: '50 km',
+    route_label: 'Mumbai-Pune',
+  },
+  {
+    trip_date: new Date(new Date().getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    total_earnings: 500,
+    net_earnings: 400,
+    distance: '30.5 km',
+    route_label: 'Delhi-Jaipur',
+  },
+];
+
+const mockAllTrips = [
+  {
+    trip_date: new Date().toISOString(),
+    distance: '25 km',
+    route_label: 'Mumbai-Pune',
+  },
+  {
+    trip_date: new Date(new Date().getTime() - 24 * 60 * 60 * 1000).toISOString(),
+    distance: '40 km',
+    route_label: 'Delhi-Jaipur',
+  },
+];
+
 // Setup app
 const app = express();
 app.use(express.json());

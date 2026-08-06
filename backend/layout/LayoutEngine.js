@@ -60,12 +60,44 @@ class LayoutEngine {
     }
     
     // ============ Layout Scheduling ============
-    
+
     scheduleLayout() {
         if (this.isProcessing) return;
-        
+
         this.isProcessing = true;
-        
+
         // Use microtask for immediate scheduling
-        Promise.resolve().then(() => {
-        .catch(err => console.error(err))
+        Promise.resolve().then(async () => {
+            try {
+                if (!this.root) return;
+
+                const dirtyIds = Array.from(this.dirtyNodes);
+                if (dirtyIds.length === 0) return;
+
+                this.dirtyNodes.clear();
+
+                const start = Date.now();
+                for (const nodeId of dirtyIds) {
+                    const node = this.root.findNode ? this.root.findNode(nodeId) : null;
+                    if (node && typeof node.measure === 'function') {
+                        node.measure();
+                    }
+                }
+
+                this.metrics.totalLayouts += 1;
+                this.metrics.averageLayoutTime =
+                    (this.metrics.averageLayoutTime * (this.metrics.totalLayouts - 1) + (Date.now() - start)) /
+                    this.metrics.totalLayouts;
+
+                logger.info(`Layout scheduled for ${dirtyIds.length} nodes in ${Date.now() - start}ms`);
+            } catch (err) {
+                logger.error({ err }, '[LayoutEngine] Layout scheduling failed');
+            } finally {
+                this.isProcessing = false;
+            }
+        }).catch(err => {
+            this.isProcessing = false;
+            logger.error({ err }, '[LayoutEngine] Unexpected error in layout microtask');
+        });
+    }
+}

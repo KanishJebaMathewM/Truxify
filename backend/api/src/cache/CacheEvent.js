@@ -82,63 +82,6 @@ export function createCacheEvent(type, opts = {}) {
     id: crypto.randomUUID(),
     type,
     namespace: opts.namespace,
-    key: opts.key || null,
-    pattern: opts.pattern || null,
-    entityId: opts.entityId || null,
-    subKey: opts.subKey || null,
-    originInstanceId: opts.originInstanceId || null,
-    timestamp: opts.timestamp || Date.now(),
-  };
-}
-
-/**
- * Serialize a cache event to a JSON string for Pub/Sub publishing.
- *
- * @param {object} event — as returned by createCacheEvent
- * @returns {string}
- */
-export function serializeCacheEvent(event) {
-  return JSON.stringify(event);
-}
-
-/**
- * Deserialize a JSON string back into a cache event object.
- * Returns null if parsing fails.
- *
- * @param {string} json
- * @returns {object|null}
- */
-export function deserializeCacheEvent(json) {
-  try {
-    const event = JSON.parse(json);
-    if (!event || !event.type || !event.namespace) return null;
-    return event;
-  } catch (err) {
-    logger.warn('[CacheEvent] Deserialization failed:', err?.message);
-    return null;
-  }
-}
-
-export default { CacheEventType, createCacheEvent, serializeCacheEvent, deserializeCacheEvent };
-/**
- * Create a cache invalidation event.
- *
- * @param {string} type — one of CacheEventType values
- * @param {object} opts
- * @param {string} opts.namespace — target namespace
- * @param {string} [opts.key] — specific Redis key (for INVALIDATE_KEY)
- * @param {string} [opts.pattern] — glob pattern (for INVALIDATE_PATTERN)
- * @param {string} [opts.entityId] — entity identifier
- * @param {string} [opts.subKey] — sub-entity key
- * @param {string} [opts.originInstanceId] — ID of the instance that originated the event
- * @param {number} [opts.timestamp] — event creation time (auto-set if omitted)
- * @returns {object} serialized event ready for JSON.stringify
- */
-export function createCacheEvent(type, opts = {}) {
-  return {
-    id: crypto.randomUUID(),
-    type,
-    namespace: opts.namespace,
     key: opts.key ?? null,
     pattern: opts.pattern ?? null,
     entityId: opts.entityId ?? null,
@@ -160,7 +103,7 @@ export function serializeCacheEvent(event) {
 
 /**
  * Deserialize a JSON string back into a cache event object.
- * Returns null if parsing fails.
+ * Returns null if parsing fails or the payload is structurally invalid.
  *
  * @param {string} json
  * @returns {object|null}
@@ -168,10 +111,23 @@ export function serializeCacheEvent(event) {
 export function deserializeCacheEvent(json) {
   try {
     const event = JSON.parse(json);
-    if (!event || !event.type || !event.namespace) return null;
+    if (!event || !event.type || !event.namespace) {
+      logger.warn(
+        { received: String(json).slice(0, 100) },
+        '[CacheEvent] Deserialization skipped: missing type or namespace field.'
+      );
+      return null;
+    }
+    if (!VALID_EVENT_TYPES.has(event.type)) {
+      logger.warn(
+        { eventType: event.type, validTypes: Array.from(VALID_EVENT_TYPES) },
+        '[CacheEvent] Deserialization skipped: unknown event type.'
+      );
+      return null;
+    }
     return event;
   } catch (err) {
-    logger.warn('[CacheEvent] Deserialization failed:', err?.message);
+    logger.warn({ err }, '[CacheEvent] Deserialization failed: invalid JSON.');
     return null;
   }
 }

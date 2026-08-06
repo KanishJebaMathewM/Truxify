@@ -123,11 +123,12 @@ export const dlqService = {
               .eq('id', event.id);
             logger.warn(`[DLQ] Event ${event.id} marked as failed_permanently`);
           } else {
-            // Schedule next retry
+            // Schedule next retry by resetting status to pending so the event can be re-claimed.
             const nextRetryAt = new Date(Date.now() + nextBackoffMin * 60000).toISOString();
             await dlqDb()
               .from('webhook_failures')
-              .update({ 
+              .update({
+                status: 'pending',
                 retry_count: newRetryCount,
                 next_retry_at: nextRetryAt,
                 error_message: String(procErr.message || procErr).slice(0, 1000),

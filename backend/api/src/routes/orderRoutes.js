@@ -1081,6 +1081,15 @@ router.post(
         return res.status(400).json({ error: 'driver_lat and driver_lng must be valid numbers.' });
       }
 
+      if (geofence_radius_m !== undefined) {
+        const parsedRadius = parseFloat(geofence_radius_m);
+        if (!Number.isFinite(parsedRadius) || parsedRadius <= 0) {
+          return res.status(400).json({ error: 'geofence_radius_m must be a positive number.' });
+        }
+        // Only pass the validated radius; the service will apply its own default if undefined.
+        req.body._validatedGeofenceRadiusM = parsedRadius;
+      }
+
       // Verify the order exists and the requesting driver is assigned to it
       const order = await orderValidationService.findOrderByIdOrDisplayId(
         req.params.id,
@@ -1102,7 +1111,7 @@ router.post(
         driverId: req.user.id,
         driverLat: lat,
         driverLng: lng,
-        geofenceRadiusM: geofence_radius_m ? parseFloat(geofence_radius_m) : 500,
+        geofenceRadiusM: req.body._validatedGeofenceRadiusM ?? 500,
       });
 
       return res.json(result);

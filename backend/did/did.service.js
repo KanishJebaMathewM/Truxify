@@ -117,13 +117,22 @@ class DIDService {
             );
             const receipt = await tx.wait();
 
-            const blockTimestamp = Math.floor(Date.now() / 1000);
-            const credentialId = ethers.keccak256(
-                ethers.solidityPacked(
-                    ["uint256", "address", "address", "string"],
-                    [blockTimestamp, this.wallet.address, subject, credentialType]
-                )
-            );
+            // Use the on-chain credentialId emitted by CredentialIssued instead of fabricating one from Date.now()
+            let credentialId = null;
+            for (const log of receipt.logs) {
+                try {
+                    const parsed = this.didRegistry.interface.parseLog(log);
+                    if (parsed && parsed.name === 'CredentialIssued') {
+                        credentialId = parsed.args[0];
+                        break;
+                    }
+                } catch (e) {
+                    continue;
+                }
+            }
+            if (!credentialId) {
+                throw new Error('CredentialIssued event not found in receipt');
+            }
 
             await this.identityWallet.addCredential(credentialId);
 

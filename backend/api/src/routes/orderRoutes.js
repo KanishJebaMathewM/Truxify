@@ -185,6 +185,12 @@ const router = express.Router();
 router.use(userLimiter);
 const LOAD_OFFER_CACHE_TTL_SECONDS = 120;
 
+const { JSDOM } = require('jsdom');
+const createDOMPurify = require('dompurify');
+const window = new JSDOM('').window;
+const DOMPurify = createDOMPurify(window);
+const MAX_NOTES_LENGTH = 500;
+
 async function readLoadOfferCache(cacheKey) {
   if (!redisClient) return null;
 
@@ -311,7 +317,36 @@ const changeDropLimiter = rateLimit({
  */
 router.post('/', authenticate, userLimiter, requirePolicy('order:create'), requireIdempotency(86400), validateBody(createOrderSchema), async (req, res) => {
   try {
-    const { order } = await orderLifecycleService.createOrder(req.user.id, req.user.fullName || 'Customer', req.body);
+    // --- Start of new validation code ---
+    // Extract special_instructions from the request body
+    const { special_instructions, ...otherFields } = req.body;
+
+    // 1. Length check
+    if (special_instructions && special_instructions.length > MAX_NOTES_LENGTH) {
+      return res.status(422).json({
+        error: `Special instructions must be ${MAX_NOTES_LENGTH} characters or fewer.`
+      });
+    }
+
+    // 2. Strip all HTML tags to prevent XSS
+    const safeNotes = special_instructions
+      ? DOMPurify.sanitize(special_instructions, { ALLOWED_TAGS: [] })
+      : null;
+
+    // 3. Reconstruct the body with the sanitized notes
+    const sanitizedBody = {
+      ...otherFields,
+      special_instructions: safeNotes
+    };
+    // --- End of validation code ---
+
+    // Now call the service with the sanitized body instead of req.body
+    const { order } = await orderLifecycleService.createOrder(
+      req.user.id,
+      req.user.fullName || 'Customer',
+      sanitizedBody   // <--- changed from req.body
+    );
+
     return res.status(201).json({ message: 'Order created successfully and broadcasted to loads board.', order });
   } catch (err) {
     if (err instanceof DomainError) {

@@ -72,6 +72,7 @@ export const createOrderSchema = z.object({
   requires_refrigeration: z.boolean().default(false).optional(),
   target_temperature_min: coerceNumber(z.number()).optional(),
   target_temperature_max: coerceNumber(z.number()).optional(),
+  special_instructions: z.string().max(500).optional().nullable(),
   special_requirements: z.string().max(500).optional().nullable(),
   payment_method_id: z.string().optional(),
   upi_id: z.string().regex(upiRegex, "Invalid UPI ID format").optional().or(z.literal('')).nullable(),

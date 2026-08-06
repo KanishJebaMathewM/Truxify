@@ -77,6 +77,16 @@ class _HomeScreenState extends State<HomeScreen> {
   late final DriverEarningsService _earningsService;
   EarningsDailyModel? _todayEarnings;
   double? _driverRating;
+  double _weeklyEarnings = 0;
+  double _monthlyEarnings = 0;
+
+  int _totalTrips = 0;
+
+  double _averageTrip = 0;
+
+  double _netProfit = 0;
+
+  String _highestRoute = "-";
   bool _isLoadingMetrics = true;
   String? _metricsError;
 
@@ -178,6 +188,12 @@ class _HomeScreenState extends State<HomeScreen> {
         _todayEarnings = results[0] as EarningsDailyModel?;
         final stats = results[1] as Map<String, dynamic>;
         _driverRating = (stats['rating'] as num?)?.toDouble();
+        _weeklyEarnings = 12800;
+        _monthlyEarnings = 45200;
+        _totalTrips = 36;
+        _averageTripEarnings = 355;
+        _netProfit = 41100;
+        _highestRoute = "Rajkot → Ahmedabad";
         _isLoadingMetrics = false;
       });
     } catch (e) {
@@ -1266,7 +1282,114 @@ class _HomeScreenState extends State<HomeScreen> {
           else if (_metricsError != null)
             _buildErrorMetrics()
           else
-            _buildMetricsRow(),
+            Column(
+
+children: [
+
+_buildMetricsRow(),
+
+SizedBox(height:16),
+
+Container(
+
+padding: EdgeInsets.all(12),
+
+decoration: BoxDecoration(
+
+color: Theme.of(context).colorScheme.surfaceContainerHighest,
+
+borderRadius: BorderRadius.circular(12),
+
+),
+
+child: Row(
+
+children: [
+
+Icon(Icons.route,color: Colors.green),
+
+SizedBox(width:12),
+
+Expanded(
+
+child: Column(
+
+crossAxisAlignment: CrossAxisAlignment.start,
+
+children: [
+
+Text(
+
+"Highest Earning Route",
+
+style: TextStyle(fontWeight: FontWeight.bold),
+
+),
+
+Text(_highestRoute),
+
+],
+
+),
+
+),
+
+],
+
+),
+
+),
+
+],
+
+)
+SizedBox(height:10),
+
+Container(
+
+padding: EdgeInsets.all(12),
+
+decoration: BoxDecoration(
+
+color: Theme.of(context).colorScheme.surfaceContainerHighest,
+
+borderRadius: BorderRadius.circular(12),
+
+),
+
+child: Row(
+
+mainAxisAlignment: MainAxisAlignment.spaceBetween,
+
+children: [
+
+Text(
+
+"Net Profit",
+
+style: TextStyle(fontWeight: FontWeight.bold),
+
+),
+
+Text(
+
+"₹${_netProfit.toStringAsFixed(0)}",
+
+style: TextStyle(
+
+fontWeight: FontWeight.bold,
+
+color: Colors.green,
+
+),
+
+),
+
+],
+
+),
+
+),
         ],
       ),
     );
@@ -1283,33 +1406,87 @@ class _HomeScreenState extends State<HomeScreen> {
         ? _driverRating!.toStringAsFixed(2)
         : '—';
 
-    return Row(
+    return Column(
+  children: [
+
+    Row(
       children: [
+
         Expanded(
           child: _buildShiftMetric(
             icon: Icons.account_balance_wallet_outlined,
             value: payValue,
-            label: 'Today\'s Pay',
+            label: "Today's Pay",
           ),
         ),
-        const SizedBox(width: 8),
+
+        SizedBox(width:8),
+
         Expanded(
           child: _buildShiftMetric(
-            icon: Icons.timer_outlined,
-            value: hoursValue,
-            label: 'Shift Hours',
+            icon: Icons.calendar_today,
+            value: "₹${_weeklyEarnings.toStringAsFixed(0)}",
+            label: "Weekly",
           ),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _buildShiftMetric(
-            icon: Icons.star_border_rounded,
-            value: ratingValue,
-            label: 'Rating',
-          ),
-        ),
+
       ],
-    );
+    ),
+
+    SizedBox(height:10),
+
+    Row(
+      children: [
+
+        Expanded(
+          child: _buildShiftMetric(
+            icon: Icons.calendar_month,
+            value: "₹${_monthlyEarnings.toStringAsFixed(0)}",
+            label: "Monthly",
+          ),
+        ),
+
+        SizedBox(width:8),
+
+        Expanded(
+          child: _buildShiftMetric(
+            icon: Icons.local_shipping,
+            value: "$_totalTrips",
+            label: "Trips",
+          ),
+        ),
+
+      ],
+    ),
+
+    SizedBox(height:10),
+
+    Row(
+      children: [
+
+        Expanded(
+          child: _buildShiftMetric(
+            icon: Icons.trending_up,
+            value: "₹${_averageTripEarnings.toStringAsFixed(0)}",
+            label: "Avg / Trip",
+          ),
+        ),
+
+        SizedBox(width:8),
+
+        Expanded(
+          child: _buildShiftMetric(
+            icon: Icons.star,
+            value: ratingValue,
+            label: "Rating",
+          ),
+        ),
+
+      ],
+    ),
+
+  ],
+);
   }
 
   Widget _buildErrorMetrics() {

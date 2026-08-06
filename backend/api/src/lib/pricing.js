@@ -15,9 +15,9 @@
  * `load_bids.bid_amount` is documented as paisa in orderRoutes.js:215).
  */
 
-import logger from '../middleware/logger.js';
+import logger from "../middleware/logger.js";
 
-function sanitizePrice(value) {
+export function sanitizePrice(value) {
   const num = Number(value);
   return Number.isFinite(num) && num >= 0 ? Math.round(num) : 0;
 }
@@ -25,46 +25,82 @@ function sanitizePrice(value) {
 const EARTH_RADIUS_KM = 6371.0088;
 
 const DEFAULTS = Object.freeze({
-  RATE_PER_TONNE_KM: 50,    // paisa per tonne-km, base rate
-  FRAGILE_MULTIPLIER: 1.5,  // multiplier on the base rate
-  STACKABLE_DISCOUNT: 0.9,  // multiplier < 1 to discount stackable cargo
-  HANDLING_FEE: 30000,      // paisa (₹300) flat handling fee
-  PLATFORM_FEE_PCT: 5,      // percent of base freight
-  FUEL_COST_PCT: 45,        // percent of base freight (driver-side cost)
-  TOLL_PER_KM: 200,         // paisa per km, proxy for highway toll
+  RATE_PER_TONNE_KM: 50, // paisa per tonne-km, base rate
+  FRAGILE_MULTIPLIER: 1.5, // multiplier on the base rate
+  STACKABLE_DISCOUNT: 0.9, // multiplier < 1 to discount stackable cargo
+  HANDLING_FEE: 30000, // paisa (₹300) flat handling fee
+  PLATFORM_FEE_PCT: 5, // percent of base freight
+  FUEL_COST_PCT: 45, // percent of base freight (driver-side cost)
+  TOLL_PER_KM: 200, // paisa per km, proxy for highway toll
 });
 
 function parsePositiveInt(raw, fallback, label) {
-  if (raw === null || raw === undefined || raw === '') {
-    if (label) logger.warn(`[pricing] ${label} is not set — using default ${fallback}`);
+  if (raw === null || raw === undefined || raw === "") {
+    if (label)
+      logger.warn(`[pricing] ${label} is not set — using default ${fallback}`);
     return fallback;
   }
   const n = Number(raw);
   if (Number.isFinite(n) && n >= 0) return n;
-  if (label) logger.warn(`[pricing] ${label}=${raw} is invalid — using default ${fallback}`);
+  if (label)
+    logger.warn(
+      `[pricing] ${label}=${raw} is invalid — using default ${fallback}`,
+    );
   return fallback;
 }
 
 function parsePositiveFloat(raw, fallback, label) {
-  if (raw === null || raw === undefined || raw === '') {
-    if (label) logger.warn(`[pricing] ${label} is not set — using default ${fallback}`);
+  if (raw === null || raw === undefined || raw === "") {
+    if (label)
+      logger.warn(`[pricing] ${label} is not set — using default ${fallback}`);
     return fallback;
   }
   const n = Number(raw);
   if (Number.isFinite(n) && n > 0) return n;
-  if (label) logger.warn(`[pricing] ${label}=${raw} is invalid — using default ${fallback}`);
+  if (label)
+    logger.warn(
+      `[pricing] ${label}=${raw} is invalid — using default ${fallback}`,
+    );
   return fallback;
 }
 
 function readRateCard() {
   return {
-    ratePerTonneKm: parsePositiveInt(process.env.TRUXIFY_RATE_PER_TONNE_KM, DEFAULTS.RATE_PER_TONNE_KM, 'TRUXIFY_RATE_PER_TONNE_KM'),
-    fragileMultiplier: parsePositiveFloat(process.env.TRUXIFY_FRAGILE_MULTIPLIER, DEFAULTS.FRAGILE_MULTIPLIER, 'TRUXIFY_FRAGILE_MULTIPLIER'),
-    stackableDiscount: parsePositiveFloat(process.env.TRUXIFY_STACKABLE_DISCOUNT, DEFAULTS.STACKABLE_DISCOUNT, 'TRUXIFY_STACKABLE_DISCOUNT'),
-    handlingFee: parsePositiveInt(process.env.TRUXIFY_HANDLING_FEE, DEFAULTS.HANDLING_FEE, 'TRUXIFY_HANDLING_FEE'),
-    platformFeePct: parsePositiveInt(process.env.TRUXIFY_PLATFORM_FEE_PCT, DEFAULTS.PLATFORM_FEE_PCT, 'TRUXIFY_PLATFORM_FEE_PCT'),
-    fuelCostPct: parsePositiveInt(process.env.TRUXIFY_FUEL_COST_PCT, DEFAULTS.FUEL_COST_PCT, 'TRUXIFY_FUEL_COST_PCT'),
-    tollPerKm: parsePositiveInt(process.env.TRUXIFY_TOLL_PER_KM, DEFAULTS.TOLL_PER_KM, 'TRUXIFY_TOLL_PER_KM'),
+    ratePerTonneKm: parsePositiveInt(
+      process.env.TRUXIFY_RATE_PER_TONNE_KM,
+      DEFAULTS.RATE_PER_TONNE_KM,
+      "TRUXIFY_RATE_PER_TONNE_KM",
+    ),
+    fragileMultiplier: parsePositiveFloat(
+      process.env.TRUXIFY_FRAGILE_MULTIPLIER,
+      DEFAULTS.FRAGILE_MULTIPLIER,
+      "TRUXIFY_FRAGILE_MULTIPLIER",
+    ),
+    stackableDiscount: parsePositiveFloat(
+      process.env.TRUXIFY_STACKABLE_DISCOUNT,
+      DEFAULTS.STACKABLE_DISCOUNT,
+      "TRUXIFY_STACKABLE_DISCOUNT",
+    ),
+    handlingFee: parsePositiveInt(
+      process.env.TRUXIFY_HANDLING_FEE,
+      DEFAULTS.HANDLING_FEE,
+      "TRUXIFY_HANDLING_FEE",
+    ),
+    platformFeePct: parsePositiveInt(
+      process.env.TRUXIFY_PLATFORM_FEE_PCT,
+      DEFAULTS.PLATFORM_FEE_PCT,
+      "TRUXIFY_PLATFORM_FEE_PCT",
+    ),
+    fuelCostPct: parsePositiveInt(
+      process.env.TRUXIFY_FUEL_COST_PCT,
+      DEFAULTS.FUEL_COST_PCT,
+      "TRUXIFY_FUEL_COST_PCT",
+    ),
+    tollPerKm: parsePositiveInt(
+      process.env.TRUXIFY_TOLL_PER_KM,
+      DEFAULTS.TOLL_PER_KM,
+      "TRUXIFY_TOLL_PER_KM",
+    ),
   };
 }
 
@@ -76,10 +112,14 @@ function readRateCard() {
  */
 export function haversineKm(lat1, lon1, lat2, lon2) {
   if (
-    !Number.isFinite(lat1) || !Number.isFinite(lon1) ||
-    !Number.isFinite(lat2) || !Number.isFinite(lon2)
+    !Number.isFinite(lat1) ||
+    !Number.isFinite(lon1) ||
+    !Number.isFinite(lat2) ||
+    !Number.isFinite(lon2)
   ) {
-    throw new TypeError('haversineKm requires finite numeric lat/lng arguments');
+    throw new TypeError(
+      "haversineKm requires finite numeric lat/lng arguments",
+    );
   }
   if (lat1 === lat2 && lon1 === lon2) return 0;
 
@@ -110,32 +150,50 @@ export function haversineKm(lat1, lon1, lat2, lon2) {
  * @throws {RangeError|TypeError} on invalid inputs
  */
 export function computeOrderPricing(input, rateCard = readRateCard()) {
-  if (!input || typeof input !== 'object') {
-    throw new TypeError('computeOrderPricing requires an input object');
+  if (!input || typeof input !== "object") {
+    throw new TypeError("computeOrderPricing requires an input object");
   }
 
   // Validate rate card at call time
   if (!rateCard.ratePerTonneKm || rateCard.ratePerTonneKm <= 0) {
-    throw new RangeError(`ratePerTonneKm must be > 0, got ${rateCard.ratePerTonneKm}`);
+    throw new RangeError(
+      `ratePerTonneKm must be > 0, got ${rateCard.ratePerTonneKm}`,
+    );
   }
   if (!rateCard.handlingFee || rateCard.handlingFee < 0) {
-    throw new RangeError(`handlingFee must be >= 0, got ${rateCard.handlingFee}`);
+    throw new RangeError(
+      `handlingFee must be >= 0, got ${rateCard.handlingFee}`,
+    );
   }
 
   const {
-    pickupLat, pickupLng, dropLat, dropLng,
-    weightTonnes, roadDistanceKm, isFragile = false, isStackable = false,
+    pickupLat,
+    pickupLng,
+    dropLat,
+    dropLng,
+    weightTonnes,
+    roadDistanceKm,
+    isFragile = false,
+    isStackable = false,
     tollFactor = 1,
   } = input;
 
   if (!Number.isFinite(weightTonnes) || weightTonnes <= 0) {
-    throw new RangeError(`weightTonnes must be a positive number, got ${weightTonnes}`);
+    throw new RangeError(
+      `weightTonnes must be a positive number, got ${weightTonnes}`,
+    );
   }
 
-  const fallbackDistanceKm = haversineKm(pickupLat, pickupLng, dropLat, dropLng);
-  const distanceKm = Number.isFinite(roadDistanceKm) && roadDistanceKm >= 0
-    ? roadDistanceKm
-    : fallbackDistanceKm;
+  const fallbackDistanceKm = haversineKm(
+    pickupLat,
+    pickupLng,
+    dropLat,
+    dropLng,
+  );
+  const distanceKm =
+    Number.isFinite(roadDistanceKm) && roadDistanceKm >= 0
+      ? roadDistanceKm
+      : fallbackDistanceKm;
 
   // Base rate scaled by goods class.
   let rate = rateCard.ratePerTonneKm;
@@ -145,7 +203,8 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
     throw new RangeError(`Computed rate-per-tonne-km must be > 0, got ${rate}`);
   }
 
-  const baseFreight = Math.round(rate * weightTonnes * distanceKm) + rateCard.handlingFee;
+  const baseFreight =
+    Math.round(rate * weightTonnes * distanceKm) + rateCard.handlingFee;
   const tollEstimate = Math.round(rateCard.tollPerKm * distanceKm * tollFactor);
   const platformFee = Math.round((baseFreight * rateCard.platformFeePct) / 100);
   const totalAmount = baseFreight + tollEstimate + platformFee;
@@ -166,8 +225,8 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
 }
 
 export function convertKmToMiles(km) {
-  if (typeof km !== 'number' || Number.isNaN(km)) {
-    throw new TypeError('km must be a number');
+  if (typeof km !== "number" || Number.isNaN(km)) {
+    throw new TypeError("km must be a number");
   }
   return km * 0.621371;
 }

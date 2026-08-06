@@ -59,6 +59,7 @@ import paymentRoutes from './routes/paymentRoutes.js'
 import userRoutes from './routes/userRoutes.js'
 import voiceRoutes from './routes/voiceRoutes.js'
 import demandRoutes from './routes/demandRoutes.js'
+import blockchainRoutes from './routes/blockchainRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -479,6 +480,7 @@ app.use('/api/v1/admin', adminRoutes)
 app.use('/api/v1/admin/audit-logs', auditRoutes)
 app.use('/api/voice', voiceRoutes)
 app.use('/api/demand-heatmap', demandRoutes)
+app.use('/api/blockchain', blockchainRoutes)
 
 // ============================================================================
 // WEBHOOK ROUTES

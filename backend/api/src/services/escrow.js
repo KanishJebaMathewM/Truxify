@@ -249,6 +249,7 @@ export async function getEscrowBooking(escrowBookingId) {
 export async function buildDepositTx (orderDisplayId, driverWalletAddress, amountWei) {
   return measureExecution('EscrowService.buildDepositTx', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
+
   if (!escrowContract) {
     return { txData: null, bookingId }
   }

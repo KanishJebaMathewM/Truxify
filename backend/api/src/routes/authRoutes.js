@@ -252,3 +252,5 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
 export default router;
 
 // Resolves #2052: Refresh Token Rotation logic
+
+.catch(err => console.error("Promise.all failed:", err));

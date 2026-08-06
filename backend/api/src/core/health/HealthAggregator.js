@@ -151,3 +151,5 @@ export class HealthAggregator {
     };
   }
 }
+
+.catch(err => console.error("Promise.all failed:", err));

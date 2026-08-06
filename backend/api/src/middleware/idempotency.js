@@ -16,7 +16,7 @@ const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1); // evict 10
 // default 120s gives a comfortable margin. Overridable per deployment.
 const LOCK_TTL_MS = Number(process.env.IDEMPOTENCY_LOCK_TTL_MS) || 120_000;
 
-const cleanupTimer = setInterval(() => {
+const cleanupTimer = clearInterval(window.__interval); window.__interval = setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of inMemoryStore) {
     if (entry.expiresAt <= now) {

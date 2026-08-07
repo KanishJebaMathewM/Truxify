@@ -149,10 +149,14 @@ export class OrderRepository {
         for (const f of filters) {
           if (f.op === 'eq') {
             query = query.eq(f.column, f.value);
+          } else if (f.op === 'neq') {
+            query = query.neq(f.column, f.value);
           } else if (f.op === 'not') {
             query = query.not(f.column, f.operator, f.value);
           } else if (f.op === 'in') {
             query = query.in(f.column, f.value);
+          } else if (f.op === 'neq') {
+            query = query.not(f.column, 'neq', f.value);
           }
         }
       }

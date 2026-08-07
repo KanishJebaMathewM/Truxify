@@ -4,8 +4,13 @@ const SQLI_PATTERNS = [
   /union\s+select/i,
   /drop\s+table/i,
   /insert\s+into/i,
+  /delete\s+from/i,
   /or\s+1=1/i,
-  /--/,
+  // Match -- only when it appears in a SQL comment context: preceded by
+  // whitespace, a quote, a closing paren, or a semicolon — not when
+  // embedded mid-word (e.g. date ranges like 2026-01-01--2026-02-01,
+  // negative numbers, or note fields containing "--").
+  /(?:^|[\s'");])--/,
 ];
 
 const XSS_PATTERNS = [

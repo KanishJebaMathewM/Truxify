@@ -10,6 +10,8 @@ const submitEscrowRefundMock = vi.fn();
 const confirmEscrowRefundMock = vi.fn();
 const ordersUpdateCalls = [];
 let scriptedResponses = [];
+const supabaseAdminBuilder = { from: vi.fn(makeBuilder) };
+const supabaseBuilder = { from: vi.fn(makeBuilder) };
 
 function makeBuilder(table) {
   const builder = {
@@ -86,9 +88,8 @@ vi.mock('../../src/core/telemetry/SpanFactory.js', () => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
-  supabase: {
-    from: vi.fn(makeBuilder),
-  },
+  supabase: supabaseBuilder,
+  supabaseAdmin: supabaseAdminBuilder,
 }));
 
 describe('staleOrderWorker TOCTOU guard (issue #5741)', () => {
@@ -100,12 +101,23 @@ describe('staleOrderWorker TOCTOU guard (issue #5741)', () => {
     sendPushNotificationMock.mockReset();
     submitEscrowRefundMock.mockReset();
     confirmEscrowRefundMock.mockReset();
+    supabaseBuilder.from.mockClear();
+    supabaseAdminBuilder.from.mockClear();
     vi.resetModules();
     const { startStaleOrderWorker } = await import('../../src/workers/staleOrderWorker.js');
     startStaleOrderWorker();
   });
 
   const staleOrder = { id: 'order-1', customer_id: 'customer-1', order_display_id: 'disp-1' };
+
+  it('routes orders queries through the service-role client, never the anon client', async () => {
+    scriptedResponses = [{ data: [], error: null }];
+
+    await scheduledHandler();
+
+    expect(supabaseAdminBuilder.from).toHaveBeenCalledWith('orders');
+    expect(supabaseBuilder.from).not.toHaveBeenCalled();
+  });
 
   function stillPending(overrides = {}) {
     return {

@@ -66,7 +66,8 @@ router.post('/query', authenticate, userLimiter, upload.single('file'), async (r
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.headers.host;
     if (result.audio_url && result.audio_url.startsWith('/')) {
-      result.audio_url = `${protocol}://${host}${result.audio_url}`;
+      const baseUrl = process.env.PUBLIC_BASE_URL || `${protocol}://${host}`;
+      result.audio_url = `${baseUrl}${result.audio_url}`;
     }
     
     res.json(result);

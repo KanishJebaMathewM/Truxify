@@ -1,10 +1,11 @@
-﻿import { ApolloServer } from '@apollo/server';
+import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { buildSubgraphSchema } from '@apollo/federation';
 import { gql } from 'graphql-tag';
 import { supabase } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
 import { generateOrderDisplayId } from '../../api/src/lib/orderDisplayId.js';
+import { createLoaders } from '../gateway/authContext.js';
 
 const ADMIN_ROLES = new Set(['ADMIN', 'admin']);
 
@@ -51,7 +52,7 @@ const ORDER_STATUS_TO_DB = {
     IN_TRANSIT: 'in_transit',
     COMPLETED: 'delivered',
     CANCELLED: 'cancelled',
-    DISPUTED: 'cancelled',
+    DISPUTED: 'disputed',
 };
 
 function toDbStatus(status) {
@@ -287,27 +288,31 @@ const resolvers = {
             // Fetch driver from driver service
             return { id: order.driverId };
         },
-        payment: async (order) => {
-            // Fetch payment from payment service
-            const { data, error } = await supabase
-                .from('payments')
-                .select('*')
-                .eq('order_id', order.id)
-                .single();
-            
-            if (error) return null;
-            return data;
+        payment: async (order, _, context) => {
+            if (!context.loaders) {
+                const { data, error } = await supabase
+                    .from('payments')
+                    .select('*')
+                    .eq('order_id', order.id)
+                    .single();
+                
+                if (error) return null;
+                return data;
+            }
+            return context.loaders.paymentLoader.load(order.id);
         },
-        trip: async (order) => {
-            // Fetch trip from trip service
-            const { data, error } = await supabase
-                .from('trips')
-                .select('*')
-                .eq('order_id', order.id)
-                .single();
-            
-            if (error) return null;
-            return data;
+        trip: async (order, _, context) => {
+            if (!context.loaders) {
+                const { data, error } = await supabase
+                    .from('trips')
+                    .select('*')
+                    .eq('order_id', order.id)
+                    .single();
+                
+                if (error) return null;
+                return data;
+            }
+            return context.loaders.tripLoader.load(order.id);
         }
     }
 };
@@ -319,7 +324,17 @@ async function startOrderService() {
     });
 
     const { url } = await startStandaloneServer(server, {
-        listen: { port: 4001 }
+        listen: { port: 4001 },
+        context: async ({ req }) => {
+            const id = req.headers['x-user-id'];
+            const role = req.headers['x-user-role'];
+            const user = id ? { id, role } : null;
+            
+            return {
+                user,
+                loaders: createLoaders(supabase)
+            };
+        }
     });
 
     logger.info(`âœ… Order GraphQL service running at ${url}`);

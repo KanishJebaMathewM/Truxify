@@ -285,7 +285,6 @@ export const updateProfileSchema = z.object({
   language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').refine((v) => VALID_LANGUAGES.includes(v), { message: 'Unsupported language code' }).optional(),
   dark_mode: z.boolean().optional(),
   is_online: z.boolean().optional(),
-  verification_status: z.enum(['pending', 'verified', 'rejected']).optional(),
 }).strict();
 
 // ── Oracle & Verification schemas ───────────────────────────────────────

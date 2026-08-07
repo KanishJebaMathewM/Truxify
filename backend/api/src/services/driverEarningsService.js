@@ -6,11 +6,12 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
   // Weekly Chart Aggregation (always shows past 7 days)
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const weeklyChartMap = {};
+  const pad = (n) => String(n).padStart(2, '0');
+  const toDateKey = (date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    const dayLabel = daysOfWeek[d.getDay()];
-    weeklyChartMap[dayLabel] = 0;
+    weeklyChartMap[toDateKey(d)] = { day: daysOfWeek[d.getDay()], earnings: 0 };
   }
 
   let totalKm = 0;
@@ -30,13 +31,13 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
 
     if (trip.trip_date) {
       const tripDate = new Date(trip.trip_date);
-      // Only add to weekly chart if within the last 7 days
+      // Only add to weekly chart if within the last 7 days (excluding future trips)
       const diffMs = new Date() - tripDate;
       const diffDays = diffMs / (1000 * 60 * 60 * 24);
-      if (diffDays <= 7) {
-        const dayLabel = daysOfWeek[tripDate.getDay()];
-        if (weeklyChartMap[dayLabel] !== undefined) {
-          weeklyChartMap[dayLabel] += tEarnings;
+      if (diffDays >= 0 && diffDays <= 7) {
+        const dateKey = toDateKey(tripDate);
+        if (weeklyChartMap[dateKey] !== undefined) {
+          weeklyChartMap[dateKey].earnings += tEarnings;
         }
       }
     }
@@ -53,10 +54,7 @@ export const calculateEarningsAggregation = (trips, allCompletedTrips, lifetimeT
     gross_earnings += tEarnings;
   });
 
-  const weeklyChart = Object.entries(weeklyChartMap).map(([day, earnings]) => ({
-    day,
-    earnings
-  }));
+  const weeklyChart = Object.values(weeklyChartMap);
 
   let deadheadTripsSaved = 0;
   if (allCompletedTrips && allCompletedTrips.length > 1) {

@@ -380,4 +380,120 @@ export function createStore(prefix) {
   return new DeferredRedisStore(prefix);
 }
 
+const VERIFY_DELIVERY_WINDOW_MS =
+  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const VERIFY_DELIVERY_MAX_REQUESTS =
+  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) || 5;
+
+export const verifyDeliveryLimiter = rateLimit({
+  windowMs: VERIFY_DELIVERY_WINDOW_MS,
+  max: VERIFY_DELIVERY_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const userKey = userKeyGenerator(req);
+    const orderId = req.params?.id || "unknown";
+    return `${userKey}:order:${orderId}`;
+  },
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:verify-delivery:"),
+  handler: sentryAlertHandler("verifyDeliveryLimiter"),
+  message: {
+    error: "Too many delivery verification attempts. Please try again later.",
+    retryAfter: Math.ceil(VERIFY_DELIVERY_WINDOW_MS / 1000),
+  },
+});
+
+const RESEND_OTP_WINDOW_MS =
+  Number(process.env.RESEND_OTP_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const RESEND_OTP_MAX_REQUESTS =
+  Number(process.env.RESEND_OTP_RATE_LIMIT_MAX_REQUESTS) || 3;
+
+export const resendOtpLimiter = rateLimit({
+  windowMs: RESEND_OTP_WINDOW_MS,
+  max: RESEND_OTP_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const userKey = userKeyGenerator(req);
+    const orderId = req.params?.id || "unknown";
+    return `${userKey}:order:${orderId}`;
+  },
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:resend-otp:"),
+  handler: sentryAlertHandler("resendOtpLimiter"),
+  message: {
+    error: "Too many OTP resend attempts. Please try again later.",
+    retryAfter: Math.ceil(RESEND_OTP_WINDOW_MS / 1000),
+  },
+});
+
+const CHANGE_DROP_WINDOW_MS =
+  Number(process.env.CHANGE_DROP_RATE_LIMIT_WINDOW_MS) || 5 * 60 * 1000;
+const CHANGE_DROP_MAX_REQUESTS =
+  Number(process.env.CHANGE_DROP_RATE_LIMIT_MAX_REQUESTS) || 5;
+
+export const changeDropLimiter = rateLimit({
+  windowMs: CHANGE_DROP_WINDOW_MS,
+  max: CHANGE_DROP_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const userKey = userKeyGenerator(req);
+    const orderId = req.params?.id || "unknown";
+    return `${userKey}:order:${orderId}`;
+  },
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:change-drop:"),
+  handler: sentryAlertHandler("changeDropLimiter"),
+  message: {
+    error: "Too many drop-location change requests. Please try again later.",
+    retryAfter: Math.ceil(CHANGE_DROP_WINDOW_MS / 1000),
+  },
+});
+
+const PREDICT_DEMAND_WINDOW_MS =
+  Number(process.env.PREDICT_DEMAND_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const PREDICT_DEMAND_MAX_REQUESTS =
+  Number(process.env.PREDICT_DEMAND_RATE_LIMIT_MAX_REQUESTS) || 10;
+
+export const predictDemandLimiter = rateLimit({
+  windowMs: PREDICT_DEMAND_WINDOW_MS,
+  max: PREDICT_DEMAND_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:predict-demand:"),
+  handler: sentryAlertHandler("predictDemandLimiter"),
+  message: {
+    error: "Rate limit exceeded",
+    retryAfter: Math.ceil(PREDICT_DEMAND_WINDOW_MS / 1000),
+  },
+});
+
+const TELEMETRY_WINDOW_MS =
+  Number(process.env.TELEMETRY_RATE_LIMIT_WINDOW_MS) || 60 * 1000;
+const TELEMETRY_MAX_REQUESTS =
+  Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS) || 60;
+
+export const telemetryLimiter = rateLimit({
+  windowMs: TELEMETRY_WINDOW_MS,
+  max: TELEMETRY_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const userKey = userKeyGenerator(req);
+    const orderId = req.params?.id || "unknown";
+    return `${userKey}:order:${orderId}`;
+  },
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:telemetry:"),
+  handler: sentryAlertHandler("telemetryLimiter"),
+  message: {
+    error: "Rate limit exceeded",
+    retryAfter: Math.ceil(TELEMETRY_WINDOW_MS / 1000),
+  },
+});
+
 export const __testing = { DeferredRedisStore, isRedisReady };

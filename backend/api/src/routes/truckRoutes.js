@@ -80,7 +80,7 @@
  */
 
 import express from 'express';
-import { supabase, mongoDb, redisClient } from '../config/db.js';
+import { supabase, supabaseAdmin, mongoDb, redisClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -605,7 +605,10 @@ router.get(
       return res.json([]);
     }
 
-    const { data: drivers, error: driversErr } = await supabase
+    // driver_details / trucks / profiles are RLS-protected with all anon
+    // privileges revoked, so the marketplace search must use the service-role
+    // client (scope is enforced by the search criteria, never the raw anon key).
+    const { data: drivers, error: driversErr } = await supabaseAdmin
       .from('driver_details')
       .select('user_id, rating, total_trips, completion_rate, truck_id')
       .eq('is_online', true)
@@ -625,8 +628,8 @@ router.get(
     const driverIds = drivers.map(d => d.user_id);
 
     const [trucksRes, profilesRes] = await Promise.all([
-      supabase.from('trucks').select('id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
-      supabase.from('profiles').select('id, full_name, avatar_url, is_digilocker_verified').in('id', driverIds),
+      supabaseAdmin.from('trucks').select('id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
+      supabaseAdmin.from('profiles').select('id, full_name, avatar_url, is_digilocker_verified').in('id', driverIds),
     ]);
 
     if (trucksRes.error) {

@@ -51,6 +51,7 @@ vi.mock('../src/services/escrow.js', () => ({
   submitEscrowCancelWithPenalty: vi.fn(),
   confirmEscrowRefund: vi.fn(),
   getEscrowBookingId: vi.fn(),
+  paisaToMaticWei: vi.fn((paisa) => BigInt(Math.round(paisa * 4e12))),
 }));
 
 vi.mock('../src/services/osrm.js', () => ({
@@ -121,8 +122,9 @@ describe('changeDrop escrow rebalance (issue #5825)', () => {
     const [name, params] = repo.executeRpc.mock.calls[0];
     expect(name).toBe('update_order_and_load_offer');
     const { total_amount, escrow_amount_wei } = params.p_order_updates;
-    // escrow payout figure must track the advertised total (wei = paisa * 1e16).
-    expect(escrow_amount_wei).toBe(BigInt(Math.round(total_amount * 1e16)).toString());
+    // escrow payout figure must track the advertised total via the canonical
+    // paisa -> wei converter (wei = paisa * 4e12, see escrow.js paisaToMaticWei).
+    expect(escrow_amount_wei).toBe(BigInt(Math.round(total_amount * 4e12)).toString());
   });
 
   it('rejects change-drop once escrow funding has started or completed', async () => {
@@ -178,6 +180,6 @@ describe('RPC/route persist escrow_amount_wei (issue #5825)', () => {
       src.indexOf('// ============================================================================\n// 16.'),
     );
     expect(changeDropSection).toContain('escrow_amount_wei: newAmountWei.toString()');
-    expect(changeDropSection).toContain('BigInt(Math.round(pricing.totalAmount * 1e16))');
+    expect(changeDropSection).toContain('BigInt(paisaToMaticWei(pricing.totalAmount))');
   });
 });

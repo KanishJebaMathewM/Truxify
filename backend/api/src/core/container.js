@@ -18,7 +18,6 @@ import {
   buildDepositTx,
   submitEscrowRefund,
   recordDepositTx,
-  submitEscrowRefund,
   confirmEscrowRefund,
 } from '../services/escrow.js';
 
@@ -83,6 +82,5 @@ export {
   buildDepositTx,
   submitEscrowRefund,
   recordDepositTx,
-  submitEscrowRefund,
   confirmEscrowRefund,
 };

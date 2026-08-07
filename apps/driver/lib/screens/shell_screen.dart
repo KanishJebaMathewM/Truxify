@@ -16,7 +16,7 @@ import 'earnings_screen.dart';
 import 'load_detail_screen.dart';
 import 'load_point_detail_screen.dart';
 import 'notifications_screen.dart';
-import 'profile_screen.dart';
+import 'driver_profile_screen.dart';
 import 'trip_detail_screen.dart';
 import 'trips_screen.dart';
 import 'my_truck_screen.dart';
@@ -89,7 +89,7 @@ class _ShellScreenState extends State<ShellScreen> {
       // Tab 3 — Profile
       _buildTabNavigator(
         _profileNavigatorKey,
-        ProfileScreen(
+        DriverProfileScreen(
           onOpenDocuments: () =>
               _profileNavigatorKey.currentState?.pushNamed(AppRoutes.documents),
           onSelectTab: _openTab,

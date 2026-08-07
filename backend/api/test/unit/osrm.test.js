@@ -63,14 +63,14 @@ describe('osrm - buildRouteUrl', () => {
 });
 
 describe('osrm - buildCacheKey', ()=> {
-  it('rounds coordinates to 6 decimal places with v2 prefix', () => {
+  it('rounds coordinates to 8 decimal places with v2 prefix', () => {
     const key = buildCacheKey({
       pickupLat: 12.9715987,
       pickupLng: 77.5945627,
       dropLat: 13.0827,
       dropLng: 80.2707,
     });
-    expect(key).toBe('osrm:route:v2:12.971599:77.594563:13.0827:80.2707');
+    expect(key).toBe('osrm:route:v2:12.9715987:77.5945627:13.0827:80.2707');
   });
 
   it('produces same key for coordinates that round to same values', () => {
@@ -234,7 +234,7 @@ describe('osrm - getRouteEstimate', () => {
       pickupLat: 12.9715987, pickupLng: 77.5945627, dropLat: 13.0827, dropLng: 80.2707,
     });
 
-    expect(mockRedis.get).toHaveBeenCalledWith('osrm:route:v2:12.971599:77.594563:13.0827:80.2707');
+    expect(mockRedis.get).toHaveBeenCalledWith('osrm:route:v2:12.9715987:77.5945627:13.0827:80.2707');
   });
 
   it('calls OSRM and stores result in Redis on cache miss', async () => {

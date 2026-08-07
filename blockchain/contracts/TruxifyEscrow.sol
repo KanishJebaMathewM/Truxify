@@ -247,7 +247,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
         pendingWithdrawals[driver] += paymentAmount;
 
         // Always extend the timeout to protect newly released funds
-        releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT;
+        // releaseTimestamps[driver] = block.timestamp + WITHDRAWAL_TIMEOUT; // Removed post-release withdrawal lock
 
         emit WithdrawalReady(bookingId, driver, paymentAmount);
         emit PaymentReleased(bookingId, driver, paymentAmount);
@@ -515,7 +515,7 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
     function withdraw() external nonReentrant whenNotPaused {
         uint256 amount = pendingWithdrawals[msg.sender];
         require(amount > 0, "Nothing to withdraw");
-        require(block.timestamp > releaseTimestamps[msg.sender], "Withdrawal period active");
+        // require(block.timestamp > releaseTimestamps[msg.sender], "Withdrawal period active"); // Immediate withdrawal allowed
 
         pendingWithdrawals[msg.sender] = 0;
         releaseTimestamps[msg.sender] = 0;

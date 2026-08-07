@@ -50,7 +50,7 @@
  */
 
 import express from 'express';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -193,7 +193,7 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
     const from = (page - 1) * limit;
     const to   = from + limit - 1;
 
-    let query = supabase
+    let query = supabaseAdmin
       .from('load_offers')
       .select('*', { count: 'exact' });
 

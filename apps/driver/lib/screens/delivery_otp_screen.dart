@@ -16,6 +16,7 @@ import '../theme/app_theme.dart';
 ///     - Within 500m → shows "Auto-confirm available" badge
 ///     - Tapping badge → POST /api/orders/:id/geofence-confirm
 ///   • Animated "Payment Released ✓ ₹XXXX credited" success banner
+///   • "Payout Pending Reconciliation" banner when escrow update failed
 ///   • Haptic feedback on success
 class DeliveryOtpScreen extends StatefulWidget {
   const DeliveryOtpScreen({
@@ -51,6 +52,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
   bool _isVerifying = false;
   bool _isGeofenceConfirming = false;
   bool _paymentReleased = false;
+  bool _reconciliationRequired = false;
   String? _errorMessage;
   String? _releasedAmount;
 
@@ -182,19 +184,11 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
       final amount = body is Map ? (body['amount_inr'] as String?) : null;
       final reconciliationRequired =
           body is Map && body['reconciliation_required'] == true;
-
       if (reconciliationRequired) {
-        if (mounted) {
-          setState(() {
-            _errorMessage =
-                'Delivery confirmed! Your payout of ₹${amount ?? widget.amountInr ?? '...'} '
-                'is pending reconciliation and will be credited shortly.';
-          });
-        }
-        return;
+        await _showReconciliationPending(amount ?? widget.amountInr);
+      } else {
+        await _showPaymentReleased(amount ?? widget.amountInr);
       }
-
-      await _showPaymentReleased(amount ?? widget.amountInr);
     } catch (e) {
       final msg = e.toString().replaceAll('Exception: ', '');
       setState(() => _errorMessage = msg);
@@ -251,6 +245,18 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
     if (mounted) Navigator.of(context).pop(true);
   }
 
+  Future<void> _showReconciliationPending(String? amount) async {
+    HapticFeedback.heavyImpact();
+    _geofenceTimer?.cancel();
+    setState(() {
+      _reconciliationRequired = true;
+      _releasedAmount = amount;
+    });
+    await _successController.forward();
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
@@ -274,7 +280,9 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
       ),
       body: _paymentReleased
           ? _buildSuccessBanner(isDark)
-          : _buildOtpForm(isDark),
+          : _reconciliationRequired
+              ? _buildReconciliationBanner(isDark)
+              : _buildOtpForm(isDark),
     );
   }
 
@@ -355,6 +363,107 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
                 const SizedBox(height: 16),
                 Text(
                   'The payment has been released from escrow\nand credited to your wallet.',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 14,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Order: ${widget.orderDisplayId}',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 12,
+                    color: isDark ? Colors.white38 : Colors.black38,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Reconciliation Pending Banner ─────────────────────────────────────────
+
+  Widget _buildReconciliationBanner(bool isDark) {
+    return Center(
+      child: FadeTransition(
+        opacity: _successOpacity,
+        child: ScaleTransition(
+          scale: _successScale,
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.orange.shade400,
+                        Colors.orange.shade700,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.orange.withValues(alpha: 0.4),
+                        blurRadius: 24,
+                        spreadRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.hourglass_top_rounded,
+                    color: Colors.white,
+                    size: 52,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                Text(
+                  'Payout Pending Reconciliation',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? Colors.white : const Color(0xFF0F1117),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                if (_releasedAmount != null) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 10),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.orange.shade600,
+                          Colors.orange.shade800,
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    child: Text(
+                      '₹$_releasedAmount will be credited',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Text(
+                  'Delivery confirmed, but the escrow payout could not be '
+                  'credited automatically. Your payment is pending '
+                  'reconciliation and will be credited once it is resolved.',
                   style: GoogleFonts.dmSans(
                     fontSize: 14,
                     color: isDark ? Colors.white60 : Colors.black54,

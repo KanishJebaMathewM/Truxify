@@ -1,19 +1,31 @@
 import cron from 'node-cron';
 import logger from '../middleware/logger.js';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import { sendPushNotification } from '../services/notificationService.js';
 import { submitEscrowRefund, confirmEscrowRefund } from '../services/escrow.js';
 import { WorkerTracer } from '../core/telemetry/WorkerTracer.js';
 import spanFactory from '../core/telemetry/SpanFactory.js';
 
 let staleOrderWorkerTask = null;
+let staleOrderClient = null;
 
 const STALE_ORDER_CANCELLATION_REASON = 'Stale order: no accepted bid within 24 hours.';
 
-export const startStaleOrderWorker = () => {
+export const startStaleOrderWorker = (orderRepository) => {
   if (staleOrderWorkerTask) {
     logger.info('[StaleOrderWorker] Stale order cleanup cron job already scheduled.');
     return staleOrderWorkerTask;
+  }
+
+  if (orderRepository) {
+    staleOrderClient = orderRepository.supabase;
+  } else if (supabaseAdmin) {
+    staleOrderClient = supabaseAdmin;
+  } else {
+    staleOrderClient = supabase;
+    logger.warn(
+      '[StaleOrderWorker] Service-role client not configured - falling back to the anon-key client. RLS will block stale-order reads/writes.'
+    );
   }
 
   const tracedHandler = WorkerTracer.wrapCronJob('stale-order-worker', async () => {
@@ -22,7 +34,7 @@ export const startStaleOrderWorker = () => {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
       // Find all pending orders created more than 24 hours ago
-      const { data: staleOrders, error: fetchError } = await supabase
+      const { data: staleOrders, error: fetchError } = await staleOrderClient
         .from('orders')
         .select('id, customer_id, order_display_id')
         .eq('status', 'pending')
@@ -99,7 +111,7 @@ async function cancelStaleOrder(staleOrder) {
   try {
     // Re-fetch the order inside the loop with a status filter to close the
     // window between the batch SELECT and the per-order UPDATE.
-    const { data: current, error: refetchErr } = await supabase
+    const { data: current, error: refetchErr } = await staleOrderClient
       .from('orders')
       .select('id, customer_id, order_display_id, escrow_status, refund_tx_hash, escrow_refund_attempts')
       .eq('id', staleOrder.id)
@@ -140,7 +152,7 @@ async function cancelStaleOrder(staleOrder) {
 
     // Cancel associated load offers (guarded on nothing — the order is now
     // cancelled, so its offers can never be fulfilled).
-    await supabase
+    await staleOrderClient
       .from('load_offers')
       .update({ status: 'cancelled' })
       .eq('order_display_id', current.order_display_id);
@@ -173,7 +185,7 @@ async function cancelStaleOrder(staleOrder) {
  * @returns {Promise<boolean>} true when the order was actually cancelled
  */
 async function cancelPlain(current) {
-  const { data: cancelled, error: updateErr } = await supabase
+  const { data: cancelled, error: updateErr } = await staleOrderClient
     .from('orders')
     .update({
       status: 'cancelled',
@@ -209,7 +221,7 @@ async function cancelWithRefund(current, escrowStatus) {
   // Guarded transition: only an order that is STILL pending AND in the exact
   // escrow state we observed may enter refund reconciliation. This is the
   // serialisation point that prevents two workers from double-refunding.
-  const { data: pendingOrder, error: pendingErr } = await supabase
+  const { data: pendingOrder, error: pendingErr } = await staleOrderClient
     .from('orders')
     .update({
       status: 'cancelled',
@@ -251,7 +263,7 @@ async function cancelWithRefund(current, escrowStatus) {
     }
 
     const refundedAt = new Date().toISOString();
-    const { error: finalErr } = await supabase
+    const { error: finalErr } = await staleOrderClient
       .from('orders')
       .update({
         status: 'cancelled',
@@ -273,7 +285,7 @@ async function cancelWithRefund(current, escrowStatus) {
   } catch (refundErr) {
     const failedAt = new Date().toISOString();
     const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
-    await supabase
+    await staleOrderClient
       .from('orders')
       .update({
         status: 'cancelled',

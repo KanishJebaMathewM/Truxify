@@ -4,9 +4,9 @@
 #include <cmath>
 #include <chrono>
 #include <sstream>
-#include <thread>
 #include <algorithm>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
 
 #if defined(_WIN32)
@@ -17,6 +17,7 @@ typedef int socklen_t;
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #define SOCKET int
 #define INVALID_SOCKET -1
@@ -35,16 +36,13 @@ struct DriverEmbedding {
     std::vector<float> vector;
 };
 
-// Compute Cosine Similarity between two vectors. The loop is bounded by the
-// actual vector lengths so shorter embeddings cannot cause an out-of-bounds
-// read.
+// Compute Cosine Similarity between two 64-D vectors
 float cosine_similarity(const std::vector<float>& v1, const std::vector<float>& v2) {
     float dot = 0.0f;
     float norm_a = 0.0f;
     float norm_b = 0.0f;
 
-    const size_t dim = std::min<size_t>(EMBEDDING_DIM, std::min(v1.size(), v2.size()));
-    for (size_t i = 0; i < dim; ++i) {
+    for (int i = 0; i < EMBEDDING_DIM; ++i) {
         dot += v1[i] * v2[i];
         norm_a += v1[i] * v1[i];
         norm_b += v2[i] * v2[i];
@@ -83,45 +81,161 @@ std::string search_top_k(const std::vector<DriverEmbedding>& pool, const std::ve
     double micros = std::chrono::duration<double, std::micro>(elapsed).count();
 
     std::stringstream ss;
-    ss << "{
-";
-    ss << "  "engine": "Truxify C++20 SIMD Vector Matcher v1.0",
-";
-    ss << "  "total_scanned": " << pool.size() << ",
-";
-    ss << "  "latency_micros": " << micros << ",
-";
-    ss << "  "top_matches": [
-";
+    ss << "{\n";
+    ss << "  \"engine\": \"Truxify C++20 SIMD Vector Matcher v1.0\",\n";
+    ss << "  \"total_scanned\": " << pool.size() << ",\n";
+    ss << "  \"latency_micros\": " << micros << ",\n";
+    ss << "  \"top_matches\": [\n";
 
-    int limit = std::min<int>(k, results.size());
+    int limit = std::min<int>(k, static_cast<int>(results.size()));
     for (int i = 0; i < limit; ++i) {
-        ss << "    {
-";
-        ss << "      "rank": " << (i + 1) << ",
-";
-        ss << "      "driver_id": "" << results[i].driver_id << "",
-";
-        ss << "      "match_score": " << results[i].score << ",
-";
-        ss << "      "latitude": " << results[i].lat << ",
-";
-        ss << "      "longitude": " << results[i].lng << "
-";
-        ss << "    }" << (i < limit - 1 ? "," : "") << "
-";
+        ss << "    {\n";
+        ss << "      \"rank\": " << (i + 1) << ",\n";
+        ss << "      \"driver_id\": \"" << results[i].driver_id << "\",\n";
+        ss << "      \"match_score\": " << results[i].score << ",\n";
+        ss << "      \"latitude\": " << results[i].lat << ",\n";
+        ss << "      \"longitude\": " << results[i].lng << "\n";
+        ss << "    }" << (i < limit - 1 ? "," : "") << "\n";
     }
-    ss << "  ]
-";
+    ss << "  ]\n";
     ss << "}";
 
     return ss.str();
 }
 
-int main() {
-    std::cout << "🚀 Truxify C++20 Vector Matcher Engine initializing..." << std::endl;
+// ---- Minimal JSON extraction helpers for the /search request body ----
 
-    // Generate 1,000 synthetic driver vector embeddings
+// Parses the first "query": [ ... ] float array in the body.
+std::vector<float> parse_query_vector(const std::string& body) {
+    std::vector<float> vec;
+    size_t pos = body.find("query");
+    if (pos == std::string::npos) return vec;
+    pos = body.find('[', pos);
+    if (pos == std::string::npos) return vec;
+    pos++;
+    while (pos < body.size()) {
+        while (pos < body.size() &&
+               !(std::isdigit(static_cast<unsigned char>(body[pos])) || body[pos] == '-')) {
+            pos++;
+        }
+        if (pos >= body.size() || body[pos] == ']') break;
+        const char* begin = body.c_str() + pos;
+        char* end = nullptr;
+        double val = std::strtod(begin, &end);
+        if (end == begin) break;
+        vec.push_back(static_cast<float>(val));
+        pos = static_cast<size_t>(end - body.c_str());
+    }
+    return vec;
+}
+
+// Parses the "k" field, defaulting to 5.
+int parse_top_k(const std::string& body) {
+    size_t pos = body.find("\"k\"");
+    if (pos == std::string::npos) return 5;
+    pos = body.find(':', pos);
+    if (pos == std::string::npos) return 5;
+    pos++;
+    while (pos < body.size() && (body[pos] == ' ' || body[pos] == '\t')) pos++;
+    int k = std::atoi(body.c_str() + pos);
+    return k > 0 ? k : 5;
+}
+
+// ---- Minimal HTTP/1.1 server ----
+
+// Returns the body Content-Length from the request head, or 0.
+size_t parse_content_length(const std::string& request) {
+    size_t header_end = request.find("\r\n\r\n");
+    if (header_end == std::string::npos) return 0;
+
+    std::istringstream ss(request.substr(0, header_end));
+    std::string line;
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        size_t colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        std::string name = line.substr(0, colon);
+        std::string value = line.substr(colon + 1);
+        for (auto& c : name) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (name == "content-length") {
+            return static_cast<size_t>(std::strtoul(value.c_str(), nullptr, 10));
+        }
+    }
+    return 0;
+}
+
+// Splits a request into method, path, and (read) body.
+void parse_request(const std::string& request, std::string& method, std::string& path, std::string& body) {
+    size_t line_end = request.find("\r\n");
+    std::string head = request.substr(0, line_end);
+    std::istringstream iss(head);
+    iss >> method >> path;
+
+    size_t header_end = request.find("\r\n\r\n");
+    if (header_end != std::string::npos) {
+        size_t content_length = parse_content_length(request);
+        size_t body_start = header_end + 4;
+        if (request.size() >= body_start + content_length) {
+            body = request.substr(body_start, content_length);
+        }
+    }
+}
+
+// Wraps a JSON payload in an HTTP/1.1 response.
+std::string build_response(const std::string& body, const std::string& status) {
+    std::stringstream ss;
+    ss << "HTTP/1.1 " << status << "\r\n";
+    ss << "Content-Type: application/json\r\n";
+    ss << "Content-Length: " << body.size() << "\r\n";
+    ss << "Connection: close\r\n\r\n";
+    ss << body;
+    return ss.str();
+}
+
+// Reads one request and writes one response on the given client socket.
+void handle_client(SOCKET client, const std::vector<DriverEmbedding>& driver_pool) {
+    char buf[8192];
+    std::string request;
+    for (;;) {
+        int n = recv(client, buf, sizeof(buf), 0);
+        if (n <= 0) break;
+        request.append(buf, static_cast<size_t>(n));
+
+        size_t header_end = request.find("\r\n\r\n");
+        if (header_end != std::string::npos) {
+            size_t content_length = parse_content_length(request);
+            if (request.size() >= header_end + 4 + content_length) break;
+        }
+        if (request.size() > 65536) break;
+    }
+
+    std::string method, path, body;
+    parse_request(request, method, path, body);
+
+    std::string response;
+    if (method == "GET" && path == "/health") {
+        response = build_response(
+            "{\"status\":\"ok\",\"service\":\"vector-matcher-cpp\",\"pool_size\":" + std::to_string(driver_pool.size()) + "}",
+            "200 OK");
+    } else if (method == "POST" && path == "/search") {
+        std::vector<float> query = parse_query_vector(body);
+        if (query.size() != static_cast<size_t>(EMBEDDING_DIM)) {
+            response = build_response(
+                "{\"success\":false,\"error\":\"query vector must contain 64 elements\"}",
+                "400 Bad Request");
+        } else {
+            int k = parse_top_k(body);
+            response = build_response(search_top_k(driver_pool, query, k), "200 OK");
+        }
+    } else {
+        response = build_response("{\"error\":\"not found\"}", "404 Not Found");
+    }
+
+    send(client, response.c_str(), static_cast<int>(response.size()), 0);
+}
+
+// Generates the synthetic driver embedding pool used for searches.
+std::vector<DriverEmbedding> generate_driver_pool() {
     std::vector<DriverEmbedding> driver_pool;
     driver_pool.reserve(1000);
 
@@ -138,76 +252,56 @@ int main() {
             vec
         });
     }
+    return driver_pool;
+}
 
-    int port = 8088;
-    if (const char* env_p = std::getenv("PORT")) {
-        port = std::atoi(env_p);
+int main() {
+    std::cout << "🚀 Truxify C++20 Vector Matcher Engine initializing..." << std::endl;
+
+    // Generate 1,000 synthetic driver vector embeddings
+    std::vector<DriverEmbedding> driver_pool = generate_driver_pool();
+
+    // Startup self-test query.
+    std::vector<float> load_query(EMBEDDING_DIM);
+    for (int d = 0; d < EMBEDDING_DIM; ++d) {
+        load_query[d] = static_cast<float>(rand()) / RAND_MAX;
     }
+    std::string result = search_top_k(driver_pool, load_query, 5);
+    std::cout << "✅ Vector Search Results:\n" << result << "\n";
 
-#if defined(_WIN32)
-    WSADATA wsaData;
-    WSAStartup(MAKEWORD(2, 2), &wsaData);
-#endif
-
-    SOCKET server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_fd == INVALID_SOCKET) {
-        std::cerr << "Failed to create socket." << std::endl;
+    SOCKET listen_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (listen_sock == INVALID_SOCKET) {
+        std::cerr << "Failed to create socket" << std::endl;
         return 1;
     }
 
     int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
+    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
 
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(port);
+    sockaddr_in addr;
+    std::memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(8088);
 
-    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) == SOCKET_ERROR) {
-        std::cerr << "Bind failed on port " << port << std::endl;
-        closesocket(server_fd);
+    if (bind(listen_sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR) {
+        std::cerr << "Failed to bind port 8088" << std::endl;
+        closesocket(listen_sock);
         return 1;
     }
 
-    if (listen(server_fd, 10) == SOCKET_ERROR) {
-        std::cerr << "Listen failed." << std::endl;
-        closesocket(server_fd);
+    if (listen(listen_sock, 16) == SOCKET_ERROR) {
+        std::cerr << "Failed to listen on 8088" << std::endl;
+        closesocket(listen_sock);
         return 1;
     }
 
-    std::cout << "✅ Vector Matcher HTTP Server listening on port " << port << std::endl;
+    std::cout << "✅ C++20 Vector Matcher Engine listening on port 8088" << std::endl;
 
-    while (true) {
-        sockaddr_in client_addr{};
-        socklen_t client_len = sizeof(client_addr);
-        SOCKET client_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
-        if (client_fd == INVALID_SOCKET) continue;
-
-        char buffer[1024] = {0};
-        recv(client_fd, buffer, sizeof(buffer) - 1, 0);
-
-        std::vector<float> load_query(EMBEDDING_DIM);
-        for (int d = 0; d < EMBEDDING_DIM; ++d) {
-            load_query[d] = static_cast<float>(rand()) / RAND_MAX;
-        }
-
-        std::string json_body = search_top_k(driver_pool, load_query, 5);
-
-        std::stringstream response_ss;
-        response_ss << "HTTP/1.1 200 OK\r\n"
-                    << "Content-Type: application/json\r\n"
-                    << "Content-Length: " << json_body.length() << "\r\n"
-                    << "Connection: close\r\n\r\n"
-                    << json_body;
-
-        std::string response = response_ss.str();
-        send(client_fd, response.c_str(), static_cast<int>(response.length()), 0);
-        closesocket(client_fd);
+    for (;;) {
+        SOCKET client = accept(listen_sock, nullptr, nullptr);
+        if (client == INVALID_SOCKET) continue;
+        handle_client(client, driver_pool);
+        closesocket(client);
     }
-
-    closesocket(server_fd);
-#if defined(_WIN32)
-    WSACleanup();
-#endif
-    return 0;
 }

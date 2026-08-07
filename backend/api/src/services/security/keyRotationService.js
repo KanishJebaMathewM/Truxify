@@ -74,7 +74,7 @@ class KeyRotationService {
 
   async createRotationRecord(userId, walletAddress, reason) {
     try {
-      const rotationId = `rot_${crypto.randomBytes(16).toString('hex')}`;
+      const rotationId = `rot_${crypto.randomUUID()}`;
 
       const { data, error } = await supabase
         .from('key_rotations')

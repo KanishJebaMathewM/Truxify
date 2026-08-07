@@ -309,13 +309,13 @@ class WebRTCSignalingServer {
   }
 
   getOrCreateMesh() {
-    const meshId = `mesh_${crypto.randomBytes(8).toString('hex')}`;
+    const meshId = `mesh_${crypto.randomUUID()}`;
     this.meshes.set(meshId, new Set());
     return meshId;
   }
 
   generatePeerId() {
-    return `peer_${crypto.randomBytes(8).toString('hex')}`;
+    return `peer_${crypto.randomUUID()}`;
   }
 
   startDiscovery() {

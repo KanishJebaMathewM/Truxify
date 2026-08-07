@@ -7,10 +7,10 @@ import { supabaseAdmin } from '../../config/db.js';
 import {
   submitEscrowRefund,
   recordDepositTx,
-  submitEscrowRefund,
   submitEscrowCancelWithPenalty,
   confirmEscrowRefund,
   getEscrowBookingId,
+  paisaToMaticWei,
 } from '../escrow.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { getRouteEstimate } from '../osrm.js';
@@ -301,8 +301,8 @@ export class OrderLifecycleService {
   async submitBid(loadOfferId, driverId, bidAmount) {
     return measureExecution('OrderLifecycleService.submitBid', async () => {
       const lockKey = `lock:submitBid:${driverId}:${loadOfferId}`;
-      const acquired = await acquireLock(lockKey, 5000);
-      if (!acquired) throw new DomainError(409, { error: 'Duplicate bid submission in progress.' });
+      const lockValue = await acquireLock(lockKey, 5000);
+      if (!lockValue) throw new DomainError(409, { error: 'Duplicate bid submission in progress.' });
 
       try {
         const { data: offer, error: offerErr } = await this.orderRepository.findLoadOfferById(loadOfferId, 'id, status, customer_id');
@@ -341,7 +341,7 @@ export class OrderLifecycleService {
 
         return { message: 'Bid submitted successfully.', bid };
       } finally {
-        await releaseLock(lockKey);
+        await releaseLock(lockKey, lockValue);
       }
     });
   }
@@ -572,7 +572,7 @@ export class OrderLifecycleService {
           throw new DomainError(400, { error: 'Unable to compute new pricing for the requested drop.', details: pricingErr.message });
         }
 
-        const newAmountWei = BigInt(Math.round(pricing.totalAmount * 1e16));
+        const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
 
         const updates = {
           drop_address,

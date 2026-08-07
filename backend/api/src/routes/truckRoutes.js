@@ -588,6 +588,9 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       return res.json([]);
     }
 
+    // driver_details / trucks / profiles are RLS-protected with all anon
+    // privileges revoked, so the marketplace search must use the service-role
+    // client (scope is enforced by the search criteria, never the raw anon key).
     const { data: drivers, error: driversErr } = await supabaseAdmin
       .from('driver_details')
       .select('user_id, rating, total_trips, completion_rate, truck_id')

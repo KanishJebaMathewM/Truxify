@@ -78,7 +78,7 @@ class StoreTransaction {
     
     async rollback() {
         if (!this.isActive) {
-            throw new Error('Transaction not active');
+            return { id: this.id, duration: 0, error: 'already rolled back' };
         }
         
         if (this.snapshot) {
@@ -183,7 +183,7 @@ class GlobalStore extends EventEmitter {
     
     // ============ Transaction Support ============
     
-    transaction(fn) {
+    async transaction(fn) {
         if (this.activeTransaction) {
             throw new Error('Nested transactions not supported');
         }

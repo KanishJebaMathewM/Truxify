@@ -153,7 +153,7 @@ async function cancelStaleOrder(staleOrder) {
         requiresRefund
           ? `Your order ${current.order_display_id} was cancelled because it was not completed in time. Any escrowed funds are being refunded.`
           : 'Your order was cancelled because it received no accepted bids within 24 hours. Please try posting again.',
-        'ORDER_CANCELLED',
+        'order_update',
         { orderId: current.id, orderDisplayId: current.order_display_id }
       );
       logger.info(`[StaleOrderWorker] Cancelled order ${current.order_display_id} and notified customer ${current.customer_id}.`);

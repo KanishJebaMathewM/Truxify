@@ -57,6 +57,7 @@ import lookupRoutes from './routes/lookupRoutes.js'
 import { getRoot, notFound } from './controllers/rootController.js'
 import webhookRoutes from './routes/webhookRoutes.js'
 import auditRoutes from './routes/auditRoutes.js'
+import droneRoutes from './routes/droneRoutes.js'
 import paymentRoutes from './routes/paymentRoutes.js'
 import userRoutes from './routes/userRoutes.js'
 import voiceRoutes from './routes/voiceRoutes.js'
@@ -450,6 +451,7 @@ app.use(requireJsonContent)
 // ============================================================================
 // RATE LIMITING
 // ============================================================================
+app.use('/api/drone', droneRoutes)
 app.use('/api/health', healthLimiter)
 app.use('/api/health', healthRoutes)
 app.use('/api/v1/health', healthLimiter)

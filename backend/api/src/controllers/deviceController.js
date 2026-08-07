@@ -153,15 +153,23 @@ export async function unregisterDeviceToken(req, res, next) {
       });
     }
 
-    const { error: deleteError } = await supabase
+    const { error: deleteError, count } = await supabase
       .from('user_devices')
-      .delete()
+      .delete({ count: 'exact' })
       .eq('user_id', userId)
       .eq('fcm_token', fcmToken);
 
     if (deleteError) {
       logger.error('[DeviceController] Failed to remove device token from database:', deleteError.message);
       return next(new AppError('Failed to unregister device', 500));
+    }
+
+    // If no rows were deleted, the token didn't exist for this user
+    if (count === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Device token not found'
+      });
     }
 
     const { error: profileClearError } = await supabase

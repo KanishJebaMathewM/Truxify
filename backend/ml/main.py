@@ -414,7 +414,7 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
     features = [
         input.hour,
         input.day_of_week,
-        1 if input.day_of_week >= 5 else 0,
+        1 if input.day_of_week in (0, 6) else 0,
         input.temperature,
         input.precipitation,
         input.historical_volume,

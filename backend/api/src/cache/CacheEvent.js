@@ -103,7 +103,7 @@ export function serializeCacheEvent(event) {
 
 /**
  * Deserialize a JSON string back into a cache event object.
- * Returns null if parsing fails or the payload is structurally invalid.
+ * Returns null if parsing fails or payload contains invalid event structure.
  *
  * @param {string} json
  * @returns {object|null}
@@ -111,20 +111,19 @@ export function serializeCacheEvent(event) {
 export function deserializeCacheEvent(json) {
   try {
     const event = JSON.parse(json);
-    if (!event || !event.type || !event.namespace) {
-      logger.warn(
-        { received: String(json).slice(0, 100) },
-        '[CacheEvent] Deserialization skipped: missing type or namespace field.'
-      );
+
+    if (!event || typeof event !== 'object') return null;
+
+    if (!event.namespace || typeof event.namespace !== 'string') {
+      logger.warn('[CacheEvent] Deserialization failed: missing or invalid namespace.');
       return null;
     }
-    if (!VALID_EVENT_TYPES.has(event.type)) {
-      logger.warn(
-        { eventType: event.type, validTypes: Array.from(VALID_EVENT_TYPES) },
-        '[CacheEvent] Deserialization skipped: unknown event type.'
-      );
+
+    if (!event.type || !VALID_EVENT_TYPES.has(event.type)) {
+      logger.warn(`[CacheEvent] Deserialization failed: unrecognized event type "${event.type}".`);
       return null;
     }
+
     return event;
   } catch (err) {
     logger.warn({ err }, '[CacheEvent] Deserialization failed: invalid JSON.');

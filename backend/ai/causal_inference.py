@@ -93,19 +93,35 @@ class DoCalculus:
             data=data,
             treatment=treatments,
             outcome=outcomes,
-            graph=self._build_graph()
+            graph=self._build_graph(treatments, outcomes, data)
         )
         logger.info("✅ Causal model set")
-    
-    def _build_graph(self) -> str:
-        """Build graph structure"""
-        return """
-            digraph {
-                treatment -> outcome;
-                confounder -> treatment;
-                confounder -> outcome;
-            }
+
+    def _build_graph(self, treatments: List[str], outcomes: List[str], data: pd.DataFrame) -> str:
+        """Build graph structure using the real dataframe column names.
+
+        The previous implementation hardcoded placeholder nodes named
+        'treatment', 'outcome' and 'confounder', which never match the columns
+        passed to set_causal_model. DoWhy resolves treatment/outcome variables
+        by name, so identification always failed and every estimate silently
+        returned None. Any column that is neither a treatment nor an outcome is
+        treated as a potential common cause (confounder) of treatment/outcome.
         """
+        treatment_set = set(treatments)
+        outcome_set = set(outcomes)
+        confounders = [c for c in data.columns if c not in treatment_set and c not in outcome_set]
+
+        lines = []
+        for treatment in treatments:
+            for outcome in outcomes:
+                lines.append(f"    {treatment} -> {outcome};")
+        for confounder in confounders:
+            for treatment in treatments:
+                lines.append(f"    {confounder} -> {treatment};")
+            for outcome in outcomes:
+                lines.append(f"    {confounder} -> {outcome};")
+
+        return "digraph {\n" + "\n".join(lines) + "\n}"
     
     def estimate_ate(self, treatment: str, outcome: str) -> Dict:
         """Estimate Average Treatment Effect"""

@@ -73,4 +73,4 @@ class LayoutEngine {
     }
 }
 
-export default new LayoutEngine();
+export default LayoutEngine;

@@ -179,4 +179,3 @@ class KEDAService {
 }
 
 export default new KEDAService();
-.catch(err => console.error("Promise.all failed:", err));

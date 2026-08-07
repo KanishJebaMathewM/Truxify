@@ -94,9 +94,15 @@ class EventRepository {
 
   async reemitEvent(event) {
     // Re-emit event to Kafka
-    const kafka = (await import('../config/kafka.config.js')).default;
+    const kafkaModule = await import('../config/kafka.config.js');
+    const kafka = kafkaModule.default;
+    const topic = kafkaModule.TOPICS[event.event_type];
+    if (!topic) {
+      logger.warn(`No Kafka topic mapped for event type ${event.event_type}; skipping replay`);
+      return;
+    }
     await kafka.publishEvent(
-      event.event_type,
+      topic,
       {
         eventId: event.event_id,
         eventType: event.event_type,

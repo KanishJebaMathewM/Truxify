@@ -11,6 +11,7 @@ vi.mock('node-cron', () => ({
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: {},
+  supabaseAdmin: null,
 }));
 
 vi.mock('../../src/services/notificationService.js', () => ({

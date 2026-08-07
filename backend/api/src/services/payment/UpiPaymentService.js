@@ -1,9 +1,14 @@
+import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 
 const DEFAULT_PAYOUT_GATEWAY = 'Razorpay (Mock)';
 const MOCK_PAYOUT_DELAY_MS = 200;
-const RANDOM_ID_START_INDEX = 2;
-const RANDOM_ID_END_INDEX = 15;
+const UTR_MIN = 100000000000;
+const UTR_RANGE = 900000000000;
+
+function generateUtr() {
+  return (UTR_MIN + crypto.randomInt(0, UTR_RANGE)).toString();
+}
 
 class UpiPaymentService {
   constructor() {
@@ -29,9 +34,9 @@ class UpiPaymentService {
     await new Promise(resolve => setTimeout(resolve, MOCK_PAYOUT_DELAY_MS));
 
     return {
-      payout_id: `pout_${Math.random().toString(36).substring(RANDOM_ID_START_INDEX, RANDOM_ID_END_INDEX)}`,
+      payout_id: `pout_${crypto.randomBytes(8).toString('hex')}`,
       status: 'processed',
-      utr: Math.floor(100000000000 + Math.random() * 900000000000).toString(),
+      utr: generateUtr(),
       processed_at: new Date().toISOString()
     };
   }

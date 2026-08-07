@@ -360,6 +360,41 @@ describe('ml service — predictPrice', () => {
     expect(result.estimated_price).toBe(3000);
     expect(result.currency).toBe('INR');
   });
+
+  it('rejects response where estimated_price is a string', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 'five thousand', currency: 'INR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction');
+  });
+
+  it('rejects response with invalid currency code', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 3000, currency: 'EUR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction');
+  });
+
+  it('uses default truck type medium_truck when undefined is passed explicitly', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 3000, currency: 'INR' })),
+    });
+
+    await predictPrice({ distanceKm: 50, cargoWeightKg: 200, truckType: undefined });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.truck_type).toBe('medium_truck');
+  });
 });
 
 describe('ml service — predictEta', () => {

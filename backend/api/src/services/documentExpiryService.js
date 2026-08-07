@@ -1,4 +1,4 @@
-import { supabase, redisClient } from '../config/db.js';
+import { supabaseAdmin, redisClient } from '../config/db.js';
 import { sendPushNotification } from './notificationService.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
@@ -59,10 +59,10 @@ function endOfDay(date) {
 }
 
 async function hasExistingNotification(userId, documentId, daysRemaining) {
-  if (!supabase) return false;
+  if (!supabaseAdmin) return false;
   try {
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('notifications')
       .select('id, metadata')
       .eq('user_id', userId)
@@ -127,7 +127,7 @@ export async function processDocumentExpiryBatch() {
 
       let documents = [];
       try {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
           .from('documents')
           .select('id, user_id, doc_type, valid_until')
           .not('valid_until', 'is', null)

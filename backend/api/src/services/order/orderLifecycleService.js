@@ -229,6 +229,16 @@ export class OrderLifecycleService {
         (history || []).forEach(o => { o.driver_name = driverMap[o.driver_id] || 'Driver Assigned'; });
       }
 
+      try {
+        const { data: ratings } = await this.orderRepository.findRatingsForCustomer(customerId);
+        const ratingMap = Object.fromEntries((ratings || []).map(r => [r.order_display_id, r.stars]));
+        (history || []).forEach(o => {
+          o.rating_given = ratingMap[o.order_display_id] || null;
+        });
+      } catch (err) {
+        logger.error("[orderLifecycleService] Failed to map ratings:", err.message);
+      }
+
       return {
         page,
         limit,

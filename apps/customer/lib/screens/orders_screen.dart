@@ -198,6 +198,8 @@ class _OrdersScreenState extends State<OrdersScreen>
               isStackable: order['is_stackable'] as bool?,
               isFragile: order['is_fragile'] as bool?,
               specialRequirements: order['special_requirements']?.toString(),
+              ratingGiven: order['rating_given'] as int?,
+              blockchainTxHash: order['blockchain_tx_hash']?.toString(),
             );
           }).toList();
         });

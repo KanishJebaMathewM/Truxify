@@ -368,6 +368,13 @@ export class OrderRepository {
       .maybeSingle(), 'findRatingByOrder');
   }
 
+  async findRatingsForCustomer(customerId) {
+    return this._retryableQuery(() => this.supabase
+      .from('ratings')
+      .select('order_display_id, stars')
+      .eq('customer_id', customerId), 'findRatingsForCustomer');
+  }
+
   // ===================================================================
   // RPC
   // ===================================================================

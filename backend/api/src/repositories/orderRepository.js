@@ -155,8 +155,6 @@ export class OrderRepository {
             query = query.not(f.column, f.operator, f.value);
           } else if (f.op === 'in') {
             query = query.in(f.column, f.value);
-          } else if (f.op === 'neq') {
-            query = query.not(f.column, 'neq', f.value);
           }
         }
       }

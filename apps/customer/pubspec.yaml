@@ -5,7 +5,7 @@ publish_to: none
 version: 1.0.0+1
 
 environment:
-  sdk: ">=3.3.0 <4.0.0"
+  sdk: ">=3.5.0 <4.0.0"
 
 dependencies:
   firebase_core: ^4.11.0
@@ -40,7 +40,7 @@ dependencies:
   share_plus: ^10.1.4
   pdf: ^3.11.2
   printing: ^5.13.4
-  qr: ^4.0.2
+  qr: ^3.0.2
   flutter_dotenv: ^5.2.0
   sentry_flutter: ^8.14.1
 

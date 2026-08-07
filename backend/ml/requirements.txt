@@ -63,4 +63,3 @@ networkx==3.2.1
 pytest==9.0.3
 
 pytesseract==0.3.10
-python-multipart==0.0.9

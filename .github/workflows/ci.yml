@@ -180,7 +180,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: blockchain
-        run: npm ci
+        run: npm ci --workspaces=false --legacy-peer-deps
 
       - name: Compile contracts
         working-directory: blockchain

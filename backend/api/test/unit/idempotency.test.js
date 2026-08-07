@@ -60,7 +60,7 @@ describe('requireIdempotency middleware', () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({
-      error: 'X-Idempotency-Key header is required for this action.',
+      error: 'X-Idempotency-Key must be a non-empty string.',
     });
     expect(next).not.toHaveBeenCalled();
   });

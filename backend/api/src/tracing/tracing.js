@@ -1,17 +1,42 @@
-import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { Resource } from '@opentelemetry/resources';
-import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
-import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
-import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
-import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
-import { registerInstrumentations } from '@opentelemetry/instrumentation';
-import { PinoInstrumentation } from '@opentelemetry/instrumentation-pino';
-import { MongoDBInstrumentation } from '@opentelemetry/instrumentation-mongodb';
-import { RedisInstrumentation } from '@opentelemetry/instrumentation-redis';
-import { WinstonInstrumentation } from '@opentelemetry/instrumentation-winston';
-import { trace, context } from '@opentelemetry/api';
+import { createRequire } from 'module';
 import logger from '../middleware/logger.js';
+
+const require = createRequire(import.meta.url);
+
+let NodeTracerProvider;
+let Resource;
+let SemanticResourceAttributes;
+let OTLPTraceExporter;
+let BatchSpanProcessor;
+let ExpressInstrumentation;
+let HttpInstrumentation;
+let registerInstrumentations;
+let PinoInstrumentation;
+let MongoDBInstrumentation;
+let RedisInstrumentation;
+let WinstonInstrumentation;
+let trace;
+let context;
+let otelAvailable = false;
+
+try {
+  ({ NodeTracerProvider } = require('@opentelemetry/sdk-trace-node'));
+  ({ Resource } = require('@opentelemetry/resources'));
+  ({ SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions'));
+  ({ OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-grpc'));
+  ({ BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base'));
+  ({ ExpressInstrumentation } = require('@opentelemetry/instrumentation-express'));
+  ({ HttpInstrumentation } = require('@opentelemetry/instrumentation-http'));
+  ({ registerInstrumentations } = require('@opentelemetry/instrumentation'));
+  ({ PinoInstrumentation } = require('@opentelemetry/instrumentation-pino'));
+  ({ MongoDBInstrumentation } = require('@opentelemetry/instrumentation-mongodb'));
+  ({ RedisInstrumentation } = require('@opentelemetry/instrumentation-redis'));
+  ({ WinstonInstrumentation } = require('@opentelemetry/instrumentation-winston'));
+  ({ trace, context } = require('@opentelemetry/api'));
+  otelAvailable = true;
+} catch (err) {
+  logger.warn(`[tracing] OpenTelemetry packages unavailable; tracing disabled (${err.message})`);
+}
 
 class Tracing {
     constructor() {
@@ -21,6 +46,7 @@ class Tracing {
 
     initialize(serviceName = 'truxify-api') {
         if (this.isInitialized) return;
+        if (!otelAvailable) return;
 
         try {
             // Create resource

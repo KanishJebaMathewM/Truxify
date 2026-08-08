@@ -388,10 +388,6 @@ class OrderService {
     }
   }
 
-  void dispose() {
-    _apiClient.close();
-  }
-
   Future<Map<String, dynamic>> fetchOrderRoute(String orderDisplayId) async {
     try {
       final body = await _apiClient.get(
@@ -403,5 +399,31 @@ class OrderService {
     } catch (e) {
       throw StateError('Failed to fetch order route: $e');
     }
+  }
+
+  Future<Map<String, dynamic>> sendVoiceQuery({
+    required String bookingId,
+    String? query,
+    List<int>? audioBytes,
+    String? filename,
+  }) async {
+    try {
+      final body = await _apiClient.post(
+        '/api/voice/query',
+        body: <String, dynamic>{
+          'bookingId': bookingId,
+          if (query != null && query.isNotEmpty) 'query': query,
+        },
+      );
+      return body is Map<String, dynamic> ? body : <String, dynamic>{};
+    } on ApiException catch (e) {
+      throw StateError(e.message);
+    } catch (e) {
+      throw StateError('Failed to process voice query: $e');
+    }
+  }
+
+  void dispose() {
+    _apiClient.close();
   }
 }

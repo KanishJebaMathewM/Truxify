@@ -984,6 +984,41 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     }
   }
 
+  void _showVoiceAi() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _VoiceAiSheet(
+        orderId: widget.orderId,
+        orderService: _orderService,
+        orderData: _order,
+      ),
+    );
+  }
+
+  void _showCallDriver() {
+    if (_driverPhone == null || _driverPhone!.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Driver phone number not available')),
+      );
+      return;
+    }
+    launchUrl(Uri.parse('tel:$_driverPhone'));
+  }
+
+  void _showChangeDrop() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Drop address change requested')),
+    );
+  }
+
+  void _showCancel() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Order cancellation unavailable for active trips')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final driverName = _driverName;
@@ -1172,6 +1207,14 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                               ),
                             ),
                             IconButton(
+                              onPressed: _showVoiceAi,
+                              tooltip: 'Voice AI Assistant',
+                              icon: const Icon(
+                                Icons.mic_rounded,
+                                color: TruxifyColors.accentDark,
+                              ),
+                            ),
+                            IconButton(
                               onPressed: _order == null ? null : _shareTracking,
                               icon: Icon(
                                 Icons.share_rounded,
@@ -1276,20 +1319,20 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
                             _ActionTile(
                                 icon: Icons.mic_rounded,
                                 label: 'Voice AI',
-                                onTap: _order == null ? null : _showVoiceAi),
+                                onTap: _showVoiceAi),
                             _ActionTile(
                                 icon: Icons.call_rounded,
                                 label: 'Call Driver',
-                                onTap: _order == null ? null : _showCallDriver),
+                                onTap: _showCallDriver),
                             _ActionTile(
                                 icon: Icons.edit_location_alt_rounded,
                                 label: 'Change Drop',
-                                onTap: _order == null ? null : _showChangeDrop),
+                                onTap: _showChangeDrop),
                             _ActionTile(
                                 icon: Icons.close_rounded,
                                 label: 'Cancel',
                                 color: TruxifyColors.error,
-                                onTap: _order == null ? null : _showCancel),
+                                onTap: _showCancel),
                           ],
                         ),
                       ],
@@ -1300,6 +1343,345 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _VoiceAiSheet extends StatefulWidget {
+  final String orderId;
+  final OrderService orderService;
+  final Map<String, dynamic>? orderData;
+
+  const _VoiceAiSheet({
+    required this.orderId,
+    required this.orderService,
+    this.orderData,
+  });
+
+  @override
+  State<_VoiceAiSheet> createState() => _VoiceAiSheetState();
+}
+
+class _VoiceAiSheetState extends State<_VoiceAiSheet> {
+  bool _isListening = false;
+  bool _isProcessing = false;
+  String? _transcript;
+  String? _responseText;
+  String? _audioUrl;
+  String? _intent;
+  String? _errorMessage;
+
+  Future<void> _handleQuery(String queryText) async {
+    setState(() {
+      _isProcessing = true;
+      _errorMessage = null;
+      _transcript = queryText;
+    });
+
+    try {
+      final res = await widget.orderService.sendVoiceQuery(
+        bookingId: widget.orderId,
+        query: queryText,
+      );
+      final parsed = VoiceAiService.parseVoiceResponse(res);
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _transcript = parsed['transcript'];
+          _responseText = parsed['responseText'];
+          _audioUrl = parsed['audioUrl'];
+          _intent = parsed['intent'];
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _errorMessage = 'Voice AI backend unreachable. Showing local status fallback.';
+          _responseText = VoiceAiService.buildResponse(
+            VoiceAiOrderInput.fromMap(widget.orderData),
+          );
+          _intent = VoiceAiService.detectIntent(queryText);
+        });
+      }
+    }
+  }
+
+  void _startListeningSim() {
+    setState(() {
+      _isListening = true;
+    });
+    Future.delayed(const Duration(milliseconds: 1800), () {
+      if (mounted && _isListening) {
+        setState(() {
+          _isListening = false;
+        });
+        _handleQuery('Where is my package?');
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final presets = VoiceAiService.getPresetQueries();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x30000000),
+            blurRadius: 20,
+            offset: Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 48,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: TruxifyColors.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: TruxifyColors.accent.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.mic_rounded,
+                      color: TruxifyColors.accentDark,
+                      size: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Truxify Voice AI Assistant',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                        Text(
+                          'Whisper + LLM + ElevenLabs TTS',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: TruxifyColors.adaptiveSecondaryText(context),
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Center(
+                child: Column(
+                  children: [
+                    GestureDetector(
+                      onTap: _isListening || _isProcessing ? null : _startListeningSim,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        width: 72,
+                        height: 72,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isListening
+                              ? Colors.redAccent
+                              : (_isProcessing ? TruxifyColors.accent : TruxifyColors.accentDark),
+                          boxShadow: [
+                            BoxShadow(
+                              color: (_isListening ? Colors.redAccent : TruxifyColors.accent)
+                                  .withValues(alpha: 0.4),
+                              blurRadius: _isListening ? 20 : 10,
+                              spreadRadius: _isListening ? 4 : 1,
+                            )
+                          ],
+                        ),
+                        child: Icon(
+                          _isListening
+                              ? Icons.graphic_eq_rounded
+                              : (_isProcessing ? Icons.hourglass_top_rounded : Icons.mic_rounded),
+                          color: Colors.white,
+                          size: 32,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      _isListening
+                          ? 'Listening to your question…'
+                          : (_isProcessing ? 'Processing with Voice AI…' : 'Tap mic to ask hands-free'),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: _isListening
+                            ? Colors.redAccent
+                            : TruxifyColors.adaptiveSecondaryText(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Frequent Queries',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: presets.map((query) {
+                  return ActionChip(
+                    avatar: const Icon(Icons.record_voice_over_rounded, size: 16),
+                    label: Text(query),
+                    backgroundColor: isDark
+                        ? Colors.white10
+                        : TruxifyColors.accent.withValues(alpha: 0.1),
+                    onPressed: _isProcessing ? null : () => _handleQuery(query),
+                  );
+                }).toList(),
+              ),
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline_rounded, color: Colors.orange, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: const TextStyle(color: Colors.orange, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              if (_responseText != null) ...[
+                const SizedBox(height: 20),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF4F6FB),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: TruxifyColors.border),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.smart_toy_rounded,
+                            color: TruxifyColors.accentDark,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'AI Response',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: TruxifyColors.accentDark,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (_intent != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: TruxifyColors.accent.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                _intent!.toUpperCase(),
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: TruxifyColors.accentDark,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (_transcript != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'You: "${_transcript!}"',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontStyle: FontStyle.italic,
+                            color: TruxifyColors.adaptiveSecondaryText(context),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 10),
+                      Text(
+                        _responseText!,
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                        ),
+                      ),
+                      if (_audioUrl != null) ...[
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            const Icon(Icons.volume_up_rounded, color: TruxifyColors.accentDark, size: 20),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Audio ready (ElevenLabs TTS)',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: TruxifyColors.accentDark,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -174,6 +174,8 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         requiresRefrigeration: widget.draft.requiresRefrigeration ?? false,
         targetTemperatureMin: widget.draft.targetTemperatureMin,
         targetTemperatureMax: widget.draft.targetTemperatureMax,
+        driverId: widget.truck.driverId,
+        truckId: widget.truck.truckId,
       );
 
       _createdOrderId = orderId;

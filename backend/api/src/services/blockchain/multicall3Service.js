@@ -35,7 +35,7 @@ class Multicall3Service {
       );
       logger.info('[Multicall3Service] Multicall3 initialized at', MULTICALL3_ADDRESS);
     } catch (err) {
-      logger.error('[Multicall3Service] Initialization failed:', err.message);
+      logger.error({ err }, '[Multicall3Service] Initialization failed');
       Sentry.captureException(err);
     }
   }
@@ -73,14 +73,22 @@ class Multicall3Service {
       }));
 
       try {
-        const result = await Promise.race([
+        const rawResult = await Promise.race([
           this.multicallContract.aggregate3(callsData),
           new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Multicall timeout')), CALL_TIMEOUT_MS)
           ),
         ]);
 
-        const { blockNumber, returnData } = result;
+        if (!rawResult || !rawResult.returnData) {
+          logger.error('[Multicall3Service] Unexpected null result from multicall3 contract');
+          return calls.map((call, idx) => ({
+            success: false,
+            error: 'null_result',
+            callIndex: idx,
+          }));
+        }
+        const { blockNumber, returnData } = rawResult;
 
         return returnData.map((res, idx) => ({
           success: res.success,
@@ -90,7 +98,7 @@ class Multicall3Service {
           blockNumber,
         }));
       } catch (err) {
-        logger.error('[Multicall3Service] Batch execution failed:', err.message);
+        logger.error({ err }, '[Multicall3Service] Batch execution failed');
         Sentry.captureException(err);
 
         return calls.map((call, idx) => ({

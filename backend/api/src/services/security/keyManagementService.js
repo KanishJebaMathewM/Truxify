@@ -122,6 +122,18 @@ class KeyManagementService {
 
         const keyId = crypto.randomUUID();
 
+        // Deactivate any previously active key for this user+wallet
+        await supabase
+          .from('encrypted_wallet_keys')
+          .update({
+            active: false,
+            archived_at: new Date().toISOString(),
+            archive_reason: 'rotated',
+          })
+          .eq('user_id', userId)
+          .eq('wallet_address', walletAddress)
+          .eq('active', true);
+
         const { data, error } = await supabase
           .from('encrypted_wallet_keys')
           .insert([{

@@ -14,7 +14,7 @@ function check() {
       },
     };
   }
-  return { status: HealthStatus.HEALTHY, message: 'active' };
+  return { status: HealthStatus.DEGRADED, message: 'websocket_not_initialized' };
 }
 
 export default function websocketHealth(opts) {

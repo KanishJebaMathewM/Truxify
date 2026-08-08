@@ -121,8 +121,13 @@ function checkFirebase() {
 }
 
 async function checkEscrow() {
-  const result = await checkEscrowHealth();
-  return result.status;
+  try {
+    const result = await checkEscrowHealth();
+    return result?.status ?? 'unavailable';
+  } catch (err) {
+    logger.error('[health] Escrow health check failed:', err.message);
+    return 'unavailable';
+  }
 }
 
 function checkPolygon() {

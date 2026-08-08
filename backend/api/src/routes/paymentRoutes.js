@@ -137,8 +137,11 @@ router.post(
       const amountPaisa = order.total_amount || 0;
       const amountInr = (amountPaisa / 100).toFixed(2);
 
-      // Platform UPI ID from env (falls back to demo value for dev)
-      const platformUpiId = process.env.PLATFORM_UPI_ID || 'truxify@upi';
+      const platformUpiId = process.env.PLATFORM_UPI_ID?.trim();
+      if (!platformUpiId) {
+        logger.error('[payments] PLATFORM_UPI_ID is not configured; cannot generate UPI intent');
+        return res.status(503).json({ error: 'UPI payments are not configured on the server.' });
+      }
       const orderRef = order.order_display_id;
 
       // Standard UPI deep-link format (works with GPay, PhonePe, Paytm, BHIM)

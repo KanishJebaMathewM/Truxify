@@ -2,6 +2,11 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { CacheKeyBuilder } from '../../src/cache/CacheKeyBuilder.js';
 import { CacheNamespace } from '../../src/cache/CacheNamespace.js';
 
+function globToRegExp(glob) {
+  const escaped = glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${escaped}$`);
+}
+
 describe('CacheKeyBuilder', () => {
   beforeEach(() => {
     CacheNamespace.clear();
@@ -109,9 +114,17 @@ describe('CacheKeyBuilder', () => {
   });
 
   describe('pattern()', () => {
-    it('creates SCAN glob matching all versions for an entity', () => {
+    it('creates SCAN glob matching the unversioned keys build() writes', () => {
       const pat = CacheKeyBuilder.pattern('profile', 'sb:abc123');
-      expect(pat).toBe('profile:*:sb:abc123*');
+      expect(pat).toBe('profile:sb:abc123*');
+    });
+
+    it('pattern() matches the key produced by build() (round-trip)', () => {
+      const key = CacheKeyBuilder.build('profile', 'sb:abc123', 'stats');
+      const pat = CacheKeyBuilder.pattern('profile', 'sb:abc123');
+      const regex = globToRegExp(pat);
+      expect(regex.test(key)).toBe(true);
+      expect(regex.test(CacheKeyBuilder.build('profile', 'sb:abc123'))).toBe(true);
     });
 
     it('matches entire namespace when entityId is omitted', () => {
@@ -132,12 +145,12 @@ describe('CacheKeyBuilder', () => {
     it('uses custom prefix in pattern', () => {
       CacheNamespace.register('custom', { prefix: 'c:v2' });
       const pat = CacheKeyBuilder.pattern('custom', 'entity-1');
-      expect(pat).toBe('c:v2:*:entity-1*');
+      expect(pat).toBe('c:v2:entity-1*');
     });
 
     it('falls back for unknown namespace', () => {
       const pat = CacheKeyBuilder.pattern('unknown', 'id-1');
-      expect(pat).toBe('unknown:*:id-1*');
+      expect(pat).toBe('unknown:id-1*');
     });
 
     it('falls back for unknown namespace without entityId', () => {

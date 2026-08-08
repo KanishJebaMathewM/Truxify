@@ -81,17 +81,20 @@ export const CacheKeyBuilder = {
 
   /**
    * Build a SCAN-compatible glob pattern for invalidating all keys
-   * under a namespace + entity prefix.
+   * under a namespace + entity prefix. Matches the unversioned keys
+   * produced by build()/buildWithPrefix() (and their sub-keys), e.g.
+   * `prefix:entity*` matches `prefix:entity`, `prefix:entity:123`,
+   * and `prefix:entity:123:stats`.
    *
    * @param {string} namespace
    * @param {string} [entityId] — if omitted, matches the entire namespace
-   * @returns {string} glob pattern e.g. 'profile:*' or 'profile:*:sb:abc123'
+   * @returns {string} glob pattern e.g. 'profile:*' or 'profile:sb:abc123*'
    */
   pattern(namespace, entityId) {
     const ns = CacheNamespace.get(namespace);
     const prefix = ns?.prefix || namespace;
     if (entityId) {
-      return `${prefix}:*:${entityId}*`;
+      return `${prefix}:${entityId}*`;
     }
     return `${prefix}:*`;
   },

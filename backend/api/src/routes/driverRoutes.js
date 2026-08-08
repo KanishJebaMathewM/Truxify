@@ -1677,7 +1677,7 @@ router.patch('/availability', authenticate, userLimiter, async (req, res) => {
   }
 });
 
-router.put('/truck', authenticate, userLimiter, async (req, res) => {
+router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, res) => {
   try {
     const { type, capacityWeight, capacityVolume, registrationNumber } = req.body;
 

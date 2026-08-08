@@ -26,7 +26,7 @@ class DigilockerService {
         ];
         this.contract = new ethers.Contract(contractAddress, this.contractABI, this.wallet);
       } catch (err) {
-        logger.error('Failed to initialize DocumentRegistry/KYC contract:', err.message);
+        logger.error({ err }, 'Failed to initialize DocumentRegistry/KYC contract');
       }
     } else {
       logger.warn('DocumentRegistry/KYC contract not configured: missing RPC, key, or contract address');
@@ -64,7 +64,7 @@ class DigilockerService {
           name: tokenResponse.data.name || 'DigiLocker User'
         };
       } catch (err) {
-        logger.error('[DigilockerService] OAuth exchange failed:', err.message);
+        logger.error({ err }, '[DigilockerService] OAuth exchange failed');
         return { success: false, error: err.message };
       }
     }
@@ -176,7 +176,7 @@ class DigilockerService {
         });
         tokenData = tokenResponse.data;
       } catch (err) {
-        logger.error('Digilocker token exchange failed:', err.message);
+        logger.error({ err }, 'Digilocker token exchange failed');
         throw new Error('Digilocker token exchange failed: ' + err.message, { cause: err });
       }
     }
@@ -221,7 +221,7 @@ class DigilockerService {
           }
         }
       } catch (err) {
-        logger.error('Failed to fetch DigiLocker documents:', err.message);
+        logger.error({ err }, 'Failed to fetch DigiLocker documents');
         throw new Error('Failed to fetch DigiLocker documents: ' + err.message, { cause: err });
       }
     }
@@ -245,7 +245,7 @@ class DigilockerService {
           await tx.wait();
           txHash = tx.hash;
         } catch (err) {
-          logger.error(`Blockchain registration failed for ${doc.type}:`, err.message);
+          logger.error({ err, docType: doc.type }, 'Blockchain registration failed');
         }
       }
 
@@ -264,7 +264,7 @@ class DigilockerService {
         .single();
 
       if (dbErr) {
-        logger.error(`Database record failed for ${doc.type}:`, dbErr.message);
+        logger.error({ err: dbErr, docType: doc.type }, 'Database record failed');
       } else {
         syncResults.push(docRecord);
       }

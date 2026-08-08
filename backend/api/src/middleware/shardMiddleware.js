@@ -31,7 +31,7 @@ export const shardMiddleware = async (req, res, next) => {
 
       if (rawLat === undefined || rawLng === undefined || parsedLat.error || parsedLng.error) {
         return res.status(400).json({
-          error: parsedLat.error || parsedLng.error || 'lat and lng are both required when routing by location'
+          error: parsedLat?.error || parsedLng?.error || 'lat and lng are both required when routing by location'
         });
       }
 

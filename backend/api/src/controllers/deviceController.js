@@ -23,7 +23,7 @@ function validatePlatform(platform) {
  * are not confused with validation failures.
  */
 function normalizeMetadata(metadata) {
-  if (metadata === undefined || metadata === null) return null;
+  if (metadata === undefined || metadata === null) return undefined;
   if (typeof metadata !== 'object' || Array.isArray(metadata)) {
     return null;
   }
@@ -82,7 +82,7 @@ export async function registerDeviceToken(req, res, next) {
       p_user_id:      userId,
       p_fcm_token:    fcmToken,
       p_platform:     platform || 'android',
-      p_metadata:     normalizedMetadata,
+      p_metadata:     normalizedMetadata ?? null,
       p_prev_user_id: previousUserId ?? null,
     });
 

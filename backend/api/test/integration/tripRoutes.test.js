@@ -379,6 +379,60 @@ describe('Trip Routes', () => {
         expect(upsertCall.payload[0].metadata).not.toHaveProperty('password');
         expect(upsertCall.payload[0].metadata.lat).toBe(19.076);
     });
+
+    it('POST /events/batch inserts non-telemetry events (otpDelivery) with NULL coordinates', async () => {
+        const originalFrom = m.supabase.from.bind(m.supabase);
+        m.supabase.from = table => {
+            const builder = originalFrom(table);
+            if (table === 'trip_events') {
+                builder.upsert = vi.fn(async payload => {
+                    m.calls.push({
+                        table: 'trip_events',
+                        mode: 'upsert',
+                        payload,
+                    });
+                    m.store.trip_events.push(...payload);
+                    return { data: payload, error: null };
+                });
+            }
+            return builder;
+        };
+
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-otp-delivery',
+                events: [
+                    {
+                        id: 'event-otp',
+                        trip_id: 'trip-1',
+                        type: 'otpDelivery',
+                        occurred_at: new Date().toISOString(),
+                        payload: {
+                            stopId: 'stop-1',
+                        },
+                    },
+                ],
+            });
+
+        m.supabase.from = originalFrom;
+
+        expect(res.status).toBe(202);
+        const upsertCall = m.calls.find(
+            c => c.table === 'trip_events' && c.mode === 'upsert' && c.payload[0].event_id === 'event-otp'
+        );
+        expect(upsertCall).toBeTruthy();
+        expect(upsertCall.payload[0]).toEqual(
+            expect.objectContaining({
+                event_id: 'event-otp',
+                event_type: 'otpDelivery',
+                latitude: null,
+                longitude: null,
+                metadata: { stopId: 'stop-1' },
+            })
+        );
+    });
 });
 
 // ============================================================================

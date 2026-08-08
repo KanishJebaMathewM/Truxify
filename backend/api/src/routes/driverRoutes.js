@@ -145,11 +145,11 @@ import {
   toDateKey,
 } from '../services/driver/earningsReportService.js';
 import { userLimiter, createStore } from '../middleware/rateLimiter.js';
-import { checkBypassEligibility } from '../services/weighStationService.js';
+import { checkBypassEligibility, syncAndTransmitInternalWeights } from '../services/weighStationService.js';
 import { isPayoutProviderConfigured } from '../services/wallet/payoutProvider.js';
 
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema, driverIdParamSchema, driverStatementSchema } from '../validation/requestSchemas.js';
+import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema, driverIdParamSchema, driverStatementSchema, syncWeightSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
@@ -1393,6 +1393,68 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
     return res.status(200).json(status);
   } catch (err) {
     logger.error(`[weigh-station] Error getting bypass status for driver ${req.user.id}: ${err.message}`);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * @openapi
+ * /api/driver/weigh-stations/sync-weight:
+ *   post:
+ *     tags: [Driver, WIM]
+ *     summary: Sync internal air suspension weights
+ *     description: Syncs internal highly accurate axle weights to the DOT enforcement software for bypassing weigh stations.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - truck_id
+ *               - axles
+ *             properties:
+ *               truck_id:
+ *                 type: string
+ *                 format: uuid
+ *               axles:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     position:
+ *                       type: string
+ *                     pressure_psi:
+ *                       type: number
+ *     responses:
+ *       200:
+ *         description: Bypass status and calculation details
+ *       400:
+ *         description: Invalid payload
+ */
+router.post('/weigh-stations/sync-weight', authenticate, requirePolicy('driver:view-stats'), userLimiter, validateBody(syncWeightSchema), async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const { truck_id, axles } = req.body;
+
+    // Optional: verify the truck belongs to the driver
+    const { data: truck, error: truckErr } = await supabase
+      .from('trucks')
+      .select('id')
+      .eq('id', truck_id)
+      .eq('driver_id', driverId)
+      .single();
+
+    if (truckErr || !truck) {
+      return res.status(403).json({ error: 'Forbidden: Truck does not belong to you or does not exist' });
+    }
+
+    const status = await syncAndTransmitInternalWeights(driverId, truck_id, axles);
+    return res.status(200).json(status);
+  } catch (err) {
+    logger.error(`[weigh-station] Error syncing internal weight for driver ${req.user.id}: ${err.message}`);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });

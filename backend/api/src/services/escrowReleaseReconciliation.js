@@ -138,8 +138,8 @@ export async function reconcilePendingEscrowReleases(orderRepository) {
           if (result.code === 'DEPOSIT_AMOUNT_MISMATCH') {
             // The on-chain amount will not change by retrying — record the
             // reason and escalate to manual review instead of looping.
-            const releaseAttemptedAt = new Date().toISOString();
-            const releaseAttempts = (order.escrow_release_attempts || 0) + 1;
+            releaseAttemptedAt = new Date().toISOString();
+            releaseAttempts = (order.escrow_release_attempts || 0) + 1;
             await supabaseAdmin
               .from('orders')
               .update({

@@ -809,6 +809,7 @@ export class OrderLifecycleService {
             const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
             await this.orderRepository.updateOrder(currentOrder.id, {
               status: 'cancelled',
+              cancellation_fee: cancellationFee,
               escrow_status: nextEscrowStatus,
               refund_tx_hash: refundTxHash,
               escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),

@@ -1,8 +1,4 @@
-
-﻿apiVersion: security.istio.io/v1beta1
-
 apiVersion: security.istio.io/v1beta1
-
 kind: AuthorizationPolicy
 metadata:
   name: truxify-auth-policy
@@ -27,18 +23,12 @@ spec:
         namespaces: ["istio-system"]
     to:
     - operation:
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        paths: ["/api/*"]
+    - operation:
         methods: ["GET"]
         paths: ["/health", "/metrics"]
----
-apiVersion: security.istio.io/v1beta1
-kind: AuthorizationPolicy
-metadata:
-  name: deny-all
-  namespace: truxify
-spec:
-  action: DENY
-  rules:
-  - from:
-    - source:
-        notPrincipals: ["*"]
 
+  - to:
+    - operation:
+        ports: ["15020", "15021"]

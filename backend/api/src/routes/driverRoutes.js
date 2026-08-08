@@ -154,6 +154,7 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
+import { requireIdempotency } from '../middleware/idempotency.js';
 const router = express.Router();
 router.use(userLimiter);
 const hosStatusSchema = z.object({
@@ -964,7 +965,7 @@ router.get('/bids', authenticate, userLimiter, requirePolicy('driver:view-bids')
  *       400:
  *         description: Insufficient balance or validation error
  */
-router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver:withdraw'), auditLog({ action: 'driver:withdraw', resourceType: 'wallet_withdrawal' }), validateBody(withdrawSchema), async (req, res) => {
+router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver:withdraw'), auditLog({ action: 'driver:withdraw', resourceType: 'wallet_withdrawal' }), requireIdempotency(86400), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa
 
   try {

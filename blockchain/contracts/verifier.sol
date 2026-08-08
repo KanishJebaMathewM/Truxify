@@ -5,36 +5,20 @@ pragma solidity ^0.8.0;
 // It contains the verifier contract for ZK-SNARKs
 // NOTE: Regenerate via `circom kyc_verification.circom --r1cs --wasm --json`
 // after fixing circuits/kyc_verification.circom to produce the real Verifier.sol.
-// Until the real verifier is generated, this placeholder REJECTS zero, empty,
-// and malformed proofs instead of accepting every proof.
+// Until the real Groth16 verifier is generated, verifyProof FAILS CLOSED: it
+// rejects every proof instead of accepting fabricated ones, so KYC and zkEVM
+// callers can never be tricked into trusting a proof that was never verified.
 
 contract Verifier {
-    uint256 constant BN254_GX = 1;
-    uint256 constant BN254_GY = 2;
-    uint256 constant BN254_P = 21888242871839275222246405745257275088696311157297823662689037894645226208583;
-
     function verifyProof(
         uint[2] memory a,
         uint[2][2] memory b,
         uint[2] memory c,
         uint[2] memory input
     ) public view returns (bool r) {
-        require(input[0] != 0 || input[1] != 0, "Empty public input");
-        require(_isOnBn254(a[0], a[1]), "Invalid G1 point in proof (a)");
-        require(_isOnBn254(c[0], c[1]), "Invalid G1 point in proof (c)");
-        require(_isOnBn254(b[0][0], b[0][1]), "Invalid G2 point in proof (b[0])");
-        for (uint i = 0; i < input.length; i++) {
-            require(input[i] < BN254_P, "Public input exceeds field modulus");
-        }
-        r = true;
-    }
-
-    function _isOnBn254(uint256 x, uint256 y) internal pure returns (bool) {
-        if (x == 0 && y == 0) return false; // point at infinity is never a valid proof point
-        if (x >= BN254_P || y >= BN254_P) return false;
-        uint256 lhs = mulmod(y, y, BN254_P);
-        uint256 rhs = mulmod(mulmod(x, x, BN254_P), x, BN254_P);
-        rhs = addmod(rhs, 3, BN254_P);
-        return lhs == rhs;
+        // No real circuit / verification key exists yet, so no proof can be
+        // accepted. Replace this with the snarkjs pairing verifier once the
+        // kyc circuit and trusted setup have been generated.
+        return false;
     }
 }

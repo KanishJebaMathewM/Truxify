@@ -114,16 +114,40 @@ pub fn wasi_delete_file(path: &str) -> Result<(), String> {
     }
 }
 
+use std::path::{Component, Path, PathBuf};
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut components = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if let Some(Component::Normal(_)) = components.last() {
+                    components.pop();
+                } else {
+                    components.push(component);
+                }
+            }
+            _ => components.push(component),
+        }
+    }
+    components.iter().collect()
+}
+
 fn is_path_allowed(path: &str) -> bool {
     // Capability-based security: only allow specific paths
-    let allowed_prefixes = vec![
-        "/tmp/truxify/",
-        "./data/",
-        "/var/truxify/",
+    let allowed_roots = vec![
+        "/tmp/truxify",
+        "./data",
+        "/var/truxify",
     ];
-    
-    for prefix in allowed_prefixes {
-        if path.starts_with(prefix) {
+
+    let p = Path::new(path);
+    let normalized = normalize_path(p);
+
+    for root in allowed_roots {
+        let root_path = normalize_path(Path::new(root));
+        if normalized.starts_with(&root_path) {
             return true;
         }
     }

@@ -549,19 +549,48 @@ export class OrderRepository {
   }
 
   async revertEscrowStatus(orderId) {
+    // Guard the revert to 'pending' so it can never clobber a concurrent
+    // escrow transition (e.g. the stale-order worker moving a funded order
+    // into 'refund_pending'). Only states this method legitimately reverts
+    // are 'funding'/'funded'.
     return this._retryableQuery(() => this.supabase
       .from('orders')
       .update({
         escrow_status: 'pending',
         escrow_booking_id: null,
       })
-      .eq('id', orderId), 'revertEscrowStatus');
+      .eq('id', orderId)
+      .in('escrow_status', ['funding', 'funded']), 'revertEscrowStatus');
+  }
+
+  // ===================================================================
+  // STALE ORDER CANCELLATION
+  // ===================================================================
+
+  async findStalePendingOrders(cutoff, limit) {
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select('id')
+      .eq('status', 'pending')
+      .lt('created_at', cutoff)
+      .neq('escrow_status', 'funding')
+      .limit(limit), 'findStalePendingOrders');
+  }
+
+  async cancelStaleOrder(orderId, cancellationReason, staleSince, client) {
+    const supabaseClient = client || this.supabase;
+    return this._retryableQuery(() => supabaseClient
+      .rpc('cancel_stale_order_tx', {
+        p_order_id: orderId,
+        p_cancellation_reason: cancellationReason,
+        p_stale_since: staleSince,
+      }), 'cancelStaleOrder');
   }
 
   async findStaleFundingOrders(cutoff) {
     return this._retryableQuery(() => this.supabase
       .from('orders')
-      .select('id, order_display_id, customer_id, escrow_booking_id, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
+      .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
       .eq('escrow_status', 'funding')
       .not('pending_bid_acceptance', 'is', null)
       .or(`escrow_funding_started_at.lt.${cutoff},and(escrow_funding_started_at.is.null,updated_at.lt.${cutoff})`), 'findStaleFundingOrders');
@@ -596,6 +625,33 @@ export class OrderRepository {
         p_order_id: orderId,
         p_instance_id: instanceId,
       }), 'claimRefundReconciliation');
+  }
+
+  // ===================================================================
+  // ESCROW RELEASE RECONCILIATION
+  // ===================================================================
+
+  /**
+   * Selects orders whose on-chain escrow release may have completed without
+   * the trip being finalized. Covers the exact failure window: a release that
+   * succeeded on-chain but whose `complete_trip_tx` never ran (or whose
+   * release evidence was never persisted), leaving the order at
+   * `status <> 'payment_released'`.
+   *
+   * Plain `funded` orders that are still awaiting delivery are included so the
+   * worker can consult the on-chain booking and heal the release if it did in
+   * fact land; orders still waiting are skipped without side effects. The
+   * attempt budget excludes orders already escalated to manual review.
+   */
+  async findPendingEscrowReleases(limit = 50) {
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select('id, order_display_id, status, escrow_status, escrow_disabled, escrow_booking_id, escrow_release_attempts, escrow_release_last_attempt_at, escrow_release_error, release_tx_hash, escrow_released_at')
+      .in('escrow_status', ['release_failed', 'released', 'funded'])
+      .neq('status', 'payment_released')
+      .or('escrow_release_attempts.lt.10,escrow_release_attempts.is.null')
+      .order('escrow_release_attempts', { ascending: false })
+      .limit(limit), 'findPendingEscrowReleases');
   }
 }
 

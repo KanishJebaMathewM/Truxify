@@ -145,7 +145,14 @@ class DoCalculus:
             return None
     
     def estimate_cate(self, treatment: str, outcome: str, features: List[str]) -> Dict:
-        """Estimate Conditional Average Treatment Effect"""
+        """Estimate the Average Treatment Effect (ATE).
+
+        DoWhy's ``backdoor.propensity_score_weighting`` with ``target_units="ate"`
+        produces a single population-level ATE, NOT a Conditional Average
+        Treatment Effect (CATE). The result is therefore returned under an honest
+        ``ate`` key. ``features`` is retained for API compatibility; it does not
+        condition the estimate, so callers must not interpret the value as a CATE.
+        """
         try:
             identified_estimand = self.causal_model.identify_effect()
             estimate = self.causal_model.estimate_effect(
@@ -153,35 +160,40 @@ class DoCalculus:
                 method_name="backdoor.propensity_score_weighting",
                 target_units="ate"
             )
-            
+
             return {
                 'treatment': treatment,
                 'outcome': outcome,
-                'cate': estimate.value,
-                'features': features
+                'ate': estimate.value,
+                'features': features,
             }
         except Exception as e:
-            logger.error(f"CATE estimation failed: {e}")
+            logger.error(f"ATE estimation failed: {e}")
             return None
-    
+
     def estimate_ite(self, treatment: str, outcome: str) -> Dict:
-        """Estimate Individual Treatment Effect"""
+        """Estimate the Average Treatment effect on the Treated (ATT).
+
+        ``target_units="att"`` produces a single aggregate ATT, not per-unit
+        Individual Treatment Effects, so the result is returned under an honest
+        ``att`` key. Callers that need true ITE must use per-unit/subpopulation
+        estimation instead.
+        """
         try:
             identified_estimand = self.causal_model.identify_effect()
             estimate = self.causal_model.estimate_effect(
                 identified_estimand,
                 method_name="backdoor.propensity_score_weighting",
-                target_units="att"  # Average Treatment on Treated
+                target_units="att"
             )
-            
+
             return {
                 'treatment': treatment,
                 'outcome': outcome,
-                'ite': estimate.value,
-                'effect_heterogeneity': 'high' if abs(estimate.value) > 0.6 else 'medium' if abs(estimate.value) > 0.3 else 'low'
+                'att': estimate.value,
             }
         except Exception as e:
-            logger.error(f"ITE estimation failed: {e}")
+            logger.error(f"ATT estimation failed: {e}")
             return None
 
 class CausalImpact:

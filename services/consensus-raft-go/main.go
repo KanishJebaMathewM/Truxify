@@ -409,11 +409,14 @@ func (rn *RaftNode) sendHeartbeats() {
 			return
 		}
 		if res.resp.Success {
-			// Follower accepted the prefix; record the highest matching index.
-			rn.matchIndex[res.url] = res.request.PrevLogIndex + uint64(len(res.request.Entries))
-			rn.nextIndex[res.url] = rn.matchIndex[res.url] + 1
-		} else if rn.nextIndex[res.url] > 1 {
-			// Log inconsistency: back off and retry from an earlier prefix.
+			// Follower accepted the prefix; monotonically record highest matching index.
+			newMatch := res.request.PrevLogIndex + uint64(len(res.request.Entries))
+			if newMatch > rn.matchIndex[res.url] {
+				rn.matchIndex[res.url] = newMatch
+				rn.nextIndex[res.url] = newMatch + 1
+			}
+		} else if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
+			// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.
 			rn.nextIndex[res.url]--
 		}
 	}
@@ -566,6 +569,7 @@ func (rn *RaftNode) HandleVote(w http.ResponseWriter, r *http.Request) {
 		(rn.VotedFor == "" || rn.VotedFor == req.CandidateID) &&
 		rn.isLogUpToDate(req.LastLogIndex, req.LastLogTerm) {
 		rn.VotedFor = req.CandidateID
+		rn.lastLeaderSeen = time.Now()
 		resp.VoteGranted = true
 	}
 

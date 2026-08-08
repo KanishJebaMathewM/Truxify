@@ -1,17 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-let scheduledHandler;
-const scheduleMock = vi.fn((expression, handler) => {
-  scheduledHandler = handler;
-  return { stop: vi.fn() };
-});
 const sendPushNotificationMock = vi.fn();
 const loggerWarnMock = vi.fn();
-const updateCalls = [];
+const redisSetMock = vi.fn();
+const redisDelMock = vi.fn();
+const redisExpireMock = vi.fn();
 
 vi.mock('node-cron', () => ({
   default: {
-    schedule: scheduleMock,
+    schedule: vi.fn(),
   },
 }));
 
@@ -49,95 +46,96 @@ vi.mock('../../src/core/telemetry/SpanFactory.js', () => ({
   SPAN_NAMES: {},
 }));
 
-function makeBuilder(table) {
-  const builder = {
-    _mode: 'select',
-    _payload: null,
-    _id: null,
-    select() { return this; },
-    eq(column, value) {
-      if (column === 'id') this._id = value;
-      return this;
-    },
-    lt() { return this; },
-    or() { return this; },
-    in() { return this; },
-    maybeSingle() { return this; },
-    update(payload) {
-      this._mode = 'update';
-      this._payload = payload;
-      return this;
-    },
-    then(resolve) {
-      // Per-order re-fetch (inside the loop): the worker re-reads the order
-      // with a status='pending' filter before touching it, so a single,
-      // still-pending order is returned.
-      if (table === 'orders' && this._mode === 'select' && this._id) {
-        const single = {
-          id: this._id,
-          customer_id: this._id === 'order-1' ? 'customer-1' : 'customer-2',
-          order_display_id: this._id === 'order-1' ? 'disp-1' : 'disp-2',
-          escrow_status: 'pending',
-          escrow_amount_wei: null,
-          refund_tx_hash: null,
-          escrow_refund_attempts: 0,
-        };
-        return resolve({ data: single, error: null });
-      }
-
-      // Batch SELECT of stale orders
-      if (table === 'orders' && this._mode === 'select') {
-        return resolve({
-          data: [
-            { id: 'order-1', customer_id: 'customer-1' },
-            { id: 'order-2', customer_id: 'customer-2' },
-          ],
-          error: null,
-        });
-      }
-
-      if (table === 'orders' && this._mode === 'update') {
-        updateCalls.push(this._payload);
-        return resolve({ data: [{ id: this._id }], error: null });
-      }
-
-      return resolve({ data: null, error: null });
-    },
-  };
-
-  return builder;
-}
-
 vi.mock('../../src/config/db.js', () => ({
-  supabase: {
-    from: vi.fn(makeBuilder),
+  supabase: {},
+  supabaseAdmin: {},
+  redisClient: {
+    set: redisSetMock,
+    del: redisDelMock,
+    expire: redisExpireMock,
   },
 }));
 
 describe('staleOrderWorker notifications', () => {
+  let orderRepository;
+  let reconcileStaleOrders;
+
   beforeEach(async () => {
-    scheduledHandler = null;
-    updateCalls.length = 0;
-    scheduleMock.mockClear();
     sendPushNotificationMock.mockReset();
     loggerWarnMock.mockClear();
+    redisSetMock.mockReset().mockResolvedValue(true);
+    redisDelMock.mockReset().mockResolvedValue(true);
+    redisExpireMock.mockReset().mockResolvedValue(true);
     vi.resetModules();
+    orderRepository = {
+      findStalePendingOrders: vi.fn(),
+      cancelStaleOrder: vi.fn(),
+      updateLoadOffer: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    ({ reconcileStaleOrders } = await import('../../src/workers/staleOrderWorker.js'));
   });
+
+  function claimRow(id, customerId, displayId) {
+    return {
+      id,
+      customer_id: customerId,
+      order_display_id: displayId,
+      escrow_status: 'pending',
+    };
+  }
 
   it('continues cancelling stale orders when one notification fails', async () => {
     sendPushNotificationMock
       .mockRejectedValueOnce(new Error('push unavailable'))
       .mockResolvedValueOnce();
 
-    const { startStaleOrderWorker } = await import('../../src/workers/staleOrderWorker.js');
-    startStaleOrderWorker();
+    orderRepository.findStalePendingOrders.mockResolvedValue({
+      data: [{ id: 'order-1' }, { id: 'order-2' }],
+      error: null,
+    });
+    orderRepository.cancelStaleOrder
+      .mockResolvedValueOnce({ data: [claimRow('order-1', 'customer-1', 'disp-1')], error: null })
+      .mockResolvedValueOnce({ data: [claimRow('order-2', 'customer-2', 'disp-2')], error: null });
 
-    await scheduledHandler();
+    await reconcileStaleOrders(orderRepository);
 
-    expect(updateCalls).toHaveLength(2);
+    expect(orderRepository.updateLoadOffer).toHaveBeenCalledTimes(2);
     expect(sendPushNotificationMock).toHaveBeenCalledTimes(2);
     expect(loggerWarnMock).toHaveBeenCalledWith(
       expect.stringContaining('failed to notify customer customer-1')
     );
+  });
+
+  it('continues cancelling when the load-offer update fails', async () => {
+    orderRepository.updateLoadOffer
+      .mockRejectedValueOnce(new Error('offer update boom'))
+      .mockResolvedValue({ data: null, error: null });
+
+    orderRepository.findStalePendingOrders.mockResolvedValue({
+      data: [{ id: 'order-1' }, { id: 'order-2' }],
+      error: null,
+    });
+    orderRepository.cancelStaleOrder
+      .mockResolvedValueOnce({ data: [claimRow('order-1', 'customer-1', 'disp-1')], error: null })
+      .mockResolvedValueOnce({ data: [claimRow('order-2', 'customer-2', 'disp-2')], error: null });
+
+    await reconcileStaleOrders(orderRepository);
+
+    expect(sendPushNotificationMock).toHaveBeenCalledTimes(2);
+    expect(loggerWarnMock).toHaveBeenCalledWith(
+      expect.stringContaining('Failed to cancel load offer for order disp-1')
+    );
+  });
+
+  it('does not notify when the claim is lost', async () => {
+    orderRepository.findStalePendingOrders.mockResolvedValue({
+      data: [{ id: 'order-1' }],
+      error: null,
+    });
+    orderRepository.cancelStaleOrder.mockResolvedValue({ data: [], error: null });
+
+    await reconcileStaleOrders(orderRepository);
+
+    expect(sendPushNotificationMock).not.toHaveBeenCalled();
   });
 });

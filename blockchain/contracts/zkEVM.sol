@@ -152,7 +152,7 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         require(transactionsData.length > 0, "Empty batch");
         require(transactionsData.length <= MAX_BATCH_SIZE, "Batch too large");
 
-        // Verify proof; zero, empty, and malformed proofs are rejected
+        // Verify proof — fails closed until a real Groth16 verifier is deployed
         require(_verifyProof(proof), "Invalid proof");
 
         // Process transactions
@@ -228,7 +228,7 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         require(amount > 0, "Amount must be > 0");
         require(currentState.balances[msg.sender] >= amount, "Insufficient balance");
 
-        // Verify withdrawal proof; zero, empty, and malformed proofs are rejected
+        // Verify withdrawal proof — fails closed until a real Groth16 verifier is deployed
         require(_verifyProof(proof), "Invalid proof");
 
         currentState.balances[msg.sender] -= amount;

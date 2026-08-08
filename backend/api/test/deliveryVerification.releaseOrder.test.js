@@ -18,6 +18,20 @@ vi.mock('../src/core/performanceMetrics.js', () => ({
 
 vi.mock('../src/services/escrow.js', () => ({
   escrowRelease: vi.fn(),
+  resolveExpectedDepositAmount: (order) => {
+    if (order?.escrow_amount_wei != null) {
+      return { expectedAmountWei: BigInt(order.escrow_amount_wei) };
+    }
+    if (order?.pending_bid_acceptance?.bid_amount != null) {
+      return { expectedAmountWei: BigInt(order.pending_bid_acceptance.bid_amount) * 4000000000000n };
+    }
+    return { error: 'no amount on file', code: 'ESCROW_AMOUNT_MISSING' };
+  },
+  paisaToMaticWei: (paisa) => BigInt(Math.round(Number(paisa))) * 4000000000000n,
+  weiWithinTolerance: (a, b, toleranceWei = 1000000000n) => {
+    const diff = BigInt(a) > BigInt(b) ? BigInt(a) - BigInt(b) : BigInt(b) - BigInt(a);
+    return diff <= BigInt(toleranceWei);
+  },
 }));
 
 const { DeliveryVerificationService } = await import(
@@ -153,5 +167,162 @@ describe('verifyDelivery escrow-before-RPC ordering (issue #4996)', () => {
       expect.objectContaining({ escrow_status: 'released' }),
     );
     expect(result.escrowUpdateFailed).toBe(false);
+  });
+
+  it('routes all release-path writes through the service-role admin repository', async () => {
+    const readRepo = makeOrderRepository();
+    const adminRepo = {
+      updateOrder: vi.fn().mockResolvedValue({ data: { id: 'order-1' }, error: null }),
+      updateOrderGuardStatus: vi.fn().mockResolvedValue({ data: { id: 'order-1' }, error: null }),
+      updateWalletTransaction: vi.fn().mockResolvedValue({ data: null, error: null }),
+      executeRpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    const releaseFn = vi.fn().mockResolvedValue({ txHash: '0xADMIN' });
+
+    const svc = makeService({ escrowReleaseFn: releaseFn });
+    svc.orderRepository = readRepo;
+    svc.adminOrderRepository = adminRepo;
+    svc.assertDriverAtDropoff = vi.fn().mockResolvedValue();
+
+    const result = await svc.verifyDelivery(
+      { orderId: 'order-1', driverId: 'driver-1', otp: '123456' },
+      {},
+    );
+
+    // Release evidence persisted via the admin (service_role) repository
+    expect(adminRepo.updateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({ escrow_status: 'released', release_tx_hash: '0xADMIN' }),
+    );
+    // Guard update and wallet description also on the admin repo
+    expect(adminRepo.updateOrderGuardStatus).toHaveBeenCalled();
+    expect(adminRepo.updateWalletTransaction).toHaveBeenCalled();
+    // The RPC itself goes through the read repository with the admin client
+    // (executeRpc requires an explicit per-call client); the admin repo never
+    // executes it, and reads (order lookup, post-RPC verification) stay on the
+    // user repo.
+    expect(adminRepo.executeRpc).not.toHaveBeenCalled();
+    expect(readRepo.executeRpc).toHaveBeenCalledWith(
+      'complete_trip_tx',
+      expect.objectContaining({ p_release_tx_hash: '0xADMIN' }),
+      expect.anything(),
+    );
+    expect(result.escrowUpdateFailed).toBe(false);
+  });
+});
+
+describe('verifyDelivery payout defense-in-depth (amount integrity)', () => {
+  const EXPECTED_WEI = 220000000000000000n; // 55000 paisa × 4e12
+
+  function makeFundedOrder(overrides = {}) {
+    return {
+      ...ORDER,
+      escrow_amount_wei: EXPECTED_WEI.toString(),
+      pending_bid_acceptance: { bid_amount: 55000 },
+      ...overrides,
+    };
+  }
+
+  function makeRepo(order = makeFundedOrder()) {
+    let readCount = 0;
+    return {
+      findOrderById: () => {
+        readCount++;
+        if (readCount === 1) return Promise.resolve({ data: order, error: null });
+        return Promise.resolve({
+          data: { status: 'payment_released', escrow_status: 'released', escrow_release_attempts: 1 },
+          error: null,
+        });
+      },
+      updateOrderGuardStatus: vi.fn().mockResolvedValue({ data: { id: order.id }, error: null }),
+      executeRpc: vi.fn().mockResolvedValue({ data: { driver_id: 'driver-1', order_display_id: 'OD-1' }, error: null }),
+      updateOrder: vi.fn().mockResolvedValue({ data: { id: order.id }, error: null }),
+      updateWalletTransaction: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+  }
+
+  function makeService({ escrowReleaseFn, repo }) {
+    const svc = new DeliveryVerificationService(null, {
+      notificationService: {
+        getActiveDeliveryOtp: () => Promise.resolve({ id: 'otp-1' }),
+        verifyDeliveryOtpHash: () => true,
+        verifyDeliveryOtp: () => Promise.resolve(true),
+        storeDeliveryOtp: () => Promise.resolve(true),
+        sendDeliveryOtpNotification: () => Promise.resolve({ success: true }),
+      },
+      escrowReleaseFn,
+      trackingTokenService: null,
+    });
+    svc.orderRepository = repo;
+    svc.assertDriverAtDropoff = vi.fn().mockResolvedValue();
+    return svc;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes the authoritative expected amount to escrowReleaseFn for on-chain verification', async () => {
+    const repo = makeRepo();
+    const releaseFn = vi.fn().mockResolvedValue({ txHash: '0xRELEASE' });
+    const svc = makeService({ escrowReleaseFn: releaseFn, repo });
+
+    await svc.verifyDelivery({ orderId: 'order-1', driverId: 'driver-1', otp: '123456' }, {});
+
+    expect(releaseFn).toHaveBeenCalledWith('OD-1', EXPECTED_WEI);
+  });
+
+  it('blocks the release when escrow_amount_wei is inconsistent with total_amount', async () => {
+    const repo = makeRepo(makeFundedOrder({ escrow_amount_wei: '1000000000000000' }));
+    const releaseFn = vi.fn().mockResolvedValue({ txHash: '0xRELEASE' });
+    const svc = makeService({ escrowReleaseFn: releaseFn, repo });
+
+    await expect(
+      svc.verifyDelivery({ orderId: 'order-1', driverId: 'driver-1', otp: '123456' }, {}),
+    ).rejects.toMatchObject({
+      status: 409,
+      payload: { code: 'ESCROW_AMOUNT_MISMATCH' },
+    });
+
+    expect(releaseFn).not.toHaveBeenCalled();
+    expect(repo.executeRpc).not.toHaveBeenCalled();
+    expect(repo.updateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({
+        escrow_status: 'release_failed',
+        escrow_release_error: expect.stringContaining('ESCROW_AMOUNT_MISMATCH'),
+      }),
+    );
+  });
+
+  it('treats an on-chain amount mismatch from escrowReleaseFn as a terminal 409, not a retryable 503', async () => {
+    const repo = makeRepo();
+    const releaseFn = vi.fn().mockResolvedValue({
+      txHash: null,
+      error: 'On-chain booking amount does not match',
+      code: 'DEPOSIT_AMOUNT_MISMATCH',
+    });
+    const svc = makeService({ escrowReleaseFn: releaseFn, repo });
+
+    await expect(
+      svc.verifyDelivery({ orderId: 'order-1', driverId: 'driver-1', otp: '123456' }, {}),
+    ).rejects.toMatchObject({
+      status: 409,
+      payload: { code: 'DEPOSIT_AMOUNT_MISMATCH', retryable: false },
+    });
+
+    expect(repo.executeRpc).not.toHaveBeenCalled();
+  });
+
+  it('still releases when the stored amount is within tolerance of total_amount (legacy float rounding)', async () => {
+    const legacyWei = (EXPECTED_WEI + 256n).toString();
+    const repo = makeRepo(makeFundedOrder({ escrow_amount_wei: legacyWei }));
+    const releaseFn = vi.fn().mockResolvedValue({ txHash: '0xRELEASE' });
+    const svc = makeService({ escrowReleaseFn: releaseFn, repo });
+
+    const result = await svc.verifyDelivery({ orderId: 'order-1', driverId: 'driver-1', otp: '123456' }, {});
+
+    expect(releaseFn).toHaveBeenCalledWith('OD-1', BigInt(legacyWei));
+    expect(result).toEqual({ escrowUpdateFailed: false });
   });
 });

@@ -36,10 +36,25 @@ async function finalizeOrRevert(order, orderRepository) {
 
   try {
     const booking = await getEscrowBooking(order.escrow_booking_id);
+    const bookingAmount = booking?.amount;
+    const bookingFunded = booking && bookingAmount != null && bookingAmount > 0n;
 
-    if (booking && booking.paid) {
-      // The deposit DID land on-chain. Heal the acceptance by running
-      // accept_bid_tx as the backend (service_role).
+    // An on-chain booking only counts as "the deposit landed" if it is funded
+    // with EXACTLY the authoritative amount recorded for the order. A booking
+    // funded with any other amount must never finalize the acceptance — the
+    // order is reverted and the deposit refunded instead.
+    let mismatchReason = null;
+    if (bookingFunded && order.escrow_amount_wei != null) {
+      const expectedWei = BigInt(order.escrow_amount_wei);
+      if (bookingAmount !== expectedWei) {
+        mismatchReason = `booking amount ${bookingAmount} wei does not match expected ${expectedWei} wei`;
+        logger.error(`[escrow-funding] Order ${order.order_display_id} ${mismatchReason} — reverting instead of healing.`);
+      }
+    }
+
+    if (bookingFunded && !mismatchReason) {
+      // The deposit DID land on-chain with the correct amount. Heal the
+      // acceptance by running accept_bid_tx as the backend (service_role).
       const pending = order.pending_bid_acceptance;
       if (pending) {
         const { error: acceptErr } = await orderRepository.executeRpc('accept_bid_tx', {
@@ -71,7 +86,7 @@ async function finalizeOrRevert(order, orderRepository) {
           pending.driver_id,
           'Bid Accepted!',
           `Your bid for order ${pending.order_display_id} has been accepted. You are now assigned to this load.`,
-          'bid_accepted',
+          'order_update',
           { orderId: order.id, orderDisplayId: pending.order_display_id }
         ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err.message}`));
       }
@@ -85,7 +100,8 @@ async function finalizeOrRevert(order, orderRepository) {
       return;
     }
 
-    // Deposit never landed (or booking could not be read). Release the driver.
+    // Deposit never landed (or the amount does not match the authoritative
+    // figure). Release the driver and refund the incorrect deposit.
     let refundError = null;
     try {
       await submitEscrowRefund(order.order_display_id);
@@ -100,7 +116,9 @@ async function finalizeOrRevert(order, orderRepository) {
       pending_bid_acceptance: null,
       escrow_funding_attempts: 0,
       escrow_funding_last_attempt_at: null,
-      escrow_funding_error: refundError ? `refund failed: ${refundError}` : null,
+      escrow_funding_error: mismatchReason
+        ? `ESCROW_AMOUNT_MISMATCH: ${mismatchReason}`
+        : (refundError ? `refund failed: ${refundError}` : null),
       updated_at: new Date().toISOString(),
     }, [
       { op: 'eq', column: 'escrow_status', value: 'funding' },
@@ -114,7 +132,7 @@ async function finalizeOrRevert(order, orderRepository) {
         order.customer_id,
         'Bid Acceptance Expired',
         `The escrow deposit for order ${order.order_display_id} was not completed in time, so the driver is no longer reserved. You can accept a bid again.`,
-        'BID_ACCEPTANCE_EXPIRED',
+        'order_update',
         { orderId: order.id }
       ).catch((err) => logger.error(`[FCM] Failed to notify customer of expired bid acceptance: ${err.message}`));
       logger.info(`[escrow-funding] Order ${order.order_display_id} reverted to pending (funding TTL expired).`);

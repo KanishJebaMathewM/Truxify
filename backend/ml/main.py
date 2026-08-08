@@ -437,7 +437,11 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
 @app.post("/predict/price", response_model=PricePredictOutput)
 async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_api_key)):
     try:
-        result = predict_price(
+        # predict_price performs blocking weather lookups (requests.get) and
+        # CPU-bound model scoring; run it in a worker thread so it never blocks
+        # the FastAPI event loop and stalls other ML endpoints.
+        result = await asyncio.to_thread(
+            predict_price,
             distance_km=input.distance_km,
             cargo_weight_kg=input.cargo_weight_kg,
             truck_type=input.truck_type,

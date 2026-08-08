@@ -228,6 +228,26 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
   try {
     // 1. Validate per-event-type payloads and strip sensitive fields
     for (const event of events) {
+      // Explicit coordinate validation for telemetry frames
+      const isTelemetry = event.type === 'gpsUpdate' || (event.payload && ('lat' in event.payload || 'lng' in event.payload));
+      if (isTelemetry) {
+        const lat = event.payload?.lat;
+        const lng = event.payload?.lng;
+        const numLat = Number(lat);
+        const numLng = Number(lng);
+
+        if (
+          lat === null || lat === undefined ||
+          lng === null || lng === undefined ||
+          Number.isNaN(numLat) || Number.isNaN(numLng) ||
+          numLat < -90 || numLat > 90 ||
+          numLng < -180 || numLng > 180
+        ) {
+          logger.warn(`[SyncEngine] Rejected batch: invalid coordinate data in event ${event.id}`);
+          return res.status(400).json({ error: 'Invalid coordinate data' });
+        }
+      }
+
       const result = validateEventPayload(event.type, event.payload || {});
       if (!result.success) {
         logger.warn('[SyncEngine] Invalid payload for event', event.id, '(type:', event.type, '):', result.error.issues);

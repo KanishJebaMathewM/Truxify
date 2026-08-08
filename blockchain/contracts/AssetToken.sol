@@ -58,6 +58,12 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
     // ETH accrued to each user from treasury buy-backs (sellFraction); the
     // funds are held by the contract and released via claimPayout().
     mapping(address => uint256) public claimableBalances;
+    // Hard supply invariant: per-asset count of fractions that were minted
+    // and remain outstanding (minted via purchaseFraction, burned back via
+    // sellFraction). Enforced to never exceed totalTokens so the ERC20 supply
+    // backing an asset can never exceed its collateralized pool, regardless of
+    // how many times fractions change hands on the secondary market.
+    mapping(uint256 => uint256) public issuedTokens;
 
     uint256 private _assetCounter;
     uint256 private _tradeOrderCounter;
@@ -158,12 +164,16 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         require(asset.isActive, "Asset not active");
         require(amount > 0, "Amount must be > 0");
         require(asset.availableTokens >= amount, "Insufficient tokens");
+        require(issuedTokens[assetId] + amount <= asset.totalTokens, "Supply cap exceeded");
 
         uint256 totalCost = (amount * asset.tokenPrice + 1e18 - 1) / 1e18;
         require(msg.value >= totalCost, "Insufficient payment");
 
+        require(totalSupply() + amount <= asset.totalTokens, "Exceeds total token cap");
+
         // Update asset
         asset.availableTokens -= amount;
+        issuedTokens[assetId] += amount;
 
         // Update fractional ownership
         FractionalOwnership storage ownership = fractionalOwnership[assetId][msg.sender];
@@ -206,8 +216,13 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         // Update ownership
         ownership.amount -= amount;
 
-        // Update asset — returned fractions re-enter the available pool
+        // Update asset — returned fractions re-enter the available pool. Only
+        // real, currently-outstanding fractions can be sold back: they are
+        // burned first, and the issuedTokens ledger is decremented to keep the
+        // outstanding count in sync with availableTokens (so re-adding here can
+        // never exceed what was originally minted from the primary pool).
         assets[assetId].availableTokens += amount;
+        issuedTokens[assetId] -= amount;
 
         if (ownership.amount == 0) {
             _removeUserAsset(msg.sender, assetId);
@@ -382,6 +397,11 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
 
     function getAsset(uint256 assetId) external view returns (Asset memory) {
         return assets[assetId];
+    }
+
+    /// @notice Outstanding (minted, not yet sold back) fraction count for an asset.
+    function getIssuedTokens(uint256 assetId) external view returns (uint256) {
+        return issuedTokens[assetId];
     }
 
     function getFractionalOwnership(uint256 assetId, address owner) external view returns (FractionalOwnership memory) {

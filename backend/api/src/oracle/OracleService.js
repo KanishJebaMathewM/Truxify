@@ -14,6 +14,12 @@ const DELIVERY_IN_PROGRESS_STATUSES = new Set([
   'arriving',
 ]);
 
+const DELIVERY_IN_PROGRESS_STATUSES = new Set([
+  'picked_up',
+  'in_transit',
+  'arriving',
+]);
+
 class OracleService {
   constructor(deps = {}) {
     this.orderRepository = deps.orderRepository || null;

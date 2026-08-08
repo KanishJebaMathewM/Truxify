@@ -110,10 +110,11 @@ it('rejects an already-funded booking created for a different driver', async () 
     expect(result.error).toMatch(/different driver/i)
 })
 
-it('rejects an already-funded booking that is underfunded', async () => {
+it('rejects an already-funded booking whose amount differs from the expected amount', async () => {
     mockBookings.mockResolvedValue({ amount: 1n, customer: someSender, driver: driverAddr })
     const result = await recordDepositTx(bookingId, txHash, someSender, driverAddr, '100')
-    expect(result.error).toMatch(/underfunded/i)
+    expect(result.error).toMatch(/does not match/i)
+    expect(result.code).toBe('DEPOSIT_AMOUNT_MISMATCH')
 })
 
 it('succeeds on an already-funded booking that matches customer, driver, and amount', async () => {
@@ -131,7 +132,7 @@ it('rejects a deposit tx created for a different driver', async () => {
     expect(result.error).toMatch(/driver address does not match/i)
 })
 
-it('rejects a deposit tx whose value is below the expected escrow amount', async () => {
+it('rejects a deposit tx whose value differs from the expected escrow amount (exact equality)', async () => {
     mockGetTransaction.mockResolvedValue({
         to: CONTRACT_ADDRESS,
         data: '0xdeadbeef',
@@ -139,7 +140,22 @@ it('rejects a deposit tx whose value is below the expected escrow amount', async
         from: someSender,
     })
     const result = await recordDepositTx(bookingId, txHash, someSender, driverAddr, '100')
-    expect(result.error).toMatch(/less than the expected escrow amount/i)
+    expect(result.error).toMatch(/does not match/i)
+    expect(result.error).toMatch(/less than/i)
+    expect(result.code).toBe('DEPOSIT_AMOUNT_MISMATCH')
+})
+
+it('rejects a deposit tx that overpays the expected escrow amount', async () => {
+    mockGetTransaction.mockResolvedValue({
+        to: CONTRACT_ADDRESS,
+        data: '0xdeadbeef',
+        value: 1000n,
+        from: someSender,
+    })
+    const result = await recordDepositTx(bookingId, txHash, someSender, driverAddr, '100')
+    expect(result.error).toMatch(/does not match/i)
+    expect(result.error).toMatch(/greater than/i)
+    expect(result.code).toBe('DEPOSIT_AMOUNT_MISMATCH')
 })
 
 it('returns a 4xx-friendly error for a malformed booking ID instead of throwing', async () => {

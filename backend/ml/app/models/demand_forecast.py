@@ -60,6 +60,7 @@ FEATURE_NAMES = [
 
 
 def train_demand_forecast_model() -> dict:
+    global _model_cache
     X, y = generate_synthetic_demand_data()
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
@@ -89,6 +90,9 @@ def train_demand_forecast_model() -> dict:
     }
 
     save_model((model, scaler), MODEL_NAME, metrics)
+    # Invalidate the in-memory cache so the next predict_demand call reloads the
+    # freshly trained model instead of continuing to score with the stale one.
+    _model_cache = None
     logger.info("Demand forecast model trained. R2: %.3f, MAE: %.3f", r2, mae)
     return metrics
 

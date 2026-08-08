@@ -154,4 +154,18 @@ describe('AnomalyDetectionService', () => {
       expect(result).toBe(true);
     });
   });
+
+  describe('detectLargeWithdrawal', () => {
+    it('never scores a deposit/credit transaction as LARGE_WITHDRAWAL', async () => {
+      const transaction = { type: 'deposit', amount: 50000 };
+      const result = await service.detectLargeWithdrawal('user-1', 'wallet-1', transaction);
+      expect(result).toBeNull();
+    });
+
+    it('never scores a credit/refund transaction as LARGE_WITHDRAWAL', async () => {
+      const transaction = { type: 'credit', amount: 50000 };
+      const result = await service.detectLargeWithdrawal('user-1', 'wallet-1', transaction);
+      expect(result).toBeNull();
+    });
+  });
 });

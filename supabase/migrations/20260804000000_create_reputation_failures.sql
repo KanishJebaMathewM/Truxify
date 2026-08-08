@@ -17,9 +17,9 @@
 CREATE TABLE IF NOT EXISTS public.reputation_failures (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   driver_wallet text NOT NULL,
-  stars integer,
-  failed_at timestamptz DEFAULT now(),
-  retry_count integer DEFAULT 0,
+  stars numeric NOT NULL DEFAULT 0,
+  failed_at timestamptz NOT NULL DEFAULT now(),
+  retry_count integer NOT NULL DEFAULT 0,
   last_error text,
   last_attempt_at timestamptz,
   created_at timestamptz DEFAULT now(),

@@ -15,6 +15,7 @@ contract zkEVMBridge is Ownable, ReentrancyGuard {
     mapping(address => uint256) public pendingWithdrawals;
     mapping(address => uint256) public depositedAmount;
     uint256 public bridgeFee = 0.001 ether;
+    uint256 public collectedFees;
 
     event BridgeDeposit(address indexed user, uint256 amount, uint256 fee);
     event BridgeWithdraw(address indexed user, uint256 amount);
@@ -29,6 +30,7 @@ contract zkEVMBridge is Ownable, ReentrancyGuard {
         uint256 amount = msg.value - bridgeFee;
 
         depositedAmount[msg.sender] += amount;
+        collectedFees += bridgeFee;
 
         // Deposit to L2
         zkEVM.depositToL2{value: amount}();
@@ -73,8 +75,20 @@ function withdrawFromL2(
     }
 
     function withdrawFees() external onlyOwner {
-        payable(owner()).transfer(address(this).balance);
+        // Only ever sweep the fees collected in depositToL2. The contract
+        // balance also holds user funds queued in pendingWithdrawals, so it
+        // must never be transferred in full to the owner.
+        uint256 amount = collectedFees;
+        require(amount > 0, "No fees to withdraw");
+        collectedFees = 0;
+        payable(owner()).transfer(amount);
     }
 
-    receive() external payable {}
+    receive() external payable {
+        // Only the zkEVM rollup sends ETH back to the bridge (the amount
+        // returned during withdrawFromL2, which is queued for the user).
+        // Rejecting arbitrary ETH keeps stray funds from inflating the
+        // balance and being mistaken for user money or fees.
+        require(msg.sender == address(zkEVM), "Only zkEVM can fund the bridge");
+    }
 }

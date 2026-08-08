@@ -2,6 +2,7 @@ import rateLimit, { MemoryStore } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import * as Sentry from "@sentry/node";
 import { redisClient } from "../config/db.js";
+import crypto from "crypto";
 import logger from "./logger.js";
 
 function isRedisReady() {
@@ -304,7 +305,14 @@ export const otpVerificationLimiter = rateLimit({
   max: OTP_VERIFICATION_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: safeIpKeyGenerator,
+  keyGenerator: (req) => {
+    const phone = typeof req.body?.phone === "string" ? req.body.phone.trim() : "";
+    if (phone) {
+      const phoneHash = crypto.createHash("sha256").update(phone).digest("hex").slice(0, 16);
+      return `otp-verify:${phoneHash}:${safeIpKeyGenerator(req)}`;
+    }
+    return safeIpKeyGenerator(req);
+  },
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:otp-verification:"),
   handler: sentryAlertHandler("otpVerificationLimiter"),

@@ -67,14 +67,13 @@ export class OrderLifecycleService {
         waypoints = [],
       } = body;
 
-      let optimizedWaypoints = waypoints;
-      if (waypoints && waypoints.length > 0) {
-        optimizedWaypoints = await optimizeWaypoints(
-          { lat: Number(pickup_lat), lng: Number(pickup_lng), address: pickup_address },
-          { lat: Number(drop_lat), lng: Number(drop_lng), address: drop_address },
-          waypoints
-        );
-      }
+      const optimizedWaypoints = await optimizeWaypoints(
+        { lat: Number(pickup_lat), lng: Number(pickup_lng), address: pickup_address },
+        { lat: Number(drop_lat), lng: Number(drop_lng), address: drop_address },
+        waypoints,
+        pickup_date,
+        pickup_time
+      );
 
       let pricing;
       try {

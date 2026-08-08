@@ -55,8 +55,8 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
-import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
-import { validateParams, validateQuery } from '../middleware/validate.js';
+import { loadFilterQuerySchema, createLoadSchema } from '../validation/loadSchemas.js';
+import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
 import { paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 
@@ -310,29 +310,9 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
 // 1.5 CREATE NEW LOAD OFFER (CUSTOMER)
 // POST /api/loads
 // ============================================================================
-router.post('/', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
+router.post('/', authenticate, userLimiter, requireRole(['customer']), validateBody(createLoadSchema), async (req, res) => {
   try {
     const { origin, destination, weight_tons, expected_price, material_type } = req.body;
-
-    if (!origin || !origin.lat || !origin.lng) {
-      return res.status(400).json({ error: 'Origin with lat/lng is required' });
-    }
-    if (!destination || !destination.lat || !destination.lng) {
-      return res.status(400).json({ error: 'Destination with lat/lng is required' });
-    }
-
-    const parsedWeight = Number(weight_tons);
-    if (weight_tons === undefined || weight_tons === null || Number.isNaN(parsedWeight)) {
-      return res.status(400).json({ error: 'Valid weight_tons is required' });
-    }
-    if (parsedWeight <= 0) {
-      return res.status(400).json({ error: 'weight_tons must be a positive number' });
-    }
-
-    const parsedPrice = Number(expected_price);
-    if (expected_price === undefined || expected_price === null || Number.isNaN(parsedPrice)) {
-      return res.status(400).json({ error: 'Valid expected_price is required' });
-    }
 
     const pickupAddress = origin.address || 'Unknown Origin';
     const dropAddress = destination.address || 'Unknown Destination';

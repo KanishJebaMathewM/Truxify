@@ -576,7 +576,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
               $maxDistance: maxDistanceMeters
             }
           }
-        }).toArray();
+        }).limit(200).toArray();
 
         nearbyDriverIds = [...new Set(nearbyTelemetry.map(t => t.driver_id))];
       } catch (mongoErr) {

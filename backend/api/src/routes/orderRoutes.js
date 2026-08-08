@@ -753,7 +753,22 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
           logger.error('[confirm-deposit] Escrow refund also failed:', refundErr.message);
           refundResult = { error: refundErr.message };
         }
-        const refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
+        let refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
+        if (refundConfirmed && typeof refundResult.waitForConfirmation === 'function') {
+          try {
+            await refundResult.waitForConfirmation();
+          } catch (confirmErr) {
+            logger.error('[confirm-deposit] Escrow refund confirmation failed:', confirmErr.message);
+            refundResult = { error: confirmErr.message, txHash: refundResult.txHash };
+            refundConfirmed = false;
+          }
+        } else if (refundConfirmed && typeof refundResult.waitForConfirmation !== 'function') {
+          refundConfirmed = false;
+          refundResult = {
+            error: refundResult.error || 'escrow refund confirmation is unavailable',
+            txHash: refundResult.txHash,
+          };
+        }
 
         if (!refundConfirmed) {
           // The deposit is still locked on-chain. Keep escrow_booking_id and
@@ -773,7 +788,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
           });
         }
 
-        // Refund confirmed — safe to release the escrow booking reference.
+        // Refund confirmed on-chain — safe to release the escrow booking reference.
         await orderRepository.revertEscrowStatus(orderId).catch((revertErr) => {
           logger.error('[confirm-deposit] Failed to revert escrow status:', revertErr.message);
         });

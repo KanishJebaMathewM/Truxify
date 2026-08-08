@@ -91,7 +91,7 @@ export const CacheKeyBuilder = {
     const ns = CacheNamespace.get(namespace);
     const prefix = ns?.prefix || namespace;
     if (entityId) {
-      return `${prefix}:*:${entityId}*`;
+      return `${prefix}:${entityId}*`;
     }
     return `${prefix}:*`;
   },

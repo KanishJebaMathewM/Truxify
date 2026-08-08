@@ -535,7 +535,7 @@ async function authenticateWs(ws, token) {
     }
     ws.authenticated = true;
     await restoreSubscriptions(ws);
-    logger.info(`✅ WS Authenticated user: ${ws.user.id}`);
+    logger.info({ userId: ws.user.id }, 'WS Authenticated user');
   } catch (err) {
     logger.error({ err }, 'WS Auth failed');
     ws.send(JSON.stringify({ error: 'Unauthorized: Invalid token', code: 4001 }));
@@ -711,14 +711,14 @@ export function initWebSocketServer(server, orderRepository) {
     });
 
     ws.on('close', () => {
-      logger.info('🔌 WebSocket connection closed.');
+      logger.info('WebSocket connection closed');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
       })();
     });
 
     ws.on('error', (err) => {
-      logger.error('🔌 WebSocket client error:', err.message);
+      logger.error({ err }, 'WebSocket client error');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
       })();
@@ -751,7 +751,7 @@ export function initWebSocketServer(server, orderRepository) {
       };
       ws.authenticated = true;
       logger.warn({ event: 'WS_BYPASS_AUTH_USED', driverId: ws.driverId, role: ws.user.role }, 'WS Auth bypassed via DEV_ACCESS_TOKEN');
-      logger.info('🔌 New WebSocket connection established on /ws/tracking');
+      logger.info('New WebSocket connection established on /ws/tracking');
       return;
     }
 
@@ -767,13 +767,13 @@ export function initWebSocketServer(server, orderRepository) {
       }
     }, WS_AUTH_TIMEOUT_MS);
     ws.once('close', () => clearTimeout(authTimeout));
-    logger.info('🔌 New WebSocket connection established on /ws/tracking (awaiting first-frame auth)');
+    logger.info('New WebSocket connection established on /ws/tracking (awaiting first-frame auth)');
   });
 
   wsHeartbeatInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        logger.info('🔌 Terminating unresponsive WebSocket client.');
+        logger.info('Terminating unresponsive WebSocket client');
         return ws.terminate();
       }
       ws.isAlive = false;
@@ -863,7 +863,7 @@ export async function handleTrackingMessage(ws, message, req) {
             status: 'authenticated',
             user_id: ws.user?.id ?? ws.driverId,
           }));
-          logger.info('🔌 New WebSocket connection established on /ws/tracking (first-frame auth)');
+          logger.info('New WebSocket connection established on /ws/tracking (first-frame auth)');
         }
         return;
       }
@@ -1531,7 +1531,7 @@ export async function handleSubscribe(ws, data) {
     }
   }
 
-  logger.info(`🔌 Client subscribed to telemetry updates for: "${targetId}"`);
+  logger.info({ targetId }, 'Client subscribed to telemetry updates');
   ws.send(JSON.stringify({ status: 'subscribed', target: targetId, reconnect_supported: true }));
 }
 
@@ -1606,7 +1606,7 @@ async function handleUnsubscribe(ws, data) {
       }
     }
 
-    logger.info(`🔌 Client unsubscribed from updates for: "${targetId}"`);
+    logger.info({ targetId }, 'Client unsubscribed from updates');
     ws.send(JSON.stringify({ status: 'unsubscribed', target: targetId }));
   }
 }
@@ -1615,7 +1615,7 @@ async function removeClientFromAllSubscriptions(ws) {
   trackingSubscriptions.forEach((clients, key) => {
     if (clients.has(ws)) {
       clients.delete(ws);
-      logger.info(`🔌 Removed socket subscription from "${key}" due to disconnect.`);
+      logger.info({ key }, 'Removed socket subscription due to disconnect');
     }
     if (clients.size === 0) {
       trackingSubscriptions.delete(key);
@@ -1630,7 +1630,7 @@ async function removeClientFromAllSubscriptions(ws) {
               supabase.removeChannel(channel);
             }
             locationChannels.delete(uuidKey);
-            logger.info(`🔌 Removed Supabase Realtime channel for order "${uuidKey}" on last subscriber disconnect.`);
+            logger.info({ uuidKey }, 'Removed Supabase Realtime channel on last subscriber disconnect');
           }
         }
         displayIdToLocationChannelKeys.delete(key);

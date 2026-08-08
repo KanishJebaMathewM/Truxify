@@ -194,7 +194,7 @@ router.post(
   validateBody(lockPaymentSchema),
   auditLog({ action: 'payment:lock', resourceType: 'escrow' }),
   async (req, res) => {
-    const { order_id, tx_hash, wallet_address } = req.body;
+    const { order_id, tx_hash } = req.body;
     const lockKey = `payment_lock:${order_id}`;
 
     // lockValue holds the owner UUID returned by acquireLock.
@@ -261,11 +261,19 @@ router.post(
       const bookingId = order.escrow_booking_id || getEscrowBookingId(order.order_display_id);
 
       // 5. Verify the deposit transaction on-chain against the order's escrow
-      //    booking: the sender must be the registered customer wallet, the
-      //    booking must be created for the assigned driver, and funded with at
-      //    least the expected escrow amount. The client-supplied tx_hash is
-      //    never trusted without on-chain verification (no dev trust path).
-      const senderAddress = wallet_address || order.wallet_address;
+      //    booking: the sender must be the authenticated customer's profile
+      //    wallet (never a client-supplied wallet_address), the booking must
+      //    be created for the assigned driver, and funded with at least the
+      //    expected escrow amount. The client-supplied tx_hash is never
+      //    trusted without on-chain verification (no dev trust path).
+      const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
+      const senderAddress = customerProfile?.polygon_wallet_address ?? null;
+      if (!senderAddress) {
+        return res.status(422).json({
+          error: 'No Polygon wallet is registered on your profile. Add a wallet before locking escrow payment.',
+          code: 'WALLET_REQUIRED',
+        });
+      }
 
       // Resolve the authoritative expected deposit amount (cross-checked
       // against the server-written bid context). If it cannot be resolved the

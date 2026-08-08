@@ -246,7 +246,9 @@ describe('Driver Profile & Availability Endpoints', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(mockInsertTruck).toHaveBeenCalled();
+      expect(mockInsertTruck).toHaveBeenCalledWith(
+        expect.objectContaining({ driver_id: 'driver-123' })
+      );
       expect(mockUpdateDetails).toHaveBeenCalled();
     });
   });

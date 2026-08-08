@@ -1721,6 +1721,7 @@ router.put('/truck', authenticate, userLimiter, async (req, res) => {
       const { data, error } = await supabase
         .from('trucks')
         .insert({
+          driver_id: req.user.id,
           truck_type: type,
           capacity_weight_tonnes: capacityWeight || 0,
           capacity_volume_m3: capacityVolume || 0,

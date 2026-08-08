@@ -22,6 +22,41 @@ import logger from '../middleware/logger.js';
 
 const SEP = ':';
 
+/** Bounded timeout (ms) for the Redis version lookup in buildVersioned. */
+const DEFAULT_VERSION_TIMEOUT_MS = 500;
+
+/** Redis client used for the live version lookup. Wired via CacheManager.init. */
+let redisClient = null;
+
+/**
+ * Register the Redis client used for version lookups.
+ *
+ * @param {object|null} client — ioredis instance (or null to clear)
+ */
+function _setRedisClient(client) {
+  redisClient = client;
+}
+
+/**
+ * Resolve a promise but bound it to a timeout. A late rejection after the
+ * timeout fires is swallowed so it can never surface as an unhandled rejection.
+ *
+ * @param {PromiseLike<*>} promise
+ * @param {number} timeoutMs
+ * @returns {Promise<*>}
+ */
+function _boundedRead(promise, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    Promise.resolve(promise).catch(() => null).then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (error) => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
 export const CacheKeyBuilder = {
   /**
    * Build a cache key for the given namespace, entity ID and optional sub-key.
@@ -43,20 +78,40 @@ export const CacheKeyBuilder = {
   },
 
   /**
-   * Build a versioned cache key. The version is looked up from Redis
-   * and appended to the key so that bumping the version invalidates
-   * all previous keys.
+   * Build a versioned cache key. The current version is read live from
+   * Redis (see versionKey) and appended to the key, so bumping the version
+   * invalidates all previously built keys. Falls back to `v1` only when the
+   * read fails, times out, or no Redis client is configured.
    *
    * @param {string} namespace
    * @param {string} entityId
    * @param {string} [subKey]
-   * @param {number} [version] — if provided, skips Redis lookup
-   * @returns {string} versioned Redis key
+   * @param {number} [version] — if provided, skips the Redis lookup
+   * @param {object} [opts]
+   * @param {string} [opts.versionKey] — custom version key to read instead
+   * @param {number} [opts.timeoutMs] — bounded timeout for the Redis read
+   * @returns {Promise<string>} versioned Redis key
    */
-  buildVersioned(namespace, entityId, subKey, version) {
+  async buildVersioned(namespace, entityId, subKey, version, opts = {}) {
     const ns = CacheNamespace.get(namespace);
     const prefix = ns?.prefix || namespace;
-    const v = version != null ? version : 1;
+    let v = version;
+    if (v == null) {
+      const client = redisClient;
+      if (client) {
+        try {
+          const versionKey = opts.versionKey || this.versionKey(namespace, entityId, subKey);
+          const raw = await _boundedRead(client.get(versionKey), opts.timeoutMs ?? DEFAULT_VERSION_TIMEOUT_MS);
+          const parsed = raw != null ? parseInt(raw, 10) : 1;
+          v = Number.isNaN(parsed) ? 1 : parsed;
+        } catch (err) {
+          logger.warn({ err }, `[CacheKeyBuilder] Failed to read version for namespace "${namespace}" — falling back to v1.`);
+          v = 1;
+        }
+      } else {
+        v = 1;
+      }
+    }
     const parts = [prefix, `v${v}`, entityId];
     if (subKey) parts.push(subKey);
     return parts.join(SEP);
@@ -123,6 +178,16 @@ export const CacheKeyBuilder = {
         ? (parts.length > 3 ? parts.slice(3).join(SEP) : null)
         : (parts.length > 2 ? parts.slice(2).join(SEP) : null),
     };
+  },
+
+  /**
+   * Register (or clear) the Redis client used for version lookups.
+   * Wired automatically by CacheManager.init.
+   *
+   * @param {object|null} client — ioredis instance
+   */
+  _setRedisClient(client) {
+    _setRedisClient(client);
   },
 };
 

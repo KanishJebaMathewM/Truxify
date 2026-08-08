@@ -128,6 +128,7 @@ async function handleBookingCancelled(payload) {
     .from('orders')
     .update({
       escrow_status: 'refunded',
+      refund_tx_hash: payload.txHash || null,
       updated_at: now,
     })
     .eq('id', order.id)
@@ -165,6 +166,8 @@ async function handleWithdrawalSettled(payload) {
     .from('orders')
     .update({
       escrow_status: isRefund ? 'refunded' : 'released',
+      release_tx_hash: isRefund ? undefined : txHash,
+      refund_tx_hash: isRefund ? txHash : undefined,
       escrow_released_at: isRefund ? undefined : now,
       escrow_release_error: isRefund ? undefined : null,
       updated_at: now,

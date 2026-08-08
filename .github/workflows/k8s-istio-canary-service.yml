@@ -1,0 +1,20 @@
+name: K8s Istio Canary Service Validation
+
+on:
+  pull_request:
+    paths:
+      - 'k8s/**'
+      - '.github/scripts/check-istio-canary-service.js'
+      - '.github/workflows/k8s-istio-canary-service.yml'
+
+jobs:
+  check:
+    name: Validate canary destinations resolve to Services
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run canary destination validation
+        run: node .github/scripts/check-istio-canary-service.js

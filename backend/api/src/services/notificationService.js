@@ -280,6 +280,3 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     // Push notification logic placeholder / dispatch
     return { success: true };
   }
-}
-
-module.exports = new NotificationService();

@@ -186,7 +186,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   ShipmentCardData? _buildShipmentFromOrder(Map<String, dynamic> order) {
-    final route = '${order['pickup_city'] ?? '?'} \u2192 ${order['drop_city'] ?? '?'}';
+    final pickupCity = _shortenAddress(order['pickup_address']?.toString() ?? '');
+    final dropCity = _shortenAddress(order['drop_address']?.toString() ?? '');
+    final route = '${pickupCity.isNotEmpty ? pickupCity : '?'} \u2192 ${dropCity.isNotEmpty ? dropCity : '?'}';
     final rawDriverName = order['driver_name']?.toString() ?? '';
     final hasDriver = DriverUtils.isValidDriverName(rawDriverName);
     final driverName = hasDriver ? rawDriverName : '';

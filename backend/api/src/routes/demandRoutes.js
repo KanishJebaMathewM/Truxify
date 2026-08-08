@@ -5,6 +5,7 @@ import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
 import { predictDemand } from '../services/ml.js';
+import { demandConfig } from '../config/demand.js';
 
 const router = express.Router();
 
@@ -45,21 +46,21 @@ router.get('/', authenticate, userLimiter, requirePolicy('demand:view-heatmap'),
     const { vehicle_type, cargo_category } = req.query;
 
     // Generate intelligent route recommendations and earnings potential based on ML predictions
-    const baseEarningRate = 18.50; // per km estimate
+    const baseEarningRate = demandConfig.baseEarningRate; // per km estimate
     const multiplier = mlPrediction.predicted_demand || 0.5;
     const estimatedEarningPotential = Number((baseEarningRate * (1 + multiplier)).toFixed(2));
 
     const routeSuggestions = (loads || []).slice(0, 3).map((l, idx) => ({
       id: idx + 1,
       recommendedRoute: `${l.pickup_address || 'Current Location'} -> ${l.drop_address || 'High Demand Zone'}`,
-      estimatedEarnings: estimatedEarningPotential * (1.2 + idx * 0.1),
+      estimatedEarnings: estimatedEarningPotential * (demandConfig.routeMultiplierBase + idx * demandConfig.routeMultiplierStep),
       confidenceScore: Number((multiplier * 100).toFixed(1))
     }));
 
     const predictedDemandNext48Hours = {
-      next24Hours: Number((multiplier * 1.1).toFixed(2)),
-      next48Hours: Number((multiplier * 0.95).toFixed(2)),
-      peakHours: ['08:00 - 10:00', '17:00 - 19:00']
+      next24Hours: Number((multiplier * demandConfig.next24HoursFactor).toFixed(2)),
+      next48Hours: Number((multiplier * demandConfig.next48HoursFactor).toFixed(2)),
+      peakHours: demandConfig.peakHours
     };
 
     const repositioningAreas = [

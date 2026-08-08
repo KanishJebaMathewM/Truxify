@@ -1,3 +1,4 @@
+import os from 'os';
 import { supabaseAdmin } from '../config/db.js';
 import { escrowRelease, getEscrowBooking, getEscrowBookingId } from './escrow.js';
 import { acquireLock, releaseLock, renewLock, LockAcquisitionError } from '../lib/redisLock.js';
@@ -66,26 +67,13 @@ export async function reconcilePendingEscrowReleases(orderRepository) {
       }
       throw err;
     }
-  } else {
-    // Redis not configured — single-instance mode, use in-process guard only
-    if (reconciliationRunning) return;
-  }
-
-  try {
-    if (!lockAcquired) reconciliationRunning = true;
-    const instanceId = process.env.HOSTNAME || os.hostname();
-    const { data: failedOrders, error } = await supabaseAdmin
-      .from('orders')
-      .select('id, order_display_id, escrow_amount_wei, escrow_release_attempts, release_tx_hash')
-      .eq('escrow_status', 'release_failed')
-      .lt('escrow_release_attempts', MAX_RETRIES)
-      .limit(50);
 
     if (!globalLockValue) {
       logger.info('[escrow-release-reconciliation] Global lock held by another instance, skipping batch.');
       return;
     }
 
+    const instanceId = process.env.HOSTNAME || os.hostname();
     const { data: pendingOrders, error } = await orderRepository.findPendingEscrowReleases();
     if (error) {
       logger.error('[escrow-release-reconciliation] Failed to load pending release orders:', error.message);

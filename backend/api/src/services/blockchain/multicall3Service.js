@@ -141,7 +141,7 @@ class Multicall3Service {
     }
 
     cachedResults.forEach(({ index, result }) => {
-      results[index] = result;
+      results[index] = { ...result, cached: true };
     });
 
     return results;

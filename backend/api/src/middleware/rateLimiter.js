@@ -314,66 +314,6 @@ export const otpVerificationLimiter = rateLimit({
   },
 });
 
-export const verifyDeliveryLimiter = rateLimit({
-  windowMs: Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000,
-  max: Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) || 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: userKeyGenerator,
-  validate: { keyGeneratorIpFallback: false },
-  store: createStore("rl:verify-delivery:"),
-  handler: sentryAlertHandler("verifyDeliveryLimiter"),
-  message: { error: "Rate limit exceeded", retryAfter: 3600 },
-});
-
-export const resendOtpLimiter = rateLimit({
-  windowMs: Number(process.env.RESEND_OTP_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max: Number(process.env.RESEND_OTP_RATE_LIMIT_MAX_REQUESTS) || 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: userKeyGenerator,
-  validate: { keyGeneratorIpFallback: false },
-  store: createStore("rl:resend-otp:"),
-  handler: sentryAlertHandler("resendOtpLimiter"),
-  message: { error: "Too many OTP resend attempts. Please try again later." },
-});
-
-export const changeDropLimiter = rateLimit({
-  windowMs: Number(process.env.CHANGE_DROP_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000,
-  max: Number(process.env.CHANGE_DROP_RATE_LIMIT_MAX_REQUESTS) || 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: userKeyGenerator,
-  validate: { keyGeneratorIpFallback: false },
-  store: createStore("rl:change-drop:"),
-  handler: sentryAlertHandler("changeDropLimiter"),
-  message: { error: "Rate limit exceeded", retryAfter: 3600 },
-});
-
-export const predictDemandLimiter = rateLimit({
-  windowMs: Number(process.env.PREDICT_DEMAND_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max: Number(process.env.PREDICT_DEMAND_RATE_LIMIT_MAX_REQUESTS) || 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: userKeyGenerator,
-  validate: { keyGeneratorIpFallback: false },
-  store: createStore("rl:predict-demand:"),
-  handler: sentryAlertHandler("predictDemandLimiter"),
-  message: { error: "Rate limit exceeded", retryAfter: 900 },
-});
-
-export const telemetryLimiter = rateLimit({
-  windowMs: Number(process.env.TELEMETRY_RATE_LIMIT_WINDOW_MS) || 60 * 1000,
-  max: Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS) || 60,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: userKeyGenerator,
-  validate: { keyGeneratorIpFallback: false },
-  store: createStore("rl:telemetry:"),
-  handler: sentryAlertHandler("telemetryLimiter"),
-  message: { error: "Rate limit exceeded", retryAfter: 60 },
-});
-
 const POD_WINDOW_MS =
   Number(process.env.POD_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000;
 const POD_MAX_REQUESTS = Number(process.env.POD_RATE_LIMIT_MAX_REQUESTS) || 10;

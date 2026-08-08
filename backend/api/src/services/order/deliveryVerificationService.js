@@ -490,9 +490,6 @@ export class DeliveryVerificationService {
           order.escrow_status === "funded" ||
           order.escrow_status === "release_failed"
         ) {
-          try {
-            const releaseResult = await this.escrowReleaseFn(
-              order.order_display_id,
           // Payout defense-in-depth: resolve the authoritative escrow amount
           // and verify it is consistent with the payout figure (total_amount)
           // BEFORE any on-chain release. The actual on-chain booking amount is
@@ -592,7 +589,6 @@ export class DeliveryVerificationService {
           // retries with a NULL release hash.
           if (releaseTxHash || escrowAlreadyReleased) {
             const { error: persistReleaseErr } =
-              await this._writeRepository.updateOrder(orderId, {
               await this.orderRepository.updateOrder(orderId, {
                 escrow_status: "released",
                 escrow_release_error: null,
@@ -607,15 +603,15 @@ export class DeliveryVerificationService {
               );
             }
           }
-        } else if (order.escrow_status === "released") {
-        // 1. Database and Trip State Verification/Execution First
-        if (order.escrow_status === "released") {
-          // Release was confirmed in a previous attempt — reuse the persisted hash.
-          releaseTxHash = order.release_tx_hash || null;
-        } else {
-          logger.info(
-            `[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`,
-          );
+          if (order.escrow_status === "released") {
+            // Release was confirmed in a previous attempt — reuse the persisted hash.
+            releaseTxHash = order.release_tx_hash || null;
+          } else {
+            logger.info(
+              `[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`,
+            );
+          }
+
         }
 
         // 2. Execute Postgres RPC to complete the trip AFTER blockchain success

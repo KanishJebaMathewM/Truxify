@@ -536,4 +536,30 @@ describe('GET /api/trips/:id/events', () => {
     expect(res.body.events).toHaveLength(1);
     expect(res.body.events[0].event_id).toBe('ev-in');
   });
+
+  it('returns 400 for a non-numeric coordinate query param', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: '11111111-1111-4111-a111-111111111111', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+    );
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/11111111-1111-4111-a111-111111111111/events?min_lat=abc')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('min_lat must be a number');
+  });
+
+  it('returns 400 for an out-of-range coordinate query param', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: '11111111-1111-4111-a111-111111111111', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+    );
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/11111111-1111-4111-a111-111111111111/events?max_lng=200')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('max_lng must be a number within [-180, 180]');
+  });
 });

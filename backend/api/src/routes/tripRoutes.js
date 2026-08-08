@@ -498,10 +498,29 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
       eventsQuery = eventsQuery.eq('event_type', type);
     }
 
-    if (min_lat !== undefined) eventsQuery = eventsQuery.gte('latitude', Number(min_lat));
-    if (max_lat !== undefined) eventsQuery = eventsQuery.lte('latitude', Number(max_lat));
-    if (min_lng !== undefined) eventsQuery = eventsQuery.gte('longitude', Number(min_lng));
-    if (max_lng !== undefined) eventsQuery = eventsQuery.lte('longitude', Number(max_lng));
+    const coordParams = [
+      { raw: min_lat, min: -90, max: 90, label: 'min_lat' },
+      { raw: max_lat, min: -90, max: 90, label: 'max_lat' },
+      { raw: min_lng, min: -180, max: 180, label: 'min_lng' },
+      { raw: max_lng, min: -180, max: 180, label: 'max_lng' },
+    ];
+    const parsedCoords = {};
+    for (const { raw, min, max, label } of coordParams) {
+      if (raw === undefined) continue;
+      if (typeof raw !== 'string' || raw.trim() === '') {
+        return res.status(400).json({ error: `Query parameter ${label} must be a number.` });
+      }
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+        return res.status(400).json({ error: `Query parameter ${label} must be a number within [${min}, ${max}].` });
+      }
+      parsedCoords[label] = parsed;
+    }
+
+    if (parsedCoords.min_lat !== undefined) eventsQuery = eventsQuery.gte('latitude', parsedCoords.min_lat);
+    if (parsedCoords.max_lat !== undefined) eventsQuery = eventsQuery.lte('latitude', parsedCoords.max_lat);
+    if (parsedCoords.min_lng !== undefined) eventsQuery = eventsQuery.gte('longitude', parsedCoords.min_lng);
+    if (parsedCoords.max_lng !== undefined) eventsQuery = eventsQuery.lte('longitude', parsedCoords.max_lng);
 
     const { data: events, error: eventsErr, count } = await eventsQuery
       .order('event_timestamp', { ascending: isAscending })

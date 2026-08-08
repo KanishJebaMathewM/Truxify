@@ -10,6 +10,7 @@ class AppRoutes {
   static const myTruck = '/my-truck';
   static const earnings = '/earnings';
   static const tripDetail = '/trip-detail';
+  static const activeTrip = '/active-trip';
   static const weightCalculator = '/weight-calculator';
   static const pastTrips = '/past-trips';
 }

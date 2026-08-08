@@ -435,6 +435,28 @@ class MarketplaceRepository {
     }
   }
 
+  Future<Map<String, dynamic>> confirmTripStop({
+    required String tripId,
+    required String stopId,
+    required String otp,
+  }) async {
+    final path = '/api/trips/${_encodePathSegment(tripId)}/confirm-stop';
+    try {
+      final decoded = await _apiClient.post(
+        path,
+        body: <String, dynamic>{
+          'stopId': stopId,
+          'otp': otp,
+        },
+      );
+      if (decoded is! Map<String, dynamic>) throw StateError('Unexpected response type');
+      return decoded;
+    } catch (e) {
+      if (e is ApiException) throw StateError(e.message);
+      rethrow;
+    }
+  }
+
   double _parseDistanceKm(String distance) {
     final cleaned = distance.replaceAll(RegExp(r'[^0-9.]'), '');
     return double.tryParse(cleaned) ?? 0;

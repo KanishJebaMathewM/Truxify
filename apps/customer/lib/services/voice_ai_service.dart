@@ -98,6 +98,37 @@ class VoiceAiService {
     return parts.join(' ');
   }
 
+  static List<String> getPresetQueries() {
+    return const [
+      'Where is my package?',
+      'When will it arrive?',
+      'Is my payment released?',
+    ];
+  }
+
+  static String detectIntent(String text) {
+    final lower = text.toLowerCase();
+    if (lower.contains('where') || lower.contains('location') || lower.contains('package') || lower.contains('truck')) {
+      return 'location';
+    }
+    if (lower.contains('when') || lower.contains('arrive') || lower.contains('eta') || lower.contains('reach')) {
+      return 'eta';
+    }
+    if (lower.contains('payment') || lower.contains('released') || lower.contains('escrow') || lower.contains('pay')) {
+      return 'escrow';
+    }
+    return 'general';
+  }
+
+  static Map<String, dynamic> parseVoiceResponse(Map<String, dynamic> res) {
+    return {
+      'transcript': res['transcript'] ?? 'Voice query',
+      'responseText': res['response_text'] ?? res['message'] ?? 'Query processed successfully.',
+      'audioUrl': res['audio_url'] ?? res['audioUrl'],
+      'intent': res['intent'] ?? detectIntent(res['transcript']?.toString() ?? ''),
+    };
+  }
+
   static String buildSummary(VoiceAiOrderInput order) {
     final sb = StringBuffer('Order Summary: ');
     if (order.status != null) sb.write('Status: ${formatStatus(order.status)}. ');

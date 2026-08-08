@@ -18,6 +18,7 @@ import 'load_point_detail_screen.dart';
 import 'notifications_screen.dart';
 import 'driver_profile_screen.dart';
 import 'trip_detail_screen.dart';
+import 'active_trip_screen.dart';
 import 'trips_screen.dart';
 import 'my_truck_screen.dart';
 
@@ -254,6 +255,10 @@ class _ShellScreenState extends State<ShellScreen> {
         final args = settings.arguments;
         if (args is! Trip) return _errorRoute();
         return truxifyPageRoute((context) => TripDetailScreen(trip: args));
+      case AppRoutes.activeTrip:
+        final args = settings.arguments;
+        if (args is! Trip) return _errorRoute();
+        return truxifyPageRoute((context) => ActiveTripScreen(trip: args));
       case AppRoutes.documents:
         return truxifyPageRoute((context) => const DocumentsScreen());
       case AppRoutes.loadDetail:

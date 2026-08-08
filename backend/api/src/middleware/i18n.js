@@ -3,6 +3,7 @@ import middleware from 'i18next-http-middleware';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import logger from './logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,7 +12,7 @@ const enDict = (() => {
   try {
     return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/en.json')));
   } catch (err) {
-    console.warn('[i18n] Failed to load en.json locale, falling back to empty object:', err.message);
+    logger.warn({ err }, '[i18n] Failed to load en.json locale, falling back to empty object');
     return {};
   }
 })();
@@ -20,7 +21,7 @@ const esDict = (() => {
   try {
     return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/es.json')));
   } catch (err) {
-    console.warn('[i18n] Failed to load es.json locale, falling back to empty object:', err.message);
+    logger.warn({ err }, '[i18n] Failed to load es.json locale, falling back to empty object');
     return {};
   }
 })();

@@ -3,17 +3,6 @@ import logger from '../middleware/logger.js';
 import { verifyDeliveryOtpHash } from '../services/notificationService.js';
 import { DeliveryVerificationService } from '../services/order/deliveryVerificationService.js';
 
-// Statuses that indicate a delivery is currently in progress and therefore
-// eligible for verification. Terminal states ('delivered', 'payment_released')
-// must NOT be used here: confirmDelivery runs BEFORE the order is marked
-// delivered, so a status check against those states could never confirm and
-// the 2-of-3 provider consensus would be unreachable.
-const DELIVERY_IN_PROGRESS_STATUSES = new Set([
-  'picked_up',
-  'in_transit',
-  'arriving',
-]);
-
 const DELIVERY_IN_PROGRESS_STATUSES = new Set([
   'picked_up',
   'in_transit',

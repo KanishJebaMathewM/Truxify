@@ -221,10 +221,11 @@ describe('Individual health checks', () => {
   });
 
   describe('workerHealth', () => {
-    it('returns healthy with no registered workers', async () => {
+    it('returns unhealthy when no workers are registered (fail closed)', async () => {
       const { default: check } = await import('../../../src/core/health/checks/workerHealth.js');
       const result = await check();
-      expect(result.status).toBe(HealthStatus.HEALTHY);
+      expect(result.status).toBe(HealthStatus.UNHEALTHY);
+      expect(result.message).toBe('no_registered_workers');
       expect(result.metadata.workerCount).toBe(0);
     });
 

@@ -56,6 +56,10 @@ export const CacheKeyBuilder = {
   buildVersioned(namespace, entityId, subKey, version) {
     const ns = CacheNamespace.get(namespace);
     const prefix = ns?.prefix || namespace;
+    // NOTE: Redis version counter lookup is not yet implemented.
+    // When version is null, this defaults to v1. To enable automatic
+    // version bumps, a Redis GET on versionKey(namespace, entityId, subKey)
+    // should be added here using the redis client.
     const v = version != null ? version : 1;
     const parts = [prefix, `v${v}`, entityId];
     if (subKey) parts.push(subKey);

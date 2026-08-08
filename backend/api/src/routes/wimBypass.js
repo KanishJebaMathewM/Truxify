@@ -1,9 +1,10 @@
 import express from 'express';
 import { evaluateBypassEligibility, createSignedWimPacket } from '../services/wimBypass.js';
+import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
-router.post('/request-bypass', (req, res) => {
+router.post('/request-bypass', requireAuth, (req, res) => {
     try {
         const { truckId, safetyScore, bolId, axleWeight, maxWeightLimit } = req.body;
 

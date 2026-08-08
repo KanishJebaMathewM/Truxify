@@ -21,7 +21,7 @@ async function findOrderByIdOrDisplayId(orderId) {
     throw new Error('Missing orderId in escrow webhook payload');
   }
 
-  const columns = 'id, order_display_id, driver_id, escrow_status, release_tx_hash';
+  const columns = 'id, order_display_id, driver_id, escrow_status, release_tx_hash, refund_tx_hash';
 
   if (UUID_REGEX.test(orderId)) {
     const { data, error } = await db
@@ -128,6 +128,7 @@ async function handleBookingCancelled(payload) {
     .from('orders')
     .update({
       escrow_status: 'refunded',
+      refund_tx_hash: payload.txHash || order.refund_tx_hash || null,
       updated_at: now,
     })
     .eq('id', order.id)
@@ -161,12 +162,22 @@ async function handleWithdrawalSettled(payload) {
     return;
   }
 
+  // Persist the settlement hash under the column that matches the outcome, so
+  // the on-chain evidence survives on the order either way. Falls back to any
+  // hash already on file when the webhook payload omits one.
+  const settlement = isRefund
+    ? { escrow_status: 'refunded', refund_tx_hash: txHash || order.refund_tx_hash || null }
+    : {
+        escrow_status: 'released',
+        release_tx_hash: txHash || order.release_tx_hash || null,
+        escrow_released_at: now,
+        escrow_release_error: null,
+      };
+
   const { error } = await requireDb()
     .from('orders')
     .update({
-      escrow_status: isRefund ? 'refunded' : 'released',
-      escrow_released_at: isRefund ? undefined : now,
-      escrow_release_error: isRefund ? undefined : null,
+      ...settlement,
       updated_at: now,
     })
     .eq('id', order.id)

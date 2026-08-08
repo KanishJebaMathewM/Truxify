@@ -24,9 +24,125 @@ const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js
 
 const m = createSupabaseMock();
 let completeTripRpcError = null;
+let createOrderTxError = null;
+// Simulates the durable order_idempotency_keys registry that the extended
+// create_order_tx maintains transactionally. Keyed by `${user_id}:${key}`.
+const idempotencyRegistry = new Map();
+// Override for the single next create_order_tx call with a key — lets tests
+// exercise the 'in_progress' service path the registry cannot produce here.
+let createOrderTxIdempotencyOutcome = null;
 
 const originalRpc = m.supabase.rpc;
 m.supabase.rpc = vi.fn().mockImplementation(async (fnName, args) => {
+  if (fnName === 'claim_order_idempotency_key') {
+    m.calls.push({ rpc: fnName, args });
+    return { data: { status: 'claimed', fingerprint: args.p_fingerprint }, error: null };
+  }
+  if (fnName === 'complete_order_idempotency_key') {
+    m.calls.push({ rpc: fnName, args });
+    return { data: { ok: true }, error: null };
+  }
+  if (fnName === 'create_order_tx') {
+    m.calls.push({ rpc: fnName, args });
+    if (createOrderTxError) {
+      const error = createOrderTxError;
+      createOrderTxError = null;
+      return { data: null, error };
+    }
+    // Simulate the PL/pgSQL transaction: order + timeline + load offer all in
+    // one atomic unit, exactly like the real RPC.
+    const order = {
+      id: `mock-order-${m.store.orders.length + 1}`,
+      order_display_id: args.p_order_display_id,
+      customer_id: args.p_customer_id,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      pickup_address: args.p_pickup_address,
+      drop_address: args.p_drop_address,
+      weight_tonnes: args.p_weight_tonnes,
+      goods_type: args.p_goods_type,
+      base_freight: args.p_base_freight,
+      toll_estimate: args.p_toll_estimate,
+      platform_fee: args.p_platform_fee,
+      total_amount: args.p_total_amount,
+      fuel_cost: args.p_fuel_cost,
+      net_profit: args.p_net_profit,
+      extra_distance_km: args.p_extra_distance_km,
+    };
+    if (args.p_idempotency_key) {
+      const registryKey = `${args.p_customer_id}:${args.p_idempotency_key}`;
+      const existing = idempotencyRegistry.get(registryKey);
+      if (existing) {
+        // Key reused with a different payload → reject instead of replaying.
+        if (existing.fingerprint !== args.p_request_fingerprint) {
+          return { data: { idempotent: true, outcome: 'conflict' }, error: null };
+        }
+        // Crash after the first commit: replay the stored 2xx response, never
+        // creating a second order (the real RPC returns the completed row).
+        return { data: { idempotent: true, outcome: 'replayed', response: existing.response }, error: null };
+      }
+      if (createOrderTxIdempotencyOutcome) {
+        const outcome = createOrderTxIdempotencyOutcome;
+        createOrderTxIdempotencyOutcome = null;
+        return { data: { idempotent: true, outcome }, error: null };
+      }
+      // Fresh claim → create + complete atomically, exactly like the RPC.
+      m.store.orders.push(order);
+      m.store.load_offers.push({
+        order_display_id: args.p_order_display_id,
+        customer_id: args.p_customer_id,
+        route_label: args.p_route_label,
+        route_subtitle: args.p_route_subtitle,
+        pickup_address: args.p_pickup_address,
+        drop_address: args.p_drop_address,
+        goods_type: args.p_goods_type,
+        weight: args.p_weight_text,
+        freight_value: args.p_total_amount,
+        fuel_cost: args.p_fuel_cost,
+        toll_cost: args.p_toll_estimate,
+        net_profit: args.p_net_profit,
+        extra_distance_km: args.p_extra_distance_km,
+        status: 'available',
+      });
+      const response = {
+        message: 'Order created successfully and broadcasted to loads board.',
+        order,
+      };
+      idempotencyRegistry.set(registryKey, { fingerprint: args.p_request_fingerprint, response });
+      return { data: { idempotent: true, outcome: 'created', response }, error: null };
+    }
+    m.store.orders.push(order);
+    m.store.load_offers.push({
+      order_display_id: args.p_order_display_id,
+      customer_id: args.p_customer_id,
+      route_label: args.p_route_label,
+      route_subtitle: args.p_route_subtitle,
+      pickup_address: args.p_pickup_address,
+      drop_address: args.p_drop_address,
+      goods_type: args.p_goods_type,
+      weight: args.p_weight_text,
+      freight_value: args.p_total_amount,
+      fuel_cost: args.p_fuel_cost,
+      toll_cost: args.p_toll_estimate,
+      net_profit: args.p_net_profit,
+      extra_distance_km: args.p_extra_distance_km,
+      status: 'available',
+    });
+    return { data: order, error: null };
+  }
+  if (fnName === 'update_order_and_load_offer') {
+    m.calls.push({ rpc: fnName, args });
+    const orderIdx = m.store.orders.findIndex(o => o.id === args.p_order_id);
+    if (orderIdx === -1) {
+      return { data: null, error: { message: 'Order not found' } };
+    }
+    m.store.orders[orderIdx] = { ...m.store.orders[orderIdx], ...args.p_order_updates };
+    const offerIdx = m.store.load_offers.findIndex(o => o.order_display_id === args.p_order_display_id);
+    if (offerIdx !== -1) {
+      m.store.load_offers[offerIdx] = { ...m.store.load_offers[offerIdx], ...args.p_offer_updates };
+    }
+    return { data: m.store.orders[orderIdx], error: null };
+  }
   if (fnName === 'complete_trip_tx') {
     m.calls.push({ rpc: fnName, args });
     if (completeTripRpcError) {
@@ -75,14 +191,16 @@ afterEach(() => {
 });
 
 vi.mock('../../src/config/db.js', () => ({
-  supabase: m.supabase,
-  firebaseAdmin: null,
-  get redisClient() {
-    return mockRedis;
-  },
-  get mongoDb() {
-    return mockMongoDb;
-  }
+   supabase: m.supabase,
+   supabaseAdmin: m.supabase,
+   createUserClient: () => null,
+   firebaseAdmin: null,
+   get redisClient() {
+     return mockRedis;
+   },
+   get mongoDb() {
+     return mockMongoDb;
+   }
 }));
 
 function makeMongoDbMock(records) {
@@ -106,7 +224,7 @@ function seedDriverAtDropOff(orderId, driverId) {
       order_id: orderId,
       lat: 28.6139,
       lng: 77.209,
-      server_received_at: new Date()
+      server_received_at: new Date(Date.now())
     }
   ]);
 }
@@ -142,8 +260,10 @@ vi.mock('../../src/services/escrow.js', async () => {
 });
 
 const predictDemandMock = vi.fn();
+const predictPriceMock = vi.fn().mockResolvedValue({ estimatedPricePaisa: null });
 vi.mock('../../src/services/ml.js', () => ({
-  predictDemand: predictDemandMock
+  predictDemand: predictDemandMock,
+  predictPrice: predictPriceMock,
 }));
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
@@ -198,6 +318,8 @@ describe('POST /api/orders — server-side pricing contract', () => {
     m.store.order_timeline = [];
     m.store.load_offers = [];
     m.calls.length = 0;
+    idempotencyRegistry.clear();
+    createOrderTxIdempotencyOutcome = null;
     routeEstimateMock.mockReset();
     routeEstimateMock.mockResolvedValue(null);
     escrowReleaseMock.mockReset();
@@ -209,22 +331,29 @@ describe('POST /api/orders — server-side pricing contract', () => {
 
     expect(res.status).toBe(201);
     expect(res.body).toHaveProperty('order');
+    expect(res.body.order).toHaveProperty('order_display_id');
 
-    // Find the orders.insert call
-    const ordersInsert = m.calls.find(c => c.table === 'orders' && c.mode === 'insert');
-    expect(ordersInsert, 'orders.insert should be called').toBeTruthy();
-    const persisted = ordersInsert.payload;
+    // The order, its timeline, and the load offer are created atomically in a
+    // single create_order_tx RPC — no separate table inserts.
+    const createOrderRpc = m.calls.find(c => c.rpc === 'create_order_tx');
+    expect(createOrderRpc, 'create_order_tx should be called').toBeTruthy();
+    const persisted = createOrderRpc.args;
 
     // Server-computed values are paisa integers, derived from rate card
-    expect(persisted.base_freight).toBeGreaterThan(0);
-    expect(persisted.toll_estimate).toBeGreaterThan(0);
-    expect(persisted.platform_fee).toBeGreaterThan(0);
-    expect(persisted.total_amount).toBe(persisted.base_freight + persisted.toll_estimate + persisted.platform_fee);
+    expect(persisted.p_base_freight).toBeGreaterThan(0);
+    expect(persisted.p_toll_estimate).toBeGreaterThan(0);
+    expect(persisted.p_platform_fee).toBeGreaterThan(0);
+    expect(persisted.p_total_amount).toBe(persisted.p_base_freight + persisted.p_toll_estimate + persisted.p_platform_fee);
     // No client monetary field was ever read off the body.
     // (The destructure on the old line 64 dropped all 4 client fields
     //  from req.body before the insert — see PR #299 commit 6cc8ce8.)
-    expect(persisted.base_freight).not.toBe(1);
-    expect(persisted.total_amount).not.toBe(1);
+    expect(persisted.p_base_freight).not.toBe(1);
+    expect(persisted.p_total_amount).not.toBe(1);
+
+    // Transactional side effects landed in the store.
+    expect(m.store.orders).toHaveLength(1);
+    expect(m.store.load_offers).toHaveLength(1);
+    expect(m.store.orders[0].total_amount).toBe(persisted.p_total_amount);
   });
 
   it('CLIENT PRICING REJECTED: body includes base_freight:1 / total_amount:1 → 400 validation error', async () => {
@@ -256,15 +385,16 @@ describe('POST /api/orders — server-side pricing contract', () => {
     const app = buildApp();
     await request(app).post('/api/orders').set(CUSTOMER_HEADERS).send(validOrderBody);
 
-    const orderInsert = m.calls.find(c => c.table === 'orders' && c.mode === 'insert').payload;
-    const offerInsert = m.calls.find(c => c.table === 'load_offers' && c.mode === 'insert').payload;
-    expect(offerInsert.freight_value).toBe(orderInsert.total_amount);
-    expect(offerInsert.toll_cost).toBe(orderInsert.toll_estimate);
-    expect(offerInsert.freight_value).toBe(
-      orderInsert.base_freight + orderInsert.toll_estimate + orderInsert.platform_fee
+    const createOrderRpc = m.calls.find(c => c.rpc === 'create_order_tx');
+    const args = createOrderRpc.args;
+    const offer = m.store.load_offers[0];
+    expect(offer.freight_value).toBe(args.p_total_amount);
+    expect(offer.toll_cost).toBe(args.p_toll_estimate);
+    expect(offer.freight_value).toBe(
+      args.p_base_freight + args.p_toll_estimate + args.p_platform_fee
     );
     // Component fields continue to preserve the driver-side ledger invariant.
-    expect(offerInsert.fuel_cost + offerInsert.toll_cost + offerInsert.net_profit).toBe(orderInsert.base_freight);
+    expect(args.p_fuel_cost + args.p_toll_estimate + args.p_net_profit).toBe(args.p_base_freight);
   });
 
   it('uses OSRM road distance for persisted pricing when routing succeeds', async () => {
@@ -284,7 +414,8 @@ describe('POST /api/orders — server-side pricing contract', () => {
       dropLng: validOrderBody.drop_lng
     });
 
-    const orderInsert = m.calls.find(c => c.table === 'orders' && c.mode === 'insert').payload;
+    const createOrderRpc = m.calls.find(c => c.rpc === 'create_order_tx');
+    const persisted = createOrderRpc.args;
     const straightLinePricing = computeOrderPricing({
       pickupLat: validOrderBody.pickup_lat,
       pickupLng: validOrderBody.pickup_lng,
@@ -293,8 +424,8 @@ describe('POST /api/orders — server-side pricing contract', () => {
       weightTonnes: validOrderBody.weight_tonnes
     });
 
-    expect(orderInsert.base_freight).not.toBe(straightLinePricing.baseFreight);
-    expect(orderInsert.toll_estimate).toBe(Math.round(200 * 1423.456));
+    expect(persisted.p_base_freight).not.toBe(straightLinePricing.baseFreight);
+    expect(persisted.p_toll_estimate).toBe(Math.round(200 * 1423.456));
   });
 
   it('accepts zero-valued coordinates when they are in range', async () => {
@@ -378,17 +509,17 @@ describe('POST /api/orders — server-side pricing contract', () => {
     );
   });
 
-  it('regression: NO client monetary fields in the orders.insert payload', async () => {
+  it('regression: NO client monetary fields in the create_order_tx args', async () => {
     // The route must not read base_freight/toll_estimate/platform_fee/total_amount
     // from req.body at all. The schema now rejects them outright (z.never()),
     // so a clean body must succeed with server-computed pricing persisted.
     const app = buildApp();
     const res = await request(app).post('/api/orders').set(CUSTOMER_HEADERS).send(validOrderBody);
     expect(res.status).toBe(201);
-    const orderInsert = m.calls.find(c => c.table === 'orders' && c.mode === 'insert').payload;
-    expect(orderInsert.base_freight).not.toBe(99999);
-    expect(orderInsert.base_freight).toBeGreaterThan(0);
-    expect(orderInsert.total_amount).toBeGreaterThan(0);
+    const createOrderRpc = m.calls.find(c => c.rpc === 'create_order_tx');
+    expect(createOrderRpc.args.p_base_freight).not.toBe(99999);
+    expect(createOrderRpc.args.p_base_freight).toBeGreaterThan(0);
+    expect(createOrderRpc.args.p_total_amount).toBeGreaterThan(0);
   });
   it('driver can update milestone when assigned to order', async () => {
     m.store.orders = [
@@ -421,8 +552,6 @@ describe('POST /api/orders — server-side pricing contract', () => {
         milestone: 'Goods Loaded'
       });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/Milestone updated successfully/i);
   });
@@ -458,8 +587,6 @@ describe('POST /api/orders — server-side pricing contract', () => {
         milestone: 'En Route to Pickup'
       });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('en_route_pickup');
     expect(res.body.status).not.toBe('picked_up');
@@ -496,8 +623,6 @@ describe('POST /api/orders — server-side pricing contract', () => {
         milestone: 'Arrived at Pickup'
       });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('arrived_pickup');
   });
@@ -533,8 +658,6 @@ describe('POST /api/orders — server-side pricing contract', () => {
         milestone: 'Goods Loaded'
       });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('picked_up');
   });
@@ -560,19 +683,249 @@ describe('POST /api/orders — server-side pricing contract', () => {
         milestone: 'Goods Loaded'
       });
 
-    if (res.status !== 403) console.log('ERROR:', res.body);
     expect(res.status).toBe(403);
   });
 
-  it('returns 500 when orders insert fails', async () => {
+  it('returns 500 when the create_order_tx transaction fails', async () => {
     routeEstimateMock.mockResolvedValue({ distanceKm: 15, durationMin: 30 });
-    m.programError('insert failed');
+    createOrderTxError = { message: 'insert failed' };
 
     const app = buildApp();
 
     const res = await request(app).post('/api/orders').set(CUSTOMER_HEADERS).send(validOrderBody);
 
     expect(res.status).toBe(500);
+  });
+});
+
+describe('POST /api/orders — durable transactional idempotency (issue #7135)', () => {
+  let redisStore;
+  let activeRedis;
+
+  // A minimal Redis mock so the idempotency middleware stores its response
+  // cache in Redis, letting tests simulate a crash / Redis restart by clearing
+  // only the middleware layer while the durable Postgres registry survives.
+  function makeRedisMock() {
+    redisStore = new Map();
+    activeRedis = {
+      get: vi.fn(async key => redisStore.get(key) ?? null),
+      set: vi.fn(async (key, val, ...rest) => {
+        redisStore.set(key, val);
+        return 'OK';
+      }),
+      del: vi.fn(async (...keys) => {
+        for (const key of keys) redisStore.delete(key);
+        return keys.length;
+      })
+    };
+    return activeRedis;
+  }
+
+  function middlewareCacheKey(idempotencyKey, userId = CUSTOMER_HEADERS['x-user-id']) {
+    return `idempotency:${userId}:POST:/api/orders:${idempotencyKey}`;
+  }
+
+  // Clears the middleware fast-path cache (the equivalent of a process crash
+  // or Redis restart) so the next request falls through to the durable layer.
+  function simulateMiddlewareCacheLoss(idempotencyKey) {
+    const key = middlewareCacheKey(idempotencyKey);
+    redisStore.delete(key);
+    redisStore.delete(`${key}:lock`);
+  }
+
+  beforeEach(() => {
+    m.store.orders = [];
+    m.store.order_timeline = [];
+    m.store.load_offers = [];
+    m.calls.length = 0;
+    idempotencyRegistry.clear();
+    createOrderTxIdempotencyOutcome = null;
+    mockRedis = null;
+    routeEstimateMock.mockReset();
+    routeEstimateMock.mockResolvedValue({ distanceKm: 15, durationMin: 30 });
+  });
+
+  it('passes the idempotency key and request fingerprint into create_order_tx', async () => {
+    const app = buildApp();
+    const key = 'create-key-1';
+    const res = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+
+    expect(res.status).toBe(201);
+    expect(res.body.order).toHaveProperty('order_display_id');
+    expect(m.store.orders).toHaveLength(1);
+
+    const createOrderRpc = m.calls.find(c => c.rpc === 'create_order_tx');
+    expect(createOrderRpc.args.p_idempotency_key).toBe(key);
+    // sha256 hex digest of `${userId}:<canonical body>`.
+    expect(createOrderRpc.args.p_request_fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    // claim/complete are folded into create_order_tx — no separate RPCs.
+    expect(m.calls.some(c => c.rpc === 'claim_order_idempotency_key')).toBe(false);
+    expect(m.calls.some(c => c.rpc === 'complete_order_idempotency_key')).toBe(false);
+  });
+
+  it('replays a sequential duplicate with the same key (middleware fast path)', async () => {
+    const app = buildApp();
+    const key = 'create-key-dup';
+
+    const res1 = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+    expect(res1.status).toBe(201);
+
+    const res2 = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+
+    expect(res2.status).toBe(201);
+    expect(res2.body.order.order_display_id).toBe(res1.body.order.order_display_id);
+    expect(m.store.orders).toHaveLength(1);
+    expect(idempotencyRegistry.size).toBe(1);
+  });
+
+  it('recovers from a crash after commit: same key returns the original order, no duplicate', async () => {
+    mockRedis = makeRedisMock();
+    const app = buildApp();
+    const key = 'create-key-crash';
+
+    const res1 = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+    expect(res1.status).toBe(201);
+
+    // Process dies after create_order_tx committed; the middleware response
+    // cache and lock are lost (Redis restart) but Postgres retained the
+    // 'completed' registry row.
+    simulateMiddlewareCacheLoss(key);
+
+    const res2 = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+
+    expect(res2.status).toBe(201);
+    expect(res2.body.order.order_display_id).toBe(res1.body.order.order_display_id);
+    expect(res2.body.message).toMatch(/Order created successfully/i);
+    expect(m.store.orders).toHaveLength(1);
+    expect(idempotencyRegistry.size).toBe(1);
+  });
+
+  it('rejects reusing a completed key with a different payload (fingerprint conflict)', async () => {
+    mockRedis = makeRedisMock();
+    const app = buildApp();
+    const key = 'create-key-conflict';
+
+    const res1 = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+    expect(res1.status).toBe(201);
+
+    simulateMiddlewareCacheLoss(key);
+
+    const res2 = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send({ ...validOrderBody, drop_address: '999 Different St, Pune' });
+
+    expect(res2.status).toBe(409);
+    expect(res2.body.error).toBe('Idempotency key has already been used for a different request.');
+    expect(m.store.orders).toHaveLength(1);
+  });
+
+  it('rejects a concurrent in-flight duplicate with 409 (service/DB layer)', async () => {
+    createOrderTxIdempotencyOutcome = 'in_progress';
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', 'create-key-inflight')
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe('Duplicate request being processed');
+    expect(m.store.orders).toHaveLength(0);
+  });
+
+  it('rolls back the claim when the transaction fails, so a retry succeeds', async () => {
+    const app = buildApp();
+    const key = 'create-key-retry';
+
+    createOrderTxError = { message: 'insert failed' };
+    const res1 = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+    expect(res1.status).toBe(500);
+
+    // The failed transaction rolled back atomically — no registry row, no order.
+    expect(idempotencyRegistry.size).toBe(0);
+    expect(m.store.orders).toHaveLength(0);
+
+    const res2 = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+    expect(res2.status).toBe(201);
+    expect(m.store.orders).toHaveLength(1);
+  });
+
+  it('scopes idempotency keys per user — the same key creates separate orders', async () => {
+    const app = buildApp();
+    const key = 'create-key-shared';
+    const otherUser = { 'x-user-id': '00000000-0000-0000-0000-000000000def', 'x-user-role': 'customer' };
+
+    const res1 = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+    expect(res1.status).toBe(201);
+
+    const res2 = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(otherUser)
+      .send(validOrderBody);
+
+    expect(res2.status).toBe(201);
+    expect(res2.body.order.order_display_id).not.toBe(res1.body.order.order_display_id);
+    expect(m.store.orders).toHaveLength(2);
+    expect(idempotencyRegistry.size).toBe(2);
+  });
+
+  it('survives a display-ID collision while holding the key: retries once, never duplicates', async () => {
+    const app = buildApp();
+    const key = 'create-key-collision';
+
+    createOrderTxError = { code: '23505', message: 'duplicate key value violates unique constraint "orders_order_display_id_key"' };
+
+    const res = await request(app)
+      .post('/api/orders')
+      .set('X-Idempotency-Key', key)
+      .set(CUSTOMER_HEADERS)
+      .send(validOrderBody);
+
+    expect(res.status).toBe(201);
+    const createOrderRpcs = m.calls.filter(c => c.rpc === 'create_order_tx');
+    expect(createOrderRpcs.length).toBe(2);
+    expect(m.store.orders).toHaveLength(1);
+    expect(idempotencyRegistry.size).toBe(1);
   });
 });
 
@@ -705,8 +1058,6 @@ describe('GET /api/orders/history — order history', () => {
 
     const res = await request(app).get('/api/orders/history').set(CUSTOMER_HEADERS);
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.history)).toBe(true);
     expect(res.body.history).toHaveLength(1);
@@ -775,8 +1126,6 @@ describe('GET /api/orders/:id — order details', () => {
 
     const res = await request(app).get('/api/orders/order-1').set(CUSTOMER_HEADERS);
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body.order.id).toBe('order-1');
     expect(Array.isArray(res.body.timeline)).toBe(true);
@@ -807,8 +1156,6 @@ describe('GET /api/orders/:id — order details', () => {
 
     const res = await request(app).get('/api/orders/order-2').set(CUSTOMER_HEADERS);
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body.driver.name).toBe('Test Driver');
   });
@@ -1115,8 +1462,6 @@ describe('Delivery OTP Verification and Milestones', () => {
       })
       .send({ milestone: 'In Transit' });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty('otp');
     expect(res.body.order).not.toHaveProperty('delivery_otp');
@@ -1250,8 +1595,6 @@ describe('Delivery OTP Verification and Milestones', () => {
       })
       .send({ otp: 123456 }); // Numeric input, verifies type safety
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/Delivery verified successfully/i);
 
@@ -1373,8 +1716,6 @@ describe('Delivery OTP Verification and Milestones', () => {
       })
       .send({ otp: 123456 });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
 
     // The release hash now flows through complete_trip_tx and the orders
@@ -1743,8 +2084,6 @@ describe('Delivery OTP Verification and Milestones', () => {
       })
       .send({ milestone: 'In Transit' });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body).not.toHaveProperty('otp');
     expect(res.body.order).not.toHaveProperty('delivery_otp');
@@ -1896,13 +2235,16 @@ describe('Delivery OTP Verification and Milestones', () => {
         }
       ];
 
-      // Milestone change clears lockout in Redis and generates new OTP
+      // Milestone change clears the failure count in Redis and generates a new
+      // OTP; the lockout key is intentionally retained (self-expires via its
+      // own TTL) so a driver cannot clear their own brute-force lockout by
+      // triggering a milestone regeneration.
       await request(app)
         .put('/api/orders/order-redis-active/milestones')
         .set({ 'x-user-id': 'driver-123', 'x-user-role': 'driver' })
         .send({ milestone: 'In Transit' });
       expect(redisStore.get('otp_failed_count:order-redis-active')).toBeUndefined();
-      expect(redisStore.get('otp_lockout:order-redis-active')).toBeUndefined();
+      expect(redisStore.get('otp_lockout:order-redis-active')).toBe('1');
     });
 
     it('gracefully falls back to in-memory rate limiting when Redis client throws error (resilience)', async () => {
@@ -2182,8 +2524,6 @@ describe('POST /api/orders/predict-demand — ML demand prediction', () => {
       nearby_drivers: 15
     });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       predicted_demand: 42.5,
@@ -2341,7 +2681,8 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       weight_tonnes: 3,
       is_fragile: false,
       is_stackable: true,
-      status: 'pending'
+      status: 'pending',
+      escrow_status: null
     });
 
     const app = buildApp();
@@ -2355,8 +2696,6 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
         drop_lng: 88.88
       });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('pricing');
     expect(res.body.pricing).toHaveProperty('total_amount');
@@ -2418,8 +2757,6 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('cancellation_fee');
     expect(res.body.cancellation_fee).toBe(500);
@@ -2454,8 +2791,6 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     const stored = m.store.orders.find(o => o.id === 'aaaa0004-0000-4000-8000-000000000004');
     expect(stored.status).toBe('cancelled');
@@ -2481,7 +2816,6 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
-    if (res.status !== 202) console.log('ERROR:', res.body);
     expect(res.status).toBe(202);
     expect(res.body.escrow_status).toBe('refund_failed');
     expect(res.body.retryable).toBe(true);
@@ -2537,8 +2871,6 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       .set(CUSTOMER_HEADERS)
       .send({ reason: 'Change of plans' });
 
-    console.log(res.body);
-    if (res.status !== 200) console.log('ERROR:', res.body);
     expect(res.status).toBe(200);
     expect(confirmEscrowRefundMock).toHaveBeenCalledWith(txHash);
     expect(submitEscrowRefundMock).not.toHaveBeenCalled();
@@ -2648,7 +2980,8 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       weight_tonnes: 3,
       is_fragile: false,
       is_stackable: true,
-      status: 'pending'
+      status: 'pending',
+      escrow_status: null
     });
 
     routeEstimateMock.mockRejectedValue(new Error('OSRM service down'));
@@ -2681,7 +3014,8 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
       weight_tonnes: null,
       is_fragile: false,
       is_stackable: true,
-      status: 'pending'
+      status: 'pending',
+      escrow_status: null
     });
 
     const app = buildApp();

@@ -60,7 +60,7 @@ describe('requireIdempotency middleware', () => {
 
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({
-      error: 'X-Idempotency-Key header is required for this action.',
+      error: 'X-Idempotency-Key must be a non-empty string.',
     });
     expect(next).not.toHaveBeenCalled();
   });
@@ -302,7 +302,9 @@ describe('requireIdempotency middleware', () => {
       const next = makeNext();
 
       const duplicate = middleware(req, res, next);
-      await vi.advanceTimersByTimeAsync(200 * 50 + 10);
+      // The middleware polls the lock for up to 600 x 200ms = 120s (matches
+      // the lock TTL) before giving up with a 409.
+      await vi.advanceTimersByTimeAsync(200 * 600 + 10);
       await duplicate;
 
       expect(res.status).toHaveBeenCalledWith(409);

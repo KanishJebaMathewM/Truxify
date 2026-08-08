@@ -87,6 +87,8 @@ export function requireIdempotency(ttlSeconds = 3600) {
       return res.status(400).json({ error: 'X-Idempotency-Key must be a non-empty string.' });
     }
 
+    req.idempotencyKey = idempotencyKey;
+
     const key = cacheKey(req, idempotencyKey);
 
     try {

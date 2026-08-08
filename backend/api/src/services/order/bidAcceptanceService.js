@@ -1,7 +1,7 @@
 import { paisaToMaticWei, getEscrowBookingId } from '../escrow.js';
 import { DomainError } from './domainError.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
-import { acquireLock, releaseLock } from '../../lib/redisLock.js';
+import { acquireLockOrFallback } from '../../lib/lockFallback.js';
 
 // Re-export for backward compatibility — prefer importing from domainError.js
 export { DomainError } from './domainError.js';
@@ -33,8 +33,8 @@ export class BidAcceptanceService {
   async acceptBid({ orderId, bidId, customerId }) {
     return measureExecution('BidAcceptanceService.acceptBid', async () => {
       const lockKey = `escrow_lock:${orderId}`;
-      const lockValue = await acquireLock(lockKey, 10000);
-      if (!lockValue) {
+      const lock = await acquireLockOrFallback(lockKey, 10000);
+      if (!lock.ok) {
         throw new DomainError(409, { error: 'Another bid acceptance is in progress for this order. Please try again.' });
       }
 
@@ -224,7 +224,7 @@ export class BidAcceptanceService {
           },
         };
       } finally {
-        await releaseLock(lockKey, lockValue);
+        await lock.release();
       }
     });
   }

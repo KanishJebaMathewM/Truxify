@@ -1,3 +1,4 @@
+import { ethers } from 'ethers';
 import { supabaseAdmin } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
 
@@ -68,12 +69,40 @@ async function reconcileWalletLedger(order, txHash) {
   }
 }
 
+async function getPolygonProvider() {
+  const rpcUrl = process.env.POLYGON_RPC_URL;
+  if (!rpcUrl) {
+    throw new Error('POLYGON_RPC_URL is not configured for Polygon receipt validation');
+  }
+  return new ethers.JsonRpcProvider(rpcUrl);
+}
+
 async function verifyPolygonTransactionReceipt(txHash) {
   if (!txHash) {
     throw new Error('Missing transaction hash for Polygon receipt validation');
   }
-  // Require valid on-chain txHash verification before updating DB state
   logger.info(`[Webhook] Verifying Polygon transaction receipt for tx: ${txHash}`);
+
+  const provider = await getPolygonProvider();
+  const receipt = await provider.getTransactionReceipt(txHash);
+  if (!receipt) {
+    throw new Error(`Polygon transaction receipt not found for tx: ${txHash}`);
+  }
+
+  const status = receipt.status;
+  if (status !== 1 && status !== 1n) {
+    throw new Error(`Polygon transaction failed or reverted (status=${status}) for tx: ${txHash}`);
+  }
+
+  const escrowAddress = process.env.ESCROW_CONTRACT_ADDRESS;
+  if (escrowAddress && receipt.to) {
+    if (String(receipt.to).toLowerCase() !== String(escrowAddress).toLowerCase()) {
+      throw new Error(
+        `Transaction ${txHash} was not sent to the configured escrow contract (${escrowAddress})`
+      );
+    }
+  }
+
   return true;
 }
 

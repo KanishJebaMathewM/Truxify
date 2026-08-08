@@ -8,6 +8,16 @@ vi.mock('../../src/middleware/logger.js', () => ({
   },
 }));
 
+const mockGetTransactionReceipt = vi.fn();
+vi.mock('ethers', () => ({
+  ethers: {
+    JsonRpcProvider: vi.fn(function JsonRpcProvider() {
+      this.getTransactionReceipt = mockGetTransactionReceipt;
+    }),
+  },
+}));
+
+
 const mockQuery = {
   select: vi.fn(function () { return this; }),
   eq: vi.fn(function () { return this; }),
@@ -31,6 +41,12 @@ describe('processEscrowWebhookEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuery.maybeSingle.mockReset();
+    process.env.POLYGON_RPC_URL = 'https://polygon-rpc.example';
+    process.env.ESCROW_CONTRACT_ADDRESS = '0xEscrowContract000000000000000000000001';
+    mockGetTransactionReceipt.mockResolvedValue({
+      status: 1,
+      to: '0xEscrowContract000000000000000000000001',
+    });
   });
 
   it('acknowledges unsupported escrow events without changing state', async () => {
@@ -92,6 +108,25 @@ describe('processEscrowWebhookEvent', () => {
 
     const walletTables = mockSupabaseAdmin.from.mock.calls.filter(([table]) => table === 'wallet_transactions');
     expect(walletTables.length).toBeGreaterThan(0);
+  });
+
+  it('rejects PaymentReleased when the Polygon receipt is missing or failed', async () => {
+    mockGetTransactionReceipt.mockResolvedValueOnce(null);
+
+    await expect(
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD1', txHash: '0xdead' })
+    ).rejects.toThrow('Polygon transaction receipt not found');
+
+    mockGetTransactionReceipt.mockResolvedValueOnce({
+      status: 0,
+      to: '0xEscrowContract000000000000000000000001',
+    });
+
+    await expect(
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD1', txHash: '0xdead' })
+    ).rejects.toThrow('Polygon transaction failed or reverted');
+
+    expect(mockSupabaseAdmin.from).not.toHaveBeenCalled();
   });
 
   it('marks the order refunded on BookingCancelled', async () => {

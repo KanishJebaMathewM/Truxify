@@ -1,3 +1,4 @@
+import tollOptimizationRouter from './routes/tollOptimization.js';
 import express from 'express'
 import { corsMiddleware } from './middleware/cors.js'
 import { compressionMiddleware } from './config/compression.js'
@@ -851,3 +852,5 @@ app.use((err, req, res, next) => {
 
   next(err);
 });
+
+app.use('/api/tolls', tollOptimizationRouter);

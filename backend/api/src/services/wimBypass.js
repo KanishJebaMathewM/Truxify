@@ -1,7 +1,13 @@
 import crypto from 'crypto';
 
 // Secret key for signing pre-clearance packets
-const PACKET_SIGNING_SECRET = process.env.WIM_SIGNING_SECRET || 'wim-bypass-secret-key';
+const PACKET_SIGNING_SECRET = process.env.WIM_SIGNING_SECRET;
+if (!PACKET_SIGNING_SECRET) {
+  throw new Error(
+    'WIM_SIGNING_SECRET environment variable is not set. ' +
+    'Weigh-station bypass signing is disabled until a secret is configured.'
+  );
+}
 
 /**
  * Validates truck criteria for weigh station bypass.

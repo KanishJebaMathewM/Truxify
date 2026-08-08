@@ -92,6 +92,9 @@ import { predictPrice } from '../services/ml.js';
 import { getLiveTrafficMultiplier } from '../services/trafficService.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import logger from '../middleware/logger.js';
+import crypto from 'crypto';
+import { cacheMiddleware } from '../middleware/cacheMiddleware.js';
+import { getTruckSearchVersion } from '../utils/cacheInvalidation.js';
 
 const DEFAULT_TRUCK_TYPES = ['Open Body', 'Closed Body', 'Container', 'Refrigerated'];
 
@@ -421,7 +424,21 @@ async function canViewTruckNumber(user, truck) {
  *       400:
  *         description: Missing or invalid parameters
  */
-router.get('/search', authenticate, userLimiter, async (req, res) => {
+router.get(
+  '/search',
+  authenticate,
+  userLimiter,
+  cacheMiddleware(30, 'truck_search', async (req) => {
+    const version = await getTruckSearchVersion();
+    const q = req.query;
+    const sorted = Object.keys(q).sort().reduce((acc, key) => {
+      acc[key] = q[key];
+      return acc;
+    }, {});
+    const hash = crypto.createHash('md5').update(JSON.stringify(sorted)).digest('hex');
+    return `v${version}:${hash}`;
+  }),
+  async (req, res) => {
   const {
     pickup_lat, pickup_lng,
     drop_lat, drop_lng,

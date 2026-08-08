@@ -41,19 +41,22 @@ async function getBookingContext(bookingId, userId) {
     return null;
   }
 
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const isUuid = uuidRegex.test(bookingId);
-
-  // Orders table is the real order model (there is no bookings table).
   try {
     let orderQuery = supabase.from('orders').select('*');
-    if (isUuid) {
-      orderQuery = orderQuery.eq('id', bookingId);
+    if (bookingId) {
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (uuidRegex.test(bookingId)) {
+        orderQuery = orderQuery.eq('id', bookingId);
+      } else {
+        orderQuery = orderQuery.eq('order_display_id', bookingId);
+      }
+      orderQuery = orderQuery.or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
     } else {
-      orderQuery = orderQuery.eq('order_display_id', bookingId);
+      orderQuery = orderQuery
+        .or(`customer_id.eq.${userId},driver_id.eq.${userId}`)
+        .order('created_at', { ascending: false })
+        .limit(1);
     }
-    
-    orderQuery = orderQuery.or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
 
     const { data: order, error } = await orderQuery.maybeSingle();
     if (error) {
@@ -68,77 +71,136 @@ async function getBookingContext(bookingId, userId) {
   return null;
 }
 
-export async function processVoiceQuery(userId, bookingId, audioBuffer, filename) {
-  const bookingData = await getBookingContext(bookingId, userId);
-  
-  if (!process.env.OPENAI_API_KEY || !process.env.ELEVENLABS_API_KEY) {
-    logger.warn('Missing OpenAI or ElevenLabs API keys. Using mock Voice AI pipeline.');
-    
-    // Choose mock response matching user's query keywords if any
-    const queries = [
-      {
-        transcript: "Where is my package?",
-        response_text: bookingData
-          ? `Your shipment is currently ${bookingData.status?.replace(/_/g, ' ') || 'in transit'}.`
-          : "Your package is currently in transit."
-      },
-      {
-        transcript: "When will it reach?",
-        response_text: bookingData
-          ? `It is estimated to reach its destination in ${bookingData.eta || '2 hours'}.`
-          : "It will reach in approximately 2 hours."
-      },
-      {
-        transcript: "Is my payment released?",
-        response_text: bookingData
-          ? `Your payment is in status ${bookingData.escrow_status || 'secured in escrow'} and will release upon delivery.`
-          : "The payment is currently secured in the smart contract escrow."
-      }
-    ];
+function detectQueryIntent(text = '') {
+  const lower = text.toLowerCase();
+  if (
+    lower.includes('where') ||
+    lower.includes('location') ||
+    lower.includes('package') ||
+    lower.includes('truck') ||
+    lower.includes('shipment') ||
+    lower.includes('कहाँ') ||
+    lower.includes('काह') ||
+    lower.includes('எங்கே')
+  ) {
+    return 'location';
+  }
+  if (
+    lower.includes('when') ||
+    lower.includes('reach') ||
+    lower.includes('arrive') ||
+    lower.includes('eta') ||
+    lower.includes('time') ||
+    lower.includes('कब') ||
+    lower.includes('எப்போது')
+  ) {
+    return 'eta';
+  }
+  if (
+    lower.includes('payment') ||
+    lower.includes('released') ||
+    lower.includes('escrow') ||
+    lower.includes('pay') ||
+    lower.includes('money') ||
+    lower.includes('भुगतान') ||
+    lower.includes('பணம்')
+  ) {
+    return 'escrow';
+  }
+  return 'general';
+}
 
-    const selected = queries[crypto.randomInt(0, queries.length)];
-    
-    // Generate a dummy silent mp3
+function buildResponseForIntent(intent, bookingData, transcriptText) {
+  const orderId = bookingData?.order_display_id || bookingData?.id || 'your order';
+  const status = bookingData?.status?.replace(/_/g, ' ') || 'in transit';
+
+  switch (intent) {
+    case 'location': {
+      const loc = bookingData?.current_location_name || bookingData?.drop_address || 'en route to destination';
+      return `Your shipment (${orderId}) is currently ${status} near ${loc}.`;
+    }
+    case 'eta': {
+      const eta = bookingData?.eta || '45 minutes';
+      return `Your shipment (${orderId}) is estimated to reach its destination in ${eta}.`;
+    }
+    case 'escrow': {
+      const escrowStatus = bookingData?.escrow_status || 'secured in smart contract escrow';
+      return `Payment for ${orderId} is currently ${escrowStatus} and will release upon delivery.`;
+    }
+    default:
+      return bookingData
+        ? `Your shipment (${orderId}) is currently ${status}.`
+        : `Your query "${transcriptText}" has been processed. Shipment status is normal.`;
+  }
+}
+
+export async function processVoiceQuery(userId, bookingId, audioBuffer, filename, textQuery) {
+  const bookingData = await getBookingContext(bookingId, userId);
+
+  // If no OpenAI/ElevenLabs API key, use local intent pipeline
+  if (!process.env.OPENAI_API_KEY || !process.env.ELEVENLABS_API_KEY) {
+    logger.warn('Missing OpenAI or ElevenLabs API keys. Using mock Voice AI intent pipeline.');
+
+    let transcript = textQuery || 'Where is my package?';
+    if (!textQuery && audioBuffer) {
+      // Deterministically sample query based on buffer byte content or intent matching
+      const querySamples = [
+        'Where is my package?',
+        'When will it arrive?',
+        'Is my payment released?'
+      ];
+      const byteSum = audioBuffer.reduce((acc, val) => acc + val, 0);
+      transcript = querySamples[byteSum % querySamples.length];
+    }
+
+    const intent = detectQueryIntent(transcript);
+    const responseText = buildResponseForIntent(intent, bookingData, transcript);
+
     const mockAudio = Buffer.alloc(1000);
     const audioId = crypto.randomUUID();
     cacheAudio(audioId, mockAudio, userId);
 
     return {
-      transcript: selected.transcript,
-      response_text: selected.response_text,
-      audio_url: `/api/voice/audio/${audioId}`
+      transcript,
+      response_text: responseText,
+      audio_url: `/api/voice/audio/${audioId}`,
+      intent
     };
   }
 
-  // Production Whisper call
-  let transcript;
-  try {
-    const boundary = '----VoiceAIBoundary' + crypto.randomBytes(16).toString('hex');
-    const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename || 'audio.wav'}"\r\nContent-Type: audio/wav\r\n\r\n`;
-    const footer = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n--${boundary}--`;
-    const body = Buffer.concat([
-      Buffer.from(header, 'utf-8'),
-      audioBuffer,
-      Buffer.from(footer, 'utf-8')
-    ]);
+  // Production Whisper call or text transcript
+  let transcript = textQuery;
+  if (!transcript && audioBuffer) {
+    try {
+      const boundary = '----VoiceAIBoundary' + crypto.randomBytes(16).toString('hex');
+      const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename || 'audio.wav'}"\r\nContent-Type: audio/wav\r\n\r\n`;
+      const footer = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n--${boundary}--`;
+      const body = Buffer.concat([
+        Buffer.from(header, 'utf-8'),
+        audioBuffer,
+        Buffer.from(footer, 'utf-8')
+      ]);
 
-    const whisperResponse = await axios.post('https://api.openai.com/v1/audio/transcriptions', body, {
-      headers: {
-        'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-        'Content-Type': `multipart/form-data; boundary=${boundary}`
-      }
-    });
-    transcript = whisperResponse.data.text;
-  } catch (err) {
-    logger.error('Whisper transcription failed:', err.message);
-    throw new Error('Transcription failed: ' + err.message, { cause: err });
+      const whisperResponse = await axios.post('https://api.openai.com/v1/audio/transcriptions', body, {
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`
+        }
+      });
+      transcript = whisperResponse.data.text;
+    } catch (err) {
+      logger.error('Whisper transcription failed:', err.message);
+      throw new Error('Transcription failed: ' + err.message, { cause: err });
+    }
   }
+
+  const intent = detectQueryIntent(transcript);
 
   // Production LLM call
   let responseText;
   try {
-    const systemPrompt = `You are a freight assistant. Answer in 1-2 sentences in the customer's language (Hindi/English/Tamil).\nBooking: ${JSON.stringify(bookingData || {})}`;
-    
+    const systemPrompt = `You are Truxify Voice AI Assistant for freight tracking. Answer in 1-2 concise sentences in the customer's language (English/Hindi/Tamil). Focus on intent: ${intent}.\nOrder Context: ${JSON.stringify(bookingData || {})}`;
+
     const llmResponse = await axios.post('https://api.openai.com/v1/chat/completions', {
       model: 'gpt-4o-mini',
       messages: [
@@ -153,8 +215,8 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     });
     responseText = llmResponse.data.choices[0].message.content;
   } catch (err) {
-    logger.error('LLM completion failed:', err.message);
-    throw new Error('LLM failed: ' + err.message, { cause: err });
+    logger.warn('LLM completion failed, falling back to rule-based intent response:', err.message);
+    responseText = buildResponseForIntent(intent, bookingData, transcript);
   }
 
   // Production ElevenLabs TTS call
@@ -180,14 +242,18 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     cacheAudio(audioId, Buffer.from(ttsResponse.data), userId);
     audioUrl = `/api/voice/audio/${audioId}`;
   } catch (err) {
-    logger.error('ElevenLabs TTS failed:', err.message);
-    throw new Error('TTS failed: ' + err.message, { cause: err });
+    logger.warn('ElevenLabs TTS failed:', err.message);
+    const mockAudio = Buffer.alloc(1000);
+    const audioId = crypto.randomUUID();
+    cacheAudio(audioId, mockAudio, userId);
+    audioUrl = `/api/voice/audio/${audioId}`;
   }
 
   return {
     transcript,
     response_text: responseText,
-    audio_url: audioUrl
+    audio_url: audioUrl,
+    intent
   };
 }
 

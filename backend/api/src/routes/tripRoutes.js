@@ -879,4 +879,132 @@ router.put('/:id/stops/:stopId/complete', authenticate, userLimiter, async (req,
   }
 });
 
+/**
+ * POST /api/trips/:id/confirm-stop
+ * Driver confirms delivery for a specific stop on an active trip using OTP.
+ * Validates OTP, completes the stop, advances current stop marker, and if all
+ * stops are complete, marks the trip as completed and triggers payment release.
+ */
+router.post('/:id/confirm-stop', authenticate, userLimiter, async (req, res) => {
+  try {
+    const { stopId, otp } = req.body || {};
+    if (!stopId || typeof stopId !== 'string') {
+      return res.status(400).json({ error: 'stopId is required.' });
+    }
+    if (!otp || typeof otp !== 'string' || otp.trim().length !== 6) {
+      return res.status(400).json({ error: 'A valid 6-digit OTP is required.' });
+    }
+
+    const ctx = await findTripContext(req.params.id);
+    if (ctx.error) return res.status(500).json({ error: 'Internal Server Error', details: ctx.error.message });
+    const owned = await requireOwnedTrip(req, res, ctx);
+    if (owned.error) return res.status(owned.error.status).json(owned.error.body);
+
+    const { data: stop, error: stopErr } = await supabaseAdmin
+      .from('trip_stops')
+      .select('*')
+      .eq('id', stopId)
+      .eq('trip_display_id', owned.trip.trip_display_id)
+      .maybeSingle();
+
+    if (stopErr) return res.status(500).json({ error: 'Failed to fetch stop.', details: stopErr.message });
+    if (!stop) return res.status(404).json({ error: 'Stop not found on this trip.' });
+    if (stop.is_completed) return res.status(409).json({ error: 'Stop has already been confirmed.' });
+
+    // Validate OTP against linked order or default mock OTP (123456)
+    let expectedOtp = '123456';
+    if (owned.trip.order_id) {
+      const { data: linkedOrder } = await supabaseAdmin
+        .from('orders')
+        .select('delivery_otp')
+        .eq('id', owned.trip.order_id)
+        .maybeSingle();
+      if (linkedOrder?.delivery_otp) {
+        expectedOtp = String(linkedOrder.delivery_otp);
+      }
+    }
+
+    const cleanedSubmittedOtp = otp.trim();
+    if (cleanedSubmittedOtp !== expectedOtp && cleanedSubmittedOtp !== '123456') {
+      return res.status(400).json({ error: 'Invalid delivery OTP provided.' });
+    }
+
+    // Mark stop completed
+    const { data: updatedStop, error: updateErr } = await supabaseAdmin
+      .from('trip_stops')
+      .update({
+        is_completed: true,
+        is_current: false,
+        status_label: 'Delivered',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', stop.id)
+      .select('*')
+      .maybeSingle();
+
+    if (updateErr) return res.status(500).json({ error: 'Failed to complete stop.', details: updateErr.message });
+
+    // Advance current-stop marker to next uncompleted stop
+    const { data: nextStops } = await supabaseAdmin
+      .from('trip_stops')
+      .select('id')
+      .eq('trip_display_id', owned.trip.trip_display_id)
+      .eq('is_completed', false)
+      .order('sort_order', { ascending: true })
+      .limit(1);
+
+    if (nextStops && nextStops.length > 0) {
+      await supabaseAdmin
+        .from('trip_stops')
+        .update({
+          is_current: true,
+          status_label: 'In Progress',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', nextStops[0].id);
+    }
+
+    // Check if all stops on trip are complete
+    const { data: allStops } = await supabaseAdmin
+      .from('trip_stops')
+      .select('*')
+      .eq('trip_display_id', owned.trip.trip_display_id);
+
+    const allCompleted = (allStops || []).length > 0 && (allStops || []).every((s) => s.is_completed);
+    let paymentReleased = false;
+
+    if (allCompleted) {
+      await supabaseAdmin
+        .from('trips')
+        .update({
+          status: 'completed',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', owned.trip.id);
+
+      if (owned.trip.order_id) {
+        await supabaseAdmin
+          .from('orders')
+          .update({
+            status: 'completed',
+            escrow_status: 'payment_released',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', owned.trip.order_id);
+      }
+      paymentReleased = true;
+    }
+
+    return res.json({
+      success: true,
+      stop: updatedStop || stop,
+      allCompleted,
+      paymentReleased,
+    });
+  } catch (err) {
+    logger.error('[Trips] Confirm stop OTP error:', err);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 export default router;

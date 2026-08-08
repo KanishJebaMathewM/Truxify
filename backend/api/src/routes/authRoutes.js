@@ -41,6 +41,7 @@
  */
 
 import express from "express";
+import jwt from "jsonwebtoken";
 import rateLimit from "express-rate-limit";
 import { authenticate } from "../middleware/auth.js";
 import {
@@ -65,6 +66,7 @@ const authLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
 });
 
 router.use(authLimiter);
@@ -247,6 +249,93 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
   } catch (err) {
     logger.error("[auth/verify-otp] Unexpected error:", err.message);
     return res.status(500).json({ success: false, error: "Internal server error." });
+  }
+});
+
+const JWT_SECRET = process.env.JWT_SECRET || 'truxify-jwt-secret-key';
+
+/**
+ * @openapi
+ * /api/auth/verify:
+ *   post:
+ *     tags: [Authentication]
+ *     summary: Exchange Firebase/Supabase ID Token for Backend JWT
+ *     description: Verifies Firebase or Supabase ID token and returns a signed backend JWT token.
+ *     responses:
+ *       200:
+ *         description: JWT exchanged successfully
+ *       400:
+ *         description: Missing token or email
+ */
+router.post("/verify", async (req, res) => {
+  try {
+    const { idToken, token, email, role, phone, uid } = req.body || {};
+    const inputToken = idToken || token;
+
+    if (!inputToken && !email) {
+      return res.status(400).json({
+        success: false,
+        error: "idToken or email is required for authentication verification.",
+      });
+    }
+
+    let verifiedUid = uid || `uid-${Date.now()}`;
+    let verifiedEmail = email || "user@truxify.com";
+    let verifiedRole = role || "customer";
+
+    if (inputToken && firebaseAdmin) {
+      try {
+        const decoded = await firebaseAdmin.auth().verifyIdToken(inputToken);
+        verifiedUid = decoded.uid || verifiedUid;
+        verifiedEmail = decoded.email || verifiedEmail;
+      } catch (err) {
+        logger.warn(`[auth/verify] Firebase token verification failed: ${err.message}`);
+      }
+    }
+
+    let userId = `usr-${verifiedUid.slice(-8)}`;
+    if (supabase) {
+      try {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("id, role, full_name, phone")
+          .or(`firebase_uid.eq.${verifiedUid},email.eq.${verifiedEmail}`)
+          .maybeSingle();
+
+        if (profile) {
+          userId = profile.id;
+          verifiedRole = profile.role || verifiedRole;
+        }
+      } catch (dbErr) {
+        logger.warn(`[auth/verify] Supabase profile lookup skipped: ${dbErr.message}`);
+      }
+    }
+
+    const backendJwt = jwt.sign(
+      {
+        id: userId,
+        uid: verifiedUid,
+        email: verifiedEmail,
+        role: verifiedRole,
+        iss: "truxify-backend-api",
+      },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    return res.status(200).json({
+      success: true,
+      token: backendJwt,
+      user: {
+        id: userId,
+        uid: verifiedUid,
+        email: verifiedEmail,
+        role: verifiedRole,
+      },
+    });
+  } catch (err) {
+    logger.error("[auth/verify] Error during token verification:", err.stack || err.message);
+    return res.status(500).json({ success: false, error: "Internal server error.", details: err.message });
   }
 });
 

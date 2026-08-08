@@ -454,22 +454,20 @@ func sweepDrivers() {
 	})
 
 	pingRateLimit.Range(func(key, value interface{}) bool {
-		pingRateLimit.Range(func(key, value interface{}) bool {
-				e := value.(*rateEntry)
-				e.mu.Lock()
-				if len(e.stamps) > 0 {
-						if now.Sub(e.stamps[len(e.stamps)-1]) <= driverTTL {
-								e.mu.Unlock()
-								return true
-						}
-				}
-				e.mu.Unlock()
-				pingRateLimit.Delete(key)
-				return true
-		})
+		e := value.(*rateEntry)
+		e.mu.Lock()
+		// Stamps are appended in order and pruned oldest-first, so the last
+		// stamp is the driver's most recent activity. Entries are aged out
+		// once they go quiet for a full driverTTL, not only when empty.
+		stale := len(e.stamps) == 0 || now.Sub(e.stamps[len(e.stamps)-1]) > driverTTL
+		// Delete under the entry lock: a concurrent allowPing that re-locks
+		// the entry between the emptiness check and the removal would
+		// otherwise lose its timestamps when the entry is deleted, resetting
+		// that driver's 1-second window and allowing bursts above the cap.
 		if stale {
 			pingRateLimit.Delete(key)
 		}
+		e.mu.Unlock()
 		return true
 	})
 }

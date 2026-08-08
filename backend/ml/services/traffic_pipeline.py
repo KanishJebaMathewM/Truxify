@@ -316,7 +316,8 @@ class TrafficPipeline:
                     osrm_data = await self._fetch_osrm_data(current_location, destination)
                     route_distance_m = float(osrm_data.get('distance') or 0)
                     if route_distance_m > 0 and predicted_speed_kmh > 0:
-                        eta_seconds = (route_distance_m / 1000.0) / (predicted_speed_kmh / 3.6)
+                        # distance in metres / speed in metres-per-second (km/h / 3.6) = seconds
+                        eta_seconds = route_distance_m / (predicted_speed_kmh / 3.6)
                     else:
                         # Fall back to the routing engine's duration estimate.
                         eta_seconds = float(osrm_data.get('duration') or 0)

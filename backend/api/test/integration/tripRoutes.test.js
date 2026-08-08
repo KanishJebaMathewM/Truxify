@@ -7,6 +7,7 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
     supabase: m.supabase,
+    supabaseAdmin: m.supabase,
     firebaseAdmin: null,
     redisClient: null,
     mongoDb: null,
@@ -119,7 +120,7 @@ describe('Trip Routes', () => {
             });
 
         expect(res.status).toBe(200);
-        expect(res.body.message).toBe('Empty batch received, nothing to process.');
+        expect(res.body.error).toBe('Empty batch received, nothing to process.');
     });
 
     it('POST /events/batch returns 202 when batch was already processed', async () => {
@@ -135,7 +136,7 @@ describe('Trip Routes', () => {
             .send(validPayload);
 
         expect(res.status).toBe(202);
-        expect(res.body.message).toBe('Batch already processed.');
+        expect(res.body.error).toBe('Batch already processed.');
     });
 
     it('POST /events/batch inserts trip events and logs processed batch', async () => {
@@ -324,8 +325,8 @@ describe('Trip Routes', () => {
                 ],
             });
 
-        expect(res.status).toBe(422);
-        expect(res.body.error).toContain('Unprocessable Entity: Invalid event payload for type gpsUpdate');
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('Invalid coordinate data');
     });
 
     it('POST /events/batch inserts trip events and strips sensitive fields from metadata', async () => {

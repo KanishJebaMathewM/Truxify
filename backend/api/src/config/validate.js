@@ -49,7 +49,7 @@ export function createCacheEvent(type, opts = {}) {
     );
   }
 
-  // 2. Validate options argument
+  // 2. Validate options object argument
   if (!opts || typeof opts !== 'object') {
     throw new Error('Options argument (opts) must be an object.');
   }

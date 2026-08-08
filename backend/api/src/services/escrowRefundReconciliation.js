@@ -48,8 +48,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
       try {
         globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
       } catch (err) {
-        logger.error('[escrow-reconciliation] Failed to acquire Redis global lock, skipping batch:', err.message);
-        return;
+        logger.warn({ err }, '[escrow-reconciliation] Failed to acquire reconciliation lock, proceeding without lock');
       }
       if (!globalLockAcquired) {
         logger.info('[escrow-reconciliation] Global lock held by another instance, skipping batch pull.');

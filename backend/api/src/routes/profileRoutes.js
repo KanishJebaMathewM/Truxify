@@ -288,7 +288,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
   try {
     const { data: existing, error: checkErr } = await supabase
       .from('profiles')
-      .select('wallet_address, polygon_wallet_address')
+      .select('polygon_wallet_address')
       .eq('id', userId)
       .maybeSingle();
 
@@ -298,7 +298,6 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     const { error: updateErr } = await supabase
       .from('profiles')
       .update({
-        wallet_address: normalized,
         polygon_wallet_address: normalized,
       })
       .eq('id', userId);

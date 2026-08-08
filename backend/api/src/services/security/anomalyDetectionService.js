@@ -23,11 +23,21 @@ class AnomalyDetectionService {
     this.keyRotationService = deps.keyRotationService;
   }
 
+  isWithdrawalDirection(transaction) {
+    return String(transaction?.type || '').toLowerCase() === 'withdrawal';
+  }
+
   async analyzeTransaction(userId, walletAddress, transaction) {
     return measureExecution('AnomalyDetectionService.analyzeTransaction', async () => {
       const anomalies = [];
 
-      const largeWithdrawal = await this.detectLargeWithdrawal(userId, walletAddress, transaction);
+      // Large-withdrawal scoring only applies to withdrawals. Deposits/credits
+      // must never be compared against the user's withdrawal statistics, and
+      // must never trigger an account lock.
+      let largeWithdrawal = null;
+      if (this.isWithdrawalDirection(transaction)) {
+        largeWithdrawal = await this.detectLargeWithdrawal(userId, walletAddress, transaction);
+      }
       if (largeWithdrawal) anomalies.push(largeWithdrawal);
 
       const unusualTime = this.detectUnusualTime(transaction);
@@ -53,6 +63,12 @@ class AnomalyDetectionService {
 
   async detectLargeWithdrawal(userId, walletAddress, transaction) {
     try {
+      // Defense-in-depth: even if a caller forgets to check the direction,
+      // never score a non-withdrawal transaction as a LARGE_WITHDRAWAL.
+      if (!this.isWithdrawalDirection(transaction)) {
+        return null;
+      }
+
       const amount = parseFloat(transaction.amount || 0);
 
       if (amount < ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL) {

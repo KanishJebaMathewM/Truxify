@@ -50,7 +50,7 @@
  */
 
 import express from 'express';
-import { supabase, supabaseAdmin } from '../config/db.js';
+import { supabaseAdmin } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -194,6 +194,8 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
     const from = (page - 1) * limit;
     const to   = from + limit - 1;
 
+    // load_offers is RLS-protected with all anon privileges revoked, so the
+    // marketplace board must read through the service-role client.
     let query = supabaseAdmin
       .from('load_offers')
       .select('*', { count: 'exact' });
@@ -331,7 +333,7 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), async (re
     const dropAddress = destination.address || 'Unknown Destination';
     const routeLabel = `${pickupAddress.split(',')[0]} \u2192 ${dropAddress.split(',')[0]}`;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('load_offers')
       .insert({
         customer_id: req.user.id,
@@ -399,7 +401,7 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), async (re
  */
 router.get('/:id', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateParams(paramIdSchema), async (req, res) => {
   try {
-    const { data: load, error } = await supabase
+    const { data: load, error } = await supabaseAdmin
       .from('load_offers')
       .select('*')
       .eq('id', req.params.id)

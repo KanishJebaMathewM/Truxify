@@ -506,6 +506,11 @@ app.use('/api/webhooks', webhookRoutes)
 // ============================================================================
 app.use('/api/verify', verificationRoutes)
 app.use('/api/oracle', oracleRoutes)
+app.use('/api/blockchain', (req, _res, next) => {
+  req.blockchainMetrics = blockchainMetrics;
+  req.escalationHandler = escalationHandler;
+  next();
+}, blockchainMonitoringRoutes)
 app.use('/api/webhooks', webhookRoutes)
 
 // ============================================================================
@@ -692,7 +697,7 @@ server.listen(PORT, () => {
     ? new OrderRepository(supabaseAdmin)
     : orderRepository;
   startEscrowRefundReconciliation(escrowReconciliationOrderRepository)
-  startEscrowReleaseReconciliation()
+  startEscrowReleaseReconciliation(escrowReconciliationOrderRepository)
   startEscrowFundingReconciliation(escrowReconciliationOrderRepository)
   startReputationReconciliation(orderRepository)
   startDlqWorker()

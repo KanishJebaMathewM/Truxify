@@ -9,7 +9,7 @@ interface IVerifier {
         uint[2] memory a,
         uint[2][2] memory b,
         uint[2] memory c,
-        uint[] memory input
+        uint[2] memory input
     ) external view returns (bool);
 }
 
@@ -35,7 +35,7 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         uint[2] a;
         uint[2][2] b;
         uint[2] c;
-        uint[] input;
+        uint[2] input;
     }
 
     // ============ State Variables ============
@@ -110,7 +110,7 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         uint[2] memory a,
         uint[2][2] memory b,
         uint[2] memory c,
-        uint[] memory input
+        uint[2] memory input
     ) external whenNotPaused returns (bool) {
         require(verifier != address(0), "Verifier not set");
         
@@ -178,11 +178,11 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
     function verifySTARK(
         bytes calldata proof,
         bytes calldata publicInputs
-    ) external view returns (bool) {
+    ) public view returns (bool) {
         require(proof.length > 0, "ZKPrivacy: Empty proof");
         require(publicInputs.length > 0, "ZKPrivacy: Empty publicInputs");
         require(verifier != address(0), "ZKPrivacy: Verifier not set");
-        uint[] memory input = new uint[](2);
+        uint[2] memory input;
         input[0] = uint(keccak256(abi.encodePacked(proof)));
         input[1] = uint(keccak256(abi.encodePacked(publicInputs)));
         return IVerifier(verifier).verifyProof(

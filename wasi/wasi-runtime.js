@@ -52,9 +52,12 @@ class WASIRuntime {
         try {
             await this.initialize();
             
-            // Path traversal protection
-            const normalized = path.normalize(wasmPath).replace(/^(\.\.[\/\\])+/, '');
-            const resolvedPath = path.resolve(normalized);
+            // Path traversal protection: resolve full path and ensure it stays inside allowed base directory
+            const resolvedPath = path.resolve(wasmPath);
+            const allowedBaseDir = path.resolve(process.cwd());
+            if (!resolvedPath.startsWith(allowedBaseDir + path.sep) && resolvedPath !== allowedBaseDir) {
+                throw new Error('Security Error: Path traversal outside allowed runtime sandbox directory');
+            }
             if (!resolvedPath.endsWith('.wasm')) {
                 throw new Error('Security Error: Only .wasm files are permitted');
             }

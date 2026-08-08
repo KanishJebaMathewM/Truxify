@@ -204,4 +204,106 @@ describe("AssetToken", function () {
       /No claimable balance/
     );
   });
+
+  it("should never let an asset's supply exceed totalTokens across purchase -> secondary sale -> sellFraction cycles", async function () {
+    const { assetToken, owner, buyer1, buyer2, outsider } = await deployAssetToken();
+    const T = ethers.parseEther("100");
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      T,
+      "ipfs://..."
+    );
+
+    // Buyer 1 purchases from the primary pool: available + issued track supply
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("10"), {
+      value: ethers.parseEther("10")
+    });
+    assert.equal(await assetToken.totalSupply(), ethers.parseEther("10"));
+    assert.equal(await assetToken.getIssuedTokens(1), ethers.parseEther("10"));
+    let asset = await assetToken.getAsset(1);
+    assert.equal(asset.availableTokens, ethers.parseEther("90"));
+
+    // Secondary market: escrow + execution must not change inventory or supply
+    await assetToken.connect(buyer1).createTradeOrder(1, ethers.parseEther("10"), 1, "sell");
+    await assetToken.connect(buyer2).executeTradeOrder(1, 0, {
+      value: ethers.parseEther("10")
+    });
+    assert.equal(await assetToken.totalSupply(), ethers.parseEther("10"));
+    assert.equal(await assetToken.getIssuedTokens(1), ethers.parseEther("10"));
+    asset = await assetToken.getAsset(1);
+    assert.equal(asset.availableTokens, ethers.parseEther("90"));
+
+    // Secondary-market buyer sells back to the treasury: tokens burned,
+    // fractions re-enter the pool exactly once.
+    await assetToken.connect(buyer2).sellFraction(1, ethers.parseEther("10"));
+    assert.equal(await assetToken.totalSupply(), 0n);
+    assert.equal(await assetToken.getIssuedTokens(1), 0n);
+    asset = await assetToken.getAsset(1);
+    assert.equal(asset.availableTokens, T);
+
+    // The full pool can be re-purchased, but never beyond totalTokens.
+    await assetToken.connect(buyer1).purchaseFraction(1, T, {
+      value: ethers.parseEther("100")
+    });
+    assert.equal(await assetToken.totalSupply(), T);
+    assert.equal(await assetToken.getIssuedTokens(1), T);
+    asset = await assetToken.getAsset(1);
+    assert.equal(asset.availableTokens, 0n);
+
+    // Pool exhausted: any further primary minting reverts.
+    await assert.rejects(
+      assetToken.connect(outsider).purchaseFraction(1, ethers.parseEther("1"), {
+        value: ethers.parseEther("1")
+      }),
+      /Insufficient tokens/
+    );
+
+    // Invariant: availableTokens + outstanding supply always equals totalTokens.
+    assert.equal((await assetToken.totalSupply()) + asset.availableTokens, T);
+  });
+
+  it("should keep availableTokens in sync with the issued ledger across repeated buy/sell cycles", async function () {
+    const { assetToken, owner, buyer1, buyer2 } = await deployAssetToken();
+    const T = ethers.parseEther("100");
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      T,
+      "ipfs://..."
+    );
+
+    // Repeated cycles: buy, sell back to treasury, buy again.
+    for (let i = 0; i < 5; i++) {
+      await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("20"), {
+        value: ethers.parseEther("20")
+      });
+      await assetToken.connect(buyer1).sellFraction(1, ethers.parseEther("20"));
+    }
+
+    const asset = await assetToken.getAsset(1);
+    assert.equal(asset.availableTokens, T);
+    assert.equal(await assetToken.getIssuedTokens(1), 0n);
+    assert.equal(await assetToken.totalSupply(), 0n);
+
+    // A secondary-market buyer who sells back can never refill the pool
+    // beyond totalTokens or leave supply above zero.
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("40"), {
+      value: ethers.parseEther("40")
+    });
+    await assetToken.connect(buyer1).createTradeOrder(1, ethers.parseEther("40"), 1, "sell");
+    await assetToken.connect(buyer2).executeTradeOrder(1, 0, {
+      value: ethers.parseEther("40")
+    });
+    await assetToken.connect(buyer2).sellFraction(1, ethers.parseEther("40"));
+
+    const assetAfter = await assetToken.getAsset(1);
+    assert.equal(assetAfter.availableTokens, T);
+    assert.equal(await assetToken.getIssuedTokens(1), 0n);
+    assert.equal(await assetToken.totalSupply(), 0n);
+  });
 });

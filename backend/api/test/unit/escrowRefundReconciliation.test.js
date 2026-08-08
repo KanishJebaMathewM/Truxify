@@ -64,8 +64,8 @@ import {
 let orderRepository;
 
 beforeEach(() => {
-  mocks.redisSet.mockClear();
-  mocks.redisDel.mockClear();
+  mocks.redisSet.mockReset();
+  mocks.redisDel.mockReset();
   mocks.redisSet.mockReturnValue('OK');
   mocks.redisDel.mockReturnValue('OK');
   orderRepository = new OrderRepository(supabase);

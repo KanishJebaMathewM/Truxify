@@ -464,7 +464,7 @@ router.get(
   }
 
   if (numWeightTonnes <= 0 || numWeightTonnes > 50) {
-    return res.status(400).json({ error: 'Weight must be between 0 and 50 tonnes' });
+    return res.status(400).json({ error: 'Weight must be greater than 0 and at most 50 tonnes' });
   }
   const fragileFilter = parseBoolean(is_fragile);
   if (fragileFilter.error) {

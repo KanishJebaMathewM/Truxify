@@ -16,7 +16,8 @@ class KeyManagementService {
 
   async deriveDeviceEncryptionKey(deviceId, masterSecret) {
     return measureExecution('KeyManagementService.deriveDeviceEncryptionKey', async () => {
-      const cacheKey = `${deviceId}:${masterSecret.slice(0, 8)}`;
+      const secretHash = crypto.createHash('sha256').update(masterSecret).digest('hex');
+      const cacheKey = `${deviceId}:${secretHash}`;
 
       if (this.encryptionKeyCache.has(cacheKey)) {
         return this.encryptionKeyCache.get(cacheKey);

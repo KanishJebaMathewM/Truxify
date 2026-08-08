@@ -1053,7 +1053,7 @@ async function createOrderTransactional({ idempotencyKey, orderData, timelineDat
 
     return data;
   } catch (err) {
-    console.error(`[TRANSACTIONAL_ORDER_ERROR] Key ${idempotencyKey}:`, err.message);
+    logger.error({ err: err.message, key: idempotencyKey }, 'TRANSACTIONAL_ORDER_ERROR');
     throw err;
   }
 }

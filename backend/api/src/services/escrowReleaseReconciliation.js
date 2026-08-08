@@ -56,19 +56,21 @@ export async function reconcilePendingEscrowReleases(orderRepository) {
   reconciliationRunning = true;
 
   let globalLockValue = null;
+  let lockAcquired = false;
   try {
-    try {
-      globalLockValue = await acquireLock(GLOBAL_LOCK_KEY, GLOBAL_LOCK_TTL_MS);
-    } catch (err) {
-      if (err instanceof LockAcquisitionError) {
-        logger.warn('[escrow-release-reconciliation] Redis unavailable — skipping cycle:', err.message);
-        return;
-      }
-      throw err;
+    globalLockValue = await acquireLock(GLOBAL_LOCK_KEY, GLOBAL_LOCK_TTL_MS);
+    lockAcquired = true;
+  } catch (err) {
+    if (err instanceof LockAcquisitionError) {
+      logger.warn('[escrow-release-reconciliation] Redis unavailable — skipping cycle:', err.message);
+      return;
     }
-  } else {
+    throw err;
+  }
+
+  if (!lockAcquired && reconciliationRunning) {
     // Redis not configured — single-instance mode, use in-process guard only
-    if (reconciliationRunning) return;
+    return;
   }
 
   try {
@@ -86,9 +88,9 @@ export async function reconcilePendingEscrowReleases(orderRepository) {
       return;
     }
 
-    const { data: pendingOrders, error } = await orderRepository.findPendingEscrowReleases();
-    if (error) {
-      logger.error('[escrow-release-reconciliation] Failed to load pending release orders:', error.message);
+    const { data: pendingOrders, error: pendingError } = await orderRepository.findPendingEscrowReleases();
+    if (pendingError) {
+      logger.error('[escrow-release-reconciliation] Failed to load pending release orders:', pendingError.message);
       return;
     }
 

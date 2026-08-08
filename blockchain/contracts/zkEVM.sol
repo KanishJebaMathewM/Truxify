@@ -169,6 +169,8 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
             processedTxHashes[txHash] = true;
 
             // Execute
+            require(!usedNonces[from][nonce], "Nonce already used");
+            usedNonces[from][nonce] = true;
             currentState.balances[from] -= value + gasPrice * gasLimit;
             currentState.balances[to] += value;
             currentState.nonces[from] = nonce + 1;

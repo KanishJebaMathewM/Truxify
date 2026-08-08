@@ -62,6 +62,38 @@ describe("EnterpriseMultiSig", function () {
     });
   });
 
+  describe("Owner Management and Rotation", function () {
+    it("Should allow adding an owner via multi-sig execution", async function () {
+        const addOwnerData = multiSig.interface.encodeFunctionData("addOwner", [nonOwner.address]);
+        
+        await multiSig.connect(owner1).submitTransaction(multiSig.target || multiSig.address, 0, addOwnerData);
+        await multiSig.connect(owner1).confirmTransaction(0);
+        await multiSig.connect(owner2).confirmTransaction(0);
+
+        await expect(multiSig.connect(owner1).executeTransaction(0))
+            .to.emit(multiSig, "OwnerAdded")
+            .withArgs(nonOwner.address);
+
+        expect(await multiSig.isOwner(nonOwner.address)).to.equal(true);
+        expect((await multiSig.getOwners()).length).to.equal(4);
+    });
+
+    it("Should allow removing an owner and changing requirement via multi-sig execution", async function () {
+        const removeOwnerData = multiSig.interface.encodeFunctionData("removeOwner", [owner3.address]);
+        
+        await multiSig.connect(owner1).submitTransaction(multiSig.target || multiSig.address, 0, removeOwnerData);
+        await multiSig.connect(owner1).confirmTransaction(0);
+        await multiSig.connect(owner2).confirmTransaction(0);
+
+        await expect(multiSig.connect(owner1).executeTransaction(0))
+            .to.emit(multiSig, "OwnerRemoved")
+            .withArgs(owner3.address);
+
+        expect(await multiSig.isOwner(owner3.address)).to.equal(false);
+        expect((await multiSig.getOwners()).length).to.equal(2);
+    });
+  });
+
   describe("Confirm and Execute", function () {
     const value = 1000;
 

@@ -13,6 +13,9 @@ contract EnterpriseMultiSig {
     event ConfirmTransaction(address indexed owner, uint indexed txIndex);
     event RevokeConfirmation(address indexed owner, uint indexed txIndex);
     event ExecuteTransaction(address indexed owner, uint indexed txIndex);
+    event OwnerAdded(address indexed owner);
+    event OwnerRemoved(address indexed owner);
+    event RequirementChanged(uint numConfirmationsRequired);
 
     address[] public owners;
     mapping(address => bool) public isOwner;
@@ -33,6 +36,11 @@ contract EnterpriseMultiSig {
 
     modifier onlyOwner() {
         require(isOwner[msg.sender], "not owner");
+        _;
+    }
+
+    modifier onlySelf() {
+        require(msg.sender == address(this), "not self");
         _;
     }
 
@@ -150,6 +158,43 @@ contract EnterpriseMultiSig {
 
     function getOwners() public view returns (address[] memory) {
         return owners;
+    }
+
+    function addOwner(address _owner) public onlySelf {
+        require(_owner != address(0), "invalid owner");
+        require(!isOwner[_owner], "owner not unique");
+
+        isOwner[_owner] = true;
+        owners.push(_owner);
+
+        emit OwnerAdded(_owner);
+    }
+
+    function removeOwner(address _owner) public onlySelf {
+        require(isOwner[_owner], "not owner");
+        require(owners.length - 1 >= numConfirmationsRequired, "owners less than required confirmations");
+
+        isOwner[_owner] = false;
+        for (uint i = 0; i < owners.length; i++) {
+            if (owners[i] == _owner) {
+                owners[i] = owners[owners.length - 1];
+                owners.pop();
+                break;
+            }
+        }
+
+        emit OwnerRemoved(_owner);
+    }
+
+    function changeRequirement(uint _numConfirmationsRequired) public onlySelf {
+        require(
+            _numConfirmationsRequired > 0 &&
+                _numConfirmationsRequired <= owners.length,
+            "invalid number of required confirmations"
+        );
+        numConfirmationsRequired = _numConfirmationsRequired;
+
+        emit RequirementChanged(_numConfirmationsRequired);
     }
 
     function getTransactionCount() public view returns (uint) {

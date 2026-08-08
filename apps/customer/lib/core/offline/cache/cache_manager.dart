@@ -139,11 +139,29 @@ class CacheManager {
 
   Future<List<Map<String, dynamic>>> getOrders({bool activeOnly = false, int limit = 20}) async {
     final db = await open();
-    final rows = await db.query(
-      'orders',
-      orderBy: 'updated_at DESC',
-      limit: limit,
-    );
+    final List<Map<String, dynamic>> rows;
+    if (activeOnly) {
+      const activeStatuses = {
+        'pending',
+        'active',
+        'truck_assigned',
+        'en_route_pickup',
+        'arrived_pickup',
+        'picked_up',
+        'in_transit',
+        'arriving'
+      };
+      final statusIn = activeStatuses.map((s) => "'$s'").join(', ');
+      rows = await db.rawQuery(
+        "SELECT * FROM orders WHERE status IN ($statusIn) ORDER BY updated_at DESC LIMIT $limit",
+      );
+    } else {
+      rows = await db.query(
+        'orders',
+        orderBy: 'updated_at DESC',
+        limit: limit,
+      );
+    }
 
     final results = <Map<String, dynamic>>[];
 
@@ -161,20 +179,6 @@ class CacheManager {
         ...payload,
         '_cached_at': row['updated_at'],
       });
-    }
-
-    if (activeOnly) {
-      const activeStatuses = {
-        'pending',
-        'active',
-        'truck_assigned',
-        'en_route_pickup',
-        'arrived_pickup',
-        'picked_up',
-        'in_transit',
-        'arriving'
-      };
-      return results.where((item) => activeStatuses.contains(item['status'])).toList();
     }
 
     return results;

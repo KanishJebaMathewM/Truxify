@@ -31,17 +31,30 @@ export async function dispatchPayout({ driverId, withdrawal }) {
   }
 
   if (webhookUrl) {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        provider,
-        driver_id: driverId,
-        withdrawal_id: withdrawal.id,
-        amount: withdrawal.amount,
-        reference: `w${withdrawal.id}`,
-      }),
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30000);
+    let response;
+    try {
+      response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          provider,
+          driver_id: driverId,
+          withdrawal_id: withdrawal.id,
+          amount: withdrawal.amount,
+          reference: `w${withdrawal.id}`,
+        }),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      if (err.name === 'AbortError') {
+        throw new Error('Payout webhook timed out after 30000ms.');
+      }
+      throw err;
+    }
+    clearTimeout(timer);
 
     if (!response.ok) {
       throw new Error(`Payout webhook returned HTTP ${response.status}.`);

@@ -176,59 +176,9 @@ import {
   confirmEscrowRefund,
 } from '../core/container.js';
 import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei } from '../services/escrow.js';
-import { getEscrowBookingId, paisaToMaticWei } from '../services/escrow.js';
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 
-const verifyDeliveryLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || 'unknown',
-  store: createStore('rl:verify-delivery:'),
-  message: { error: 'Too many delivery verification attempts. Please try again later.' },
-});
-
-const predictDemandLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
-  keyGenerator: (req) => req.user?.id || 'unauthenticated',
-  store: createStore('rl:predict-demand:'),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many demand prediction requests. Please try again later.' },
-});
-
-const telemetryLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 30,
-  keyGenerator: userKeyGenerator,
-  store: createStore('rl:telemetry:'),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many telemetry requests. Please try again later.' },
-});
-
-const resendOtpLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || 'unknown',
-  store: createStore('rl:resend-otp:'),
-  message: { error: 'Too many OTP resend requests. Please try again later.' },
-});
-
-const changeDropLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || 'unknown',
-  store: createStore('rl:change-drop:'),
-  message: { error: 'Too many drop change requests. Please try again later.' },
-});
 
 const router = express.Router();
 

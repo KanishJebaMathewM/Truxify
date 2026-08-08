@@ -339,38 +339,6 @@ export const dlqService = {
       const backlog = await this.getBacklogCount();
       if (backlog !== null) {
         logger.info(`[DLQ] Backlog of pending webhook failures: ${backlog}`);
-        } catch (procErr) {
-          logger.error(`[DLQ] Retry failed for event ${event.id}: ${procErr.message}`);
-
-          const newRetryCount = (event.retry_count ?? 0) + 1;
-          const nextBackoffMin = RETRY_BACKOFF[newRetryCount] || -1;
-
-          if (nextBackoffMin === -1) {
-            // Failed permanently
-            await dlqDb()
-              .from('webhook_failures')
-              .update({ 
-                status: 'failed_permanently', 
-                error_message: String(procErr.message || procErr).slice(0, 1000),
-                updated_at: new Date().toISOString()
-              })
-              .eq('id', event.id);
-            logger.warn(`[DLQ] Event ${event.id} marked as failed_permanently`);
-          } else {
-            // Schedule next retry by resetting status to pending so the event can be re-claimed.
-            const nextRetryAt = new Date(Date.now() + nextBackoffMin * 60000).toISOString();
-            await dlqDb()
-              .from('webhook_failures')
-              .update({
-                status: 'pending',
-                retry_count: newRetryCount,
-                next_retry_at: nextRetryAt,
-                error_message: String(procErr.message || procErr).slice(0, 1000),
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', event.id);
-          }
-        }
       }
     } catch (err) {
       logger.warn(`[DLQ] Backlog metrics unavailable: ${err.message}`);

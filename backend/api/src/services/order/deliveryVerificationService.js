@@ -486,9 +486,6 @@ export class DeliveryVerificationService {
           order.escrow_status === "funded" ||
           order.escrow_status === "release_failed"
         ) {
-          try {
-            const releaseResult = await this.escrowReleaseFn(
-              order.order_display_id,
           // Payout defense-in-depth: resolve the authoritative escrow amount
           // and verify it is consistent with the payout figure (total_amount)
           // BEFORE any on-chain release. The actual on-chain booking amount is
@@ -600,7 +597,6 @@ export class DeliveryVerificationService {
           if (releaseTxHash || escrowAlreadyReleased) {
             const { error: persistReleaseErr } =
               await this._writeRepository.updateOrder(orderId, {
-              await this.orderRepository.updateOrder(orderId, {
                 escrow_status: "released",
                 escrow_release_error: null,
                 escrow_released_at: new Date().toISOString(),

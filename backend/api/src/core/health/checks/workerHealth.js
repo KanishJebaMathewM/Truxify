@@ -12,7 +12,7 @@ function check() {
 
   if (activeWorkers.length === 0) {
     return {
-      status: HealthStatus.HEALTHY,
+      status: HealthStatus.UNHEALTHY,
       message: 'no_registered_workers',
       metadata: { workerCount: 0 },
     };

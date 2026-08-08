@@ -521,7 +521,10 @@ async function authenticateWs(ws, token) {
       uid: profile.firebase_uid,
       role: profile.role,
     };
-    ws.driverId = profile.id;
+    // Only drivers may publish location telemetry on this socket.
+    if (profile.role === 'driver') {
+      ws.driverId = profile.id;
+    }
     ws.authenticated = true;
     await restoreSubscriptions(ws);
     logger.info(`✅ WS Authenticated user: ${ws.user.id}`);
@@ -770,8 +773,11 @@ export async function handleTrackingMessage(ws, message, req) {
 export async function handleLocationPing(ws, data, req) {
   const driver_id = ws.driverId;
 
-  if (!driver_id) {
-    return ws.send(JSON.stringify({ error: 'Unauthorized: Missing authenticated WebSocket identity.' }));
+  if (!driver_id || ws.user?.role !== 'driver') {
+    return ws.send(JSON.stringify({
+      error: 'Forbidden: Driver role required to publish location updates',
+      code: 4003,
+    }));
   }
 
   const { driver_id: payloadDriverId, speed, bearing, device_timestamp } = data;

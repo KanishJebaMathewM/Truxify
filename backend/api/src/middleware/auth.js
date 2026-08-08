@@ -138,6 +138,9 @@ export async function verifyAuthToken(token) {
 }
 
 export async function authenticate(req, res, next) {
+  if (req.user) {
+    return next();
+  }
   const bypassAuth = process.env.BYPASS_AUTH === "true";
   // Header-based test impersonation is an explicit opt-in (ENABLE_TEST_AUTH),
   // independent of NODE_ENV, so a stray NODE_ENV=test deployment cannot
@@ -523,4 +526,67 @@ export function requireRole(allowedRoles) {
 
     next();
   };
+}
+
+export function verifyJWT(req, res, next) {
+  const originalUrl = req.originalUrl || '';
+  const method = req.method || '';
+
+  // Public exclusions
+  const isHealth = originalUrl === '/api/health' || originalUrl === '/api/v1/health' || originalUrl === '/health' || originalUrl === '/api/v1/health/';
+  const isAuthPublic = originalUrl === '/api/auth/login' || originalUrl === '/api/auth/register' || originalUrl === '/api/auth/verify-otp' || originalUrl === '/auth/login' || originalUrl === '/auth/register' || originalUrl === '/auth/verify-otp';
+  const isPublic = originalUrl.startsWith('/api/public') || originalUrl.startsWith('/public');
+  const isDocs = originalUrl.startsWith('/api-docs') || originalUrl.startsWith('/docs') || originalUrl.startsWith('/swagger') || originalUrl.startsWith('/api/docs');
+  const isRoot = method === 'GET' && (originalUrl === '/' || originalUrl === '/api');
+  const isSocket = originalUrl.startsWith('/socket.io') || originalUrl.startsWith('/webrtc');
+
+  if (isHealth || isAuthPublic || isPublic || isDocs || isRoot || isSocket) {
+    return next();
+  }
+
+  // Delegate authentication
+  authenticate(req, res, (err) => {
+    if (err) {
+      if (!res.headersSent) {
+        return res.status(401).json({ error: err.message || 'Invalid or expired authentication token.' });
+      }
+      return;
+    }
+
+    if (!req.user) {
+      if (!res.headersSent) {
+        return res.status(401).json({ error: 'Access Denied. No authenticated user profile found.' });
+      }
+      return;
+    }
+
+    const role = req.user.role;
+
+    // Driver-only routes guard
+    if (originalUrl.startsWith('/api/driver') || originalUrl.startsWith('/api/earnings') || originalUrl.startsWith('/driver') || originalUrl.startsWith('/earnings')) {
+      if (role !== 'driver' && role !== 'admin' && role !== 'support') {
+        return res.status(403).json({ error: 'Access Denied. Drivers only.' });
+      }
+    }
+
+    // Customer-only routes guard
+    if (
+      originalUrl.startsWith('/api/payments') ||
+      originalUrl.startsWith('/payments') ||
+      originalUrl === '/api/orders' ||
+      originalUrl === '/api/orders/' ||
+      originalUrl === '/orders' ||
+      originalUrl === '/orders/' ||
+      originalUrl === '/api/orders/history' ||
+      originalUrl === '/orders/history' ||
+      (originalUrl.startsWith('/api/orders/') && originalUrl.endsWith('/accept')) ||
+      (originalUrl.startsWith('/orders/') && originalUrl.endsWith('/accept'))
+    ) {
+      if (role !== 'customer' && role !== 'admin' && role !== 'support') {
+        return res.status(403).json({ error: 'Access Denied. Customers only.' });
+      }
+    }
+
+    next();
+  });
 }

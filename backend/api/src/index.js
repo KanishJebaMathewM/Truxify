@@ -120,7 +120,8 @@ import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
 import { requestCacheMiddleware } from './middleware/requestCacheMiddleware.js'
 import { requireJsonContent } from './middleware/contentType.js'
-import { initSentry, flushSentry, sentryRequestHandler, captureException, sentryErrorHandler } from './middleware/sentry.js'
+import { verifyJWT } from './middleware/auth.js'
+import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js'
 import {
   startEscrowRefundReconciliation,
   stopEscrowRefundReconciliation
@@ -450,6 +451,7 @@ app.use(requireJsonContent)
 // ============================================================================
 // RATE LIMITING
 // ============================================================================
+app.use('/api', verifyJWT)
 app.use('/api/health', healthLimiter)
 app.use('/api/health', healthRoutes)
 app.use('/api/v1/health', healthLimiter)

@@ -494,7 +494,7 @@ async function authenticateWs(ws, token) {
         ws.close(4001, 'Unauthorized: Firebase Auth is not configured');
         return;
       }
-      const decodedToken = await firebaseAdmin.auth().verifyIdToken(token);
+      const decodedToken = await firebaseAdmin.auth().verifyIdToken(token, true);
       if (!supabase) {
         ws.send(JSON.stringify({ error: 'Unauthorized: Profile lookup is not configured', code: 4001 }));
         ws.close(4001, 'Unauthorized: Profile lookup is not configured');

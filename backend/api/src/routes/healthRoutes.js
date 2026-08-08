@@ -122,17 +122,12 @@ function checkFirebase() {
 
 async function checkEscrow() {
   try {
-  try {
-  const result = await checkEscrowHealth();
+    const result = await checkEscrowHealth();
+    return result.status;
   } catch (err) {
     logger.error('[Health] checkEscrow failed:', err?.message || err);
-    return { status: 'failed', detail: err?.message || 'Unknown error' };
+    return 'failed';
   }
-  } catch (err) {
-    logger.error('[Health] checkEscrow failed:', err?.message || err);
-    return { status: 'failed', detail: err?.message || 'Unknown error' };
-  }
-  return result.status;
 }
 
 function checkPolygon() {

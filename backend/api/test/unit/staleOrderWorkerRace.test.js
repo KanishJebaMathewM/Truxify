@@ -101,6 +101,7 @@ vi.mock('../../src/config/db.js', () => ({
 describe('staleOrderWorker TOCTOU guard (issue #5741)', () => {
   let orderRepository;
   let reconcileStaleOrders;
+  let startStaleOrderWorkerFn;
 
   const cancelledRow = (overrides = {}) => ({
     id: 'order-1',
@@ -125,13 +126,16 @@ describe('staleOrderWorker TOCTOU guard (issue #5741)', () => {
       findStalePendingOrders: vi.fn(),
       cancelStaleOrder: vi.fn(),
       updateLoadOffer: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
     submitEscrowRefundMock.mockReset();
     confirmEscrowRefundMock.mockReset();
     supabaseBuilder.from.mockClear();
     supabaseAdminBuilder.from.mockClear();
     vi.resetModules();
-    const { startStaleOrderWorker } = await import('../../src/workers/staleOrderWorker.js');
+    const { startStaleOrderWorker, reconcileStaleOrders: reconcileStaleOrdersFn } = await import('../../src/workers/staleOrderWorker.js');
     startStaleOrderWorker();
+    reconcileStaleOrders = reconcileStaleOrdersFn;
+    startStaleOrderWorkerFn = startStaleOrderWorker;
   });
 
   const staleOrder = { id: 'order-1', customer_id: 'customer-1', order_display_id: 'disp-1' };
@@ -139,13 +143,14 @@ describe('staleOrderWorker TOCTOU guard (issue #5741)', () => {
   it('routes orders queries through the service-role client, never the anon client', async () => {
     scriptedResponses = [{ data: [], error: null }];
 
-    await scheduledHandler();
+    await startStaleOrderWorkerFn();
 
     expect(supabaseAdminBuilder.from).toHaveBeenCalledWith('orders');
     expect(supabaseBuilder.from).not.toHaveBeenCalled();
   });
 
-  function stillPending(overrides = {}) {
+  async function stillPending(overrides = {}) {
+    await import('../../src/workers/staleOrderWorker.js');
     return {
       id: 'order-1',
       customer_id: 'customer-1',
@@ -156,8 +161,7 @@ describe('staleOrderWorker TOCTOU guard (issue #5741)', () => {
       escrow_refund_attempts: 0,
       ...overrides,
     };
-    ({ reconcileStaleOrders } = await import('../../src/workers/staleOrderWorker.js'));
-  });
+  }
 
   it('skips ALL side effects when the CAS claim is lost (order accepted concurrently)', async () => {
     orderRepository.findStalePendingOrders.mockResolvedValue({ data: [staleCandidate()], error: null });

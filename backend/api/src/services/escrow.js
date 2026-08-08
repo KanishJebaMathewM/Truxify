@@ -528,45 +528,6 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
 }
 
 /**
- * Mark an escrow booking as started on-chain once the trip has begun, so
- * cancelBooking / cancelWithPenalty revert and a full refund is blocked
- * (issue #5768).
- *
- * @param {string} orderDisplayId
- * @returns {Promise<{txHash: string|null, bookingId: string, waitForConfirmation?: Function, error?: string}>}
- */
-export async function markEscrowBookingStarted (orderDisplayId) {
-  return measureExecution('EscrowService.markEscrowBookingStarted', async () => {
-  const bookingId = getEscrowBookingId(orderDisplayId)
-
-  if (!escrowContract) {
-    logger.warn('[escrow] Contract not initialised — skipping markBookingStarted.')
-    return { txHash: null, bookingId }
-  }
-
-  try {
-    const tx = await escrowContract.markBookingStarted(bookingId)
-    logger.info(`[escrow] markBookingStarted tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
-    return {
-      txHash: tx.hash,
-      bookingId,
-      waitForConfirmation: async () => {
-        const receipt = await tx.wait(1)
-        if (!receipt || receipt.status === 0) {
-          throw new Error('Escrow markBookingStarted transaction reverted or was not found.')
-        }
-        logger.info(`[escrow] markBookingStarted confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`)
-        return receipt
-      },
-    }
-  } catch (err) {
-    logger.error(`[escrow] markBookingStarted failed for booking ${orderDisplayId}: ${err.message}`)
-    return { txHash: null, bookingId, error: err.message }
-  }
-  });
-}
-
-/**
  * Release escrowed funds to the driver after successful delivery verification.
  * Must be called by an authorised relayer.
  *

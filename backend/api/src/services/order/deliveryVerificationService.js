@@ -487,8 +487,6 @@ export class DeliveryVerificationService {
           order.escrow_status === "release_failed"
         ) {
           try {
-            const releaseResult = await this.escrowReleaseFn(
-              order.order_display_id,
           // Payout defense-in-depth: resolve the authoritative escrow amount
           // and verify it is consistent with the payout figure (total_amount)
           // BEFORE any on-chain release. The actual on-chain booking amount is
@@ -598,9 +596,7 @@ export class DeliveryVerificationService {
           // 'released' before the RPC runs, so the SQL gate no longer blocks
           // retries with a NULL release hash.
           if (releaseTxHash || escrowAlreadyReleased) {
-            const { error: persistReleaseErr } =
-              await this._writeRepository.updateOrder(orderId, {
-              await this.orderRepository.updateOrder(orderId, {
+            const { error: persistReleaseErr } = await this.orderRepository.updateOrder(orderId, {
                 escrow_status: "released",
                 escrow_release_error: null,
                 escrow_released_at: new Date().toISOString(),
@@ -614,6 +610,25 @@ export class DeliveryVerificationService {
               );
             }
           }
+        } catch (outerErr) {
+          logger.error("[escrow] Escrow release block failed for order", orderId, ":", outerErr.message);
+          await this.orderRepository
+            .updateOrder(orderId, {
+              escrow_release_error: String(outerErr.message).slice(0, 1000),
+              updated_at: new Date().toISOString(),
+            })
+            .catch((err) =>
+              logger.warn(
+                "[escrow] Failed to record outer escrow failure:",
+                err.message,
+              ),
+            );
+          throw new DomainError(503, {
+            error:
+              "Escrow release operation failed. Payment cannot be processed. Please retry.",
+            retryable: true,
+          });
+        }
         } else if (order.escrow_status === "released") {
           // Release was confirmed in a previous attempt — reuse the persisted hash.
           releaseTxHash = order.release_tx_hash || null;

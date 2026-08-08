@@ -277,9 +277,10 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
   }
 
-    // Push notification logic placeholder / dispatch
-    return { success: true };
-  }
+  // Push notification logic placeholder / dispatch
+  return { success: true };
 }
+
+class NotificationService {}
 
 module.exports = new NotificationService();

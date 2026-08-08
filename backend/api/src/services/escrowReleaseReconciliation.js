@@ -55,25 +55,19 @@ export async function reconcilePendingEscrowReleases(orderRepository) {
   }
   reconciliationRunning = true;
 
-  let globalLockValue = null;
+  let globalLockValue;
   try {
-    try {
-      globalLockValue = await acquireLock(GLOBAL_LOCK_KEY, GLOBAL_LOCK_TTL_MS);
-    } catch (err) {
-      if (err instanceof LockAcquisitionError) {
-        logger.warn('[escrow-release-reconciliation] Redis unavailable — skipping cycle:', err.message);
-        return;
-      }
-      throw err;
+    globalLockValue = await acquireLock(GLOBAL_LOCK_KEY, GLOBAL_LOCK_TTL_MS);
+  } catch (err) {
+    if (err instanceof LockAcquisitionError) {
+      logger.warn('[escrow-release-reconciliation] Redis unavailable — skipping cycle:', err.message);
+      return;
     }
-  } else {
-    // Redis not configured — single-instance mode, use in-process guard only
-    if (reconciliationRunning) return;
+    throw err;
   }
 
   try {
-    if (!lockAcquired) reconciliationRunning = true;
-    const instanceId = process.env.HOSTNAME || os.hostname();
+    const instanceId = process.env.HOSTNAME || require('os').hostname();
     const { data: failedOrders, error } = await supabaseAdmin
       .from('orders')
       .select('id, order_display_id, escrow_amount_wei, escrow_release_attempts, release_tx_hash')
@@ -86,9 +80,9 @@ export async function reconcilePendingEscrowReleases(orderRepository) {
       return;
     }
 
-    const { data: pendingOrders, error } = await orderRepository.findPendingEscrowReleases();
-    if (error) {
-      logger.error('[escrow-release-reconciliation] Failed to load pending release orders:', error.message);
+    const { data: pendingOrders, error: pendingError } = await orderRepository.findPendingEscrowReleases();
+    if (pendingError) {
+      logger.error('[escrow-release-reconciliation] Failed to load pending release orders:', pendingError.message);
       return;
     }
 

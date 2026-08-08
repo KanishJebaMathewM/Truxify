@@ -1,5 +1,7 @@
 import crypto from 'crypto';
 import { supabase } from '../config/db.js';
+
+const SCAN_TIMEOUT_MS = Number(process.env.SCAN_TIMEOUT_MS) || 30000;
 import logger from '../middleware/logger.js';
 import {
   validateDocumentBuffer,

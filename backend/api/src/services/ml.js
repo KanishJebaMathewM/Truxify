@@ -72,45 +72,36 @@ function guardMlApiKey() {
 }
 
 /**
+ * Utility: get the ML API base URL
+ */
+function getBaseUrl() {
+  return process.env.ML_API_BASE_URL || 'http://localhost:8000';
+}
+
+/**
  * Utility: build headers with optional API key
  */
 function getHeaders() {
-    const headers = { 'Content-Type': 'application/json' };
-    if (process.env.ML_API_KEY) {
-        headers['X-API-Key'] = process.env.ML_API_KEY;
-    }
-
-    if (response.status === 401) {
-      throw new Error(`[MLService] Unauthorized (401) for ${method} ${url}`);
-    }
-
-    if (response.status === 403) {
-      throw new Error(`[MLService] Forbidden (403) for ${method} ${url}`);
-    }
-
-  const result = await handleResponse(response);
-
-  if (
-    result == null ||
-    typeof result.predicted_profit !== 'number' ||
-    !isFinite(result.predicted_profit)
-  ) {
-    throw new Error('[ML] Invalid driver profit prediction: missing or non-finite predicted_profit');
+  const headers = { 'Content-Type': 'application/json' };
+  if (process.env.ML_API_KEY) {
+    headers['X-API-Key'] = process.env.ML_API_KEY;
   }
-
-  if (result.confidence_interval == null || typeof result.confidence_interval !== 'object') {
-    throw new Error('[ML] Invalid driver profit prediction: missing confidence_interval');
-  }
-
-  return {
-    predicted_profit: Math.round(result.predicted_profit * 100) / 100,
-    confidence_interval: {
-      lower: Math.max(0, Math.round((result.confidence_interval.lower ?? 0) * 100) / 100),
-      upper: Math.round((result.confidence_interval.upper ?? result.predicted_profit * 2) * 100) / 100,
-    },
-    currency: 'INR',
-  };
+  return headers;
 }
+
+async function handleResponse(response) {
+  if (response.status === 401) {
+    throw new Error(`[MLService] Unauthorized (401)`);
+  }
+  if (response.status === 403) {
+    throw new Error(`[MLService] Forbidden (403)`);
+  }
+  if (response.status !== 200) {
+    throw new Error(`[MLService] Unexpected status ${response.status}`);
+  }
+  return response.json();
+}
+
 
 /**
  * Optimises packing of packages into a truck with delivery routing.
@@ -423,10 +414,22 @@ export async function matchEnRouteLoads({
           estimated_earnings: Number(o.payment_inr || (o.freight_value ? o.freight_value / 100 : 0)),
           _fallback: true,
         };
-      })
+      }
+      )
       .filter(r => r.detour_km <= maxDetourKm)
       .sort((a, b) => b.match_score - a.match_score);
   }
+  }
+  const _haversineKm = (lat1, lng1, lat2, lng2) => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+  return recommendations;
 }
+
+class MLService {}
 
 module.exports = new MLService();

@@ -175,69 +175,17 @@ import {
   recordDepositTx,
   confirmEscrowRefund,
 } from '../core/container.js';
-import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei } from '../services/escrow.js';
-import { getEscrowBookingId, paisaToMaticWei } from '../services/escrow.js';
+import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei, submitEscrowRefund } from '../services/escrow.js';
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
-
-const verifyDeliveryLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || 'unknown',
-  store: createStore('rl:verify-delivery:'),
-  message: { error: 'Too many delivery verification attempts. Please try again later.' },
-});
-
-const predictDemandLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
-  keyGenerator: (req) => req.user?.id || 'unauthenticated',
-  store: createStore('rl:predict-demand:'),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many demand prediction requests. Please try again later.' },
-});
-
-const telemetryLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 30,
-  keyGenerator: userKeyGenerator,
-  store: createStore('rl:telemetry:'),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many telemetry requests. Please try again later.' },
-});
-
-const resendOtpLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || 'unknown',
-  store: createStore('rl:resend-otp:'),
-  message: { error: 'Too many OTP resend requests. Please try again later.' },
-});
-
-const changeDropLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || 'unknown',
-  store: createStore('rl:change-drop:'),
-  message: { error: 'Too many drop change requests. Please try again later.' },
-});
 
 const router = express.Router();
 
 const getOrderResource = async (req) => {
   const { id } = req.params;
   if (!id) return null;
-  return await orderService.getOrderById(id);
+  return await orderValidationService.findOrderByIdOrDisplayId(id, 'id');
 };
-
 
 router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
@@ -282,30 +230,6 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
       geofenceRadiusM,
     });
 
-      'id, driver_id, customer_id',
-    );
-    orderValidationService.assertOrderFound(order);
-    orderValidationService.assertDriverAssignment(order, req.user.id);
-
-    logger.info(
-      {
-        event: 'GEOFENCE_CONFIRM_ATTEMPT',
-        orderId: req.params.id,
-        driverId: req.user.id,
-        lat,
-        lng,
-      },
-      'Driver geofence confirm attempt',
-    );
-
-    const result = await orderLifecycleService.deliveryVerification.geofenceAutoConfirm({
-      orderId: req.params.id,
-      driverId: req.user.id,
-      driverLat: lat,
-      driverLng: lng,
-      geofenceRadiusM,
-    });
-
     return res.json(result);
   } catch (err) {
     if (err instanceof DomainError) {
@@ -314,8 +238,6 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
     logger.error('[geofence-confirm] Exception:', err.message);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
-}
-);
 });
 
 // ============================================================================
@@ -397,50 +319,6 @@ const deliveryVerificationMiddleware = [
   validateParams(paramIdSchema),
   validateBody(verifyDeliverySchema),
 ];
-  async (req, res) => {
-    try {
-      const order = await orderValidationService.findOrderByIdOrDisplayId(
-        req.params.id,
-        'id, driver_id, customer_id'
-      );
-      orderValidationService.assertOrderFound(order);
-      orderValidationService.assertDriverAssignment(order, req.user.id);
-
-      logger.info({
-        event: 'CONFIRM_OTP_ATTEMPT',
-        orderId: req.params.id,
-        driverId: req.user.id,
-      }, 'Driver OTP confirm attempt');
-
-      const { escrowUpdateFailed } = await orderLifecycleService.verifyDeliveryFn(
-        req.params.id,
-        req.user.id,
-        req.body.otp,
-        req.token ? createUserClient(req.token) : undefined
-      );
-
-      // Fetch the released amount to include in the response
-      const orderForAmount = await orderValidationService.findOrderByIdOrDisplayId(
-        req.params.id,
-        'total_amount, order_display_id'
-      );
-      const amountInr = orderForAmount?.total_amount
-        ? (orderForAmount.total_amount / 100).toFixed(0)
-        : null;
-
-      if (escrowUpdateFailed) {
-        logger.warn(
-          '[confirm-otp] Escrow payout requires reconciliation.',
-          { orderId: req.params.id, driverId: req.user.id }
-        );
-        return res.status(202).json({
-          message: 'Delivery confirmed. Payout is pending reconciliation.',
-          payment_released: false,
-          escrow_status: 'released',
-          reconciliation_required: true,
-          amount_inr: amountInr,
-        });
-      }
 
 router.post('/:id/confirm-otp', deliveryVerificationMiddleware, handleDeliveryVerification);
 router.post('/:id/verify-delivery', deliveryVerificationMiddleware, handleDeliveryVerification);
@@ -563,8 +441,6 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
     // at deposit time and on release), so it must track total_amount using the
     // same canonical paisa→wei conversion the rest of the escrow pipeline uses.
     const newAmountWei = paisaToMaticWei(pricing.totalAmount);
-    // at deposit time and read on release), so it must track total_amount.
-    const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
 
     const updates = {
       drop_address,

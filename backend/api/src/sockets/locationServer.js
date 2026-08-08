@@ -187,13 +187,15 @@ export function initLocationServer(httpServer) {
      *
      * Expected payload:
      * {
-     *   bookingId: string,
      *   lat: number,        // -90 to 90
      *   lng: number,        // -180 to 180
      *   speed: number,      // km/h
      *   heading: number,    // 0–360 degrees
      *   timestamp: string   // ISO 8601
      * }
+     *
+     * Note: bookingId is taken from the authenticated socket session,
+     * NOT from the payload, to prevent unauthorized location updates.
      */
     socket.on("location_update", async (payload) => {
       // Treat any incoming data as proof-of-life (avoids evicting an active
@@ -217,6 +219,7 @@ export function initLocationServer(httpServer) {
         const gpsTimestamp = timestamp ? new Date(timestamp) : new Date();
 
         // 1. Persist GPS point to MongoDB time-series collection
+        // Use authenticated bookingId from socket, NOT from payload
         await GpsLog.create({
           bookingId,
           driverId,
@@ -228,6 +231,7 @@ export function initLocationServer(httpServer) {
         });
 
         // 2. Broadcast to customer's booking room
+        // Use authenticated bookingId from socket, NOT from payload
         io.of("/customer")
           .to(`booking:${bookingId}`)
           .emit("driver_location", {
@@ -361,7 +365,7 @@ async function verifyDriverToken(socket, next) {
       return next();
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
 
     if (decoded.role !== "driver") {
       return next(new Error("Forbidden: driver role required"));
@@ -402,7 +406,7 @@ async function verifyCustomerToken(socket, next) {
       return next();
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
 
     if (decoded.role !== "customer") {
       return next(new Error("Forbidden: customer role required"));

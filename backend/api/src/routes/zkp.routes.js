@@ -1,5 +1,5 @@
-const { authenticate } = require('../middleware/auth.middleware');
 import express from 'express';
+import { authenticate } from '../middleware/auth.js';
 import zkpService from '../services/zkp/zkp.service.js';
 import { LockAcquisitionError } from '../lib/redisLock.js';
 import { redisRateLimiter } from '../middleware/redisRateLimiter.js';

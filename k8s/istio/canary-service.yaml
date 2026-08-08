@@ -7,11 +7,12 @@ metadata:
     app: api
     version: v2
 spec:
-  selector:
-    app: api
-    version: v2
+  type: ClusterIP
   ports:
   - port: 5000
     targetPort: 5000
     protocol: TCP
     name: http
+  selector:
+    app: api
+    version: v2

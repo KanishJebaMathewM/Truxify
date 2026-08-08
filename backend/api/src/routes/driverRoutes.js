@@ -132,6 +132,18 @@ import { getDriverReputation } from '../services/reputation.js';
 import { predictDriverProfit } from '../services/ml.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
+import {
+  DEADHEAD_COLUMNS,
+  DEADHEAD_MAX_ROWS,
+  EARNINGS_TRIP_COLUMNS,
+  buildWeeklyChart,
+  countDeadheadTripsSaved,
+  getDeadheadCutoff,
+  getEarningsCutoff,
+  sumDistanceKm,
+  sumEarnings,
+  toDateKey,
+} from '../services/driver/earningsReportService.js';
 import { userLimiter, createStore } from '../middleware/rateLimiter.js';
 import { checkBypassEligibility } from '../services/weighStationService.js';
 import { isPayoutProviderConfigured } from '../services/wallet/payoutProvider.js';
@@ -1477,108 +1489,67 @@ router.get('/:id/earnings', authenticate, userLimiter, requirePolicy('driver:vie
   }
 
   try {
-    let cutoff = new Date();
-    if (period === 'day') {
-      cutoff.setHours(0, 0, 0, 0);
-    } else if (period === 'week') {
-      cutoff.setDate(cutoff.getDate() - 7);
-    } else if (period === 'month') {
-      cutoff.setDate(cutoff.getDate() - 30);
-    } else {
+    const cutoff = getEarningsCutoff(period);
+    if (!cutoff) {
       return res.status(400).json({ error: 'Invalid period. Must be day, week, or month.' });
     }
 
-    const { data: trips, error: tripsError } = await supabase
-      .from('trips')
-      .select('*')
-      .eq('driver_id', id)
-      .eq('status', 'completed')
-      .gte('trip_date', cutoff.toISOString().split('T')[0])
-      .order('trip_date', { ascending: false });
+    // The deadhead scan only compares a trip to its immediate predecessor
+    // within DEADHEAD_MAX_GAP_DAYS, so it needs the reporting window extended
+    // backwards by that gap — not the driver's entire trip history.
+    const deadheadCutoff = getDeadheadCutoff(cutoff);
 
+    // None of these three queries depends on another's result, so they run
+    // concurrently rather than stacking three round trips of latency.
+    const [tripsResult, lifetimeResult, adjacentResult] = await Promise.all([
+      supabase
+        .from('trips')
+        .select(EARNINGS_TRIP_COLUMNS)
+        .eq('driver_id', id)
+        .eq('status', 'completed')
+        .gte('trip_date', toDateKey(cutoff))
+        .order('trip_date', { ascending: false }),
+      supabase
+        .from('trips')
+        .select('*', { count: 'exact', head: true })
+        .eq('driver_id', id)
+        .eq('status', 'completed'),
+      supabase
+        .from('trips')
+        .select(DEADHEAD_COLUMNS)
+        .eq('driver_id', id)
+        .eq('status', 'completed')
+        .gte('trip_date', toDateKey(deadheadCutoff))
+        .order('trip_date', { ascending: true })
+        .limit(DEADHEAD_MAX_ROWS),
+    ]);
+
+    const { data: trips, error: tripsError } = tripsResult;
     if (tripsError) {
       return res.status(500).json({ error: 'Failed to fetch trips.', details: tripsError.message });
     }
 
-    const { count: lifetimeTrips, error: countError } = await supabase
-      .from('trips')
-      .select('*', { count: 'exact', head: true })
-      .eq('driver_id', id)
-      .eq('status', 'completed');
-
+    const { count: lifetimeTrips, error: countError } = lifetimeResult;
     if (countError) {
       logger.warn('Failed to fetch lifetime trips count:', countError.message);
     }
 
-    // Weekly Chart Aggregation (always shows past 7 days)
-    const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const weeklyChartMap = {};
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dayLabel = daysOfWeek[d.getDay()];
-      weeklyChartMap[dayLabel] = 0;
+    // Non-fatal: the deadhead figure degrades to 0 rather than failing the
+    // whole report, matching how the lifetime count is treated above.
+    const { data: adjacentTrips, error: adjacentError } = adjacentResult;
+    if (adjacentError) {
+      logger.warn('Failed to fetch trips for deadhead analysis:', adjacentError.message);
     }
 
-    trips.forEach(trip => {
-      const tripDate = new Date(trip.trip_date);
-      const dayLabel = daysOfWeek[tripDate.getDay()];
-      if (weeklyChartMap[dayLabel] !== undefined) {
-        weeklyChartMap[dayLabel] += trip.total_earnings;
-      }
-    });
+    const weeklyChart = buildWeeklyChart(trips);
+    const totalKm = sumDistanceKm(trips);
+    const deadheadTripsSaved = countDeadheadTripsSaved(adjacentTrips);
 
-    const weeklyChart = Object.entries(weeklyChartMap).map(([day, earnings]) => ({
-      day,
-      earnings
-    }));
-
-    let totalKm = 0;
-    trips.forEach(trip => {
-      if (trip.distance) {
-        const distanceNum = parseInt(String(trip.distance, 10).replace(/[^0-9]/g, '')) || 0;
-        totalKm += distanceNum;
-      }
-    });
-
-    // Deadhead Trips Saved logic
-    const { data: allCompletedTrips, error: allTripsError } = await supabase
-      .from('trips')
-      .select('route_label, trip_date')
-      .eq('driver_id', id)
-      .eq('status', 'completed')
-      .order('trip_date', { ascending: true });
-
-    let deadheadTripsSaved = 0;
-    if (allCompletedTrips && allCompletedTrips.length > 1) {
-      for (let i = 1; i < allCompletedTrips.length; i++) {
-        const prevTrip = allCompletedTrips[i - 1];
-        const currTrip = allCompletedTrips[i];
-        
-        const prevRoute = (prevTrip.route_label || '').split(' → ');
-        const currRoute = (currTrip.route_label || '').split(' → ');
-        
-        if (prevRoute.length === 2 && currRoute.length === 2) {
-          const prevDrop = prevRoute[1].trim().toLowerCase();
-          const currPickup = currRoute[0].trim().toLowerCase();
-          
-          if (prevDrop === currPickup) {
-            const prevDate = new Date(prevTrip.trip_date);
-            const currDate = new Date(currTrip.trip_date);
-            const diffDays = Math.abs(currDate - prevDate) / (1000 * 60 * 60 * 24);
-            if (diffDays <= 3) {
-              deadheadTripsSaved++;
-            }
-          }
-        }
-      }
-    }
-
-    const totalNetEarnings = trips.reduce((sum, t) => sum + t.net_earnings, 0);
+    const { gross: grossEarnings, net: totalNetEarnings } = sumEarnings(trips);
 
     res.json({
       period,
-      gross_earnings: trips.reduce((sum, t) => sum + t.total_earnings, 0),
+      gross_earnings: grossEarnings,
       net_earnings: totalNetEarnings,
       trips_completed: trips.length,
       weekly_chart: weeklyChart,
@@ -1602,6 +1573,179 @@ router.get('/:id/earnings', authenticate, userLimiter, requirePolicy('driver:vie
 
   } catch (err) {
     logger.error('Driver analytics fetch error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// Driver Profile & Availability & Truck endpoints
+// ============================================================================
+
+router.get('/profile', authenticate, userLimiter, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // 1. Fetch base profile
+    const { data: profile, error: profileErr } = await supabase
+      .from('profiles')
+      .select('id, full_name, phone, email')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (profileErr || !profile) {
+      return res.status(404).json({ error: 'Driver profile not found.' });
+    }
+
+    // 2. Fetch driver details
+    const { data: details, error: detailsErr } = await supabase
+      .from('driver_details')
+      .select('rating, total_trips, completion_rate, is_online, kyc_status, truck_id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    // 3. Fetch truck details if assigned
+    let truck = null;
+    if (details && details.truck_id) {
+      const { data: truckData } = await supabase
+        .from('trucks')
+        .select('*')
+        .eq('id', details.truck_id)
+        .maybeSingle();
+      truck = truckData;
+    }
+
+    // 4. Fetch documents and map their status
+    const { data: docs } = await supabase
+      .from('driver_documents')
+      .select('document_type, status, is_govt_verified')
+      .eq('driver_id', userId);
+
+    const docMap = {
+      rc_book: 'Missing',
+      driving_licence: 'Missing',
+      insurance: 'Missing'
+    };
+
+    if (docs && docs.length > 0) {
+      for (const d of docs) {
+        if (d.is_govt_verified) {
+          docMap[d.document_type] = 'Verified (Digilocker)';
+        } else if (d.status === 'approved' || d.status === 'pending_review') {
+          docMap[d.document_type] = 'Uploaded';
+        }
+      }
+    }
+
+    res.json({
+      profile,
+      driverDetails: details || { rating: 0, total_trips: 0, is_online: false, kyc_status: 'Unverified' },
+      truck,
+      documents: docMap
+    });
+  } catch (err) {
+    logger.error('Driver profile fetch error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+router.patch('/availability', authenticate, userLimiter, async (req, res) => {
+  try {
+    const { available } = req.body;
+    if (typeof available !== 'boolean') {
+      return res.status(400).json({ error: 'available field must be a boolean.' });
+    }
+
+    const { data: details, error } = await supabase
+      .from('driver_details')
+      .update({ is_online: available, updated_at: new Date().toISOString() })
+      .eq('user_id', req.user.id)
+      .select('is_online')
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to update availability.', details: error.message });
+    }
+
+    res.json({
+      success: true,
+      isOnline: details?.is_online || false
+    });
+  } catch (err) {
+    logger.error('Driver availability update error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+router.put('/truck', authenticate, userLimiter, async (req, res) => {
+  try {
+    const { type, capacityWeight, capacityVolume, registrationNumber } = req.body;
+
+    if (!type || !registrationNumber) {
+      return res.status(400).json({ error: 'type and registrationNumber are required.' });
+    }
+
+    // Check if driver has an existing truck assigned
+    const { data: details, error: detailsErr } = await supabase
+      .from('driver_details')
+      .select('truck_id')
+      .eq('user_id', req.user.id)
+      .maybeSingle();
+
+    if (detailsErr) {
+      return res.status(500).json({ error: 'Failed to retrieve driver details.' });
+    }
+
+    let truckId = details?.truck_id;
+    let truckData;
+
+    if (truckId) {
+      // Update existing truck
+      const { data, error } = await supabase
+        .from('trucks')
+        .update({
+          truck_type: type,
+          capacity_weight_tonnes: capacityWeight || 0,
+          capacity_volume_m3: capacityVolume || 0,
+          registration_number: registrationNumber,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', truckId)
+        .select('*')
+        .single();
+
+      if (error) return res.status(500).json({ error: 'Failed to update truck.' });
+      truckData = data;
+    } else {
+      // Create new truck
+      const { data, error } = await supabase
+        .from('trucks')
+        .insert({
+          truck_type: type,
+          capacity_weight_tonnes: capacityWeight || 0,
+          capacity_volume_m3: capacityVolume || 0,
+          registration_number: registrationNumber,
+          is_active: true
+        })
+        .select('*')
+        .single();
+
+      if (error) return res.status(500).json({ error: 'Failed to create truck.' });
+      truckData = data;
+      truckId = data.id;
+
+      // Update driver details with new truck ID
+      await supabase
+        .from('driver_details')
+        .update({ truck_id: truckId, updated_at: new Date().toISOString() })
+        .eq('user_id', req.user.id);
+    }
+
+    res.json({
+      success: true,
+      truck: truckData
+    });
+  } catch (err) {
+    logger.error('Driver truck update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

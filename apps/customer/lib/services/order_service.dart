@@ -371,6 +371,23 @@ class OrderService {
     }
   }
 
+  Future<Map<String, dynamic>> fetchMlEta({
+    required String tripId,
+    required double lat,
+    required double lng,
+  }) async {
+    try {
+      final body = await _apiClient.get(
+        '/api/ml/eta?tripId=${_encodePathSegment(tripId)}&lat=$lat&lng=$lng',
+      );
+      return body is Map<String, dynamic> ? body : <String, dynamic>{};
+    } on ApiException catch (e) {
+      throw StateError(e.message);
+    } catch (e) {
+      throw StateError('Failed to fetch ML ETA: $e');
+    }
+  }
+
   void dispose() {
     _apiClient.close();
   }

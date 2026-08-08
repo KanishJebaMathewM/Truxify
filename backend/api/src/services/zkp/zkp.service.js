@@ -65,16 +65,25 @@ class ZKPService {
   }
 
   async callSnarkJS(driverData, documentHash) {
-    // In production: execute snarkjs via child_process
-    // For now, return mock proof
-    return {
-      proof: {
-        a: ['0x123...', '0x456...'],
-        b: [['0x789...', '0xabc...'], ['0xdef...', '0xghi...']],
-        c: ['0xjkl...', '0xmno...']
-      },
-      publicSignals: [documentHash, '1']
-    };
+    const isMock = process.env.ZKP_MOCK === 'true' || process.env.NODE_ENV === 'test';
+    
+    if (process.env.NODE_ENV === 'production' && !isMock) {
+      throw new Error('[ZKPService] Real SNARK circuit proof execution is required in production. Mock proofs are disallowed.');
+    }
+
+    if (isMock) {
+      logger.warn('[ZKPService] Generating mock ZK proof (ZKP_MOCK or test mode active)');
+      return {
+        proof: {
+          a: ['0x123...', '0x456...'],
+          b: [['0x789...', '0xabc...'], ['0xdef...', '0xghi...']],
+          c: ['0xjkl...', '0xmno...']
+        },
+        publicSignals: [documentHash, '1']
+      };
+    }
+
+    throw new Error('[ZKPService] SNARK proof generation circuit worker is not configured.');
   }
 
   async verifyKYCOnChain(userId, proof) {

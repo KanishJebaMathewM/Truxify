@@ -62,13 +62,13 @@ class WASIRuntime {
             // Read WASM file
             const wasmBytes = fs.readFileSync(resolvedPath);
             
-            // Create WASI instance with capabilities
+            // Create WASI instance with capabilities. Never expose
+            // process.env to untrusted WASM, and do not preopen the working
+            // directory — the sandbox gets no host filesystem access by default.
             const wasi = new WASI({
                 args: [],
-                env: process.env,
-                preopens: {
-                    '/': './'
-                },
+                env: {},
+                preopens: {},
                 returnOnExit: true,
             });
             
@@ -197,7 +197,19 @@ class WASIRuntime {
     }
 
     validateUrl(url) {
-        const allowed = this.capabilities.allowedDomains.some(d => url.includes(d));
+        let parsed;
+        try {
+            parsed = new URL(url);
+        } catch (err) {
+            throw new Error(`Invalid URL: ${url}`);
+        }
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+            throw new Error(`Invalid URL protocol: ${url}`);
+        }
+        const hostname = parsed.hostname.toLowerCase();
+        // Exact host match only — an "includes" check is bypassable with
+        // http://api.truxify.com.evil.com.
+        const allowed = this.capabilities.allowedDomains.some(d => hostname === d.toLowerCase());
         if (!allowed) {
             throw new Error(`Access denied: ${url}`);
         }

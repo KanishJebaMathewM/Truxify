@@ -11,11 +11,6 @@ export function shouldIgnoreError(err) {
   return SENTRY_ERROR_FILTERS.some((f) => err.code === f.code);
 }
 
-function getSentryLevel(err) {
-  const filter = SENTRY_ERROR_FILTERS.find((f) => err.code === f.code);
-  return filter ? filter.level : "error";
-}
-
 export function initSentry() {
   const dsn = process.env.SENTRY_DSN;
   if (!dsn) return;

@@ -138,7 +138,6 @@ export class OrderMilestoneService {
             `[OrderRoutes] Delivery OTP notification failed for order ${order.order_display_id} — FCM error: ${notifResult.fcm?.error || 'unknown'}`
           );
           await this.orderRepository.updateOrder(orderId, {
-            notification_failed: true,
             updated_at: new Date().toISOString()
           });
         }

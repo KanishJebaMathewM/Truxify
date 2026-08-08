@@ -30,7 +30,9 @@ export async function verifyAuthToken(token) {
   let decoded;
   try {
     decoded = jwt.decode(token);
-  } catch (err) {}
+  } catch (err) {
+    // jwt.decode returns null for malformed or invalid tokens, which is handled in subsequent checks
+  }
 
   const isSupabaseToken =
     decoded &&
@@ -77,22 +79,48 @@ export async function verifyAuthToken(token) {
     const decodedToken = await firebaseAdmin.auth().verifyIdToken(token, true);
     firebaseUid = decodedToken.uid;
 
-    if (!supabase) {
-      throw new Error("Supabase client is not configured on this server.");
-    }
+    // Calculate token remaining lifetime to clamp cache TTL
+    const nowSec = Math.floor(Date.now() / 1000);
+    const tokenExp = decodedToken.exp || (nowSec + TTL_SECONDS);
+    const tokenRemaining = tokenExp - nowSec;
 
-    const userClient = createUserClient?.(token) || supabase;
-    const { data: profile, error } = await userClient
-      .from("profiles")
-      .select("id, firebase_uid, role, full_name, phone")
-      .eq("firebase_uid", firebaseUid)
-      .eq("is_active", true)
-      .maybeSingle();
+    // Try reading from cache first for Firebase path
+    const cached = await getCachedProfile(firebaseUid);
+    if (cached && isValidCachedProfile(firebaseUid, cached)) {
+      if (cached.isActive === false) {
+        throw new Error("User profile not found or inactive.");
+      }
+      userProfile = cached;
+    } else {
+      if (!supabase) {
+        throw new Error("Supabase client is not configured on this server.");
+      }
 
-    if (error) {
-      throw new Error("Database query failed verification: " + error.message);
+      const userClient = createUserClient?.(token) || supabase;
+      const { data: profile, error } = await userClient
+        .from("profiles")
+        .select("id, firebase_uid, role, full_name, phone")
+        .eq("firebase_uid", firebaseUid)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error("Database query failed verification: " + error.message);
+      }
+      userProfile = profile;
+
+      if (userProfile) {
+        const cacheTtl = Math.min(TTL_SECONDS, Math.max(1, tokenRemaining));
+        await setCachedProfile(firebaseUid, {
+          id: userProfile.id,
+          uid: userProfile.firebase_uid,
+          role: userProfile.role,
+          fullName: userProfile.full_name,
+          phone: userProfile.phone,
+          isActive: true,
+        }, cacheTtl);
+      }
     }
-    userProfile = profile;
   }
 
   if (!userProfile) {

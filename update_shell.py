@@ -6,13 +6,23 @@ with open(file_path, 'r', encoding='utf-8') as f:
 
 # Add import
 import_stmt = "import '../services/weigh_station_service.dart';"
-content = content.replace("import '../widgets/bottom_nav_bar.dart';", "import '../widgets/bottom_nav_bar.dart';\nimport '../services/weigh_station_service.dart';\nimport 'dart:async';")
+if "import '../services/weigh_station_service.dart';" not in content:
+    content = content.replace(
+        "import '../widgets/bottom_nav_bar.dart';",
+        "import '../widgets/bottom_nav_bar.dart';\n"
+        "import '../services/weigh_station_service.dart';\n"
+        "import 'dart:async';"
+    )
 
 # Add subscription variable
 state_class_start = content.find("class _ShellScreenState extends State<ShellScreen> {")
 var_insert_point = content.find("final ValueNotifier<int> _currentIndex = ValueNotifier<int>(0);")
-if var_insert_point != -1:
-    content = content[:var_insert_point] + "StreamSubscription? _weighStationSub;\n    " + content[var_insert_point:]
+if var_insert_point != -1 and "_weighStationSub" not in content:
+    content = (
+        content[:var_insert_point]
+        + "StreamSubscription? _weighStationSub;\n    "
+        + content[var_insert_point:]
+    )
 
 # Add init and dispose
 init_start = content.find("void initState() {")
@@ -24,7 +34,8 @@ init_code = '''
       _showBypassAlert(event);
     });
 '''
-content = content[:super_init] + init_code + content[super_init:]
+if "WeighStationService.instance.initialize();" not in content:
+    content = content[:super_init] + init_code + content[super_init:]
 
 # add _showBypassAlert method and dispose
 dispose_method = '''
@@ -98,7 +109,13 @@ dispose_method = '''
 
 # insert before final brace
 build_method_start = content.find("Widget build(BuildContext context) {")
-content = content[:build_method_start] + dispose_method + "\n  " + content[build_method_start:]
+if "_showBypassAlert(" not in content and "void dispose()" not in content:
+    content = (
+        content[:build_method_start]
+        + dispose_method
+        + "\n  "
+        + content[build_method_start:]
+    )
 
 with open(file_path, 'w', encoding='utf-8') as f:
     f.write(content)

@@ -1,6 +1,5 @@
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { errorResponse } from '../utils/apiResponse.js';
 import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
@@ -8,7 +7,8 @@ const VALID_PLATFORMS = ['android', 'ios', 'web'];
 function validateFcmToken(token) {
   if (!token || typeof token !== 'string') return 'fcmToken must be a non-empty string';
   if (token.length < 10 || token.length > 4096) return 'fcmToken length must be between 10 and 4096';
-  if (!/^[a-zA-Z0-9\-_:]+$/.test(token)) return 'fcmToken contains invalid characters';
+  // Allow standard FCM v1 token characters including ., %, /, +, =
+  if (!/^[a-zA-Z0-9\-_:.%/+=]+$/.test(token)) return 'fcmToken contains invalid characters';
   return null;
 }
 
@@ -17,14 +17,19 @@ function validatePlatform(platform) {
   return VALID_PLATFORMS.includes(platform) ? null : `Platform must be one of: ${VALID_PLATFORMS.join(', ')}`;
 }
 
+/**
+ * Normalizes and validates metadata payload.
+ * Returns an explicit result structure so user payload keys (e.g. { error: "..." }) 
+ * are not confused with validation failures.
+ */
 function normalizeMetadata(metadata) {
-  if (metadata === undefined || metadata === null) return {};
+  if (metadata === undefined || metadata === null) return null;
   if (typeof metadata !== 'object' || Array.isArray(metadata)) {
-    return { error: 'metadata must be an object' };
+    return null;
   }
   const prototype = Object.getPrototypeOf(metadata);
   if (prototype !== Object.prototype && prototype !== null) {
-    return { error: 'metadata must be an object' };
+    return null;
   }
   return metadata;
 }
@@ -43,12 +48,7 @@ export async function registerDeviceToken(req, res, next) {
 
     const tokenErr = validateFcmToken(fcmToken);
     if (tokenErr) {
-      return res.status(400).json(
-        errorResponse(
-          'VALIDATION_ERROR',
-          tokenErr
-        )
-      );
+      return res.status(400).json({ error: tokenErr });
     }
 
     const platErr = validatePlatform(platform);
@@ -57,11 +57,10 @@ export async function registerDeviceToken(req, res, next) {
     }
 
     const normalizedMetadata = normalizeMetadata(metadata);
-    if (normalizedMetadata.error) {
-      return res.status(400).json({ error: normalizedMetadata.error });
+    if (normalizedMetadata === null) {
+      return res.status(400).json({ error: 'metadata must be a plain object' });
     }
 
-    const tokenUpdatedAt = new Date().toISOString();
     const { data: existingDevice, error: lookupError } = await supabase
       .from('user_devices')
       .select('user_id')
@@ -75,53 +74,21 @@ export async function registerDeviceToken(req, res, next) {
 
     const previousUserId = existingDevice?.user_id;
 
-    const { error } = await supabase.from('user_devices').upsert(
-      {
-        user_id: userId,
-        fcm_token: fcmToken,
-        platform: platform || 'android',
-        metadata: normalizedMetadata
-      },
-      { onConflict: 'fcm_token' }
-    );
+    // All three operations (upsert user_devices, clear previous owner's profile,
+    // sync current user's profile) run inside a single Postgres transaction via
+    // the register_device_token RPC so a partial failure rolls everything back
+    // and leaves no orphaned or desynchronized records.
+    const { error: rpcError } = await supabase.rpc('register_device_token', {
+      p_user_id:      userId,
+      p_fcm_token:    fcmToken,
+      p_platform:     platform || 'android',
+      p_metadata:     normalizedMetadata,
+      p_prev_user_id: previousUserId ?? null,
+    });
 
-    if (error) {
-      logger.error('[DeviceController] Failed to register device token in database:', error.message);
+    if (rpcError) {
+      logger.error('[DeviceController] register_device_token RPC failed:', rpcError.message);
       return next(new AppError('Failed to register device', 500));
-    }
-
-    if (previousUserId && previousUserId !== userId) {
-      const { error: staleProfileError } = await supabase
-        .from('profiles')
-        .update({
-          fcm_token: null,
-          fcm_token_updated_at: tokenUpdatedAt,
-        })
-        .eq('id', previousUserId)
-        .eq('fcm_token', fcmToken);
-
-      if (staleProfileError) {
-        logger.error(
-          '[DeviceController] Device token saved but failed to clear previous profiles.fcm_token:',
-          staleProfileError.message
-        );
-      }
-    }
-
-    const { error: profileSyncError } = await supabase
-      .from('profiles')
-      .update({
-        fcm_token: fcmToken,
-        fcm_token_updated_at: tokenUpdatedAt,
-      })
-      .eq('id', userId);
-
-    if (profileSyncError) {
-      logger.error(
-        '[DeviceController] Device token saved but failed to sync profiles.fcm_token:',
-        profileSyncError.message
-      );
-      return next(new AppError('Failed to sync device token to profile', 500));
     }
 
     return res.json({
@@ -149,35 +116,49 @@ export async function unregisterDeviceToken(req, res, next) {
     const tokenErr = validateFcmToken(fcmToken);
     if (tokenErr) {
       return res.status(400).json({
+        success: false,
         error: tokenErr
       });
     }
 
-    const { error: deleteError } = await supabase
+    const { data: deletedRows, error: deleteError } = await supabase
       .from('user_devices')
       .delete()
       .eq('user_id', userId)
-      .eq('fcm_token', fcmToken);
+      .eq('fcm_token', fcmToken)
+      .select('id');
 
     if (deleteError) {
       logger.error('[DeviceController] Failed to remove device token from database:', deleteError.message);
       return next(new AppError('Failed to unregister device', 500));
     }
 
-    const { error: profileClearError } = await supabase
-      .from('profiles')
-      .update({
-        fcm_token: null,
-        fcm_token_updated_at: new Date().toISOString(),
-      })
-      .eq('id', userId)
-      .eq('fcm_token', fcmToken);
+    if (!deletedRows || deletedRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Device token not found for this user'
+      });
+    }
 
-    if (profileClearError) {
-      logger.error(
-        '[DeviceController] Device token removed but failed to clear profiles.fcm_token:',
-        profileClearError.message
-      );
+    const { data: remainingDevices } = await supabase
+      .from('user_devices')
+      .select('fcm_token')
+      .eq('user_id', userId)
+      .not('fcm_token', 'is', null)
+      .limit(1);
+
+    if ((remainingDevices || []).length === 0) {
+      const { error: profileClearError } = await supabase
+        .from('profiles')
+        .update({ fcm_token: null, fcm_token_updated_at: new Date().toISOString() })
+        .eq('id', userId);
+
+      if (profileClearError) {
+        logger.error(
+          '[DeviceController] No remaining devices but failed to clear profiles.fcm_token:',
+          profileClearError.message
+        );
+      }
     }
 
     return res.json({
@@ -221,16 +202,20 @@ export async function unregisterAllDeviceTokens(userId) {
  */
 export async function getDevicePlatforms(req, res, next) {
   try {
-    const { data, error } = await supabase
-      .from('user_devices')
-      .select('platform');
+    const checks = await Promise.all(
+      VALID_PLATFORMS.map(async (platform) => {
+        const { data, error } = await supabase
+          .from('user_devices')
+          .select('platform')
+          .eq('platform', platform)
+          .limit(1);
 
-    if (error) {
-      logger.error('[DeviceController] Failed to query device platforms:', error.message);
-      return next(new AppError('Failed to retrieve platforms', 500));
-    }
+        if (error) throw error;
+        return data && data.length > 0 ? platform : null;
+      })
+    );
 
-    const platforms = [...new Set((data || []).map((d) => d.platform).filter(Boolean))];
+    const platforms = checks.filter(Boolean);
     return res.json({ platforms });
   } catch (err) {
     logger.error('[DeviceController] Unexpected error in getDevicePlatforms:', err.message);

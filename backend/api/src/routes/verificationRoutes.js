@@ -2,16 +2,16 @@ import express from 'express';
 import multer from 'multer';
 import rateLimit from 'express-rate-limit';
 import { verificationService } from '../core/container.js';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateParams, validateBody } from '../middleware/validate.js';
 import logger from '../middleware/logger.js';
 import { verifyOrderParamsSchema, documentCheckSchema } from '../validation/requestSchemas.js';
+import { scanDocument, MalwareScanError } from '../lib/malwareScanner.js';
 import { PolicyError, policy } from '../security/policyEngine.js';
 import digilockerService from '../services/verification/DigilockerService.js';
 import { validateDocumentBuffer, DocumentValidationError } from '../lib/documentValidation.js';
-import { scanDocument, MalwareScanError } from '../lib/malwareScanner.js';
 
 const router = express.Router();
 const orderVerificationLimiter = rateLimit({
@@ -227,7 +227,7 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
     }
 
     // Set status to pending
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from('driver_details')
       .update({ kyc_status: 'Pending KYC' })
       .eq('user_id', userId);
@@ -240,11 +240,19 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
     const blob = new Blob([req.file.buffer], { type: req.file.mimetype });
     formData.append('file', blob, req.file.originalname);
 
-    const mlResponse = await fetch('http://127.0.0.1:8000/verify/kyc', {
+    const mlBaseUrl = (process.env.ML_API_URL || process.env.ML_ENGINE_URL || process.env.ML_SERVICE_URL || '').replace(/\/$/, '');
+    const mlApiKey = process.env.ML_API_KEY;
+
+    if (!mlBaseUrl || !mlApiKey) {
+      logger.error('[OCR] ML service URL (ML_API_URL) or API key (ML_API_KEY) not configured');
+      return res.status(503).json({ success: false, error: 'KYC OCR service is unconfigured' });
+    }
+
+    const mlResponse = await fetch(`${mlBaseUrl}/verify/kyc`, {
       method: 'POST',
       body: formData,
       headers: {
-        'X-API-Key': process.env.ML_API_KEY || 'truxify_ml_dev_key',
+        'X-API-Key': mlApiKey,
       },
     });
 
@@ -256,7 +264,7 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
     const ocrData = await mlResponse.json();
 
     if (ocrData.verified) {
-      const { error: verifyError } = await supabase
+      const { error: verifyError } = await supabaseAdmin
         .from('driver_details')
         .update({ 
           kyc_status: 'Verified',
@@ -266,7 +274,7 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
 
       if (verifyError) throw verifyError;
     } else {
-       const { error: rejectError } = await supabase
+       const { error: rejectError } = await supabaseAdmin
         .from('driver_details')
         .update({ kyc_status: 'Rejected' })
         .eq('user_id', userId);

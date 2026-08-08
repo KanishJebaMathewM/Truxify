@@ -1,4 +1,4 @@
-import { supabase, supabaseAdmin, firebaseAdmin } from '../config/db.js';
+import { supabaseAdmin, firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
 import { measureExecution } from '../core/performanceMetrics.js';
@@ -28,9 +28,9 @@ function calculateRetryBackoff(attempt) {
 }
 
 async function getUserFcmToken(userId) {
-  if (!supabase) return null;
+  if (!supabaseAdmin) return null;
   try {
-    const { data, error } = await supabase.from('profiles').select('fcm_token').eq('id', userId).maybeSingle();
+    const { data, error } = await supabaseAdmin.from('profiles').select('fcm_token').eq('id', userId).maybeSingle();
     if (error || !data?.fcm_token) return null;
     return data.fcm_token;
   } catch (err) {
@@ -40,9 +40,9 @@ async function getUserFcmToken(userId) {
 }
 
 async function clearInvalidToken(userId) {
-  if (!supabase) return;
+  if (!supabaseAdmin) return;
   try {
-    await supabase
+    await supabaseAdmin
       .from('profiles')
       .update({
         fcm_token: null,
@@ -271,7 +271,7 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     fcmResult = await sendFcmNotification(
       customerId,
       { title, body },
-      { orderDisplayId, notifType: 'delivery_otp', deliveryOtp: String(otp) }
+      { orderDisplayId, notifType: 'delivery_otp',  }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');

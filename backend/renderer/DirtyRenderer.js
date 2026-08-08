@@ -137,8 +137,9 @@ class DirtyRenderer {
     
     shouldFullRender() {
         // Full render if:
-        // - First frame
-        if (this.stats.frames === 0) return true;
+        // - First frame (render() increments stats.frames before calling this,
+        //   so the very first render is observed as frames === 1)
+        if (this.stats.frames === 1) return true;
         
         // - Too many dirty rects (> 20)
         if (this.dirtyRects.length > 20) return true;
@@ -281,14 +282,17 @@ class DirtyRenderer {
                 if (pixel) {
                     // Check if pixel changed from previous frame
                     const prevPixel = this.previousFrame.getPixel(x, y);
-                    if (!prevPixel || prevPixel.char !== pixel.char || 
-                        prevPixel.fg !== pixel.fg || prevPixel.bg !== pixel.bg || 
-                        prevPixel.style !== pixel.style) {
-                        output += this.getAnsiSequence(pixel);
-                        output += pixel.char;
-                    } else {
-                        // Skip unchanged pixel
-                    }
+                        if (!prevPixel || prevPixel.char !== pixel.char || 
+                            prevPixel.fg !== pixel.fg || prevPixel.bg !== pixel.bg || 
+                            prevPixel.style !== pixel.style) {
+                            output += this.getAnsiSequence(pixel);
+                            output += pixel.char;
+                        } else {
+                            // Skip the unchanged pixel, but still advance the
+                            // cursor past it so subsequent changed pixels in
+                            // this row keep their correct column position.
+                            output += '\x1b[C';
+                        }
                 }
             }
         }

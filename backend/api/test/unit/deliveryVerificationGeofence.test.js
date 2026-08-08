@@ -21,6 +21,7 @@ let mockTelemetryRecords = [];
 
 vi.mock("../../src/config/db.js", () => ({
   supabase: { from: vi.fn() },
+  supabaseAdmin: null,
   firebaseAdmin: null,
   redisClient: null,
   get mongoDb() {

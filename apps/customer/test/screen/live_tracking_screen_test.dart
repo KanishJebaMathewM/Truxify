@@ -89,6 +89,11 @@ void main() {
 
     when(() => mockOrderService.fetchDriverName(any())).thenAnswer((_) async => 'Suresh Kumar');
     when(() => mockOrderService.fetchTruckNumber(any())).thenAnswer((_) async => 'GJ-05-XX-1234');
+    when(() => mockOrderService.fetchMlEta(
+      tripId: any(named: 'tripId'),
+      lat: any(named: 'lat'),
+      lng: any(named: 'lng'),
+    )).thenAnswer((_) async => {'eta_minutes': 45.0});
   });
 
   Widget createTestWidget(WidgetTester tester) {
@@ -127,6 +132,16 @@ void main() {
 
       // Verify WebSocket connection is initiated
       verify(() => mockSocket.connect()).called(1);
+    });
+
+    testWidgets('displays Calculating... on first load, then displays the formatted ML ETA', (tester) async {
+      await tester.pumpWidget(createTestWidget(tester));
+      expect(find.textContaining('Calculating…'), findsOneWidget);
+
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('45 mins'), findsOneWidget);
     });
   });
 }

@@ -21,7 +21,6 @@ spec:
         port:
           number: 5000
       weight: 10
-
     retries:
       attempts: 3
       perTryTimeout: 2s
@@ -52,4 +51,3 @@ spec:
         host: api-service
         port:
           number: 5000
-

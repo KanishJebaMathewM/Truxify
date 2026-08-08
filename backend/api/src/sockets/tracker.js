@@ -302,6 +302,7 @@ const DRIVER_ORDER_CACHE_KEY_PREFIX = 'driver:active-order:';
  * Returns { orderId, orderDisplayId } or null on miss / error.
  */
 async function getCachedDriverOrder(driverId) {
+  if (!driverId) return null;
   if (!redisClient) return null;
   try {
     const cached = await redisClient.get(`${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`);
@@ -309,7 +310,7 @@ async function getCachedDriverOrder(driverId) {
       return JSON.parse(cached);
     }
   } catch (err) {
-    logger.error('Redis driver order cache get error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache get error');
   }
   return null;
 }
@@ -318,6 +319,7 @@ async function getCachedDriverOrder(driverId) {
  * Store the driver → active order mapping in Redis.
  */
 async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
+  if (!driverId) return;
   if (!redisClient || !orderId) return;
   try {
     await redisClient.set(
@@ -327,7 +329,7 @@ async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
       DRIVER_ORDER_CACHE_TTL_SECONDS,
     );
   } catch (err) {
-    logger.error('Redis driver order cache set error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache set error');
   }
 }
 
@@ -335,11 +337,12 @@ async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
  * Invalidate cached active order for a driver.
  */
 async function invalidateDriverOrderCache(driverId) {
+  if (!driverId) return;
   if (!redisClient) return;
   try {
     await redisClient.del(`${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`);
   } catch (err) {
-    logger.error('Redis driver order cache invalidate error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache invalidate error');
   }
 }
 

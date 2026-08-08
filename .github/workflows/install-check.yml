@@ -1,0 +1,63 @@
+name: Clean Install Check
+
+# A clean `npm install` at the repository root is the first command in
+# CONTRIBUTING.md, and it was failing with ERESOLVE. Nothing in CI performed
+# a flagless install, so a broken dependency tree could merge unnoticed.
+#
+# This job deliberately uses no --legacy-peer-deps and no --force: if it needs
+# a flag to pass, the dependency tree is wrong and contributors are blocked.
+
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "backend/api/package.json"
+      - "blockchain/package.json"
+      - ".github/workflows/install-check.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "backend/api/package.json"
+      - "blockchain/package.json"
+
+permissions:
+  contents: read
+
+jobs:
+  clean-install:
+    name: npm install (no flags)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      # No flags. This is exactly what a new contributor runs.
+      - name: Install from a clean checkout
+        run: npm install --no-audit --no-fund
+
+      - name: Verify the lockfile is committed and current
+        run: |
+          if [ ! -f package-lock.json ]; then
+            echo "::error::package-lock.json is missing. Commit it so installs are reproducible."
+            exit 1
+          fi
+          git diff --exit-code -- package-lock.json \
+            || (echo "::error::package-lock.json is out of date. Run npm install and commit the result." && exit 1)
+
+      - name: Verify npm ci works from the lockfile
+        run: |
+          rm -rf node_modules
+          npm ci --no-audit --no-fund

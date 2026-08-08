@@ -55,9 +55,16 @@ export class HealthAggregator {
     const start = Date.now();
 
     const results = await Promise.all(
-      this._checks.map(async ({ name, checkFn }) => {
+      this._checks.map(async ({ name, checkFn, timeoutMs }) => {
+        const timeout = timeoutMs ?? 5000;
         try {
-          return await checkFn();
+          const result = await Promise.race([
+            checkFn(),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`Check "${name}" exceeded ${timeout}ms`)), timeout)
+            ),
+          ]);
+          return result;
         } catch (err) {
           logger.error(
             `[health] Aggregator check "${name}" threw: ${err.message}`,

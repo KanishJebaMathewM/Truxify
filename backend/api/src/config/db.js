@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { createClient } from '@supabase/supabase-js';
 import { MongoClient } from 'mongodb';
 import Redis from 'ioredis';
+import { Redis as UpstashRedis } from '@upstash/redis';
 import pg from 'pg';
 import * as admin from 'firebase-admin';
 import path from 'path';
@@ -192,6 +193,48 @@ if (redisUrl) {
 } else {
   logger.warn('REDIS_URL not found in .env. Redis session cache disabled.');
 }
+
+// ============================================================================
+// 3.5 UPSTASH REDIS REST CLIENT
+// ============================================================================
+export let upstashRedisClient = null;
+
+if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+  try {
+    upstashRedisClient = new UpstashRedis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    logger.info('Upstash Redis REST client initialized successfully.');
+  } catch (error) {
+    logger.error({ err: error }, 'Upstash Redis REST client initialization error');
+  }
+}
+
+if (!upstashRedisClient) {
+  logger.warn('UPSTASH_REDIS_REST_URL or TOKEN not set. Falling back to local redisClient wrapper.');
+  upstashRedisClient = {
+    async get(key) {
+      if (!redisClient) return null;
+      const val = await redisClient.get(key);
+      if (!val) return null;
+      try { return JSON.parse(val); } catch { return val; }
+    },
+    async set(key, value, options) {
+      if (!redisClient) return null;
+      const stringified = typeof value === 'object' ? JSON.stringify(value) : value;
+      if (options && options.ex) {
+        return await redisClient.set(key, stringified, 'EX', options.ex);
+      }
+      return await redisClient.set(key, stringified);
+    },
+    async del(key) {
+      if (!redisClient) return 0;
+      return await redisClient.del(key);
+    }
+  };
+}
+
 // ============================================================================
 // 4. FIREBASE ADMIN SDK (SAFE OPTIONAL INIT)
 // ============================================================================

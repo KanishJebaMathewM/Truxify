@@ -29,6 +29,7 @@
     "@opentelemetry/sdk-trace-node": "^2.10.0",
     "@sentry/node": "^10.62.0",
     "@supabase/supabase-js": "^2.109.0",
+    "@upstash/redis": "^1.38.2",
     "axios": "^1.6.0",
     "circuit-breaker-js": "0.0.1",
     "compression": "^1.8.1",

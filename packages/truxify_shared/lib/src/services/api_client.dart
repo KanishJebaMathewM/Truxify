@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 
 import '../config/app_config.dart';
 import 'http_client_factory.dart';
+import 'retry_policy.dart';
 
 /// Exception thrown when an API request fails after token refresh.
 class ApiAuthException implements Exception {
@@ -62,6 +63,9 @@ class MultipartFileInfo {
 ///   - Injects `Authorization: Bearer <accessToken>` into every request.
 ///   - On HTTP 401, attempts `supabase.auth.refreshSession()` once and retries.
 ///   - If the retry still returns 401, throws [ApiAuthException].
+///   - On HTTP 429, honours the `Retry-After` header (via [RetryPolicy]),
+///     waits the specified duration (capped), retries once, and throws
+///     [RateLimitException] if the retry also returns 429.
 ///   - Automatically injects a stable `X-Idempotency-Key` (UUID v4) on every
 ///     POST, PUT, and PATCH request so the backend `requireIdempotency`
 ///     middleware never rejects customer mutations with HTTP 400.
@@ -80,11 +84,13 @@ class ApiClient {
     http.Client? httpClient,
     String? baseUrl,
     Duration? timeout,
+    RetryPolicy retryPolicy = RetryPolicy.defaultPolicy,
   })  : _providedSupabase = supabaseClient,
         _isClientOwned = httpClient == null,
         _http = httpClient ?? createHttpClient(),
         _baseUrl = _normalise(_getBaseUrl(baseUrl)),
-        _timeout = timeout ?? AppConfig.apiTimeout;
+        _timeout = timeout ?? AppConfig.apiTimeout,
+        _retryPolicy = retryPolicy;
 
   final SupabaseClient? _providedSupabase;
   SupabaseClient get _supabase => _providedSupabase ?? Supabase.instance.client;
@@ -92,6 +98,7 @@ class ApiClient {
   final bool _isClientOwned;
   final String _baseUrl;
   final Duration _timeout;
+  final RetryPolicy _retryPolicy;
 
   /// Shared UUID generator — const so it is instantiated once per isolate.
   static const _uuid = Uuid();

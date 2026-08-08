@@ -1,3 +1,12 @@
+
+class EscrowAmountMismatchError extends Error {
+  constructor(expectedWei, actualWei) {
+    super(`Escrow deposit amount mismatch: expected ${expectedWei} Wei, received ${actualWei} Wei.`);
+    this.name = 'EscrowAmountMismatchError';
+    this.code = 'ESCROW_AMOUNT_MISMATCH';
+  }
+}
+
 /**
  * Polygon Blockchain — Escrow Payment Service
  *
@@ -9,7 +18,10 @@
  * relayer wallet (RELAYER_WALLET_PRIVATE_KEY) calls releasePayment
  * and cancelBooking. createBooking() is sent by the **customer's wallet**
  * directly — the contract requires msg.sender == customer to
- * prevent the relayer from bearing the escrow cost.
+ * prevent the relayer from bearing the escrow cost — but the call is only
+ * valid with an owner-signed EIP-191 commitment binding the customer wallet,
+ * bookingId, and a per-customer nonce, so a third party cannot front-run a
+ * pending bookingId (issue #7734). buildDepositTx() mints that commitment.
  *
  * The buildDepositTx() function below builds the deposit transaction
  * and returns it as an unsigned populated transaction so the
@@ -33,8 +45,9 @@ import logger from '../middleware/logger.js'
 import { measureExecution } from '../core/performanceMetrics.js'
 
 const ESCROW_ABI = [
-  'function createBooking(uint256 bookingId, address payable driver) external payable',
+  'function createBooking(uint256 bookingId, address payable driver, bytes signature) external payable',
   'function lockPayment(uint256 bookingId, address payable customer, address payable driver) external payable',
+  'function commitmentNonces(address customer) external view returns (uint256)',
   'function releasePayment(uint256 bookingId) external',
   'function cancelBooking(uint256 bookingId) external',
   'function cancelWithPenalty(uint256 bookingId, uint256 driverFee) external',
@@ -61,12 +74,14 @@ const MAX_ESCROW_MATIC = parseEnvFloat(process.env.MAX_ESCROW_MATIC, '100', 'MAX
 
 /** @type {ethers.Contract | null} */
 let escrowContract = null
+/** @type {ethers.Wallet | null} */
+let relayerWallet = null
 
 if (rpcUrl && contractAddress && relayerPrivateKey) {
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const relayer  = new ethers.Wallet(relayerPrivateKey, provider);
-    escrowContract = new ethers.Contract(contractAddress, ESCROW_ABI, relayer);
+    relayerWallet = new ethers.Wallet(relayerPrivateKey, provider);
+    escrowContract = new ethers.Contract(contractAddress, ESCROW_ABI, relayerWallet);
     logger.info('✅ Polygon Escrow contract client initialised.');
     logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
@@ -345,18 +360,19 @@ export async function getEscrowBooking(escrowBookingId) {
  * backend can confirm the on-chain deposit.
  *
  * @param {string} orderDisplayId
+ * @param {string} customerWalletAddress — 0x-prefixed Polygon address of the customer (the signer of the deposit tx)
  * @param {string} driverWalletAddress   — 0x-prefixed Polygon address of the driver
  * @param {string} amountWei             — amount in wei (string or bigint)
  * @returns {Promise<{txData: object|null, bookingId: string}>}
  */
-export async function buildDepositTx (orderDisplayId, driverWalletAddress, amountWei) {
+export async function buildDepositTx (orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
   return measureExecution('EscrowService.buildDepositTx', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
   if (!escrowContract) {
     return { txData: null, bookingId }
   }
 
-  if (!ethers.isAddress(driverWalletAddress)) {
+  if (!ethers.isAddress(driverWalletAddress) || !ethers.isAddress(customerWalletAddress)) {
     return { txData: null, bookingId }
   }
   if (!amountWei || BigInt(amountWei) <= 0n) {
@@ -365,9 +381,22 @@ export async function buildDepositTx (orderDisplayId, driverWalletAddress, amoun
 
   let txData
   try {
+    // Owner-signed EIP-191 commitment binding chain, contract, customer,
+    // bookingId and the customer's next nonce. Without it the contract
+    // rejects createBooking, so a third party cannot front-run the slot
+    // (issue #7734).
+    const network = await escrowContract.runner.provider.getNetwork()
+    const nonce = await escrowContract.commitmentNonces(customerWalletAddress)
+    const commitment = ethers.solidityPackedKeccak256(
+      ['uint256', 'address', 'address', 'uint256', 'uint256'],
+      [network.chainId, contractAddress, customerWalletAddress, bookingId, nonce]
+    )
+    const signature = await relayerWallet.signMessage(ethers.getBytes(commitment))
+
     txData = await escrowContract.createBooking.populateTransaction(
       bookingId,
       driverWalletAddress,
+      signature,
       {
         value: amountWei
       }
@@ -401,10 +430,11 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
   }
 
   // Idempotency: check if this booking already has a funded escrow on-chain.
-  // createBooking is callable by anyone, so an already-existing booking must be
-  // verified to have been created by the registered customer — and, when the
-  // expected values are persisted on the order, for the assigned driver and
-  // for at least the expected escrow amount — before it is accepted as funded.
+  // createBooking now requires an owner-signed commitment (issue #7734), but an
+  // already-existing booking is still verified to have been created by the
+  // registered customer — and, when the expected values are persisted on the
+  // order, for the assigned driver and for at least the expected escrow amount
+  // — before it is accepted as funded.
   try {
     const booking = await escrowContract.bookings(bookingId)
     if (booking && booking.amount > 0n) {
@@ -842,3 +872,17 @@ export async function submitEscrowResolveDisputeTimeout (orderDisplayId) {
 }
 export const lockPayment = escrowLockPayment;
 
+
+
+async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
+  const bookingOnChain = await escrowContract.bookings(bookingId);
+  const onChainAmountBN = BigInt(bookingOnChain.amount.toString());
+  const expectedWeiBN = BigInt(expectedWei);
+  return {
+    valid: onChainAmountBN >= expectedWeiBN,
+    onChainAmount: onChainAmountBN.toString(),
+    expectedAmount: expectedWeiBN.toString()
+  };
+}
+
+module.exports.verifyOnChainEscrowBalance = verifyOnChainEscrowBalance;

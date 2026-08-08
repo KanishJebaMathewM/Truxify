@@ -1,4 +1,5 @@
 import express from 'express';
+import logger from '../middleware/logger.js';
 import shardManager from '../services/sharding/ShardManager.js';
 import { shardMiddleware, crossShardQuery } from '../middleware/shardMiddleware.js';
 import { authenticate } from '../middleware/auth.js';
@@ -37,9 +38,10 @@ router.get('/shards/status', authenticate, userLimiter, requirePolicy('shard:vie
       timestamp: new Date().toISOString()
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -78,9 +80,10 @@ router.get('/shards/location', authenticate, userLimiter, requirePolicy('shard:v
       }
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -100,9 +103,10 @@ router.get('/shards/:shardName/orders', authenticate, userLimiter, requirePolicy
       shard: shardName
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -122,9 +126,10 @@ router.get('/shards/all/orders', authenticate, userLimiter, requirePolicy('shard
       }
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });

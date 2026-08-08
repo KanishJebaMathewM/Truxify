@@ -93,6 +93,8 @@ import { getLiveTrafficMultiplier } from '../services/trafficService.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import logger from '../middleware/logger.js';
 
+const DEFAULT_TRUCK_TYPES = ['Open Body', 'Closed Body', 'Container', 'Refrigerated'];
+
 function sanitizeNumberPlate(plate) {
   if (!plate || typeof plate !== 'string') return '';
   return plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -133,7 +135,7 @@ const router = express.Router();
  */
 router.get('/types', authenticate, userLimiter, (req, res) => {
   return res.json({
-    types: ['Open Body', 'Closed Body', 'Container', 'Refrigerated']
+    types: DEFAULT_TRUCK_TYPES
   });
 });
 function parseCapacityFilter(value, field) {
@@ -447,7 +449,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
   }
 
   if (numWeightTonnes <= 0 || numWeightTonnes > 50) {
-    return res.status(400).json({ error: 'Weight must be between 0 and 50 tonnes' });
+    return res.status(400).json({ error: 'Weight must be greater than 0 and at most 50 tonnes' });
   }
   const fragileFilter = parseBoolean(is_fragile);
   if (fragileFilter.error) {

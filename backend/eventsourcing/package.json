@@ -3,5 +3,10 @@
   "version": "1.0.0",
   "dependencies": {
     "uuid": "^14.0.1"
+  },
+  "type": "module",
+  "main": "event-store.js",
+  "scripts": {
+    "start": "node event-store.js"
   }
 }

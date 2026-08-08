@@ -257,9 +257,14 @@ class LocationService {
             'charging_status': batteryInfo.isCharging ? 'charging' : 'discharging',
           }
         };
-        _resilientWs!.send(payload);
-        debugPrint('[LocationService] Location ping sent: lat=${position.latitude}, lng=${position.longitude}');
-        return true;
+        final success = _resilientWs!.send(payload);
+        if (success) {
+          debugPrint('[LocationService] Location ping sent: lat=${position.latitude}, lng=${position.longitude}');
+          return true;
+        } else {
+          debugPrint('[LocationService] Failed to send location ping — WebSocket unavailable');
+          return false;
+        }
       }
       return false;
     } catch (e) {

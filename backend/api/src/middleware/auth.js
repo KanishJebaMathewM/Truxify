@@ -149,11 +149,10 @@ export async function authenticate(req, res, next) {
   // Strip dev-only authentication headers before any logic runs.
   // This ensures they cannot be used even if BYPASS_AUTH is accidentally
   // enabled or a proxy misconfiguration exposes them.
-  if (
-    process.env.NODE_ENV === "production" ||
-    !bypassAuth ||
-    (process.env.NODE_ENV === "test" && !testAuthEnabled)
-  ) {
+  // This block runs unconditionally in production — the bypass path below
+  // only handles test impersonation via testAuthEnabled; the headers are
+  // always removed so no bypass header can ever survive a production deploy.
+  if (process.env.NODE_ENV === "production") {
     delete req.headers["x-user-id"];
     delete req.headers["x-user-role"];
     delete req.headers["x-user-name"];

@@ -237,9 +237,15 @@ contract DAO is Ownable, ReentrancyGuard, Pausable {
         emit ProposalExecuted(proposalId, passed);
     }
 
-    function cancelProposal(uint256 proposalId) external onlyOwner {
+    function cancelProposal(uint256 proposalId) external {
         Proposal storage proposal = proposals[proposalId];
-        require(proposal.state == ProposalState.PENDING || proposal.state == ProposalState.ACTIVE || proposal.state == ProposalState.PASSED, "Cannot cancel");
+        require(msg.sender == owner() || msg.sender == proposal.proposer, "Not authorized");
+        require(!proposal.executed, "Already executed");
+        require(
+            proposal.state == ProposalState.PENDING || proposal.state == ProposalState.ACTIVE,
+            "Cannot cancel"
+        );
+
         proposal.state = ProposalState.CANCELLED;
         emit ProposalCancelled(proposalId, msg.sender);
     }

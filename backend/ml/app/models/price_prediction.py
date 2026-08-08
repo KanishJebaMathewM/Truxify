@@ -1,7 +1,10 @@
+import asyncio
 import logging
 import math
 import os
-import requests
+import threading
+import time
+import httpx
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -249,8 +252,8 @@ def _parse_trip_row(row: dict) -> Optional[dict]:
     }
 
 
-def _get_weather_multiplier(city: str) -> float:
-    """Fetch weather for a city and return a price multiplier."""
+async def _get_weather_multiplier_async(client: httpx.AsyncClient, city: str) -> float:
+    """Async fetch weather for a city and return a price multiplier."""
     if not city:
         return 1.0
     api_key = os.environ.get("OPENWEATHERMAP_API_KEY")
@@ -258,7 +261,30 @@ def _get_weather_multiplier(city: str) -> float:
         return 1.0
     try:
         url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}"
-        response = requests.get(url, timeout=2.0)
+        response = await client.get(url, timeout=2.0)
+        if response.status_code == 200:
+            weather_main = response.json().get("weather", [{}])[0].get("main", "").lower()
+            if weather_main in ["rain", "snow", "thunderstorm", "extreme", "squall", "tornado"]:
+                return 1.2
+            elif weather_main in ["drizzle", "mist", "fog", "haze", "dust", "sand", "ash"]:
+                return 1.1
+    except Exception as e:
+        logger.warning("Weather API failed for %s: %s", city, e)
+    return 1.0
+
+
+def _get_weather_multiplier(city: str) -> float:
+    """Synchronous wrapper for backward compatibility and non-async callers."""
+    if not city:
+        return 1.0
+    api_key = os.environ.get("OPENWEATHERMAP_API_KEY")
+    if not api_key:
+        return 1.0
+    try:
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={city}&appid={api_key}"
+        with httpx.Client(timeout=5.0) as client:
+        response = client.get(url, timeout=2.0)
+        response = httpx.get(url, timeout=2.0)
         if response.status_code == 200:
             weather_main = response.json().get("weather", [{}])[0].get("main", "").lower()
             if weather_main in ["rain", "snow", "thunderstorm", "extreme", "squall", "tornado"]:
@@ -448,10 +474,15 @@ def predict_price(
 
     origin_city = _city_from_address(route_origin)
     destination_city = _city_from_address(route_destination)
-    weather_multiplier = max(
-        _get_weather_multiplier(origin_city),
-        _get_weather_multiplier(destination_city)
-    )
+    # Fetch weather for both cities in parallel without blocking the event loop
+    async def fetch_weather():
+        async with httpx.AsyncClient() as client:
+            origin_mult, dest_mult = await asyncio.gather(
+                _get_weather_multiplier_async(client, origin_city),
+                _get_weather_multiplier_async(client, destination_city),
+            )
+            return max(origin_mult, dest_mult)
+    weather_multiplier = asyncio.run(fetch_weather())
     predicted *= weather_multiplier
 
     return {

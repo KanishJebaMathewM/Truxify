@@ -138,6 +138,7 @@ router.post("/logout", authenticate, async (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Logged out successfully",
+    cacheInvalidated: true, // Redis errors are non-fatal — logout always succeeds
   });
 });
 

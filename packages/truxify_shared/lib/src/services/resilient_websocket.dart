@@ -103,18 +103,26 @@ class ResilientWebSocket {
     }
   }
 
+  /// Whether the WebSocket connection is currently active and ready.
+  bool get isConnected => _channel != null && !_closed && !_reconnecting;
+
   /// Sends a message over the WebSocket.
   ///
   /// Strings are sent as-is. All other values are JSON-encoded.
-  /// If the connection is not currently open the message is silently dropped.
-  void send(dynamic message) {
+  /// Returns true if sent successfully, false if the connection is unavailable.
+  bool send(dynamic message) {
     final channel = _channel;
-    if (channel == null) {
-      return;
+    if (channel == null || _closed) {
+      return false;
     }
 
-    final payload = message is String ? message : jsonEncode(message);
-    channel.sink.add(payload);
+    try {
+      final payload = message is String ? message : jsonEncode(message);
+      channel.sink.add(payload);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _scheduleReconnect() async {

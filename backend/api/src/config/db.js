@@ -28,6 +28,26 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 export let supabase = null;
 export let supabaseAdmin = null;
 
+// Connection health helpers
+export function isConnected() {
+  return supabase !== null;
+}
+
+export async function reconnect() {
+  logger.warn('[db] Reconnecting Supabase clients...');
+  supabase = null;
+  supabaseAdmin = null;
+  // Re-initialize (simplified - full reconnect would re-parse env vars)
+  if (supabaseUrl && supabaseAnonKey) {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+  }
+  if (supabaseUrl && supabaseServiceKey) {
+    supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+  }
+}
+
+
+
 if (supabaseUrl && supabaseAnonKey) {
   try {
     supabase = createClient(supabaseUrl, supabaseAnonKey, {

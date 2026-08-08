@@ -1,7 +1,6 @@
 import cron from 'node-cron';
 import logger from '../middleware/logger.js';
 import { supabase, supabaseAdmin, redisClient } from '../config/db.js';
-import { supabase, supabaseAdmin } from '../config/db.js';
 import { sendPushNotification } from '../services/notificationService.js';
 import { WorkerTracer } from '../core/telemetry/WorkerTracer.js';
 import spanFactory from '../core/telemetry/SpanFactory.js';
@@ -22,8 +21,6 @@ const DEFAULT_STALE_ORDER_AGE_MS = 24 * 60 * 60 * 1000;
 const CONCURRENCY_LIMIT = 5;
 
 let staleOrderClient = null;
-
-const STALE_ORDER_CANCELLATION_REASON = 'Stale order: no accepted bid within 24 hours.';
 
 export const startStaleOrderWorker = (orderRepository) => {
   if (staleOrderWorkerTask) {
@@ -49,12 +46,6 @@ export const startStaleOrderWorker = (orderRepository) => {
 
   // Run every hour at minute 0
   staleOrderWorkerTask = cron.schedule('0 * * * *', tracedHandler);
-      // Find all pending orders created more than 24 hours ago
-      const { data: staleOrders, error: fetchError } = await staleOrderClient
-        .from('orders')
-        .select('id, customer_id, order_display_id')
-        .eq('status', 'pending')
-        .lt('created_at', twentyFourHoursAgo);
 
   logger.info('[StaleOrderWorker] Stale order cleanup cron job scheduled (runs every hour).');
   return staleOrderWorkerTask;
@@ -183,6 +174,9 @@ async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
     if (rpcErr) {
       metrics.errors += 1;
       logger.error(`[StaleOrderWorker] Failed to cancel order ${staleOrder.id}: ${rpcErr.message}`);
+      return;
+    }
+
     // Re-fetch the order inside the loop with a status filter to close the
     // window between the batch SELECT and the per-order UPDATE.
     const { data: current, error: refetchErr } = await staleOrderClient
@@ -228,7 +222,7 @@ async function cancelStaleOrder(staleOrder, staleSince, repository, metrics) {
         requiresRefund
           ? `Your order ${orderDisplayId} was cancelled because it was not completed in time. Any escrowed funds are being refunded.`
           : 'Your order was cancelled because it received no accepted bids within 24 hours. Please try posting again.',
-        'ORDER_CANCELLED',
+        'order_update',
         { orderId: order.id, orderDisplayId }
       );
       logger.info(`[StaleOrderWorker] Cancelled order ${orderDisplayId} and notified customer ${order.customer_id}.`);

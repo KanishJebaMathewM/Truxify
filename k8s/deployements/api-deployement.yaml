@@ -18,6 +18,7 @@ spec:
         app: truxify
         component: api
     spec:
+      serviceAccountName: api-service-account
       containers:
       - name: api
         image: truxify/api:latest

@@ -1,3 +1,4 @@
+import wimBypassRouter from './routes/wimBypass.js';
 import express from 'express'
 import { corsMiddleware } from './middleware/cors.js'
 import { compressionMiddleware } from './config/compression.js'
@@ -493,8 +494,6 @@ app.use('/api/v1/admin', adminRoutes)
 app.use('/api/v1/admin/audit-logs', auditRoutes)
 app.use('/api/voice', voiceRoutes)
 app.use('/api/demand-heatmap', demandRoutes)
-app.use('/api/routes', routeRoutes)
-app.use('/api/iot', iotRoutes)
 
 // ============================================================================
 // WEBHOOK ROUTES
@@ -851,3 +850,5 @@ app.use((err, req, res, next) => {
 
   next(err);
 });
+
+app.use('/api/wim', wimBypassRouter);

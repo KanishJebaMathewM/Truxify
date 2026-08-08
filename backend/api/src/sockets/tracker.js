@@ -68,6 +68,57 @@ const RECOVERY_FILE_PATH = process.env.RECOVERY_FILE_PATH || path.join(os.tmpdir
 // In-memory mapping of active client subscriptions
 const trackingSubscriptions = new Map();
 
+// Dedicated Redis subscriber instance for multi-replica WebSocket broadcasting
+let redisSubClient = null;
+const TRACKER_CHANNELS = {
+  LOCATION: 'tracker:location_updates',
+  MILESTONE: 'tracker:milestone_updates',
+};
+
+function deliverToLocalSubscribers(targetId, payload) {
+  if (!targetId || !trackingSubscriptions.has(targetId)) return;
+  const clients = trackingSubscriptions.get(targetId);
+  clients.forEach((client) => {
+    if (client.readyState === 1) {
+      client.send(payload);
+    }
+  });
+}
+
+function initRedisTrackerPubSub() {
+  if (!redisClient || redisSubClient) return;
+
+  try {
+    redisSubClient = redisClient.duplicate();
+    redisSubClient.subscribe(TRACKER_CHANNELS.LOCATION, TRACKER_CHANNELS.MILESTONE, (err) => {
+      if (err) {
+        logger.error({ err }, '[Tracker] Failed to subscribe to Redis tracker channels');
+      } else {
+        logger.info('[Tracker] Subscribed to Redis Pub/Sub tracker channels for multi-replica broadcasting');
+      }
+    });
+
+    redisSubClient.on('message', (channel, message) => {
+      try {
+        const parsed = JSON.parse(message);
+        if (channel === TRACKER_CHANNELS.LOCATION) {
+          const { orderDisplayId, driver_id, payload } = parsed;
+          if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, payload);
+          if (driver_id) deliverToLocalSubscribers(driver_id, payload);
+        } else if (channel === TRACKER_CHANNELS.MILESTONE) {
+          const { orderDisplayId, payload } = parsed;
+          if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, payload);
+        }
+      } catch (err) {
+        logger.error({ err }, '[Tracker] Error handling Pub/Sub message');
+      }
+    });
+  } catch (err) {
+    logger.error({ err }, '[Tracker] Redis Pub/Sub initialization error');
+  }
+}
+
+
 // Cached Supabase Realtime channels keyed by orderUUID to avoid creating a new
 // channel per location ping. Reused across pings and cleaned up on disconnect.
 const locationChannels = new Map();
@@ -949,9 +1000,9 @@ export async function handleLocationPing(ws, data, req) {
     GpsLog.create({
       bookingId: orderDisplayId || orderUUID || driver_id,
       driverId: driver_id,
-      lat,
-      lng,
-      speed: speed || 0,
+      lat: sanitized.lat,
+      lng: sanitized.lng,
+      speed: sanitized.speed ?? 0,
       heading: sanitized.bearing ?? 0,
       timestamp: deviceTime || new Date(serverNow),
       metadata: {
@@ -977,22 +1028,22 @@ export async function handleLocationPing(ws, data, req) {
     }
   });
 
-  if (orderDisplayId && trackingSubscriptions.has(orderDisplayId)) {
-    const clients = trackingSubscriptions.get(orderDisplayId);
-    clients.forEach((client) => {
-      if (client.readyState === 1) { 
-        client.send(broadcastPayload);
-      }
-    });
-  }
+  initRedisTrackerPubSub();
 
-  if (trackingSubscriptions.has(driver_id)) {
-    const clients = trackingSubscriptions.get(driver_id);
-    clients.forEach((client) => {
-      if (client.readyState === 1) {
-        client.send(broadcastPayload);
-      }
+  if (redisClient) {
+    const pubSubMessage = JSON.stringify({
+      orderDisplayId,
+      driver_id,
+      payload: broadcastPayload,
     });
+    redisClient.publish(TRACKER_CHANNELS.LOCATION, pubSubMessage).catch((err) => {
+      logger.error({ err }, '[Tracker] Redis publish error for location update');
+      if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, broadcastPayload);
+      if (driver_id) deliverToLocalSubscribers(driver_id, broadcastPayload);
+    });
+  } else {
+    if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, broadcastPayload);
+    if (driver_id) deliverToLocalSubscribers(driver_id, broadcastPayload);
   }
 
   // Publish to Supabase Realtime channel driver-location:{orderId}
@@ -1202,14 +1253,17 @@ export async function closeWebSocketServer() {
       await new Promise(r => setTimeout(r, mongoPollIntervalMs));
     }
     if (!getMongoDb()) {
-      const dataLoss = telemetryWriteBuffer.length;
-      if (dataLoss > 0) {
+      const allPending = [
+        ...telemetryFlushBuffer,
+        ...(await telemetryWriteBuffer.toArray())
+      ];
+      if (allPending.length > 0) {
         try {
-          const lines = (await telemetryWriteBuffer.toArray()).map(r => JSON.stringify(r)).join('\n');
+          const lines = allPending.map(r => JSON.stringify(r)).join('\n');
           fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', { encoding: 'utf-8', mode: 0o600 });
-          logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available. Wrote ${dataLoss} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`);
+          logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available. Wrote ${allPending.length} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`);
         } catch (fileErr) {
-          logger.error(`[TRUXIFY SHUTDOWN] Failed to write recovery file: ${fileErr.message}. ${dataLoss} records lost.`);
+          logger.error(`[TRUXIFY SHUTDOWN] Failed to write recovery file: ${fileErr.message}. ${allPending.length} records lost.`);
         }
       }
     }
@@ -1256,9 +1310,7 @@ export async function closeWebSocketServer() {
 }
 
 export function broadcastOrderMilestone(orderDisplayId, milestone, status) {
-  if (!orderDisplayId || !trackingSubscriptions.has(orderDisplayId)) {
-    return;
-  }
+  if (!orderDisplayId) return;
 
   const payload = JSON.stringify({
     event: 'milestone_update',
@@ -1270,12 +1322,17 @@ export function broadcastOrderMilestone(orderDisplayId, milestone, status) {
     },
   });
 
-  const clients = trackingSubscriptions.get(orderDisplayId);
-  clients.forEach((client) => {
-    if (client.readyState === 1) {
-      client.send(payload);
-    }
-  });
+  initRedisTrackerPubSub();
+
+  if (redisClient) {
+    const pubSubMessage = JSON.stringify({ orderDisplayId, payload });
+    redisClient.publish(TRACKER_CHANNELS.MILESTONE, pubSubMessage).catch((err) => {
+      logger.error({ err }, '[Tracker] Redis publish error for milestone');
+      deliverToLocalSubscribers(orderDisplayId, payload);
+    });
+  } else {
+    deliverToLocalSubscribers(orderDisplayId, payload);
+  }
 }
 
 export async function handleSubscribe(ws, data) {

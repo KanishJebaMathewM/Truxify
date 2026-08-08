@@ -63,8 +63,8 @@ router.get('/', authenticate, userLimiter, requirePolicy('demand:view-heatmap'),
     };
 
     const repositioningAreas = [
-      { zone: 'Central Hub / Logistics District', suggestedDrivers: 5, priority: 'HIGH' },
-      { zone: 'Industrial Corridor Sector B', suggestedDrivers: 3, priority: 'MEDIUM' }
+      { zone: 'Central Hub / Logistics District', suggestedDrivers: 5, priority: 'HIGH', isMockData: true },
+      { zone: 'Industrial Corridor Sector B', suggestedDrivers: 3, priority: 'MEDIUM', isMockData: true }
     ];
 
     // 3. Construct GeoJSON

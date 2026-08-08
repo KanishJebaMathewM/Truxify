@@ -30,8 +30,7 @@ spec:
     - "*.truxify.com"
     tls:
       mode: SIMPLE
-      credentialName: truxify-cert
----
+      credentialName: truxify-cert---
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
 metadata:
@@ -54,18 +53,9 @@ spec:
           number: 5000
   - match:
     - uri:
-        prefix: /graphql
-    route:
-    - destination:
-        host: graphql-service
-        port:
-          number: 4000
-  - match:
-    - uri:
         prefix: /docs
     route:
     - destination:
         host: api-service
         port:
           number: 5000
-

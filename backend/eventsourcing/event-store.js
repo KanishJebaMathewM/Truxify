@@ -248,21 +248,32 @@ class EventStore {
             return [];
         }
 
-        this.eventStreams.set(aggregateId, data);
-        return data;
+        const mappedData = (data || []).map(row => ({
+            id: row.event_id || row.id,
+            type: row.event_type || row.type,
+            aggregateId: row.aggregate_id || row.aggregateId,
+            payload: row.payload,
+            version: row.version,
+            timestamp: row.timestamp || row.created_at
+        }));
+
+        this.eventStreams.set(aggregateId, mappedData);
+        return mappedData;
     }
 
     async getAggregateState(aggregateId) {
+        const snapshot = await this.getSnapshot(aggregateId);
+        let state = snapshot ? { ...snapshot.state } : { id: aggregateId, version: 0 };
+        const snapshotVersion = snapshot ? (snapshot.version || snapshot.state?.version || 0) : 0;
+
         const events = await this.getEventStream(aggregateId);
-        if (events.length === 0) {
-            // Check snapshot for last known state when event stream is empty
-            const snapshot = await this.getSnapshot(aggregateId);
-            return snapshot ? snapshot.state : null;
+        const eventsToApply = events.filter(e => e.version > snapshotVersion);
+
+        if (!snapshot && eventsToApply.length === 0) {
+            return null;
         }
 
-        // Apply events to build state
-        let state = { id: aggregateId, version: 0 };
-        for (const event of events) {
+        for (const event of eventsToApply) {
             state = this.applyEvent(state, event);
         }
         return state;

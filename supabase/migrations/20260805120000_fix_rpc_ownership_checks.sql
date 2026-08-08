@@ -55,7 +55,16 @@ BEGIN
     RAISE EXCEPTION 'Withdrawal amount must be a positive whole number of paisa';
   END IF;
 
-  -- Enforce the per-driver per-day withdrawal cap.
+  -- Lock the wallet row first so the daily cap decision and the balance
+  -- movement are serialized: two concurrent withdrawals from the same driver
+  -- cannot both read the same v_day_total and both pass the cap check.
+  SELECT wallet_confirmed, wallet_pending
+    INTO v_confirmed, v_pending
+    FROM driver_details
+   WHERE user_id = p_driver_id
+     FOR UPDATE;
+
+  -- Enforce the per-driver per-day withdrawal cap under the row lock.
   SELECT COALESCE(SUM(amount), 0)
     INTO v_day_total
     FROM wallet_transactions
@@ -67,13 +76,6 @@ BEGIN
     RAISE EXCEPTION 'Daily withdrawal cap exceeded: % of % used',
       v_day_total + p_amount, v_daily_cap;
   END IF;
-
-  -- Lock the wallet row to prevent concurrent withdrawals.
-  SELECT wallet_confirmed, wallet_pending
-    INTO v_confirmed, v_pending
-    FROM driver_details
-   WHERE user_id = p_driver_id
-     FOR UPDATE;
 
   IF v_confirmed IS NULL OR v_confirmed < p_amount THEN
     RAISE EXCEPTION 'Insufficient balance: available %, requested %',

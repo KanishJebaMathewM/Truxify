@@ -10,7 +10,7 @@ import logger from '../middleware/logger.js';
 import { verifyOrderParamsSchema, documentCheckSchema } from '../validation/requestSchemas.js';
 import { scanDocument, MalwareScanError } from '../lib/malwareScanner.js';
 import { PolicyError, policy } from '../security/policyEngine.js';
-import digilockerService from '../services/verification/DigilockerService.js';
+import digilockerService from '../services/digilockerService.js';
 import { validateDocumentBuffer, DocumentValidationError } from '../lib/documentValidation.js';
 
 const router = express.Router();

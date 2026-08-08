@@ -1,6 +1,5 @@
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { errorResponse } from '../utils/apiResponse.js';
 import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
@@ -108,6 +107,7 @@ export async function registerDeviceToken(req, res, next) {
 
 /**
  * Unregister an FCM token for a user device, e.g. on logout.
+ * Updates profiles.fcm_token to fallback to another active device token if available.
  */
 export async function unregisterDeviceToken(req, res, next) {
   try {
@@ -138,32 +138,33 @@ export async function unregisterDeviceToken(req, res, next) {
       return next(new AppError('Failed to unregister device', 500));
     }
 
-    if (!deletedRows || deletedRows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Device token not found for this user'
-      });
-    }
-
-    const { data: remainingDevices } = await supabase
+    // Query remaining device tokens for this user to fallback
+    const { data: remainingDevice, error: remainingError } = await supabase
       .from('user_devices')
       .select('fcm_token')
       .eq('user_id', userId)
-      .not('fcm_token', 'is', null)
-      .limit(1);
+      .limit(1)
+      .maybeSingle();
 
-    if ((remainingDevices || []).length === 0) {
-      const { error: profileClearError } = await supabase
-        .from('profiles')
-        .update({ fcm_token: null, fcm_token_updated_at: new Date().toISOString() })
-        .eq('id', userId);
+    if (remainingError) {
+      logger.error('[DeviceController] Failed to check remaining devices:', remainingError.message);
+    }
 
-      if (profileClearError) {
-        logger.error(
-          '[DeviceController] No remaining devices but failed to clear profiles.fcm_token:',
-          profileClearError.message
-        );
-      }
+    const nextToken = remainingDevice?.fcm_token || null;
+
+    const { error: profileSyncError } = await supabase
+      .from('profiles')
+      .update({
+        fcm_token: nextToken,
+        fcm_token_updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (profileSyncError) {
+      logger.error(
+        '[DeviceController] Device token removed but failed to sync profiles.fcm_token:',
+        profileSyncError.message
+      );
     }
 
     return res.json({

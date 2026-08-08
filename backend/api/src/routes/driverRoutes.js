@@ -154,6 +154,7 @@ import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
+import { requireIdempotency } from '../middleware/idempotency.js';
 const router = express.Router();
 router.use(userLimiter);
 const hosStatusSchema = z.object({
@@ -255,7 +256,7 @@ router.get('/stats', authenticate, userLimiter, requirePolicy('driver:view-stats
     });
 
   } catch (err) {
-    logger.error('Driver stats fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver stats fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -312,7 +313,7 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
     });
 
   } catch (err) {
-    logger.error('Driver online status update error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver online status update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -349,7 +350,7 @@ router.put('/hos/status', authenticate, userLimiter, requirePolicy('driver:updat
       shift_start_time: details.shift_start_time
     });
   } catch (err) {
-    logger.error('Driver HoS status update error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver HoS status update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -438,7 +439,7 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
     });
 
   } catch (err) {
-    logger.error('Wallet history fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Wallet history fetch error:', err);
 
     res.status(500).json({
       error: 'Internal Server Error'
@@ -505,7 +506,7 @@ router.get('/earnings/summary', authenticate, userLimiter, requirePolicy('driver
     res.json(summary || []);
 
   } catch (err) {
-    logger.error('Driver earnings summary fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver earnings summary fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -617,7 +618,7 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
       trips: enrichedTrips
     });
   } catch (err) {
-    logger.error('Driver trips fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver trips fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -667,7 +668,7 @@ router.get('/trips/:tripDisplayId', authenticate, userLimiter, requirePolicy('dr
 
     res.json(trip);
   } catch (err) {
-    logger.error('Driver single trip fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver single trip fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -715,7 +716,7 @@ router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requirePoli
     if (error) return res.status(500).json({ error: 'Failed to fetch trip items.', details: error.message });
     res.json(items || []);
   } catch (err) {
-    logger.error('Driver trip items fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver trip items fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -757,7 +758,7 @@ router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requirePoli
     if (error) return res.status(500).json({ error: 'Failed to fetch trip stops.', details: error.message });
     res.json(stops || []);
   } catch (err) {
-    logger.error('Driver trip stops fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver trip stops fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -799,7 +800,7 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
     if (error) return res.status(500).json({ error: 'Failed to fetch route points.', details: error.message });
     res.json(points || []);
   } catch (err) {
-    logger.error('Driver route points fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver route points fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -964,7 +965,7 @@ router.get('/bids', authenticate, userLimiter, requirePolicy('driver:view-bids')
  *       400:
  *         description: Insufficient balance or validation error
  */
-router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver:withdraw'), auditLog({ action: 'driver:withdraw', resourceType: 'wallet_withdrawal' }), validateBody(withdrawSchema), async (req, res) => {
+router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver:withdraw'), auditLog({ action: 'driver:withdraw', resourceType: 'wallet_withdrawal' }), requireIdempotency(86400), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa
 
   try {

@@ -61,6 +61,12 @@ logger = logging.getLogger(__name__)
 # Track loaded models for health reporting
 loaded_models: set[str] = set()
 
+
+import os
+
+MAX_CONCURRENT_INFERENCE = int(os.getenv("MAX_CONCURRENT_INFERENCE", "10"))
+INFERENCE_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_INFERENCE)
+
 app = FastAPI(
     title="Truxify ML Engine",
     description="ML prediction service for load matching, pricing, ETA, and route optimization",
@@ -421,7 +427,7 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
         input.nearby_drivers,
     ]
     try:
-        demand = predict_demand(features)
+        demand = await asyncio.to_thread(predict_demand, features)
         if demand is None:
             raise HTTPException(status_code=503, detail="Model not available")
         return DemandForecastOutput(predicted_demand=demand)
@@ -437,7 +443,11 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
 @app.post("/predict/price", response_model=PricePredictOutput)
 async def predict_price_endpoint(input: PricePredictInput, _auth=Depends(verify_api_key)):
     try:
-        result = predict_price(
+        # predict_price performs blocking weather lookups (requests.get) and
+        # CPU-bound model scoring; run it in a worker thread so it never blocks
+        # the FastAPI event loop and stalls other ML endpoints.
+        result = await asyncio.to_thread(
+            predict_price,
             distance_km=input.distance_km,
             cargo_weight_kg=input.cargo_weight_kg,
             truck_type=input.truck_type,
@@ -521,7 +531,7 @@ async def packing_endpoint(input: PackingInput, _auth=Depends(verify_api_key)):
         packages = [pkg.model_dump() for pkg in input.packages]
         truck = input.truck.model_dump()
         addresses = [addr.model_dump() for addr in input.delivery_addresses]
-        result = optimise_packing(packages, truck, addresses)
+        result = await asyncio.to_thread(optimise_packing, packages, truck, addresses)
         return PackingOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -598,7 +608,7 @@ async def deadhead_endpoint(input: DeadheadInput, _auth=Depends(verify_api_key))
         driver_dest = input.driver_destination.model_dump()
         truck_specs = input.truck_specs.model_dump()
         loads = [load.model_dump() for load in input.available_loads]
-        result = find_return_loads(driver_dest, truck_specs, input.arrival_time, loads)
+        result = await asyncio.to_thread(find_return_loads, driver_dest, truck_specs, input.arrival_time, loads)
         return DeadheadOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -618,7 +628,7 @@ async def mid_trip_endpoint(input: MidTripInput, _auth=Depends(verify_api_key)):
         route = [wp.model_dump() for wp in input.remaining_route]
         capacity = input.available_capacity.model_dump()
         loads = [load.model_dump() for load in input.nearby_loads]
-        result = find_mid_trip_loads(current_loc, route, capacity, loads)
+        result = await asyncio.to_thread(find_mid_trip_loads, current_loc, route, capacity, loads)
         return MidTripOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

@@ -3,26 +3,26 @@
  *
  * Unit tests for backend/api/src/lib/redisLock.js
  *
- * Run with: node --experimental-vm-modules node_modules/.bin/jest redisLock.test.js
- * (or via: npm test -- --testPathPattern=redisLock)
+ * Run with: npx vitest run test/unit/redisLock.test.js
+ * (or via: npm run test:unit -- test/unit/redisLock.test.js)
  */
 
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 
 // ─── Mock the Redis client ────────────────────────────────────────────────────
 
 // We mock the db module so we can swap redisClient between tests.
 let mockRedisClient = null;
 
-jest.mock('../config/db.js', () => ({
+vi.mock('../config/db.js', () => ({
   get redisClient() {
     return mockRedisClient;
   },
 }));
 
 // Suppress logger noise in test output.
-jest.mock('../middleware/logger.js', () => ({
-  default: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+vi.mock('../middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 // Import after mocks are registered.

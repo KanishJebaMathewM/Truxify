@@ -253,11 +253,12 @@ describe('Individual health checks', () => {
   });
 
   describe('websocketHealth', () => {
-    it('returns healthy when no ws state is set (default)', async () => {
+    it('returns unhealthy when no ws state is set (fail closed)', async () => {
       delete globalThis.__truxify_wsState;
       const { default: check } = await import('../../../src/core/health/checks/websocketHealth.js');
       const result = await check();
-      expect(result.status).toBe(HealthStatus.HEALTHY);
+      expect(result.status).toBe(HealthStatus.UNHEALTHY);
+      expect(result.message).toBe('no_websocket_server');
     });
 
     it('returns healthy when WebSocket server is active', async () => {
@@ -273,7 +274,7 @@ describe('Individual health checks', () => {
       delete globalThis.__truxify_wsState;
     });
 
-    it('returns degraded when WebSocket server is not active', async () => {
+    it('returns unhealthy when WebSocket server is registered but not active', async () => {
       globalThis.__truxify_wsState = {
         hasWebSocketServer: false,
         hasWsHeartbeatInterval: false,
@@ -281,7 +282,8 @@ describe('Individual health checks', () => {
       };
       const { default: check } = await import('../../../src/core/health/checks/websocketHealth.js');
       const result = await check();
-      expect(result.status).toBe(HealthStatus.DEGRADED);
+      expect(result.status).toBe(HealthStatus.UNHEALTHY);
+      expect(result.message).toBe('server_not_running');
       delete globalThis.__truxify_wsState;
     });
   });

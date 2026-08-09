@@ -1,7 +1,7 @@
 import didService from '../../../did/did.service.js';
 import logger from '../middleware/logger.js';
 import { validationResult } from 'express-validator';
-import { AppError } from '../errors/AppError.js';
+import { AppError } from '../utils/errors.js';
 
 export const loadCredential = async (req, res, next) => {
     try {

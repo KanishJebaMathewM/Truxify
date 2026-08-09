@@ -516,11 +516,6 @@ app.use('/api/webhooks', webhookRoutes)
 app.use('/api/verify', verificationRoutes)
 app.use('/api/oracle', oracleRoutes)
 app.use('/api/ml', mlRoutes)
-app.use('/api/blockchain', (req, _res, next) => {
-  req.blockchainMetrics = blockchainMetrics;
-  req.escalationHandler = escalationHandler;
-  next();
-}, blockchainMonitoringRoutes)
 
 // ============================================================================
 // 🆕 BLOCKCHAIN MONITORING ROUTES

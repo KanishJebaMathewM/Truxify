@@ -49,7 +49,7 @@ class DIDService {
         logger.info('✅ DID Service initialized');
     }
 
-    async createDID(userAddress) {
+    async createDID(userAddress, publicKey) {
         try {
             const did = `did:truxify:${uuidv4()}`;
 
@@ -59,12 +59,17 @@ class DIDService {
             await this.addServiceEndpoint(did, 'identity', 'IdentityService', `${process.env.API_URL}/api/did/identity`, 'Main identity service');
             await this.addServiceEndpoint(did, 'credentials', 'CredentialService', `${process.env.API_URL}/api/did/credentials`, 'Credential management service');
 
-            const keyPair = crypto.generateKeyPairSync('rsa', {
-                modulusLength: 2048,
-                publicKeyEncoding: { type: 'spki', format: 'pem' },
-                privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-            });
-            const publicKeyMultibase = Buffer.from(keyPair.publicKey).toString('base64');
+            let publicKeyMultibase = publicKey;
+            let privateKey = null;
+            if (!publicKeyMultibase) {
+                const keyPair = crypto.generateKeyPairSync('rsa', {
+                    modulusLength: 2048,
+                    publicKeyEncoding: { type: 'spki', format: 'pem' },
+                    privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+                });
+                publicKeyMultibase = Buffer.from(keyPair.publicKey).toString('base64');
+                privateKey = Buffer.from(keyPair.privateKey).toString('base64');
+            }
             await this.addVerificationMethod(did, 'key-1', 'RsaVerificationKey2018', did, publicKeyMultibase);
 
             await this.identityWallet.createWallet(did);
@@ -72,7 +77,7 @@ class DIDService {
             await this.storeDID({ did, owner: userAddress, publicKey: publicKeyMultibase });
 
             logger.info(`✅ DID created: ${did}`);
-            return { success: true, did, publicKey: publicKeyMultibase, txHash: receipt.hash };
+            return { success: true, did, publicKey: publicKeyMultibase, privateKey, txHash: receipt.hash };
         } catch (error) {
             logger.error('DID creation failed:', error);
             throw error;

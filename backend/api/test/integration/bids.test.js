@@ -21,16 +21,16 @@ vi.mock('../../src/services/escrow.js', async () => {
     recordDepositTx: vi.fn(),
     escrowDeposit: vi.fn(),
     escrowRelease: vi.fn(),
-    escrowRefund: vi.fn(),
+    submitEscrowRefund: vi.fn(),
     submitEscrowRefund: vi.fn(),
     confirmEscrowRefund: vi.fn(),
     // Mirrors the real implementation's escrow:<id> booking id derivation
-    bookingIdFromUuid: vi.fn((orderId) => `escrow:${orderId}`),
+    getEscrowBookingId: vi.fn((orderId) => `escrow:${orderId}`),
   };
 });
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');
-const { buildDepositTx: mockBuildDepositTx, recordDepositTx: mockRecordDepositTx, escrowDeposit: mockEscrowDeposit, escrowRefund: mockEscrowRefund } = await import('../../src/services/escrow.js');
+const { buildDepositTx: mockBuildDepositTx, recordDepositTx: mockRecordDepositTx, escrowDeposit: mockEscrowDeposit, submitEscrowRefund: mockEscrowRefund } = await import('../../src/services/escrow.js');
 
 function buildApp() {
   const app = express();

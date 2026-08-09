@@ -13,7 +13,19 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
+
+      - name: Check for duplicate CREATE TABLE definitions across migrations
+        run: |
+          tables=$(grep -rhoE 'CREATE TABLE( IF NOT EXISTS)? [A-Za-z0-9_.]+' supabase/migrations/ | sed -E 's/^CREATE TABLE( IF NOT EXISTS)? //; s/^[A-Za-z0-9_]+\.//' | sort)
+          dups=$(echo "$tables" | uniq -d)
+          if [ -n "$dups" ]; then
+            echo "Duplicate CREATE TABLE definitions found for table(s):"
+            echo "$dups"
+            echo "Consolidate each table into exactly one migration."
+            exit 1
+          fi
+          echo "No duplicate CREATE TABLE definitions."
 
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1

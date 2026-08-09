@@ -17,9 +17,19 @@ contract AtomicSwap is ReentrancyGuard {
         uint256 lockTime;
         bool claimed;
         bool refunded;
+        bool isCrossChain;
     }
 
+    struct SwapReference {
+        bytes32 swapId;
+        bool isCrossChain;
+    }
+
+    mapping(address => SwapReference[]) public userSwaps;
+
     mapping(bytes32 => Swap) public swaps;
+
+    mapping(bytes32 => bool) public usedHashLocks;
 
     event SwapOpened(bytes32 indexed swapId, address indexed sender, address indexed recipient, uint256 amount, bytes32 hashLock, uint256 lockTime);
     event SwapClaimed(bytes32 indexed swapId, bytes preimage);
@@ -41,8 +51,14 @@ contract AtomicSwap is ReentrancyGuard {
             hashLock: hashLock,
             lockTime: block.timestamp + lockDuration,
             claimed: false,
-            refunded: false
+            refunded: false,
+            isCrossChain: false
         });
+
+        userSwaps[msg.sender].push(SwapReference({
+            swapId: swapId,
+            isCrossChain: false
+        }));
 
         emit SwapOpened(swapId, msg.sender, recipient, msg.value, hashLock, block.timestamp + lockDuration);
         return swapId;
@@ -67,9 +83,14 @@ contract AtomicSwap is ReentrancyGuard {
         require(msg.sender == swap.sender, "Only sender can refund");
 
         swap.refunded = true;
+        usedHashLocks[swap.hashLock] = false;
         (bool sent, ) = swap.sender.call{value: swap.amount}("");
         require(sent, "Refund transfer failed");
 
         emit SwapRefunded(swapId);
+    }
+
+    function getUserSwaps(address user) external view returns (SwapReference[] memory) {
+        return userSwaps[user];
     }
 }

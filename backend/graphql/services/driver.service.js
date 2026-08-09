@@ -170,7 +170,7 @@ const resolvers = {
                 .from('orders')
                 .update({
                     driver_id: driverId,
-                    status: 'ASSIGNED',
+                    status: 'truck_assigned',
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', orderId)
@@ -212,7 +212,7 @@ async function startDriverService() {
         listen: { port: 4002 }
     });
 
-    logger.info(`âœ… Driver GraphQL service running at ${url}`);
+    logger.info(`OK Driver GraphQL service running at ${url}`);
     return { url };
 }
 

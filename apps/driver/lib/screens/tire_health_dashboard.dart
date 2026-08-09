@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/tire_analytics_model.dart';
 import '../services/tpms_analytics_service.dart';
-
+import '../services/edge_tpms_service.dart';
 class TireHealthDashboard extends StatefulWidget {
   const TireHealthDashboard({super.key});
 
@@ -11,13 +11,69 @@ class TireHealthDashboard extends StatefulWidget {
 
 class _TireHealthDashboardState extends State<TireHealthDashboard> {
   final TpmsAnalyticsService _tpmsService = TpmsAnalyticsService();
+  final EdgeTpmsService _edgeService = EdgeTpmsService();
   List<TireAnalytics> _tires = [];
   bool _isLoading = true;
+  bool _alertActive = false;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _edgeService.alertStream.listen((alert) {
+      if (mounted && !_alertActive) {
+        _alertActive = true;
+        _showCriticalAlert(alert);
+      }
+    });
+    _edgeService.simulateHighFrequencyData();
+  }
+
+  @override
+  void dispose() {
+    _edgeService.dispose();
+    super.dispose();
+  }
+
+  void _showCriticalAlert(TpmsAlert alert) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.red[900],
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.white, size: 40),
+            SizedBox(width: 10),
+            Expanded(child: Text('CRITICAL BLOWOUT RISK', style: TextStyle(color: Colors.white))),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              alert.message,
+              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Pressure dropped ${alert.pressureDrop.toStringAsFixed(1)} PSI in ${alert.timeWindowMs} ms.',
+              style: const TextStyle(color: Colors.white70),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              _alertActive = false;
+            },
+            child: const Text('DISMISS', style: TextStyle(color: Colors.white)),
+          )
+        ],
+      ),
+    );
   }
 
   void _loadData() async {

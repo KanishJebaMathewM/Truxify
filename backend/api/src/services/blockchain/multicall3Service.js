@@ -112,10 +112,11 @@ class Multicall3Service {
       const cacheKey = this.generateCacheKey(call);
 
       if (this.isInCache(cacheKey)) {
+        const entry = this.callCache.get(cacheKey);
         cachedResults.push({
           index: i,
-          result: this.getFromCache(cacheKey),
-          cached: true,
+          result: entry.value,
+          cachedAt: entry.timestamp,
         });
       } else {
         callIndexMap[uncachedCalls.length] = i;
@@ -140,8 +141,8 @@ class Multicall3Service {
       });
     }
 
-    cachedResults.forEach(({ index, result }) => {
-      results[index] = result;
+    cachedResults.forEach(({ index, result, cachedAt }) => {
+      results[index] = { ...result, cached: true, cachedAt };
     });
 
     return results;

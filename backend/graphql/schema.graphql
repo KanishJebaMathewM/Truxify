@@ -1,0 +1,20 @@
+type LoadBid {
+  id: ID!
+  orderId: ID!
+  driverId: ID!
+  bidAmountINR: Float!
+  status: String!
+  timestamp: String!
+}
+
+type Query {
+  getLoadBids(orderId: ID!): [LoadBid!]!
+}
+
+type Mutation {
+  submitBid(orderId: ID!, driverId: ID!, amountINR: Float!): LoadBid!
+}
+
+type Subscription {
+  loadBidUpdated(orderId: ID!): LoadBid!
+}

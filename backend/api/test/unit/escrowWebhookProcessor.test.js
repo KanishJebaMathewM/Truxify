@@ -8,6 +8,16 @@ vi.mock('../../src/middleware/logger.js', () => ({
   },
 }));
 
+const mockGetTransactionReceipt = vi.fn();
+vi.mock('ethers', () => ({
+  ethers: {
+    JsonRpcProvider: vi.fn(function JsonRpcProvider() {
+      this.getTransactionReceipt = mockGetTransactionReceipt;
+    }),
+  },
+}));
+
+
 const mockQuery = {
   select: vi.fn(function () { return this; }),
   eq: vi.fn(function () { return this; }),
@@ -31,6 +41,12 @@ describe('processEscrowWebhookEvent', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuery.maybeSingle.mockReset();
+    process.env.POLYGON_RPC_URL = 'https://polygon-rpc.example';
+    process.env.ESCROW_CONTRACT_ADDRESS = '0xEscrowContract000000000000000000000001';
+    mockGetTransactionReceipt.mockResolvedValue({
+      status: 1,
+      to: '0xEscrowContract000000000000000000000001',
+    });
   });
 
   it('acknowledges unsupported escrow events without changing state', async () => {
@@ -92,6 +108,25 @@ describe('processEscrowWebhookEvent', () => {
 
     const walletTables = mockSupabaseAdmin.from.mock.calls.filter(([table]) => table === 'wallet_transactions');
     expect(walletTables.length).toBeGreaterThan(0);
+  });
+
+  it('rejects PaymentReleased when the Polygon receipt is missing or failed', async () => {
+    mockGetTransactionReceipt.mockResolvedValueOnce(null);
+
+    await expect(
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD1', txHash: '0xdead' })
+    ).rejects.toThrow('Polygon transaction receipt not found');
+
+    mockGetTransactionReceipt.mockResolvedValueOnce({
+      status: 0,
+      to: '0xEscrowContract000000000000000000000001',
+    });
+
+    await expect(
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD1', txHash: '0xdead' })
+    ).rejects.toThrow('Polygon transaction failed or reverted');
+
+    expect(mockSupabaseAdmin.from).not.toHaveBeenCalled();
   });
 
   it('marks the order refunded on BookingCancelled', async () => {
@@ -156,5 +191,74 @@ describe('processEscrowWebhookEvent', () => {
       escrow_status: 'refunded',
       refund_tx_hash: '0x222',
     }));
+  });
+});
+
+describe('processEscrowWebhookEvent — idempotency (crash-after-side-effect / duplicate delivery)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockQuery.maybeSingle.mockReset();
+  });
+
+  const updatePayloads = () => mockQuery.update.mock.calls.map(([payload]) => payload);
+
+  it('ignores a duplicate PaymentReleased when the order is already released (no re-applied order effect)', async () => {
+    // Simulates worker A having already applied the side effect before
+    // crashing; worker B re-processes the reclaimed DLQ row.
+    const order = {
+      id: 'order-uuid',
+      order_display_id: '#OD5',
+      driver_id: 'driver-5',
+      escrow_status: 'released',
+      release_tx_hash: '0xabc',
+      refund_tx_hash: null,
+    };
+    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+
+    await expect(
+      processEscrowWebhookEvent('PaymentReleased', { orderId: '#OD5', txHash: '0xabc' })
+    ).resolves.toEqual({ received: true });
+
+    // The order-level effect is NOT re-applied…
+    expect(updatePayloads().filter(p => p.escrow_status === 'released')).toHaveLength(0);
+    // …but the (idempotent) wallet ledger confirm still runs, healing a crash
+    // between the order update and the wallet update.
+    expect(updatePayloads().some(p => p.status === 'confirmed')).toBe(true);
+  });
+
+  it('ignores a duplicate BookingCancelled when the order is already refunded', async () => {
+    const order = {
+      id: 'order-uuid',
+      order_display_id: '#OD6',
+      driver_id: null,
+      escrow_status: 'refunded',
+      release_tx_hash: null,
+      refund_tx_hash: '0xdef',
+    };
+    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+
+    await expect(
+      processEscrowWebhookEvent('BookingCancelled', { orderId: '#OD6', txHash: '0xdef' })
+    ).resolves.toEqual({ received: true });
+
+    expect(updatePayloads().filter(p => p.escrow_status === 'refunded')).toHaveLength(0);
+  });
+
+  it('ignores a duplicate WithdrawalReady when the order is already released', async () => {
+    const order = {
+      id: 'order-uuid',
+      order_display_id: '#OD7',
+      driver_id: 'driver-7',
+      escrow_status: 'released',
+      release_tx_hash: '0x111',
+      refund_tx_hash: null,
+    };
+    mockQuery.maybeSingle.mockResolvedValue({ data: order, error: null });
+
+    await expect(
+      processEscrowWebhookEvent('WithdrawalReady', { orderId: '#OD7' })
+    ).resolves.toEqual({ received: true });
+
+    expect(updatePayloads().filter(p => p.escrow_status === 'released')).toHaveLength(0);
   });
 });

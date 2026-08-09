@@ -6,6 +6,10 @@ const DEFAULT_THRESHOLD = 5;
 const DEFAULT_WINDOW_MS = 60_000;
 
 export default function authFailureMonitor(req, res, next) {
+  if (process.env.NODE_ENV === 'production') {
+    return next();
+  }
+
   res.on('finish', () => {
     if (res.statusCode !== 401 && res.statusCode !== 403) {
       return;

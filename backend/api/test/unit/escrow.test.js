@@ -24,7 +24,8 @@ import {
   isEscrowEnabled,
   submitEscrowRaiseDispute,
   submitEscrowResolveDispute,
-  submitEscrowResolveDisputeTimeout
+  submitEscrowResolveDisputeTimeout,
+  markEscrowBookingStarted,
 } from '../../src/services/escrow.js'
 
 describe('escrow service — getEscrowBookingId', () => {
@@ -356,5 +357,35 @@ describe('escrow service \u2014 validateEscrowSetup (contract unconfigured)', ()
   it('returns false when ESCROW_CONTRACT_ADDRESS env vars are missing', async () => {
     const result = await validateEscrowSetup()
     expect(result).toBe(false)
+  })
+})
+
+describe('escrow service — escrowRelease (contract unconfigured)', () => {
+  it('returns txHash: null and a valid bookingId when contract is not initialised', async () => {
+    const result = await escrowRelease('#FF20260607')
+    expect(result.txHash).toBeNull()
+    expect(typeof result.bookingId).toBe('string')
+    expect(result.bookingId.startsWith('0x')).toBe(true)
+  })
+
+  it('returns the same bookingId as getEscrowBookingId', async () => {
+    const result = await escrowRelease('#FF20260608')
+    const expected = getEscrowBookingId('#FF20260608')
+    expect(result.bookingId).toBe(expected)
+  })
+})
+
+describe('escrow service — markEscrowBookingStarted (contract unconfigured)', () => {
+  it('returns txHash: null and a valid bookingId when contract is not initialised', async () => {
+    const result = await markEscrowBookingStarted('#FF20260609')
+    expect(result.txHash).toBeNull()
+    expect(typeof result.bookingId).toBe('string')
+    expect(result.bookingId.startsWith('0x')).toBe(true)
+  })
+
+  it('returns the same bookingId as getEscrowBookingId', async () => {
+    const result = await markEscrowBookingStarted('#FF20260610')
+    const expected = getEscrowBookingId('#FF20260610')
+    expect(result.bookingId).toBe(expected)
   })
 })

@@ -22,10 +22,6 @@ Future<void> main() async {
   BackgroundSyncService.initialize();
   BackgroundSyncService.registerSyncTask();
   BackgroundSyncService.listenForConnectivity();
-  FcmService.initialize();
-  Firebase.initializeApp();
-  FcmService.registerTokenForUser(userId);
-
   // ── Validate all required environment variables before app starts ────────
   Env.validate();  // Throws an error if SUPABASE_URL or SUPABASE_ANON_KEY are missing
   // ─────────────────────────────────────────────────────────────────────────────

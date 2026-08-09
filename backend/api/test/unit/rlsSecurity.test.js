@@ -364,6 +364,47 @@ describe('Service-level RPC calls carry an authenticated client (issue #5737)', 
   });
 });
 
+describe('update_order_and_load_offer invoked via the service-role client (issue #6335)', () => {
+  const base = path.resolve(__dirname, '../../src');
+  const readSource = (rel) => readFileSync(path.resolve(base, rel), 'utf8');
+
+  function rpcBlock(content, rpcName) {
+    const re = new RegExp(`executeRpc\\(\\s*'${rpcName}'`);
+    const match = re.exec(content);
+    if (!match) return null;
+    let depth = 1;
+    let i = match.index + match[0].length;
+    for (; i < content.length; i++) {
+      const ch = content[i];
+      if (ch === '(') depth += 1;
+      else if (ch === ')') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    return content.slice(match.index, i + 1);
+  }
+
+  it.each([
+    ['services/order/orderLifecycleService.js', 'orderLifecycleService.js change-drop path'],
+    ['routes/orderRoutes.js', 'orderRoutes.js change-drop route'],
+  ])('%s invokes update_order_and_load_offer with supabaseAdmin, never the user client', (rel, label) => {
+    const content = readSource(rel);
+    const block = rpcBlock(content, 'update_order_and_load_offer');
+
+    expect(block).toBeTruthy();
+    expect(block).toMatch(/,\s*supabaseAdmin\s*\)\s*;?$/);
+    expect(block).not.toMatch(/userClient/);
+    expect(block).not.toMatch(/createUserClient/);
+    expect(block).not.toMatch(/req\.token/);
+  });
+
+  it('orderRoutes.js imports supabaseAdmin from config/db.js', () => {
+    const content = readSource('routes/orderRoutes.js');
+    expect(content).toMatch(/import \{ [^}]*supabaseAdmin[^}]*\} from '\.\.\/config\/db\.js';/);
+  });
+});
+
 describe('Fraud tables RLS (issue #6334)', () => {
   let migrationContent;
   let serviceContent;

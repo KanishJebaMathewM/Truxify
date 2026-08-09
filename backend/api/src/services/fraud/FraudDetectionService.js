@@ -361,17 +361,32 @@ class FraudDetectionService {
     const safeIds = userIds.map(id => this.sanitizeUserId(id)).filter(Boolean);
     if (safeIds.length === 0) return {};
 
-    const { data: orders, error } = await supabaseAdmin
-      .from('orders')
-      .select('customer_id, driver_id')
-      .or(safeIds.map(id => `customer_id.eq.${id}`).join(',') + ',' + safeIds.map(id => `driver_id.eq.${id}`).join(','));
+    const BATCH_SIZE = 100;
+    const allOrders = [];
 
-    if (error) {
-      logger.error('Failed to load batch user fraud connections:', error);
-      return {};
+    // Query in batches to avoid unbounded OR filter URL-length limits
+    for (let i = 0; i < safeIds.length; i += BATCH_SIZE) {
+      const batch = safeIds.slice(i, i + BATCH_SIZE);
+      const { data: batchOrders, error } = await supabaseAdmin
+        .from('orders')
+        .select('customer_id, driver_id')
+        .or(
+          batch.map(id => `customer_id.eq.${id}`).join(',') +
+          ',' +
+          batch.map(id => `driver_id.eq.${id}`).join(',')
+        );
+
+      if (error) {
+        logger.error('Failed to load batch user fraud connections:', error.message);
+        return {};
+      }
+
+      if (Array.isArray(batchOrders)) {
+        allOrders.push(...batchOrders);
+      }
     }
 
-    if (!Array.isArray(orders)) {
+    if (!Array.isArray(allOrders)) {
       return {};
     }
 
@@ -380,7 +395,7 @@ class FraudDetectionService {
       connectionsMap[userId] = new Set();
     }
 
-    orders.forEach(order => {
+    allOrders.forEach(order => {
       if (userIds.includes(order.customer_id) && order.driver_id) {
         connectionsMap[order.customer_id].add(order.driver_id);
       }

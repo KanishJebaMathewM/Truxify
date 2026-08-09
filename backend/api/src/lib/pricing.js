@@ -17,12 +17,18 @@
 
 import logger from '../middleware/logger.js';
 
-function sanitizePrice(value) {
+export function sanitizePrice(value) {
   const num = Number(value);
   return Number.isFinite(num) && num >= 0 ? Math.round(num) : 0;
 }
 
 const EARTH_RADIUS_KM = 6371.0088;
+
+// Pricing constants (all amounts in paisa unless noted)
+const MIN_FREIGHT_PAISa = 0;
+const MAX_FREIGHT_PAISa = 10_000_000_00; // 1 crore in paisa
+const TOLL_ESCALATION_HOURS = 6;
+const DEFAULT_RATE_PER_TONNE_KM = 50; // paisa per tonne-km
 
 const DEFAULTS = Object.freeze({
   RATE_PER_TONNE_KM: 50,    // paisa per tonne-km, base rate
@@ -94,6 +100,14 @@ export function haversineKm(lat1, lon1, lat2, lon2) {
 }
 
 /**
+ * Guard against NaN and Infinity in numeric pricing fields.
+ * If any arithmetic result is not finite, returns a safe fallback of 0.
+ */
+function safePaisa(value) {
+  return Number.isFinite(value) ? Math.round(value) : 0;
+}
+
+/**
  * Compute the canonical pricing for an order.
  *
  * @param {object} input
@@ -128,6 +142,9 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
     tollFactor = 1,
   } = input;
 
+  // Guard tollFactor against NaN/undefined: treat invalid values as 1 (no extra toll).
+  const safeTollFactor = Number.isFinite(tollFactor) && tollFactor >= 0 ? tollFactor : 1;
+
   if (!Number.isFinite(weightTonnes) || weightTonnes <= 0) {
     throw new RangeError(`weightTonnes must be a positive number, got ${weightTonnes}`);
   }
@@ -145,14 +162,17 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
     throw new RangeError(`Computed rate-per-tonne-km must be > 0, got ${rate}`);
   }
 
-  const baseFreight = Math.round(rate * weightTonnes * distanceKm) + rateCard.handlingFee;
-  const tollEstimate = Math.round(rateCard.tollPerKm * distanceKm * tollFactor);
-  const platformFee = Math.round((baseFreight * rateCard.platformFeePct) / 100);
-  const totalAmount = baseFreight + tollEstimate + platformFee;
+  const baseFreight = safePaisa(rate * weightTonnes * distanceKm) + rateCard.handlingFee;
+  const tollEstimate = safePaisa(rateCard.tollPerKm * distanceKm * safeTollFactor);
+  const platformFee = safePaisa((baseFreight * rateCard.platformFeePct) / 100);
+  const totalAmount = safePaisa(baseFreight + tollEstimate + platformFee);
 
   // Driver-side cost / margin hints persisted on load_offers.
-  const fuelCost = Math.round((baseFreight * rateCard.fuelCostPct) / 100);
-  const netProfit = baseFreight - fuelCost - tollEstimate;
+  // The toll is a pass-through cost recovered from the customer on the revenue
+  // side (totalAmount includes tollEstimate), so it must not be subtracted a
+  // second time as a driver expense.
+  const fuelCost = safePaisa((baseFreight * rateCard.fuelCostPct) / 100);
+  const netProfit = safePaisa(baseFreight - fuelCost);
 
   return {
     distanceKm: Math.round(distanceKm * 100 + Number.EPSILON) / 100, // 2-decimal precision

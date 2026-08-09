@@ -23,6 +23,10 @@ pub fn compute_offline_route_matrix(origin_lat: f64, origin_lng: f64, dest_lat: 
 
     let a = (d_lat / 2.0).sin().powi(2)
         + origin_lat.to_radians().cos() * dest_lat.to_radians().cos() * (d_lng / 2.0).sin().powi(2);
+    // Floating-point rounding can push `a` marginally above 1.0 for
+    // near-identical/antipodal pairs; clamp so `(1.0 - a).sqrt()` stays finite
+    // and serde_json can serialize the result.
+    let a = a.clamp(0.0, 1.0);
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
     
     // Straight-line distance multiplied by road tortuosity factor (1.25 for highways)

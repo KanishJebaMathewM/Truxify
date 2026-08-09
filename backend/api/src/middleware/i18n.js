@@ -7,8 +7,23 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const enDict = JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/en.json')));
-const esDict = JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/es.json')));
+const enDict = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/en.json')));
+  } catch (err) {
+    console.warn('[i18n] Failed to load en.json locale, falling back to empty object:', err.message);
+    return {};
+  }
+})();
+
+const esDict = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/es.json')));
+  } catch (err) {
+    console.warn('[i18n] Failed to load es.json locale, falling back to empty object:', err.message);
+    return {};
+  }
+})();
 
 i18next
   .use(middleware.LanguageDetector)

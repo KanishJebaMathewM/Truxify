@@ -9,6 +9,7 @@ let mockTelemetryResults = [];
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: {
@@ -332,6 +333,32 @@ describe('Truck Routes', () => {
 
       expect(res.status).toBe(200);
       expect(Array.isArray(res.body)).toBe(true);
+    });
+
+    it('filters results by material compatibility', async () => {
+      mockTelemetryResults = [
+        { driver_id: 'driver-open' },
+        { driver_id: 'driver-reefer' },
+      ];
+      m.store.trucks = [
+        { id: 'truck-open', name: 'Open Body Truck', truck_type: 'Open Body', number_plate: 'MH12AB0001', max_capacity_tons: 10, owner_id: 'driver-open' },
+        { id: 'truck-reefer', name: 'Cold Chain Truck', truck_type: 'Refrigerated', number_plate: 'MH12AB0002', max_capacity_tons: 10, owner_id: 'driver-reefer' },
+      ];
+      m.store.driver_details = [
+        { user_id: 'driver-open', is_online: true, truck_id: 'truck-open', rating: 4.2, total_trips: 50, completion_rate: 95 },
+        { user_id: 'driver-reefer', is_online: true, truck_id: 'truck-reefer', rating: 4.8, total_trips: 90, completion_rate: 98 },
+      ];
+      m.store.profiles = [
+        { id: 'driver-open', full_name: 'Open Driver' },
+        { id: 'driver-reefer', full_name: 'Cold Driver' },
+      ];
+
+      const res = await request(buildApp())
+        .get(`/api/trucks/search?${SEARCH_PARAMS}&material_type=Food`)
+        .set(CUSTOMER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.map(item => item.truck)).toEqual(['Cold Chain Truck']);
     });
 
     it('returns empty when no nearby drivers', async () => {

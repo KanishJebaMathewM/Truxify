@@ -175,6 +175,10 @@ describe('Individual health checks', () => {
   });
 
   describe('polygonHealth', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
     it('returns unhealthy when not configured', async () => {
       delete process.env.POLYGON_RPC_URL;
       const { default: check } = await import('../../../src/core/health/checks/polygonHealth.js');
@@ -184,12 +188,29 @@ describe('Individual health checks', () => {
       expect(result.critical).toBe(false);
     });
 
-    it('returns healthy when RPC URL is set', async () => {
+    it('returns healthy when the RPC endpoint answers a probe', async () => {
       process.env.POLYGON_RPC_URL = 'https://polygon-rpc.com';
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: vi.fn().mockResolvedValue({ jsonrpc: '2.0', id: 1, result: '0x19a3b7' }),
+      }));
+
       const { default: check } = await import('../../../src/core/health/checks/polygonHealth.js');
       const result = await check();
       expect(result.status).toBe(HealthStatus.HEALTHY);
       expect(result.metadata.rpcUrl).toBe('https://polygon-rpc.com');
+      expect(result.metadata.blockNumber).toBe('0x19a3b7');
+    });
+
+    it('returns unhealthy when RPC URL is set but unreachable', async () => {
+      process.env.POLYGON_RPC_URL = 'https://polygon-rpc.com';
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+
+      const { default: check } = await import('../../../src/core/health/checks/polygonHealth.js');
+      const result = await check();
+      expect(result.status).toBe(HealthStatus.UNHEALTHY);
+      expect(result.message).toMatch(/^configured_but_unreachable/);
+      expect(result.critical).toBe(false);
     });
   });
 
@@ -221,10 +242,11 @@ describe('Individual health checks', () => {
   });
 
   describe('workerHealth', () => {
-    it('returns healthy with no registered workers', async () => {
+    it('returns unhealthy when no workers are registered (fail closed)', async () => {
       const { default: check } = await import('../../../src/core/health/checks/workerHealth.js');
       const result = await check();
-      expect(result.status).toBe(HealthStatus.HEALTHY);
+      expect(result.status).toBe(HealthStatus.UNHEALTHY);
+      expect(result.message).toBe('no_registered_workers');
       expect(result.metadata.workerCount).toBe(0);
     });
 

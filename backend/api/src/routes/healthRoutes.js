@@ -121,7 +121,17 @@ function checkFirebase() {
 }
 
 async function checkEscrow() {
+  try {
+  try {
   const result = await checkEscrowHealth();
+  } catch (err) {
+    logger.error('[Health] checkEscrow failed:', err?.message || err);
+    return { status: 'failed', detail: err?.message || 'Unknown error' };
+  }
+  } catch (err) {
+    logger.error('[Health] checkEscrow failed:', err?.message || err);
+    return { status: 'failed', detail: err?.message || 'Unknown error' };
+  }
   return result.status;
 }
 
@@ -295,9 +305,13 @@ router.get('/full', healthLimiter, async (_req, res) => {
     return res.status(500).json({
       status: 'unhealthy',
       timestamp: new Date().toISOString(),
-      error: 'Health aggregation failed',
+      error: 'health aggregation failed',
     });
   }
+});
+
+router.get('/sentry-debug', healthLimiter, (req, res) => {
+  throw new Error('Sentry Test Error from Node.js Backend');
 });
 
 export default router;

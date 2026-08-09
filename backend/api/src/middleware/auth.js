@@ -143,16 +143,32 @@ export async function authenticate(req, res, next) {
   // independent of NODE_ENV, so a stray NODE_ENV=test deployment cannot
   // silently turn plaintext x-user-id/x-user-role headers into a full
   // impersonation primitive.
-  const testAuthEnabled = process.env.ENABLE_TEST_AUTH === "true";
+  // Never honour the opt-in in production, whatever the environment says.
+  const testAuthEnabled =
+    process.env.ENABLE_TEST_AUTH === "true" &&
+    process.env.NODE_ENV !== "production";
 
-  // ── Production header sanitization (defense in depth) ──────────────
-  // Strip dev-only authentication headers before any logic runs.
-  // This ensures they cannot be used even if BYPASS_AUTH is accidentally
-  // enabled or a proxy misconfiguration exposes them.
-  // This block runs unconditionally in production — the bypass path below
-  // only handles test impersonation via testAuthEnabled; the headers are
-  // always removed so no bypass header can ever survive a production deploy.
-  if (process.env.NODE_ENV === "production") {
+  // ── Dev identity header sanitization (defense in depth) ────────────
+  // Strip the dev-only identity headers before any logic runs, unless this
+  // process has explicitly opted into header impersonation via
+  // ENABLE_TEST_AUTH. Stripping is keyed on the opt-in rather than on
+  // NODE_ENV === "production" so the headers cannot survive in staging,
+  // preview or any environment whose NODE_ENV is something other than
+  // "production" — the only place they are ever legitimate is a process that
+  // asked for them.
+  //
+  // They are removed from req.headers entirely, not merely ignored here, so
+  // no downstream handler or logger can pick a client-supplied identity back
+  // up off the request. The values are captured first because the
+  // DEV_ACCESS_TOKEN flow below still needs them — that path is gated on a
+  // shared secret, so it is authenticated in a way a bare header is not.
+  const devIdentity = {
+    id: req.headers["x-user-id"],
+    role: req.headers["x-user-role"],
+    name: req.headers["x-user-name"],
+  };
+
+  if (!testAuthEnabled) {
     delete req.headers["x-user-id"];
     delete req.headers["x-user-role"];
     delete req.headers["x-user-name"];
@@ -199,9 +215,9 @@ export async function authenticate(req, res, next) {
       process.env.DEV_ACCESS_TOKEN &&
       devToken === process.env.DEV_ACCESS_TOKEN
     ) {
-      const testUserId = req.headers["x-user-id"];
-      const testUserRole = req.headers["x-user-role"] || "customer";
-      const testFullName = req.headers["x-user-name"] || "Test User";
+      const testUserId = devIdentity.id;
+      const testUserRole = devIdentity.role || "customer";
+      const testFullName = devIdentity.name || "Test User";
 
       if (testUserId) {
         req.user = {

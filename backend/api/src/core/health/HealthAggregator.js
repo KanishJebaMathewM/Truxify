@@ -55,9 +55,14 @@ export class HealthAggregator {
     const start = Date.now();
 
     const results = await Promise.all(
-      this._checks.map(async ({ name, checkFn }) => {
+      this._checks.map(async ({ name, checkFn, critical }) => {
         try {
-          return await checkFn();
+          const result = await checkFn();
+          return {
+            ...result,
+            name,
+            critical: !!critical,
+          };
         } catch (err) {
           logger.error(
             `[health] Aggregator check "${name}" threw: ${err.message}`,
@@ -67,7 +72,7 @@ export class HealthAggregator {
             status: HealthStatus.UNHEALTHY,
             message: err.message,
             responseTime: 0,
-            critical: false,
+            critical: !!critical,
             timestamp: new Date().toISOString(),
           };
         }

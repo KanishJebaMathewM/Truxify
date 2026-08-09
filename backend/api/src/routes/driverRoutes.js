@@ -1628,7 +1628,7 @@ router.get('/:id/earnings', authenticate, userLimiter, requirePolicy('driver:vie
       })),
       cumulative_stats: {
         total_km: totalKm,
-        avg_earning_per_km: totalKm > 0 ? (totalNetEarnings / 100.0) / totalKm : 0,
+        avg_earning_per_km: totalKm > 0 ? totalNetEarnings / totalKm : 0,
         lifetime_trips: lifetimeTrips || 0
       },
       deadhead_trips_saved: deadheadTripsSaved

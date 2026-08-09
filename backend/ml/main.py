@@ -103,11 +103,6 @@ app.add_middleware(
 )
 
 
-@app.get("/sentry-debug")
-async def trigger_error():
-    division_by_zero = 1 / 0
-
-
 @app.on_event("startup")
 async def startup_event():
     from app.models.base import preload_all_models

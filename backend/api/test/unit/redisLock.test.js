@@ -3,45 +3,45 @@
  *
  * Unit tests for backend/api/src/lib/redisLock.js
  *
- * Run with: node --experimental-vm-modules node_modules/.bin/jest redisLock.test.js
- * (or via: npm test -- --testPathPattern=redisLock)
+ * Run with: npx vitest run test/unit/redisLock.test.js
  */
 
-import { jest } from '@jest/globals';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // ─── Mock the Redis client ────────────────────────────────────────────────────
 
-// We mock the db module so we can swap redisClient between tests.
-let mockRedisClient = null;
+// We mock the db module so we can swap redisClient between tests. The holder
+// is hoisted because vi.mock factories are lifted above module-level bindings.
+const redisHolder = vi.hoisted(() => ({ client: null }));
 
-jest.mock('../config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
   get redisClient() {
-    return mockRedisClient;
+    return redisHolder.client;
   },
 }));
 
 // Suppress logger noise in test output.
-jest.mock('../middleware/logger.js', () => ({
-  default: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 // Import after mocks are registered.
 const { acquireLock, releaseLock, renewLock, LockAcquisitionError } =
-  await import('../lib/redisLock.js');
+  await import('../../src/lib/redisLock.js');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeRedis({ setResult = 'OK', evalResult = 1, throwOn = null } = {}) {
   return {
-    set: jest.fn(async (...args) => {
+    set: vi.fn(async (...args) => {
       if (throwOn === 'set') throw new Error('Redis connection refused');
       return setResult;
     }),
-    eval: jest.fn(async (...args) => {
+    eval: vi.fn(async (...args) => {
       if (throwOn === 'eval') throw new Error('Redis connection refused');
       return evalResult;
     }),
-    del: jest.fn(async () => 1),
+    del: vi.fn(async () => 1),
   };
 }
 
@@ -49,29 +49,29 @@ function makeRedis({ setResult = 'OK', evalResult = 1, throwOn = null } = {}) {
 
 describe('acquireLock', () => {
   afterEach(() => {
-    mockRedisClient = null;
+    redisHolder.client = null;
   });
 
   // ── Fail-closed tests (the core bug fix) ──────────────────────────────────
 
-  test('throws LockAcquisitionError when redisClient is null (not initialised)', async () => {
-    mockRedisClient = null; // Redis not configured
+  it('throws LockAcquisitionError when redisClient is null (not initialised)', async () => {
+    redisHolder.client = null; // Redis not configured
 
     await expect(acquireLock('test:key', 5000))
       .rejects
       .toThrow(LockAcquisitionError);
   });
 
-  test('throws LockAcquisitionError (not silently returns null) when Redis SET throws', async () => {
-    mockRedisClient = makeRedis({ throwOn: 'set' });
+  it('throws LockAcquisitionError (not silently returns null) when Redis SET throws', async () => {
+    redisHolder.client = makeRedis({ throwOn: 'set' });
 
     await expect(acquireLock('test:key', 5000))
       .rejects
       .toThrow(LockAcquisitionError);
   });
 
-  test('LockAcquisitionError carries the resourceKey', async () => {
-    mockRedisClient = null;
+  it('LockAcquisitionError carries the resourceKey', async () => {
+    redisHolder.client = null;
     let caughtErr;
     try {
       await acquireLock('payment_lock:order_42', 5000);
@@ -84,8 +84,8 @@ describe('acquireLock', () => {
 
   // ── Normal success / contention paths ────────────────────────────────────
 
-  test('returns a UUID string when SET NX succeeds', async () => {
-    mockRedisClient = makeRedis({ setResult: 'OK' });
+  it('returns a UUID string when SET NX succeeds', async () => {
+    redisHolder.client = makeRedis({ setResult: 'OK' });
 
     const result = await acquireLock('test:key', 5000);
     expect(typeof result).toBe('string');
@@ -94,17 +94,17 @@ describe('acquireLock', () => {
     );
   });
 
-  test('returns null (not throws) when lock is already held by another process', async () => {
+  it('returns null (not throws) when lock is already held by another process', async () => {
     // SET NX returns null when the key already exists.
-    mockRedisClient = makeRedis({ setResult: null });
+    redisHolder.client = makeRedis({ setResult: null });
 
     const result = await acquireLock('test:key', 5000);
     expect(result).toBeNull();
   });
 
-  test('passes the correct TTL (in ms) to Redis SET', async () => {
+  it('passes the correct TTL (in ms) to Redis SET', async () => {
     const redis = makeRedis({ setResult: 'OK' });
-    mockRedisClient = redis;
+    redisHolder.client = redis;
 
     await acquireLock('test:key', 30_000);
 
@@ -112,9 +112,9 @@ describe('acquireLock', () => {
     expect(ttl).toBe(30_000);
   });
 
-  test('passes NX flag to Redis SET', async () => {
+  it('passes NX flag to Redis SET', async () => {
     const redis = makeRedis({ setResult: 'OK' });
-    mockRedisClient = redis;
+    redisHolder.client = redis;
 
     await acquireLock('test:key', 5000);
 
@@ -127,46 +127,46 @@ describe('acquireLock', () => {
 
 describe('releaseLock', () => {
   afterEach(() => {
-    mockRedisClient = null;
+    redisHolder.client = null;
   });
 
-  test('returns true when Lua script confirms we hold the lock', async () => {
-    mockRedisClient = makeRedis({ evalResult: 1 });
+  it('returns true when Lua script confirms we hold the lock', async () => {
+    redisHolder.client = makeRedis({ evalResult: 1 });
 
     const result = await releaseLock('test:key', 'some-uuid');
     expect(result).toBe(true);
   });
 
-  test('returns false when Lua script says we no longer hold the lock (expired / stolen)', async () => {
-    mockRedisClient = makeRedis({ evalResult: 0 });
+  it('returns false when Lua script says we no longer hold the lock (expired / stolen)', async () => {
+    redisHolder.client = makeRedis({ evalResult: 0 });
 
     const result = await releaseLock('test:key', 'stale-uuid');
     expect(result).toBe(false);
   });
 
-  test('returns false (does not throw) when Redis eval throws', async () => {
-    mockRedisClient = makeRedis({ throwOn: 'eval' });
+  it('returns false (does not throw) when Redis eval throws', async () => {
+    redisHolder.client = makeRedis({ throwOn: 'eval' });
 
     await expect(releaseLock('test:key', 'some-uuid')).resolves.toBe(false);
   });
 
-  test('returns false when lockValue is null (no-op guard)', async () => {
-    mockRedisClient = makeRedis();
+  it('returns false when lockValue is null (no-op guard)', async () => {
+    redisHolder.client = makeRedis();
 
     const result = await releaseLock('test:key', null);
     expect(result).toBe(false);
   });
 
-  test('returns false when lockValue is undefined (no-op guard)', async () => {
-    mockRedisClient = makeRedis();
+  it('returns false when lockValue is undefined (no-op guard)', async () => {
+    redisHolder.client = makeRedis();
 
     const result = await releaseLock('test:key', undefined);
     expect(result).toBe(false);
   });
 
-  test('passes the lockValue as ARGV[1] to the Lua script', async () => {
+  it('passes the lockValue as ARGV[1] to the Lua script', async () => {
     const redis = makeRedis({ evalResult: 1 });
-    mockRedisClient = redis;
+    redisHolder.client = redis;
 
     const token = 'abc-123-uuid';
     await releaseLock('test:key', token);
@@ -182,26 +182,26 @@ describe('releaseLock', () => {
 
 describe('renewLock', () => {
   afterEach(() => {
-    mockRedisClient = null;
+    redisHolder.client = null;
   });
 
-  test('returns true when Lua confirms we still hold the lock', async () => {
-    mockRedisClient = makeRedis({ evalResult: 1 });
+  it('returns true when Lua confirms we still hold the lock', async () => {
+    redisHolder.client = makeRedis({ evalResult: 1 });
     expect(await renewLock('test:key', 'uuid', 5000)).toBe(true);
   });
 
-  test('returns false when we no longer hold the lock', async () => {
-    mockRedisClient = makeRedis({ evalResult: 0 });
+  it('returns false when we no longer hold the lock', async () => {
+    redisHolder.client = makeRedis({ evalResult: 0 });
     expect(await renewLock('test:key', 'stale', 5000)).toBe(false);
   });
 
-  test('returns false when redisClient is null', async () => {
-    mockRedisClient = null;
+  it('returns false when redisClient is null', async () => {
+    redisHolder.client = null;
     expect(await renewLock('test:key', 'uuid', 5000)).toBe(false);
   });
 
-  test('returns false when lockValue is falsy', async () => {
-    mockRedisClient = makeRedis();
+  it('returns false when lockValue is falsy', async () => {
+    redisHolder.client = makeRedis();
     expect(await renewLock('test:key', '', 5000)).toBe(false);
     expect(await renewLock('test:key', null, 5000)).toBe(false);
   });
@@ -211,7 +211,7 @@ describe('renewLock', () => {
 
 describe('Critical section protection — Redis down must block the operation', () => {
   afterEach(() => {
-    mockRedisClient = null;
+    redisHolder.client = null;
   });
 
   /**
@@ -252,8 +252,8 @@ describe('Critical section protection — Redis down must block the operation', 
     return { status: responseStatus, mutationPerformed };
   }
 
-  test('mutation is NOT performed and 503 is returned when Redis is down', async () => {
-    mockRedisClient = null; // Redis not available
+  it('mutation is NOT performed and 503 is returned when Redis is down', async () => {
+    redisHolder.client = null; // Redis not available
 
     const { status, mutationPerformed } =
       await simulateProtectedMutation('payment_lock:order_99');
@@ -262,8 +262,8 @@ describe('Critical section protection — Redis down must block the operation', 
     expect(status).toBe(503);
   });
 
-  test('mutation is NOT performed and 503 is returned when Redis SET throws', async () => {
-    mockRedisClient = makeRedis({ throwOn: 'set' });
+  it('mutation is NOT performed and 503 is returned when Redis SET throws', async () => {
+    redisHolder.client = makeRedis({ throwOn: 'set' });
 
     const { status, mutationPerformed } =
       await simulateProtectedMutation('payment_lock:order_99');
@@ -272,8 +272,8 @@ describe('Critical section protection — Redis down must block the operation', 
     expect(status).toBe(503);
   });
 
-  test('mutation IS performed (201) when Redis lock is available', async () => {
-    mockRedisClient = makeRedis({ setResult: 'OK', evalResult: 1 });
+  it('mutation IS performed (201) when Redis lock is available', async () => {
+    redisHolder.client = makeRedis({ setResult: 'OK', evalResult: 1 });
 
     const { status, mutationPerformed } =
       await simulateProtectedMutation('payment_lock:order_99');
@@ -282,8 +282,8 @@ describe('Critical section protection — Redis down must block the operation', 
     expect(status).toBe(201);
   });
 
-  test('mutation is NOT performed (409) when lock is already held', async () => {
-    mockRedisClient = makeRedis({ setResult: null }); // NX returns null = already locked
+  it('mutation is NOT performed (409) when lock is already held', async () => {
+    redisHolder.client = makeRedis({ setResult: null }); // NX returns null = already locked
 
     const { status, mutationPerformed } =
       await simulateProtectedMutation('payment_lock:order_99');

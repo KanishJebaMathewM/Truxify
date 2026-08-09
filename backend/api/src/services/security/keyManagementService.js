@@ -16,7 +16,8 @@ class KeyManagementService {
 
   async deriveDeviceEncryptionKey(deviceId, masterSecret) {
     return measureExecution('KeyManagementService.deriveDeviceEncryptionKey', async () => {
-      const cacheKey = `${deviceId}:${masterSecret.slice(0, 8)}`;
+      const secretHash = crypto.createHash('sha256').update(masterSecret).digest('hex');
+      const cacheKey = `${deviceId}:${secretHash}`;
 
       if (this.encryptionKeyCache.has(cacheKey)) {
         return this.encryptionKeyCache.get(cacheKey);
@@ -104,6 +105,21 @@ class KeyManagementService {
   async storeEncryptedKey(userId, walletAddress, encryptedKeyData, deviceId, version = 1) {
     return measureExecution('KeyManagementService.storeEncryptedKey', async () => {
       try {
+        // Deactivate any previously active row for this user/wallet scope so
+        // exactly one active row exists and retrieveEncryptedKey's
+        // .eq('active', true).single() never 406s on multiple rows.
+        const { error: deactivateError } = await supabase
+          .from('encrypted_wallet_keys')
+          .update({ active: false })
+          .eq('user_id', userId)
+          .eq('wallet_address', walletAddress)
+          .eq('active', true);
+
+        if (deactivateError) {
+          logger.error('[KeyManagementService] Failed to deactivate prior active keys:', deactivateError);
+          throw deactivateError;
+        }
+
         const keyId = crypto.randomUUID();
 
         const { data, error } = await supabase

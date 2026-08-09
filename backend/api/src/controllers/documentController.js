@@ -15,7 +15,14 @@ const ALLOWED_DOCUMENT_TYPES = Object.freeze([
   'other',
 ]);
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+const MIME_EXTENSION_MAP = Object.freeze({
+  'application/pdf': 'pdf',
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/webp': 'webp',
+  'image/heic': 'heic',
+});
 
 /**
  * Handles a driver KYC document upload. The file itself is validated
@@ -109,26 +116,14 @@ export async function uploadDriverDocument(req, res) {
       clearTimeout(timeoutId);
     }
 
-    // Check if driver already has an existing document record for this documentType
-    const { data: existingDoc, error: checkError } = await supabase
-      .from('driver_documents')
-      .select('id, storage_path')
-      .eq('driver_id', driverId)
-      .eq('document_type', documentType)
-      .maybeSingle();
-
-    if (checkError) {
-      logger.error('[DocumentController] Failed to check for existing document:', checkError.message);
-      return res.status(500).json({ error: 'Failed to process document' });
+    const extension = MIME_EXTENSION_MAP[verifiedMimeType];
+    if (!extension) {
+      return res.status(422).json({
+        error: `Unsupported file extension for MIME type: ${verifiedMimeType}`,
+      });
     }
 
-    const extension = verifiedMimeType === 'application/pdf' ? 'pdf'
-      : verifiedMimeType === 'image/png' ? 'png'
-      : 'jpg';
-    
-    // Use crypto.randomUUID() alongside Date.now() to guarantee path uniqueness and prevent collisions
-    const uniqueId = crypto.randomUUID();
-    const storagePath = `${driverId}/${documentType}-${Date.now()}-${uniqueId}.${extension}`;
+    const storagePath = `${driverId}/${documentType}-${Date.now()}.${extension}`;
 
     const { error: storageError } = await supabase.storage
       .from('driver-documents')

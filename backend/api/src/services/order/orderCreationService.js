@@ -1,5 +1,5 @@
 import { supabase, supabaseAdmin } from '../../config/db.js';
-import { getRouteEstimate } from '../osrm.js';
+import { getRouteEstimate, validateCoordinates } from '../osrm.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { predictPrice } from '../ml.js';
 import { getLiveTrafficMultiplier } from '../trafficService.js';
@@ -146,6 +146,13 @@ export async function createOrder({ orderData, userId, user }) {
 
   if (!pickup_address || pickup_lat == null || pickup_lng == null || !drop_address || drop_lat == null || drop_lng == null || !goods_type || weight_tonnes == null) {
     throw new DomainError(400, { error: 'Missing required routing or cargo specification fields.' });
+  }
+
+  const validationError = validateCoordinates(
+    Number(pickup_lat), Number(pickup_lng), Number(drop_lat), Number(drop_lng)
+  );
+  if (validationError) {
+    throw new DomainError(400, { error: validationError });
   }
 
   let pricing;

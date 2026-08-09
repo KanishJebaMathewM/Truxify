@@ -130,7 +130,8 @@ describe('Driver Profile & Availability Endpoints', () => {
       id: 'driver-123',
       full_name: 'John Driver',
       phone: '+919999999999',
-      email: 'john.driver@truxify.com'
+      email: 'john.driver@truxify.com',
+      role: 'driver'
     };
     mockDriverDetails = {
       rating: 4.7,
@@ -246,8 +247,28 @@ describe('Driver Profile & Availability Endpoints', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(mockInsertTruck).toHaveBeenCalled();
+      expect(mockInsertTruck).toHaveBeenCalledWith(
+        expect.objectContaining({ driver_id: 'driver-123' })
+      );
       expect(mockUpdateDetails).toHaveBeenCalled();
+    });
+
+    it('returns 403 for a customer role', async () => {
+      mockProfile = { ...mockProfile, role: 'customer' };
+      const res = await request(app)
+        .put('/api/driver/truck')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          type: 'Heavy Duty Truck',
+          capacityWeight: 16.0,
+          capacityVolume: 50.0,
+          registrationNumber: 'MH12AB9999'
+        });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe('Forbidden: Driver role required');
+      expect(mockUpdateTruck).not.toHaveBeenCalled();
+      expect(mockInsertTruck).not.toHaveBeenCalled();
     });
   });
 });

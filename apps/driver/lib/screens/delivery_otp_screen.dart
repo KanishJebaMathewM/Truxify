@@ -59,6 +59,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
   // Geofence
   double? _distanceM;
   bool _withinGeofence = false;
+  bool _geofenceVerified = false;
   Timer? _geofenceTimer;
   late final AnimationController _pulseController;
 
@@ -191,7 +192,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
       }
     } catch (e) {
       final msg = e.toString().replaceAll('Exception: ', '');
-      setState(() => _errorMessage = msg);
+      if (mounted) setState(() => _errorMessage = msg);
     } finally {
       if (mounted) setState(() => _isVerifying = false);
     }
@@ -209,6 +210,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
             const LocationSettings(accuracy: LocationAccuracy.high),
       );
 
+      // Client path stays under /api/orders; server route alignment is separate.
       final body = await _apiClient.post(
         '/api/orders/${widget.orderId}/geofence-confirm',
         body: {
@@ -217,8 +219,19 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
         },
       );
 
+      if (!mounted) return;
+
       if (body is Map && body['autoConfirmed'] == true) {
-        await _showPaymentReleased(widget.amountInr);
+        // Geofence only verifies presence — OTP is still required to release payment.
+        final serverMsg = body['message'] as String?;
+        setState(() {
+          _geofenceVerified = true;
+          _errorMessage = null;
+        });
+        final msg = (serverMsg != null && serverMsg.isNotEmpty)
+            ? serverMsg
+            : 'Location verified. Enter the customer OTP to release payment.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       } else {
         final dist = body is Map ? body['distanceM'] as int? : null;
         setState(() => _errorMessage =
@@ -226,6 +239,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
             'Geofence radius is ${_geofenceRadius.toInt()}m.');
       }
     } catch (e) {
+      if (!mounted) return;
       setState(
           () => _errorMessage = e.toString().replaceAll('Exception: ', ''));
     } finally {
@@ -577,6 +591,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
             _GeofenceBadge(
               distanceM: _distanceM,
               withinGeofence: _withinGeofence,
+              geofenceVerified: _geofenceVerified,
               isConfirming: _isGeofenceConfirming,
               pulseController: _pulseController,
               onAutoConfirm: _geofenceConfirm,
@@ -706,6 +721,7 @@ class _GeofenceBadge extends StatelessWidget {
   const _GeofenceBadge({
     required this.distanceM,
     required this.withinGeofence,
+    this.geofenceVerified = false,
     required this.isConfirming,
     required this.pulseController,
     required this.onAutoConfirm,
@@ -713,6 +729,7 @@ class _GeofenceBadge extends StatelessWidget {
 
   final double? distanceM;
   final bool withinGeofence;
+  final bool geofenceVerified;
   final bool isConfirming;
   final AnimationController pulseController;
   final VoidCallback onAutoConfirm;
@@ -723,16 +740,18 @@ class _GeofenceBadge extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final label = withinGeofence
-        ? 'You are ${distanceM!.toInt()}m away — Auto-confirm available'
-        : 'You are ${distanceM!.toInt()}m away (need <500m for auto-confirm)';
+    final label = geofenceVerified
+        ? 'Location verified — enter customer OTP to release payment'
+        : withinGeofence
+            ? 'You are ${distanceM!.toInt()}m away — Auto-confirm available'
+            : 'You are ${distanceM!.toInt()}m away (need <500m for auto-confirm)';
 
     return Semantics(
       button: true,
-      enabled: withinGeofence && !isConfirming,
+      enabled: withinGeofence && !isConfirming && !geofenceVerified,
       label: label,
       child: GestureDetector(
-        onTap: withinGeofence && !isConfirming ? onAutoConfirm : null,
+        onTap: withinGeofence && !isConfirming && !geofenceVerified ? onAutoConfirm : null,
         child: AnimatedBuilder(
         animation: pulseController,
         builder: (context, child) {

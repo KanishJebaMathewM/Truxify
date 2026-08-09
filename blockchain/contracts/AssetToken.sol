@@ -32,6 +32,11 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         address owner;
         uint256 tokenId;
         uint256 amount;
+        // Number of held tokens whose tokenPrice proceeds the contract has
+        // actually collected (via purchaseFraction). Only backed tokens carry
+        // a buy-back right, so sellFraction can never over-accrue claims
+        // beyond the ETH held by the contract.
+        uint256 backedTokens;
         uint256 purchasedAt;
     }
 
@@ -41,6 +46,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         address seller;
         address buyer;
         uint256 amount;
+        uint256 backedAmount;
         uint256 price;
         string orderType; // buy, sell
         bool isActive;
@@ -183,6 +189,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         ownership.owner = msg.sender;
         ownership.tokenId = assetId;
         ownership.amount += amount;
+        ownership.backedTokens += amount;
         ownership.purchasedAt = block.timestamp;
 
         // Mint tokens
@@ -206,6 +213,10 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
 
         FractionalOwnership storage ownership = fractionalOwnership[assetId][msg.sender];
         require(ownership.amount >= amount, "Insufficient balance");
+        // Only tokens the contract was funded for carry a buy-back right.
+        // Tokens that entered circulation via a free P2P transfer or an
+        // unbacked trade cannot be sold back to the treasury.
+        require(ownership.backedTokens >= amount, "Tokens not backed");
 
         Asset storage asset = assets[assetId];
         uint256 payout = (amount * asset.tokenPrice) / 1e18;
@@ -215,6 +226,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
 
         // Update ownership
         ownership.amount -= amount;
+        ownership.backedTokens -= amount;
 
         // Update asset — returned fractions re-enter the available pool. Only
         // real, currently-outstanding fractions can be sold back: they are
@@ -272,11 +284,16 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         FractionalOwnership storage ownership = fractionalOwnership[assetId][msg.sender];
         require(ownership.amount >= amount, "Insufficient fractional ownership");
 
+        // Backed tokens are escrowed alongside the tokens so the buy-back
+        // right follows the trade and cannot be double-claimed by the seller.
+        uint256 escrowedBacking = ownership.backedTokens >= amount ? amount : ownership.backedTokens;
+
         _tradeOrderCounter++;
         uint256 orderId = _tradeOrderCounter;
 
         // Decrement seller's fractional ownership
         ownership.amount -= amount;
+        ownership.backedTokens -= escrowedBacking;
         if (ownership.amount == 0) {
             _removeUserAsset(msg.sender, assetId);
         }
@@ -290,6 +307,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
             seller: msg.sender,
             buyer: address(0),
             amount: amount,
+            backedAmount: escrowedBacking,
             price: price,
             orderType: orderType,
             isActive: true,
@@ -317,7 +335,10 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         uint256 totalCost = order.amount * order.price;
         require(msg.value >= totalCost, "Insufficient payment");
 
-        // Increment buyer's fractional ownership
+        // Increment buyer's fractional ownership. The escrowed tokens keep
+        // their buy-back backing: the buyer's payment is routed through the
+        // contract to the seller (balance-neutral), and the contract already
+        // holds the tokenPrice proceeds from the original issuance.
         FractionalOwnership storage buyerOwnership = fractionalOwnership[assetId][msg.sender];
         if (buyerOwnership.amount == 0) {
             userAssets[msg.sender].push(assetId);
@@ -325,6 +346,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         buyerOwnership.owner = msg.sender;
         buyerOwnership.tokenId = assetId;
         buyerOwnership.amount += order.amount;
+        buyerOwnership.backedTokens += order.backedAmount;
         buyerOwnership.purchasedAt = block.timestamp;
 
         // Transfer escrowed tokens from contract to buyer
@@ -361,7 +383,8 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         require(order.seller == msg.sender, "Not seller");
         require(order.isActive, "Order not active");
 
-        // Restore fractional ownership to seller
+        // Restore fractional ownership to seller, including the escrowed
+        // buy-back backing for the returned tokens.
         FractionalOwnership storage ownership = fractionalOwnership[assetId][order.seller];
         if (ownership.amount == 0) {
             userAssets[order.seller].push(assetId);
@@ -369,6 +392,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         ownership.owner = order.seller;
         ownership.tokenId = assetId;
         ownership.amount += order.amount;
+        ownership.backedTokens += order.backedAmount;
 
         // Return escrowed tokens to seller
         _transfer(address(this), order.seller, order.amount);
@@ -383,12 +407,39 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         emit ComplianceCheck(user, true);
     }
 
+    /// @notice P2P transfer of fractional tokens. The funded/backed flag rides
+    ///         along with the tokens, so the recipient keeps the buy-back right
+    ///         only for the backed portion the contract was paid for.
     function transferWithCompliance(
+        uint256 assetId,
         address to,
         uint256 amount
     ) external whenNotPaused {
-        require(msg.sender != address(0), "Invalid sender");
+        require(assetExists[assetId], "Asset not found");
         require(to != address(0), "Invalid recipient");
+        require(amount > 0, "Amount must be > 0");
+
+        FractionalOwnership storage senderOwnership = fractionalOwnership[assetId][msg.sender];
+        require(senderOwnership.amount >= amount, "Insufficient fractional ownership");
+
+        uint256 backedTransfer = senderOwnership.backedTokens >= amount ? amount : senderOwnership.backedTokens;
+
+        // Update fractional ownership records
+        senderOwnership.amount -= amount;
+        senderOwnership.backedTokens -= backedTransfer;
+        if (senderOwnership.amount == 0) {
+            _removeUserAsset(msg.sender, assetId);
+        }
+
+        FractionalOwnership storage recipientOwnership = fractionalOwnership[assetId][to];
+        if (recipientOwnership.amount == 0) {
+            userAssets[to].push(assetId);
+        }
+        recipientOwnership.owner = to;
+        recipientOwnership.tokenId = assetId;
+        recipientOwnership.amount += amount;
+        recipientOwnership.backedTokens += backedTransfer;
+        recipientOwnership.purchasedAt = block.timestamp;
 
         _transfer(msg.sender, to, amount);
     }

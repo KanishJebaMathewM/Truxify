@@ -2,7 +2,7 @@
  * Unit tests for backend/api/src/middleware/apiKey.js
  *
  * Coverage:
- *   - Skips verification when VALID_API_KEYS is not set (calls next immediately)
+ *   - Fails closed with 503 when VALID_API_KEYS is unset, empty or only separators
  *   - Returns 401 when x-api-key header is missing
  *   - Returns 401 when x-api-key header is invalid
  *   - Returns 401 when api_key query param is invalid

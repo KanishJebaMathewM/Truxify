@@ -573,7 +573,7 @@ export class OrderRepository {
       .select('id')
       .eq('status', 'pending')
       .lt('created_at', cutoff)
-      .neq('escrow_status', 'funding')
+      .or('escrow_status.is.null,escrow_status.neq.funding')
       .limit(limit), 'findStalePendingOrders');
   }
 

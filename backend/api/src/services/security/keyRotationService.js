@@ -178,16 +178,27 @@ class KeyRotationService {
 
         const receipt = await tx.wait();
 
-        await supabase
-          .from('key_ownership_transfers')
-          .insert([{
-            old_key: oldPrivateKey.slice(0, 10) + '...',
-            new_key: newPrivateKey.slice(0, 10) + '...',
-            wallet_address: walletAddress,
-            tx_hash: receipt.hash,
-            block_number: receipt.blockNumber,
-            completed_at: new Date().toISOString(),
-          }]);
+        // Receipt-row persistence is best-effort: the on-chain transfer has
+        // already committed, so a failed audit write must not surface as a
+        // transfer failure or trigger a duplicate re-transfer on retry.
+        try {
+          const { error: insertError } = await supabase
+            .from('key_ownership_transfers')
+            .insert([{
+              old_key: oldPrivateKey.slice(0, 10) + '...',
+              new_key: newPrivateKey.slice(0, 10) + '...',
+              wallet_address: walletAddress,
+              tx_hash: receipt.hash,
+              block_number: receipt.blockNumber,
+              completed_at: new Date().toISOString(),
+            }]);
+
+          if (insertError) {
+            logger.error('[KeyRotationService] Failed to record on-chain ownership transfer receipt:', insertError.message);
+          }
+        } catch (insertErr) {
+          logger.error('[KeyRotationService] Failed to record on-chain ownership transfer receipt:', insertErr.message);
+        }
 
         logger.info('[KeyRotationService] On-chain key ownership transfer completed:', receipt.hash);
 

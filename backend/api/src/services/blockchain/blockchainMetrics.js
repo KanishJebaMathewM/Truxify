@@ -23,7 +23,11 @@ class BlockchainMetrics {
     const metricsInterval = parseInt(process.env.METRICS_COLLECTION_INTERVAL_MS || '60000', 10);
 
     setInterval(async () => {
-      await this.aggregateMetrics();
+      try {
+        await this.aggregateMetrics();
+      } catch (error) {
+        logger.error('Failed to aggregate blockchain metrics', error);
+      }
     }, metricsInterval);
   }
 

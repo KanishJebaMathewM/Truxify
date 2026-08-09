@@ -4,7 +4,9 @@ import rateLimit from 'express-rate-limit';
 import { TrackingTokenService } from '../services/trackingTokenService.js';
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import { validateParams } from '../middleware/validate.js';
 import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
+import { publicTrackingTokenSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
@@ -34,13 +36,10 @@ const publicLimiter = rateLimit({
 router.get(
   '/tracking/:token',
   publicLimiter,
+  validateParams(publicTrackingTokenSchema),
   async (req, res) => {
     try {
       const { token } = req.params;
-
-      if (!token || token.length < 10) {
-        return res.status(400).json({ error: 'Invalid tracking token' });
-      }
 
       const validation = await trackingTokenService.validateToken(token);
 
@@ -127,13 +126,10 @@ router.get(
 router.get(
   '/tracking/:token/route',
   publicLimiter,
+  validateParams(publicTrackingTokenSchema),
   async (req, res) => {
     try {
       const { token } = req.params;
-
-      if (!token || token.length < 10) {
-        return res.status(400).json({ error: 'Invalid tracking token' });
-      }
 
       const validation = await trackingTokenService.validateToken(token);
 

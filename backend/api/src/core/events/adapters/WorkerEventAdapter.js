@@ -51,7 +51,7 @@ export class WorkerEventAdapter extends EventPublisher {
             },
             payload: message.payload || message,
           };
-          this._emitWorkerEvent(event);
+          this._emitWorkerEvent(name, event);
         }
       });
     }
@@ -98,8 +98,8 @@ export class WorkerEventAdapter extends EventPublisher {
     this._messageHandlers.get(workerName).push(handler);
   }
 
-  _emitWorkerEvent(event) {
-    for (const [, handlers] of this._messageHandlers) {
+  _emitWorkerEvent(workerName, event) {
+    const handlers = this._messageHandlers.get(workerName) || [];
       for (const handler of handlers) {
         try {
           const result = handler(event);
@@ -110,6 +110,5 @@ export class WorkerEventAdapter extends EventPublisher {
           logger.error('[WorkerEventAdapter] Handler error:', err.message);
         }
       }
-    }
   }
 }

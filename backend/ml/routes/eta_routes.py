@@ -10,6 +10,7 @@ from sqlalchemy import text
 import numpy as np
 
 from services.traffic_pipeline import TrafficPipeline
+from app.execution import run_inference
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,9 @@ async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
                 utc_now.weekday()
             ]])
 
-            eta_seconds = traffic_pipeline.predict_eta(features)
+            # TensorFlow LSTM inference is CPU-bound; run off the event loop so
+            # an ETA request cannot stall other endpoints or /health.
+            eta_seconds = await run_inference(traffic_pipeline.predict_eta, features)
 
             if eta_seconds:
                 return ETAResponse(
@@ -192,7 +195,9 @@ async def get_forecast(route_id: str, hours: int = Query(1, ge=1, le=24), _auth=
 async def train_model(_auth=Depends(verify_api_key)):
     """Trigger model retraining"""
     try:
-        traffic_pipeline.train_model(epochs=50)
+        # LSTM training is very CPU-heavy and would otherwise freeze the event
+        # loop for every other request; run it on the bounded inference worker.
+        await run_inference(traffic_pipeline.train_model, epochs=50)
         utc_now = datetime.now(timezone.utc)
         return {
             'status': 'success',

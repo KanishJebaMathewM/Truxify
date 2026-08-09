@@ -607,7 +607,13 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
       }
     }
   } catch (err) {
-    logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with release.`)
+    logger.error(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}`)
+    return {
+      txHash: null,
+      bookingId,
+      error: err.message,
+      code: 'ESCROW_STATUS_UNAVAILABLE',
+    }
   }
 
   try {

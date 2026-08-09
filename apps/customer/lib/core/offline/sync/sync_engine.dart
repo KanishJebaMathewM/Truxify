@@ -54,7 +54,15 @@ class SyncEngine {
       return 0;
     }
 
-    final resolved = resolver.resolve(eligible);
+    final resolution = resolver.resolveWithDetails(eligible);
+    final resolved = resolution.resolved;
+    final supersededIds = resolution.supersededIds;
+
+    // Clear superseded/deduplicated event IDs from SQLite to prevent orphan pending queue loops
+    for (final id in supersededIds) {
+      await db.markSynced(id);
+    }
+
     if (resolved.isEmpty) {
       return 0;
     }

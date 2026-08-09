@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { acquireLock, releaseLock, LockAcquisitionError } from '../../lib/redisLock.js';
 
 /**
@@ -38,12 +38,17 @@ class ZKPService {
     try {
       const documentHash = this.hashDocument(driverData);
       const proofData = await this.callSnarkJS(driverData, documentHash);
-      await this.storeProof(driverData.userId, proofData);
+      // Never persist fabricated proofs into the audit/proof ledger — mock
+      // proofs exist only to exercise the pipeline outside production.
+      if (!proofData.isMock) {
+        await this.storeProof(driverData.userId, proofData);
+      }
       return {
         success: true,
         proof: proofData.proof,
         publicSignals: proofData.publicSignals,
         documentHash,
+        isMock: proofData.isMock === true,
         timestamp: new Date().toISOString()
       };
     } catch (error) {
@@ -66,14 +71,18 @@ class ZKPService {
 
   async callSnarkJS(driverData, documentHash) {
     const isMock = process.env.ZKP_MOCK === 'true' || process.env.NODE_ENV === 'test';
-    
-    if (process.env.NODE_ENV === 'production' && !isMock) {
-      throw new Error('[ZKPService] Real SNARK circuit proof execution is required in production. Mock proofs are disallowed.');
+
+    // The mock branch must be unreachable in production: a fabricated proof
+    // would otherwise be recorded as genuine and could grant KYC-verified
+    // state with no real document inspection.
+    if (process.env.NODE_ENV === 'production' && isMock) {
+      throw new Error('[ZKPService] Mock ZK proofs are disallowed in production.');
     }
 
     if (isMock) {
-      logger.warn('[ZKPService] Generating mock ZK proof (ZKP_MOCK or test mode active)');
+      logger.warn('[ZKPService] Generating mock ZK proof (ZKP_MOCK or test mode active) — not persisted');
       return {
+        isMock: true,
         proof: {
           a: ['0x123...', '0x456...'],
           b: [['0x789...', '0xabc...'], ['0xdef...', '0xghi...']],
@@ -173,6 +182,40 @@ class ZKPService {
     return data.kyc_verified === true;
   }
 
+  /**
+   * Guards the ZKP path against self-attestation: the proof may only be
+   * generated over identity data the server already verified from the actual
+   * document (the OCR/DigiLocker KYC path sets driver_details.kyc_status and
+   * stores the extracted document number in kyc_doc_number). Client-supplied
+   * document numbers are cross-checked against that server-verified record.
+   *
+   * @returns {{ ok: true } | { ok: false, error: string }}
+   */
+  async assertServerVerified(userId, driverData) {
+    const client = supabaseAdmin ?? supabase;
+    const { data, error } = await client
+      .from('driver_details')
+      .select('kyc_status, kyc_doc_number')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error || !data) {
+      return { ok: false, error: 'No KYC verification record found. Complete document verification (OCR/DigiLocker) first.' };
+    }
+    if (data.kyc_status !== 'Verified') {
+      return { ok: false, error: `KYC is not server-verified (status: ${data.kyc_status || 'Unverified'}). Complete document verification (OCR/DigiLocker) before requesting a ZK proof.` };
+    }
+    if (data.kyc_doc_number) {
+      const normalize = (value) => String(value || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      const serverDocNumber = normalize(data.kyc_doc_number);
+      const claimedLicenseNumber = normalize(driverData.licenseNumber);
+      if (!serverDocNumber || claimedLicenseNumber !== serverDocNumber) {
+        return { ok: false, error: 'License number does not match the server-verified document. Proofs are generated only over verified document data.' };
+      }
+    }
+    return { ok: true };
+  }
+
   async getDocumentHash(userId) {
     try {
       if (!this.contract) return null;
@@ -236,8 +279,35 @@ class ZKPService {
         };
       }
 
+      // Server-side verification gate (issue #8887): the ZKP path must never
+      // prove over client-supplied plaintext. Require the document to have
+      // been verified server-side (OCR/DigiLocker) and the claimed license
+      // number to match the server-verified record before any proof is
+      // generated, persisted, or submitted on-chain.
+      const serverCheck = await this.assertServerVerified(driverData.userId, driverData);
+      if (!serverCheck.ok) {
+        logger.warn(`[ZKP] Self-attestation blocked for user ${driverData.userId}: ${serverCheck.error}`);
+        return {
+          success: false,
+          code: 'KYC_NOT_SERVER_VERIFIED',
+          error: serverCheck.error
+        };
+      }
+
       // Step 1: Generate ZK proof
       const proofResult = await this.generateZKProof(driverData);
+
+      // Mock proofs (ZKP_MOCK/test mode) are never persisted and must never
+      // reach the on-chain verifier or flip kyc_verified — no fabricated
+      // credential can be recorded.
+      if (proofResult.isMock) {
+        logger.warn(`[ZKP] Mock proof generated for user ${driverData.userId} — not persisted or submitted on-chain`);
+        return {
+          success: false,
+          code: 'MOCK_PROOF_NOT_RECORDED',
+          error: 'Mock proofs are not persisted or submitted on-chain. Run in production without ZKP_MOCK.'
+        };
+      }
 
       // Step 2: Submit to blockchain
       const onChainResult = await this.verifyKYCOnChain(

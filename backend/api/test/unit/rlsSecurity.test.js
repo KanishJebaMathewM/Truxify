@@ -364,6 +364,20 @@ describe('Service-level RPC calls carry an authenticated client (issue #5737)', 
   });
 });
 
+describe('User-facing order data path uses the service-role client (issue #8885)', () => {
+  const base = path.resolve(__dirname, '../../src');
+  const readSource = (rel) => readFileSync(path.resolve(base, rel), 'utf8');
+
+  it('container.js wires orderRepository, orderValidationService, and trackingTokenService to the service-role client', () => {
+    const container = readSource('core/container.js');
+    expect(container).toMatch(/const repoClient = supabaseAdmin \?\? supabase;/);
+    expect(container).toMatch(/const orderRepository = new OrderRepository\(repoClient\);/);
+    expect(container).toMatch(/const orderValidationService = new OrderValidationService\(\{ supabase: repoClient, logger \}\)/);
+    expect(container).toMatch(/const trackingTokenService = new TrackingTokenService\(\{ supabase: repoClient, logger \}\)/);
+    expect(container).not.toMatch(/const orderRepository = new OrderRepository\(supabase\);/);
+  });
+});
+
 describe('update_order_and_load_offer invoked via the service-role client (issue #6335)', () => {
   const base = path.resolve(__dirname, '../../src');
   const readSource = (rel) => readFileSync(path.resolve(base, rel), 'utf8');

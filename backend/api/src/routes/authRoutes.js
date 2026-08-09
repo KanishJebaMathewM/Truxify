@@ -51,7 +51,11 @@ import {
   invalidateCachedProfile,
   invalidateCachedSupabaseProfile,
 } from "../lib/profileCache.js";
-import { firebaseAdmin, supabase } from "../config/db.js";
+import { firebaseAdmin, supabase, redisClient } from "../config/db.js";
+import {
+  OTP_MAX_FAILED_ATTEMPTS,
+  OTP_LOCKOUT_MINUTES,
+} from "../services/order/orderNotificationService.js";
 import logger from "../middleware/logger.js";
 
 const router = express.Router();
@@ -138,6 +142,7 @@ router.post("/logout", authenticate, async (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Logged out successfully",
+    cacheInvalidated: true, // Redis errors are non-fatal — logout always succeeds
   });
 });
 
@@ -169,6 +174,85 @@ import crypto from "crypto";
 import { otpSendSchema } from "../validation/requestSchemas.js";
 import { z } from "zod";
 import { verifyOtpHash } from "../lib/otpHashing.js";
+
+
+const AUTH_OTP_IN_MEMORY_MAX = parseInt(process.env.IN_MEMORY_OTP_MAP_MAX_SIZE || "10000", 10);
+const authOtpFailedAttempts = new Map();
+
+function hashPhoneForLockout(phone) {
+  return crypto.createHash("sha256").update(String(phone)).digest("hex");
+}
+
+async function checkAuthOtpLockout(phone) {
+  const phoneKey = hashPhoneForLockout(phone);
+  if (redisClient) {
+    try {
+      const isLocked = await redisClient.get(`auth_otp_lockout:${phoneKey}`);
+      return !!isLocked;
+    } catch (err) {
+      logger.error("[auth/verify-otp] Redis error in checkAuthOtpLockout, falling back to memory:", err.message);
+    }
+  }
+  const record = authOtpFailedAttempts.get(phoneKey);
+  if (!record || !record.lockedUntil) return false;
+  if (Date.now() >= record.lockedUntil) {
+    authOtpFailedAttempts.delete(phoneKey);
+    return false;
+  }
+  return true;
+}
+
+async function recordAuthOtpFailure(phone) {
+  const phoneKey = hashPhoneForLockout(phone);
+  if (redisClient) {
+    try {
+      const countKey = `auth_otp_failed_count:${phoneKey}`;
+      const lockKey = `auth_otp_lockout:${phoneKey}`;
+      const count = await redisClient.incr(countKey);
+      await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
+      if (count >= OTP_MAX_FAILED_ATTEMPTS) {
+        await redisClient.set(lockKey, "1", "EX", OTP_LOCKOUT_MINUTES * 60);
+      }
+      return count;
+    } catch (err) {
+      logger.error("[auth/verify-otp] Redis error in recordAuthOtpFailure, falling back to memory:", err.message);
+    }
+  }
+
+  if (authOtpFailedAttempts.size >= AUTH_OTP_IN_MEMORY_MAX) {
+    const oldestKey = authOtpFailedAttempts.keys().next().value;
+    authOtpFailedAttempts.delete(oldestKey);
+  }
+
+  let record = authOtpFailedAttempts.get(phoneKey);
+  if (!record) {
+    record = { count: 0, lockedUntil: null };
+    authOtpFailedAttempts.set(phoneKey, record);
+  }
+  record.count += 1;
+  if (record.count >= OTP_MAX_FAILED_ATTEMPTS) {
+    record.lockedUntil = Date.now() + OTP_LOCKOUT_MINUTES * 60 * 1000;
+  }
+  return record.count;
+}
+
+async function clearAuthOtpFailures(phone) {
+  const phoneKey = hashPhoneForLockout(phone);
+  if (redisClient) {
+    try {
+      await redisClient.del(`auth_otp_failed_count:${phoneKey}`);
+      return;
+    } catch (err) {
+      logger.error("[auth/verify-otp] Redis error in clearAuthOtpFailures, falling back to memory:", err.message);
+    }
+  }
+  const record = authOtpFailedAttempts.get(phoneKey);
+  if (record) {
+    record.count = 0;
+    if (record.lockedUntil) return;
+  }
+  authOtpFailedAttempts.delete(phoneKey);
+}
 
 const verifyOtpSchema = z.object({
   phone: z.string().min(10).max(20),
@@ -203,6 +287,13 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
   const { phone, otp } = parsed.data;
 
   try {
+    if (await checkAuthOtpLockout(phone)) {
+      return res.status(429).json({
+        success: false,
+        error: "Too many failed OTP attempts. Please try again later.",
+      });
+    }
+
     // Look up the latest unused, unexpired OTP for this phone number
     const { data: otpRecord, error: fetchErr } = await supabase
       .from("phone_otps")
@@ -220,6 +311,13 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
     }
 
     if (!otpRecord) {
+      const count = await recordAuthOtpFailure(phone);
+      if (count >= OTP_MAX_FAILED_ATTEMPTS) {
+        return res.status(429).json({
+          success: false,
+          error: "Too many failed OTP attempts. Please try again later.",
+        });
+      }
       return res.status(400).json({ success: false, error: "OTP not found or has expired." });
     }
 
@@ -227,7 +325,20 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
     const isMatch = verifyOtpHash(otp, otpRecord);
 
     if (!isMatch) {
-      return res.status(400).json({ success: false, error: "Invalid OTP." });
+      const count = await recordAuthOtpFailure(phone);
+      if (count >= OTP_MAX_FAILED_ATTEMPTS) {
+        return res.status(429).json({
+          success: false,
+          error: "Too many failed OTP attempts. Please try again later.",
+        });
+      }
+      const remaining = Math.max(0, OTP_MAX_FAILED_ATTEMPTS - count);
+      return res.status(400).json({
+        success: false,
+        error: remaining > 0
+          ? `Invalid OTP. ${remaining} attempt(s) remaining before lockout.`
+          : "Invalid OTP.",
+      });
     }
 
     // Consume the OTP so it cannot be reused
@@ -241,6 +352,7 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       return res.status(500).json({ success: false, error: "Internal server error." });
     }
 
+    await clearAuthOtpFailures(phone);
     logger.info(`[auth/verify-otp] OTP verified for phone: ${phone}`);
     return res.status(200).json({ success: true, message: "OTP verified successfully." });
   } catch (err) {

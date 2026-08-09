@@ -6,7 +6,7 @@ class FuelAnalyticsService {
   Future<Map<String, dynamic>> calculateAnalytics(double averageMpg) async {
     try {
       // Fetch all completed trips for this driver
-      final trips = await _tripService.fetchTrips(status: 'delivered');
+      final trips = await _tripService.fetchTrips(status: 'completed');
       
       double totalDistanceKm = 0;
       double totalPayout = 0;

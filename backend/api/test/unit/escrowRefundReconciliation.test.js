@@ -50,6 +50,8 @@ vi.mock('../../src/middleware/logger.js', () => ({
 vi.mock('../../src/services/escrow.js', () => ({
   confirmEscrowRefund: vi.fn(),
   submitEscrowRefund: vi.fn(),
+  submitEscrowCancelWithPenalty: vi.fn(),
+  paisaToMaticWei: vi.fn((paisa) => BigInt(Math.round(Number(paisa))) * 10n**12n),
 }));
 
 import { OrderRepository } from '../../src/repositories/orderRepository.js';

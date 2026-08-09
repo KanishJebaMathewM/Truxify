@@ -100,48 +100,7 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
         uint256 gasLimit,
         bytes calldata signature
     ) external whenNotPaused returns (uint256) {
-        // Validate transaction
-        require(to != address(0), "Invalid address");
-        require(value >= 0, "Invalid value");
-        require(!usedNonces[from][nonce], "Nonce already used");
-        require(currentState.balances[from] >= value + gasPrice * gasLimit, "Insufficient balance");
-
-        // Verify signature
-        bytes32 txHash = keccak256(abi.encodePacked(from, to, value, data, nonce, gasPrice, gasLimit));
-        require(_verifySignature(txHash, signature, from), "Invalid signature");
-
-        // Execute transaction
-        uint256 txId = txCounter++;
-        currentState.balances[from] -= value + gasPrice * gasLimit;
-        currentState.balances[to] += value;
-        currentState.nonces[from] = nonce + 1;
-        usedNonces[from][nonce] = true;
-
-        // Store transaction
-        transactions[txId] = Transaction({
-            id: txId,
-            from: from,
-            to: to,
-            value: value,
-            data: data,
-            nonce: nonce,
-            gasPrice: gasPrice,
-            gasLimit: gasLimit,
-            signature: signature,
-            timestamp: block.timestamp
-        });
-
-        // Update state root
-        currentState.root = keccak256(abi.encodePacked(
-            currentState.root,
-            from,
-            to,
-            value,
-            nonce
-        ));
-        globalStateRoot = currentState.root;
-
-        emit TransactionExecuted(txId, from, to, value);
+        (uint256 txId, ) = _applyTx(from, to, value, data, nonce, gasPrice, gasLimit, signature);
         return txId;
     }
 
@@ -161,10 +120,8 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
             (address from, address to, uint256 value, bytes memory data, uint256 nonce, uint256 gasPrice, uint256 gasLimit, bytes memory signature) = 
                 abi.decode(transactionsData[i], (address, address, uint256, bytes, uint256, uint256, uint256, bytes));
 
-            uint256 txId = txCounter++;
-            bytes32 txHash = keccak256(transactionsData[i]);
-            txHashes[i] = txHash;
-
+            // Batch-level dedup on the canonical tx digest before applying.
+            bytes32 txHash = _txHash(from, to, value, data, nonce, gasPrice, gasLimit);
             require(!processedTxHashes[txHash], "Duplicate transaction");
             require(!usedNonces[from][nonce], "Nonce already used");
             require(currentState.balances[from] >= value + gasPrice * gasLimit, "Insufficient balance");
@@ -176,23 +133,9 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
             processedTxHashes[txHash] = true;
             usedNonces[from][nonce] = true;
 
-            // Execute
-            currentState.balances[from] -= value + gasPrice * gasLimit;
-            currentState.balances[to] += value;
-            currentState.nonces[from] = nonce + 1;
-
-            transactions[txId] = Transaction({
-                id: txId,
-                from: from,
-                to: to,
-                value: value,
-                data: data,
-                nonce: nonce,
-                gasPrice: gasPrice,
-                gasLimit: gasLimit,
-                signature: signature,
-                timestamp: block.timestamp
-            });
+            // Same per-tx signature/nonce/balance checks as the single-tx path.
+            _applyTx(from, to, value, data, nonce, gasPrice, gasLimit, signature);
+            txHashes[i] = txHash;
         }
 
         // Submit batch
@@ -300,6 +243,76 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
     }
 
     // ============ Internal Functions ============
+
+    /**
+     * @dev Apply a single transaction with the full signature/nonce/balance
+     *      validation. Shared by executeTransaction and executeBatch so the two
+     *      paths cannot diverge again (issue #7735).
+     */
+    function _applyTx(
+        address from,
+        address to,
+        uint256 value,
+        bytes memory data,
+        uint256 nonce,
+        uint256 gasPrice,
+        uint256 gasLimit,
+        bytes memory signature
+    ) internal returns (uint256 txId, bytes32 txHash) {
+        // CHECKS
+        require(to != address(0), "Invalid address");
+        require(!usedNonces[from][nonce], "Nonce already used");
+        require(currentState.balances[from] >= value + gasPrice * gasLimit, "Insufficient balance");
+
+        // Verify the sender's signature over the canonical tx digest.
+        txHash = _txHash(from, to, value, data, nonce, gasPrice, gasLimit);
+        require(_verifySignature(txHash, signature, from), "Invalid signature");
+
+        // EFFECTS
+        txId = txCounter++;
+        currentState.balances[from] -= value + gasPrice * gasLimit;
+        currentState.balances[to] += value;
+        currentState.nonces[from] = nonce + 1;
+        usedNonces[from][nonce] = true;
+
+        // STORE
+        transactions[txId] = Transaction({
+            id: txId,
+            from: from,
+            to: to,
+            value: value,
+            data: data,
+            nonce: nonce,
+            gasPrice: gasPrice,
+            gasLimit: gasLimit,
+            signature: signature,
+            timestamp: block.timestamp
+        });
+
+        // UPDATE STATE ROOT
+        currentState.root = keccak256(abi.encodePacked(
+            currentState.root,
+            from,
+            to,
+            value,
+            nonce
+        ));
+        globalStateRoot = currentState.root;
+
+        emit TransactionExecuted(txId, from, to, value);
+    }
+
+    function _txHash(
+        address from,
+        address to,
+        uint256 value,
+        bytes memory data,
+        uint256 nonce,
+        uint256 gasPrice,
+        uint256 gasLimit
+    ) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(from, to, value, data, nonce, gasPrice, gasLimit));
+    }
 
     function _verifyProof(bytes calldata proof) internal view returns (bool) {
         require(proof.length > 0, "Empty proof");

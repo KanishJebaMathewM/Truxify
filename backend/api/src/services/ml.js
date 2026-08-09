@@ -22,6 +22,12 @@ if (!process.env.ML_API_KEY) {
     logger.warn('[ML] WARNING: ML_API_KEY is not set. All ML API endpoints will return 503. Set ML_API_KEY in your environment.');
 }
 
+function guardMlApiKey() {
+  if (!process.env.ML_API_KEY) {
+    throw new Error("[ML] ML_API_KEY is not configured. All ML endpoints will return 503. Set ML_API_KEY to enable ML features.");
+  }
+}
+
 /**
  * Parse the free-text `weight` column of load_offers (e.g. '3 tonnes') into
  * kilograms. Returns NaN when the value cannot be interpreted.
@@ -35,6 +41,15 @@ function parseWeightKg(weight) {
   if (!match) return NaN;
   const value = Number(match[1]);
   return match[2] === 'kg' ? value : value * 1000;
+}
+
+function parseWeightKgSafe(weight) {
+  const result = parseWeightKg(weight);
+  if (Number.isNaN(result)) {
+    logger.warn(`[ML] parseWeightKg received unparseable weight: ${weight}`);
+    return 0;
+  }
+  return result;
 }
 
 /**
@@ -54,12 +69,6 @@ function parseDimensions(dimensions) {
     width: Number((width * ftToM).toFixed(2)),
     height: Number((height * ftToM).toFixed(2)),
   };
-}
-
-function guardMlApiKey() {
-  if (!process.env.ML_API_KEY) {
-    throw new Error("[ML] ML_API_KEY is not configured. All ML endpoints will return 503. Set ML_API_KEY to enable ML features.");
-  }
 }
 
 /**
@@ -606,7 +615,7 @@ export async function matchEnRouteLoads({
         length_m: dims.length,
         width_m: dims.width,
         height_m: dims.height,
-        pickup_deadline: new Date(Date.now() + ML_DEFAULT_PICKUP_LEAD_MS).toISOString(),
+        pickup_deadline: o.pickup_deadline ? new Date(o.pickup_deadline).toISOString() : new Date(Date.now() + ML_DEFAULT_PICKUP_LEAD_MS).toISOString(),
         payment_inr: Number(o.payment_inr || (o.freight_value ? o.freight_value / 100 : 0)),
       };
     })
@@ -628,7 +637,7 @@ export async function matchEnRouteLoads({
       const result = await matchDeadhead({
         driverDestination: { lat: currentLat, lng: currentLng },
         truckSpecs: specs,
-        arrivalTime: new Date(Date.now() + ML_DEFAULT_PICKUP_LEAD_MS).toISOString(),
+        arrivalTime: new Date().toISOString(),
         availableLoads,
       });
       recommendations = result.recommendations || [];
@@ -639,7 +648,7 @@ export async function matchEnRouteLoads({
   }
 
   // Haversine fallback — score by distance to pickup
-  if (!mlUsed) {
+  if (!mlUsed || recommendations.length === 0) {
     recommendations = offers
       .filter(o => o.pickup_lat && o.pickup_lng)
       .map(o => {
@@ -703,3 +712,30 @@ export const __testing = {
   priceCache,
   _haversineKm,
 };
+
+class MLService {
+  async handleResponse(response, url = '', method = 'GET') {
+    let data;
+    try {
+      data = await response.json();
+    } catch (e) {
+      throw new Error(`[MLService] Failed to parse JSON response from ${method} ${url} (Status: ${response.status})`);
+    }
+
+    if (response.status === 401) {
+      throw new Error(`[MLService] Unauthorized (401) for ${method} ${url}`);
+    }
+
+    if (response.status === 403) {
+      throw new Error(`[MLService] Forbidden (403) for ${method} ${url}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`[MLService] Request failed with status ${response.status} for ${method} ${url}`);
+    }
+
+    return data;
+  }
+}
+
+export default new MLService();

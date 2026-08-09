@@ -326,3 +326,126 @@ describe('verifyDelivery payout defense-in-depth (amount integrity)', () => {
     expect(result).toEqual({ escrowUpdateFailed: false });
   });
 });
+
+describe('verifyDelivery stuck-escrow retry release confirmation (issue #7732)', () => {
+  function makeRetryService({ escrowReleaseFn, order = {} }) {
+    const repo = {
+      findOrderById: vi.fn().mockResolvedValue({
+        data: {
+          ...ORDER,
+          status: 'payment_released',
+          escrow_status: 'funded',
+          ...order,
+        },
+        error: null,
+      }),
+      updateOrderGuardStatus: vi.fn().mockResolvedValue({ data: { id: 'order-1' }, error: null }),
+      executeRpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+      updateOrder: vi.fn().mockResolvedValue({ data: { id: 'order-1' }, error: null }),
+      updateWalletTransaction: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    const notificationService = {
+      getActiveDeliveryOtp: () => Promise.resolve({ id: 'otp-1' }),
+      verifyDeliveryOtpHash: () => true,
+      verifyDeliveryOtp: vi.fn().mockResolvedValue(true),
+      storeDeliveryOtp: () => Promise.resolve(true),
+      sendDeliveryOtpNotification: () => Promise.resolve({ success: true }),
+    };
+    const svc = new DeliveryVerificationService(null, {
+      notificationService,
+      escrowReleaseFn,
+      trackingTokenService: { revokeAllForOrder: vi.fn().mockResolvedValue() },
+    });
+    svc.orderRepository = repo;
+    return { svc, repo, notificationService };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('aborts with a retryable 503 and records the failure when the on-chain release is not confirmed on retry', async () => {
+    const { svc, repo } = makeRetryService({
+      escrowReleaseFn: () => Promise.resolve({ txHash: null, alreadyReleased: false }),
+    });
+
+    await expect(
+      svc.verifyDelivery({ orderId: 'order-1', driverId: 'driver-1', otp: '123456' }, {}),
+    ).rejects.toMatchObject({ status: 503, payload: { retryable: true } });
+
+    expect(repo.updateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({
+        escrow_release_error: expect.stringContaining('no transaction hash'),
+      }),
+    );
+    expect(repo.executeRpc).not.toHaveBeenCalled();
+  });
+
+  it('does not revoke tracking tokens or notify when the retry release is not confirmed', async () => {
+    const trackingTokenService = { revokeAllForOrder: vi.fn().mockResolvedValue() };
+    const notificationService = {
+      getActiveDeliveryOtp: () => Promise.resolve({ id: 'otp-1' }),
+      verifyDeliveryOtpHash: () => true,
+      verifyDeliveryOtp: vi.fn().mockResolvedValue(true),
+      storeDeliveryOtp: () => Promise.resolve(true),
+      sendDeliveryOtpNotification: () => Promise.resolve({ success: true }),
+    };
+    const repo = {
+      findOrderById: vi.fn().mockResolvedValue({
+        data: { ...ORDER, status: 'payment_released', escrow_status: 'release_failed' },
+        error: null,
+      }),
+      updateOrder: vi.fn().mockResolvedValue({ data: { id: 'order-1' }, error: null }),
+      updateOrderGuardStatus: vi.fn().mockResolvedValue({ data: { id: 'order-1' }, error: null }),
+      executeRpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+      updateWalletTransaction: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    const svc = new DeliveryVerificationService(null, {
+      notificationService,
+      escrowReleaseFn: () => Promise.resolve({ txHash: null, error: 'release reverted' }),
+      trackingTokenService,
+    });
+    svc.orderRepository = repo;
+
+    await expect(
+      svc.verifyDelivery({ orderId: 'order-1', driverId: 'driver-1', otp: '123456' }, {}),
+    ).rejects.toMatchObject({ status: 503, payload: { retryable: true } });
+
+    expect(trackingTokenService.revokeAllForOrder).not.toHaveBeenCalled();
+  });
+
+  it('consumes the OTP only after a confirmed release on the retry path', async () => {
+    const { svc, notificationService } = makeRetryService({
+      escrowReleaseFn: () => Promise.resolve({ txHash: '0xRETRY', alreadyReleased: false }),
+    });
+
+    const result = await svc.verifyDelivery(
+      { orderId: 'order-1', driverId: 'driver-1', otp: '123456' },
+      {},
+    );
+
+    expect(result).toEqual({ escrowUpdateFailed: false });
+    expect(notificationService.verifyDeliveryOtp).toHaveBeenCalledWith('otp-1');
+  });
+
+  it('blocks the trip-completion RPC when escrow was never funded', async () => {
+    const { svc, repo } = makeRetryService({
+      order: { status: 'arriving', escrow_status: 'pending' },
+      escrowReleaseFn: () => Promise.resolve({ txHash: '0xSHOULD-NOT-RUN' }),
+    });
+    svc.assertDriverAtDropoff = vi.fn().mockResolvedValue();
+
+    await expect(
+      svc.verifyDelivery({ orderId: 'order-1', driverId: 'driver-1', otp: '123456' }, {}),
+    ).rejects.toMatchObject({ status: 503, payload: { retryable: true } });
+
+    expect(repo.executeRpc).not.toHaveBeenCalled();
+    expect(repo.updateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({
+        escrow_release_error: expect.stringContaining('ESCROW_NOT_RELEASED'),
+      }),
+    );
+  });
+});

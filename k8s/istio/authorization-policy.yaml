@@ -27,7 +27,8 @@ spec:
         paths: ["/api/*"]
     - operation:
         methods: ["GET"]
-        paths: ["/health", "/metrics"]---
+        paths: ["/health", "/metrics"]
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:

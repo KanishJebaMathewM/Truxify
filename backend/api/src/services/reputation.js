@@ -62,7 +62,7 @@ export function initReputationContract() {
         relayer,
       );
       logger.info("✅ Polygon Reputation contract client initialised.");
-    } catch (err) {
+    } catch (err) { logger.error("[Reputation] Blockchain call failed:", err?.message || err);
       reputationContract = null;
       logger.error(
         "❌ Failed to initialise Reputation contract client:",
@@ -104,7 +104,7 @@ async function retryWithBackoff(fn, maxRetries, baseDelayMs) {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
-    } catch (err) {
+    } catch (err) { logger.error("[Reputation] Blockchain call failed:", err?.message || err);
       if (attempt === maxRetries) throw err;
       // Add ±25% jitter to spread out concurrent retries and prevent thundering herd.
       const jitter = 0.75 + Math.random() * 0.5; // [0.75, 1.25]
@@ -172,7 +172,7 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
           REPUTATION_RETRY_MAX,
           REPUTATION_RETRY_DELAY_MS,
         );
-      } catch (err) {
+      } catch (err) { logger.error("[Reputation] Blockchain call failed:", err?.message || err);
         logger.error(
           `[reputation] increaseReputation failed for driver ${driverWalletAddress} after ${REPUTATION_RETRY_MAX} retries: ${err.message}`,
         );
@@ -215,7 +215,7 @@ export async function getDriverReputation(walletAddress) {
       ]);
       clearTimeout(timeoutId);
       return Number(score);
-    } catch (err) {
+    } catch (err) { logger.error("[Reputation] Blockchain call failed:", err?.message || err);
       clearTimeout(timeoutId);
       logger.error(
         `[reputation] Failed to fetch on-chain reputation for ${walletAddress}: ${err.message}`,

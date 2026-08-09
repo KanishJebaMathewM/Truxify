@@ -145,11 +145,11 @@ import {
   toDateKey,
 } from '../services/driver/earningsReportService.js';
 import { userLimiter, createStore } from '../middleware/rateLimiter.js';
-import { checkBypassEligibility } from '../services/weighStationService.js';
+import { checkBypassEligibility, syncAndTransmitInternalWeights } from '../services/weighStationService.js';
 import { isPayoutProviderConfigured } from '../services/wallet/payoutProvider.js';
 
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema, driverIdParamSchema, driverStatementSchema } from '../validation/requestSchemas.js';
+import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema, driverIdParamSchema, driverStatementSchema, syncWeightSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
@@ -256,7 +256,7 @@ router.get('/stats', authenticate, userLimiter, requirePolicy('driver:view-stats
     });
 
   } catch (err) {
-    logger.error('Driver stats fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver stats fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -313,7 +313,7 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
     });
 
   } catch (err) {
-    logger.error('Driver online status update error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver online status update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -350,7 +350,7 @@ router.put('/hos/status', authenticate, userLimiter, requirePolicy('driver:updat
       shift_start_time: details.shift_start_time
     });
   } catch (err) {
-    logger.error('Driver HoS status update error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver HoS status update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -439,7 +439,7 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
     });
 
   } catch (err) {
-    logger.error('Wallet history fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Wallet history fetch error:', err);
 
     res.status(500).json({
       error: 'Internal Server Error'
@@ -506,7 +506,7 @@ router.get('/earnings/summary', authenticate, userLimiter, requirePolicy('driver
     res.json(summary || []);
 
   } catch (err) {
-    logger.error('Driver earnings summary fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver earnings summary fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -618,7 +618,7 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
       trips: enrichedTrips
     });
   } catch (err) {
-    logger.error('Driver trips fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver trips fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -668,7 +668,7 @@ router.get('/trips/:tripDisplayId', authenticate, userLimiter, requirePolicy('dr
 
     res.json(trip);
   } catch (err) {
-    logger.error('Driver single trip fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver single trip fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -716,7 +716,7 @@ router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requirePoli
     if (error) return res.status(500).json({ error: 'Failed to fetch trip items.', details: error.message });
     res.json(items || []);
   } catch (err) {
-    logger.error('Driver trip items fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver trip items fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -758,7 +758,7 @@ router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requirePoli
     if (error) return res.status(500).json({ error: 'Failed to fetch trip stops.', details: error.message });
     res.json(stops || []);
   } catch (err) {
-    logger.error('Driver trip stops fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver trip stops fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -800,7 +800,7 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
     if (error) return res.status(500).json({ error: 'Failed to fetch route points.', details: error.message });
     res.json(points || []);
   } catch (err) {
-    logger.error('Driver route points fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver route points fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1397,6 +1397,68 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
   }
 });
 
+/**
+ * @openapi
+ * /api/driver/weigh-stations/sync-weight:
+ *   post:
+ *     tags: [Driver, WIM]
+ *     summary: Sync internal air suspension weights
+ *     description: Syncs internal highly accurate axle weights to the DOT enforcement software for bypassing weigh stations.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - truck_id
+ *               - axles
+ *             properties:
+ *               truck_id:
+ *                 type: string
+ *                 format: uuid
+ *               axles:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     position:
+ *                       type: string
+ *                     pressure_psi:
+ *                       type: number
+ *     responses:
+ *       200:
+ *         description: Bypass status and calculation details
+ *       400:
+ *         description: Invalid payload
+ */
+router.post('/weigh-stations/sync-weight', authenticate, requirePolicy('driver:view-stats'), userLimiter, validateBody(syncWeightSchema), async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const { truck_id, axles } = req.body;
+
+    // Optional: verify the truck belongs to the driver
+    const { data: truck, error: truckErr } = await supabase
+      .from('trucks')
+      .select('id')
+      .eq('id', truck_id)
+      .eq('driver_id', driverId)
+      .single();
+
+    if (truckErr || !truck) {
+      return res.status(403).json({ error: 'Forbidden: Truck does not belong to you or does not exist' });
+    }
+
+    const status = await syncAndTransmitInternalWeights(driverId, truck_id, axles);
+    return res.status(200).json(status);
+  } catch (err) {
+    logger.error(`[weigh-station] Error syncing internal weight for driver ${req.user.id}: ${err.message}`);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // ============================================================================
 // LTL ROUTE OPTIMIZATION (DRIVER)
 // ============================================================================
@@ -1677,7 +1739,7 @@ router.patch('/availability', authenticate, userLimiter, async (req, res) => {
   }
 });
 
-router.put('/truck', authenticate, userLimiter, async (req, res) => {
+router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, res) => {
   try {
     const { type, capacityWeight, capacityVolume, registrationNumber } = req.body;
 
@@ -1721,6 +1783,7 @@ router.put('/truck', authenticate, userLimiter, async (req, res) => {
       const { data, error } = await supabase
         .from('trucks')
         .insert({
+          driver_id: req.user.id,
           truck_type: type,
           capacity_weight_tonnes: capacityWeight || 0,
           capacity_volume_m3: capacityVolume || 0,

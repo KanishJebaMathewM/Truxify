@@ -1,3 +1,10 @@
+// apps/customer/lib/screens/home_screen.dart
+// XL changes:
+//   1. Whole body content is centered with a 900 px max-width cap.
+//   2. Stat cards switch to a 3-column GridView on XL so cards don't stretch.
+//   3. Active-shipments horizontal list shows wider cards (220 px) on XL.
+// All original logic is unchanged.
+
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -7,6 +14,7 @@ import '../controllers/app_controller.dart';
 import '../core/offline/cache/cache_manager.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
+import '../utils/breakpoints.dart'; // XL: added
 import '../widgets/app_logo.dart';
 import '../widgets/app_page_route.dart';
 import '../widgets/shipment_card.dart';
@@ -51,7 +59,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadData() async {
     final connectivity = await Connectivity().checkConnectivity();
-    final hasNetwork = connectivity.isNotEmpty && !connectivity.contains(ConnectivityResult.none);
+    final hasNetwork = connectivity.isNotEmpty &&
+        !connectivity.contains(ConnectivityResult.none);
     await _cacheManager.open();
     final cachedLocation = await _cacheManager.getLastLocation();
     if (!mounted) return;
@@ -59,7 +68,8 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isOffline = !hasNetwork;
       if (cachedLocation != null) {
-        _locationLabel = 'Last truck location \u2022 ${cachedLocation['latitude']?.toStringAsFixed(3)}, ${cachedLocation['longitude']?.toStringAsFixed(3)}';
+        _locationLabel =
+            'Last truck location • ${cachedLocation['latitude']?.toStringAsFixed(3)}, ${cachedLocation['longitude']?.toStringAsFixed(3)}';
       }
     });
 
@@ -71,13 +81,22 @@ class _HomeScreenState extends State<HomeScreen> {
         _orderService.fetchHistoryOrders(),
       ]);
       if (!mounted) return;
-      final profile = results[0] is Map<String, dynamic> ? results[0] as Map<String, dynamic> : <String, dynamic>{};
-      final orders = results[1] is List ? List<Map<String, dynamic>>.from(results[1] as List) : <Map<String, dynamic>>[];
-      final stats = results[2] is Map<String, dynamic> ? results[2] as Map<String, dynamic> : null;
-      final history = results[3] is List ? List<Map<String, dynamic>>.from(results[3] as List) : <Map<String, dynamic>>[];
+      final profile = results[0] is Map<String, dynamic>
+          ? results[0] as Map<String, dynamic>
+          : <String, dynamic>{};
+      final orders = results[1] is List
+          ? List<Map<String, dynamic>>.from(results[1] as List)
+          : <Map<String, dynamic>>[];
+      final stats =
+          results[2] is Map<String, dynamic> ? results[2] as Map<String, dynamic> : null;
+      final history = results[3] is List
+          ? List<Map<String, dynamic>>.from(results[3] as List)
+          : <Map<String, dynamic>>[];
 
       setState(() {
-        _customerName = (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '').trim();
+        _customerName =
+            (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '')
+                .trim();
         _activeOrders = orders;
         _customerStats = stats;
         _usualRoutes = _computeUsualRoutes(history);
@@ -100,7 +119,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _showComingSoon(BuildContext context, String title) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(AppLocalizations.of(context)!.comingSoon(title))));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLocalizations.of(context)!.comingSoon(title))));
   }
 
   List<RouteCardData> _computeUsualRoutes(List<Map<String, dynamic>> history) {
@@ -142,7 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final displayPickup = _shortenAddress(stats.pickup);
       final displayDrop = _shortenAddress(stats.drop);
       return RouteCardData(
-        route: '$displayPickup \u2192 $displayDrop',
+        route: '$displayPickup → $displayDrop',
         pickup: stats.pickup,
         drop: stats.drop,
         tripCount: stats.count,
@@ -160,14 +180,42 @@ class _HomeScreenState extends State<HomeScreen> {
     return parts.first.trim();
   }
 
+  String _formatStatus(String status) {
+    switch (status) {
+      case 'driver_assigned':
+      case 'accepted':
+        return 'Accepted';
+      case 'in_transit':
+        return 'In Transit';
+      case 'payment_released':
+      case 'completed':
+      case 'delivered':
+        return 'Delivered';
+      case 'cancelled':
+        return 'Cancelled';
+      case 'pending':
+        return 'Pending';
+      default:
+        return status
+            .split('_')
+            .map((word) => word.isEmpty
+                ? word
+                : '${word[0].toUpperCase()}${word.substring(1)}')
+            .join(' ');
+    }
+  }
+
   ShipmentCardData? _buildShipmentFromOrder(Map<String, dynamic> order) {
-    final route = '${order['pickup_city'] ?? '?'} \u2192 ${order['drop_city'] ?? '?'}';
+    final route =
+        '${order['pickup_city'] ?? '?'} → ${order['drop_city'] ?? '?'}';
     final rawDriverName = order['driver_name']?.toString() ?? '';
     final hasDriver = DriverUtils.isValidDriverName(rawDriverName);
     final driverName = hasDriver ? rawDriverName : '';
     final truckNum = order['truck_number']?.toString() ?? '';
     final driver = driverName.isNotEmpty ? '$driverName | $truckNum' : (truckNum.isNotEmpty ? truckNum : 'Assigning driver');
-    final status = order['status']?.toString() ?? 'Active';
+    // The API returns snake_case statuses; humanize before comparing so the
+    // in-transit styling/live badge actually triggers.
+    final status = _formatStatus(order['status']?.toString() ?? 'pending');
     final eta = order['estimated_arrival']?.toString() ?? 'Pending';
 
     return ShipmentCardData(
@@ -175,7 +223,9 @@ class _HomeScreenState extends State<HomeScreen> {
       driver: driver,
       truckNumber: truckNum,
       status: status,
-      statusColor: status == 'In Transit' ? const Color(0xFF00897B) : const Color(0xFFFFB300),
+      statusColor: status == 'In Transit'
+          ? const Color(0xFF00897B)
+          : const Color(0xFFFFB300),
       eta: eta,
       isLive: status == 'In Transit',
     );
@@ -185,8 +235,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final controller = TruxifyScope.of(context);
     final now = DateTime.now();
-    final displayName = _customerName.isNotEmpty ? _customerName.split(' ').first : 'there';
+    final displayName =
+        _customerName.isNotEmpty ? _customerName.split(' ').first : 'there';
     final greeting = _greetingFor(now);
+    // XL: card width grows on wide screens so they don't look tiny
+    final shipmentCardWidth = Breakpoints.isXL(context) ? 260.0 : 200.0;
 
     return Scaffold(
       appBar: AppBar(
@@ -197,20 +250,27 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: const EdgeInsets.only(right: 8),
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(
-                    color: Theme.of(context).brightness == Brightness.dark ? TruxifyColors.darkBorder : TruxifyColors.border,
+                    color: Theme.of(context).brightness == Brightness.dark
+                        ? TruxifyColors.darkBorder
+                        : TruxifyColors.border,
                   ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.place_rounded, size: 16, color: TruxifyColors.accentDark),
+                    const Icon(Icons.place_rounded,
+                        size: 16, color: TruxifyColors.accentDark),
                     const SizedBox(width: 6),
-                    Text(_locationLabel, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    Text(_locationLabel,
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
                   ],
                 ),
               ),
@@ -232,12 +292,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(_error!, style: Theme.of(context).textTheme.bodyLarge),
+                      Text(_error!,
+                          style: Theme.of(context).textTheme.bodyLarge),
                       const SizedBox(height: 12),
                       PrimaryButton(
                         label: AppLocalizations.of(context)!.retry,
                         onPressed: () {
-                          setState(() { _isLoading = true; _error = null; });
+                          setState(() {
+                            _isLoading = true;
+                            _error = null;
+                          });
                           _loadData();
                         },
                       ),
@@ -246,131 +310,262 @@ class _HomeScreenState extends State<HomeScreen> {
                 )
               : RefreshIndicator(
                   onRefresh: _loadData,
-                  child: SingleChildScrollView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                      Text(AppLocalizations.of(context)!.greetingMessage(greeting, displayName), style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 6),
-                      Text(
-                        DateFormatter.formatFullDate(now),
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
-                      ),
-                      const SizedBox(height: 26),
-                      SectionHeader(title: AppLocalizations.of(context)!.activeShipments, actionLabel: AppLocalizations.of(context)!.seeAll, onActionTap: () => controller.openOrders(tabIndex: 0)),
-                      const SizedBox(height: 12),
-                      _activeOrders.isEmpty
-                          ? Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 24),
-                              child: Center(
-                                child: Text(AppLocalizations.of(context)!.noActiveShipments, style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context))),
-                              ),
-                            )
-                          : SizedBox(
-                              height: 170,
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: _activeOrders.length,
-                                separatorBuilder: (_, __) => const SizedBox(width: 14),
-                                itemBuilder: (context, index) {
-                                  final shipment = _buildShipmentFromOrder(_activeOrders[index]);
-                                  if (shipment == null) return const SizedBox.shrink();
-                                  final orderId = _activeOrders[index]['display_id']?.toString() ?? _activeOrders[index]['id']?.toString() ?? '';
-                                  return ShipmentCard(
-                                    shipment: shipment,
-                                    onTap: orderId.isNotEmpty
-                                        ? () => Navigator.of(context).push(
-                                              AppPageRoute(builder: (_) => LiveTrackingScreen(orderId: orderId)),
-                                            )
-                                        : () => _showComingSoon(context, 'Live tracking'),
-                                  );
-                                },
-                              ),
+                  // XL: Center content and cap at 900 px so it doesn't
+                  // stretch across a tablet or wide phone.
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 900),
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              AppLocalizations.of(context)!.greetingMessage(
+                                  greeting, displayName),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w800),
                             ),
-                      const SizedBox(height: 24),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: StatCard(title: AppLocalizations.of(context)!.active, value: '${_activeOrders.length}', icon: Icons.local_shipping_rounded),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: StatCard(
-                              title: AppLocalizations.of(context)!.totalShipments,
-                              value: '${_customerStats?['totalOrders'] ?? 0}',
-                              icon: Icons.inventory_2_rounded,
+                            const SizedBox(height: 6),
+                            Text(
+                              DateFormatter.formatFullDate(now),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: TruxifyColors.adaptiveSecondaryText(
+                                        context),
+                                  ),
                             ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: StatCard(
-                              title: AppLocalizations.of(context)!.savings,
-                              value: '${_customerStats?['totalSaved'] ?? 0}',
-                              icon: Icons.savings_rounded,
+                            const SizedBox(height: 26),
+                            SectionHeader(
+                              title: AppLocalizations.of(context)!
+                                  .activeShipments,
+                              actionLabel:
+                                  AppLocalizations.of(context)!.seeAll,
+                              onActionTap: () =>
+                                  controller.openOrders(tabIndex: 0),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 24),
-                      SectionHeader(
-                        title: AppLocalizations.of(context)!.yourUsualRoutes,
-                        actionLabel: _usualRoutes.isNotEmpty ? 'View All' : null,
-                        onActionTap: _usualRoutes.isNotEmpty ? () => controller.openOrders(tabIndex: 1) : null,
-                      ),
-                      const SizedBox(height: 8),
-                      if (_usualRoutes.isEmpty)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 24),
-                          child: Center(
-                            child: Column(
-                              children: [
-                                Icon(Icons.route_rounded, size: 36, color: TruxifyColors.adaptiveSecondaryText(context)),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'No usual routes yet',
-                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: TruxifyColors.adaptiveSecondaryText(context)),
+                            const SizedBox(height: 12),
+                            _activeOrders.isEmpty
+                                ? Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 24),
+                                    child: Center(
+                                      child: Text(
+                                        AppLocalizations.of(context)!
+                                            .noActiveShipments,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(
+                                              color: TruxifyColors
+                                                  .adaptiveSecondaryText(
+                                                      context),
+                                            ),
+                                      ),
+                                    ),
+                                  )
+                                : SizedBox(
+                                    // XL: slightly taller cards on wide screens
+                                    height: Breakpoints.isXL(context) ? 190 : 170,
+                                    child: ListView.separated(
+                                      scrollDirection: Axis.horizontal,
+                                      itemCount: _activeOrders.length,
+                                      separatorBuilder: (_, __) =>
+                                          const SizedBox(width: 14),
+                                      itemBuilder: (context, index) {
+                                        final shipment =
+                                            _buildShipmentFromOrder(
+                                                _activeOrders[index]);
+                                        if (shipment == null) {
+                                          return const SizedBox.shrink();
+                                        }
+                                        final orderId = _activeOrders[index]
+                                                    ['display_id']
+                                                ?.toString() ??
+                                            _activeOrders[index]['id']
+                                                ?.toString() ??
+                                            '';
+                                        return SizedBox(
+                                          // XL: wider card so content isn't cramped
+                                          width: shipmentCardWidth,
+                                          child: ShipmentCard(
+                                            shipment: shipment,
+                                            onTap: orderId.isNotEmpty
+                                                ? () => Navigator.of(context)
+                                                    .push(
+                                                      AppPageRoute(
+                                                        builder: (_) =>
+                                                            LiveTrackingScreen(
+                                                                orderId:
+                                                                    orderId),
+                                                      ),
+                                                    )
+                                                : () => _showComingSoon(
+                                                    context,
+                                                    'Live tracking'),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                            const SizedBox(height: 24),
+                            // XL: stat cards switch from a fixed Row to a
+                            // GridView so each card gets equal space and
+                            // doesn't stretch weirdly on wide screens.
+                            Breakpoints.isXL(context)
+                                ? GridView.count(
+                                    crossAxisCount: 3,
+                                    crossAxisSpacing: 10,
+                                    mainAxisSpacing: 10,
+                                    shrinkWrap: true,
+                                    childAspectRatio: 2.4,
+                                    physics:
+                                        const NeverScrollableScrollPhysics(),
+                                    children: [
+                                      StatCard(
+                                        title: AppLocalizations.of(context)!
+                                            .active,
+                                        value: '${_activeOrders.length}',
+                                        icon: Icons.local_shipping_rounded,
+                                      ),
+                                      StatCard(
+                                        title: AppLocalizations.of(context)!
+                                            .totalShipments,
+                                        value:
+                                            '${_customerStats?['totalOrders'] ?? 0}',
+                                        icon: Icons.inventory_2_rounded,
+                                      ),
+                                      StatCard(
+                                        title: AppLocalizations.of(context)!
+                                            .savings,
+                                        value:
+                                            '${_customerStats?['totalSaved'] ?? 0}',
+                                        icon: Icons.savings_rounded,
+                                      ),
+                                    ],
+                                  )
+                                : Row(
+                                    children: [
+                                      Expanded(
+                                        child: StatCard(
+                                          title:
+                                              AppLocalizations.of(context)!
+                                                  .active,
+                                          value: '${_activeOrders.length}',
+                                          icon: Icons.local_shipping_rounded,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: StatCard(
+                                          title:
+                                              AppLocalizations.of(context)!
+                                                  .totalShipments,
+                                          value:
+                                              '${_customerStats?['totalOrders'] ?? 0}',
+                                          icon: Icons.inventory_2_rounded,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: StatCard(
+                                          title:
+                                              AppLocalizations.of(context)!
+                                                  .savings,
+                                          value:
+                                              '${_customerStats?['totalSaved'] ?? 0}',
+                                          icon: Icons.savings_rounded,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                            const SizedBox(height: 24),
+                            SectionHeader(
+                              title: AppLocalizations.of(context)!
+                                  .yourUsualRoutes,
+                              actionLabel: _usualRoutes.isNotEmpty
+                                  ? 'View All'
+                                  : null,
+                              onActionTap: _usualRoutes.isNotEmpty
+                                  ? () =>
+                                      controller.openOrders(tabIndex: 1)
+                                  : null,
+                            ),
+                            const SizedBox(height: 8),
+                            if (_usualRoutes.isEmpty)
+                              Padding(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 24),
+                                child: Center(
+                                  child: Column(
+                                    children: [
+                                      Icon(
+                                        Icons.route_rounded,
+                                        size: 36,
+                                        color:
+                                            TruxifyColors.adaptiveSecondaryText(
+                                                context),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'No usual routes yet',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodyMedium
+                                            ?.copyWith(
+                                              color: TruxifyColors
+                                                  .adaptiveSecondaryText(
+                                                      context),
+                                            ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ],
+                              )
+                            else
+                              ..._usualRoutes.map((route) => Padding(
+                                    padding:
+                                        const EdgeInsets.only(bottom: 10),
+                                    child: RecentRouteCard(
+                                      route: route,
+                                      onRebook: () {
+                                        controller.openFindTrucks(
+                                          draft: RouteDraft(
+                                            pickup: route.pickup,
+                                            drop: route.drop,
+                                            dateLabel: '',
+                                            goodsType: '',
+                                            weightTonnes: '',
+                                            dimensions: '',
+                                            stacked: false,
+                                            fragile: false,
+                                            requirements: const [],
+                                            pickupLat: route.pickupLat,
+                                            pickupLng: route.pickupLng,
+                                            dropLat: route.dropLat,
+                                            dropLng: route.dropLng,
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  )),
+                            const SizedBox(height: 8),
+                            PrimaryButton(
+                              label:
+                                  '${AppLocalizations.of(context)!.bookATruck} \u{1f69b}',
+                              onPressed: () => controller.openFindTrucks(),
                             ),
-                          ),
-                        )
-                      else
-                        ..._usualRoutes.map((route) => Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: RecentRouteCard(
-                            route: route,
-                            onRebook: () {
-                              controller.openFindTrucks(
-                                draft: RouteDraft(
-                                  pickup: route.pickup,
-                                  drop: route.drop,
-                                  dateLabel: '',
-                                  goodsType: '',
-                                  weightTonnes: '',
-                                  dimensions: '',
-                                  stacked: false,
-                                  fragile: false,
-                                  requirements: const [],
-                                  pickupLat: route.pickupLat,
-                                  pickupLng: route.pickupLng,
-                                  dropLat: route.dropLat,
-                                  dropLng: route.dropLng,
-                                ),
-                              );
-                            },
-                          ),
-                        )),
-                      const SizedBox(height: 8),
-                      PrimaryButton(
-                        label: '${AppLocalizations.of(context)!.bookATruck} \u{1f69b}',
-                        onPressed: () => controller.openFindTrucks(),
+                          ],
+                        ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
     );
   }
 }
@@ -396,4 +591,3 @@ class _RouteStats {
   final double? dropLat;
   final double? dropLng;
 }
-

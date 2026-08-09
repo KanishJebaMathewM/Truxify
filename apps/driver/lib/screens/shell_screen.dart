@@ -175,13 +175,16 @@ class _ShellScreenState extends State<ShellScreen> {
       case NavigateToOrderDetail():
       case NavigateToLiveTracking():
         _openTab(1); // Active Trip
+        break;
 
       case NavigateToLoadDetail():
         _openTab(2); // Available Loads
+        break;
 
       case NavigateToEarnings():
       case NavigateToWallet():
         _openTab(0); // Home (earnings summary is on the home card)
+        break;
 
       case NavigateToSupportTicket():
       case NavigateToNotificationsList():
@@ -189,6 +192,7 @@ class _ShellScreenState extends State<ShellScreen> {
           Navigator.of(context)
               .push(truxifyPageRoute((_) => const NotificationsScreen()));
         });
+        break;
     }
   }
 

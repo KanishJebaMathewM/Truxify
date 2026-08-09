@@ -138,8 +138,11 @@ router.post(
       const amountPaisa = order.total_amount || 0;
       const amountInr = (amountPaisa / 100).toFixed(2);
 
-      // Platform UPI ID from env (falls back to demo value for dev)
-      const platformUpiId = process.env.PLATFORM_UPI_ID || 'truxify@upi';
+      const platformUpiId = process.env.PLATFORM_UPI_ID?.trim();
+      if (!platformUpiId) {
+        logger.error('[payments] PLATFORM_UPI_ID is not configured; cannot generate UPI intent');
+        return res.status(503).json({ error: 'UPI payments are not configured on the server.' });
+      }
       const orderRef = order.order_display_id;
 
       // Standard UPI deep-link format (works with GPay, PhonePe, Paytm, BHIM)
@@ -195,7 +198,7 @@ router.post(
   validateBody(lockPaymentSchema),
   auditLog({ action: 'payment:lock', resourceType: 'escrow' }),
   async (req, res) => {
-    const { order_id, tx_hash, wallet_address } = req.body;
+    const { order_id, tx_hash } = req.body;
     const lockKey = `payment_lock:${order_id}`;
 
     // lockValue holds the owner UUID returned by acquireLock.
@@ -262,11 +265,19 @@ router.post(
       const bookingId = order.escrow_booking_id || getEscrowBookingId(order.order_display_id);
 
       // 5. Verify the deposit transaction on-chain against the order's escrow
-      //    booking: the sender must be the registered customer wallet, the
-      //    booking must be created for the assigned driver, and funded with at
-      //    least the expected escrow amount. The client-supplied tx_hash is
-      //    never trusted without on-chain verification (no dev trust path).
-      const senderAddress = wallet_address || order.wallet_address;
+      //    booking: the sender must be the authenticated customer's profile
+      //    wallet (never a client-supplied wallet_address), the booking must
+      //    be created for the assigned driver, and funded with at least the
+      //    expected escrow amount. The client-supplied tx_hash is never
+      //    trusted without on-chain verification (no dev trust path).
+      const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
+      const senderAddress = customerProfile?.polygon_wallet_address ?? null;
+      if (!senderAddress) {
+        return res.status(422).json({
+          error: 'No Polygon wallet is registered on your profile. Add a wallet before locking escrow payment.',
+          code: 'WALLET_REQUIRED',
+        });
+      }
 
       // Resolve the authoritative expected deposit amount (cross-checked
       // against the server-written bid context). If it cannot be resolved the

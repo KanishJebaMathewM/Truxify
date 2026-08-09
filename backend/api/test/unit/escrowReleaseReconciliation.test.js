@@ -56,10 +56,6 @@ vi.mock('../../src/lib/redisLock.js', () => ({
   releaseLock: mockReleaseLock,
   renewLock: mockRenewLock,
   LockAcquisitionError: class LockAcquisitionError extends Error {},
-vi.mock('../../src/config/db.js', () => ({
-  supabase: mockSupabase,
-  supabaseAdmin: mockSupabase,
-  redisClient: mockRedisClient,
 }));
 
 vi.mock('../../src/services/escrow.js', () => ({

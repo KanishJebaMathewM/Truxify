@@ -52,6 +52,26 @@ async function finalizeOrRevert(order, orderRepository) {
       }
     }
 
+    if (bookingFunded && !mismatchReason && order.status === 'cancelled') {
+      logger.info(`[escrow-funding] Order ${order.order_display_id} is cancelled but deposit landed on-chain. Triggering refund.`);
+      try {
+        await submitEscrowRefund(order.order_display_id);
+        await orderRepository.updateOrder(order.id, {
+          escrow_status: 'refunded',
+          escrow_refund_error: null,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        logger.error(`[escrow-funding] Failed to refund cancelled order ${order.order_display_id}: ${err.message}`);
+        await orderRepository.updateOrder(order.id, {
+          escrow_status: 'refund_failed',
+          escrow_refund_error: err.message,
+          updated_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
     if (bookingFunded && !mismatchReason) {
       // The deposit DID land on-chain with the correct amount. Heal the
       // acceptance by running accept_bid_tx as the backend (service_role).
@@ -102,12 +122,55 @@ async function finalizeOrRevert(order, orderRepository) {
 
     // Deposit never landed (or the amount does not match the authoritative
     // figure). Release the driver and refund the incorrect deposit.
-    let refundError = null;
+    // submitEscrowRefund resolves with { error } / missing txHash on chain
+    // failures instead of throwing — only clear funding after confirmation.
+    let refundResult;
     try {
-      await submitEscrowRefund(order.order_display_id);
+      refundResult = await submitEscrowRefund(order.order_display_id);
     } catch (err) {
-      refundError = err.message;
+      refundResult = { txHash: null, error: err.message };
       logger.error(`[escrow-funding] Refund failed for ${order.order_display_id}: ${err.message}`);
+    }
+
+    if (refundResult?.error || !refundResult?.txHash) {
+      const refundError = refundResult?.error || 'escrow refund was not submitted';
+      logger.error(
+        `[escrow-funding] Skipping funding clear for ${order.order_display_id}: refund not confirmed (${refundError})`
+      );
+      await orderRepository.updateOrderWithFilter(order.id, {
+        escrow_funding_error: mismatchReason
+          ? `ESCROW_AMOUNT_MISMATCH: ${mismatchReason}; refund pending: ${refundError}`
+          : `refund pending: ${refundError}`,
+        escrow_funding_last_attempt_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'id', value: order.id },
+      ], 'id').catch((err) => {
+        logger.error(`[escrow-funding] Failed to record refund pending for ${order.order_display_id}: ${err.message}`);
+      });
+      return;
+    }
+
+    try {
+      await refundResult.waitForConfirmation();
+    } catch (err) {
+      logger.error(
+        `[escrow-funding] Refund confirmation failed for ${order.order_display_id}: ${err.message}`
+      );
+      await orderRepository.updateOrderWithFilter(order.id, {
+        escrow_funding_error: mismatchReason
+          ? `ESCROW_AMOUNT_MISMATCH: ${mismatchReason}; refund confirmation failed: ${err.message}`
+          : `refund confirmation failed: ${err.message}`,
+        escrow_funding_last_attempt_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'id', value: order.id },
+      ], 'id').catch((stateErr) => {
+        logger.error(`[escrow-funding] Failed to record confirmation failure for ${order.order_display_id}: ${stateErr.message}`);
+      });
+      return;
     }
 
     const { error: revertErr } = await orderRepository.updateOrderWithFilter(order.id, {
@@ -118,7 +181,7 @@ async function finalizeOrRevert(order, orderRepository) {
       escrow_funding_last_attempt_at: null,
       escrow_funding_error: mismatchReason
         ? `ESCROW_AMOUNT_MISMATCH: ${mismatchReason}`
-        : (refundError ? `refund failed: ${refundError}` : null),
+        : null,
       updated_at: new Date().toISOString(),
     }, [
       { op: 'eq', column: 'escrow_status', value: 'funding' },

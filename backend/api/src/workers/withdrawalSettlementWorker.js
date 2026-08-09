@@ -1,7 +1,10 @@
-import { supabaseAdmin } from '../config/db.js';
-import logger from '../middleware/logger.js';
-import { dispatchPayout, isPayoutProviderConfigured } from '../services/wallet/payoutProvider.js';
-import { WorkerTracer } from '../core/telemetry/WorkerTracer.js';
+import { supabaseAdmin } from "../config/db.js";
+import logger from "../middleware/logger.js";
+import {
+  dispatchPayout,
+  isPayoutProviderConfigured,
+} from "../services/wallet/payoutProvider.js";
+import { WorkerTracer } from "../core/telemetry/WorkerTracer.js";
 
 const BATCH_LIMIT = 50;
 const SETTLE_RETRY_ATTEMPTS = 3;
@@ -12,22 +15,44 @@ let intervalId = null;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Records that a payout was dispatched for this withdrawal so a crash between
+ * Atomically claims a pending withdrawal for this worker BEFORE the payout is
+ * dispatched. The update is conditioned on payout_attempted_at IS NULL, so at
+ * most one concurrent sweep can win the claim; losers skip the row entirely.
+ * Returns true only when this caller reserved the row.
+ */
+async function claimWithdrawal(withdrawalId) {
+  const { data, error } = await supabaseAdmin
+    .from("wallet_transactions")
+    .update({ payout_attempted_at: new Date().toISOString() })
+    .eq("id", withdrawalId)
+    .is("payout_attempted_at", null)
+    .select("id");
+
+  if (error) {
+    logger.error(
+      `[WithdrawalSettlementWorker] Failed to claim withdrawal ${withdrawalId}: ${error.message}`,
+    );
+    return false;
+  }
+  return data && data.length > 0;
+}
+
+/**
+ * Records the dispatch outcome on the already-claimed row so a crash between
  * dispatch and the completion RPC is detected and re-settled (not failed) on
  * the next sweep. Best-effort: failure to record only delays detection.
  */
-async function recordPayoutAttempted(withdrawalId, settlementRef) {
+async function recordDispatchOutcome(withdrawalId, settlementRef) {
   const { error } = await supabaseAdmin
-    .from('wallet_transactions')
-    .update({
-      payout_attempted_at: new Date().toISOString(),
-      settlement_ref: settlementRef,
-    })
-    .eq('id', withdrawalId)
-    .is('payout_attempted_at', null);
+    .from("wallet_transactions")
+    .update({ settlement_ref: settlementRef })
+    .eq("id", withdrawalId)
+    .is("settlement_ref", null);
 
   if (error) {
-    logger.warn(`[WithdrawalSettlementWorker] Failed to record payout attempt for ${withdrawalId}: ${error.message}`);
+    logger.warn(
+      `[WithdrawalSettlementWorker] Failed to record dispatch outcome for ${withdrawalId}: ${error.message}`,
+    );
   }
 }
 
@@ -38,7 +63,7 @@ async function recordPayoutAttempted(withdrawalId, settlementRef) {
 async function settleWithRetry(withdrawalId, settlementRef) {
   let lastError = null;
   for (let attempt = 1; attempt <= SETTLE_RETRY_ATTEMPTS; attempt += 1) {
-    const { error } = await supabaseAdmin.rpc('settle_withdrawal_tx', {
+    const { error } = await supabaseAdmin.rpc("settle_withdrawal_tx", {
       p_withdrawal_id: withdrawalId,
       p_settlement_ref: settlementRef,
     });
@@ -50,14 +75,18 @@ async function settleWithRetry(withdrawalId, settlementRef) {
       await sleep(SETTLE_RETRY_DELAYS_MS[attempt - 1]);
     }
   }
-  throw new Error(`Failed to settle withdrawal ${withdrawalId}: ${lastError.message}`);
+  throw new Error(
+    `Failed to settle withdrawal ${withdrawalId}: ${lastError.message}`,
+  );
 }
 
 /**
  * Settles 'pending' withdrawal wallet_transactions:
  *   1. loads the oldest un-settled pending withdrawals;
- *   2. dispatches the payout through the configured payout provider;
- *   3. marks the withdrawal completed (settle_withdrawal_tx) or failed
+ *   2. atomically claims each unclaimed row (payout_attempted_at IS NULL) so
+ *      exactly one concurrent sweep dispatches it;
+ *   3. dispatches the payout through the configured payout provider;
+ *   4. marks the withdrawal completed (settle_withdrawal_tx) or failed
  *      (fail_withdrawal_tx) with the reserved funds restored to
  *      wallet_confirmed.
  *
@@ -70,26 +99,32 @@ async function settleWithRetry(withdrawalId, settlementRef) {
  */
 export async function settlePendingWithdrawals() {
   if (!supabaseAdmin) {
-    logger.warn('[WithdrawalSettlementWorker] supabaseAdmin unavailable - skipping settlement cycle.');
+    logger.warn(
+      "[WithdrawalSettlementWorker] supabaseAdmin unavailable - skipping settlement cycle.",
+    );
     return;
   }
 
   if (!isPayoutProviderConfigured()) {
-    logger.warn('[WithdrawalSettlementWorker] No payout provider configured (WITHDRAWAL_PAYOUT_PROVIDER / WITHDRAWAL_PAYOUT_WEBHOOK_URL) - skipping so withdrawals are never falsely completed.');
+    logger.warn(
+      "[WithdrawalSettlementWorker] No payout provider configured (WITHDRAWAL_PAYOUT_PROVIDER / WITHDRAWAL_PAYOUT_WEBHOOK_URL) - skipping so withdrawals are never falsely completed.",
+    );
     return;
   }
 
   const { data: withdrawals, error } = await supabaseAdmin
-    .from('wallet_transactions')
-    .select('id, driver_id, amount, payout_attempted_at, settlement_ref')
-    .eq('txn_type', 'withdrawal')
-    .eq('status', 'pending')
-    .is('settled_at', null)
-    .order('created_at', { ascending: true })
+    .from("wallet_transactions")
+    .select("id, driver_id, amount, payout_attempted_at, settlement_ref")
+    .eq("txn_type", "withdrawal")
+    .eq("status", "pending")
+    .is("settled_at", null)
+    .order("created_at", { ascending: true })
     .limit(BATCH_LIMIT);
 
   if (error) {
-    logger.error(`[WithdrawalSettlementWorker] Failed to load pending withdrawals: ${error.message}`);
+    logger.error(
+      `[WithdrawalSettlementWorker] Failed to load pending withdrawals: ${error.message}`,
+    );
     return;
   }
 
@@ -101,6 +136,16 @@ export async function settlePendingWithdrawals() {
     let settlementRef = withdrawal.settlement_ref;
 
     if (!withdrawal.payout_attempted_at) {
+      // 1. ATOMIC CLAIM: reserve the row BEFORE dispatching so two concurrent
+      //    sweeps cannot both call dispatchPayout for the same withdrawal.
+      const claimed = await claimWithdrawal(withdrawal.id);
+      if (!claimed) {
+        logger.info(
+          `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} already claimed by another worker - skipping dispatch.`,
+        );
+        continue;
+      }
+
       try {
         const result = await dispatchPayout({
           driverId: withdrawal.driver_id,
@@ -108,21 +153,28 @@ export async function settlePendingWithdrawals() {
         });
         settlementRef = result.settlementRef;
 
-        // Persist the dispatch outcome BEFORE the completion RPC so a crash in
-        // between is detected and settled (not failed) on the next sweep.
-        await recordPayoutAttempted(withdrawal.id, settlementRef);
+        // 2. Persist the dispatch outcome BEFORE the completion RPC so a crash
+        //    in between is detected and settled (not failed) on the next sweep.
+        await recordDispatchOutcome(withdrawal.id, settlementRef);
       } catch (err) {
         // The payout never left the platform — safe to restore the reserved
         // funds to wallet_confirmed.
-        logger.error(`[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} payout dispatch failed: ${err.message}`);
+        logger.error(
+          `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} payout dispatch failed: ${err.message}`,
+        );
 
-        const { error: failErr } = await supabaseAdmin.rpc('fail_withdrawal_tx', {
-          p_withdrawal_id: withdrawal.id,
-          p_error: String(err.message || 'Unknown error').slice(0, 1000),
-        });
+        const { error: failErr } = await supabaseAdmin.rpc(
+          "fail_withdrawal_tx",
+          {
+            p_withdrawal_id: withdrawal.id,
+            p_error: String(err.message || "Unknown error").slice(0, 1000),
+          },
+        );
 
         if (failErr) {
-          logger.error(`[WithdrawalSettlementWorker] Failed to mark withdrawal ${withdrawal.id} as failed: ${failErr.message}`);
+          logger.error(
+            `[WithdrawalSettlementWorker] Failed to mark withdrawal ${withdrawal.id} as failed: ${failErr.message}`,
+          );
         }
         continue;
       }
@@ -133,9 +185,13 @@ export async function settlePendingWithdrawals() {
     // row 'pending' and let the next sweep retry the idempotent settle call.
     try {
       await settleWithRetry(withdrawal.id, settlementRef);
-      logger.info(`[WithdrawalSettlementWorker] Settled withdrawal ${withdrawal.id} (ref: ${settlementRef}).`);
+      logger.info(
+        `[WithdrawalSettlementWorker] Settled withdrawal ${withdrawal.id} (ref: ${settlementRef}).`,
+      );
     } catch (err) {
-      logger.error(`[WithdrawalSettlementWorker] Settlement of withdrawal ${withdrawal.id} deferred — payout already dispatched, funds NOT restored: ${err.message}`);
+      logger.error(
+        `[WithdrawalSettlementWorker] Settlement of withdrawal ${withdrawal.id} deferred — payout already dispatched, funds NOT restored: ${err.message}`,
+      );
     }
   }
 }
@@ -145,25 +201,35 @@ export const startWithdrawalSettlementWorker = () => {
 
   const INTERVAL_MS = 60 * 1000; // Poll every 1 minute
 
-  const tracedHandler = WorkerTracer.wrapIntervalWorker('withdrawal-settlement-worker', async () => {
-    await settlePendingWithdrawals();
-  }, { intervalMs: INTERVAL_MS });
+  const tracedHandler = WorkerTracer.wrapIntervalWorker(
+    "withdrawal-settlement-worker",
+    async () => {
+      await settlePendingWithdrawals();
+    },
+    { intervalMs: INTERVAL_MS },
+  );
 
   intervalId = setInterval(async () => {
     try {
       await tracedHandler();
     } catch (err) {
-      logger.error(`[WithdrawalSettlementWorker] Error in polling loop: ${err.message}`);
+      logger.error(
+        `[WithdrawalSettlementWorker] Error in polling loop: ${err.message}`,
+      );
     }
   }, INTERVAL_MS);
 
-  logger.info('[WithdrawalSettlementWorker] Started wallet withdrawal settlement worker.');
+  logger.info(
+    "[WithdrawalSettlementWorker] Started wallet withdrawal settlement worker.",
+  );
 };
 
 export const stopWithdrawalSettlementWorker = () => {
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
-    logger.info('[WithdrawalSettlementWorker] Stopped wallet withdrawal settlement worker.');
+    logger.info(
+      "[WithdrawalSettlementWorker] Stopped wallet withdrawal settlement worker.",
+    );
   }
 };

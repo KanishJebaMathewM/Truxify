@@ -60,6 +60,9 @@ router.post('/verify', authenticate, zkpVerifyLimiter, async (req, res) => {
     if (!userId) {
       return res.status(400).json({ success: false, error: 'userId is required' });
     }
+    if (userId !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
 
     const result = await zkpService.verifyDriver({
       userId,
@@ -102,6 +105,9 @@ router.post('/verify', authenticate, zkpVerifyLimiter, async (req, res) => {
 router.get('/status/:userId', authenticate, async (req, res) => {
   try {
     const { userId } = req.params;
+    if (userId !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Forbidden' });
+    }
     const verified = await zkpService.isVerified(userId);
     return res.status(200).json({ success: true, verified });
   } catch (error) {

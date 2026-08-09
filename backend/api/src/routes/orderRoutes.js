@@ -144,7 +144,18 @@ import multer from 'multer';
 import crypto from 'crypto';
 import rateLimit from 'express-rate-limit';
 
-import { bidLimiter, userLimiter, userKeyGenerator, podUploadLimiter, createStore, verifyDeliveryLimiter, resendOtpLimiter, changeDropLimiter, predictDemandLimiter, telemetryLimiter } from '../middleware/rateLimiter.js';
+import {
+  bidLimiter,
+  userLimiter,
+  userKeyGenerator,
+  podUploadLimiter,
+  createStore,
+  verifyDeliveryLimiter,
+  resendOtpLimiter,
+  changeDropLimiter,
+  predictDemandLimiter,
+  telemetryLimiter,
+} from '../middleware/rateLimiter.js';
 import { mongoDb, supabase, redisClient, createUserClient, supabaseAdmin } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -177,61 +188,17 @@ import {
   confirmEscrowRefund,
 } from '../core/container.js';
 import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei } from '../services/escrow.js';
-import { getEscrowBookingId, paisaToMaticWei } from '../services/escrow.js';
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 
-const verifyDeliveryLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || 'unknown',
-  store: createStore('rl:verify-delivery:'),
-  message: { error: 'Too many delivery verification attempts. Please try again later.' },
-});
-
-const predictDemandLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 10,
-  keyGenerator: (req) => req.user?.id || 'unauthenticated',
-  store: createStore('rl:predict-demand:'),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many demand prediction requests. Please try again later.' },
-});
-
-const telemetryLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 30,
-  keyGenerator: userKeyGenerator,
-  store: createStore('rl:telemetry:'),
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many telemetry requests. Please try again later.' },
-});
-
-const resendOtpLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || 'unknown',
-  store: createStore('rl:resend-otp:'),
-  message: { error: 'Too many OTP resend requests. Please try again later.' },
-});
-
-const changeDropLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: process.env.NODE_ENV === 'test' ? 1000 : 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => req.user?.id || 'unknown',
-  store: createStore('rl:change-drop:'),
-  message: { error: 'Too many drop change requests. Please try again later.' },
-});
-
 const router = express.Router();
+
+const getOrderResource = async (req) => {
+  const { id } = req.params;
+  if (!id) return null;
+  return await orderService.getOrderById(id);
+};
+
 
 router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
@@ -243,9 +210,6 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
     return res.status(400).json({ error: 'Invalid driver_lat or driver_lng' });
   }
 
-  const geofenceRadiusM = geofence_radius_m !== undefined ? parseFloat(geofence_radius_m) : undefined;
-  if (geofenceRadiusM !== undefined && (!Number.isFinite(geofenceRadiusM) || geofenceRadiusM <= 0)) {
-    return res.status(400).json({ error: 'Invalid geofence_radius_m' });
   let geofenceRadiusM;
   if (geofence_radius_m !== undefined) {
     geofenceRadiusM = parseFloat(geofence_radius_m);
@@ -279,30 +243,6 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
       geofenceRadiusM,
     });
 
-      'id, driver_id, customer_id',
-    );
-    orderValidationService.assertOrderFound(order);
-    orderValidationService.assertDriverAssignment(order, req.user.id);
-
-    logger.info(
-      {
-        event: 'GEOFENCE_CONFIRM_ATTEMPT',
-        orderId: req.params.id,
-        driverId: req.user.id,
-        lat,
-        lng,
-      },
-      'Driver geofence confirm attempt',
-    );
-
-    const result = await orderLifecycleService.deliveryVerification.geofenceAutoConfirm({
-      orderId: req.params.id,
-      driverId: req.user.id,
-      driverLat: lat,
-      driverLng: lng,
-      geofenceRadiusM,
-    });
-
     return res.json(result);
   } catch (err) {
     if (err instanceof DomainError) {
@@ -313,7 +253,6 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
   }
 }
 );
-});
 
 // ============================================================================
 // 13c. DRIVER OTP CONFIRM ALIAS — POST /api/deliveries/:id/confirm-otp
@@ -394,50 +333,6 @@ const deliveryVerificationMiddleware = [
   validateParams(paramIdSchema),
   validateBody(verifyDeliverySchema),
 ];
-  async (req, res) => {
-    try {
-      const order = await orderValidationService.findOrderByIdOrDisplayId(
-        req.params.id,
-        'id, driver_id, customer_id'
-      );
-      orderValidationService.assertOrderFound(order);
-      orderValidationService.assertDriverAssignment(order, req.user.id);
-
-      logger.info({
-        event: 'CONFIRM_OTP_ATTEMPT',
-        orderId: req.params.id,
-        driverId: req.user.id,
-      }, 'Driver OTP confirm attempt');
-
-      const { escrowUpdateFailed } = await orderLifecycleService.verifyDeliveryFn(
-        req.params.id,
-        req.user.id,
-        req.body.otp,
-        req.token ? createUserClient(req.token) : undefined
-      );
-
-      // Fetch the released amount to include in the response
-      const orderForAmount = await orderValidationService.findOrderByIdOrDisplayId(
-        req.params.id,
-        'total_amount, order_display_id'
-      );
-      const amountInr = orderForAmount?.total_amount
-        ? (orderForAmount.total_amount / 100).toFixed(0)
-        : null;
-
-      if (escrowUpdateFailed) {
-        logger.warn(
-          '[confirm-otp] Escrow payout requires reconciliation.',
-          { orderId: req.params.id, driverId: req.user.id }
-        );
-        return res.status(202).json({
-          message: 'Delivery confirmed. Payout is pending reconciliation.',
-          payment_released: false,
-          escrow_status: 'released',
-          reconciliation_required: true,
-          amount_inr: amountInr,
-        });
-      }
 
 router.post('/:id/confirm-otp', deliveryVerificationMiddleware, handleDeliveryVerification);
 router.post('/:id/verify-delivery', deliveryVerificationMiddleware, handleDeliveryVerification);
@@ -560,8 +455,6 @@ router.put('/:id/change-drop', authenticate, userLimiter, changeDropLimiter, req
     // at deposit time and on release), so it must track total_amount using the
     // same canonical paisa→wei conversion the rest of the escrow pipeline uses.
     const newAmountWei = paisaToMaticWei(pricing.totalAmount);
-    // at deposit time and read on release), so it must track total_amount.
-    const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
 
     const updates = {
       drop_address,
@@ -750,7 +643,22 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
           logger.error('[confirm-deposit] Escrow refund also failed:', refundErr.message);
           refundResult = { error: refundErr.message };
         }
-        const refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
+        let refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
+        if (refundConfirmed && typeof refundResult.waitForConfirmation === 'function') {
+          try {
+            await refundResult.waitForConfirmation();
+          } catch (confirmErr) {
+            logger.error('[confirm-deposit] Escrow refund confirmation failed:', confirmErr.message);
+            refundResult = { error: confirmErr.message, txHash: refundResult.txHash };
+            refundConfirmed = false;
+          }
+        } else if (refundConfirmed && typeof refundResult.waitForConfirmation !== 'function') {
+          refundConfirmed = false;
+          refundResult = {
+            error: refundResult.error || 'escrow refund confirmation is unavailable',
+            txHash: refundResult.txHash,
+          };
+        }
 
         if (!refundConfirmed) {
           // The deposit is still locked on-chain. Keep escrow_booking_id and
@@ -770,7 +678,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
           });
         }
 
-        // Refund confirmed — safe to release the escrow booking reference.
+        // Refund confirmed on-chain — safe to release the escrow booking reference.
         await orderRepository.revertEscrowStatus(orderId).catch((revertErr) => {
           logger.error('[confirm-deposit] Failed to revert escrow status:', revertErr.message);
         });

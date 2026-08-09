@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
-import jwt from "jsonwebtoken";
 import logger from "../middleware/logger.js";
+import { verifyAuthToken } from "../middleware/auth.js";
 import { GpsLog } from "../models/GpsLog.js";
 import { supabase } from "../config/db.js";
 
@@ -108,7 +108,7 @@ export function getActiveDriverCount() {
  *  /customer namespace — Customer app subscribes to booking rooms here
  *
  * Auth:
- *  Both namespaces require a valid JWT in socket.handshake.auth.token
+ *  Both namespaces require a valid Firebase/Supabase token in socket.handshake.auth.token
  *
  * Dead-connection handling (issue #5728):
  *  In addition to Socket.IO's transport-level ping/pong (pingInterval /
@@ -365,9 +365,9 @@ async function verifyDriverToken(socket, next) {
       return next();
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    const profile = await verifyAuthToken(token);
 
-    if (decoded.role !== "driver") {
+    if (profile.role !== "driver") {
       return next(new Error("Forbidden: driver role required"));
     }
 
@@ -376,12 +376,12 @@ async function verifyDriverToken(socket, next) {
       return next(new Error("bookingId required in handshake auth"));
     }
 
-    const isAssignedDriver = await verifyDriverAssignment(decoded.sub, bookingId);
+    const isAssignedDriver = await verifyDriverAssignment(profile.id, bookingId);
     if (!isAssignedDriver) {
       return next(new Error("Forbidden: driver is not assigned to this booking"));
     }
 
-    socket.data.driverId = decoded.sub;
+    socket.data.driverId = profile.id;
     socket.data.bookingId = bookingId;
 
     next();
@@ -406,13 +406,13 @@ async function verifyCustomerToken(socket, next) {
       return next();
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET, { algorithms: ['HS256'] });
+    const profile = await verifyAuthToken(token);
 
-    if (decoded.role !== "customer") {
+    if (profile.role !== "customer") {
       return next(new Error("Forbidden: customer role required"));
     }
 
-    socket.data.customerId = decoded.sub;
+    socket.data.customerId = profile.id;
     next();
   } catch (error) {
     next(new Error(`Authentication failed: ${error.message}`));

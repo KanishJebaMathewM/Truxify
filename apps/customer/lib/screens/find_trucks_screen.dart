@@ -335,6 +335,9 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       minCapacity: _filterMinCapacity > 0 ? _filterMinCapacity : null,
       maxCapacity: _filterMaxCapacity < 25 ? _filterMaxCapacity : null,
       materialType: _filterMaterialType != 'Any' ? _filterMaterialType : null,
+      requiresRefrigeration: _requirements.contains('Temperature control'),
+      targetTemperatureMin: double.tryParse(_tempMinController.text),
+      targetTemperatureMax: double.tryParse(_tempMaxController.text),
     );
   }
 

@@ -2,8 +2,30 @@ import express from 'express';
 import eventStore from './event-store.js';
 import { supabase } from '../api/src/config/db.js';
 import logger from '../api/src/middleware/logger.js';
+import { EventStoreError } from './errors.js';
 
 const router = express.Router();
+
+/**
+ * Controlled error response: typed event-store errors are translated to their
+ * HTTP status with a public message; everything else collapses to a generic
+ * 500 so SQL errors, Supabase internals and stack traces never reach clients.
+ */
+function sendEventStoreError(res, error, fallbackMessage) {
+    logger.error(fallbackMessage, error);
+    if (error instanceof EventStoreError) {
+        return res.status(error.httpStatus).json({
+            success: false,
+            error: error.message,
+            code: error.code,
+        });
+    }
+    return res.status(500).json({
+        success: false,
+        error: fallbackMessage,
+        code: 'EVENT_STORE_INTERNAL_ERROR',
+    });
+}
 
 // Handle command
 router.post('/eventsourcing/command', async (req, res) => {
@@ -25,8 +47,7 @@ router.post('/eventsourcing/command', async (req, res) => {
             timestamp: new Date().toISOString()
         });
     } catch (error) {
-        logger.error('Command error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        sendEventStoreError(res, error, 'Command processing failed');
     }
 });
 
@@ -41,8 +62,7 @@ router.get('/eventsourcing/order/:orderId', async (req, res) => {
             timestamp: new Date().toISOString()
         });
     } catch (error) {
-        logger.error('Get order error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        sendEventStoreError(res, error, 'Get order error');
     }
 });
 
@@ -62,8 +82,7 @@ router.get('/eventsourcing/orders', async (req, res) => {
             timestamp: new Date().toISOString()
         });
     } catch (error) {
-        logger.error('Get orders error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        sendEventStoreError(res, error, 'Get orders error');
     }
 });
 
@@ -79,8 +98,7 @@ router.get('/eventsourcing/stream/:aggregateId', async (req, res) => {
             timestamp: new Date().toISOString()
         });
     } catch (error) {
-        logger.error('Get event stream error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        sendEventStoreError(res, error, 'Get event stream error');
     }
 });
 
@@ -95,8 +113,7 @@ router.get('/eventsourcing/state/:aggregateId', async (req, res) => {
             timestamp: new Date().toISOString()
         });
     } catch (error) {
-        logger.error('Get state error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        sendEventStoreError(res, error, 'Get state error');
     }
 });
 
@@ -110,33 +127,40 @@ router.get('/eventsourcing/stats', async (req, res) => {
             timestamp: new Date().toISOString()
         });
     } catch (error) {
-        logger.error('Get stats error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        sendEventStoreError(res, error, 'Get stats error');
     }
 });
 
 // Rebuild projections
+// Loads every persisted event, groups by aggregate, and reconstructs each
+// aggregate from its latest valid snapshot plus only the newer events (see
+// EventStoreCore.rebuildFromRows). Read models therefore match live aggregates.
 router.post('/eventsourcing/rebuild', async (req, res) => {
     try {
-        // Rebuild all projections from events
-        const { data: events } = await supabase
+        const { data, error } = await supabase
             .from('event_store')
             .select('*')
             .order('timestamp', { ascending: true });
 
-        for (const event of events) {
-            await eventStore.updateReadModel(event);
+        if (error) {
+            logger.error('Rebuild error:', error);
+            return res.status(500).json({
+                success: false,
+                error: 'Projection rebuild failed',
+                code: 'EVENT_STORE_INTERNAL_ERROR',
+            });
         }
+
+        const result = await eventStore.rebuildProjections(data || []);
 
         res.json({
             success: true,
             message: 'Projections rebuilt',
-            count: events.length,
+            ...result,
             timestamp: new Date().toISOString()
         });
     } catch (error) {
-        logger.error('Rebuild error:', error);
-        res.status(500).json({ success: false, error: error.message });
+        sendEventStoreError(res, error, 'Projection rebuild failed');
     }
 });
 

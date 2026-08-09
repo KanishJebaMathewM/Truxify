@@ -183,12 +183,12 @@ begin
       milestone_time = now()
   where order_display_id = v_order.order_display_id and milestone = 'Delivered';
 
-  -- Update driver's wallet
+  -- Update driver's wallet (using bid_amount payout basis, falling back to total_amount)
   update driver_details
   set
     total_trips = total_trips + 1,
-    wallet_confirmed = wallet_confirmed + v_order.total_amount,
-    wallet_total = wallet_total + v_order.total_amount,
+    wallet_confirmed = wallet_confirmed + coalesce(v_order.bid_amount, v_order.total_amount),
+    wallet_total = wallet_total + coalesce(v_order.bid_amount, v_order.total_amount),
     updated_at = now()
   where user_id = v_order.driver_id;
 
@@ -198,7 +198,7 @@ begin
   ) values (
     v_order.driver_id,
     v_order.order_display_id,
-    v_order.total_amount,
+    coalesce(v_order.bid_amount, v_order.total_amount),
     'credit',
     'confirmed',
     'Payout for Order ' || v_order.order_display_id
@@ -206,7 +206,7 @@ begin
 
   -- Update daily earnings summary
   insert into earnings_daily (driver_id, day_date, amount, trip_count)
-  values (v_order.driver_id, current_date, v_order.total_amount, 1)
+  values (v_order.driver_id, current_date, coalesce(v_order.bid_amount, v_order.total_amount), 1)
   on conflict (driver_id, day_date)
   do update set
     amount = earnings_daily.amount + excluded.amount,

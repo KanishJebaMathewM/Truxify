@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import mlService from '../../src/services/ml.js';
 
-describe('mlService handleResponse error context', () => {
+describe('ml handleResponse error context', () => {
   it('should include method, url, and status in non-ok error message', async () => {
     const mockResponse = {
       status: 500,
@@ -11,7 +11,7 @@ describe('mlService handleResponse error context', () => {
 
     await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/predict', 'POST'))
       .rejects
-      .toThrow(/POST.*https:\/\/api\.ml\.com\/predict.*500/);
+      .toThrow(/500.*POST.*https:\/\/api\.ml\.com\/predict/);
   });
 
   it('should include method, url, and status 401 for unauthorized', async () => {
@@ -23,7 +23,7 @@ describe('mlService handleResponse error context', () => {
 
     await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/embed', 'GET'))
       .rejects
-      .toThrow(/GET.*https:\/\/api\.ml\.com\/embed.*401/);
+      .toThrow(/401.*GET.*https:\/\/api\.ml\.com\/embed/);
   });
 
   it('should include method, url, and status 403 for forbidden', async () => {
@@ -35,6 +35,6 @@ describe('mlService handleResponse error context', () => {
 
     await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/train', 'PUT'))
       .rejects
-      .toThrow(/PUT.*https:\/\/api\.ml\.com\/train.*403/);
+      .toThrow(/403.*PUT.*https:\/\/api\.ml\.com\/train/);
   });
 });

@@ -16,9 +16,13 @@ export function normalizePhone(phone) {
     return null;
   }
 
-  // Strip all non-digit characters except leading +
-  const isInternational = phone.trim().startsWith('+');
+  // Strip all non-digit characters
   let digits = phone.replace(/[^\d]/g, '');
+
+  // Strip a leading trunk prefix 0 (e.g. 0919876543210 -> 919876543210)
+  if (digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
 
   // Remove country code prefix if present (91 for India)
   if (digits.startsWith('91') && digits.length === 12) {

@@ -59,6 +59,8 @@ class OrderService {
     bool requiresRefrigeration = false,
     double? targetTemperatureMin,
     double? targetTemperatureMax,
+    String? driverId,
+    String? truckId,
   }) async {
     try {
       final body = await _apiClient.post(
@@ -79,6 +81,8 @@ class OrderService {
           if (requiresRefrigeration) 'requires_refrigeration': true,
           if (targetTemperatureMin != null) 'target_temperature_min': targetTemperatureMin,
           if (targetTemperatureMax != null) 'target_temperature_max': targetTemperatureMax,
+          if (driverId != null && driverId.isNotEmpty) 'driver_id': driverId,
+          if (truckId != null && truckId.isNotEmpty) 'truck_id': truckId,
         },
       ) as Map<String, dynamic>?;
 

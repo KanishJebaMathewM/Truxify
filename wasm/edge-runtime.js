@@ -1,4 +1,5 @@
 import fs from 'fs';
+import { createHash } from 'crypto';
 import { WASI } from 'wasi';
 import { createRequire } from 'module';
 import logger from '../backend/api/src/middleware/logger.js';
@@ -45,9 +46,57 @@ class EdgeRuntime {
                 logger.warn('⚠️ WASM binary file not found, initializing native JS calculation fallback engine');
                 this.wasmModules.set('default', {
                     exports: {
-                        calculate_route: (params) => ({ distance_km: params.distance || 15.4, eta_mins: 28, cost: 450 }),
-                        calculate_eta: (dist, speed, traffic) => (dist / (speed || 40)) * 60 * (traffic || 1.1),
-                        get_stats: () => ({ memory_used_mb: 4.2, active_functions: 6 })
+                        calculate_route: (params) => {
+                            const basePrice = (params.distance || 0) * 10.0;
+                            const weightFactor = (params.weight || 0) / 1000.0;
+                            return {
+                                estimated_price: basePrice * (1.0 + weightFactor * 0.5),
+                                estimated_time: (params.distance || 0) / 40.0,
+                                route_id: `route_${Date.now()}`,
+                                status: 'calculated'
+                            };
+                        },
+                        process_driver_location: (drivers) => (drivers || []).map((driver) => {
+                            const updated = { ...driver };
+                            if (driver.speed > 80) updated.status = 'fast';
+                            else if (driver.speed > 50) updated.status = 'normal';
+                            else updated.status = 'slow';
+                            return updated;
+                        }),
+                        optimize_loads: (loads, capacity) => {
+                            const selected = [];
+                            let remaining = capacity || 0;
+                            (loads || []).forEach((weight, i) => {
+                                if (weight <= remaining) {
+                                    selected.push(i);
+                                    remaining -= weight;
+                                }
+                            });
+                            return selected;
+                        },
+                        calculate_eta: (distance, speed, trafficFactor) =>
+                            distance / (speed * (1.0 - (trafficFactor || 0))),
+                        filter_drivers: (drivers, minRating) =>
+                            (drivers || []).filter((d) => d.status !== 'offline' && d.rating >= (minRating || 0)),
+                        aggregate_prices: (prices) =>
+                            prices && prices.length ? prices.reduce((a, b) => a + b, 0) / prices.length : 0,
+                        hash_data: (data) => createHash('sha256').update(String(data)).digest('hex'),
+                        compress_data: (data) => {
+                            if (!data || data.length === 0) return [];
+                            const compressed = [];
+                            let count = 1;
+                            for (let i = 1; i < data.length; i++) {
+                                if (data[i] === data[i - 1]) {
+                                    count += 1;
+                                } else {
+                                    compressed.push(data[i - 1], count);
+                                    count = 1;
+                                }
+                            }
+                            compressed.push(data[data.length - 1], count);
+                            return compressed;
+                        },
+                        get_stats: () => ({ memory_used_mb: 4.2, active_functions: 8 })
                     }
                 });
             }
@@ -59,6 +108,18 @@ class EdgeRuntime {
     }
 
     async executeEdgeFunction(functionName, params) {
+        const moduleEntry = this.wasmModules.get('default');
+
+        if (moduleEntry && moduleEntry.exports && !moduleEntry.instance && typeof moduleEntry.exports[functionName] === 'function') {
+            try {
+                const result = await this.executeWithTimeout(() => moduleEntry.exports[functionName](...params), this.timeoutLimit);
+                return { success: true, result };
+            } catch (err) {
+                logger.error(`Edge function '${functionName}' failed: ${err.message}`);
+                return { success: false, error: err.message };
+            }
+        }
+
         return new Promise((resolve) => {
             const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 

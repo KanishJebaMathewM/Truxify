@@ -171,7 +171,7 @@ class KeyRotationService {
         const tx = await signer.sendTransaction({
           to: this.escrowContract.target,
           data: this.escrowContract.interface.encodeFunctionData('transferKeyOwnership', [
-            newPrivateKey,
+            walletAddress,
             Date.now(),
           ]),
         });

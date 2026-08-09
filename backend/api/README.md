@@ -52,6 +52,24 @@ npm run test:integration
 
 ## 🚦 Load Testing
 
+Load testing is performed using [k6](https://k6.io/).
+
+### Prerequisites
+
+- Install k6 (e.g., `brew install k6` or follow official OS installation guides).
+- Ensure `BYPASS_AUTH=true` is set in `.env`.
+- Run `npm run seed:dev` first so the dummy driver profile exists.
+
+### Running Load Tests
+
+- REST API load test (simulates traffic spike up to 500 VUs):
+  ```bash
+  npm run test:load:api
+  ```
+- WebSocket load test (simulates 100 sustained VUs sending GPS updates):
+  ```bash
+  npm run test:load:ws
+  ```
 Ensure `k6` is installed on your system (e.g., `brew install k6` or official k6 installation instructions).
 
 Set `BYPASS_AUTH=true` in `.env` and execute the seeding command first to create the dummy driver profile:

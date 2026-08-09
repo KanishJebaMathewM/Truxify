@@ -1,5 +1,3 @@
-import kafka from '../kafka/config/kafka.config.js';
-import { TOPICS } from '../kafka/config/kafka.config.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
@@ -8,26 +6,150 @@ import { ContextPropagator } from '../api/src/core/telemetry/ContextPropagator.j
 import spanFactory from '../api/src/core/telemetry/SpanFactory.js';
 import { context, trace, SpanStatusCode } from '@opentelemetry/api';
 
+import { EventStoreCore, normalizeEventRow } from './event-sourcing-core.js';
+import {
+  EventStoreValidationError,
+  EventStoreVersionConflictError,
+  EventStorePersistenceError,
+  toEventStoreError,
+} from './errors.js';
+
+// Topic names mirror the values in backend/kafka/config/kafka.config.js.
+// They are duplicated here (instead of importing TOPICS) so this package does
+// not statically depend on kafkajs, which is not part of the repo's install.
+const EVENT_TOPIC_MAP = {
+  ORDER_CREATED: 'order.created',
+  ORDER_UPDATED: 'order.updated',
+  ORDER_CANCELLED: 'order.cancelled',
+  DRIVER_ASSIGNED: 'driver.assigned',
+};
+
+const SNAPSHOT_THRESHOLD_ENV = Number(process.env.EVENT_STORE_SNAPSHOT_THRESHOLD) || 50;
+
+/**
+ * Persistence adapter translating the core's `db` contract to Supabase.
+ * All insert/lookup logic (expected-version checks, uniqueness enforcement,
+ * snapshot validation) lives in EventStoreCore; this adapter only moves rows.
+ */
+function createSupabaseDb(supabaseClient, loggerAdapter) {
+  return {
+    async fetchEventStream(aggregateId) {
+      const { data, error } = await supabaseClient
+        .from('event_store')
+        .select('*')
+        .eq('aggregate_id', aggregateId)
+        .order('version', { ascending: true });
+      if (error) {
+        loggerAdapter.error(`Failed to fetch event stream for ${aggregateId}:`, error);
+        throw toEventStoreError(error, { aggregateId });
+      }
+      return data || [];
+    },
+
+    async fetchLatestVersion(aggregateId) {
+      const { data, error } = await supabaseClient
+        .from('event_store')
+        .select('version')
+        .eq('aggregate_id', aggregateId)
+        .order('version', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) {
+        throw toEventStoreError(error, { aggregateId });
+      }
+      return data;
+    },
+
+    async insertEvent(row) {
+      // Single atomic statement: INSERT ... ON CONFLICT (aggregate_id, version)
+      // DO NOTHING. The unique index is the final safety mechanism — when the
+      // version already exists this resolves to `{ data: [] }` and the core
+      // raises a typed EventStoreVersionConflictError.
+      return supabaseClient
+        .from('event_store')
+        .upsert([row], {
+          onConflict: 'aggregate_id,version',
+          ignoreDuplicates: true,
+        });
+    },
+
+    async fetchSnapshot(aggregateId) {
+      const { data, error } = await supabaseClient
+        .from('snapshots')
+        .select('*')
+        .eq('aggregate_id', aggregateId)
+        .single();
+      if (error) {
+        if (error.code === 'PGRST116') {
+          return null; // no rows for this aggregate
+        }
+        loggerAdapter.error(`Failed to fetch snapshot for ${aggregateId}:`, error);
+        throw toEventStoreError(error, { aggregateId });
+      }
+      return data;
+    },
+
+    async upsertSnapshot(row) {
+      return supabaseClient
+        .from('snapshots')
+        .upsert([row], { onConflict: 'aggregate_id' });
+    },
+  };
+}
+
 class EventStore {
-    constructor({ eventBus: externalEventBus } = {}) {
-        this.eventStore = new Map(); // In-memory cache
-        this.eventStreams = new Map();
-        this.snapshots = new Map();
-        this.snapshotThreshold = 50; // Take snapshot every 50 events
+    constructor({ eventBus: externalEventBus = null, db = null, logger: loggerAdapter = logger, snapshotThreshold = SNAPSHOT_THRESHOLD_ENV, client = null } = {}) {
+        this.logger = loggerAdapter;
+        this.snapshotThreshold = snapshotThreshold;
+        this.eventStore = new Map(); // kept for backwards compatibility with getEventStoreStats callers
         this.kafkaProducer = null;
         this.isInitialized = false;
         this._eventBus = externalEventBus || null;
+        this._db = db; // injectable for tests; defaults to supabase-backed adapter
+        this._client = client || supabase; // injectable for tests; defaults to the supabase client
+        this._core = null;
+        this._kafka = undefined; // lazy kafka module (null when unavailable)
     }
 
     setEventBus(eventBus) {
         this._eventBus = eventBus;
     }
 
+    _getCore() {
+        if (!this._core) {
+            this._core = new EventStoreCore({
+                db: this._db || createSupabaseDb(this._client, this.logger),
+                logger: this.logger,
+                snapshotThreshold: this.snapshotThreshold,
+            });
+        }
+        return this._core;
+    }
+
+    async _loadKafka() {
+        if (this._kafka === undefined) {
+            try {
+                this._kafka = await import('../kafka/config/kafka.config.js');
+            } catch (error) {
+                this.logger.warn('kafkajs is not installed — Kafka publishing disabled:', error?.message);
+                this._kafka = null;
+            }
+        }
+        return this._kafka;
+    }
+
     async initialize() {
         if (this.isInitialized) return;
-        this.kafkaProducer = await kafka.getProducer();
+        const kafkaModule = await this._loadKafka();
+        if (kafkaModule) {
+            try {
+                this.kafkaProducer = await kafkaModule.default.getProducer();
+            } catch (error) {
+                this.logger.warn('Kafka producer initialization failed:', error?.message);
+            }
+        }
         this.isInitialized = true;
-        logger.info('✅ EventStore initialized');
+        this.logger.info('✅ EventStore initialized');
     }
 
     // ============ Command Handling ============
@@ -42,39 +164,48 @@ class EventStore {
 
         try {
             await this.initialize();
-            
+
             const commandId = uuidv4();
             const timestamp = new Date().toISOString();
-            
-            logger.info(`📝 Handling command: ${command.type}`, { commandId, aggregateId: command.aggregateId });
+
+            this.logger.info(`📝 Handling command: ${command.type}`, { commandId, aggregateId: command.aggregateId });
 
             const result = await context.with(trace.setSpan(context.active(), span), async () => {
                 // Validate command
                 const validation = await this.validateCommand(command);
                 if (!validation.valid) {
-                    throw new Error(`Command validation failed: ${validation.error}`);
+                    throw new EventStoreValidationError(`Command validation failed: ${validation.error}`);
                 }
 
                 // Execute command and generate events
                 const events = await this.executeCommand(command);
 
-                // Store events
+                // Store events under optimistic concurrency. When a command
+                // emits multiple events, each one chains off the previous.
+                const storedEvents = [];
+                let lastVersion = null;
                 for (const event of events) {
-                    await this.storeEvent(event);
+                    const expectedVersion =
+                        event.expectedVersion !== undefined && event.expectedVersion !== null
+                            ? event.expectedVersion
+                            : lastVersion;
+                    const stored = await this.storeEvent(event, expectedVersion);
+                    lastVersion = stored.version;
+                    storedEvents.push(stored);
                 }
 
-                // Publish events to Kafka
-                await this.publishEvents(events);
+                // Publish events to Kafka / event bus
+                await this.publishEvents(storedEvents);
 
                 // Update read models
-                await this.updateReadModels(events);
+                await this.updateReadModels(storedEvents);
 
                 // Check if snapshot needed
                 await this.checkSnapshot(command.aggregateId);
 
                 return {
                     commandId,
-                    events,
+                    events: storedEvents,
                     timestamp,
                     success: true
                 };
@@ -86,8 +217,8 @@ class EventStore {
         } catch (error) {
             spanFactory.recordError(span, error);
             span.end();
-            logger.error('Command handling failed:', error);
-            throw error;
+            this.logger.error('Command handling failed:', error);
+            throw toEventStoreError(error, { aggregateId: command.aggregateId });
         }
     }
 
@@ -144,12 +275,14 @@ class EventStore {
                     aggregateId: command.aggregateId || `order_${Date.now()}`,
                     payload: command.payload,
                     timestamp,
-                    version: 1
+                    version: 1,
+                    expectedVersion: 0 // a new aggregate must start from version 0
                 });
                 break;
 
-            case 'UPDATE_ORDER':
+            case 'UPDATE_ORDER': {
                 const currentState = await this.getAggregateState(command.aggregateId);
+                const currentVersion = currentState?.version ?? 0;
                 events.push({
                     id: uuidv4(),
                     type: 'ORDER_UPDATED',
@@ -159,11 +292,15 @@ class EventStore {
                         previousState: currentState
                     },
                     timestamp,
-                    version: (currentState?.version || 0) + 1
+                    version: currentVersion + 1,
+                    expectedVersion: currentVersion
                 });
                 break;
+            }
 
-            case 'CANCEL_ORDER':
+            case 'CANCEL_ORDER': {
+                const currentState = await this.getAggregateState(command.aggregateId);
+                const currentVersion = currentState?.version ?? 0;
                 events.push({
                     id: uuidv4(),
                     type: 'ORDER_CANCELLED',
@@ -174,11 +311,15 @@ class EventStore {
                         cancelledAt: timestamp
                     },
                     timestamp,
-                    version: ((await this.getAggregateState(command.aggregateId))?.version || 0) + 1
+                    version: currentVersion + 1,
+                    expectedVersion: currentVersion
                 });
                 break;
+            }
 
-            case 'ASSIGN_DRIVER':
+            case 'ASSIGN_DRIVER': {
+                const currentState = await this.getAggregateState(command.aggregateId);
+                const currentVersion = currentState?.version ?? 0;
                 events.push({
                     id: uuidv4(),
                     type: 'DRIVER_ASSIGNED',
@@ -189,12 +330,14 @@ class EventStore {
                         assignedAt: timestamp
                     },
                     timestamp,
-                    version: ((await this.getAggregateState(command.aggregateId))?.version || 0) + 1
+                    version: currentVersion + 1,
+                    expectedVersion: currentVersion
                 });
                 break;
+            }
 
             default:
-                throw new Error(`Unknown command type: ${command.type}`);
+                throw new EventStoreValidationError(`Unknown command type: ${command.type}`);
         }
 
         return events;
@@ -202,175 +345,40 @@ class EventStore {
 
     // ============ Event Storage ============
 
-    async storeEvent(event) {
-        // Store in memory
-        if (!this.eventStreams.has(event.aggregateId)) {
-            this.eventStreams.set(event.aggregateId, []);
-        }
-        this.eventStreams.get(event.aggregateId).push(event);
-
-        // Store in database
-        const { error } = await supabase
-            .from('event_store')
-            .insert([{
-                event_id: event.id,
-                event_type: event.type,
-                aggregate_id: event.aggregateId,
-                payload: event.payload,
-                version: event.version,
-                timestamp: event.timestamp,
-                created_at: new Date().toISOString()
-            }]);
-
-        if (error) {
-            logger.error('Failed to store event:', error);
-            throw error;
-        }
-
-        logger.info(`✅ Event stored: ${event.type}`, { eventId: event.id, aggregateId: event.aggregateId });
+    /**
+     * Persists an event under optimistic concurrency control. On success the
+     * core also refreshes the in-memory stream cache — a phantom event is
+     * never cached, because the database insert happens first.
+     */
+    async storeEvent(event, expectedVersion) {
+        return this._getCore().appendEvent(event.aggregateId, event, expectedVersion);
     }
 
     async getEventStream(aggregateId) {
-        // Check cache
-        if (this.eventStreams.has(aggregateId)) {
-            return this.eventStreams.get(aggregateId);
-        }
-
-        // Fetch from database
-        const { data, error } = await supabase
-            .from('event_store')
-            .select('*')
-            .eq('aggregate_id', aggregateId)
-            .order('version', { ascending: true });
-
-        if (error) {
-            logger.error('Failed to fetch event stream:', error);
-            return [];
-        }
-
-        const mappedData = (data || []).map(row => ({
-            id: row.event_id || row.id,
-            type: row.event_type || row.type,
-            aggregateId: row.aggregate_id || row.aggregateId,
-            payload: row.payload,
-            version: row.version,
-            timestamp: row.timestamp || row.created_at
-        }));
-
-        this.eventStreams.set(aggregateId, mappedData);
-        return mappedData;
+        return this._getCore().getEventStream(aggregateId);
     }
 
     async getAggregateState(aggregateId) {
-        const snapshot = await this.getSnapshot(aggregateId);
-        let state = snapshot ? { ...snapshot.state } : { id: aggregateId, version: 0 };
-        const snapshotVersion = snapshot ? (snapshot.version || snapshot.state?.version || 0) : 0;
-
-        const events = await this.getEventStream(aggregateId);
-        const eventsToApply = events.filter(e => e.version > snapshotVersion);
-
-        if (!snapshot && eventsToApply.length === 0) {
-            return null;
-        }
-
-        for (const event of eventsToApply) {
-            state = this.applyEvent(state, event);
-        }
-        return state;
+        return this._getCore().getAggregateState(aggregateId);
     }
 
-    applyEvent(state, event) {
-        switch (event.type) {
-            case 'ORDER_CREATED':
-                return {
-                    ...state,
-                    ...event.payload,
-                    status: 'CREATED',
-                    version: event.version
-                };
-            case 'ORDER_UPDATED':
-                return {
-                    ...state,
-                    ...event.payload,
-                    version: event.version
-                };
-            case 'ORDER_CANCELLED':
-                return {
-                    ...state,
-                    status: 'CANCELLED',
-                    cancelledAt: event.payload.cancelledAt,
-                    reason: event.payload.reason,
-                    version: event.version
-                };
-            case 'DRIVER_ASSIGNED':
-                return {
-                    ...state,
-                    driverId: event.payload.driverId,
-                    status: 'ASSIGNED',
-                    version: event.version
-                };
-            default:
-                return state;
-        }
+    /** Clears in-memory caches (all aggregates, or one). Used on cold start. */
+    clearCache(aggregateId) {
+        return this._getCore().clearCache(aggregateId);
     }
 
     // ============ Snapshotting ============
 
     async checkSnapshot(aggregateId) {
-        const events = await this.getEventStream(aggregateId);
-        if (events.length >= this.snapshotThreshold) {
-            const state = await this.getAggregateState(aggregateId);
-            await this.takeSnapshot(aggregateId, state);
-        }
+        return this._getCore().checkSnapshot(aggregateId);
     }
 
-    async takeSnapshot(aggregateId, state) {
-        this.snapshots.set(aggregateId, {
-            state,
-            timestamp: new Date().toISOString(),
-            version: state.version
-        });
-
-        // Store in database
-        const { error } = await supabase
-            .from('snapshots')
-            .upsert([{
-                aggregate_id: aggregateId,
-                state: state,
-                version: state.version,
-                timestamp: new Date().toISOString()
-            }], {
-                onConflict: 'aggregate_id'
-            });
-
-        if (error) {
-            logger.error('Failed to store snapshot:', error);
-        } else {
-            logger.info(`✅ Snapshot taken for ${aggregateId}`);
-            // Clear events up to snapshot
-            this.eventStreams.set(aggregateId, []);
-        }
+    async takeSnapshot(aggregateId, state, version) {
+        return this._getCore().takeSnapshot(aggregateId, state, version);
     }
 
     async getSnapshot(aggregateId) {
-        // Check cache
-        if (this.snapshots.has(aggregateId)) {
-            return this.snapshots.get(aggregateId);
-        }
-
-        // Fetch from database
-        const { data, error } = await supabase
-            .from('snapshots')
-            .select('*')
-            .eq('aggregate_id', aggregateId)
-            .single();
-
-        if (error) {
-            return null;
-        }
-
-        this.snapshots.set(aggregateId, data);
-        return data;
+        return this._getCore().getSnapshot(aggregateId);
     }
 
     // ============ Projections ============
@@ -399,26 +407,41 @@ class EventStore {
         }
     }
 
-    async updateOrderReadModel(event) {
-        const { data, error } = await supabase
+    /**
+     * Persists the aggregate's full reconstructed state as the read model.
+     * Both the live projection path and the rebuild endpoint converge on the
+     * same payload shape (the aggregate state), so `payload->>status` and
+     * `payload->>customerId` filters behave identically after warm writes and
+     * after a rebuild.
+     */
+    async _upsertOrderReadModel(orderId, state, eventType, version) {
+        const { error } = await this._client
             .from('orders_read_model')
             .upsert([{
-                order_id: event.aggregateId,
-                payload: event.payload,
-                event_type: event.type,
-                version: event.version,
+                order_id: orderId,
+                payload: state,
+                event_type: eventType,
+                version: version ?? state?.version,
                 updated_at: new Date().toISOString()
             }], {
                 onConflict: 'order_id'
             });
 
         if (error) {
-            logger.error('Failed to update order read model:', error);
+            this.logger.error('Failed to update order read model:', error);
         }
     }
 
+    async updateOrderReadModel(event) {
+        const state = await this.getAggregateState(event.aggregateId);
+        if (!state) {
+            return;
+        }
+        await this._upsertOrderReadModel(event.aggregateId, state, event.type, event.version);
+    }
+
     async updateDriverReadModel(event) {
-        const { data, error } = await supabase
+        const { error } = await this._client
             .from('drivers_read_model')
             .upsert([{
                 driver_id: event.payload.driverId,
@@ -430,8 +453,52 @@ class EventStore {
             });
 
         if (error) {
-            logger.error('Failed to update driver read model:', error);
+            this.logger.error('Failed to update driver read model:', error);
         }
+    }
+
+    /**
+     * Rebuilds every read model from persisted event rows (used by
+     * POST /eventsourcing/rebuild). Each aggregate is reconstructed from its
+     * latest valid snapshot plus only the newer events, so the rebuild and a
+     * live aggregate have identical state.
+     */
+    async rebuildProjections(rawRows) {
+        const rows = rawRows || [];
+        const aggregates = [...new Set(rows.map((r) => r.aggregate_id ?? r.aggregateId))];
+
+        let orderCount = 0;
+        for (const aggregateId of aggregates) {
+            const aggRows = rows.filter((r) => (r.aggregate_id ?? r.aggregateId) === aggregateId);
+            const sorted = aggRows
+                .map(normalizeEventRow)
+                .filter(Boolean)
+                .sort((a, b) => Number(a.version) - Number(b.version));
+            const lastEventType = sorted.length ? sorted[sorted.length - 1].type : 'REBUILT';
+
+            const state = await this._getCore().rebuildFromRows(aggregateId, aggRows);
+            if (state) {
+                await this._upsertOrderReadModel(aggregateId, state, lastEventType, state.version);
+                orderCount += 1;
+            }
+        }
+
+        const driverEvents = rows
+            .map(normalizeEventRow)
+            .filter((event) => event && event.type === 'DRIVER_ASSIGNED');
+
+        let driverCount = 0;
+        for (const event of driverEvents) {
+            await this.updateDriverReadModel(event);
+            driverCount += 1;
+        }
+
+        return {
+            aggregates: aggregates.length,
+            orderCount,
+            driverCount,
+            eventCount: rows.length,
+        };
     }
 
     // ============ Event Publishing ============
@@ -454,29 +521,28 @@ class EventStore {
                 category: EVENT_CATEGORIES.DOMAIN,
             });
             this._eventBus.publish(baseEvent, { deduplicate: false });
-            logger.info(`📤 Event published via EventBus: ${event.type}`);
+            this.logger.info(`📤 Event published via EventBus: ${event.type}`);
         } else {
             const topic = this.getEventTopic(event.type);
             const enriched = ContextPropagator.injectIntoEventPayload(event);
-            await kafka.publishEvent(topic, enriched, event.aggregateId);
-            logger.info(`📤 Event published to Kafka: ${event.type}`);
+            const kafkaModule = await this._loadKafka();
+            if (!kafkaModule) {
+                this.logger.warn(`Kafka unavailable — skipping publish of ${event.type}`);
+                return;
+            }
+            await kafkaModule.default.publishEvent(topic, enriched, event.aggregateId);
+            this.logger.info(`📤 Event published to Kafka: ${event.type}`);
         }
     }
 
     getEventTopic(eventType) {
-        const topicMap = {
-            'ORDER_CREATED': TOPICS.ORDER_CREATED,
-            'ORDER_UPDATED': TOPICS.ORDER_UPDATED,
-            'ORDER_CANCELLED': TOPICS.ORDER_CANCELLED,
-            'DRIVER_ASSIGNED': TOPICS.DRIVER_ASSIGNED
-        };
-        return topicMap[eventType] || eventType;
+        return EVENT_TOPIC_MAP[eventType] || eventType;
     }
 
     // ============ Query ============
 
     async getOrderReadModel(orderId) {
-        const { data, error } = await supabase
+        const { data, error } = await this._client
             .from('orders_read_model')
             .select('*')
             .eq('order_id', orderId)
@@ -499,7 +565,7 @@ class EventStore {
     }
 
     async getOrderList(filters = {}) {
-        let query = supabase
+        let query = this._client
             .from('orders_read_model')
             .select('*');
 
@@ -515,7 +581,7 @@ class EventStore {
 
         const { data, error } = await query;
         if (error) {
-            logger.error('Failed to get order list:', error);
+            this.logger.error('Failed to get order list:', error);
             return [];
         }
         return data;
@@ -524,13 +590,17 @@ class EventStore {
     // ============ Stats ============
 
     async getEventStoreStats() {
-        const { data: events, count: totalEvents } = await supabase
+        const { data: events, count: totalEvents, error: eventsError } = await this._client
             .from('event_store')
             .select('event_type', { count: 'exact' });
 
-        const { count: totalSnapshots } = await supabase
+        const { count: totalSnapshots, error: snapshotsError } = await this._client
             .from('snapshots')
             .select('*', { count: 'exact', head: true });
+
+        if (eventsError || snapshotsError) {
+            this.logger.error('Failed to read event-store stats:', eventsError || snapshotsError);
+        }
 
         return {
             totalEvents: totalEvents || 0,
@@ -542,6 +612,18 @@ class EventStore {
             timestamp: new Date().toISOString()
         };
     }
+
+    // ============ Optimistic concurrency (adapter level) ============
+
+    /**
+     * Appends an event requiring the current version to match `expectedVersion`.
+     * Exposed for external consumers that want the same guarantee without going
+     * through a full command. Returns the stored domain event.
+     */
+    async appendEvent(aggregateId, event, expectedVersion) {
+        return this._getCore().appendEvent(aggregateId, event, expectedVersion);
+    }
 }
 
 export default new EventStore();
+export { EventStore, EventStoreVersionConflictError, EventStorePersistenceError };

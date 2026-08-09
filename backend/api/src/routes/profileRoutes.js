@@ -756,15 +756,15 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
 
     const trips = orders || [];
     const totalDeliveries = trips.length;
-    const totalDistance = trips.reduce((acc, t) => acc + (Number(t.distance_km) || 12.5), 0);
+    const totalDistance = trips.reduce((acc, t) => acc + (Number(t.distance_km) || 0), 0);
     
     // Calculate average rating
     const ratings = trips.map(t => Number(t.customer_rating)).filter(r => !isNaN(r) && r > 0);
-    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : 4.8;
+    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : 0;
 
     // Calculate on-time percentage
     const onTimeCount = trips.filter(t => t.on_time !== false).length;
-    const onTimePercentage = totalDeliveries > 0 ? Number(((onTimeCount / totalDeliveries) * 100).toFixed(1)) : 100.0;
+    const onTimePercentage = totalDeliveries > 0 ? Number(((onTimeCount / totalDeliveries) * 100).toFixed(1)) : 0;
 
     // Lifetime earnings
     const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);

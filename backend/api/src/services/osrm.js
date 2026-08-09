@@ -23,6 +23,19 @@ const DEFAULT_RETRY_BASE_DELAY_MS = 500;
 const CACHE_TTL_SECONDS = 86400;
 const ROUTE_CACHE_TTL_SECONDS = 30;
 
+export const validateCoordinates = (pickupLat, pickupLng, dropLat, dropLng) => {
+  if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || 
+      !Number.isFinite(dropLat) || !Number.isFinite(dropLng)) {
+    return 'Invalid coordinates provided.';
+  }
+  if (pickupLat < -90 || pickupLat > 90) return 'pickup_lat must be between -90 and 90.';
+  if (pickupLng < -180 || pickupLng > 180) return 'pickup_lng must be between -180 and 180.';
+  if (dropLat < -90 || dropLat > 90) return 'drop_lat must be between -90 and 90.';
+  if (dropLng < -180 || dropLng > 180) return 'drop_lng must be between -180 and 180.';
+  
+  return null;
+};
+
 function parsePositiveNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;

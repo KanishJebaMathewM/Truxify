@@ -67,14 +67,13 @@ export class OrderLifecycleService {
         waypoints = [],
       } = body;
 
-      let optimizedWaypoints = waypoints;
-      if (waypoints && waypoints.length > 0) {
-        optimizedWaypoints = await optimizeWaypoints(
-          { lat: Number(pickup_lat), lng: Number(pickup_lng), address: pickup_address },
-          { lat: Number(drop_lat), lng: Number(drop_lng), address: drop_address },
-          waypoints
-        );
-      }
+      const optimizedWaypoints = await optimizeWaypoints(
+        { lat: Number(pickup_lat), lng: Number(pickup_lng), address: pickup_address },
+        { lat: Number(drop_lat), lng: Number(drop_lng), address: drop_address },
+        waypoints,
+        pickup_date,
+        pickup_time
+      );
 
       let pricing;
       try {
@@ -580,7 +579,6 @@ export class OrderLifecycleService {
         // total_amount using the same canonical paisa→wei conversion the rest
         // of the escrow pipeline uses.
         const newAmountWei = paisaToMaticWei(pricing.totalAmount);
-        const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
 
         const updates = {
           drop_address,
@@ -809,6 +807,7 @@ export class OrderLifecycleService {
             const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
             await this.orderRepository.updateOrder(currentOrder.id, {
               status: 'cancelled',
+              cancellation_fee: cancellationFee,
               escrow_status: nextEscrowStatus,
               refund_tx_hash: refundTxHash,
               escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
@@ -1053,7 +1052,7 @@ async function createOrderTransactional({ idempotencyKey, orderData, timelineDat
 
     return data;
   } catch (err) {
-    console.error(`[TRANSACTIONAL_ORDER_ERROR] Key ${idempotencyKey}:`, err.message);
+    logger.error({ err: err.message, key: idempotencyKey }, 'TRANSACTIONAL_ORDER_ERROR');
     throw err;
   }
 }

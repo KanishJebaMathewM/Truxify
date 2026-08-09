@@ -14,6 +14,7 @@ class EventBus extends EventEmitter {
     this._registry = new EventRegistry();
     this._deduplication = new Map();
     this._deduplicationWindowMs = 60000;
+    this._handlerWrappers = new WeakMap();
     this._metrics = {
       published: 0,
       subscribed: 0,
@@ -185,13 +186,16 @@ class EventBus extends EventEmitter {
           }
         });
       };
+      this._handlerWrappers.set(handler, tracedHandler);
       this.on(eventType, tracedHandler);
       return this;
     }
 
     if (handler && typeof handler.handle === 'function') {
       this._metrics.subscribed++;
-      this.on(eventType, (event) => handler.handle(event));
+      const tracedHandlerInstance = (event) => handler.handle(event);
+      this._handlerWrappers.set(handler, tracedHandlerInstance);
+      this.on(eventType, tracedHandlerInstance);
       return this;
     }
 
@@ -200,7 +204,7 @@ class EventBus extends EventEmitter {
 
   unsubscribe(eventType, handler) {
     if (typeof handler === 'function') {
-      this.removeListener(eventType, handler);
+      this.removeListener(eventType, this._handlerWrappers.get(handler) || handler);
     }
     return this;
   }

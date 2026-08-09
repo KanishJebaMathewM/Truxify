@@ -74,7 +74,7 @@ describe('CacheManager', () => {
 
       const result = await CacheManager.get('profile', 'user-123');
       expect(result).toEqual(mockData);
-      expect(mockClient.get).toHaveBeenCalledWith('profile:user-123');
+      expect(mockClient.get).toHaveBeenCalledWith('user:profile:user-123');
     });
 
     it('returns null on cache miss', async () => {
@@ -102,7 +102,7 @@ describe('CacheManager', () => {
       CacheManager.init(mockClient);
 
       await CacheManager.get('profile', 'user-123', 'stats');
-      expect(mockClient.get).toHaveBeenCalledWith('profile:user-123:stats');
+      expect(mockClient.get).toHaveBeenCalledWith('user:profile:user-123:stats');
     });
   });
 
@@ -141,7 +141,7 @@ describe('CacheManager', () => {
       const result = await CacheManager.set('profile', 'user-123', data);
       expect(result).toBe(true);
       expect(mockClient.set).toHaveBeenCalledWith(
-        'profile:user-123',
+        'user:profile:user-123',
         JSON.stringify(data),
         'EX',
         expect.any(Number)
@@ -155,7 +155,7 @@ describe('CacheManager', () => {
 
       await CacheManager.set('profile', 'user-123', { data: 1 });
       expect(mockClient.set).toHaveBeenCalledWith(
-        'profile:user-123',
+        'user:profile:user-123',
         expect.any(String),
         'EX',
         profileNs.defaultTtl
@@ -168,7 +168,7 @@ describe('CacheManager', () => {
 
       await CacheManager.set('profile', 'user-123', { data: 1 }, { ttl: 60 });
       expect(mockClient.set).toHaveBeenCalledWith(
-        'profile:user-123',
+        'user:profile:user-123',
         expect.any(String),
         'EX',
         60
@@ -181,7 +181,7 @@ describe('CacheManager', () => {
 
       await CacheManager.set('profile', 'user-123', { data: 1 }, { ttl: 0 });
       expect(mockClient.set).toHaveBeenCalledWith(
-        'profile:user-123',
+        'user:profile:user-123',
         expect.any(String)
       );
     });
@@ -206,7 +206,7 @@ describe('CacheManager', () => {
       await CacheManager.invalidate('profile', 'user-123');
       expect(invalidateKey).toHaveBeenCalledWith(
         'profile',
-        'profile:user-123',
+        'user:profile:user-123',
         { localOnly: undefined }
       );
     });
@@ -219,7 +219,7 @@ describe('CacheManager', () => {
       await CacheManager.invalidate('profile', 'user-123', { localOnly: true });
       expect(invalidateKey).toHaveBeenCalledWith(
         'profile',
-        'profile:user-123',
+        'user:profile:user-123',
         { localOnly: true }
       );
     });

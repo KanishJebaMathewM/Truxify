@@ -241,15 +241,9 @@ async function clearAuthOtpFailures(phone) {
   if (redisClient) {
     try {
       await redisClient.del(`auth_otp_failed_count:${phoneKey}`);
-      return;
     } catch (err) {
       logger.error("[auth/verify-otp] Redis error in clearAuthOtpFailures, falling back to memory:", err.message);
     }
-  }
-  const record = authOtpFailedAttempts.get(phoneKey);
-  if (record) {
-    record.count = 0;
-    if (record.lockedUntil) return;
   }
   authOtpFailedAttempts.delete(phoneKey);
 }

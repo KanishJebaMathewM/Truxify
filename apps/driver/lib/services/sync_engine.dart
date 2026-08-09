@@ -21,9 +21,9 @@ class SyncEngine {
     if (envUrl.isNotEmpty) return envUrl;
     if (kReleaseMode) throw StateError('TRUXIFY_API_BASE_URL must be set in release mode');
 
-    if (kIsWeb) return 'http://localhost:8080';
-    if (Platform.isAndroid) return 'http://10.0.2.2:8080';
-    return 'http://localhost:8080';
+    if (kIsWeb) return 'http://localhost:5000';
+    if (Platform.isAndroid) return 'http://10.0.2.2:5000';
+    return 'http://localhost:5000';
   }
 
   static Future<Database> get database async {

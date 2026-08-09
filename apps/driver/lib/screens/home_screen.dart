@@ -1116,13 +1116,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                         ),
-                      if (_isOffline) const OfflineBanner(),
-                      if (!_isCharging && _batteryLevel <= 20)
-                        LowBatteryBanner(
-                          batteryLevel: _batteryLevel,
-                          isCritical: _batteryLevel <= 10,
-                        ),
-                      ),
                     if (_isOffline) const OfflineBanner(),
                     if (!_isCharging && _batteryLevel <= 20)
                       LowBatteryBanner(

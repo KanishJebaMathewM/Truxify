@@ -1,14 +1,11 @@
 import { WebSocketServer } from 'ws';
-import { mongoDb, redisClient, firebaseAdmin, supabase } from '../config/db.js';
+import { redisClient, firebaseAdmin, supabase } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';
-import os from 'os';
-import path from 'path';
-import fs from 'fs';
 import crypto from 'crypto';
-import { GpsLog } from '../models/GpsLog.js';
 import { ebpfLoader } from '../../../../ebpf/loader.js';
 import { createLocationEventBus } from './locationEventBus.js';
+import telemetryBuffer from './telemetryBuffer.js';
 
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: true, min: -90, max: 90 },
@@ -58,13 +55,7 @@ function sanitizeTelemetryData(data) {
   return sanitized;
 }
 
-let mongoDbOverride = null;
-const getMongoDb = () => mongoDbOverride || mongoDb;
-
 let _orderRepository = null;
-
-let telemetryDropCounter = 0;
-const RECOVERY_FILE_PATH = process.env.RECOVERY_FILE_PATH || path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
 
 // In-memory mapping of active client subscriptions (process-local by design;
 // distributed fan-out across replicas is handled by the locationEventBus).
@@ -163,123 +154,15 @@ function sweepStaleDriverState(now) {
 }
 
 // =====================================================================
-// EXTRA STORAGE & BUFFER CONFIGURATIONS (#269)
+// Telemetry persistence is delegated to the shared telemetryBuffer module
+// (./telemetryBuffer.js). Live broadcasting never waits on MongoDB.
 // =====================================================================
-class TelemetryRingBuffer {
-  constructor(capacity) {
-    this.capacity = capacity;
-    this.buffer = new Array(capacity);
-    this.head = 0;
-    this.tail = 0;
-    this.size = 0;
-    this._lock = false;
-    this._queue = [];
-  }
-
-  async _acquire() {
-    if (!this._lock) {
-      this._lock = true;
-      return;
-    }
-    return new Promise(resolve => {
-      this._queue.push(resolve);
-    });
-  }
-
-  _release() {
-    if (this._queue.length > 0) {
-      const next = this._queue.shift();
-      next();
-    } else {
-      this._lock = false;
-    }
-  }
-
-  async push(item) {
-    await this._acquire();
-    try {
-      this.buffer[this.tail] = item;
-      this.tail = (this.tail + 1) % this.capacity;
-      if (this.size < this.capacity) {
-        this.size++;
-      } else {
-        this.head = (this.head + 1) % this.capacity;
-      }
-    } finally {
-      this._release();
-    }
-  }
-
-  async toArray() {
-    await this._acquire();
-    try {
-      if (this.size === 0) return [];
-      const result = new Array(this.size);
-      for (let i = 0; i < this.size; i++) {
-        result[i] = this.buffer[(this.head + i) % this.capacity];
-      }
-      return result;
-    } finally {
-      this._release();
-    }
-  }
-
-  async prepend(items) {
-    if (!items || items.length === 0) return 0;
-    await this._acquire();
-    try {
-      const available = this.capacity - this.size;
-      const toInsert = items.length > available ? items.slice(items.length - available) : items;
-      const dropped = items.length > available ? items.length - available : 0;
-      for (let i = toInsert.length - 1; i >= 0; i--) {
-        this.head = (this.head - 1 + this.capacity) % this.capacity;
-        this.buffer[this.head] = toInsert[i];
-        this.size++;
-      }
-      return dropped;
-    } finally {
-      this._release();
-    }
-  }
-
-  async clear() {
-    await this._acquire();
-    try {
-      this.head = 0;
-      this.tail = 0;
-      this.size = 0;
-    } finally {
-      this._release();
-    }
-  }
-
-  get length() {
-    return this.size;
-  }
-}
-
-const MAX_BUFFER_SIZE = 5000;
-const BUFFER_WARN_THRESHOLD = 0.5;
-const BUFFER_CRIT_THRESHOLD = 0.8;
-const BUFFER_MONITOR_INTERVAL_MS = 30000;
-const telemetryWriteBuffer = new TelemetryRingBuffer(MAX_BUFFER_SIZE);
-let telemetryFlushBuffer = [];
-let currentFlushPromise = null;
-let flushMutex = false;
-const BUFFER_FLUSH_INTERVAL_MS = 20000;
-let flushBackoffMs = 1000;
 let isSchedulerActive = false;
 let telemetryFlushTimeout = null;
 let wsServer = null;
 let wsHeartbeatInterval = null;
 let telemetryMonitorInterval = null;
 const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WS_HEARTBEAT_INTERVAL_MS, 10) || 180000; // 3 minutes
-
-// Observability counters
-let telemetryTotalFlushed = 0;
-let telemetryTotalDropped = 0;
-let telemetryRaceDropped = 0;
-let telemetryOverflowDropped = 0;
 
 const WS_UPGRADE_RATE_LIMIT = 5;
 const WS_UPGRADE_RATE_WINDOW_SECONDS = 60;
@@ -789,7 +672,7 @@ export function initWebSocketServer(server, orderRepository) {
   });
 
   if (!isSchedulerActive) {
-    initTelemetryScheduler();
+    telemetryBuffer.start();
   }
 
   logger.info('🚀 WebSocket tracking router initialized.');
@@ -937,6 +820,12 @@ export async function handleLocationPing(ws, data, req) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat and lng are required'] }));
   }
 
+  // Canonicalise `latitude`/`longitude` into `lat`/`lng` so the schema
+  // validation, sanitisation and the buffered telemetry record all operate on
+  // one canonical coordinate pair regardless of which naming the client used.
+  data.lat = lat;
+  data.lng = lng;
+
   // Fix 3 + dead-code fix: run the payload through the schema validator/
   const normalizedForValidation = {
     lat,
@@ -1077,36 +966,25 @@ export async function handleLocationPing(ws, data, req) {
     }
   }
 
-  // Buffer write with capacity limit (always push to active buffer)
-  if (telemetryWriteBuffer.length >= MAX_BUFFER_SIZE) {
-    telemetryTotalDropped++;
-    telemetryOverflowDropped++;
-  }
-  await telemetryWriteBuffer.push({
-  driver_id,
-  order_id: orderUUID || null,
-  order_display_id: orderDisplayId || null,
-  lat: sanitized.lat,
-  lng: sanitized.lng,
-  location: {
-    type: 'Point',
-    coordinates: [sanitized.lng, sanitized.lat]
-  },
-  speed_kmh: sanitized.speed ?? 0,
-  bearing_deg: sanitized.bearing ?? 0,
+  // Buffer write with capacity limit. Synchronous, non-blocking enqueue into
+  // the shared telemetry pipeline — the broadcast path never waits on MongoDB.
+  telemetryBuffer.enqueue({
+    driver_id,
+    order_id: orderUUID || null,
+    order_display_id: orderDisplayId || null,
+    lat: sanitized.lat,
+    lng: sanitized.lng,
+    location: {
+      type: 'Point',
+      coordinates: [sanitized.lng, sanitized.lat]
+    },
+    speed_kmh: sanitized.speed ?? 0,
+    bearing_deg: sanitized.bearing ?? 0,
     timestamp: deviceTime || new Date(),
     pinged_at: deviceTime || new Date(),
     buffered_at: new Date(),
     server_received_at: new Date(serverNow),
   });
-
-  // Buffer usage monitoring
-  const usagePct = (telemetryWriteBuffer.length / MAX_BUFFER_SIZE) * 100;
-  if (usagePct >= 80) {
-    logger.warn(`[TRUXIFY BUFFER CRITICAL] Buffer at ${usagePct.toFixed(0)}% capacity (${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`);
-  } else if (usagePct >= 50 && usagePct < 80) {
-    logger.warn(`[TRUXIFY BUFFER WARN] Buffer at ${usagePct.toFixed(0)}% capacity (${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE})`);
-  }
 
   if (redisClient) {
     try {
@@ -1120,29 +998,6 @@ export async function handleLocationPing(ws, data, req) {
     } catch (err) {
       logger.error('Redis cache telemetry error:', err.message);
     }
-  }
-
-  // Persist GPS log to MongoDB Atlas (GPS Logs collection) using the typed
-  // GpsLog mongoose schema. Fire-and-forget — the write must not block the
-  // WebSocket broadcast path. The bulk telemetry flush to the raw `telemetry`
-  // collection continues separately for batch analytics.
-  if (getMongoDb()) {
-    GpsLog.create({
-      bookingId: orderDisplayId || orderUUID || driver_id,
-      driverId: driver_id,
-      lat: sanitized.lat,
-      lng: sanitized.lng,
-      speed: sanitized.speed ?? 0,
-      heading: sanitized.bearing ?? 0,
-      timestamp: deviceTime || new Date(serverNow),
-      metadata: {
-        order_id: orderUUID || null,
-        order_display_id: orderDisplayId || null,
-        server_received_at: new Date(serverNow).toISOString(),
-      },
-    }).catch((err) => {
-      logger.error('[GpsLog] Failed to persist GPS coordinate to MongoDB:', err.message);
-    });
   }
 
   const timestampIso = new Date(serverNow).toISOString();
@@ -1182,23 +1037,6 @@ export async function handleLocationPing(ws, data, req) {
   // publishing replica's Pub/Sub consumer skips self-originated events, so a
   // client on this replica receives the update exactly once.
   deliverLocationToLocalSubscribers(trackingSubscriptions, broadcastPayload, orderDisplayId ?? null, driver_id);
-  initRedisTrackerPubSub();
-
-  if (redisClient) {
-    const pubSubMessage = JSON.stringify({
-      orderDisplayId,
-      driver_id,
-      payload: broadcastPayload,
-    });
-    redisClient.publish(TRACKER_CHANNELS.LOCATION, pubSubMessage).catch((err) => {
-      logger.error({ err }, '[Tracker] Redis publish error for location update');
-      if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, broadcastPayload);
-      if (driver_id) deliverToLocalSubscribers(driver_id, broadcastPayload);
-    });
-  } else {
-    if (orderDisplayId) deliverToLocalSubscribers(orderDisplayId, broadcastPayload);
-    if (driver_id) deliverToLocalSubscribers(driver_id, broadcastPayload);
-  }
 
   // Publish to Supabase Realtime channel driver-location:{orderId}
   // Reuse cached channel to avoid creating a new channel per ping.
@@ -1232,153 +1070,10 @@ export async function handleLocationPing(ws, data, req) {
 }
 
 /**
- * Periodically dumps the aggregated batch matrix logs into MongoDB Atlas
+ * Telemetry flush, retry, overflow and recovery handling now lives entirely in
+ * the shared telemetryBuffer module. tracker.js exposes a thin `__testing`
+ * surface so the existing unit-test contracts keep working.
  */
-async function flushTelemetryBuffer() {
-  if (currentFlushPromise) {
-    return currentFlushPromise;
-  }
-
-  if (telemetryWriteBuffer.length === 0 && telemetryFlushBuffer.length === 0) {
-    flushBackoffMs = 1000;
-    return;
-  }
-
-  if (!getMongoDb()) {
-    logger.error('[TRUXIFY STORAGE WARN] MongoDB is not initialized or disconnected. Retaining telemetry logs in memory buffer.');
-    return;
-  }
-
-  if (flushMutex) return;
-  flushMutex = true;
-
-  // Atomic buffer swap: take everything pending (retry queue first, then the
-  // active buffer) and reset both. Any ping that arrives while the insert is
-  // in flight lands in the fresh active buffer, and on failure the taken
-  // records are prepended back so oldest data retries first. Taking a merged
-  // snapshot (instead of aliasing the active buffer as the flush buffer)
-  // avoids re-queueing the same array twice on transient failures.
-  const recordsToFlush = telemetryFlushBuffer.length > 0
-    ? [...telemetryFlushBuffer, ...(await telemetryWriteBuffer.toArray())]
-    : await telemetryWriteBuffer.toArray();
-  telemetryFlushBuffer = [];
-  await telemetryWriteBuffer.clear();
-
-  if (recordsToFlush.length === 0) {
-    flushMutex = false;
-    return;
-  }
-
-  currentFlushPromise = (async () => {
-    logger.info(`[TRUXIFY BATCH CONTROL] Committing bulk cluster of ${recordsToFlush.length} spatial rows to MongoDB...`);
-
-    try {
-      const collection = getMongoDb().collection('telemetry');
-      await collection.insertMany(recordsToFlush, { ordered: false });
-      telemetryTotalFlushed += recordsToFlush.length;
-      logger.info(`[TRUXIFY DB SUCCESS] Successfully flushed ${recordsToFlush.length} records to MongoDB telemetry collection. Total flushed: ${telemetryTotalFlushed}`);
-      flushBackoffMs = 1000;
-    } catch (err) {
-      const isBulkWriteError = err.code === 121 || err.name === 'BulkWriteError' || err.message.includes('Document failed validation');
-
-      if (isBulkWriteError) {
-        if (err.writeErrors && err.writeErrors.length > 0) {
-          const sampleErrors = err.writeErrors.slice(0, 5).map(e =>
-            `doc ${e.index}: ${e.err?.message || 'unknown'}`
-          ).join('; ');
-          logger.error(`[TRUXIFY VALIDATION] ${err.writeErrors.length} documents failed validation. Samples: ${sampleErrors}`);
-        } else {
-          logger.error(`[TRUXIFY VALIDATION] Bulk insert validation error: ${err.message}`);
-        }
-        const failed = err.writeErrors
-          ? recordsToFlush.filter((_, i) => err.writeErrors.some(e => e.index === i))
-          : [];
-        if (failed.length > 0) {
-          const overflowDrop = await telemetryWriteBuffer.prepend(failed);
-          if (overflowDrop > 0) {
-            telemetryTotalDropped += overflowDrop;
-            telemetryOverflowDropped += overflowDrop;
-            logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after partial insert.`);
-          }
-        }
-      } else {
-        flushBackoffMs = Math.min(flushBackoffMs * 2, 60000);
-        const overflowDrop = await telemetryWriteBuffer.prepend(recordsToFlush);
-        if (overflowDrop > 0) {
-          telemetryTotalDropped += overflowDrop;
-          telemetryOverflowDropped += overflowDrop;
-          logger.warn(`[TRUXIFY BUFFER DROP] Dropped ${overflowDrop} oldest records due to capacity after flush failure.`);
-        }
-      }
-    } finally {
-      currentFlushPromise = null;
-      flushMutex = false;
-    }
-  })();
-
-  return currentFlushPromise;
-}
-
-function monitorBufferSize() {
-  const activeLen = telemetryWriteBuffer.length;
-  const flushLen = telemetryFlushBuffer.length;
-  const totalLen = activeLen + flushLen;
-  const usagePct = totalLen / MAX_BUFFER_SIZE;
-  if (usagePct >= BUFFER_CRIT_THRESHOLD) {
-    logger.warn(
-      `[TRUXIFY BUFFER MONITOR] CRITICAL: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
-      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
-      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
-    );
-  } else if (usagePct >= BUFFER_WARN_THRESHOLD) {
-    logger.warn(
-      `[TRUXIFY BUFFER MONITOR] WARNING: Buffer at ${(usagePct * 100).toFixed(0)}% ` +
-      `(${totalLen}/${MAX_BUFFER_SIZE}) [active=${activeLen} flush=${flushLen}] ` +
-      `flushed=${telemetryTotalFlushed} dropped=${telemetryTotalDropped}`
-    );
-  }
-}
-
-function scheduleNextFlush() {
-  if (!isSchedulerActive) return;
-
-  telemetryFlushTimeout = setTimeout(async () => {
-    try {
-      await flushTelemetryBuffer();
-    } finally {
-      scheduleNextFlush();
-    }
-  }, Math.max(BUFFER_FLUSH_INTERVAL_MS, flushBackoffMs));
-}
-
-async function loadRecoveryFile() {
-  try {
-    if (fs.existsSync(RECOVERY_FILE_PATH)) {
-      const content = fs.readFileSync(RECOVERY_FILE_PATH, 'utf-8').trim();
-      if (content) {
-        const records = content.split('\n').filter(Boolean).map(line => JSON.parse(line));
-        if (records.length > 0) {
-          await telemetryWriteBuffer.prepend(records);
-          logger.info(`[TRUXIFY RECOVERY] Loaded ${records.length} telemetry records from recovery file. Buffer size: ${telemetryWriteBuffer.length}`);
-        }
-      }
-      fs.unlinkSync(RECOVERY_FILE_PATH);
-    }
-  } catch (err) {
-    logger.error('[TRUXIFY RECOVERY] Failed to load recovery file:', err.message);
-    try { fs.unlinkSync(RECOVERY_FILE_PATH); } catch (_) { /* ignore */ }
-  }
-}
-
-async function initTelemetryScheduler() {
-  await loadRecoveryFile();
-  isSchedulerActive = true;
-  scheduleNextFlush();
-  
-  telemetryMonitorInterval = setInterval(() => {
-    monitorBufferSize();
-  }, BUFFER_MONITOR_INTERVAL_MS);
-}
 
 export async function closeWebSocketServer() {
   if (telemetryFlushTimeout) {
@@ -1397,46 +1092,11 @@ export async function closeWebSocketServer() {
     wsHeartbeatInterval = null;
   }
 
-  // Wait for MongoDB to be available before final flush
-  const parsedWait = parseInt(process.env.MONGODB_SHUTDOWN_WAIT_MS, 10);
-  const mongoMaxWaitMs = Number.isNaN(parsedWait) ? 10000 : parsedWait;
-  if (mongoMaxWaitMs > 0) {
-    const mongoPollIntervalMs = Math.min(500, mongoMaxWaitMs);
-    const mongoWaitStart = Date.now();
-    while (!getMongoDb() && Date.now() - mongoWaitStart < mongoMaxWaitMs) {
-      await new Promise(r => setTimeout(r, mongoPollIntervalMs));
-    }
-    if (!getMongoDb()) {
-      const allPending = [
-        ...telemetryFlushBuffer,
-        ...(await telemetryWriteBuffer.toArray())
-      ];
-      if (allPending.length > 0) {
-        try {
-          const lines = allPending.map(r => JSON.stringify(r)).join('\n');
-          fs.writeFileSync(RECOVERY_FILE_PATH, lines + '\n', { encoding: 'utf-8', mode: 0o600 });
-          logger.warn(`[TRUXIFY SHUTDOWN] MongoDB not available. Wrote ${allPending.length} telemetry records to recovery file: ${RECOVERY_FILE_PATH}`);
-        } catch (fileErr) {
-          logger.error(`[TRUXIFY SHUTDOWN] Failed to write recovery file: ${fileErr.message}. ${allPending.length} records lost.`);
-        }
-      }
-    }
-  }
-
-  // Wait for any in-flight flush to complete
-  if (currentFlushPromise) {
-    try {
-      await currentFlushPromise;
-    } catch (err) {
-      // Ignore errors; final flush retry will handle them
-    }
-  }
-
-  try {
-    await flushTelemetryBuffer();
-  } catch (err) {
-    logger.error('[shutdown] Failed to flush telemetry buffer:', err.message);
-  }
+  // Stop the telemetry scheduler, wait for MongoDB (MONGODB_SHUTDOWN_WAIT_MS
+  // is read at call time), and perform the final flush. When MongoDB is
+  // unavailable the pending records are written to the recovery file AND
+  // retained in the buffer so nothing is silently lost.
+  await telemetryBuffer.shutdown();
 
   // Close the distributed location fan-out: unsubscribe and release the
   // dedicated Redis subscriber connection. Done regardless of whether the WS
@@ -1738,33 +1398,33 @@ export const __testing = {
   getLocationEventBusMetrics() {
     return locationEventBus ? locationEventBus.getMetrics() : null;
   },
-  flushTelemetryBuffer,
+  flushTelemetryBuffer() {
+    return telemetryBuffer._test.flush();
+  },
   removeClientFromAllSubscriptions,
   getTelemetryWriteBuffer() {
-    return telemetryWriteBuffer;
+    return telemetryBuffer._test.getBuffer();
   },
   getTelemetryFlushBuffer() {
-    return telemetryFlushBuffer;
+    return telemetryBuffer._test.getRetryQueue();
   },
   async setTelemetryWriteBuffer(records) {
-    await telemetryWriteBuffer.clear();
-    if (records) await telemetryWriteBuffer.prepend(records);
+    await telemetryBuffer._test.setBuffer(records);
   },
   setTelemetryFlushBuffer(records) {
-    telemetryFlushBuffer = records;
+    telemetryBuffer._test.setRetryQueue(records);
   },
   async pushToTelemetryWriteBuffer(records) {
-    if (Array.isArray(records)) {
-      for (const r of records) await telemetryWriteBuffer.push(r);
-    } else {
-      await telemetryWriteBuffer.push(records);
-    }
+    await telemetryBuffer._test.push(records);
   },
   async clearTelemetryWriteBuffer() {
-    await telemetryWriteBuffer.clear();
+    await telemetryBuffer._test.clearBuffer();
   },
   clearTelemetryFlushBuffer() {
-    telemetryFlushBuffer = [];
+    telemetryBuffer._test.setRetryQueue([]);
+  },
+  getTelemetryBufferMetrics() {
+    return telemetryBuffer.getMetrics();
   },
   getShutdownState() {
     const state = {
@@ -1791,7 +1451,7 @@ export const __testing = {
     isSchedulerActive = Boolean(telemetryInterval);
   },
   setMongoDbOverride(val) {
-    mongoDbOverride = val;
+    telemetryBuffer._test.setMongoDbOverride(val);
   },
   getConsecutiveDropCount(driverId) {
     const entry = consecutiveDropCount.get(driverId);

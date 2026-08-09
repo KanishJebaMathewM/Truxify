@@ -125,7 +125,7 @@ describe('tracker', () => {
     it('rejects when driver_id is missing', async () => {
       const ws = makeWs({ driverId: null });
       await handleLocationPing(ws, { lat: 19.0, lng: 72.8 });
-      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Unauthorized: Missing authenticated WebSocket identity.' }));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Forbidden: Driver role required to publish location updates', code: 4003 }));
     });
 
     it('rejects spoofed location with mismatched driver_id', async () => {
@@ -138,13 +138,13 @@ describe('tracker', () => {
     it('rejects invalid coordinates', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 'abc', lng: 72.8 });
-      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Missing mandatory tracking parameters (lat, lng).' }));
+      expect(ws.send).toHaveBeenCalledWith(expect.stringContaining('"error":"Invalid telemetry payload."'));
     });
 
     it('rejects out-of-range coordinates', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 100, lng: 72.8 });
-      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Coordinates out of valid range' }));
+      expect(ws.send).toHaveBeenCalledWith(expect.stringContaining('"error":"Invalid telemetry payload."'));
     });
 
     it('buffers valid location ping', async () => {

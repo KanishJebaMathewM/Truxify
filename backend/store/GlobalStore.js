@@ -183,7 +183,7 @@ class GlobalStore extends EventEmitter {
     
     // ============ Transaction Support ============
     
-    transaction(fn) {
+    async transaction(fn) {
         if (this.activeTransaction) {
             throw new Error('Nested transactions not supported');
         }

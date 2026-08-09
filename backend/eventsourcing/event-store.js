@@ -1,5 +1,4 @@
-import kafka from '../kafka/config/kafka.config.js';
-import { TOPICS } from '../kafka/config/kafka.config.js';
+import kafka, { TOPICS } from '../kafka/config/kafka.config.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
@@ -148,7 +147,7 @@ class EventStore {
                 });
                 break;
 
-            case 'UPDATE_ORDER':
+            case 'UPDATE_ORDER': {
                 const currentState = await this.getAggregateState(command.aggregateId);
                 events.push({
                     id: uuidv4(),
@@ -162,6 +161,7 @@ class EventStore {
                     version: (currentState?.version || 0) + 1
                 });
                 break;
+            }
 
             case 'CANCEL_ORDER':
                 events.push({

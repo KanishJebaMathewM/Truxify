@@ -54,5 +54,14 @@ class StateChannelService {
             });
             const channelId = eventLog
                 ? this.channel.interface.parseLog(eventLog).args[0].toString()
-                : (await this.getUserChannels(participantA).then(ch => {
-                .catch(err => console.error(err))
+                : null;
+
+            return channelId;
+        } catch (error) {
+            logger.error('Failed to open channel:', error);
+            throw error;
+        }
+    }
+}
+
+export default StateChannelService;

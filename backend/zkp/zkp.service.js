@@ -216,7 +216,7 @@ class ZKPService {
             return used;
         } catch (error) {
             logger.error('Nullifier check failed:', error);
-            throw new Error(`Nullifier verification failed: ${error.message}`);
+            throw new Error(`Nullifier verification failed: ${error.message}`, { cause: error });
         }
     }
 

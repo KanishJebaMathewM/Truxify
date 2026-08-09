@@ -68,4 +68,9 @@ class LayoutEngine {
         
         // Use microtask for immediate scheduling
         Promise.resolve().then(() => {
-        .catch(err => console.error(err))
+            this.isProcessing = false;
+        }).catch(err => console.error(err));
+    }
+}
+
+export default LayoutEngine;

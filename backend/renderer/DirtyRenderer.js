@@ -101,7 +101,6 @@ class DirtyRenderer {
         
         // Generate output
         let output = '';
-        let totalChars = 0;
         
         if (mergedRects.length === 0) {
             // No changes
@@ -112,16 +111,14 @@ class DirtyRenderer {
             // Full render
             output = this.renderFullFrame();
             this.stats.fullFrames++;
-            totalChars = output.length;
         } else {
             // Partial render (dirty rects only)
             output = this.renderDirtyRects(mergedRects);
             this.stats.dirtyFrames++;
-            totalChars = output.length;
         }
         
         // Update stats
-        this.stats.totalCharsWritten += totalChars;
+        this.stats.totalCharsWritten += output.length;
         this.stats.totalRects += mergedRects.length;
         this.stats.avgRectsPerFrame = this.stats.totalRects / this.stats.frames;
         

@@ -1197,26 +1197,42 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
   const { start_date, end_date, sort_by, format } = req.query;
 
   try {
-    let query = supabase
-      .from('orders')
-      .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, base_freight, toll_estimate, platform_fee')
-      .eq('driver_id', userId)
-      .in('status', ['delivered', 'payment_released'])
-      .limit(1000);
+    // PostgREST caps a single response at 1000 rows, so page through the
+    // whole history instead of silently truncating the statement.
+    const pageSize = 1000;
+    const trips = [];
 
-    if (start_date) {
-      query = query.gte('pickup_date', start_date);
-    }
-    if (end_date) {
-      query = query.lte('pickup_date', end_date);
+    while (true) {
+      let pageQuery = supabase
+        .from('orders')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, base_freight, toll_estimate, platform_fee')
+        .eq('driver_id', userId)
+        .in('status', ['delivered', 'payment_released'])
+        .order('pickup_date', { ascending: true })
+        .range(trips.length, trips.length + pageSize - 1);
+
+      if (start_date) {
+        pageQuery = pageQuery.gte('pickup_date', start_date);
+      }
+      if (end_date) {
+        pageQuery = pageQuery.lte('pickup_date', end_date);
+      }
+
+      const { data: pageRows, error } = await pageQuery;
+
+      if (error) {
+        logger.error({ err: error }, errorLabel);
+        return res.status(500).json({ error: 'Failed to fetch statement records.' });
+      }
+
+      trips.push(...(pageRows || []));
+      if (!pageRows || pageRows.length < pageSize) {
+        break;
+      }
     }
 
-    const { data: trips, error } = await query.order('pickup_date', { ascending: false });
-
-    if (error) {
-      logger.error({ err: error }, errorLabel);
-      return res.status(500).json({ error: 'Failed to fetch statement records.' });
-    }
+    // Pages were fetched oldest-first; restore newest-first ordering.
+    trips.reverse();
 
     // Compute totals
     let totalBaseFreight = 0;

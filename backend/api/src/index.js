@@ -579,6 +579,7 @@ app.use('/api', wasiRoutes)
 app.use('/api', wasmRoutes)
 app.use('/api', snykRoutes)
 app.use('/api', liquibaseRoutes)
+app.use('/api/wim', wimBypassRouter)
 
 // 🆕 WebRTC Health Check Endpoint
 app.get('/api/webrtc/status', (req, res) => {
@@ -853,5 +854,3 @@ app.use((err, req, res, next) => {
 
   next(err);
 });
-
-app.use('/api/wim', wimBypassRouter);

@@ -109,11 +109,11 @@ export function parseDistanceKm(value) {
   if (value === null || value === undefined) {
     return 0;
   }
-  const digits = String(value).replace(/[^0-9]/g, '');
-  if (digits.length === 0) {
+  const decimal = String(value).replace(/[^0-9.]/g, '');
+  if (decimal.length === 0) {
     return 0;
   }
-  const parsed = parseInt(digits, 10);
+  const parsed = parseFloat(decimal);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 

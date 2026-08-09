@@ -175,8 +175,6 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         uint256 totalCost = (amount * asset.tokenPrice + 1e18 - 1) / 1e18;
         require(msg.value >= totalCost, "Insufficient payment");
 
-        require(totalSupply() + amount <= asset.totalTokens, "Exceeds total token cap");
-
         // Update asset
         asset.availableTokens -= amount;
         issuedTokens[assetId] += amount;

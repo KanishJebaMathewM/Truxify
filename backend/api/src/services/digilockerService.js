@@ -4,6 +4,8 @@ import { ethers } from 'ethers';
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
+const DIGILOCKER_TIMEOUT_MS = 10000;
+
 class DigilockerService {
   constructor() {
     this.clientId = process.env.DIGILOCKER_CLIENT_ID;
@@ -56,7 +58,8 @@ class DigilockerService {
           client_secret: this.clientSecret,
           redirect_uri: this.redirectUri
         }, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: DIGILOCKER_TIMEOUT_MS
         });
         return {
           access_token: tokenResponse.data.access_token,
@@ -172,7 +175,8 @@ class DigilockerService {
           client_secret: this.clientSecret,
           redirect_uri: this.redirectUri
         }, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: DIGILOCKER_TIMEOUT_MS
         });
         tokenData = tokenResponse.data;
       } catch (err) {
@@ -205,14 +209,16 @@ class DigilockerService {
     } else {
       try {
         const listResponse = await axios.get('https://api.digitallocker.gov.in/public/oauth2/1/files/issued', {
-          headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
+          headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
+          timeout: DIGILOCKER_TIMEOUT_MS
         });
         const files = listResponse.data?.items || [];
 
         for (const file of files) {
           if (file.doctype === 'ADLNK' || file.doctype === 'DRVLC') {
             const docResponse = await axios.get(`https://api.digitallocker.gov.in/public/oauth2/1/file/${file.uri}`, {
-              headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
+              headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
+              timeout: DIGILOCKER_TIMEOUT_MS
             });
             documents.push({
               type: file.doctype === 'DRVLC' ? 'driving_licence' : 'rc_book',

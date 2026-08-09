@@ -135,7 +135,7 @@ class SnykService {
             const results = JSON.parse(stdout);
             this.scanResults.push({
                 type: 'code',
-                path,
+                path: safePath,
                 timestamp: new Date().toISOString(),
                 results
             });

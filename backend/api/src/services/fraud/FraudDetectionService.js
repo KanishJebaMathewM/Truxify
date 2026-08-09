@@ -714,13 +714,31 @@ class FraudDetectionService {
 
   async getFraudStats() {
     if (!supabaseAdmin) return { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 };
-    const { data: scores } = await supabaseAdmin
-      .from('fraud_risk_scores')
-      .select('risk_score, created_at')
-      .order('created_at', { ascending: false })
-      .limit(1000);
 
-    const safe = scores || [];
+    // PostgREST caps a single response at 1000 rows, so page through the whole
+    // table instead of letting the stats silently reflect only the latest slice.
+    const pageSize = 1000;
+    const scores = [];
+    while (true) {
+      const from = scores.length;
+      const { data: page, error } = await supabaseAdmin
+        .from('fraud_risk_scores')
+        .select('risk_score, created_at')
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        logger.error('Failed to load fraud stats:', error);
+        return { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 };
+      }
+
+      scores.push(...(page || []));
+      if (!page || page.length < pageSize) {
+        break;
+      }
+    }
+
+    const safe = scores;
 
     const highRisk = safe.filter(s => s.risk_score > 0.7).length;
     const mediumRisk = safe.filter(s => s.risk_score > 0.4 && s.risk_score <= 0.7).length;

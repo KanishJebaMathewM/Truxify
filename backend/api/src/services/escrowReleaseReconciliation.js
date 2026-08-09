@@ -1,3 +1,4 @@
+import os from 'os';
 import { supabaseAdmin } from '../config/db.js';
 import { escrowRelease, getEscrowBooking, getEscrowBookingId } from './escrow.js';
 import { acquireLock, releaseLock, renewLock, LockAcquisitionError } from '../lib/redisLock.js';
@@ -66,26 +67,13 @@ export async function reconcilePendingEscrowReleases(orderRepository) {
       }
       throw err;
     }
-  } else {
-    // Redis not configured — single-instance mode, use in-process guard only
-    if (reconciliationRunning) return;
-  }
-
-  try {
-    if (!lockAcquired) reconciliationRunning = true;
-    const instanceId = process.env.HOSTNAME || os.hostname();
-    const { data: failedOrders, error } = await supabaseAdmin
-      .from('orders')
-      .select('id, order_display_id, escrow_amount_wei, escrow_release_attempts, release_tx_hash')
-      .eq('escrow_status', 'release_failed')
-      .lt('escrow_release_attempts', MAX_RETRIES)
-      .limit(50);
 
     if (!globalLockValue) {
       logger.info('[escrow-release-reconciliation] Global lock held by another instance, skipping batch.');
       return;
     }
 
+    const instanceId = process.env.HOSTNAME || os.hostname();
     const { data: pendingOrders, error } = await orderRepository.findPendingEscrowReleases();
     if (error) {
       logger.error('[escrow-release-reconciliation] Failed to load pending release orders:', error.message);
@@ -104,85 +92,6 @@ export async function reconcilePendingEscrowReleases(orderRepository) {
 
       try {
         await finalizeReleasedOrder(order, orderRepository);
-        const { data: claimed, error: claimError } = await supabaseAdmin
-          .rpc('claim_release_reconciliation', {
-            p_order_id: order.id,
-            p_instance_id: instanceId,
-          });
-
-        if ((!claimed || (Array.isArray(claimed) && claimed.length === 0)) && !claimError) {
-          logger.info(`[escrow-release-reconciliation] Order ${order.order_display_id} already claimed by another instance, skipping.`);
-          continue;
-        }
-
-        if (claimError) {
-          const { data: existing } = await supabaseAdmin
-            .from('orders')
-            .select('escrow_status, reconciled_by')
-            .eq('id', order.id)
-            .maybeSingle();
-          if (existing && (existing.escrow_status !== 'release_failed' || existing.reconciled_by)) {
-            logger.info(`[escrow-release-reconciliation] Order ${order.order_display_id} already processed, skipping.`);
-            continue;
-          }
-        }
-
-        const releaseAttemptedAt = new Date().toISOString();
-        const releaseAttempts = (order.escrow_release_attempts || 0) + 1;
-
-        // The expected amount is passed so escrowRelease verifies the on-chain
-        // booking amount before submitting the release (defense-in-depth).
-        const result = await escrowRelease(order.order_display_id, order.escrow_amount_wei ?? null);
-        const { txHash, alreadyReleased } = result;
-        if (!txHash && !alreadyReleased) {
-          if (result.code === 'DEPOSIT_AMOUNT_MISMATCH') {
-            // The on-chain amount will not change by retrying — record the
-            // reason and escalate to manual review instead of looping.
-            const releaseAttemptedAt = new Date().toISOString();
-            const releaseAttempts = (order.escrow_release_attempts || 0) + 1;
-            await supabaseAdmin
-              .from('orders')
-              .update({
-                escrow_release_attempts: releaseAttempts,
-                escrow_release_last_attempt_at: releaseAttemptedAt,
-                escrow_release_error: String(result.error).slice(0, 1000),
-                reconciled_by: null,
-                updated_at: releaseAttemptedAt,
-              })
-              .eq('id', order.id);
-            logger.error(
-              `[escrow-release-reconciliation] Order ${order.order_display_id} on-chain amount mismatch (${result.error}). Escalating to manual review.`
-            );
-            continue;
-          }
-          throw new Error('Escrow release did not return a transaction hash');
-        }
-
-        const releasedAt = new Date().toISOString();
-        const { error: updateError } = await supabaseAdmin
-          .from('orders')
-          .update({
-            escrow_status: 'released',
-            release_tx_hash: txHash || order.release_tx_hash,
-            escrow_release_error: null,
-            escrow_released_at: releasedAt,
-            escrow_release_attempts: releaseAttempts,
-            escrow_release_last_attempt_at: releaseAttemptedAt,
-            reconciled_by: null,
-            updated_at: releasedAt,
-          })
-          .eq('id', order.id)
-          .in('escrow_status', ['release_failed', 'funded'])
-          .eq('reconciled_by', instanceId);
-
-        if (updateError) {
-          logger.error(
-            `[escrow-release-reconciliation] Failed to finalize release for ${order.order_display_id}:`,
-            updateError.message
-          );
-        } else {
-          logger.info(`[escrow-release-reconciliation] Release succeeded for ${order.order_display_id}`);
-        }
       } catch (err) {
         logger.error(
           `[escrow-release-reconciliation] Finalization failed for order ${order.order_display_id}:`,

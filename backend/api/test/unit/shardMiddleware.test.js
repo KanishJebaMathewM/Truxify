@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.hoisted(() => {
-  process.env.SHARD_NORTH_PASSWORD = 'mock';
-  process.env.SHARD_SOUTH_PASSWORD = 'mock';
-  process.env.SHARD_EAST_PASSWORD = 'mock';
-  process.env.SHARD_WEST_PASSWORD = 'mock';
+  process.env.SHARD_PASSWORD_NORTH = 'mock';
+  process.env.SHARD_PASSWORD_SOUTH = 'mock';
+  process.env.SHARD_PASSWORD_EAST = 'mock';
+  process.env.SHARD_PASSWORD_WEST = 'mock';
 });
 
 import { shardMiddleware } from '../../src/middleware/shardMiddleware.js';

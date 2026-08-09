@@ -165,10 +165,11 @@ describe("AssetToken", function () {
     assert.equal(await assetToken.balanceOf(buyer1.address), ethers.parseEther("6"));
 
     const balanceBefore = await ethers.provider.getBalance(buyer1.address);
-    await assetToken.connect(buyer1).claimPayout();
+    const receipt = await (await assetToken.connect(buyer1).claimPayout()).wait();
+    const gasCost = receipt.gasUsed * receipt.gasPrice;
     assert.equal(await assetToken.getClaimableBalance(buyer1.address), 0n);
     const balanceAfter = await ethers.provider.getBalance(buyer1.address);
-    assert.equal(balanceAfter - balanceBefore, ethers.parseEther("4"));
+    assert.equal(balanceAfter - balanceBefore + gasCost, ethers.parseEther("4"));
   });
 
   it("should return sold fractions to the available pool and not double count ownership", async function () {
@@ -202,6 +203,120 @@ describe("AssetToken", function () {
     await assert.rejects(
       assetToken.connect(buyer1).claimPayout(),
       /No claimable balance/
+    );
+  });
+
+  it("should carry the buy-back backing through a P2P transfer so claims stay within contract ETH", async function () {
+    const { assetToken, owner, buyer1, buyer2 } = await deployAssetToken();
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      ethers.parseEther("100"),
+      "ipfs://..."
+    );
+
+    // buyer1 funds the contract with 10 ETH for 10 tokens
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("10"), {
+      value: ethers.parseEther("10")
+    });
+
+    // P2P transfer of 4 tokens: the backed flag rides along
+    await assetToken.connect(buyer1).transferWithCompliance(1, buyer2.address, ethers.parseEther("4"));
+
+    let buyer1Ownership = await assetToken.getFractionalOwnership(1, buyer1.address);
+    let buyer2Ownership = await assetToken.getFractionalOwnership(1, buyer2.address);
+    assert.equal(buyer1Ownership.amount, ethers.parseEther("6"));
+    assert.equal(buyer1Ownership.backedTokens, ethers.parseEther("6"));
+    assert.equal(buyer2Ownership.amount, ethers.parseEther("4"));
+    assert.equal(buyer2Ownership.backedTokens, ethers.parseEther("4"));
+
+    // Both holders sell back their backed tokens
+    await assetToken.connect(buyer2).sellFraction(1, ethers.parseEther("4"));
+    await assetToken.connect(buyer1).sellFraction(1, ethers.parseEther("6"));
+
+    const totalClaims =
+      (await assetToken.getClaimableBalance(buyer1.address)) +
+      (await assetToken.getClaimableBalance(buyer2.address));
+    const contractBalance = await ethers.provider.getBalance(assetToken.target);
+
+    // The contract only ever held the 10 ETH from the original purchase
+    assert.equal(totalClaims, ethers.parseEther("10"));
+    assert.equal(contractBalance, ethers.parseEther("10"));
+    assert.ok(totalClaims <= contractBalance, "claims must never exceed contract ETH");
+
+    // Everyone can withdraw their payout
+    await assetToken.connect(buyer2).claimPayout();
+    await assetToken.connect(buyer1).claimPayout();
+    assert.equal(await ethers.provider.getBalance(assetToken.target), 0n);
+  });
+
+  it("should keep the buy-back backing for tokens acquired via a secondary-market trade", async function () {
+    const { assetToken, owner, buyer1, buyer2 } = await deployAssetToken();
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      ethers.parseEther("100"),
+      "ipfs://..."
+    );
+
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("10"), {
+      value: ethers.parseEther("10")
+    });
+
+    // buyer1 lists the 10 tokens; buyer2 fills the order at 1 ETH/token
+    // (price is expressed in wei per 1e18 token unit, so price=1 yields 1 ETH/token)
+    await assetToken.connect(buyer1).createTradeOrder(1, ethers.parseEther("10"), 1, "sell");
+    await assetToken.connect(buyer2).executeTradeOrder(1, 0, {
+      value: ethers.parseEther("10")
+    });
+
+    // buyer2 holds the escrowed tokens with their buy-back backing intact
+    const buyer2Ownership = await assetToken.getFractionalOwnership(1, buyer2.address);
+    assert.equal(buyer2Ownership.amount, ethers.parseEther("10"));
+    assert.equal(buyer2Ownership.backedTokens, ethers.parseEther("10"));
+
+    // The trade routed buyer2's payment to buyer1, so the contract's balance
+    // still reflects only the original purchase proceeds
+    const contractBalance = await ethers.provider.getBalance(assetToken.target);
+    assert.equal(contractBalance, ethers.parseEther("10"));
+
+    // buyer2 can sell the acquired tokens back and claim within contract ETH
+    await assetToken.connect(buyer2).sellFraction(1, ethers.parseEther("10"));
+    const claims = await assetToken.getClaimableBalance(buyer2.address);
+    assert.equal(claims, ethers.parseEther("10"));
+    assert.ok(claims <= contractBalance, "claims must never exceed contract ETH");
+
+    await assetToken.connect(buyer2).claimPayout();
+    assert.equal(await ethers.provider.getBalance(assetToken.target), 0n);
+  });
+
+  it("should reject sellFraction for tokens the contract was never funded for", async function () {
+    const { assetToken, owner, buyer1, buyer2 } = await deployAssetToken();
+    await assetToken.connect(owner).createAsset(
+      "Truck 1",
+      "Volvo FH16",
+      "truck",
+      ethers.parseEther("100"),
+      ethers.parseEther("100"),
+      "ipfs://..."
+    );
+
+    await assetToken.connect(buyer1).purchaseFraction(1, ethers.parseEther("10"), {
+      value: ethers.parseEther("10")
+    });
+
+    // transferWithCompliance carries backing for exactly the tokens it moved,
+    // so a seller can never sell back more than the backed portion
+    await assetToken.connect(buyer1).transferWithCompliance(1, buyer2.address, ethers.parseEther("10"));
+
+    // buyer1 no longer holds any tokens and has no backing left
+    await assert.rejects(
+      assetToken.connect(buyer1).sellFraction(1, ethers.parseEther("1")),
+      /Insufficient balance/
     );
   });
 

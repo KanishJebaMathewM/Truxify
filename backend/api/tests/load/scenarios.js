@@ -19,6 +19,14 @@ export default function () {
     },
   };
 
+  const resHealth = http.get(`${BASE_URL}/health`, params);
+  check(resHealth, {
+    'health status is 200': (r) => r.status === 200,
+  });
+
+  const resLoads = http.get(`${BASE_URL}/api/loads/available`, params);
+  check(resLoads, {
+    'available loads status is 200': (r) => r.status === 200,
   const healthRes = http.get(`${BASE_URL}/health`, params);
   check(healthRes, {
     'status is 200': (r) => r.status === 200,

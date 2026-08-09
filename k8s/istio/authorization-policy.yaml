@@ -27,7 +27,8 @@ spec:
         paths: ["/api/*"]
     - operation:
         methods: ["GET"]
-        paths: ["/health", "/metrics"]---
+        paths: ["/health", "/metrics"]
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -46,25 +47,6 @@ spec:
     - source:
         notPrincipals: ["cluster.local/ns/truxify/sa/api-service-account", "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
         paths: ["/health", "/metrics"]
----
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: api-service-account
-  namespace: truxify
-
----
-apiVersion: security.istio.io/v1beta1
-kind: AuthorizationPolicy
-metadata:
-  name: deny-all
-  namespace: truxify
-spec:
-  action: DENY
-  rules:
-  - from:
-    - source:
-        notPrincipals: ["cluster.local/ns/truxify/sa/api-service-account", "cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account"]
 
   - to:
     - operation:

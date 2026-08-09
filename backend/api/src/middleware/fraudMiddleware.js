@@ -15,7 +15,7 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
       '/api/trips'
     ];
 
-    const isCritical = criticalEndpoints.some(endpoint => req.path.startsWith(endpoint));
+    const isCritical = criticalEndpoints.some(endpoint => req.originalUrl.startsWith(endpoint));
 
     if (!userId) {
       // Authentication has not run yet or this is a public endpoint.

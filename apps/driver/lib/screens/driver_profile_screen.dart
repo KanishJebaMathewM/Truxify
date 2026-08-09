@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/services.dart';
 import '../core/app_routes.dart';
 import '../core/config.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/text_scale_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 
@@ -650,6 +652,42 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                     _buildDocRow('Driving Licence (DL)', _documents['driving_licence'] ?? 'Missing'),
                     _buildDocRow('Insurance Policy', _documents['insurance'] ?? 'Missing'),
                   ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Display / UI Scaling Card
+            Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Consumer<TextScaleProvider>(
+                  builder: (context, scaleProvider, child) {
+                    return SwitchListTile.adaptive(
+                      title: Text(
+                        'Enable Large Text',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Optimized for dashboard mounting',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                      value: scaleProvider.isLargeText,
+                      onChanged: (val) => scaleProvider.toggleScale(val),
+                      activeColor: TruxifyColors.accent,
+                    );
+                  },
                 ),
               ),
             ),

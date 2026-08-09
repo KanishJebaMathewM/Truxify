@@ -68,14 +68,26 @@ describe('requireApiKey', () => {
     vi.clearAllMocks();
   });
 
-  it('skips verification when VALID_API_KEYS is not set', () => {
+  // Fails closed: an unconfigured VALID_API_KEYS must not turn into an open
+  // door on the backend-to-backend routes this middleware guards.
+  it('returns 503 and does not call next() when VALID_API_KEYS is not set', () => {
     vi.stubEnv('VALID_API_KEYS', '');
     const { req, res, next } = createMocks();
 
     requireApiKey(req, res, next);
 
-    expect(next).toHaveBeenCalled();
-    expect(res.status).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when VALID_API_KEYS is only separators or whitespace', () => {
+    vi.stubEnv('VALID_API_KEYS', ' , ,  ');
+    const { req, res, next } = createMocks();
+
+    requireApiKey(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(next).not.toHaveBeenCalled();
   });
 
   it('returns 401 when x-api-key header is missing', () => {

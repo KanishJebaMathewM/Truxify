@@ -122,6 +122,46 @@ export async function sendFcmNotification(userId, notification, data = {}) {
   };
 }
 
+export async function sendPushNotification(userId, title, body, notifType = 'order_update', data = {}) {
+  if (!userId || !title || !body) {
+    logger.warn('[NotificationService] sendPushNotification skipped — missing required fields.');
+    return { success: false, error: 'Missing required fields' };
+  }
+
+  let dbSuccess = false;
+  try {
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot persist notification.');
+    } else {
+      const { error } = await supabaseAdmin.from('notifications').insert({
+        user_id: userId,
+        title,
+        body,
+        notif_type: notifType,
+        metadata: data
+      });
+
+      if (error) {
+        logger.error({ err: error }, '[NotificationService] Database insert failed');
+      } else {
+        logger.info(`[NotificationService] Notification inserted for user ${userId}`);
+        dbSuccess = true;
+      }
+    }
+  } catch (dbErr) {
+    logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');
+  }
+
+  let fcmResult;
+  try {
+    fcmResult = await sendFcmNotification(userId, { title, body }, data);
+  } catch (err) {
+    logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
+  }
+
+  return { success: true, persisted: dbSuccess, fcm: fcmResult };
+}
+
 export const hashDeliveryOtp = hashOtp;
 export const verifyDeliveryOtpHash = verifyOtpHash;
 

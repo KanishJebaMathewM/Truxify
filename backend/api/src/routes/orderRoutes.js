@@ -292,7 +292,7 @@ const handleDeliveryVerification = async (req, res) => {
       'total_amount, order_display_id'
     );
     const amountInr = orderForAmount?.total_amount
-      ? (orderForAmount.total_amount / 100).toFixed(0)
+      ? Math.round(orderForAmount.total_amount / 100)
       : null;
 
     if (escrowUpdateFailed) {

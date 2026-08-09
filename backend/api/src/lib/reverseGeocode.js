@@ -2,6 +2,12 @@ import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 const CACHE_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+const NOMINATIM_TIMEOUT_MS = 5000;
+
+function getTimeoutMs() {
+  const configured = Number(process.env.NOMINATIM_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : NOMINATIM_TIMEOUT_MS;
+}
 
 /**
  * Reverse geocodes a latitude and longitude to a human-readable address
@@ -36,6 +42,7 @@ export async function reverseGeocode(lat, lon) {
         'User-Agent': 'Truxify-Node-Backend/1.0',
         'Accept-Language': 'en-US,en;q=0.9',
       },
+      signal: AbortSignal.timeout(getTimeoutMs()),
     });
 
     if (!response.ok) {

@@ -61,6 +61,7 @@ import auditRoutes from './routes/auditRoutes.js'
 import paymentRoutes from './routes/paymentRoutes.js'
 import userRoutes from './routes/userRoutes.js'
 import voiceRoutes from './routes/voiceRoutes.js'
+import voiceAssistantRoutes from './routes/voice.routes.js'
 import demandRoutes from './routes/demandRoutes.js'
 import escortWalletRoutes from './routes/escortWalletRoutes.js'
 
@@ -495,6 +496,7 @@ app.use('/api/auth', authLimiter, authRoutes)
 app.use('/api/v1/admin', adminRoutes)
 app.use('/api/v1/admin/audit-logs', auditRoutes)
 app.use('/api/voice', voiceRoutes)
+app.use('/api/v1/voice', voiceAssistantRoutes)
 app.use('/api/demand-heatmap', demandRoutes)
 app.use('/api/escorts/wallet', escortWalletRoutes)
 

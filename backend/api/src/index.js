@@ -513,7 +513,6 @@ app.use('/api/blockchain', (req, _res, next) => {
   req.escalationHandler = escalationHandler;
   next();
 }, blockchainMonitoringRoutes)
-app.use('/api/webhooks', webhookRoutes)
 
 // ============================================================================
 // 🆕 BLOCKCHAIN MONITORING ROUTES

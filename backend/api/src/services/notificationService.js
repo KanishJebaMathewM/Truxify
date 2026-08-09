@@ -277,6 +277,17 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
   }
 
-    // Push notification logic placeholder / dispatch
-    return { success: true };
+    // Return the actual push-delivery result so callers can branch on it.
+    // The notification row is persisted independently of push delivery, so
+    // overall success is driven by the FCM outcome.
+    const fcmOk = Boolean(fcmResult?.success);
+    return {
+      success: fcmOk,
+      dbSuccess,
+      fcm: {
+        success: fcmOk,
+        messageId: fcmResult?.messageId ?? null,
+        error: fcmResult?.error ?? (fcmResult ? null : 'Unexpected sendFcmNotification error'),
+      },
+    };
   }

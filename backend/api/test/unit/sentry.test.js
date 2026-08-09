@@ -16,6 +16,7 @@ import {
   initSentry,
   flushSentry,
   sentryErrorHandler,
+  shouldIgnoreError,
 } from "../../src/middleware/sentry.js";
 
 vi.mock("../../src/middleware/logger.js", () => ({
@@ -147,4 +148,36 @@ describe("sentry — error filter and level", () => {
       global.Error = OriginalError;
     }
   });
+
+describe('shouldIgnoreError', () => {
+  it('returns warn level for ECONNRESET errors', () => {
+    const err = new Error('Connection reset');
+    err.code = 'ECONNRESET';
+    expect(shouldIgnoreError(err)).toBe('warn');
+  });
+
+  it('returns warn level for ECONNREFUSED errors', () => {
+    const err = new Error('Connection refused');
+    err.code = 'ECONNREFUSED';
+    expect(shouldIgnoreError(err)).toBe('warn');
+  });
+
+  it('returns false for ETIMEDOUT errors (not in filter list)', () => {
+    const err = new Error('Operation timed out');
+    err.code = 'ETIMEDOUT';
+    expect(shouldIgnoreError(err)).toBe(false);
+  });
+
+  it('returns false for errors with unknown codes', () => {
+    const err = new Error('Some other error');
+    err.code = 'OTHER_ERROR';
+    expect(shouldIgnoreError(err)).toBe(false);
+  });
+
+  it('returns false for errors without a code property', () => {
+    const err = new Error('No code');
+    expect(shouldIgnoreError(err)).toBe(false);
+  });
+});
+
 });

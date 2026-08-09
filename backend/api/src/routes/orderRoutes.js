@@ -1174,6 +1174,32 @@ router.get('/:id/timeline', authenticate, userLimiter, requirePolicy('order:view
   }
 });
 
+// POST /api/orders/:id/ratings
+router.post('/:id/ratings', authenticate, userLimiter, requirePolicy('order:submit-rating', async (req) => {
+  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  return { order };
+}), auditLog({ action: 'order:submit-rating', resourceType: 'order_rating' }), validateParams(paramIdSchema), validateBody(submitRatingSchema), async (req, res) => {
+  try {
+    const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id');
+    orderValidationService.assertOrderFound(order);
+
+    const result = await orderLifecycleService.submitRating(
+      order.id,
+      req.user.id,
+      req.body.stars,
+      req.body.comment ?? null,
+      req.token ? createUserClient(req.token) : undefined
+    );
+    return res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Submit rating exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // GET /api/orders/:id
 router.get('/:id', authenticate, userLimiter, requirePolicy('order:view', async (req) => {
   const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');

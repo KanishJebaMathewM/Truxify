@@ -67,8 +67,9 @@ export async function reconcileFailedReputationUpdates() {
 
     for (const row of failedReputations ?? []) {
       let claimError;
+      let claimKey;
       if (redisClient) {
-        const claimKey = `reputation:claim:${row.id}`;
+        claimKey = `reputation:claim:${row.id}`;
         const claimed = await redisClient.set(claimKey, instanceId, 'NX', 'EX', 300);
         if (!claimed) {
           logger.info(`[reputation-reconciliation] Row ${row.id} already claimed, skipping.`);
@@ -95,6 +96,16 @@ export async function reconcileFailedReputationUpdates() {
           last_attempt_at: new Date().toISOString(),
         });
         logger.warn(`[reputation-reconciliation] Retry ${newRetryCount}/${MAX_RETRIES} failed for ${row.driver_wallet}: ${err.message}`);
+      } finally {
+        // Release the per-row claim so a re-queued failure can be retried on
+        // the next cycle instead of waiting for the 300s claim TTL to expire.
+        if (claimKey) {
+          try {
+            await redisClient.del(claimKey);
+          } catch (err) {
+            logger.warn(`[reputation-reconciliation] Failed to release claim for ${row.id}:`, err.message);
+          }
+        }
       }
     }
   } finally {

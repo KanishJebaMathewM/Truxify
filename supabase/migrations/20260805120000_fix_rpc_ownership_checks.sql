@@ -117,8 +117,10 @@ DECLARE
 BEGIN
   -- Verify the caller IS the customer. get_profile_id() maps the Firebase JWT
   -- sub to profiles.id, which is what p_customer_id/req.user.id actually store
-  -- (auth.uid() is the Firebase UID and would never match).
-  IF auth.uid() IS NOT NULL AND get_profile_id() <> p_customer_id THEN
+  -- (auth.uid() is the Firebase UID and would never match). Null-safe: an
+  -- unauthenticated caller (auth.uid() IS NULL) must also be rejected, not
+  -- just skipped.
+  IF auth.uid() IS NULL OR get_profile_id() <> p_customer_id THEN
     RAISE EXCEPTION 'Unauthorized: you can only submit ratings for yourself';
   END IF;
 
@@ -161,6 +163,12 @@ BEGIN
   WHERE user_id = p_driver_id;
 END;
 $$;
+
+-- Function creation grants EXECUTE to PUBLIC by default (callable with the
+-- public anon key). Revoke it and allow only authenticated sessions so the
+-- ownership guard above is the only gate for real users.
+REVOKE EXECUTE ON FUNCTION submit_rating_tx(TEXT, UUID, UUID, SMALLINT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION submit_rating_tx(TEXT, UUID, UUID, SMALLINT, TEXT) TO authenticated;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 3. accept_bid_tx — verify the caller IS the order's customer by profiles.id

@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockSupabaseFrom = vi.fn();
 const mockEq = vi.fn();
+const mockOr = vi.fn();
 const mockMaybeSingle = vi.fn();
 
 const mockSupabase = {
@@ -41,7 +42,9 @@ describe('getBookingContext', () => {
     mockSupabaseFrom.mockReturnValue({
       select: vi.fn().mockReturnValue({
         eq: mockEq.mockReturnValue({
-          maybeSingle: mockMaybeSingle,
+          or: mockOr.mockReturnValue({
+            maybeSingle: mockMaybeSingle,
+          }),
         }),
       }),
     });
@@ -51,28 +54,45 @@ describe('getBookingContext', () => {
     const mockOrder = { id: '550e8400-e29b-41d4-a716-446655440000', status: 'in_transit', eta: '2 hours' };
     mockMaybeSingle.mockResolvedValue({ data: mockOrder, error: null });
 
-    const result = await getBookingContext('550e8400-e29b-41d4-a716-446655440000');
+    const result = await getBookingContext('550e8400-e29b-41d4-a716-446655440000', 'user-1');
 
     expect(result).toEqual(mockOrder);
     expect(mockSupabaseFrom).toHaveBeenCalledWith('orders');
     expect(mockEq).toHaveBeenCalledWith('id', '550e8400-e29b-41d4-a716-446655440000');
+    expect(mockOr).toHaveBeenCalledWith('customer_id.eq.user-1,driver_id.eq.user-1');
   });
 
   it('uses order_display_id when bookingId is not a valid UUID', async () => {
     const mockOrder = { id: '123e4567-e89b-12d3-a456-426614174000', order_display_id: '#FF20260101ABC123DEF456', status: 'delivered' };
     mockMaybeSingle.mockResolvedValue({ data: mockOrder, error: null });
 
-    const result = await getBookingContext('#FF20260101ABC123DEF456');
+    const result = await getBookingContext('#FF20260101ABC123DEF456', 'driver-1');
 
     expect(result).toEqual(mockOrder);
     expect(mockSupabaseFrom).toHaveBeenCalledWith('orders');
     expect(mockEq).toHaveBeenCalledWith('order_display_id', '#FF20260101ABC123DEF456');
+    expect(mockOr).toHaveBeenCalledWith('customer_id.eq.driver-1,driver_id.eq.driver-1');
   });
 
   it('returns null when supabase query returns null data', async () => {
     mockMaybeSingle.mockResolvedValue({ data: null, error: null });
 
+    const result = await getBookingContext('550e8400-e29b-41d4-a716-446655440000', 'user-1');
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null without querying when userId is missing', async () => {
     const result = await getBookingContext('550e8400-e29b-41d4-a716-446655440000');
+
+    expect(result).toBeNull();
+    expect(mockSupabaseFrom).not.toHaveBeenCalled();
+  });
+
+  it('returns null when supabase query returns an error', async () => {
+    mockMaybeSingle.mockResolvedValue({ data: null, error: { message: 'permission denied' } });
+
+    const result = await getBookingContext('550e8400-e29b-41d4-a716-446655440000', 'user-1');
 
     expect(result).toBeNull();
   });
@@ -80,7 +100,7 @@ describe('getBookingContext', () => {
   it('returns null and logs warning when supabase query throws an error', async () => {
     mockMaybeSingle.mockRejectedValue(new Error('Connection refused'));
 
-    const result = await getBookingContext('550e8400-e29b-41d4-a716-446655440000');
+    const result = await getBookingContext('550e8400-e29b-41d4-a716-446655440000', 'user-1');
 
     expect(result).toBeNull();
   });
@@ -89,13 +109,13 @@ describe('getBookingContext', () => {
     const validUuid = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
     mockMaybeSingle.mockResolvedValue({ data: { id: validUuid }, error: null });
 
-    await getBookingContext(validUuid);
+    await getBookingContext(validUuid, 'user-1');
     expect(mockEq).toHaveBeenCalledWith('id', validUuid);
 
     mockMaybeSingle.mockClear();
 
     const invalidUuid = 'not-a-uuid';
-    await getBookingContext(invalidUuid);
+    await getBookingContext(invalidUuid, 'user-1');
     expect(mockEq).toHaveBeenCalledWith('order_display_id', invalidUuid);
   });
 });
@@ -168,9 +188,10 @@ describe('trimCache Eviction Logic', () => {
     const now = Date.now();
     audioCache.set('expired_old', { buffer: Buffer.from('old'), timestamp: now - CACHE_TTL_MS - 5000 });
 
-    cacheAudio('new_item', Buffer.from('fresh_data'));
+    cacheAudio('new_item', Buffer.from('fresh_data'), 'user-1');
 
     expect(audioCache.has('expired_old')).toBe(false);
     expect(audioCache.has('new_item')).toBe(true);
+    expect(audioCache.get('new_item').userId).toBe('user-1');
   });
 });

@@ -1,4 +1,4 @@
-import { supabase, redisClient } from '../config/db.js';
+import { supabaseAdmin, redisClient } from '../config/db.js';
 import { sendPushNotification } from './notificationService.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
@@ -59,14 +59,14 @@ function endOfDay(date) {
 }
 
 async function hasExistingNotification(userId, documentId, daysRemaining) {
-  if (!supabase) return false;
+  if (!supabaseAdmin) return false;
   try {
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('notifications')
       .select('id, metadata')
       .eq('user_id', userId)
-      .eq('notif_type', 'document_expiry')
+      .eq('notif_type', 'document')
       .gte('created_at', cutoff);
 
     if (error || !data || data.length === 0) return false;
@@ -127,7 +127,7 @@ export async function processDocumentExpiryBatch() {
 
       let documents = [];
       try {
-        const { data, error } = await supabase
+        const { data, error } = await supabaseAdmin
           .from('documents')
           .select('id, user_id, doc_type, valid_until')
           .not('valid_until', 'is', null)
@@ -183,7 +183,7 @@ export async function processDocumentExpiryBatch() {
         };
 
         try {
-          await sendPushNotification(doc.user_id, title, body, 'document_expiry', metadata);
+          await sendPushNotification(doc.user_id, title, body, 'document', metadata);
           totalNotificationsSent++;
           logger.info(`[document-expiry] Sent ${window.label} expiry alert for ${docLabel} (doc: ${doc.id}) to user ${doc.user_id}`);
         } catch (err) {

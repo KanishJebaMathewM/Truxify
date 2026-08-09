@@ -1365,7 +1365,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               FontWeight textWeight = FontWeight.normal;
 
               if (earnings > 0) {
-                final double scale = (earnings / _heatmapMaxDailyEarnings).clamp(0.0, 1.0);
+                final double scale = (earnings / _heatmapMaxDailyEarnings).clamp(0.0, 1.0).toDouble();
                 final double opacity = 0.15 + (scale * 0.75);
                 cellBgColor = TruxifyColors.accent.withValues(alpha: opacity);
 

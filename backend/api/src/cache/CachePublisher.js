@@ -90,7 +90,7 @@ export async function publishInvalidation(namespace, eventOpts = {}) {
   if (!ns.enablePubSub) return;
 
   const channel = CacheKeyBuilder.pubSubChannel(namespace);
-  const event = createCacheEvent(eventOpts.type || CacheEventType.INVALIDATE_KEY, {
+  const event = createCacheEvent(eventOpts.type ?? CacheEventType.INVALIDATE_KEY, {
     namespace,
     originInstanceId: instanceId,
     ...eventOpts,
@@ -162,7 +162,8 @@ export function setupMessageHandler(cacheInvalidator) {
     const event = (() => {
       try {
         return JSON.parse(message);
-      } catch {
+      } catch (err) {
+        logger.warn({ err, channel, messagePreview: message.slice(0, 100) }, '[CachePublisher] Failed to parse event from Redis channel.');
         return null;
       }
     })();

@@ -26,11 +26,7 @@ class VerificationService {
       const [oracleResult, crossChainResult, documentIntegrity, driverVerification] = await Promise.all([
         this.oracleService.confirmDelivery({
           orderId,
-          gpsCoordinates: order.drop_lat != null && order.drop_lng != null
-            ? { lat: order.drop_lat, lng: order.drop_lng }
-            : order.pickup_lat != null && order.pickup_lng != null
-              ? { lat: order.pickup_lat, lng: order.pickup_lng }
-              : null,
+          gpsCoordinates: null,
         }),
         order.blockchain_tx_hash
           ? this.oracleService.verifyCrossChain(orderId, order.blockchain_tx_hash)

@@ -68,6 +68,69 @@ void main() {
       expect(model.trips, isEmpty);
     });
 
+    test('fromJson parses nested backend response correctly', () {
+      final json = {
+        'driver_name': 'Ramesh Kumar',
+        'driver_phone': '+919876543210',
+        'start_date': '2026-06-01',
+        'end_date': '2026-06-30',
+        'summary': {
+          'total_trips': 2,
+          'total_base_freight': 800000,
+          'total_platform_fees': 80000,
+          'total_toll_estimate': 12000,
+          'total_net_earnings': 720000,
+        },
+        'trips': [
+          {
+            'id': 'trip-1',
+            'order_display_id': 'TRP-001',
+            'pickup_address': 'Delhi',
+            'drop_address': 'Agra',
+            'pickup_date': '2026-06-05',
+            'base_freight': 500000,
+            'platform_fee': 50000,
+            'toll_estimate': 5000,
+            'net_earnings': 450000,
+            'status': 'delivered',
+          },
+          {
+            'id': 'trip-2',
+            'order_display_id': 'TRP-002',
+            'pickup_address': 'Agra',
+            'drop_address': 'Jaipur',
+            'pickup_date': '2026-06-12',
+            'base_freight': 300000,
+            'platform_fee': 30000,
+            'toll_estimate': 7000,
+            'net_earnings': 270000,
+            'status': 'delivered',
+          },
+        ],
+      };
+
+      final model = EarningsStatementModel.fromJson(json);
+
+      expect(model.driverName, equals('Ramesh Kumar'));
+      expect(model.driverPhone, equals('+919876543210'));
+      expect(model.startDate, equals(DateTime(2026, 6, 1)));
+      expect(model.endDate, equals(DateTime(2026, 6, 30)));
+      expect(model.totalTrips, equals(2));
+      expect(model.totalEarnings, equals(8000.0));
+      expect(model.platformFees, equals(800.0));
+      expect(model.netEarnings, equals(7200.0));
+      expect(model.trips.length, equals(2));
+      expect(model.trips[0].tripId, equals('trip-1'));
+      expect(model.trips[0].displayId, equals('TRP-001'));
+      expect(model.trips[0].tripDate, equals(DateTime(2026, 6, 5)));
+      expect(model.trips[0].route, equals('Delhi → Agra'));
+      expect(model.trips[0].earnings, equals(4500.0));
+      expect(model.trips[0].platformFee, equals(500.0));
+      expect(model.trips[0].tollEstimate, equals(50.0));
+      expect(model.trips[0].status, equals('delivered'));
+      expect(model.trips[1].earnings, equals(2700.0));
+    });
+
     test('fromJson handles null fields gracefully', () {
       final json = {
         'start_date': '2026-06-01',

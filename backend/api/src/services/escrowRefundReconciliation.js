@@ -1,6 +1,6 @@
 import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { confirmEscrowRefund, submitEscrowRefund } from './escrow.js';
+import { confirmEscrowRefund, submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import os from 'os';
 
@@ -48,8 +48,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
       try {
         globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
       } catch (err) {
-        logger.error('[escrow-reconciliation] Failed to acquire Redis global lock, skipping batch:', err.message);
-        return;
+        logger.warn({ err }, '[escrow-reconciliation] Failed to acquire reconciliation lock, proceeding without lock');
       }
       if (!globalLockAcquired) {
         logger.info('[escrow-reconciliation] Global lock held by another instance, skipping batch pull.');
@@ -121,16 +120,43 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
         let receipt;
 
         if (!refundTxHash) {
-          const submitted = await submitEscrowRefund(order.order_display_id);
-          if (submitted.waitForConfirmation) {
-            receipt = await submitted.waitForConfirmation();
-          } else {
-            logger.warn(`[escrow-reconciliation] waitForConfirmation unavailable for ${order.order_display_id} — escrow contract may not be initialized.`);
-            receipt = { hash: submitted.txHash };
+          const cancellationFee = Number(order.cancellation_fee ?? 0);
+          let driverFeeWei = 0n;
+          if (cancellationFee > 0) {
+            // Prefer proportional wei from escrow_amount_wei when available so
+            // on-chain penalty matches the fee used at cancel time.
+            if (order.escrow_amount_wei != null && order.total_amount) {
+              const totalAmount = Number(order.total_amount);
+              if (Number.isFinite(totalAmount) && totalAmount > 0) {
+                driverFeeWei = (BigInt(order.escrow_amount_wei) * BigInt(cancellationFee)) / BigInt(Math.round(totalAmount));
+              }
+            }
+            if (driverFeeWei === 0n) {
+              driverFeeWei = paisaToMaticWei(cancellationFee);
+            }
           }
+
+          const submitted = driverFeeWei > 0n
+            ? await submitEscrowCancelWithPenalty(order.order_display_id, driverFeeWei)
+            : await submitEscrowRefund(order.order_display_id);
+          if (!submitted.waitForConfirmation || !submitted.txHash) {
+            // The on-chain refund was not actually submitted/confirmed
+            // (cancelBooking / cancelWithPenalty threw or the contract is not
+            // configured). Never finalize the order as refunded in that case —
+            // keep it in refund_pending/refund_failed so the retry loop can heal it.
+            throw new Error(
+              submitted.error ||
+              `Escrow refund for ${order.order_display_id} could not be submitted on-chain (no confirmation available).`
+            );
+          }
+          receipt = await submitted.waitForConfirmation();
           refundTxHash = receipt.hash ?? submitted.txHash;
         } else {
           receipt = await confirmEscrowRefund(refundTxHash);
+        }
+
+        if (!refundTxHash) {
+          throw new Error(`Escrow refund for ${order.order_display_id} has no confirmed on-chain refund transaction hash.`);
         }
 
         const refundedAt = new Date().toISOString();

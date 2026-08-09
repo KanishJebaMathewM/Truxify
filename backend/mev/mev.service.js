@@ -10,7 +10,7 @@ class MEVService {
         this.escrowAddress = process.env.MEV_ESCROW_ADDRESS;
         
         this.escrowABI = [
-            'function createEscrow(address driver, bytes32 commitHash, bytes32 secretHash) external payable',
+            'function createEscrow(address driver, bytes32 secretHash) external payable',
             'function releaseEscrowWithProof(uint256 escrowId, bytes32 secret, bytes calldata proof) external',
             'function disputeEscrowWithProof(uint256 escrowId, bytes calldata proof) external',
             'function createCommitment(bytes32 secretHash) external',
@@ -36,9 +36,10 @@ class MEVService {
 
     async createCommitment(secret, userId) {
         try {
-            // Hash secret with user address
+            // Hash secret (the exact bytes revealed at release time, so the
+            // on-chain keccak(preimage) == secretHash check can pass)
             const secretHash = ethers.keccak256(
-                ethers.toUtf8Bytes(secret + userId)
+                ethers.toUtf8Bytes(secret)
             );
             
             const tx = await this.escrow.createCommitment(secretHash, {
@@ -72,19 +73,17 @@ class MEVService {
             // Create commitment first
             const commitment = await this.createCommitment(secret, userId);
             
-            // Hash secret for escrow
+            // Hash secret for escrow (same bytes as release reveals: plain secret)
             const secretHash = ethers.keccak256(
-                ethers.toUtf8Bytes(secret + userId)
+                ethers.toUtf8Bytes(secret)
             );
             
-            // Create escrow with commit hash
-            const commitHash = ethers.keccak256(
-                ethers.toUtf8Bytes(secret + userId + Date.now().toString())
-            );
-            
+            // Create escrow with MEV protection. The contract's createEscrow
+            // takes (address driver, bytes32 secretHash) — the secretHash is
+            // stored on-chain as the escrow's commit hash, so no separate
+            // commit hash argument is passed.
             const tx = await this.escrow.createEscrow(
                 driver,
-                commitHash,
                 secretHash,
                 { 
                     value: ethers.parseEther(amount.toString()),
@@ -101,7 +100,7 @@ class MEVService {
                 customer: this.wallet.address,
                 driver,
                 amount,
-                commitHash,
+                commitHash: secretHash,
                 secretHash,
                 txHash: receipt.hash
             });
@@ -110,7 +109,8 @@ class MEVService {
             return {
                 success: true,
                 escrowId,
-                commitHash,
+                commitHash: secretHash,
+                secretHash,
                 txHash: receipt.hash
             };
         } catch (error) {

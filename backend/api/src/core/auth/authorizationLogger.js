@@ -12,6 +12,8 @@
  * development mode for debugging.
  */
 
+import logger from '../../middleware/logger.js';
+
 const isDev = process.env.NODE_ENV !== 'production';
 
 /**
@@ -29,7 +31,7 @@ export function logAuthGrant({ user, action, resource, requestId, durationMs }) 
   if (isDev && resource) {
     entry.resourceType = typeof resource === 'object' ? 'object' : String(resource);
   }
-  console.log(JSON.stringify(entry));
+  logger.info(entry);
 }
 
 /**
@@ -48,31 +50,31 @@ export function logAuthDenial({ user, action, resource, reason, requestId, durat
   if (isDev && resource) {
     entry.resourceType = typeof resource === 'object' ? 'object' : String(resource);
   }
-  console.warn(JSON.stringify(entry));
+  logger.warn(entry);
 }
 
 /**
  * Log an attempt to use an unknown/undefined policy action.
  */
 export function logUnknownAction({ user, action, requestId }) {
-  console.warn(JSON.stringify({
+  logger.warn({
     event: 'AUTH_UNKNOWN_ACTION',
     action,
     userId: user?.id,
     requestId,
-  }));
+  });
 }
 
 /**
  * Log an authentication failure (no token, invalid token, etc.)
  */
 export function logAuthFailure({ reason, ip, requestId }) {
-  console.warn(JSON.stringify({
+  logger.warn({
     event: 'AUTH_FAILURE',
     reason,
     ip,
     requestId,
-  }));
+  });
 }
 
 /**

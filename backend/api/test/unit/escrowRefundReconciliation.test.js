@@ -50,6 +50,8 @@ vi.mock('../../src/middleware/logger.js', () => ({
 vi.mock('../../src/services/escrow.js', () => ({
   confirmEscrowRefund: vi.fn(),
   submitEscrowRefund: vi.fn(),
+  submitEscrowCancelWithPenalty: vi.fn(),
+  paisaToMaticWei: vi.fn((paisa) => BigInt(Math.round(Number(paisa))) * 10n**12n),
 }));
 
 import { OrderRepository } from '../../src/repositories/orderRepository.js';
@@ -64,8 +66,8 @@ import {
 let orderRepository;
 
 beforeEach(() => {
-  mocks.redisSet.mockClear();
-  mocks.redisDel.mockClear();
+  mocks.redisSet.mockReset();
+  mocks.redisDel.mockReset();
   mocks.redisSet.mockReturnValue('OK');
   mocks.redisDel.mockReturnValue('OK');
   orderRepository = new OrderRepository(supabase);

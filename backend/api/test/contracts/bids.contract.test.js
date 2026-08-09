@@ -17,10 +17,10 @@ vi.mock('../../src/services/escrow.js', () => ({
   recordDepositTx: vi.fn(),
   escrowDeposit: vi.fn(),
   escrowRelease: vi.fn(),
-  escrowRefund: vi.fn(),
+  submitEscrowRefund: vi.fn(),
   submitEscrowRefund: vi.fn(),
   confirmEscrowRefund: vi.fn(),
-  bookingIdFromUuid: vi.fn((orderId) => `escrow:${orderId}`),
+  getEscrowBookingId: vi.fn((orderId) => `escrow:${orderId}`),
   ESCROW_MATIC_PER_PAISA: 0.01,
 }));
 

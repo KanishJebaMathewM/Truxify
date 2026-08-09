@@ -332,10 +332,10 @@ class GraphQLGateway {
                 }
             });
 
-            logger.info(`âœ… GraphQL Gateway running at ${url}`);
+           logger.info(`OK GraphQL Gateway running at ${url}`);
             return { url };
         } catch (error) {
-            logger.error('âŒ GraphQL Gateway startup failed:', error);
+            logger.error('ERROR GraphQL Gateway startup failed:', error);
             throw error;
         }
     }
@@ -359,7 +359,7 @@ class GraphQLGateway {
     async stop() {
         if (this.server) {
             await this.server.stop();
-            logger.info('âœ… GraphQL Gateway stopped');
+            logger.info('OK GraphQL Gateway stopped');
         }
     }
 }

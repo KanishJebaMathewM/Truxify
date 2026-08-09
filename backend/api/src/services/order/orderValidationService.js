@@ -8,10 +8,13 @@ export class OrderValidationService {
   }
 
   async findOrderByIdOrDisplayId(identifier, select = '*') {
-    const { data: byId, error: errId } = await this.supabase.from('orders').select(select).eq('id', identifier).maybeSingle();
+    const targetId = typeof identifier === 'string' && identifier.startsWith('TX-')
+      ? identifier.slice(3)
+      : identifier;
+    const { data: byId, error: errId } = await this.supabase.from('orders').select(select).eq('id', targetId).maybeSingle();
     if (errId) throw new DomainError(500, { error: 'Query failed.', details: errId.message });
     if (byId) return byId;
-    const { data: byDisplay, error: errDisplay } = await this.supabase.from('orders').select(select).eq('order_display_id', identifier).maybeSingle();
+    const { data: byDisplay, error: errDisplay } = await this.supabase.from('orders').select(select).eq('order_display_id', targetId).maybeSingle();
     if (errDisplay) throw new DomainError(500, { error: 'Query failed.', details: errDisplay.message });
     return byDisplay || null;
   }

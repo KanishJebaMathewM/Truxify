@@ -1,0 +1,94 @@
+{
+  "name": "Truxify Emergency Smart Contract Circuit Breaker",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "name": "Cron 1 Min Monitor",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://api:5000/api/internal/escrow-velocity",
+        "method": "GET",
+        "options": {}
+      },
+      "name": "Check Escrow Velocity",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isAnomalyDetected }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "name": "If Anomaly > Threshold",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://api:5000/api/internal/pause-escrow",
+        "method": "POST",
+        "options": {}
+      },
+      "name": "Execute Emergency Pause",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [850, 200]
+    }
+  ],
+  "connections": {
+    "Cron 1 Min Monitor": {
+      "main": [
+        [
+          {
+            "node": "Check Escrow Velocity",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Escrow Velocity": {
+      "main": [
+        [
+          {
+            "node": "If Anomaly > Threshold",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Anomaly > Threshold": {
+      "main": [
+        [
+          {
+            "node": "Execute Emergency Pause",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

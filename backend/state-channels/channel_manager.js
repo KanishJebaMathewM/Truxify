@@ -22,18 +22,35 @@ export class StateChannelManager {
     return channelState;
   }
 
-  updateState(channelId, deltaAmount, recipient) {
+  updateState(channelId, deltaAmount, recipient, callerAddress = null) {
     const state = this.activeChannels.get(channelId);
     if (!state) throw new Error(`Channel ${channelId} not found.`);
 
-    state.sequence += 1;
+    if (typeof deltaAmount !== 'number' || !Number.isFinite(deltaAmount) || deltaAmount <= 0) {
+      throw new Error(`Invalid deltaAmount: ${deltaAmount}`);
+    }
+
+    if (callerAddress !== null && callerAddress !== state.userA) {
+      throw new Error(`Caller ${callerAddress} is not authorized to update channel ${channelId}`);
+    }
+
     if (recipient === state.userB) {
+      if (state.balanceA < deltaAmount) {
+        throw new Error(`Insufficient balance in channel ${channelId}: balanceA=${state.balanceA}, requested=${deltaAmount}`);
+      }
       state.balanceA -= deltaAmount;
       state.balanceB += deltaAmount;
-    } else {
+    } else if (recipient === state.userA) {
+      if (state.balanceB < deltaAmount) {
+        throw new Error(`Insufficient balance in channel ${channelId}: balanceB=${state.balanceB}, requested=${deltaAmount}`);
+      }
       state.balanceA += deltaAmount;
       state.balanceB -= deltaAmount;
+    } else {
+      throw new Error(`Recipient ${recipient} is not part of channel ${channelId}`);
     }
+
+    state.sequence += 1;
 
     return state;
   }

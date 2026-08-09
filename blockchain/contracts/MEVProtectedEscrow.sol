@@ -23,8 +23,11 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
     uint256 public depositCount;
     address public trustedRelayer;
 
+    uint256 public constant REFUND_WINDOW = 5760;
+
     event DepositCreated(uint256 indexed depositId, address indexed shipper, address indexed driver, uint256 amount);
     event DepositReleasedMEV(uint256 indexed depositId, address indexed driver, uint256 amount);
+    event DepositRefunded(uint256 indexed depositId, address indexed shipper, uint256 amount);
     event RelayerUpdated(address indexed newRelayer);
 
     modifier onlyRelayer() {
@@ -41,6 +44,13 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
         emit RelayerUpdated(_newRelayer);
     }
 
+    /**
+     * @dev The SHIPPER is responsible for minting the secret preimage and
+     * committing keccak256(preimage) as _secretHash. The relayer can only
+     * release after it learns the preimage out of band (e.g. a private
+     * Flashbots bundle); if it never does, refundDeposit returns the funds
+     * after blockMin + REFUND_WINDOW.
+     */
     function createProtectedDeposit(address payable _driver, bytes32 _secretHash) external payable returns (uint256 depositId) {
         require(msg.value > 0, "Deposit must be > 0");
         require(_driver != address(0), "Invalid driver address");
@@ -64,6 +74,7 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
     function releaseDepositPrivate(uint256 _depositId, bytes32 _preimage) external onlyRelayer nonReentrant {
         ProtectedDeposit storage dep = deposits[_depositId];
         require(!dep.released, "Already released");
+        require(block.number >= dep.blockMin, "Release window not open");
         require(keccak256(abi.encodePacked(_preimage)) == dep.secretHash, "Invalid preimage");
 
         dep.released = true;
@@ -72,5 +83,23 @@ contract MEVProtectedEscrow is ReentrancyGuard, Ownable {
         require(success, "ETH transfer failed");
 
         emit DepositReleasedMEV(_depositId, dep.driver, amt);
+    }
+
+    /**
+     * @dev Refunds a deposit to the shipper once the MEV-protection window has
+     * elapsed without a release. Callable by anyone so a keeper can trigger the
+     * refund even if the shipper is offline; funds always go to dep.shipper.
+     */
+    function refundDeposit(uint256 _depositId) external nonReentrant {
+        ProtectedDeposit storage dep = deposits[_depositId];
+        require(!dep.released, "Already released");
+        require(block.number >= dep.blockMin + REFUND_WINDOW, "Refund window not open");
+
+        dep.released = true;
+        uint256 amt = dep.amount;
+        (bool success, ) = dep.shipper.call{value: amt}("");
+        require(success, "ETH transfer failed");
+
+        emit DepositRefunded(_depositId, dep.shipper, amt);
     }
 }

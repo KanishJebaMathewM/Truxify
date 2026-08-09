@@ -11,11 +11,24 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 
 class BookingConfirmationScreen extends StatefulWidget {
-  const BookingConfirmationScreen(
-      {super.key, required this.draft, required this.truck});
+  const BookingConfirmationScreen({
+    super.key,
+    required this.draft,
+    required this.truck,
+    this.orderService,
+    this.paymentRepository,
+    this.addressRepository,
+    this.apiClient,
+  });
 
   final RouteDraft draft;
   final TruckResultData truck;
+
+  /// Test seam — defaults are constructed in the state when null.
+  final OrderService? orderService;
+  final PaymentRepository? paymentRepository;
+  final AddressRepository? addressRepository;
+  final ApiClient? apiClient;
 
   @override
   State<BookingConfirmationScreen> createState() =>
@@ -30,6 +43,12 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   bool _isLoading = true;
   bool _isSubmitting = false;
   String? _createdOrderId;
+  String? _createdOrderDisplayId;
+  String? _upiDeepLink;
+  String? _amountInr;
+  String? _upiIntentError;
+  String? _lockError;
+
   late final AnimationController _controller;
   late final OrderService _orderService;
   List<PaymentMethod> _paymentMethods = [];
@@ -40,7 +59,10 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
   @override
   void initState() {
     super.initState();
-    _orderService = OrderService();
+    _orderService = widget.orderService ?? OrderService();
+    _paymentRepo = widget.paymentRepository ?? PaymentRepository();
+    _addressRepo = widget.addressRepository ?? AddressRepository();
+    _apiClient = widget.apiClient ?? ApiClient();
     _controller = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 600));
     _loadCheckoutData();
@@ -152,14 +174,16 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         pickupLng: widget.draft.pickupLng!,
         dropLat: finalDropLat,
         dropLng: finalDropLng,
-        pickupTime: pickupTime,
-        pickupDate: pickupDate,
-        goodsType: widget.draft.goodsType,
-        weightTonnes: weight,
+        pickupTime: widget.draft.dateLabel,
+        pickupDate: widget.draft.pickupDate,
+        goodsType: widget.draft.goodsType + (_isPassengerMode ? ' + Passenger' : ''),
+        weightTonnes: double.tryParse(widget.draft.weightTonnes) ?? 0,
         paymentMethodId: _selectedPayment?.id,
         requiresRefrigeration: widget.draft.requiresRefrigeration,
         targetTemperatureMin: widget.draft.targetTemperatureMin,
         targetTemperatureMax: widget.draft.targetTemperatureMax,
+        driverId: widget.truck.driverId,
+        truckId: widget.truck.truckId,
       );
 
       _createdOrderId = orderId;
@@ -193,6 +217,135 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         setState(() => _isSubmitting = false);
       }
     }
+  }
+
+  // ── Step 2: Get UPI intent ────────────────────────────────────────────────
+  Future<void> _fetchUpiIntent(String orderId) async {
+    try {
+      final body = await _apiClient.post(
+        '/api/payments/upi-intent',
+        body: {'order_id': orderId},
+      );
+      if (body is Map<String, dynamic>) {
+        setState(() {
+          _upiDeepLink = body['deep_link'] as String?;
+          _amountInr = body['amount_inr'] as String?;
+          _createdOrderDisplayId = body['order_ref'] as String?;
+          _isAwaitingUpi = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('UPI intent failed: $e');
+      if (!mounted) return;
+      setState(() {
+        _upiIntentError = e.toString().replaceAll('Exception: ', '');
+        _isAwaitingUpi = false;
+      });
+    }
+  }
+
+  // ── Step 2 retry: Re-invoke the UPI intent flow after a failure ───────────
+  Future<void> _retryUpiIntent() async {
+    final orderId = _createdOrderId;
+    if (orderId == null || _isSubmitting) return;
+    setState(() {
+      _upiIntentError = null;
+      _isSubmitting = true;
+    });
+    await _fetchUpiIntent(orderId);
+    if (mounted) {
+      setState(() => _isSubmitting = false);
+    }
+  }
+
+  // ── Step 3: Open UPI deep-link ────────────────────────────────────────────
+  Future<void> _launchUpi() async {
+    if (_upiDeepLink == null) return;
+    final uri = Uri.parse(_upiDeepLink!);
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        // After returning from UPI app, user taps "I've Paid" button
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'No UPI app found. Please install GPay, PhonePe, or Paytm.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to launch UPI: $e');
+    }
+  }
+
+  // ── Step 4: Verify payment after UPI success ───────────────────────────────
+  // POST /api/payments/lock requires the real on-chain tx_hash that a wallet
+  // SDK returns once `createBooking` is mined; recordDepositTx() verifies it
+  // against Polygon. No wallet SDK is integrated in this app, so there is no
+  // real hash to submit — fabricating one would post a hash the backend can
+  // never verify and the escrow would never lock.
+  //
+  // Instead we poll GET /api/payments/:orderId/status and only show the
+  // success panel when the backend reports escrow_status == 'funded'. Any
+  // other result renders a retryable pending state with a path back to the
+  // bookings list — never a false confirmation, never a dead-end.
+  Future<void> _confirmPaymentLocked() async {
+    final orderId = _createdOrderId;
+    if (orderId == null || _isSubmitting) return;
+
+    setState(() {
+      _isSubmitting = true;
+      _lockError = null;
+    });
+
+    try {
+      final body = await _apiClient.get('/api/payments/$orderId/status');
+      final escrowStatus =
+          body is Map<String, dynamic> ? body['escrow_status']?.toString() : null;
+
+      if (!mounted) return;
+
+      if (escrowStatus == 'funded') {
+        _showSuccessPanel();
+      } else {
+        setState(() {
+          _lockError = escrowStatus == null
+              ? 'We could not verify your payment right now. Please check again.'
+              : 'Your payment is still being verified (status: $escrowStatus). '
+                  'Please check again in a moment.';
+        });
+      }
+    } catch (e) {
+      debugPrint('Payment verification failed: $e');
+      if (!mounted) return;
+      setState(() {
+        _lockError =
+            'We could not verify your payment right now. Please check again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  void _exitToBookings() {
+    if (!mounted) return;
+    TruxifyScope.of(context).openOrders(tabIndex: 0);
+    Navigator.of(context).popUntil((route) => route.isFirst);
+  }
+
+  void _showSuccessPanel() {
+    if (!mounted) return;
+    setState(() {
+      _showSuccess = true;
+      _isAwaitingUpi = false;
+    });
+    _controller.forward(from: 0).then((_) async {
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
+      _exitToBookings();
+    });
   }
 
   @override
@@ -373,12 +526,107 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
                           controller: _controller,
                           orderId: _createdOrderId ?? '',
                         )
-                      : PrimaryButton(
-                          label: _isSubmitting
-                              ? 'Submitting...'
-                              : (_isLoading ? 'Loading...' : 'Pay & Confirm'),
-                          onPressed: _isLoading || _isSubmitting ? null : _pay,
-                        ),
+                      : _lockError != null
+                          ? _VerificationPendingSheet(
+                              message: _lockError!,
+                              isChecking: _isSubmitting,
+                              onCheckAgain: _confirmPaymentLocked,
+                              onBackToBookings: _exitToBookings,
+                            )
+                          : _upiIntentError != null
+                              ? _UpiIntentErrorSheet(
+                                  message: _upiIntentError!,
+                                  isRetrying: _isSubmitting,
+                                  onRetry: _retryUpiIntent,
+                                )
+                              : _isAwaitingUpi
+                                  ? _UpiPaymentSheet(
+                                      amountInr: _amountInr ?? widget.truck.price,
+                                      isSubmitting: _isSubmitting,
+                                      onLaunchUpi: _launchUpi,
+                                      onConfirmPaid: _confirmPaymentLocked,
+                                    )
+                                  : PrimaryButton(
+                                      label: _isSubmitting
+                                          ? 'Creating booking...'
+                                          : (_isLoading
+                                              ? 'Loading...'
+                                              : 'Pay & Confirm'),
+                                      onPressed: _isLoading || _isSubmitting
+                                          ? null
+                                          : _createOrderAndInitiatePayment,
+                                    ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── UPI Payment Sheet ─────────────────────────────────────────────────────────
+
+class _UpiPaymentSheet extends StatelessWidget {
+  const _UpiPaymentSheet({
+    required this.amountInr,
+    required this.isSubmitting,
+    required this.onLaunchUpi,
+    required this.onConfirmPaid,
+  });
+
+  final String amountInr;
+  final bool isSubmitting;
+  final VoidCallback onLaunchUpi;
+  final VoidCallback onConfirmPaid;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            TruxifyColors.accent.withValues(alpha: 0.12),
+            TruxifyColors.accentDark.withValues(alpha: 0.06),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+            color: TruxifyColors.accent.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: TruxifyColors.accent.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.lock_outline_rounded,
+                    color: TruxifyColors.accentDark, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Booking created!',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                    Text('Now secure your booking via UPI',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: TruxifyColors.adaptiveSecondaryText(
+                                context))),
+                  ],
                 ),
               ],
             ),
@@ -667,6 +915,115 @@ class _UpiPaymentMockDialogState extends State<_UpiPaymentMockDialog> {
                   )
                 ],
               ),
+      ),
+    );
+  }
+}
+
+// ── Payment Verification Pending Sheet ───────────────────────────────────────
+
+class _VerificationPendingSheet extends StatelessWidget {
+  const _VerificationPendingSheet({
+    required this.message,
+    required this.isChecking,
+    required this.onCheckAgain,
+    required this.onBackToBookings,
+  });
+
+  final String message;
+  final bool isChecking;
+  final VoidCallback onCheckAgain;
+  final VoidCallback onBackToBookings;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: TruxifyColors.warning.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+            color: TruxifyColors.warning.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: TruxifyColors.warning.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.hourglass_top_rounded,
+                    color: TruxifyColors.warning, size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Verifying your payment',
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w800)),
+                    Text('Your booking is created.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: TruxifyColors.adaptiveSecondaryText(
+                                context))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text(message,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: TruxifyColors.warning)),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              id: 'btn_check_payment_status',
+              onPressed: isChecking ? null : onCheckAgain,
+              icon: isChecking
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(isChecking ? 'Checking...' : 'Check payment status'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: TruxifyColors.accentDark,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              id: 'btn_back_to_bookings',
+              onPressed: isChecking ? null : onBackToBookings,
+              icon: const Icon(Icons.arrow_back_rounded, size: 18),
+              label: const Text('Back to bookings'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+                side: BorderSide(
+                    color: TruxifyColors.accent.withValues(alpha: 0.5)),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

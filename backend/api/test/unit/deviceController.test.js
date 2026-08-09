@@ -65,4 +65,30 @@ describe('registerDeviceToken', () => {
     expect(next).not.toHaveBeenCalled();
     expect(supabaseMock.calls.some((call) => call.table === 'user_devices')).toBe(false);
   });
+
+  it('returns a structured VALIDATION_ERROR 400 when metadata is invalid', async () => {
+    const req = {
+      user: { id: 'user-1' },
+      body: {
+        fcmToken: 'valid_token_12345',
+        metadata: 'not-an-object',
+      },
+    };
+    const res = makeResponse();
+    const next = vi.fn();
+
+    await registerDeviceToken(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        success: false,
+        error: expect.objectContaining({
+          code: 'VALIDATION_ERROR',
+          message: 'metadata must be an object',
+        }),
+      }),
+    );
+    expect(next).not.toHaveBeenCalled();
+  });
 });

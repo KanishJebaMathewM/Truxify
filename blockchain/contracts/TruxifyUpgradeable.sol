@@ -384,6 +384,7 @@ function disputeEscrow(uint256 escrowId) external onlyRole(DEFAULT_ADMIN_ROLE) n
         proposal.executed = true;
 
         if (passed) {
+            require(approvedImplementations[proposal.newImplementation], "Implementation not approved");
             // Set the DAO approval flag before calling upgradeToAndCall. The _authorizeUpgrade
             // hook will find this flag, consume it, and allow the upgrade to proceed.
             daoApprovedUpgrades[proposal.newImplementation] = true;

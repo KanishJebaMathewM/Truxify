@@ -1,4 +1,4 @@
-import { supabase, redisClient, mongoDb, firebaseAdmin } from '../config/db.js';
+import { supabase, supabaseAdmin, redisClient, mongoDb, firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 import { OrderRepository } from '../repositories/orderRepository.js';
@@ -16,13 +16,17 @@ import { OrderLifecycleService } from '../services/order/orderLifecycleService.j
 
 import {
   buildDepositTx,
-  escrowRefund,
-  recordDepositTx,
   submitEscrowRefund,
+  recordDepositTx,
   confirmEscrowRefund,
 } from '../services/escrow.js';
 
 const orderRepository = new OrderRepository(supabase);
+// Service-role repository for release-path DB writes. The anon-key client has
+// no RLS policy on `orders` and `escrow_status`/`escrow_release_*` are REVOKE
+// UPDATE from anon/authenticated, so persisting release evidence through it
+// would be a silent no-op and break reconciliation.
+const adminOrderRepository = supabaseAdmin ? new OrderRepository(supabaseAdmin) : null;
 
 const oracleService = new OracleService({ orderRepository });
 const verificationService = new VerificationService({ orderRepository, oracleService });
@@ -35,7 +39,7 @@ const bidAcceptanceService = new BidAcceptanceService({
   orderRepository,
   buildDepositTxFn: buildDepositTx,
   recordDepositTxFn: recordDepositTx,
-  escrowRefundFn: escrowRefund,
+  escrowRefundFn: submitEscrowRefund,
   logger,
 });
 
@@ -43,6 +47,7 @@ const trackingTokenService = new TrackingTokenService({ supabase, logger });
 
 const deliveryVerificationService = new DeliveryVerificationService(orderRepository, {
   trackingTokenService,
+  adminOrderRepository,
 });
 
 const orderMilestoneService = new OrderMilestoneService({
@@ -81,8 +86,7 @@ export {
   orderLifecycleService,
 
   buildDepositTx,
-  escrowRefund,
-  recordDepositTx,
   submitEscrowRefund,
+  recordDepositTx,
   confirmEscrowRefund,
 };

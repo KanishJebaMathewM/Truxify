@@ -1,7 +1,14 @@
 import crypto from 'crypto';
 
-// Secret key for signing pre-clearance packets
-const PACKET_SIGNING_SECRET = process.env.WIM_SIGNING_SECRET || 'wim-bypass-secret-key';
+// Secret key for signing pre-clearance packets. There is no production
+// fallback: without a configured secret the service fails fast at startup
+// rather than silently signing packets with a public, hardcoded value.
+const IS_TEST = process.env.NODE_ENV === 'test';
+const PACKET_SIGNING_SECRET = process.env.WIM_SIGNING_SECRET || (IS_TEST ? 'wim-bypass-test-secret' : null);
+
+if (!PACKET_SIGNING_SECRET) {
+  throw new Error('WIM_SIGNING_SECRET environment variable is required to sign WIM bypass packets.');
+}
 
 /**
  * Validates truck criteria for weigh station bypass.

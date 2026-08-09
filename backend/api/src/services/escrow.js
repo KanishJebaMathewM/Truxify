@@ -607,7 +607,13 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
       }
     }
   } catch (err) {
-    logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with release.`)
+    logger.error(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}`)
+    return {
+      txHash: null,
+      bookingId,
+      error: err.message,
+      code: 'ESCROW_STATUS_UNAVAILABLE',
+    }
   }
 
   try {
@@ -625,44 +631,6 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
     return { txHash: null, bookingId, error: err.message }
   }
   });
-}
-
-/**
- * Marks the on-chain booking as started, which is required for the escrow
- * release/withdraw logic to proceed.
- *
- * @param {string} orderDisplayId — display ID of the order, e.g. "#FF20260521"
- * @returns {Promise<{txHash: string | null, bookingId: string, error?: string}>}
- */
-export async function markEscrowBookingStarted(orderDisplayId) {
-  return measureExecution('EscrowService.markEscrowBookingStarted', async () => {
-    const bookingId = getEscrowBookingId(orderDisplayId)
-
-    if (!escrowContract) {
-      logger.warn('[escrow] Contract not initialised — skipping markBookingStarted.')
-      return { txHash: null, bookingId }
-    }
-
-    try {
-      const tx = await escrowContract.markBookingStarted(bookingId)
-      logger.info(`[escrow] markBookingStarted tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
-      return {
-        txHash: tx.hash,
-        bookingId,
-        waitForConfirmation: async () => {
-          const receipt = await tx.wait(1)
-          if (!receipt || receipt.status === 0) {
-            throw new Error('Escrow markBookingStarted transaction reverted or was not found.')
-          }
-          logger.info(`[escrow] markBookingStarted confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`)
-          return receipt
-        },
-      }
-    } catch (err) {
-      logger.error(`[escrow] markBookingStarted failed for booking ${orderDisplayId}: ${err.message}`)
-      return { txHash: null, bookingId, error: err.message }
-    }
-  })
 }
 
 /**

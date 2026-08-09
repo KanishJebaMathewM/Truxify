@@ -8,6 +8,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { GpsLog } from '../models/GpsLog.js';
 import { ebpfLoader } from '../../../../ebpf/loader.js';
+import { createLocationEventBus } from './locationEventBus.js';
 
 const TELEMETRY_SCHEMA = {
   lat: { type: 'number', required: true, min: -90, max: 90 },
@@ -65,8 +66,9 @@ let _orderRepository = null;
 let telemetryDropCounter = 0;
 const RECOVERY_FILE_PATH = process.env.RECOVERY_FILE_PATH || path.join(os.tmpdir(), 'truxify-telemetry-recovery.jsonl');
 
-// In-memory mapping of active client subscriptions
-const trackingSubscriptions = new Map();
+// In-memory mapping of active client subscriptions (process-local by design;
+// distributed fan-out across replicas is handled by the locationEventBus).
+let trackingSubscriptions = new Map();
 
 // Dedicated Redis subscriber instance for multi-replica WebSocket broadcasting
 let redisSubClient = null;
@@ -127,6 +129,12 @@ const locationChannels = new Map();
 // Used during disconnect cleanup so channels are properly removed when the last
 // subscriber for a display ID disconnects.
 const displayIdToLocationChannelKeys = new Map();
+
+// Redis Pub/Sub fan-out bus that distributes location events across API
+// replicas so a driver connected to Replica A reaches a customer connected to
+// Replica B. Local subscribers are still stored only in `trackingSubscriptions`;
+// the bus only relays validated events between processes.
+let locationEventBus = null;
 
 // =====================================================================
 // CLOCK SKEW & CIRCUIT BREAKER CONFIGURATION (#596)
@@ -494,7 +502,7 @@ async function authenticateWs(ws, token) {
         ws.close(4001, 'Unauthorized: Firebase Auth is not configured');
         return;
       }
-      const decodedToken = await firebaseAdmin.auth().verifyIdToken(token);
+      const decodedToken = await firebaseAdmin.auth().verifyIdToken(token, true);
       if (!supabase) {
         ws.send(JSON.stringify({ error: 'Unauthorized: Profile lookup is not configured', code: 4001 }));
         ws.close(4001, 'Unauthorized: Profile lookup is not configured');
@@ -521,7 +529,10 @@ async function authenticateWs(ws, token) {
       uid: profile.firebase_uid,
       role: profile.role,
     };
-    ws.driverId = profile.id;
+    // Only drivers may publish location telemetry on this socket.
+    if (profile.role === 'driver') {
+      ws.driverId = profile.id;
+    }
     ws.authenticated = true;
     await restoreSubscriptions(ws);
     logger.info(`✅ WS Authenticated user: ${ws.user.id}`);
@@ -530,6 +541,114 @@ async function authenticateWs(ws, token) {
     ws.send(JSON.stringify({ error: 'Unauthorized: Invalid token', code: 4001 }));
     ws.close(4001, 'Unauthorized: Invalid token');
   }
+}
+
+/**
+ * Build the client-facing `location_update` payload. This is the exact wire
+ * format consumed by existing WebSocket clients and is byte-identical whether
+ * produced by the publishing replica or reconstructed from a distributed event.
+ */
+function buildClientLocationPayload({ driverId, orderDisplayId, lat, lng, speed, bearing, timestampIso }) {
+  return JSON.stringify({
+    event: 'location_update',
+    data: {
+      driver_id: driverId,
+      order_display_id: orderDisplayId,
+      latitude: lat,
+      longitude: lng,
+      speed,
+      bearing,
+      timestamp: timestampIso,
+    },
+  });
+}
+
+/**
+ * Rebuild the client-facing payload from a validated internal Pub/Sub event.
+ */
+function buildClientPayloadFromInternalEvent(event) {
+  return buildClientLocationPayload({
+    driverId: event.driverId,
+    orderDisplayId: event.orderDisplayId,
+    lat: event.location.lat,
+    lng: event.location.lng,
+    speed: event.location.speed,
+    bearing: event.location.bearing,
+    timestampIso: event.timestamp,
+  });
+}
+
+/**
+ * Deliver a location payload to a subscription map's local subscribers.
+ *
+ * Semantics preserved from the original implementation:
+ *   - clients subscribed to the order (`orderDisplayId`) receive it
+ *   - clients subscribed to the driver (`driverId`) receive it
+ *   - only open sockets (readyState 1) receive it
+ *
+ * A client subscribed to both the order and the driver receives the payload
+ * exactly ONCE (the previous code could send it twice for such a client).
+ *
+ * @param {Map} subscriptionMap - this replica's local subscription registry.
+ * @param {string} payload - serialized client-facing payload.
+ * @param {string|null} orderDisplayId - order routing key.
+ * @param {string|null} driverId - driver routing key.
+ * @param {object} [metricsBus] - location event bus used to record delivery metrics.
+ * @returns {number} number of sockets that received the payload.
+ */
+function deliverLocationToLocalSubscribers(subscriptionMap, payload, orderDisplayId, driverId, metricsBus) {
+  const bus = metricsBus || locationEventBus;
+  const deliveredSockets = new Set();
+  let delivered = 0;
+
+  if (orderDisplayId && subscriptionMap.has(orderDisplayId)) {
+    for (const client of subscriptionMap.get(orderDisplayId)) {
+      if (client.readyState === 1 && !deliveredSockets.has(client)) {
+        deliveredSockets.add(client);
+        client.send(payload);
+        delivered++;
+      }
+    }
+  }
+
+  if (driverId && subscriptionMap.has(driverId)) {
+    for (const client of subscriptionMap.get(driverId)) {
+      if (client.readyState === 1 && !deliveredSockets.has(client)) {
+        deliveredSockets.add(client);
+        client.send(payload);
+        delivered++;
+      }
+    }
+  }
+
+  bus?.recordDelivery(delivered);
+  return delivered;
+}
+
+/**
+ * Build the handler invoked for every VALID distributed location event received
+ * on a replica. The publishing replica already delivered the event locally, so
+ * its own events (matching sourceInstanceId) are skipped — this is what
+ * prevents duplicate delivery to local clients.
+ *
+ * @param {object} [targetBus] - bus instance that received the event
+ *   (defaults to the module-level bus; required for multi-instance tests).
+ * @param {Map} [subscriptionMap] - local subscription registry to deliver to
+ *   (defaults to the module-level registry).
+ */
+function createLocationEventHandler(targetBus, subscriptionMap) {
+  return (event) => {
+    const bus = targetBus || locationEventBus;
+    if (!bus) return;
+    if (event.sourceInstanceId === bus.getInstanceId()) return;
+
+    const payload = buildClientPayloadFromInternalEvent(event);
+    const map = subscriptionMap || trackingSubscriptions;
+    const delivered = deliverLocationToLocalSubscribers(map, payload, event.orderDisplayId, event.driverId, bus);
+    if (delivered === 0) {
+      bus.recordNoSubscribers();
+    }
+  };
 }
 
 /**
@@ -545,6 +664,14 @@ export function initWebSocketServer(server, orderRepository) {
   const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 4096;
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_WS_PAYLOAD_BYTES });
   wsServer = wss;
+
+  // Start the distributed location fan-out. When Redis is unavailable this
+  // degrades to local-only delivery; the WebSocket server keeps working.
+  if (!locationEventBus) {
+    locationEventBus = createLocationEventBus();
+    locationEventBus.init(redisClient);
+    locationEventBus.subscribe(createLocationEventHandler());
+  }
 
   server.on('upgrade', async (request, socket, head) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
@@ -770,8 +897,11 @@ export async function handleTrackingMessage(ws, message, req) {
 export async function handleLocationPing(ws, data, req) {
   const driver_id = ws.driverId;
 
-  if (!driver_id) {
-    return ws.send(JSON.stringify({ error: 'Unauthorized: Missing authenticated WebSocket identity.' }));
+  if (!driver_id || ws.user?.role !== 'driver') {
+    return ws.send(JSON.stringify({
+      error: 'Forbidden: Driver role required to publish location updates',
+      code: 4003,
+    }));
   }
 
   const { driver_id: payloadDriverId, speed, bearing, device_timestamp } = data;
@@ -1015,19 +1145,43 @@ export async function handleLocationPing(ws, data, req) {
     });
   }
 
-  const broadcastPayload = JSON.stringify({
-    event: 'location_update',
-    data: {
-      driver_id,
-      order_display_id: orderDisplayId,
-      latitude: sanitized.lat,
-      longitude: sanitized.lng,
-      speed: sanitized.speed ?? 0,
-      bearing: sanitized.bearing ?? 0,
-      timestamp: new Date(serverNow)
-    }
+  const timestampIso = new Date(serverNow).toISOString();
+  const broadcastPayload = buildClientLocationPayload({
+    driverId: driver_id,
+    orderDisplayId: orderDisplayId ?? null,
+    lat: sanitized.lat,
+    lng: sanitized.lng,
+    speed: sanitized.speed ?? 0,
+    bearing: sanitized.bearing ?? 0,
+    timestampIso,
   });
 
+  // ── Distributed fan-out (multi-replica) ──────────────────────────────
+  // Publish a compact internal event to the shared Redis channel so every API
+  // replica can deliver this update to its own local subscribers. Best-effort
+  // and fire-and-forget — local delivery below never depends on Redis.
+  if (locationEventBus) {
+    void locationEventBus.publish({
+      type: 'location_update',
+      v: 1,
+      sourceInstanceId: locationEventBus.getInstanceId(),
+      driverId: driver_id,
+      orderDisplayId: orderDisplayId ?? null,
+      sequence: serverNow,
+      timestamp: timestampIso,
+      location: {
+        lat: sanitized.lat,
+        lng: sanitized.lng,
+        speed: sanitized.speed ?? 0,
+        bearing: sanitized.bearing ?? 0,
+      },
+    });
+  }
+
+  // Local delivery to this replica's own order/driver subscribers. The
+  // publishing replica's Pub/Sub consumer skips self-originated events, so a
+  // client on this replica receives the update exactly once.
+  deliverLocationToLocalSubscribers(trackingSubscriptions, broadcastPayload, orderDisplayId ?? null, driver_id);
   initRedisTrackerPubSub();
 
   if (redisClient) {
@@ -1282,6 +1436,14 @@ export async function closeWebSocketServer() {
     await flushTelemetryBuffer();
   } catch (err) {
     logger.error('[shutdown] Failed to flush telemetry buffer:', err.message);
+  }
+
+  // Close the distributed location fan-out: unsubscribe and release the
+  // dedicated Redis subscriber connection. Done regardless of whether the WS
+  // server itself was ever started.
+  if (locationEventBus) {
+    await locationEventBus.close();
+    locationEventBus = null;
   }
 
   if (!wsServer) {
@@ -1563,6 +1725,19 @@ export const __testing = {
   getTrackingSubscriptions() {
     return trackingSubscriptions;
   },
+  setTrackingSubscriptions(map) {
+    trackingSubscriptions = map;
+  },
+  setLocationEventBus(bus) {
+    locationEventBus = bus;
+  },
+  getLocationEventBus() {
+    return locationEventBus;
+  },
+  createLocationEventHandler,
+  getLocationEventBusMetrics() {
+    return locationEventBus ? locationEventBus.getMetrics() : null;
+  },
   flushTelemetryBuffer,
   removeClientFromAllSubscriptions,
   getTelemetryWriteBuffer() {
@@ -1592,12 +1767,22 @@ export const __testing = {
     telemetryFlushBuffer = [];
   },
   getShutdownState() {
-    return {
+    const state = {
       isSchedulerActive,
       hasTelemetryFlushInterval: Boolean(telemetryFlushTimeout),
       hasWebSocketServer: Boolean(wsServer),
       hasWsHeartbeatInterval: Boolean(wsHeartbeatInterval),
     };
+    // Expose live (not snapshot) distributed fan-out state so the health check
+    // can report whether Redis Pub/Sub is operational.
+    Object.defineProperty(state, 'pubSub', {
+      enumerable: true,
+      configurable: true,
+      get() {
+        return locationEventBus ? locationEventBus.getState() : null;
+      },
+    });
+    return state;
   },
   setShutdownState({ telemetryInterval = null, heartbeatInterval = null, server = null } = {}) {
     telemetryFlushTimeout = telemetryInterval;

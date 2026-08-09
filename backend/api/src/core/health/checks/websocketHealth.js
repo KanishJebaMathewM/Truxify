@@ -5,12 +5,15 @@ const NAME = 'websocket';
 function check() {
   const wsState = globalThis.__truxify_wsState;
   if (wsState && typeof wsState === 'object') {
+    const pubSub = wsState.pubSub;
     return {
       status: wsState.hasWebSocketServer ? HealthStatus.HEALTHY : HealthStatus.DEGRADED,
       metadata: {
         hasServer: Boolean(wsState.hasWebSocketServer),
         hasHeartbeat: Boolean(wsState.hasWsHeartbeatInterval),
         isSchedulerActive: Boolean(wsState.isSchedulerActive),
+        pubSubEnabled: Boolean(pubSub && pubSub.enabled),
+        pubSubReady: Boolean(pubSub && pubSub.ready),
       },
     };
   }

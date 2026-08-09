@@ -136,6 +136,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   void dispose() {
     _routeRefreshTimer?.cancel();
     _movementController.dispose();
+    _mapController.dispose();
     if (SupabaseConfig.isConfigured || SupabaseService.mockClient != null) {
       if (_ordersChannel != null) {
         SupabaseService.client.removeChannel(_ordersChannel!);

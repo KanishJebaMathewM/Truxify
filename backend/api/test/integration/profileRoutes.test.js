@@ -590,4 +590,72 @@ describe('Profile Routes', () => {
       expect(res.body.trips[0].id).toBe('order-high-earn');
     });
   });
+
+  describe('GET /api/profile/driver/performance-stats', () => {
+    it('computes stats from real order data', async () => {
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      m.store.orders.push(
+        {
+          id: 'order-1',
+          driver_id: 'driver-uuid-456',
+          status: 'delivered',
+          distance_km: 100,
+          customer_rating: 5,
+          on_time: true,
+          base_freight: 1000,
+          created_at: `${currentMonth}-05T00:00:00Z`,
+        },
+        {
+          id: 'order-2',
+          driver_id: 'driver-uuid-456',
+          status: 'payment_released',
+          distance_km: 200,
+          customer_rating: 4,
+          on_time: false,
+          base_freight: 2000,
+          created_at: `${currentMonth}-10T00:00:00Z`,
+        },
+        {
+          id: 'order-other-driver',
+          driver_id: 'other-driver',
+          status: 'delivered',
+          distance_km: 999,
+          customer_rating: 1,
+          on_time: true,
+          base_freight: 9999,
+          created_at: `${currentMonth}-01T00:00:00Z`,
+        }
+      );
+
+      const res = await request(buildApp())
+        .get('/api/profile/driver/performance-stats')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.totalDeliveries).toBe(2);
+      expect(res.body.totalDistanceKm).toBe(300);
+      expect(res.body.averageRating).toBe(4.5);
+      expect(res.body.onTimePercentage).toBe(50);
+      expect(res.body.lifetimeEarnings).toBe(3000);
+      expect(res.body.monthlyPerformanceSummary).toEqual({
+        month: currentMonth,
+        deliveriesCompleted: 2,
+        earnings: 3000,
+      });
+    });
+
+    it('returns zeros instead of fabricated values when there is no data', async () => {
+      const res = await request(buildApp())
+        .get('/api/profile/driver/performance-stats')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.totalDeliveries).toBe(0);
+      expect(res.body.totalDistanceKm).toBe(0);
+      expect(res.body.averageRating).toBe(0);
+      expect(res.body.onTimePercentage).toBe(0);
+      expect(res.body.lifetimeEarnings).toBe(0);
+      expect(res.body.achievementBadges).toEqual([]);
+    });
+  });
 });

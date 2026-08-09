@@ -138,20 +138,26 @@ describe('tracker', () => {
     it('rejects invalid coordinates', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 'abc', lng: 72.8 });
-      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Missing mandatory tracking parameters (lat, lng).' }));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({
+        error: 'Invalid telemetry payload.',
+        details: ['lat must be a valid number'],
+      }));
     });
 
     it('rejects out-of-range coordinates', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 100, lng: 72.8 });
-      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Coordinates out of valid range' }));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({
+        error: 'Invalid telemetry payload.',
+        details: ['lat must be <= 90'],
+      }));
     });
 
     it('buffers valid location ping', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 19.076, lng: 72.877 });
-      const rawBuf = __testing.getTelemetryWriteBuffer();
-      const buffer = rawBuf.toArray ? rawBuf.toArray() : rawBuf;
+      // telemetryWriteBuffer is a TelemetryRingBuffer whose toArray() is async.
+      const buffer = await __testing.getTelemetryWriteBuffer().toArray();
       expect(buffer.length).toBe(1);
       expect(buffer[0].lat).toBe(19.076);
       expect(buffer[0].lng).toBe(72.877);
@@ -198,10 +204,11 @@ describe('tracker', () => {
       expect(subs).toBeInstanceOf(Map);
     });
 
-    it('getTelemetryWriteBuffer returns an array', () => {
+    it('getTelemetryWriteBuffer exposes the ring buffer, whose toArray() resolves to an array', async () => {
       const rawBuf = __testing.getTelemetryWriteBuffer();
-      const buf = rawBuf.toArray ? rawBuf.toArray() : rawBuf;
-      expect(Array.isArray(buf)).toBe(true);
+      expect(typeof rawBuf.toArray).toBe('function');
+      expect(typeof rawBuf.push).toBe('function');
+      expect(Array.isArray(await rawBuf.toArray())).toBe(true);
     });
   });
 });

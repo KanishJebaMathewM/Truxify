@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import notificationService from '../../src/services/notificationService.js';
-import DomainError from '../../src/errors/DomainError.js';
+import { DomainError } from '../../src/services/order/domainError.js';
 
 describe('notificationService allowlist validation', () => {
   it('should throw DomainError for invalid notif_type in insertNotification', async () => {

@@ -238,10 +238,6 @@ export async function processEscrowWebhookEvent(eventType, payload = {}) {
   const orderId = payload.orderId || 'unknown';
   logger.info(`[Webhook] Processing escrow event ${eventType} for order ${orderId}`);
 
-  if (payload.simulateFailure === true) {
-    throw new Error('Simulated database lock or processing failure');
-  }
-
   const handler = EVENT_HANDLERS[eventType];
   if (!handler) {
     logger.warn(`[Webhook] No handler registered for escrow event ${eventType} — acknowledging without state change.`);

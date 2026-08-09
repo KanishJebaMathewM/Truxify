@@ -2,7 +2,7 @@ import express from 'express';
 import { body } from 'express-validator';
 import { loadCredential, handshake } from '../controllers/escortWalletController.js';
 import { authenticate } from '../middleware/auth.js';
-import { requireRole } from '../middleware/requireRole.js';
+import { requireRole } from '../middleware/auth.js';
 
 const router = express.Router();
 

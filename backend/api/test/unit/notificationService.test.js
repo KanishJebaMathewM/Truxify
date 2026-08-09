@@ -20,4 +20,18 @@ describe('notificationService allowlist validation', () => {
       await expect(notificationService.sendPushNotification(payload)).resolves.toBeDefined();
     }
   });
+
+  describe('FCM edge cases', () => {
+    it('returns null when userId is null in getFcmTokenForUser', async () => {
+      const result = await notificationService.getFcmTokenForUser(null);
+      expect(result).toBeNull();
+    });
+
+    it('returns error result when fcmToken is empty in sendFcmNotification', async () => {
+      const result = await notificationService.sendFcmNotification(null, '', { title: 'Test', body: 'Test body' });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('No FCM token');
+    });
+  });
+
 });

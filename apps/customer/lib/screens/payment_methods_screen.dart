@@ -353,17 +353,21 @@ class _AddPaymentSheetState extends State<_AddPaymentSheet> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
 
-    final method = PaymentMethod(
-      id: '',
-      userId: SupabaseService.requireUserId(),
-      methodType: _selectedType,
-      displayLabel: _labelCtrl.text.trim(),
-      provider:
-          _providerCtrl.text.trim().isEmpty ? null : _providerCtrl.text.trim(),
-      isDefault: _setAsDefault,
-    );
+    try {
+      final method = PaymentMethod(
+        id: '',
+        userId: SupabaseService.requireUserId(),
+        methodType: _selectedType,
+        displayLabel: _labelCtrl.text.trim(),
+        provider:
+            _providerCtrl.text.trim().isEmpty ? null : _providerCtrl.text.trim(),
+        isDefault: _setAsDefault,
+      );
 
-    Navigator.of(context).pop(method);
+      Navigator.of(context).pop(method);
+    } catch (_) {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override

@@ -3,7 +3,7 @@ import random
 from datetime import datetime
 from typing import Dict, Any, Optional
 from sqlalchemy import create_engine, Column, String, Float, DateTime, Integer
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker
 import pandas as pd
 import json
@@ -100,12 +100,18 @@ class ABTestModel:
                 metric_df = df[df['metric_name'] == metric]
                 avg_metrics = metric_df.groupby('model_version')['metric_value'].mean()
                 
+                prod_val = avg_metrics.get('production', None)
+                shadow_val = avg_metrics.get('shadow', None)
+                lower_is_better_keywords = {'rmse', 'mae', 'mse', 'loss', 'error_rate', 'latency', 'error'}
+                higher_is_better = not any(k in metric.lower() for k in lower_is_better_keywords)
+
                 results[metric] = {
-                    'production': avg_metrics.get('production', None),
-                    'shadow': avg_metrics.get('shadow', None),
+                    'production': prod_val,
+                    'shadow': shadow_val,
                     'improvement': self.calculate_improvement(
-                        avg_metrics.get('production', 0),
-                        avg_metrics.get('shadow', 0)
+                        prod_val if prod_val is not None else 0.0,
+                        shadow_val if shadow_val is not None else 0.0,
+                        higher_is_better=higher_is_better
                     )
                 }
             
@@ -122,50 +128,75 @@ class ABTestModel:
         finally:
             session.close()
     
-    def calculate_improvement(self, prod_value: float, shadow_value: float) -> float:
-        """Calculate percentage improvement"""
+    def calculate_improvement(
+        self, prod_value: float, shadow_value: float, higher_is_better: bool = True
+    ) -> float:
+        """Calculate percentage improvement taking metric direction into account and handling zero prod_value."""
         if prod_value == 0:
-            return 0
-        return ((shadow_value - prod_value) / prod_value) * 100
+            if shadow_value == 0:
+                return 0.0
+            diff = shadow_value - prod_value
+            pct = diff * 100.0
+            return pct if higher_is_better else -pct
+
+        diff = shadow_value - prod_value
+        pct = (diff / abs(prod_value)) * 100.0
+        return pct if higher_is_better else -pct
+
+    
     
     def is_shadow_better(self, results: Dict) -> bool:
-        """Determine if shadow model outperforms production"""
-        # For regression: lower RMSE is better
-        # For classification: higher accuracy is better
-        
+        """Determine if shadow model outperforms production based on metric direction and threshold."""
         better_count = 0
         total_metrics = 0
-        
+
+        lower_is_better_keywords = {'rmse', 'mae', 'mse', 'loss', 'error_rate', 'latency', 'error'}
+
         for metric, values in results.items():
-            if values['production'] is None or values['shadow'] is None:
+            prod = values.get('production')
+            shadow = values.get('shadow')
+            if prod is None or shadow is None:
                 continue
-                
+
             total_metrics += 1
-            if metric in ['rmse', 'mae', 'mse']:
-                if values['shadow'] < values['production'] * self.threshold:
+            metric_lower = metric.lower()
+            is_lower_better = any(k in metric_lower for k in lower_is_better_keywords)
+
+            if is_lower_better:
+                if shadow < prod * self.threshold:
                     better_count += 1
-            else:  # Higher is better (accuracy, f1, precision, recall)
-                if values['shadow'] > values['production'] * self.threshold:
+            else:
+                if shadow > prod * self.threshold:
                     better_count += 1
-        
-        # Require majority of metrics to be better
+
         return better_count > (total_metrics / 2) if total_metrics > 0 else False
+
+    
     
     def get_active_test(self) -> Optional[Dict]:
-        """Get currently active A/B test"""
-        # In production, this would query the database
-        # For demo, return sample config
-        return {
-            'test_id': 'test_001',
-            'production_version': '1.2.0',
-            'shadow_version': '2.0.0',
-            'started_at': datetime.utcnow().isoformat(),
-            'status': 'active'
-        }
-    
+        """Get currently active A/B test from database"""
+        session = self.Session()
+        try:
+            recent = session.query(ABTestMetrics).filter(
+                ABTestMetrics.timestamp <= datetime.utcnow()
+            ).order_by(ABTestMetrics.timestamp.desc()).first()
+
+            if recent:
+                return {
+                    'test_id': recent.test_id,
+                    'production_version': 'production',
+                    'shadow_version': recent.model_version,
+                    'started_at': recent.timestamp.isoformat(),
+                    'status': 'active'
+                }
+            return None
+        except Exception:
+            return None
+        finally:
+            session.close()
+
     def get_production_version(self) -> str:
-        """Get current production model version"""
-        return '1.2.0'
+        return 'production'
     
     def trigger_rollback(self, test_id: str) -> Dict[str, Any]:
         """Auto-rollback to previous version if shadow model underperforms"""
@@ -180,8 +211,8 @@ class ABTestModel:
                 'action': 'rollback',
                 'test_id': test_id,
                 'reason': 'Shadow model underperformed',
-                'production_version': '1.2.0',
-                'previous_version': '1.1.0',
+                'production_version': 'production',
+                'previous_version': 'production',
                 'timestamp': datetime.utcnow().isoformat()
             }
         

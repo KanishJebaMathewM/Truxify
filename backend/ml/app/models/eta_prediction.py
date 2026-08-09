@@ -107,8 +107,12 @@ class ETAPredictor:
         if self.model is None:
             self.load()
 
-        rt = str(route_type or "").strip().lower()
-        route_type_value = 1 if rt == "highway" else 0
+        if isinstance(route_type, int):
+            route_type_value = route_type
+        elif isinstance(route_type, str):
+            route_type_value = 1 if route_type.strip().lower() == "highway" else 0
+        else:
+            route_type_value = 0
 
         features = np.array([[
             distance,

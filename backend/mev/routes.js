@@ -1,6 +1,6 @@
 import express from 'express';
 import mevService from './mev.service.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 

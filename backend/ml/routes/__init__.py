@@ -1,11 +1,25 @@
+import hmac
 import importlib
 import logging
+import os
 from typing import TYPE_CHECKING
+
+from fastapi import Depends, Header, HTTPException
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
+
+
+async def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
+    """Shared auth dependency applied to every ML route (incl. dynamic routers)."""
+    ml_api_key = os.environ.get("ML_API_KEY")
+    if not ml_api_key:
+        logger.warning("ML_API_KEY not set - ML engine is unavailable (503)")
+        raise HTTPException(status_code=503, detail="ML engine not configured: missing ML_API_KEY")
+    if not x_api_key or not hmac.compare_digest(x_api_key, ml_api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 # ---------------------------------------------------------------------------
 # Registry of ML route modules to attempt loading.
@@ -32,12 +46,10 @@ ML_ROUTE_MODULES: list[tuple[str, str]] = [
     ("safety_routes", "Driver Safety Monitoring"),
     ("ssl_routes", "Self-Supervised Learning"),
     ("transformer_routes", "Time Series Transformers"),
+    ("eta_routes", "Real-Time Traffic ETA"),
 ]
 
-# Intentionally excluded:
-# - "eta_routes": Duplicate of the /eta/* endpoints already defined inline
-#   in main.py (predict_traffic_eta, update_eta_realtime, get_traffic_data,
-#   get_traffic_forecast, train_traffic_model).
+
 
 
 def register_ml_routers(app: "FastAPI") -> list[str]:
@@ -81,7 +93,7 @@ def register_ml_routers(app: "FastAPI") -> list[str]:
             continue
 
         try:
-            app.include_router(router)
+            app.include_router(router, dependencies=[Depends(verify_api_key)])
         except Exception as exc:
             logger.warning(
                 "Skipping ML router '%s' (%s): failed to register routes — %s",

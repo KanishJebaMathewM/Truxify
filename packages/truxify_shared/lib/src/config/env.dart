@@ -45,7 +45,7 @@ class Env {
   // ── Backend API ────────────────────────────────────────────────────────────
   static const String apiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://localhost:3000',  // Local Node.js backend
+    defaultValue: 'http://localhost:8080',  // Local API Gateway
   );
 
   static const String mlEngineUrl = String.fromEnvironment(

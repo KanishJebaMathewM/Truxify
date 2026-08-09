@@ -22,7 +22,7 @@ void main() {
       );
 
       expect(find.text('Low battery (18%). Connect charger soon.'), findsOneWidget);
-      expect(find.byIcon(Icons.battery_warning_rounded), findsOneWidget);
+      expect(find.byIcon(Icons.battery_alert_rounded), findsOneWidget);
     });
 
     testWidgets('shows critical battery warning for level at or below 10', (

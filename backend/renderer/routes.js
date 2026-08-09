@@ -1,6 +1,6 @@
 import express from 'express';
 import DirtyRenderer from './DirtyRenderer.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 

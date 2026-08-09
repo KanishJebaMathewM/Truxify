@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/app_models.dart';
+import '../core/offline/cache/cache_manager.dart';
 
 class TruxifyController extends ChangeNotifier {
   static const String _themeModeKey = 'theme_mode';
@@ -10,10 +11,12 @@ class TruxifyController extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
   String? _globalError;
   bool _isInitialized = false;
+  Locale _locale = const Locale('en');
 
   ThemeMode get themeMode => _themeMode;
   String? get globalError => _globalError;
   bool get isInitialized => _isInitialized;
+  Locale get locale => _locale;
 
   void setGlobalError(String? error) {
     _globalError = error;
@@ -88,6 +91,49 @@ class TruxifyController extends ChangeNotifier {
     if (ordersTabIndex == index) return;
     ordersTabIndex = index;
     notifyListeners();
+  }
+
+  Future<void> loadLocale() async {
+    try {
+      final cacheManager = CacheManager();
+      await cacheManager.open();
+      final settings = await cacheManager.getSettings();
+      final selectedCode = settings['language']?['code']?.toString() ?? 'en';
+      _locale = Locale(selectedCode);
+      notifyListeners();
+    } catch (_) {
+      // Ignore cache manager loading errors, fallback to English
+    }
+  }
+
+  Future<void> setLocale(String languageCode) async {
+    if (_locale.languageCode == languageCode) return;
+    _locale = Locale(languageCode);
+    notifyListeners();
+
+    try {
+      final cacheManager = CacheManager();
+      await cacheManager.open();
+      await cacheManager.cacheSettings({
+        'language': {
+          'code': languageCode,
+          'name': _nameForLanguageCode(languageCode),
+        },
+      });
+    } catch (_) {
+      // Ignore cache manager errors
+    }
+  }
+
+  String _nameForLanguageCode(String code) {
+    switch (code) {
+      case 'en': return 'English';
+      case 'hi': return 'Hindi';
+      case 'ta': return 'Tamil';
+      case 'kn': return 'Kannada';
+      case 'mr': return 'Marathi';
+      default: return 'English';
+    }
   }
 }
 

@@ -64,7 +64,7 @@ $$;
 create table if not exists profiles (
   id            uuid primary key default gen_random_uuid(),
   firebase_uid  text unique not null,                         -- Firebase Auth UID
-  role          text not null check (role in ('customer', 'driver')),
+  role          text not null check (role in ('customer', 'driver', 'admin')),
   full_name     text not null,
   phone         text not null,
   email         text,
@@ -73,6 +73,7 @@ create table if not exists profiles (
   language      text not null default 'en',
   dark_mode     boolean not null default false,
   is_active     boolean not null default true,
+  is_digilocker_verified boolean not null default false,
   polygon_wallet_address text,                                  -- Polygon wallet address for escrow deposits
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
@@ -94,8 +95,8 @@ create table if not exists driver_details (
   total_trips       int not null default 0,
   completion_rate   numeric(5,2) not null default 100.00,     -- percentage
   is_online         boolean not null default false,
-  wallet_confirmed  int not null default 0,                   -- paisa
-  wallet_pending    int not null default 0,
+  wallet_confirmed  int not null default 0 check (wallet_confirmed >= 0),   -- paisa
+  wallet_pending    int not null default 0 check (wallet_pending >= 0),
   wallet_total      int not null default 0,
   created_at        timestamptz not null default now(),
   updated_at        timestamptz not null default now()
@@ -140,6 +141,8 @@ create table if not exists trucks (
   id                    uuid primary key default gen_random_uuid(),
   driver_id             uuid not null,                        -- profiles.id
   name                  text not null,                        -- e.g. 'Tata 407'
+  truck_type            text not null default 'Open Body'
+                        check (truck_type in ('Open Body','Closed Body','Container','Refrigerated')),
   number_plate          text not null,                        -- e.g. 'TN 45 AB 1234'
   max_capacity_tons     numeric(6,2) not null default 0,
   cargo_length_ft       numeric(6,2),
@@ -368,6 +371,12 @@ alter table orders add column if not exists escrow_refund_submitted_at timestamp
 alter table orders add column if not exists escrow_release_error text;
 alter table orders add column if not exists escrow_release_attempts integer not null default 0;
 alter table orders add column if not exists escrow_release_last_attempt_at timestamptz;
+-- Two-phase bid acceptance (#5724): reserved bid context + funding sweeper state
+alter table orders add column if not exists pending_bid_acceptance jsonb;
+alter table orders add column if not exists escrow_funding_started_at timestamptz;
+alter table orders add column if not exists escrow_funding_attempts integer not null default 0;
+alter table orders add column if not exists escrow_funding_last_attempt_at timestamptz;
+alter table orders add column if not exists escrow_funding_error text;
 alter table orders
   add constraint orders_customer_id_fkey
   foreign key (customer_id) references profiles(id)
@@ -503,6 +512,7 @@ create table if not exists trips (
   id                uuid primary key default gen_random_uuid(),
   trip_display_id   text unique not null,                     -- '#TX20241205'
   driver_id         uuid not null,                            -- profiles.id
+  order_id          uuid,                                     -- orders.id (the order this trip serves)
   route_label       text not null,                            -- 'Surat → Jaipur'
 
   status            text not null default 'active'
@@ -529,10 +539,16 @@ create table if not exists trips (
   updated_at        timestamptz not null default now()
 );
 
+alter table trips
+  add constraint trips_order_id_fkey
+  foreign key (order_id) references orders(id)
+  on update cascade on delete set null;
+
 create index if not exists idx_trips_driver     on trips (driver_id);
 create index if not exists idx_trips_status     on trips (status);
 create index if not exists idx_trips_date       on trips (trip_date);
 create index if not exists idx_trips_display_id on trips (trip_display_id);
+create index if not exists idx_trips_order_id   on trips (order_id);
 create unique index if not exists idx_trips_one_active_per_driver on trips (driver_id) where (status = 'active');
 
 
@@ -915,11 +931,26 @@ create policy "Service role full access on driver_details"
   to service_role
   using (true) with check (true);
 
-create policy "Drivers access own driver_details"
-  on driver_details for all
+create policy "Drivers select own driver_details"
+  on driver_details for select
+  to authenticated
+  using (user_id = get_profile_id());
+
+create policy "Drivers insert own driver_details"
+  on driver_details for insert
+  to authenticated
+  with check (user_id = get_profile_id());
+
+create policy "Drivers update own driver_details"
+  on driver_details for update
   to authenticated
   using (user_id = get_profile_id())
   with check (user_id = get_profile_id());
+
+-- Financial/derived columns are backend-only: clients may not PATCH them (Issue #5723).
+revoke update (wallet_confirmed, wallet_pending, wallet_total, wallet_withdrawn,
+               wallet_locked, rating, total_trips, completion_rate)
+  on driver_details from anon, authenticated;
 
 
 -- 3. CUSTOMER STATS
@@ -1022,11 +1053,32 @@ create policy "Service role full access on orders"
   to service_role
   using (true) with check (true);
 
-create policy "Customers access own orders"
-  on orders for all
+create policy "Customers select own orders"
+  on orders for select
+  to authenticated
+  using (customer_id = get_profile_id());
+
+create policy "Customers insert own orders"
+  on orders for insert
+  to authenticated
+  with check (customer_id = get_profile_id());
+
+create policy "Customers update own orders"
+  on orders for update
   to authenticated
   using (customer_id = get_profile_id())
   with check (customer_id = get_profile_id());
+
+-- Financial/state columns are backend-only: clients may not PATCH them.
+revoke update (status, driver_id, driver_name, driver_rating, truck_number,
+               base_freight, toll_estimate, platform_fee, total_amount,
+               cancellation_fee, blockchain_tx_hash,
+               delivery_otp, otp_verified, otp_generated_at,
+               escrow_refund_error, escrow_refund_attempts,
+               escrow_refund_last_attempt_at, escrow_refund_submitted_at,
+               escrow_release_error, escrow_release_attempts,
+               escrow_release_last_attempt_at)
+  on orders from anon, authenticated;
 
 create policy "Drivers view assigned orders"
   on orders for select
@@ -1182,7 +1234,17 @@ create policy "Customers manage own ratings"
   on ratings for all
   to authenticated
   using (customer_id = get_profile_id())
-  with check (customer_id = get_profile_id());
+  with check (
+    customer_id = get_profile_id()
+    and exists (
+      select 1
+      from orders o
+      where o.order_display_id = ratings.order_display_id
+        and o.customer_id      = ratings.customer_id
+        and o.driver_id        = ratings.driver_id
+        and o.status           in ('delivered', 'payment_released')
+    )
+  );
 
 create policy "Drivers view ratings about themselves"
   on ratings for select
@@ -1364,8 +1426,10 @@ create trigger trg_user_devices_updated_at
 
 
 -- ────────────────────────────────────────────────────────────────────────────
--- RPC 1: accept_bid_tx — Accept a driver's bid on a load offer atomically
--- Called from: POST /api/orders/:id/bids/:bidId/accept
+-- RPC 1: accept_bid_tx — Finalize a driver's bid on a load offer atomically
+-- Called from: POST /api/orders/:id/confirm-deposit (two-phase acceptance, #5724)
+-- and the escrow funding reconciliation worker (service_role).
+-- The driver is committed ONLY after the escrow deposit is confirmed on-chain.
 -- ────────────────────────────────────────────────────────────────────────────
 create or replace function accept_bid_tx(
   p_bid_id           uuid,
@@ -1378,15 +1442,34 @@ create or replace function accept_bid_tx(
   p_truck_number     text,
   p_bid_amount       int,
   p_order_display_id text,
+  p_expected_version int,
   p_escrow_booking_id text default null
 ) returns void
 language plpgsql
 security definer
+set search_path = public, pg_temp
 as $$
 declare
+  v_customer_id uuid;
   v_load_status text;
   v_order_status text;
+  v_current_version int;
 begin
+  -- Verify the caller is the customer who owns the order, unless it is the
+  -- backend service (confirm-deposit / funding reconciliation worker).
+  select customer_id into v_customer_id
+  from orders
+  where id = p_order_id;
+
+  if v_customer_id is null then
+    raise exception 'Order not found';
+  end if;
+
+  if auth.role() <> 'service_role'
+     and (auth.uid() is null or auth.uid() <> v_customer_id) then
+    raise exception 'Unauthorized: you can only accept bids on your own orders';
+  end if;
+
   -- Lock load offer row; concurrent calls block until this transaction completes
   select status into v_load_status
     from load_offers
@@ -1398,13 +1481,17 @@ begin
   end if;
 
   -- Lock order row before modifying driver assignment
-  select status into v_order_status
+  select status, version into v_order_status, v_current_version
     from orders
     where id = p_order_id
     for update;
 
   if v_order_status is null or v_order_status <> 'pending' then
     raise exception 'Order is no longer pending';
+  end if;
+
+  if v_current_version != p_expected_version then
+    raise exception 'OPTIMISTIC_LOCK_FAIL';
   end if;
 
   -- Step 1: Accept the chosen bid
@@ -1423,7 +1510,8 @@ begin
     set status = 'claimed', updated_at = now()
     where id = p_load_id;
 
-  -- Step 4: Assign driver + truck to order, update pricing and escrow
+  -- Step 4: Assign driver + truck to order, update pricing and escrow,
+  -- and clear the pending two-phase acceptance context.
   update orders
     set driver_id        = p_driver_id,
         truck_id         = p_truck_id,
@@ -1432,7 +1520,10 @@ begin
         driver_rating    = p_driver_rating,
         truck_number     = p_truck_number,
         total_amount     = p_bid_amount,
+        bid_amount       = p_bid_amount,
         escrow_booking_id = coalesce(p_escrow_booking_id, escrow_booking_id),
+        pending_bid_acceptance = null,
+        version          = version + 1,
         updated_at       = now()
     where id = p_order_id;
 
@@ -1456,11 +1547,38 @@ create or replace function withdraw_funds_tx(
 ) returns void
 language plpgsql
 security definer
+set search_path = public, pg_temp
 as $$
 declare
   v_confirmed int;
   v_pending   int;
+  v_day_total int;
+  v_daily_cap constant int := 10000000;  -- ₹1,00,000 in paisa per UTC calendar day
 begin
+  -- Verify the caller IS the driver
+  if auth.uid() <> p_driver_id then
+    raise exception 'Unauthorized: you can only withdraw your own funds';
+  end if;
+
+  -- Reject non-positive amounts: a negative p_amount would otherwise mint
+  -- wallet_confirmed via wallet_confirmed = v_confirmed - p_amount.
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'Withdrawal amount must be a positive whole number of paisa';
+  end if;
+
+  -- Enforce the per-driver per-day withdrawal cap.
+  select coalesce(sum(amount), 0)
+    into v_day_total
+    from wallet_transactions
+   where driver_id  = p_driver_id
+     and txn_type   = 'withdrawal'
+     and created_at >= date_trunc('day', now());
+
+  if v_day_total + p_amount > v_daily_cap then
+    raise exception 'Daily withdrawal cap exceeded: % of % used',
+      v_day_total + p_amount, v_daily_cap;
+  end if;
+
   -- Lock the row to prevent concurrent withdrawals
   select wallet_confirmed, wallet_pending
     into v_confirmed, v_pending
@@ -1468,9 +1586,9 @@ begin
     where user_id = p_driver_id
     for update;
 
-  if v_confirmed < p_amount then
+  if v_confirmed is null or v_confirmed < p_amount then
     raise exception 'Insufficient balance: available %, requested %',
-      v_confirmed, p_amount;
+      coalesce(v_confirmed, 0), p_amount;
   end if;
 
   -- Move funds from confirmed → pending
@@ -1542,17 +1660,23 @@ $$;
 -- RPC 4: complete_trip_tx (overload) — Atomically verify delivery and release payment
 -- ────────────────────────────────────────────────────────────────────────────
 drop function if exists complete_trip_tx(uuid);
+drop function if exists complete_trip_tx(uuid, uuid);
+drop function if exists complete_trip_tx(uuid, uuid, text);
 
-create or replace function complete_trip_tx(p_order_id uuid, p_otp_id uuid)
-returns void
+create or replace function complete_trip_tx(
+  p_order_id uuid,
+  p_otp_id uuid,
+  p_release_tx_hash text default null
+)
+returns table(driver_id uuid)
 language plpgsql
 security definer
 as $$
 declare
   v_order record;
   v_trip_display_id text;
-  v_active_trip_count int;
   v_updated_count int;
+  v_otp_updated int;
 begin
   -- Use FOR UPDATE to lock the order row and prevent concurrent modifications
   select * into v_order from orders where id = p_order_id for update;
@@ -1567,6 +1691,8 @@ begin
 
   -- Idempotency guard: check if the order status is already payment_released
   if v_order.status = 'payment_released' then
+    driver_id := v_order.driver_id;
+    return next;
     return;
   end if;
 
@@ -1581,6 +1707,8 @@ begin
   get diagnostics v_otp_updated = row_count;
   if v_otp_updated <> 1 then
     raise exception 'Delivery OTP is invalid, expired, or already verified';
+  end if;
+
   -- Check if the order was cancelled
   if v_order.status = 'cancelled' then
     raise exception 'Order has been cancelled — cannot complete trip';
@@ -1591,44 +1719,43 @@ begin
     raise exception 'Order has already been delivered';
   end if;
 
-  -- Safe lookup for the driver's active trip
-  select count(*) into v_active_trip_count
+  -- Finalize the active trip that actually served THIS order
+  select trip_display_id into v_trip_display_id
   from trips
-  where driver_id = v_order.driver_id and status = 'active';
+  where order_id = p_order_id and status = 'active'
+  order by created_at
+  limit 1;
 
-  if v_active_trip_count > 1 then
-    raise exception 'Multiple active trips found for driver %', v_order.driver_id;
+  if v_trip_display_id is null then
+    raise exception 'No active trip found for this order — cannot complete trip';
   end if;
 
-  if v_active_trip_count = 1 then
-    select trip_display_id into v_trip_display_id
-    from trips
-    where driver_id = v_order.driver_id and status = 'active';
+  -- Update trip record
+  update trips
+  set status = 'completed',
+      end_time = to_char(now(), 'HH24:MI'),
+      updated_at = now()
+  where trip_display_id = v_trip_display_id;
 
-    -- Update trip record
-    update trips
-    set status = 'completed',
-        end_time = to_char(now(), 'HH24:MI'),
-        updated_at = now()
-    where trip_display_id = v_trip_display_id;
+  -- Update trip items to delivered
+  update trip_items
+  set is_delivered = true
+  where trip_display_id = v_trip_display_id;
 
-    -- Update trip items to delivered
-    update trip_items
-    set is_delivered = true
-    where trip_display_id = v_trip_display_id;
+  -- Update trip stops to completed/delivered
+  update trip_stops
+  set is_completed = true,
+      is_current = false,
+      status_label = 'Delivered',
+      updated_at = now()
+  where trip_display_id = v_trip_display_id;
 
-    -- Update trip stops to completed/delivered
-    update trip_stops
-    set is_completed = true,
-        is_current = false,
-        status_label = 'Delivered',
-        updated_at = now()
-    where trip_display_id = v_trip_display_id;
-  end if;
-
-  -- Update order status to payment_released with defensive WHERE guards
+  -- Update order status and escrow details
   update orders
   set status = 'payment_released',
+      escrow_status = 'released',
+      escrow_released_at = now(),
+      blockchain_tx_hash = coalesce(p_release_tx_hash, blockchain_tx_hash),
       updated_at = now()
   where id = p_order_id
     and status != 'cancelled'
@@ -1674,6 +1801,9 @@ begin
   do update set
     amount = earnings_daily.amount + excluded.amount,
     trip_count = earnings_daily.trip_count + 1;
+
+  driver_id := v_order.driver_id;
+  return next;
 end;
 $$;
 
@@ -1699,9 +1829,28 @@ begin
     raise exception 'Star rating must be between 1 and 5, got %', p_stars;
   end if;
 
+  -- Step 0.5: Validate the order relationship — the order must exist, be owned
+  --           by the caller, be delivered or payment released, and must have
+  --           been completed by the rated driver.
+  if not exists (
+    select 1
+    from orders
+    where order_display_id = p_order_display_id
+      and customer_id      = p_customer_id
+      and driver_id        = p_driver_id
+      and status           in ('delivered', 'payment_released')
+  ) then
+    raise exception 'Order not found or not eligible for rating: the order must be delivered or payment released, owned by you, and completed by this driver';
+  end if;
+
   -- Step 1: Insert the rating
   insert into ratings (order_display_id, customer_id, driver_id, stars, comment)
-  values (p_order_display_id, p_customer_id, p_driver_id, p_stars, p_comment);
+  values (p_order_display_id, p_customer_id, p_driver_id, p_stars, p_comment)
+  on conflict (order_display_id, customer_id)
+  do update set
+    stars      = excluded.stars,
+    comment    = excluded.comment,
+    updated_at = now();
 
   -- Step 2: Recalculate driver average rating
   select round(avg(stars)::numeric, 2)

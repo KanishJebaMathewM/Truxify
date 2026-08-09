@@ -49,7 +49,26 @@ class SyncEngine {
 
   Future<int> syncPending() async {
     final pending = await db.pendingEvents(limit: batchSize);
-    final eligible = pending.where((event) => event.retryCount < maxRetries).toList();
+    if (pending.isEmpty) {
+      return 0;
+    }
+
+    // Events that exhausted their retry budget must never be silently dropped
+    // forever: mark them rejected with a stored reason the UI can surface.
+    final exhausted = pending
+        .where((event) => event.retryCount >= maxRetries)
+        .toList();
+    if (exhausted.isNotEmpty) {
+      for (final event in exhausted) {
+        await db.markRejected(event.id, reason: 'retry budget exhausted');
+      }
+      developer.log(
+        '[SyncEngine] Rejected ${exhausted.length} offline event(s) that exhausted their retry budget.',
+      );
+    }
+
+    final eligible =
+        pending.where((event) => event.retryCount < maxRetries).toList();
     if (eligible.isEmpty) {
       return 0;
     }
@@ -149,7 +168,7 @@ class SyncEngine {
   }
 
   Duration _backoffDelay(int retryCount) {
-    final delayMs = 250 * (1 << (retryCount.clamp(0, 5)));
+    final delayMs = 250 * (1 << (retryCount.clamp(0, 5).toInt()));
     return Duration(milliseconds: delayMs > 8000 ? 8000 : delayMs);
   }
 }

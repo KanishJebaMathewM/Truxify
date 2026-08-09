@@ -280,13 +280,11 @@ Truxify/
 ├── docs/
 │   ├── architecture.md    # ← You are here
 │   ├── schema.md          # Database schema visualization
-│   ├── supabase_setup.sql # One-shot DB setup for contributors
-│   ├── supabase_drop_all.sql
-│   ├── supabase_schema.sql
-│   ├── supabase_queries.sql
-│   └── migrations/
-│       ├── 01_rpc_transactions.sql
-│       └── 02_patch_missing.sql
+│   ├── supabase_setup.sql    # One-shot DB setup for contributors
+│   └── supabase/
+│       └── migrations/
+│           ├── 002_rls_policies.sql
+│           └── test_rls_policies.sql
 ├── .env.example           # All service credentials template
 ├── docker-compose.yml
 └── README.md
@@ -394,7 +392,7 @@ flowchart TB
 | Database (Supabase) | ✅ 26 tables + 4 RPCs | Schema finalized, seed data included |
 | Auth (Firebase) | 🔧 Integrated in backend | Middleware working, test mode available |
 | GPS Tracking (MongoDB) | 🔧 WebSocket handler built | `tracker.js` handles live pings |
-| ML Engine (FastAPI) | 📋 Planned | Skeleton exists in `backend/ml/` |
-| Blockchain (Polygon) | 📋 Planned | Contract directory exists |
-| Automation (n8n) | 📋 Planned | Workflow definitions pending |
-| Voice AI | 📋 Planned | WebRTC + Whisper + LLM stack |
+| ML Engine (FastAPI) | ✅ Core models live | 10 models + 15 research modules in `backend/ml/` |
+| Blockchain (Polygon) | ✅ Contracts deployed | Escrow, document hash, and reputation Solidity contracts |
+| Automation (n8n) | ✅ 4 Workflows live | Dispute resolution, ML retraining, doc integrity, rollback |
+| Voice AI | 🔧 Integrated in stack | WebRTC + Whisper + ElevenLabs voice interface |

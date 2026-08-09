@@ -25,6 +25,7 @@ class FederatedServer:
         self.clients_per_round = 5
         self.encryption_key = Fernet.generate_key()
         self.cipher = Fernet(self.encryption_key)
+        self.redis.setex('federated:encryption_key', 86400, self.encryption_key)
         
         # Differential Privacy settings
         self.dp_noise_scale = 0.01

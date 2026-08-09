@@ -1,5 +1,7 @@
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { Resource } from '@opentelemetry/resources';
+import resourcesModule from '@opentelemetry/resources';
+
+const { Resource } = resourcesModule;
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
@@ -10,6 +12,7 @@ import { PinoInstrumentation } from '@opentelemetry/instrumentation-pino';
 import { MongoDBInstrumentation } from '@opentelemetry/instrumentation-mongodb';
 import { RedisInstrumentation } from '@opentelemetry/instrumentation-redis';
 import { WinstonInstrumentation } from '@opentelemetry/instrumentation-winston';
+import { trace, context } from '@opentelemetry/api';
 import logger from '../middleware/logger.js';
 
 class Tracing {
@@ -124,7 +127,7 @@ class Tracing {
     }
 
     getActiveSpan() {
-        return this.provider?.getActiveSpan();
+        return trace.getSpan(context.active());
     }
 
     shutdown() {

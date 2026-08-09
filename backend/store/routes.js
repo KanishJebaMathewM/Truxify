@@ -1,6 +1,6 @@
 import express from 'express';
 import GlobalStore from './GlobalStore.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 
@@ -122,6 +122,7 @@ router.post('/store/transaction', async (req, res) => {
                     tx.addOperation(op.fn);
                 }
             }
+            return tx.execute();
         });
         
         res.json({

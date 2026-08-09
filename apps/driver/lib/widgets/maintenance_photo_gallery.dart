@@ -82,8 +82,8 @@ class _MaintenancePhotoGalleryState extends State<MaintenancePhotoGallery> {
               child: Image.network(
                 widget.imageUrls[index],
                 fit: BoxFit.contain,
-                loadingBuilder: (child, progress) {
-                  if (progress == null) return child;
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
                   return const Center(
                     child: CircularProgressIndicator(
                       color: TruxifyColors.accent,

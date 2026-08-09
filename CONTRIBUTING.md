@@ -155,6 +155,31 @@ Copy the example environment file and update the variables (Supabase, Firebase, 
 cp .env.example .env
 ```
 
+### 4. Set Up Pre-commit Secrets Guard
+
+To prevent sensitive credentials (e.g. Supabase keys, Relayer private keys, Firebase service accounts) from being accidentally committed, we enforce local secret scanning:
+
+1. Install **Gitleaks** on your development machine:
+   - **macOS**: `brew install gitleaks`
+   - **Windows**: `scoop install gitleaks` or download the binary from the [Gitleaks Releases page](https://github.com/gitleaks/gitleaks/releases).
+   - **Linux**: Install via snap `sudo snap install gitleaks` or download the binary.
+
+2. Configure a local pre-commit hook to block commits containing secrets:
+   Create or edit `.git/hooks/pre-commit` inside your local checkout with the following shell script:
+   ```bash
+   #!/bin/sh
+   # Run gitleaks detect on staged changes before committing
+   if ! gitleaks protect --staged --redact --verbose; then
+     echo "❌ Gitleaks detected secrets in your staged changes. Commit blocked!"
+     exit 1
+   fi
+   ```
+
+3. Make the pre-commit script executable:
+   ```bash
+   chmod +x .git/hooks/pre-commit
+   ```
+
 #### Flutter Development Setup
 
 Both Flutter applications (Customer & Driver) require:

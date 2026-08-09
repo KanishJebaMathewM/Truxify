@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
@@ -21,6 +22,7 @@ import '../services/marketplace_repository.dart';
 import '../services/trip_cache.dart';
 import '../services/trip_service.dart';
 import '../services/sync_service.dart';
+import '../services/truck_repository.dart';
 import 'pod_screen.dart';
 
 class TripsScreen extends StatefulWidget {
@@ -39,6 +41,7 @@ class _TripsScreenState extends State<TripsScreen> {
   RealtimeChannel? _bidChannel;
   final MarketplaceRepository _marketplaceRepository = MarketplaceRepository();
   final BidSubmissionGuard _bidSubmissionGuard = BidSubmissionGuard();
+  final TruckRepository _truckRepository = TruckRepository();
   late final TripService _tripService;
 
   List<Map<String, dynamic>> _trips = [];
@@ -68,6 +71,8 @@ class _TripsScreenState extends State<TripsScreen> {
   List<DeadheadRecommendation> _deadheadRecommendations = const [];
   Map<String, DriverBid> _deadheadBidsByLoadId = const {};
   Set<String> _submittingDeadheadLoadIds = const <String>{};
+
+  Truck? _truck;
 
   final List<String> _statusFilters = [
     'All',
@@ -241,22 +246,34 @@ class _TripsScreenState extends State<TripsScreen> {
 
     if (currentStop.isEmpty) return;
 
+    // The trips API returns the order this trip serves via the trip's
+    // `order_id` column. Resolve it so the captured PoD is uploaded with a
+    // real order id instead of being silently skipped by SyncService.
+    final tripRow = _trips.firstWhere(
+      (t) => t['trip_display_id']?.toString() == tripId,
+      orElse: () => <String, dynamic>{},
+    );
+    final orderId = tripRow['order_id']?.toString();
+
     if (!mounted) return;
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (context) => ProofOfDeliveryScreen(
         tripDisplayId: currentStop['trip_display_id'].toString(),
         stopId: currentStop['id'].toString(),
+        orderId: orderId,
         onComplete: (photoPath, signPath) async {
           await SyncService.instance.queueOrSyncPoD(
             tripDisplayId: currentStop['trip_display_id'].toString(),
             stopId: currentStop['id'].toString(),
+            orderId: orderId,
             photoPath: photoPath,
             signaturePath: signPath,
           );
         },
       ),
     ));
-    
+
+    if (!mounted) return;
     await _loadTrips();
   }
 
@@ -281,7 +298,7 @@ class _TripsScreenState extends State<TripsScreen> {
         customerName: item['customer_name']?.toString() ?? 'Unknown',
         goods: item['goods']?.toString() ?? '',
         destination: item['destination']?.toString() ?? '',
-        earnings: '₹${((item['earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+        earnings: '₹${((item['earnings'] as num? ?? 0) / 100).toStringAsFixed(0)}',
         delivered: item['is_delivered'] as bool? ?? false,
         isFragile: item['is_fragile'] as bool? ?? false,
         isStackable: item['is_stackable'] as bool? ?? true,
@@ -297,20 +314,21 @@ class _TripsScreenState extends State<TripsScreen> {
       items: tripItems.map((i) => i.goods).toList(),
       itemCount: '${tripItems.length} item${tripItems.length == 1 ? '' : 's'} · ${row['distance']?.toString() ?? ''}',
       distance: row['distance']?.toString() ?? '',
-      earnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+      earnings: '₹${((row['net_earnings'] as num? ?? 0) / 100).toStringAsFixed(0)}',
       status: _mapStatus(row['status']?.toString()),
       tripId: tripId,
       hash: '',
       duration: row['duration']?.toString() ?? '',
       endTime: '',
       paymentBreakdown: PaymentBreakdown(
-        baseFreight: '₹${((row['total_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
+        baseFreight: '₹${((row['total_earnings'] as num? ?? 0) / 100).toStringAsFixed(0)}',
         fuelDeducted: '₹0',
         tollDeducted: '₹0',
         platformFee: '₹0',
         netEarnings: '₹${((row['net_earnings'] ?? 0) / 100).toStringAsFixed(0)}',
       ),
       tripItems: tripItems,
+      escrowStatus: row['escrow_status']?.toString(),
     );
   }).toList();
 }
@@ -423,9 +441,30 @@ class _TripsScreenState extends State<TripsScreen> {
     }
 
     try {
+      // Resolve driver's current GPS from the active trip's last known route
+      // point so the ML engine can compute detour distances accurately.
+      double? currentLat;
+      double? currentLng;
+      final activeTrip = _trips.cast<Map<String, dynamic>?>().firstWhere(
+        (t) => t?['status'] == 'active',
+        orElse: () => null,
+      );
+      if (activeTrip != null) {
+        final tripId = activeTrip['trip_display_id']?.toString();
+        final routePoints = tripId != null ? (_routePointsByTripId[tripId] ?? []) : [];
+        if (routePoints.isNotEmpty) {
+          final lastPoint = routePoints.last;
+          currentLat = (lastPoint['latitude'] as num?)?.toDouble();
+          currentLng = (lastPoint['longitude'] as num?)?.toDouble();
+        }
+      }
+
       final results = await Future.wait([
         _marketplaceRepository.fetchLoadOffers(),
-        _marketplaceRepository.fetchEnRouteLoads(),
+        _marketplaceRepository.fetchEnRouteLoads(
+          currentLat: currentLat,
+          currentLng: currentLng,
+        ),
         _marketplaceRepository.fetchDriverBids(),
       ]);
 
@@ -464,6 +503,20 @@ class _TripsScreenState extends State<TripsScreen> {
         .subscribe();
   }
 
+  Future<Truck?> _loadDriverTruck() async {
+    if (_truck != null) return _truck;
+    try {
+      final truck =
+          await _truckRepository.fetchTruckForDriver(DriverSession.driverId);
+      if (!mounted) return null;
+      setState(() => _truck = truck);
+      return truck;
+    } catch (e) {
+      debugPrint('Failed to load truck specs: $e');
+      return null;
+    }
+  }
+
   Future<void> _fetchDeadheadRecommendations() async {
     final activeTrip = _trips.cast<Map<String, dynamic>?>().firstWhere(
       (t) => t?['status'] == 'active',
@@ -487,6 +540,27 @@ class _TripsScreenState extends State<TripsScreen> {
       _deadheadError = null;
     });
 
+    // The deadhead ML model is filtered by the driver's real truck capacity.
+    // Without a configured truck there are no real specs to use, so the
+    // feature is disabled instead of silently assuming a 25-ton box-truck.
+    final truck = await _loadDriverTruck();
+    if (truck == null ||
+        truck.maxCapacityTons <= 0 ||
+        truck.cargoLengthFt <= 0 ||
+        truck.cargoWidthFt <= 0 ||
+        truck.cargoHeightFt <= 0) {
+      if (!mounted) return;
+      setState(() {
+        _deadheadLoading = false;
+        _deadheadError = 'Add your truck details first';
+      });
+      return;
+    }
+    final truckMaxWeightKg = truck.maxCapacityTons * 1000;
+    final truckMaxLengthM = truck.cargoLengthFt * 0.3048;
+    final truckMaxWidthM = truck.cargoWidthFt * 0.3048;
+    final truckMaxHeightM = truck.cargoHeightFt * 0.3048;
+
     try {
       final loads = await _marketplaceRepository.fetchLoadOffers();
       if (!mounted) return;
@@ -503,10 +577,10 @@ class _TripsScreenState extends State<TripsScreen> {
         loads: loads,
         driverLat: destLat,
         driverLng: destLng,
-        truckMaxWeightKg: 25000,
-        truckMaxLengthM: 12,
-        truckMaxWidthM: 2.5,
-        truckMaxHeightM: 4,
+        truckMaxWeightKg: truckMaxWeightKg,
+        truckMaxLengthM: truckMaxLengthM,
+        truckMaxWidthM: truckMaxWidthM,
+        truckMaxHeightM: truckMaxHeightM,
         arrivalTime: now.add(const Duration(hours: 6)).toIso8601String(),
       );
       final availableLoadMaps = payload['available_loads'] as List<Map<String, dynamic>>;
@@ -515,10 +589,10 @@ class _TripsScreenState extends State<TripsScreen> {
           .fetchDeadheadRecommendations(
         destLat: destLat,
         destLng: destLng,
-        maxWeightKg: 25000,
-        maxLengthM: 12,
-        maxWidthM: 2.5,
-        maxHeightM: 4,
+        maxWeightKg: truckMaxWeightKg,
+        maxLengthM: truckMaxLengthM,
+        maxWidthM: truckMaxWidthM,
+        maxHeightM: truckMaxHeightM,
         arrivalTime: now.add(const Duration(hours: 6)).toIso8601String(),
         availableLoads: availableLoadMaps,
       );
@@ -1134,18 +1208,43 @@ class _TripsScreenState extends State<TripsScreen> {
                                                         strokeWidth: 2),
                                               )
                                             else if (_deadheadError != null)
-                                              GestureDetector(
-                                                onTap:
-                                                    _fetchDeadheadRecommendations,
-                                                child: Text(
-                                                  AppLocalizations.of(context)!
-                                                      .retry,
-                                                  style: GoogleFonts.dmSans(
-                                                    fontSize: 12,
-                                                    color:
-                                                        TruxifyColors.accent,
+                                              Row(
+                                                mainAxisSize:
+                                                    MainAxisSize.min,
+                                                children: [
+                                                  Flexible(
+                                                    child: Text(
+                                                      _deadheadError!,
+                                                      maxLines: 1,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style:
+                                                          GoogleFonts.dmSans(
+                                                        fontSize: 11,
+                                                        color: TruxifyColors
+                                                            .hintText,
+                                                      ),
+                                                    ),
                                                   ),
-                                                ),
+                                                  const SizedBox(width: 8),
+                                                  GestureDetector(
+                                                    onTap:
+                                                        _fetchDeadheadRecommendations,
+                                                    child: Text(
+                                                      AppLocalizations.of(
+                                                              context)!
+                                                          .retry,
+                                                      style:
+                                                          GoogleFonts.dmSans(
+                                                        fontSize: 12,
+                                                        color: TruxifyColors
+                                                            .accent,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                           ],
                                         ),
@@ -1530,10 +1629,11 @@ class _TripsScreenState extends State<TripsScreen> {
       );
     }).toList();
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: FlutterMap(
-        options: MapOptions(
+    return RepaintBoundary(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: FlutterMap(
+          options: MapOptions(
           initialCenter: points.first,
           initialZoom: 6.0,
           interactionOptions: const InteractionOptions(
@@ -1559,7 +1659,7 @@ class _TripsScreenState extends State<TripsScreen> {
               p == routePoints.first ||
               p == routePoints.last ||
               p['is_claimed'] == true
-            ).map((point) {
+            ).map<Marker>((point) {
               return Marker(
                 point: ll.LatLng(
                   (point['latitude'] as num).toDouble(),
@@ -1567,30 +1667,32 @@ class _TripsScreenState extends State<TripsScreen> {
                 ),
                 width: 12,
                 height: 12,
-                onTap: () {
-                  final mapPoint = RouteMapPoint(
-                    id: point['id']?.toString() ?? '',
-                    title: (point['label'] ?? point['title'] ?? 'Stop').toString(),
-                    subtitle: (point['address'] ?? point['subtitle'] ?? '').toString(),
-                    details: (point['details'] ?? '').toString(),
-                    progress: (point['progress'] as num?)?.toDouble() ?? 0.0,
-                    claimed: point['is_claimed'] == true,
-                    icon: Icons.place,
-                    latitude: (point['latitude'] as num).toDouble(),
-                    longitude: (point['longitude'] as num).toDouble(),
-                    loadOfferId: point['load_offer_id']?.toString(),
-                  );
-                  Navigator.of(context).pushNamed(
-                    AppRoutes.loadPointDetail,
-                    arguments: mapPoint,
-                  );
-                },
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: point['is_claimed'] == true
-                        ? TruxifyColors.success
-                        : TruxifyColors.accent,
+                child: GestureDetector(
+                  onTap: () {
+                    final mapPoint = RouteMapPoint(
+                      id: point['id']?.toString() ?? '',
+                      title: (point['label'] ?? point['title'] ?? 'Stop').toString(),
+                      subtitle: (point['address'] ?? point['subtitle'] ?? '').toString(),
+                      details: (point['details'] ?? '').toString(),
+                      progress: (point['progress'] as num?)?.toDouble() ?? 0.0,
+                      claimed: point['is_claimed'] == true,
+                      icon: Icons.place,
+                      latitude: (point['latitude'] as num).toDouble(),
+                      longitude: (point['longitude'] as num).toDouble(),
+                      loadOfferId: point['load_offer_id']?.toString(),
+                    );
+                    Navigator.of(context).pushNamed(
+                      AppRoutes.loadPointDetail,
+                      arguments: mapPoint,
+                    );
+                  },
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: point['is_claimed'] == true
+                          ? TruxifyColors.success
+                          : TruxifyColors.accent,
+                    ),
                   ),
                 ),
               );
@@ -1598,7 +1700,7 @@ class _TripsScreenState extends State<TripsScreen> {
           ),
         ],
       ),
-    );
+    ));
   }
 }
 
@@ -1709,7 +1811,8 @@ class _MarketplaceBody extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           SizedBox(height: 80),
-          Center(child: Text(AppLocalizations.of(context)!.noLoadsAvailable)),
+          Lottie.asset('packages/truxify_shared/assets/lottie/no_trips.json', width: 200, height: 200),
+          Center(child: Text(AppLocalizations.of(context)!.noLoadsAvailable, style: TextStyle(color: Colors.grey, fontSize: 16))),
         ],
       );
     }

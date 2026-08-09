@@ -27,12 +27,24 @@ class TruckCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(
-                  '${truck.driver}  ⭐ ${truck.rating.toStringAsFixed(1)}',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.w800),
+                child: Row(
+                  children: [
+                    Text(
+                      '${truck.driver}  ⭐ ${truck.rating.toStringAsFixed(1)}',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w800),
+                    ),
+                    if (truck.isDigilockerVerified) ...[
+                      const SizedBox(width: 6),
+                      const Icon(
+                        Icons.verified_user_rounded,
+                        color: Colors.green,
+                        size: 18,
+                      ),
+                    ],
+                  ],
                 ),
               ),
               if (truck.badge != null)

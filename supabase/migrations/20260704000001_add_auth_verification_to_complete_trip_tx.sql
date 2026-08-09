@@ -13,7 +13,6 @@ AS $$
 DECLARE
   v_order RECORD;
   v_trip_display_id TEXT;
-  v_active_trip_count INT;
   v_otp_updated INT;
 BEGIN
   SELECT * INTO v_order
@@ -60,38 +59,34 @@ BEGIN
     RAISE EXCEPTION 'Delivery OTP is invalid, expired, or already verified';
   END IF;
 
-  SELECT COUNT(*) INTO v_active_trip_count
+  -- Finalize the active trip that actually served THIS order
+  SELECT trip_display_id INTO v_trip_display_id
   FROM trips
-  WHERE driver_id = v_order.driver_id
-    AND status = 'active';
+  WHERE order_id = p_order_id
+    AND status = 'active'
+  ORDER BY created_at
+  LIMIT 1;
 
-  IF v_active_trip_count > 1 THEN
-    RAISE EXCEPTION 'Multiple active trips found for driver %', v_order.driver_id;
+  IF v_trip_display_id IS NULL THEN
+    RAISE EXCEPTION 'No active trip found for this order — cannot complete trip';
   END IF;
 
-  IF v_active_trip_count = 1 THEN
-    SELECT trip_display_id INTO v_trip_display_id
-    FROM trips
-    WHERE driver_id = v_order.driver_id
-      AND status = 'active';
+  UPDATE trips
+  SET status = 'completed',
+      end_time = TO_CHAR(NOW(), 'HH24:MI'),
+      updated_at = NOW()
+  WHERE trip_display_id = v_trip_display_id;
 
-    UPDATE trips
-    SET status = 'completed',
-        end_time = TO_CHAR(NOW(), 'HH24:MI'),
-        updated_at = NOW()
-    WHERE trip_display_id = v_trip_display_id;
+  UPDATE trip_items
+  SET is_delivered = true
+  WHERE trip_display_id = v_trip_display_id;
 
-    UPDATE trip_items
-    SET is_delivered = true
-    WHERE trip_display_id = v_trip_display_id;
-
-    UPDATE trip_stops
-    SET is_completed = true,
-        is_current = false,
-        status_label = 'Delivered',
-        updated_at = NOW()
-    WHERE trip_display_id = v_trip_display_id;
-  END IF;
+  UPDATE trip_stops
+  SET is_completed = true,
+      is_current = false,
+      status_label = 'Delivered',
+      updated_at = NOW()
+  WHERE trip_display_id = v_trip_display_id;
 
   UPDATE orders
   SET status = 'payment_released',

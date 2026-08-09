@@ -1,10 +1,11 @@
-import { ApolloGateway, IntrospectAndCompose } from '@apollo/gateway';
+﻿import { ApolloGateway, IntrospectAndCompose } from '@apollo/gateway';
 import { RemoteGraphQLDataSource } from '@apollo/gateway';
 import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { InMemoryLRUCache } from '@apollo/utils.keyvaluecache';
 import logger from '../../api/src/middleware/logger.js';
 import { supabase } from '../../api/src/config/db.js';
+import { resolveUserContext, DEFAULT_ROLE } from './authContext.js';
 
 class GraphQLGateway {
     constructor() {
@@ -37,7 +38,24 @@ class GraphQLGateway {
             buildService({ name, url }) {
                 return new RemoteGraphQLDataSource({
                     url,
-                    willSendRequest({ request }) {
+                    willSendRequest({ request, context }) {
+                        const authorization = context?.headers?.authorization;
+                        if (authorization) {
+                            request.http.headers.set('authorization', authorization);
+                        }
+
+                        // Strip any client-supplied identity headers so subgraph
+                        // authorization can only ever come from the gateway's
+                        // verified context (profiles-backed role), never from a
+                        // forged x-user-id/x-user-role on the raw client request.
+                        request.http.headers.delete('x-user-id');
+                        request.http.headers.delete('x-user-role');
+
+                        if (context?.user?.id) {
+                            request.http.headers.set('x-user-id', context.user.id);
+                            request.http.headers.set('x-user-role', context.user.role || DEFAULT_ROLE);
+                        }
+
                         logger.debug(`GraphQL ${name} request sent`);
                     },
                 });
@@ -314,10 +332,10 @@ class GraphQLGateway {
                 }
             });
 
-            logger.info(`✅ GraphQL Gateway running at ${url}`);
+           logger.info(`OK GraphQL Gateway running at ${url}`);
             return { url };
         } catch (error) {
-            logger.error('❌ GraphQL Gateway startup failed:', error);
+            logger.error('ERROR GraphQL Gateway startup failed:', error);
             throw error;
         }
     }
@@ -326,13 +344,12 @@ class GraphQLGateway {
         if (!token) return null;
 
         try {
-            const stripped = token.startsWith('Bearer ') ? token.slice(7) : token;
-            const { data: { user }, error } = await supabase.auth.getUser(stripped);
-            if (error || !user) {
-                logger.warn('[GraphQL Gateway] Invalid auth token:', error?.message || 'no user');
+            const user = await resolveUserContext(supabase, token);
+            if (!user) {
+                logger.warn('[GraphQL Gateway] Invalid auth token: no user');
                 return null;
             }
-            return { id: user.id, role: user.user_metadata?.role || 'CUSTOMER' };
+            return user;
         } catch (err) {
             logger.warn('[GraphQL Gateway] Token verification failed:', err.message);
             return null;
@@ -342,7 +359,7 @@ class GraphQLGateway {
     async stop() {
         if (this.server) {
             await this.server.stop();
-            logger.info('✅ GraphQL Gateway stopped');
+            logger.info('OK GraphQL Gateway stopped');
         }
     }
 }

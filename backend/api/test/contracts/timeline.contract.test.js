@@ -14,6 +14,7 @@ vi.mock('../../src/config/db.js', () => ({
 
 vi.mock('../../src/sockets/tracker.js', () => ({
   initWebSocketServer: () => ({}),
+  broadcastOrderMilestone: vi.fn(),
 }));
 
 const { default: orderRouter } = await import('../../src/routes/orderRoutes.js');

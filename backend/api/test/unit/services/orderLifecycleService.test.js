@@ -44,11 +44,12 @@ describe('OrderLifecycleService - verifyDeliveryFn', () => {
     const orderId = 'order-123';
     const driverId = 'driver-456';
     const otp = '123456';
+    const mockUserClient = { rpc: vi.fn() };
 
-    const result = await service.verifyDeliveryFn(orderId, driverId, otp);
+    const result = await service.verifyDeliveryFn(orderId, driverId, otp, mockUserClient);
 
-    expect(redisLock.acquireLock).toHaveBeenCalledWith(`escrow_lock:${orderId}`, 30000);
-    expect(mockDeliveryVerification.verifyDelivery).toHaveBeenCalledWith({ orderId, driverId, otp });
+    expect(redisLock.acquireLock).toHaveBeenCalledWith(`escrow_lock:${orderId}`, 120000);
+    expect(mockDeliveryVerification.verifyDelivery).toHaveBeenCalledWith({ orderId, driverId, otp }, mockUserClient);
     expect(redisLock.releaseLock).toHaveBeenCalledWith(`escrow_lock:${orderId}`, lockValue);
     expect(result).toEqual({ success: true });
   });

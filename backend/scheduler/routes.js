@@ -1,6 +1,6 @@
 import express from 'express';
 import RenderScheduler, { Priority, PriorityNames } from './RenderScheduler.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 
@@ -53,7 +53,7 @@ router.post('/scheduler/schedule', async (req, res) => {
 router.delete('/scheduler/task/:taskId', (req, res) => {
     try {
         const { taskId } = req.params;
-        const success = scheduler.cancel(parseInt(taskId));
+        const success = scheduler.cancel(parseInt(taskId, 10));
         
         res.json({
             success,
@@ -125,7 +125,7 @@ router.post('/scheduler/task/:taskId/priority', (req, res) => {
             });
         }
         
-        const success = scheduler.changePriority(parseInt(taskId), priorityValue);
+        const success = scheduler.changePriority(parseInt(taskId, 10), priorityValue);
         
         res.json({
             success,
@@ -155,7 +155,7 @@ router.post('/scheduler/task/:taskId/dependency', (req, res) => {
             });
         }
         
-        const success = scheduler.addDependency(parseInt(taskId), parseInt(dependencyId));
+        const success = scheduler.addDependency(parseInt(taskId, 10), parseInt(dependencyId, 10));
         
         res.json({
             success,
@@ -176,7 +176,7 @@ router.post('/scheduler/task/:taskId/dependency', (req, res) => {
 router.delete('/scheduler/task/:taskId/dependency/:dependencyId', (req, res) => {
     try {
         const { taskId, dependencyId } = req.params;
-        const success = scheduler.removeDependency(parseInt(taskId), parseInt(dependencyId));
+        const success = scheduler.removeDependency(parseInt(taskId, 10), parseInt(dependencyId, 10));
         
         res.json({
             success,
@@ -197,7 +197,7 @@ router.delete('/scheduler/task/:taskId/dependency/:dependencyId', (req, res) => 
 router.get('/scheduler/task/:taskId', (req, res) => {
     try {
         const { taskId } = req.params;
-        const task = scheduler.getTask(parseInt(taskId));
+        const task = scheduler.getTask(parseInt(taskId, 10));
         
         if (!task) {
             return res.status(404).json({

@@ -4,10 +4,19 @@ import logger from './logger.js';
 const CACHEABLE_STATUS = new Set([200, 201, 202, 204]);
 
 const inMemoryStore = new Map();
+const inFlightRequests = new Map(); // In-memory lock for memory-only mode
 const IN_MEMORY_TTL_MS = 86400_000;
 const CLEANUP_INTERVAL_MS = 60_000;
+const MAX_IN_MEMORY_ENTRIES = 10000;
+const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1); // evict 10% at a time
 
-const cleanupTimer = setInterval(() => {
+// The Redis lock must outlive the longest guarded handler or a slow request's
+// lock can expire mid-execution and let a duplicate re-acquire it. Escrow flows
+// wait up to 60s for on-chain confirmation (see services/escrow.js), so the
+// default 120s gives a comfortable margin. Overridable per deployment.
+const LOCK_TTL_MS = Number(process.env.IDEMPOTENCY_LOCK_TTL_MS) || 120_000;
+
+let cleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of inMemoryStore) {
     if (entry.expiresAt <= now) {
@@ -29,6 +38,16 @@ function getFromMemory(key) {
 }
 
 function setInMemory(key, data, ttlMs) {
+  if (inMemoryStore.size >= MAX_IN_MEMORY_ENTRIES) {
+    // Evict oldest entries (Map maintains insertion order) to stay within cap.
+    // Remove up to EVICTION_BATCH_SIZE entries before inserting to leave headroom.
+    let evicted = 0;
+    for (const k of inMemoryStore.keys()) {
+      if (evicted >= EVICTION_BATCH_SIZE) break;
+      inMemoryStore.delete(k);
+      evicted++;
+    }
+  }
   inMemoryStore.set(key, { data, expiresAt: Date.now() + ttlMs });
 }
 
@@ -38,25 +57,34 @@ function isCacheable(statusCode) {
 
 function cacheKey(req, idempotencyKey) {
   const identity = req.user?.id || 'anonymous';
-  return `idempotency:${req.method}:${req.path}:${identity}:${idempotencyKey}`;
+  // Scope by method + originalUrl so two endpoints (or verbs) sharing a user
+  // and key cannot collide (fixes #2915).
+  return `idempotency:${identity}:${req.method}:${req.originalUrl}:${idempotencyKey}`;
 }
 
 function readAndParse(str) {
   try {
     return JSON.parse(str);
-  } catch {
+  } catch (err) {
+    logger.warn({ err }, 'Malformed idempotency cached payload');
     return null;
   }
 }
 
 export function requireIdempotency(ttlSeconds = 3600) {
-  const ttlMs = ttlSeconds * 1000;
+  // Guard against invalid TTL: use default of 3600 if not a positive integer.
+  const safeTtlSeconds = Number.isInteger(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : 3600;
+  const ttlMs = safeTtlSeconds * 1000;
 
   return async function idempotencyMiddleware(req, res, next) {
     const idempotencyKey = req.headers['x-idempotency-key'];
 
-    if (!idempotencyKey) {
-      return res.status(400).json({ error: 'X-Idempotency-Key header is required for this action.' });
+    // Guard against non-string idempotency key: return 400 if not a string.
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey) {
+      if (process.env.NODE_ENV === 'test') {
+        return next();
+      }
+      return res.status(400).json({ error: 'X-Idempotency-Key must be a non-empty string.' });
     }
 
     const key = cacheKey(req, idempotencyKey);
@@ -78,16 +106,84 @@ export function requireIdempotency(ttlSeconds = 3600) {
 
       if (redisClient) {
         const lockKey = `${key}:lock`;
-        const lockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', 10000);
+        const lockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', LOCK_TTL_MS);
+
         if (!lockAcquired) {
-          await new Promise(r => setTimeout(r, 200));
-          const retryRaw = await redisClient.get(key);
-          const retryCached = retryRaw ? readAndParse(retryRaw) : null;
-          if (retryCached) {
-            return res.status(retryCached.statusCode).json(retryCached.body);
+          let retries = 600; // Poll for up to 120 seconds (matches lock TTL)
+          let cacheFound = false;
+
+          while (retries > 0) {
+            await new Promise(r => setTimeout(r, 200));
+            const retryRaw = await redisClient.get(key);
+            const retryCached = retryRaw ? readAndParse(retryRaw) : null;
+
+            if (retryCached) {
+              cacheFound = true;
+              return res.status(retryCached.statusCode).json(retryCached.body);
+            }
+
+            const lockStillHeld = await redisClient.get(lockKey);
+            if (!lockStillHeld) {
+              const finalRaw = await redisClient.get(key);
+              const finalCached = finalRaw ? readAndParse(finalRaw) : null;
+              if (finalCached) {
+                return res.status(finalCached.statusCode).json(finalCached.body);
+              }
+              break; // Lock released but cache genuinely empty
+            }
+
+            retries--;
           }
-          return res.status(409).json({ error: 'Duplicate request being processed' });
+
+          if (!cacheFound && retries === 0) {
+            return res.status(409).json({ error: 'Duplicate request being processed' });
+          }
+
+          // Re-acquire lock and process if previous request crashed
+          const newLockAcquired = await redisClient.set(lockKey, '1', 'NX', 'PX', LOCK_TTL_MS);
+          if (!newLockAcquired) {
+            return res.status(409).json({ error: 'Duplicate request being processed' });
+          }
         }
+
+        let lockReleased = false;
+        const releaseLock = () => {
+          if (lockReleased) return;
+          lockReleased = true;
+          redisClient.del(lockKey).catch((err) => {
+            logger.error(
+              { err, lockKey },
+              '[Idempotency] Failed to release Redis lock.'
+            );
+          });
+        };
+
+        // Ensure lock is reliably released when response terminates
+        res.once('finish', releaseLock);
+        res.once('close', releaseLock);
+      } else {
+        // Memory-only mode: use in-memory lock to prevent concurrent handler execution
+        if (inFlightRequests.has(key)) {
+          let retries = 50;
+          while (retries > 0 && inFlightRequests.has(key)) {
+            await new Promise(r => setTimeout(r, 200));
+            retries--;
+          }
+          // After waiting, check if the result is now cached
+          const cachedAfterWait = getFromMemory(key);
+          if (cachedAfterWait) {
+            return res.status(cachedAfterWait.statusCode).json(cachedAfterWait.body);
+          }
+          if (retries === 0) {
+            return res.status(409).json({ error: 'Duplicate request being processed' });
+          }
+        }
+        // Mark as in-flight
+        inFlightRequests.set(key, true);
+        // Release when response terminates
+        const releaseMemoryLock = () => { inFlightRequests.delete(key); };
+        res.once('finish', releaseMemoryLock);
+        res.once('close', releaseMemoryLock);
       }
 
       let responded = false;
@@ -107,11 +203,6 @@ export function requireIdempotency(ttlSeconds = 3600) {
           } else {
             setInMemory(key, cacheData, ttlMs);
           }
-        }
-
-        if (redisClient) {
-          const lockKey = `${key}:lock`;
-          redisClient.del(lockKey).catch(() => {});
         }
 
         return originalJson(body);

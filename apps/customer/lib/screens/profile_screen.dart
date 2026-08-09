@@ -1,7 +1,7 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:truxify/widgets/menu_card.dart';
-import 'package:truxify/widgets/menu_item.dart';
+import '../widgets/menu_item.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
 import '../controllers/app_controller.dart';
@@ -12,7 +12,6 @@ import '../repositories/payment_repository.dart';
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
 import '../l10n/app_localizations.dart';
-import '../widgets/truxify_button.dart';
 import '../services/fcm_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
@@ -245,6 +244,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             'wallet_address': address,
                           },
                         );
+                        if (!mounted) return;
                         setState(() {
                           _walletAddress = address;
                         });
@@ -662,12 +662,8 @@ class _ThemeModeTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final controller = TruxifyScope.of(context);
-    final currentTheme = controller.themeMode;
+    final selectedTheme = controller.themeMode;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    final selectedTheme = currentTheme == ThemeMode.system
-        ? (isDark ? ThemeMode.dark : ThemeMode.light)
-        : currentTheme;
 
     final iconBg =
         isDark ? TruxifyColors.darkAccentLight : TruxifyColors.accentLight;
@@ -712,7 +708,11 @@ class _ThemeModeTile extends StatelessWidget {
                     ),
                   ),
                 ),
-                segments: const [
+                segments: [
+                  const ButtonSegment<ThemeMode>(
+                    value: ThemeMode.system,
+                    label: Text('System'),
+                  ),
                   ButtonSegment<ThemeMode>(
                     value: ThemeMode.light,
                     label: Text(AppLocalizations.of(context)!.lightTheme),

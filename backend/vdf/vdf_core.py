@@ -2,6 +2,7 @@ import hashlib
 import time
 import json
 import base64
+import random
 from typing import Dict, Tuple, Any, Optional
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -91,22 +92,35 @@ class VDF:
         return prime1 * prime2
     
     def _generate_prime(self, bits: int) -> int:
-        """Generate prime number (simplified)"""
-        # In production: use proper prime generation
-        import random
         while True:
             candidate = random.getrandbits(bits)
+            candidate |= (1 << (bits - 1)) | 1
             if self._is_prime(candidate):
                 return candidate
-    
-    def _is_prime(self, n: int) -> bool:
-        """Simple primality test"""
+
+    def _is_prime(self, n: int, k: int = 20) -> bool:
         if n < 2:
             return False
+        if n == 2 or n == 3:
+            return True
         if n % 2 == 0:
-            return n == 2
-        for i in range(3, int(n**0.5) + 1, 2):
-            if n % i == 0:
+            return False
+
+        r, d = 0, n - 1
+        while d % 2 == 0:
+            r += 1
+            d //= 2
+
+        for _ in range(k):
+            a = random.randrange(2, n - 2)
+            x = pow(a, d, n)
+            if x == 1 or x == n - 1:
+                continue
+            for _ in range(r - 1):
+                x = pow(x, 2, n)
+                if x == n - 1:
+                    break
+            else:
                 return False
         return True
     
@@ -129,18 +143,22 @@ class VDF:
             # Parse proof
             proof_json = json.loads(proof_data.decode())
             
-            # Verify proof
-            # In production: implement proper verification
-            # For demo: verify hash matches
-            
+            # Recompute the VDF output: y' = x^(2^T) mod N
             x = self._hash_to_point(input_data)
-            y = int(proof_json['output'], 16)
-            
-            # Verify elapsed time
-            elapsed_time = proof_json.get('elapsed_time', 0)
-            if elapsed_time < 0.1:  # Minimum time
+            modulus = int(proof_json['modulus'], 16)
+            iterations = int(proof_json.get('iterations', self.iterations))
+            y = x
+            for _ in range(iterations):
+                y = self._square_mod(y, modulus)
+
+            # The recomputed output must match the claimed output in the proof
+            if int(proof_json['output'], 16) != y:
                 return False
-            
+
+            # And the caller-provided expected output, when given
+            if output_data and output_data != y.to_bytes(32, 'big'):
+                return False
+
             return True
             
         except Exception as e:

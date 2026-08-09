@@ -33,3 +33,19 @@ export const loadFilterQuerySchema = z.object({
     });
   }
 });
+
+export const createLoadSchema = z.object({
+  origin: z.object({
+    lat: z.coerce.number(),
+    lng: z.coerce.number(),
+    address: z.string().optional(),
+  }),
+  destination: z.object({
+    lat: z.coerce.number(),
+    lng: z.coerce.number(),
+    address: z.string().optional(),
+  }),
+  weight_tons: z.coerce.number().positive().max(50),
+  expected_price: z.coerce.number().positive(),
+  material_type: z.string().min(2).max(100).optional(),
+});

@@ -112,7 +112,7 @@ void main() {
       expect(doc.document, isNotNull);
     });
 
-    test('PDF content contains order ID and driver phone', () {
+    test('PDF content contains order ID and driver phone', () async {
       final data = InvoiceData(
         orderId: 'ORD-7777',
         date: '2026-01-01',
@@ -126,7 +126,7 @@ void main() {
       );
 
       final doc = buildInvoicePdf(data);
-      final bytes = doc.save();
+      final bytes = await doc.save();
       final content = utf8.decode(bytes);
 
       expect(content, contains('ORD-7777'));
@@ -137,7 +137,7 @@ void main() {
       expect(content, contains('+91 99999 11111'));
     });
 
-    test('PDF content contains blockchain hash when provided', () {
+    test('PDF content contains blockchain hash when provided', () async {
       final data = InvoiceData(
         orderId: 'ORD-5555',
         date: '2026-03-20',
@@ -151,14 +151,14 @@ void main() {
       );
 
       final doc = buildInvoicePdf(data);
-      final bytes = doc.save();
+      final bytes = await doc.save();
       final content = utf8.decode(bytes);
 
       expect(content, contains('Blockchain Verification'));
       expect(content, contains('0xabcdef1234567890'));
     });
 
-    test('PDF omits blockchain section when hash is null', () {
+    test('PDF omits blockchain section when hash is null', () async {
       final data = InvoiceData(
         orderId: 'ORD-4444',
         date: '2026-04-10',
@@ -172,13 +172,13 @@ void main() {
       );
 
       final doc = buildInvoicePdf(data);
-      final bytes = doc.save();
+      final bytes = await doc.save();
       final content = utf8.decode(bytes);
 
       expect(content, isNot(contains('Blockchain Verification')));
     });
 
-    test('PDF omits driver phone section when null', () {
+    test('PDF omits driver phone section when null', () async {
       final data = InvoiceData(
         orderId: 'ORD-3333',
         date: '2026-05-05',
@@ -192,7 +192,7 @@ void main() {
       );
 
       final doc = buildInvoicePdf(data);
-      final bytes = doc.save();
+      final bytes = await doc.save();
       final content = utf8.decode(bytes);
 
       expect(content, isNot(contains('Phone')));

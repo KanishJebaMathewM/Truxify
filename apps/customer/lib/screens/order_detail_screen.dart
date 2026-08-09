@@ -14,9 +14,17 @@ import '../theme/app_theme.dart';
 import 'chat_screen.dart';
 import '../widgets/common_widgets.dart';
 import '../widgets/timeline_row.dart';
+import '../utils/driver_utils.dart';
 
 class OrderDetailScreen extends StatefulWidget {
-  const OrderDetailScreen({super.key, required this.order});
+  final OrderService? orderService;
+  final TrackingService? trackingService;
+  const OrderDetailScreen({
+    super.key,
+    required this.order,
+    this.orderService,
+    this.trackingService,
+  });
 
   final HistoryOrderData order;
 
@@ -28,17 +36,70 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   int _rating = 0;
   final TextEditingController _commentController = TextEditingController();
   late HistoryOrderData _currentOrder;
-  final OrderService _orderService = OrderService();
-  final TrackingService _trackingService = TrackingService();
+  late final OrderService _orderService;
+  late final TrackingService _trackingService;
   RealtimeChannel? _ordersChannel;
   bool _ratingDialogShown = false;
   bool _isGeneratingInvoice = false;
   bool _isSubmittingRating = false;
   bool _ratingSubmitted = false;
+  String _mlEta = 'Calculating…';
+
+  String _formatEta(double etaMinutes) {
+    if (etaMinutes <= 0) return '0 mins';
+    final hrs = etaMinutes ~/ 60;
+    final mins = (etaMinutes % 60).round();
+    if (hrs > 0) {
+      if (mins > 0) {
+        return '$hrs hrs $mins mins';
+      } else {
+        return '$hrs hrs';
+      }
+    } else {
+      return '$mins mins';
+    }
+  }
+
+  Future<void> _fetchMlEta(String orderId) async {
+    try {
+      final locData = await _orderService.fetchDriverLocation(orderId);
+      final data = locData['data'] ?? locData;
+      final lat = (data['lat'] as num?)?.toDouble();
+      final lng = (data['lng'] as num?)?.toDouble();
+      if (lat != null && lng != null) {
+        final res = await _orderService.fetchMlEta(
+          tripId: orderId,
+          lat: lat,
+          lng: lng,
+        );
+        final etaMinutes = (res['eta_minutes'] as num?)?.toDouble();
+        if (etaMinutes != null && mounted) {
+          setState(() {
+            _mlEta = _formatEta(etaMinutes);
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _mlEta = 'TBD';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching ML ETA in OrderDetailScreen: $e');
+      if (mounted) {
+        setState(() {
+          _mlEta = 'TBD';
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _orderService = widget.orderService ?? OrderService();
+    _trackingService = widget.trackingService ?? TrackingService();
     _currentOrder = widget.order;
     _loadOrderAndTimeline();
     _subscribeToOrderUpdates();
@@ -79,16 +140,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   }
 
   String _resolveDriverName(Map<String, dynamic> order) {
-    final profile = order['profiles'];
-    if (profile is Map<String, dynamic>) {
-      final name = profile['full_name']?.toString().trim();
-      if (name != null && name.isNotEmpty) return name;
-    }
-
-    final driverName = order['driver_name']?.toString().trim();
-    if (driverName != null && driverName.isNotEmpty) return driverName;
-
-    return 'Driver Assigned';
+    return DriverUtils.resolveDriverName(order);
   }
 
   String _formatTime(DateTime dateTime) {
@@ -155,6 +207,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 (orderMap['profiles'] is Map<String, dynamic>
                     ? orderMap['profiles']['phone']?.toString()
                     : null),
+            escrowStatus: orderMap['escrow_status']?.toString(),
           );
           // Trigger rating flow if status becomes completed and rating dialog hasn't been shown yet
           final orderStatus = orderMap['status']?.toString() ?? '';
@@ -162,6 +215,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             _checkAndShowRatingDialog();
           }
         });
+        _fetchMlEta(_currentOrder.orderId);
       }
     } catch (e) {
       debugPrint('Error loading order detail: $e');
@@ -495,7 +549,9 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 const SizedBox(height: 8),
                 Text('Date: ${_currentOrder.date}', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 8),
-                if (_currentOrder.requiresRefrigeration) ...[
+                Text('ETA: $_mlEta', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                if (_currentOrder.requiresRefrigeration ?? false) ...[
                   Row(
                     children: [
                       const Icon(Icons.ac_unit_rounded, size: 16, color: Colors.blue),
@@ -576,6 +632,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     _PriceLine(label: 'Platform Fee', amount: _currentOrder.platformFee!),
                 ],
                 _PriceLine(label: 'Total', amount: _currentOrder.amount, isTotal: true),
+                const Divider(),
+                _PriceLine(
+                  label: 'Payment Escrow',
+                  amount: (_currentOrder.escrowStatus ?? 'pending').toUpperCase(),
+                ),
               ],
             ),
           ),
@@ -594,11 +655,11 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                   pickup: pickup,
                   drop: drop,
                   dateLabel: _currentOrder.date,
-                  goodsType: 'Textile',
-                  weightTonnes: '3',
-                  dimensions: '12 × 6 × 6',
-                  stacked: true,
-                  fragile: false,
+                  goodsType: _currentOrder.goodsType ?? 'General',
+                  weightTonnes: _currentOrder.weightTonnes ?? '0',
+                  dimensions: _currentOrder.dimensions ?? '',
+                  stacked: _currentOrder.isStackable ?? true,
+                  fragile: _currentOrder.isFragile ?? false,
                   requirements: _currentOrder.specialRequirements != null && _currentOrder.specialRequirements!.isNotEmpty
           ? [_currentOrder.specialRequirements!]
           : const [],

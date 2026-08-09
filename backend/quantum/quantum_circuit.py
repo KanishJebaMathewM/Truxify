@@ -3,10 +3,10 @@ from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
 from qiskit.circuit.library import QAOAAnsatz
 from qiskit.quantum_info import SparsePauliOp
 from qiskit_aer import AerSimulator
-from qiskit.optimization import QuadraticProgram
-from qiskit.optimization.algorithms import MinimumEigenOptimizer
-from qiskit.algorithms.minimum_eigensolvers import QAOA
-from qiskit.algorithms.optimizers import COBYLA
+from qiskit_optimization import QuadraticProgram
+from qiskit_optimization.algorithms import MinimumEigenOptimizer
+from qiskit_algorithms.minimum_eigensolvers import QAOA
+from qiskit_algorithms.optimizers import COBYLA
 import networkx as nx
 from typing import Dict, List, Tuple, Any
 import logging

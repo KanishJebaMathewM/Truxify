@@ -76,7 +76,8 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
     const { data: todayOrders, error: revErr } = await supabase
       .from('orders')
       .select('total_amount')
-      .gte('created_at', today.toISOString());
+      .gte('created_at', today.toISOString())
+      .in('status', ['delivered', 'payment_released']);
       
     if (revErr) {
       logger.error('Error fetching revenue:', revErr.message);

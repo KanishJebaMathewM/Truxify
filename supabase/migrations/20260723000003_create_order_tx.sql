@@ -35,12 +35,30 @@ CREATE OR REPLACE FUNCTION create_order_tx(
 RETURNS json
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_order_id UUID;
   v_status TEXT;
   v_created_at TIMESTAMPTZ;
+  v_customer_id UUID;
 BEGIN
+  -- Resolve the customer identity: only the service-role backend may supply a
+  -- p_customer_id. Any other caller is bound to their own JWT-derived profile
+  -- id (get_profile_id maps the Firebase JWT sub to profiles.id), so clients
+  -- can never create orders or load offers as another customer.
+  IF auth.role() = 'service_role' THEN
+    v_customer_id := p_customer_id;
+  ELSE
+    v_customer_id := get_profile_id();
+    IF v_customer_id IS NULL THEN
+      RAISE EXCEPTION 'Unauthorized: could not resolve caller profile';
+    END IF;
+    IF p_customer_id IS NOT NULL AND p_customer_id <> v_customer_id THEN
+      RAISE EXCEPTION 'Unauthorized: cannot create orders as another customer';
+    END IF;
+  END IF;
+
   -- 1. Insert into orders
   INSERT INTO orders (
     order_display_id, customer_id, status,
@@ -52,7 +70,7 @@ BEGIN
     base_freight, toll_estimate, platform_fee, total_amount, estimated_price,
     payment_method_id, upi_id
   ) VALUES (
-    p_order_display_id, p_customer_id, 'pending',
+    p_order_display_id, v_customer_id, 'pending',
     p_pickup_address, p_pickup_lat, p_pickup_lng,
     p_drop_address, p_drop_lat, p_drop_lng,
     p_pickup_date, p_pickup_time,
@@ -84,7 +102,7 @@ BEGIN
     freight_value, fuel_cost, toll_cost, net_profit, extra_distance_km,
     status
   ) VALUES (
-    p_order_display_id, p_customer_id, p_customer_name,
+    p_order_display_id, v_customer_id, p_customer_name,
     p_route_label, p_route_subtitle,
     p_pickup_address, p_pickup_lat, p_pickup_lng,
     p_drop_address, p_drop_lat, p_drop_lng,

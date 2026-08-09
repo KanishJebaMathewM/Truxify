@@ -19,9 +19,58 @@ from multimodal.sensor_fusion import SensorFusion
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/safety", tags=["Driver Safety"])
 
+# Upload hardening: never read more than this many bytes from a client upload,
+# and only accept known media types for each analysis endpoint.
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+_UPLOAD_CHUNK_BYTES = 64 * 1024
+_ALLOWED_VISION_MIME = {'image/jpeg', 'image/png', 'image/webp', 'image/bmp'}
+_ALLOWED_AUDIO_MIME = {
+    'audio/wav', 'audio/x-wav', 'audio/wave', 'audio/flac', 'audio/ogg',
+    'audio/oga', 'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/x-m4a',
+}
+
 # Shared Redis client initialized once at module level
 _redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379')
 redis_client = redis.Redis.from_url(_redis_url, decode_responses=True)
+
+
+def _validate_content_length(content_length):
+    if content_length is not None:
+        try:
+            content_length = int(content_length)
+        except (TypeError, ValueError):
+            content_length = None
+        if content_length is not None and content_length > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f'Upload too large: maximum allowed size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB',
+            )
+
+
+async def _read_upload(file, allowed_mimes):
+    """Validate MIME type and read the upload in bounded chunks.
+
+    Rejects unknown media types with 415 and any upload that exceeds
+    ``MAX_UPLOAD_BYTES`` with 413 instead of buffering it into memory.
+    """
+    if file.content_type not in allowed_mimes:
+        raise HTTPException(
+            status_code=415,
+            detail=f'Unsupported media type: {file.content_type or "unknown"}',
+        )
+    _validate_content_length(file.headers.get('content-length'))
+    contents = bytearray()
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+        if not chunk:
+            break
+        contents.extend(chunk)
+        if len(contents) > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f'Upload too large: maximum allowed size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB',
+            )
+    return bytes(contents)
 
 # Initialize monitors
 vision_monitor = VisionMonitor()
@@ -39,8 +88,8 @@ class SafetyAlertResponse(BaseModel):
 async def analyze_vision_frame(file: UploadFile = File(...)):
     """Analyze driver vision frame"""
     try:
-        # Read image
-        contents = await file.read()
+        # Read image (bounded, MIME-checked)
+        contents = await _read_upload(file, _ALLOWED_VISION_MIME)
         nparr = np.frombuffer(contents, np.uint8)
         frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         
@@ -52,16 +101,20 @@ async def analyze_vision_frame(file: UploadFile = File(...)):
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Vision analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/audio/analyze")
 async def analyze_audio(file: UploadFile = File(...)):
     """Analyze driver audio"""
     try:
-        # Read audio
-        contents = await file.read()
+        # Read audio (bounded, MIME-checked)
+        contents = await _read_upload(file, _ALLOWED_AUDIO_MIME)
         audio_data, sr = sf.read(io.BytesIO(contents))
         
         # Process audio
@@ -72,9 +125,13 @@ async def analyze_audio(file: UploadFile = File(...)):
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Audio analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/audio/record")
 async def record_audio(duration: int = 2):
@@ -93,7 +150,9 @@ async def record_audio(duration: int = 2):
         }
     except Exception as e:
         logger.error(f"Audio recording failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/fusion/analyze")
 async def analyze_safety(
@@ -121,7 +180,9 @@ async def analyze_safety(
         }
     except Exception as e:
         logger.error(f"Safety analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/fusion/report", response_model=SafetyAlertResponse)
 async def get_safety_report():
@@ -137,7 +198,9 @@ async def get_safety_report():
         )
     except Exception as e:
         logger.error(f"Safety report failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/vision/status")
 async def get_vision_status():
@@ -157,7 +220,9 @@ async def get_vision_status():
         }
     except Exception as e:
         logger.error(f"Vision status failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/audio/status")
 async def get_audio_status():
@@ -177,7 +242,9 @@ async def get_audio_status():
         }
     except Exception as e:
         logger.error(f"Audio status failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/fusion/stats")
 async def get_fusion_stats():
@@ -191,7 +258,9 @@ async def get_fusion_stats():
         }
     except Exception as e:
         logger.error(f"Fusion stats failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/alert/trigger")
 async def trigger_alert(level: str = "WARNING"):
@@ -214,4 +283,6 @@ async def trigger_alert(level: str = "WARNING"):
         }
     except Exception as e:
         logger.error(f"Alert trigger failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

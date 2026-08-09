@@ -1,11 +1,13 @@
 import express from 'express';
 import liquibaseService from './liquibase.service.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../../backend/api/src/middleware/logger.js';
+import { authenticate } from '../../backend/api/src/middleware/auth.js';
+import { requirePolicy } from '../../backend/api/src/middleware/requirePolicy.js';
 
 const router = express.Router();
 
-// Run migrations
-router.post('/liquibase/migrate', async (req, res) => {
+// Run migrations (admin only)
+router.post('/liquibase/migrate', authenticate, requirePolicy('liquibase:migrate'), async (req, res) => {
     try {
         const result = await liquibaseService.runMigrations();
         res.json({
@@ -19,8 +21,8 @@ router.post('/liquibase/migrate', async (req, res) => {
     }
 });
 
-// Rollback migrations
-router.post('/liquibase/rollback', async (req, res) => {
+// Rollback migrations (admin only)
+router.post('/liquibase/rollback', authenticate, requirePolicy('liquibase:rollback'), async (req, res) => {
     try {
         const { count } = req.body;
         const result = await liquibaseService.rollback(count || 1);
@@ -35,8 +37,8 @@ router.post('/liquibase/rollback', async (req, res) => {
     }
 });
 
-// Get status
-router.get('/liquibase/status', async (req, res) => {
+// Get status (admin only)
+router.get('/liquibase/status', authenticate, requirePolicy('liquibase:status'), async (req, res) => {
     try {
         const result = await liquibaseService.getStatus();
         res.json({
@@ -50,8 +52,8 @@ router.get('/liquibase/status', async (req, res) => {
     }
 });
 
-// Validate changelog
-router.post('/liquibase/validate', async (req, res) => {
+// Validate changelog (admin only)
+router.post('/liquibase/validate', authenticate, requirePolicy('liquibase:validate'), async (req, res) => {
     try {
         const result = await liquibaseService.validate();
         res.json({

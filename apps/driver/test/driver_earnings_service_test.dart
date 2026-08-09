@@ -167,7 +167,7 @@ void main() {
       service.dispose();
     });
 
-    test('fetchMonthlyEarnings returns filtered earnings for current month', () async {
+    test('fetchMonthlyEarnings requests only the selected month via the API', () async {
       final mockResponse = [
         {'day_date': '2026-06-01', 'amount': 2000, 'trip_count': 1, 'hours_driven': 2.5},
         {'day_date': '2026-06-15', 'amount': 4500, 'trip_count': 2, 'hours_driven': 5.0},
@@ -176,6 +176,8 @@ void main() {
 
       final httpClient = MockHttpClient((request) async {
         expect(request.url.path, equals('/api/driver/earnings/summary'));
+        expect(request.url.queryParameters['start_date'], equals('2026-06-01'));
+        expect(request.url.queryParameters['end_date'], equals('2026-07-01'));
         return http.Response(jsonEncode(mockResponse), 200);
       });
 
@@ -194,23 +196,22 @@ void main() {
       service.dispose();
     });
 
-    test('fetchMonthlyEarnings falls back to database for dates > 365 days ago', () async {
+    test('fetchMonthlyEarnings uses the API for historical months older than 365 days', () async {
       bool databaseCalled = false;
       final supabaseClient = FakeSupabaseClient(
         auth: mockAuth,
         onFrom: (relation) {
-          expect(relation, equals('earnings_daily'));
           databaseCalled = true;
-        },
-        queryResult: (relation) {
-          return Future.value([
-            {'day_date': '2020-01-15', 'amount': 3000, 'trip_count': 2, 'hours_driven': 4.0}
-          ]);
         },
       );
 
       final httpClient = MockHttpClient((request) async {
-        fail('HTTP client should not be called for historical months older than 365 days');
+        expect(request.url.path, equals('/api/driver/earnings/summary'));
+        expect(request.url.queryParameters['start_date'], equals('2020-01-01'));
+        expect(request.url.queryParameters['end_date'], equals('2020-02-01'));
+        return http.Response(jsonEncode([
+          {'day_date': '2020-01-15', 'amount': 3000, 'trip_count': 2, 'hours_driven': 4.0}
+        ]), 200);
       });
 
       final service = DriverEarningsService(
@@ -218,9 +219,10 @@ void main() {
         httpClient: httpClient,
       );
 
-      // Querying January 2020 (way older than 365 days)
+      // Querying January 2020 (way older than 365 days): the API is still the
+      // single source, and the direct database path is never used.
       final result = await service.fetchMonthlyEarnings(month: DateTime(2020, 1));
-      expect(databaseCalled, isTrue);
+      expect(databaseCalled, isFalse);
       expect(result.length, equals(1));
       expect(result[0]['amount'], equals(3000));
       

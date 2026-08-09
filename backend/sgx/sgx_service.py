@@ -2,9 +2,11 @@ import base64
 import hashlib
 import json
 import logging
+import os
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 import numpy as np
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 logger = logging.getLogger(__name__)
 
@@ -42,39 +44,45 @@ class SGXService:
                 'timestamp': datetime.now().isoformat()
             }
     
+    def _get_aes_key(self) -> bytes:
+        key = os.environ.get('SGX_ENCRYPTION_KEY')
+        if key:
+            return base64.b64decode(key)
+        return hashlib.sha256(b'Truxify-SGX-default-key').digest()
+
     def encrypt_data(self, plaintext: str) -> Dict:
-        """Encrypt data inside enclave"""
         try:
             if not self.enclave_initialized:
                 return {'success': False, 'error': 'Enclave not initialized'}
-            
-            # In production: call ecall_encrypt_data
-            # For demo: simulate encryption
+
+            aesgcm = AESGCM(self._get_aes_key())
+            nonce = os.urandom(12)
             plaintext_bytes = plaintext.encode()
-            key = b'\x01\x23\x45\x67\x89\xAB\xCD\xEF' * 4
-            ciphertext = bytes([plaintext_bytes[i] ^ key[i % 32] for i in range(len(plaintext_bytes))])
-            
+            ciphertext = aesgcm.encrypt(nonce, plaintext_bytes, None)
+
+            payload = base64.b64encode(nonce + ciphertext).decode()
             return {
                 'success': True,
-                'ciphertext': base64.b64encode(ciphertext).decode(),
-                'length': len(ciphertext),
+                'ciphertext': payload,
+                'length': len(plaintext_bytes),
                 'enclave_id': self.enclave_id,
                 'timestamp': datetime.now().isoformat()
             }
         except Exception as e:
             logger.error(f"Encryption failed: {e}")
             return {'success': False, 'error': str(e)}
-    
+
     def decrypt_data(self, ciphertext_b64: str) -> Dict:
-        """Decrypt data inside enclave"""
         try:
             if not self.enclave_initialized:
                 return {'success': False, 'error': 'Enclave not initialized'}
-            
-            ciphertext = base64.b64decode(ciphertext_b64)
-            key = b'\x01\x23\x45\x67\x89\xAB\xCD\xEF' * 4
-            plaintext_bytes = bytes([ciphertext[i] ^ key[i % 32] for i in range(len(ciphertext))])
-            
+
+            aesgcm = AESGCM(self._get_aes_key())
+            payload = base64.b64decode(ciphertext_b64)
+            nonce = payload[:12]
+            ciphertext = payload[12:]
+            plaintext_bytes = aesgcm.decrypt(nonce, ciphertext, None)
+
             return {
                 'success': True,
                 'plaintext': plaintext_bytes.decode(),
@@ -199,9 +207,9 @@ class SGXService:
                 return {'success': False, 'error': 'Enclave not initialized'}
             
             # In production: call ecall_secure_random
-            # For demo: generate random
-            import random
-            random_num = random.randint(0, 2**32 - 1)
+            # For demo: use a CSPRNG instead of the predictable Mersenne Twister
+            import secrets
+            random_num = secrets.randbits(32)
             
             return {
                 'success': True,

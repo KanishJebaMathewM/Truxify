@@ -38,8 +38,8 @@ class AnomalyDetector:
         for name, model in self.models.items():
             model.build_model()
         
-        self.anomaly_history = deque(maxlen=self.max_history)
         self.max_history = 1000
+        self.anomaly_history = deque(maxlen=self.max_history)
         
         logger.info("✅ Anomaly Detector initialized")
     
@@ -247,7 +247,7 @@ class AnomalyDetector:
         """Get recent alerts"""
         alerts = []
         cursor = 0
-        pattern = 'anomaly:alert:*'
+        pattern = 'anomaly:latest:*'
 
         while True:
             cursor, keys = self.redis.scan(cursor=cursor, match=pattern, count=100)

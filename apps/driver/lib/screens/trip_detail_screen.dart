@@ -4,12 +4,18 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
 import 'package:url_launcher/url_launcher.dart';
 import '../services/geocode_service.dart';
+import '../services/gps_tracking_service.dart';
+import '../services/location_service.dart';
 import '../services/route_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../models/app_models.dart';
 import '../widgets/common_widgets.dart';
 import 'chat_screen.dart';
+import 'delivery_otp_screen.dart';
+
+import 'dart:async';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 class TripDetailScreen extends StatefulWidget {
   final Trip trip;
@@ -23,17 +29,51 @@ class TripDetailScreen extends StatefulWidget {
 class _TripDetailScreenState extends State<TripDetailScreen> {
   final MapController _mapController = MapController();
   late Future<_RouteResult?> _routeFuture;
+  late StreamSubscription<List<ConnectivityResult>> _connectivitySubscription;
+  bool _isOffline = false;
+
+  // ── GPS tracking for active trips ──────────────────────────────────
+  final GpsTrackingService _gpsTracking = GpsTrackingService();
+  WsConnectionStatus _wsStatus = WsConnectionStatus.disconnected;
+
+  /// Statuses that require live GPS emission.
+  static const _activeStatuses = {
+    TripStatusType.active,
+  };
 
   @override
   void initState() {
     super.initState();
     _routeFuture = _loadRouteForTrip(widget.trip.route);
+    _maybeStartGpsTracking();
+    _connectivitySubscription =
+        Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
+      final offline = results.every((result) => result == ConnectivityResult.none);
+      if (mounted) setState(() => _isOffline = offline);
+    });
   }
 
   @override
   void dispose() {
+    _connectivitySubscription.cancel();
     _mapController.dispose();
+    // Disconnect WebSocket to prevent memory/battery leaks on screen exit.
+    _gpsTracking.stop();
     super.dispose();
+  }
+
+  /// Start GPS emission only if this trip is in an active status.
+  void _maybeStartGpsTracking() {
+    if (!_activeStatuses.contains(widget.trip.status)) return;
+
+    _gpsTracking.connectionStatus.listen((status) {
+      if (mounted) setState(() => _wsStatus = status);
+    });
+
+    // Fire-and-forget; errors surface via debugPrint inside the service.
+    _gpsTracking.startForTrip(tripDisplayId: widget.trip.tripId).catchError(
+      (e) => debugPrint('[TripDetailScreen] GPS tracking error: $e'),
+    );
   }
   Future<void> _openGoogleMapsRoute() async {
     final routeResult = await _routeFuture;
@@ -62,7 +102,8 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
           const SnackBar(content: Text('Unable to open Google Maps')),
         );
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[TripDetailScreen] Failed to open Google Maps: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to open Google Maps')),
@@ -70,6 +111,7 @@ class _TripDetailScreenState extends State<TripDetailScreen> {
       }
     }
   }
+
   void _showBlockchainBottomSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -373,6 +415,26 @@ Widget _cargoBadge({
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (_isOffline)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                color: TruxifyColors.errorRed,
+                child: Row(
+                  children: [
+                    const Icon(Icons.cloud_off, color: Colors.white, size: 16),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Offline Mode. Progress saved locally.',
+                      style: GoogleFonts.dmSans(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             // 1. Route Hero Card
             Container(
               width: double.infinity,
@@ -820,6 +882,9 @@ Widget _cargoBadge({
                   ),
                   const SizedBox(height: 12),
                   _buildPaymentRow(
+                      'Escrow status', (widget.trip.escrowStatus ?? 'pending').toUpperCase()),
+                  const Divider(),
+                  _buildPaymentRow(
                       'Base freight', breakdown?.baseFreight ?? '₹0'),
                   const Divider(),
                   _buildPaymentRow(
@@ -855,6 +920,113 @@ Widget _cargoBadge({
                 ],
               ),
             ),
+
+            // OTP Confirm Delivery CTA — shown only for active trips
+            if (trip.status == TripStatusType.active)
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [TruxifyColors.accentDark, TruxifyColors.accent],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: TruxifyColors.accentDark.withValues(alpha: 0.35),
+                      blurRadius: 14,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    id: 'btn_enter_otp_confirm_delivery',
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () async {
+                      final released = await Navigator.of(context).push<bool>(
+                        MaterialPageRoute(
+                          builder: (_) => DeliveryOtpScreen(
+                            orderId: trip.tripId,
+                            orderDisplayId: trip.tripId,
+                            dropLat: trip.dropLat,
+                            dropLng: trip.dropLng,
+                            amountInr: trip.earnings.replaceAll('₹', '').trim(),
+                          ),
+                        ),
+                      );
+                      if (released == true && mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Row(
+                              children: [
+                                const Icon(Icons.check_circle_rounded,
+                                    color: Colors.white, size: 18),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Payment released! ${trip.earnings} credited.',
+                                  style: GoogleFonts.dmSans(
+                                      fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                            backgroundColor: Colors.green.shade700,
+                            behavior: SnackBarBehavior.floating,
+                            duration: const Duration(seconds: 4),
+                          ),
+                        );
+                        Navigator.of(context).pop();
+                      }
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 16),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.pin_rounded,
+                                color: Colors.white, size: 22),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Enter OTP & Confirm Delivery',
+                                  style: GoogleFonts.dmSans(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 15,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Get the 6-digit OTP from customer to release payment',
+                                  style: GoogleFonts.dmSans(
+                                    color: Colors.white.withValues(alpha: 0.75),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.arrow_forward_ios_rounded,
+                              color: Colors.white, size: 16),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 12),
 
             // 5. Blockchain Receipt
             Container(
@@ -930,12 +1102,12 @@ Widget _cargoBadge({
       ),
     );
   }
-
   Future<_RouteResult?> _loadRouteForTrip(String routeLabel) async {
     try {
       final normalized = routeLabel.replaceAll('->', '→').replaceAll('=>', '→');
       final parts = normalized.split('→');
       final startLabel = parts.isNotEmpty ? parts[0].trim() : '';
+
       final endLabel = parts.length > 1 ? parts[1].trim() : '';
 
       final start = startLabel.isNotEmpty
@@ -956,7 +1128,8 @@ Widget _cargoBadge({
 
       final result = _RouteResult(start: start, end: end, routePoints: routePoints);
       return result;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[TripDetailScreen] Route resolution failed: $e');
       return null;
     }
   }

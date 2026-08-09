@@ -566,4 +566,4 @@ Conversion: `display = stored / 100`
 Run these files in Supabase SQL Editor in order:
 
 1. **Fresh setup** → Run [`supabase_setup.sql`](supabase_setup.sql) (one file, everything included)
-2. **Reset existing** → Run [`supabase_drop_all.sql`](supabase_drop_all.sql) first, then `supabase_setup.sql`
+2. **Reset existing** → Run [`supabase_setup.sql`](supabase_setup.sql) with fresh setup

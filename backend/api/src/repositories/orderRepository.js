@@ -81,6 +81,10 @@ export class OrderRepository {
     return this.findOrderByDisplayId(id, columns);
   }
 
+  async findOrderByIdOrDisplayId(id, columns = '*') {
+    return this.findOrderByAnyId(id, columns);
+  }
+
   async findOrdersByCustomer(customerId, columns, statuses, orderColumn, ascending, pagination) {
     return this._retryableQuery(() => {
       let query = this.supabase
@@ -95,6 +99,18 @@ export class OrderRepository {
       }
       return query;
     }, 'findOrdersByCustomer');
+  }
+
+  async findActiveOrderForDriverByCustomer(customerId, driverId, columns) {
+    const activeStatuses = ['pending', 'active', 'truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving'];
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select(columns || 'id, order_display_id')
+      .eq('customer_id', customerId)
+      .eq('driver_id', driverId)
+      .in('status', activeStatuses)
+      .limit(1)
+      .maybeSingle(), 'findActiveOrderForDriverByCustomer');
   }
 
   async findOrdersWithCount(customerId, columns, pagination) {
@@ -133,10 +149,14 @@ export class OrderRepository {
         for (const f of filters) {
           if (f.op === 'eq') {
             query = query.eq(f.column, f.value);
+          } else if (f.op === 'neq') {
+            query = query.neq(f.column, f.value);
           } else if (f.op === 'not') {
             query = query.not(f.column, f.operator, f.value);
           } else if (f.op === 'in') {
             query = query.in(f.column, f.value);
+          } else if (f.op === 'neq') {
+            query = query.not(f.column, 'neq', f.value);
           }
         }
       }
@@ -357,8 +377,12 @@ export class OrderRepository {
   // ===================================================================
 
   async executeRpc(name, params, client) {
-    const supabaseClient = client || this.supabase;
-    return this._retryableQuery(() => supabaseClient.rpc(name, params), `executeRpc:${name}`);
+    if (!client) {
+      throw new Error(
+        `executeRpc("${name}") requires a Supabase client. Pass the per-request user client so auth.uid() resolves to the caller instead of falling back to the shared anon-key client.`
+      );
+    }
+    return this._retryableQuery(() => client.rpc(name, params), `executeRpc:${name}`);
   }
 
   // ===================================================================
@@ -470,8 +494,8 @@ export class OrderRepository {
   // DELIVERY OTPS
   // ===================================================================
 
-  async findVerifiedDeliveryOtp(orderId) {
-    return this._retryableQuery(() => this.supabase
+  async findVerifiedDeliveryOtp(orderId, client) {
+    return this._retryableQuery(() => (client ?? this.supabase)
       .from('delivery_otps')
       .select('id')
       .eq('order_id', orderId)
@@ -491,7 +515,7 @@ export class OrderRepository {
       .eq('driver_id', driverId)
       .eq('order_display_id', orderDisplayId)
       .eq('txn_type', 'credit')
-      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
       .limit(1), 'updateWalletTransaction');
   }
 
@@ -499,24 +523,77 @@ export class OrderRepository {
   // ESCROW
   // ===================================================================
 
-  async updateEscrowBooking(orderId, bookingId, escrowStatus) {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .update({
-        escrow_booking_id: bookingId,
-        escrow_status: escrowStatus,
-      })
-      .eq('id', orderId), 'updateEscrowBooking');
+  async updateEscrowBooking(orderId, bookingId, escrowStatus, extra = {}, filters) {
+    return this._retryableQuery(() => {
+      let query = this.supabase
+        .from('orders')
+        .update({
+          escrow_booking_id: bookingId,
+          escrow_status: escrowStatus,
+          ...extra,
+        })
+        .eq('id', orderId);
+      if (filters) {
+        for (const f of filters) {
+          if (f.op === 'eq') {
+            query = query.eq(f.column, f.value);
+          } else if (f.op === 'is') {
+            query = query.is(f.column, f.value);
+          } else if (f.op === 'or') {
+            query = query.or(f.value);
+          }
+        }
+      }
+      return query.select('id, escrow_status, pending_bid_acceptance').single();
+    }, 'updateEscrowBooking');
   }
 
   async revertEscrowStatus(orderId) {
+    // Guard the revert to 'pending' so it can never clobber a concurrent
+    // escrow transition (e.g. the stale-order worker moving a funded order
+    // into 'refund_pending'). Only states this method legitimately reverts
+    // are 'funding'/'funded'.
     return this._retryableQuery(() => this.supabase
       .from('orders')
       .update({
         escrow_status: 'pending',
         escrow_booking_id: null,
       })
-      .eq('id', orderId), 'revertEscrowStatus');
+      .eq('id', orderId)
+      .in('escrow_status', ['funding', 'funded']), 'revertEscrowStatus');
+  }
+
+  // ===================================================================
+  // STALE ORDER CANCELLATION
+  // ===================================================================
+
+  async findStalePendingOrders(cutoff, limit) {
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select('id')
+      .eq('status', 'pending')
+      .lt('created_at', cutoff)
+      .neq('escrow_status', 'funding')
+      .limit(limit), 'findStalePendingOrders');
+  }
+
+  async cancelStaleOrder(orderId, cancellationReason, staleSince, client) {
+    const supabaseClient = client || this.supabase;
+    return this._retryableQuery(() => supabaseClient
+      .rpc('cancel_stale_order_tx', {
+        p_order_id: orderId,
+        p_cancellation_reason: cancellationReason,
+        p_stale_since: staleSince,
+      }), 'cancelStaleOrder');
+  }
+
+  async findStaleFundingOrders(cutoff) {
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
+      .eq('escrow_status', 'funding')
+      .not('pending_bid_acceptance', 'is', null)
+      .or(`escrow_funding_started_at.lt.${cutoff},and(escrow_funding_started_at.is.null,updated_at.lt.${cutoff})`), 'findStaleFundingOrders');
   }
 
   // ===================================================================
@@ -536,7 +613,7 @@ export class OrderRepository {
   async findPendingEscrowRefunds() {
     return this._retryableQuery(() => this.supabase
       .from('orders')
-      .select('id, order_display_id, refund_tx_hash, escrow_status, escrow_refund_retry_count')
+      .select('id, order_display_id, refund_tx_hash, escrow_status, escrow_refund_attempts, updated_at, cancellation_fee, escrow_amount_wei, total_amount')
       .in('escrow_status', ['refund_pending', 'refund_failed'])
       .limit(50), 'findPendingEscrowRefunds');
   }
@@ -548,6 +625,33 @@ export class OrderRepository {
         p_order_id: orderId,
         p_instance_id: instanceId,
       }), 'claimRefundReconciliation');
+  }
+
+  // ===================================================================
+  // ESCROW RELEASE RECONCILIATION
+  // ===================================================================
+
+  /**
+   * Selects orders whose on-chain escrow release may have completed without
+   * the trip being finalized. Covers the exact failure window: a release that
+   * succeeded on-chain but whose `complete_trip_tx` never ran (or whose
+   * release evidence was never persisted), leaving the order at
+   * `status <> 'payment_released'`.
+   *
+   * Plain `funded` orders that are still awaiting delivery are included so the
+   * worker can consult the on-chain booking and heal the release if it did in
+   * fact land; orders still waiting are skipped without side effects. The
+   * attempt budget excludes orders already escalated to manual review.
+   */
+  async findPendingEscrowReleases(limit = 50) {
+    return this._retryableQuery(() => this.supabase
+      .from('orders')
+      .select('id, order_display_id, status, escrow_status, escrow_disabled, escrow_booking_id, escrow_release_attempts, escrow_release_last_attempt_at, escrow_release_error, release_tx_hash, escrow_released_at')
+      .in('escrow_status', ['release_failed', 'released', 'funded'])
+      .neq('status', 'payment_released')
+      .or('escrow_release_attempts.lt.10,escrow_release_attempts.is.null')
+      .order('escrow_release_attempts', { ascending: false })
+      .limit(limit), 'findPendingEscrowReleases');
   }
 }
 

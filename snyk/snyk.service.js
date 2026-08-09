@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../backend/api/src/middleware/logger.js';
 
 const execAsync = promisify(exec);
 
@@ -19,10 +19,24 @@ class SnykService {
         logger.info('✅ Snyk Service initialized');
     }
 
+    _sanitizePath(inputPath) {
+        if (!inputPath || typeof inputPath !== 'string') return '.';
+        const sanitized = inputPath.replace(/[^a-zA-Z0-9_\-\.\/]/g, '');
+        return sanitized || '.';
+    }
+
+    _sanitizeImage(image) {
+        if (!image || typeof image !== 'string') throw new Error('Invalid image name');
+        const sanitized = image.replace(/[^a-zA-Z0-9_\-\.\/\:@]/g, '');
+        if (!sanitized) throw new Error('Invalid image name');
+        return sanitized;
+    }
+
     async scanDependencies(projectPath = '.') {
         try {
+            const safePath = this._sanitizePath(projectPath);
             const command = `snyk test --severity-threshold=high --json`;
-            const { stdout, stderr } = await execAsync(command, { cwd: projectPath });
+            const { stdout, stderr } = await execAsync(command, { cwd: safePath });
             
             if (stderr && !stderr.includes('WARNING')) {
                 logger.error('Dependency scan error:', stderr);
@@ -49,7 +63,8 @@ class SnykService {
 
     async scanContainer(image) {
         try {
-            const command = `snyk container test ${image} --severity-threshold=high --json`;
+            const safeImage = this._sanitizeImage(image);
+            const command = `snyk container test ${safeImage} --severity-threshold=high --json`;
             const { stdout, stderr } = await execAsync(command);
             
             if (stderr && !stderr.includes('WARNING')) {
@@ -60,7 +75,7 @@ class SnykService {
             const results = JSON.parse(stdout);
             this.scanResults.push({
                 type: 'container',
-                image,
+                image: safeImage,
                 timestamp: new Date().toISOString(),
                 results
             });
@@ -76,9 +91,10 @@ class SnykService {
         }
     }
 
-    async scanIaC(path) {
+    async scanIaC(inputPath) {
         try {
-            const command = `snyk iac test ${path} --severity-threshold=high --json`;
+            const safePath = this._sanitizePath(inputPath);
+            const command = `snyk iac test ${safePath} --severity-threshold=high --json`;
             const { stdout, stderr } = await execAsync(command);
             
             if (stderr && !stderr.includes('WARNING')) {
@@ -89,7 +105,7 @@ class SnykService {
             const results = JSON.parse(stdout);
             this.scanResults.push({
                 type: 'iac',
-                path,
+                path: safePath,
                 timestamp: new Date().toISOString(),
                 results
             });
@@ -105,9 +121,10 @@ class SnykService {
         }
     }
 
-    async scanCode(path) {
+    async scanCode(inputPath) {
         try {
-            const command = `snyk code test ${path} --severity-threshold=high --json`;
+            const safePath = this._sanitizePath(inputPath);
+            const command = `snyk code test ${safePath} --severity-threshold=high --json`;
             const { stdout, stderr } = await execAsync(command);
             
             if (stderr && !stderr.includes('WARNING')) {

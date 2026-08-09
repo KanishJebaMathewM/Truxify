@@ -3,8 +3,17 @@ package security
 
 # Deny if image tag is latest
 deny[msg] {
-    input.review.object.spec.containers[_].image == "latest"
+    image := input.review.object.spec.containers[_].image
+    image_uses_latest_tag(image)
     msg = "Image tag 'latest' is not allowed. Use specific version tags."
+}
+
+image_uses_latest_tag(image) {
+    image == "latest"
+}
+
+image_uses_latest_tag(image) {
+    endswith(image, ":latest")
 }
 
 # Deny if privileged container

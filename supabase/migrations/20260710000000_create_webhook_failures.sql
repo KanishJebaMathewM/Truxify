@@ -20,6 +20,6 @@ ALTER TABLE webhook_failures ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow Service Role full access to webhook_failures" 
   ON webhook_failures 
-  FOR ALL 
+  FOR ALL TO service_role
   USING (true)
   WITH CHECK (true);

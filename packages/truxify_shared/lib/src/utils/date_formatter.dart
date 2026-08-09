@@ -81,5 +81,17 @@ class DateFormatter {
   static String formatLastUpdated(DateTime? lastUpdated) {
     return formatRelativeTime(lastUpdated);
   }
+
+  /// Parses a date string into a formatted date string.
+  /// Accepts ISO 8601 or similar date strings.
+  /// Returns the formatted date or the original string if parsing fails.
+  static String parseDate(String dateStr) {
+    try {
+      final date = DateTime.parse(dateStr);
+      return formatDate(date);
+    } catch (_) {
+      return dateStr;
+    }
+  }
 }
 

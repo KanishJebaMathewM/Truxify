@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
 import 'package:http/http.dart' as http;
 import '../core/config.dart';
@@ -39,9 +40,9 @@ class GeocodeService {
   static Future<LatLng?> resolvePlace(String query) async {
     final key = query.trim().toLowerCase();
     if (key.isEmpty) return null;
+    _evictExpired();
     final cached = _cache[key];
     if (cached != null) return cached.value;
-    _evictExpired();
 
     final uri = Uri.https(
       'nominatim.openstreetmap.org',
@@ -82,7 +83,7 @@ class GeocodeService {
       _reverseCache['$lat,$lon'] = _CacheEntry(displayName, DateTime.now());
       return ll;
     } catch (e) {
-      print('Error: $e');
+      debugPrint('[GeocodeService] Error: $e');
       return null;
     }
   }
@@ -90,9 +91,9 @@ class GeocodeService {
   /// Reverse geocode coordinates to an address string.
   static Future<String?> reverseGeocode(LatLng point) async {
     final key = '${point.latitude},${point.longitude}';
+    _evictExpired();
     final cached = _reverseCache[key];
     if (cached != null) return cached.value;
-    _evictExpired();
 
     final uri = Uri.https(
       'nominatim.openstreetmap.org',
@@ -120,7 +121,7 @@ class GeocodeService {
       }
       return displayName;
     } catch (e) {
-      print('Error: $e');
+      debugPrint('[GeocodeService] Error: $e');
       return null;
     }
   }
@@ -148,7 +149,7 @@ class GeocodeService {
           .where((s) => s.isNotEmpty)
           .toList();
     } catch (e) {
-      print('Error: $e');
+      debugPrint('[GeocodeService] Error: $e');
       return [];
     }
   }
@@ -181,32 +182,37 @@ class GeocodeService {
       'User-Agent': 'Truxify-Driver-App',
     };
 
-    final http.Response resp;
-    if (client != null) {
-      resp = await client.get(uri, headers: headers).timeout(AppConfig.geocodeTimeout);
-    } else {
-      resp = await http.get(uri, headers: headers).timeout(AppConfig.geocodeTimeout);
+    try {
+      final http.Response resp;
+      if (client != null) {
+        resp = await client.get(uri, headers: headers).timeout(AppConfig.geocodeTimeout);
+      } else {
+        resp = await http.get(uri, headers: headers).timeout(AppConfig.geocodeTimeout);
+      }
+      if (resp.statusCode != 200) return [];
+
+      final decoded = jsonDecode(resp.body) as List<dynamic>?;
+      if (decoded == null) return [];
+
+      return decoded
+          .map((item) {
+            if (item is! Map<String, dynamic>) return null;
+            final lat = double.tryParse('${item['lat']}');
+            final lon = double.tryParse('${item['lon']}');
+            final displayName =
+                (item['display_name'] as String?)?.trim() ?? '';
+            if (lat == null || lon == null || displayName.isEmpty) return null;
+            return SearchResult(
+              address: displayName,
+              point: LatLng(lat, lon),
+            );
+          })
+          .whereType<SearchResult>()
+          .toList();
+    } catch (e) {
+      debugPrint('[GeocodeService] searchPlaces failed: $e');
+      return [];
     }
-    if (resp.statusCode != 200) return [];
-
-    final decoded = jsonDecode(resp.body) as List<dynamic>?;
-    if (decoded == null) return [];
-
-    return decoded
-        .map((item) {
-          if (item is! Map<String, dynamic>) return null;
-          final lat = double.tryParse('${item['lat']}');
-          final lon = double.tryParse('${item['lon']}');
-          final displayName =
-              (item['display_name'] as String?)?.trim() ?? '';
-          if (lat == null || lon == null || displayName.isEmpty) return null;
-          return SearchResult(
-            address: displayName,
-            point: LatLng(lat, lon),
-          );
-        })
-        .whereType<SearchResult>()
-        .toList();
   }
 
   static void clearCache() {

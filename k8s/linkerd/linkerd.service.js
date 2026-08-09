@@ -1,5 +1,10 @@
 import axios from 'axios';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../../backend/api/src/middleware/logger.js';
+
+function sanitizePromQL(input) {
+    if (typeof input !== 'string') return '';
+    return input.replace(/[^a-zA-Z0-9_\-.]/g, '');
+}
 
 class LinkerdService {
     constructor() {
@@ -22,15 +27,17 @@ class LinkerdService {
     }
 
     async getSuccessRate(namespace = 'truxify', deployment = 'api-deployment') {
+        const ns = sanitizePromQL(namespace);
+        const dep = sanitizePromQL(deployment);
         const query = `
             sum(rate(response_total{
-                namespace="${namespace}",
-                deployment="${deployment}",
+                namespace="${ns}",
+                deployment="${dep}",
                 classification="success"
             }[5m])) / 
             sum(rate(response_total{
                 namespace="${namespace}",
-                deployment="${deployment}"
+                deployment="${dep}"
             }[5m]))
         `;
         const result = await this.getMetrics(query);
@@ -38,11 +45,13 @@ class LinkerdService {
     }
 
     async getLatency(namespace = 'truxify', deployment = 'api-deployment') {
+        const ns = sanitizePromQL(namespace);
+        const dep = sanitizePromQL(deployment);
         const query = `
             histogram_quantile(0.95, 
                 sum(rate(response_latency_ms_bucket{
-                    namespace="${namespace}",
-                    deployment="${deployment}"
+                    namespace="${ns}",
+                    deployment="${dep}"
                 }[5m])) by (le)
             )
         `;
@@ -51,10 +60,12 @@ class LinkerdService {
     }
 
     async getRequestRate(namespace = 'truxify', deployment = 'api-deployment') {
+        const ns = sanitizePromQL(namespace);
+        const dep = sanitizePromQL(deployment);
         const query = `
             sum(rate(response_total{
-                namespace="${namespace}",
-                deployment="${deployment}"
+                namespace="${ns}",
+                deployment="${dep}"
             }[5m]))
         `;
         const result = await this.getMetrics(query);
@@ -62,9 +73,10 @@ class LinkerdService {
     }
 
     async getMeshedPods(namespace = 'truxify') {
+        const ns = sanitizePromQL(namespace);
         const query = `
             count(proxy_requests_total{
-                namespace="${namespace}"
+                namespace="${ns}"
             })
         `;
         const result = await this.getMetrics(query);
@@ -94,10 +106,12 @@ class LinkerdService {
     }
 
     async getTopRoutes(namespace = 'truxify', limit = 10) {
+        const ns = sanitizePromQL(namespace);
+        const l = parseInt(limit, 10);
         const query = `
-            topk(${limit}, 
+            topk(${Number.isNaN(l) ? 10 : l}, 
                 sum(rate(response_total{
-                    namespace="${namespace}"
+                    namespace="${ns}"
                 }[5m])) by (dst_service, dst_deployment)
             )
         `;
@@ -110,15 +124,17 @@ class LinkerdService {
     }
 
     async getErrorRate(namespace = 'truxify', deployment = 'api-deployment') {
+        const ns = sanitizePromQL(namespace);
+        const dep = sanitizePromQL(deployment);
         const query = `
             sum(rate(response_total{
-                namespace="${namespace}",
-                deployment="${deployment}",
+                namespace="${ns}",
+                deployment="${dep}",
                 classification="failure"
             }[5m])) / 
             sum(rate(response_total{
-                namespace="${namespace}",
-                deployment="${deployment}"
+                namespace="${ns}",
+                deployment="${dep}"
             }[5m]))
         `;
         const result = await this.getMetrics(query);
@@ -126,9 +142,10 @@ class LinkerdService {
     }
 
     async getMeshedStatus(namespace = 'truxify') {
+        const ns = sanitizePromQL(namespace);
         const query = `
             count(proxy_requests_total{
-                namespace="${namespace}"
+                namespace="${ns}"
             }) by (pod)
         `;
         const result = await this.getMetrics(query);

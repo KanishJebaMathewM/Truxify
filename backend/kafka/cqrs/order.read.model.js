@@ -167,7 +167,10 @@ class OrderReadModel {
   }
 
   async getOrderStats() {
-    const statuses = ['pending', 'accepted', 'in_transit', 'delivered', 'cancelled', 'payment_released'];
+    // These are the status values actually produced by the read-model builder
+    // (event.repository.js getSnapshot). Querying any other values would
+    // always report 0.
+    const statuses = ['created', 'assigned', 'paid', 'in_transit', 'completed', 'settled'];
     const stats = {};
 
     for (const status of statuses) {

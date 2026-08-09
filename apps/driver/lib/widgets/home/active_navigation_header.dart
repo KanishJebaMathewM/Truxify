@@ -29,7 +29,7 @@ class ActiveNavigationHeader extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Row(
         children: [
-          const LivePulseDot(color: TruxifyColors.success, size: 10),
+          const PulsingLocationDot(size: 10),
           const SizedBox(width: 10),
           Expanded(
             child: Column(

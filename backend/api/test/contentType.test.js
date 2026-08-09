@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 
-import { requireJsonContent } from '../../src/middleware/contentType.js';
+import { requireJsonContent } from '../src/middleware/contentType.js';
 
 function createApp() {
   const app = express();

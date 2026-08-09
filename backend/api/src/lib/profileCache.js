@@ -1,8 +1,38 @@
-import * as db from '../config/db.js';
-import logger from '../middleware/logger.js';
-import { firebaseProfileKey, supabaseProfileKey } from '../cache/profileCacheKeys.js';
+import * as db from "../config/db.js";
+import logger from "../middleware/logger.js";
+import {
+  firebaseProfileKey,
+  supabaseProfileKey,
+  customerStatsKey,
+  driverDetailsKey,
+} from "../cache/profileCacheKeys.js";
 
-export const TTL_SECONDS = 900; // 15 minutes
+let _publishFn = null;
+let _pubSubChecked = false;
+
+async function _publishProfileInvalidation(eventOpts) {
+  if (!_pubSubChecked) {
+    _pubSubChecked = true;
+    try {
+      const { publishInvalidation } =
+        await import("../cache/CachePublisher.js");
+      _publishFn = publishInvalidation;
+    } catch (err) {
+      logger.warn({ err }, 'Failed to initialize pub/sub publisher — profile invalidation events will not be broadcast.');
+      _publishFn = null;
+    }
+  }
+  if (_publishFn) {
+    _publishFn("profile", eventOpts).catch((err) => {
+      logger.warn(
+        { err, eventOpts },
+        "Failed to publish profile invalidation event",
+      );
+    });
+  }
+}
+
+export const TTL_SECONDS = parseInt(process.env.REDIS_CACHE_TTL || "120", 10); // 2 minutes default so role/status changes (suspension, demotion) propagate quickly
 export const TOMBSTONE_TTL_SECONDS = 30; // 30 seconds
 
 let cacheHits = 0;
@@ -10,13 +40,17 @@ let cacheMisses = 0;
 let cacheSets = 0;
 
 export function getCacheStats() {
-  const total = cacheHits + cacheMisses;
+  // Snapshot all counters in one read to avoid inconsistent intermediate sums
+  const hits = cacheHits;
+  const misses = cacheMisses;
+  const sets = cacheSets;
+  const total = hits + misses;
   return {
-    hits: cacheHits,
-    misses: cacheMisses,
-    sets: cacheSets,
+    hits,
+    misses,
+    sets,
     total,
-    hitRate: total > 0 ? (cacheHits / total * 100).toFixed(1) + '%' : '0%',
+    hitRate: total > 0 ? ((hits / total) * 100).toFixed(1) + '%' : '0%',
   };
 }
 
@@ -38,7 +72,10 @@ function logCacheError(operation, error) {
   if (now - lastLog >= LOG_THROTTLE_INTERVAL_MS) {
     LAST_LOG_TIMES[operation] = now;
     const errorDetails = error?.stack ?? error?.message ?? String(error);
-    logger.error({ operation, error: errorDetails }, 'Redis cache error (throttled)');
+    logger.error(
+      { operation, error: errorDetails },
+      "Redis cache error (throttled)",
+    );
   }
 }
 
@@ -47,42 +84,70 @@ function logCacheError(operation, error) {
  * Under Vitest, accessing a property on a mocked namespace module that is not explicitly
  * returned in the mock factory will throw an error via the mock Proxy. We wrap the access
  * in a try-catch to allow a graceful fallback to null.
- * 
+ *
  * @returns {object|null} The Redis client if configured, or null.
  */
 function getRedisClient() {
   try {
     return db.redisClient ?? null;
-  } catch {
+  } catch (err) {
+    logger.warn({ err }, 'Failed to get Redis client in getRedisClient — falling back to null.');
     return null;
   }
 }
 
 /**
  * Validates the shape of a cached profile.
- * 
+ *
  * @param {string} firebaseUid - The expected Firebase UID.
  * @param {object|null} cachedProfile - The cached profile to validate.
+ *   Must have: isActive (boolean), uid (string matching firebaseUid), id (string),
+ *   role (string). Optional: fullName (string|null), phone (string|null).
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedProfile(firebaseUid, cachedProfile) {
-  if (!cachedProfile || typeof cachedProfile !== 'object' || Array.isArray(cachedProfile)) {
+  if (typeof firebaseUid !== "string" || !firebaseUid.trim()) {
     return false;
   }
-  if (typeof cachedProfile.isActive !== 'boolean') {
+  if (
+    !cachedProfile ||
+    typeof cachedProfile !== "object" ||
+    Array.isArray(cachedProfile)
+  ) {
     return false;
   }
+  if (typeof cachedProfile.isActive !== "boolean") {
+    return false;
+  }
+  // Tombstone (inactive) is valid
   if (cachedProfile.isActive === false) {
-    return true; // Valid tombstone
+    return true;
   }
-  return (
-    cachedProfile.isActive === true &&
-    cachedProfile.uid === firebaseUid &&
-    typeof cachedProfile.id === 'string' &&
-    typeof cachedProfile.role === 'string' &&
-    (cachedProfile.fullName === undefined || cachedProfile.fullName === null || typeof cachedProfile.fullName === 'string') &&
-    (cachedProfile.phone === undefined || cachedProfile.phone === null || typeof cachedProfile.phone === 'string')
-  );
+  // Active profile must have uid matching the expected Firebase UID
+  if (cachedProfile.uid !== firebaseUid) {
+    return false;
+  }
+  if (typeof cachedProfile.id !== "string" || !cachedProfile.id) {
+    return false;
+  }
+  if (typeof cachedProfile.role !== "string" || !cachedProfile.role) {
+    return false;
+  }
+  if (
+    cachedProfile.fullName !== undefined &&
+    cachedProfile.fullName !== null &&
+    typeof cachedProfile.fullName !== "string"
+  ) {
+    return false;
+  }
+  if (
+    cachedProfile.phone !== undefined &&
+    cachedProfile.phone !== null &&
+    typeof cachedProfile.phone !== "string"
+  ) {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -96,10 +161,14 @@ export function isValidCachedProfile(firebaseUid, cachedProfile) {
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedSupabaseProfile(userId, cachedProfile) {
-  if (!cachedProfile || typeof cachedProfile !== 'object' || Array.isArray(cachedProfile)) {
+  if (
+    !cachedProfile ||
+    typeof cachedProfile !== "object" ||
+    Array.isArray(cachedProfile)
+  ) {
     return false;
   }
-  if (typeof cachedProfile.isActive !== 'boolean') {
+  if (typeof cachedProfile.isActive !== "boolean") {
     return false;
   }
   if (cachedProfile.isActive === false) {
@@ -108,9 +177,13 @@ export function isValidCachedSupabaseProfile(userId, cachedProfile) {
   return (
     cachedProfile.isActive === true &&
     cachedProfile.id === userId &&
-    typeof cachedProfile.role === 'string' &&
-    (cachedProfile.fullName === undefined || cachedProfile.fullName === null || typeof cachedProfile.fullName === 'string') &&
-    (cachedProfile.phone === undefined || cachedProfile.phone === null || typeof cachedProfile.phone === 'string')
+    typeof cachedProfile.role === "string" &&
+    (cachedProfile.fullName === undefined ||
+      cachedProfile.fullName === null ||
+      typeof cachedProfile.fullName === "string") &&
+    (cachedProfile.phone === undefined ||
+      cachedProfile.phone === null ||
+      typeof cachedProfile.phone === "string")
   );
 }
 
@@ -136,7 +209,7 @@ export async function getCachedProfile(firebaseUid) {
     cacheMisses++;
     return null;
   } catch (err) {
-    logCacheError('getCachedProfile', err);
+    logCacheError("getCachedProfile", err);
     // On read or parsing failure, attempt a best-effort delete of the corrupted key
     try {
       await redisClient.del(firebaseProfileKey(firebaseUid));
@@ -150,25 +223,34 @@ export async function getCachedProfile(firebaseUid) {
 /**
  * Stores a user profile in the Redis cache.
  * Gracefully handles Redis errors.
- * 
+ *
  * @param {string} firebaseUid - The Firebase UID of the user.
  * @param {object} profile - The user profile object to cache.
  * @returns {Promise<void>}
  */
-export async function setCachedProfile(firebaseUid, profile, ttlSeconds = TTL_SECONDS) {
+export async function setCachedProfile(
+  firebaseUid,
+  profile,
+  ttlSeconds = TTL_SECONDS,
+) {
   const redisClient = getRedisClient();
   if (!redisClient || !firebaseUid || !profile) return;
   try {
-    await redisClient.set(firebaseProfileKey(firebaseUid), JSON.stringify(profile), 'EX', ttlSeconds);
+    await redisClient.set(
+      firebaseProfileKey(firebaseUid),
+      JSON.stringify(profile),
+      "EX",
+      ttlSeconds,
+    );
   } catch (err) {
-    logCacheError('setCachedProfile', err);
+    logCacheError("setCachedProfile", err);
   }
 }
 
 /**
  * Invalidates (deletes) a cached user profile from Redis.
  * Gracefully handles Redis errors.
- * 
+ *
  * @param {string} firebaseUid - The Firebase UID of the user.
  * @returns {Promise<void>}
  */
@@ -177,8 +259,13 @@ export async function invalidateCachedProfile(firebaseUid) {
   if (!redisClient || !firebaseUid) return;
   try {
     await redisClient.del(firebaseProfileKey(firebaseUid));
+    _publishProfileInvalidation({
+      type: "INVALIDATE_KEY",
+      key: firebaseProfileKey(firebaseUid),
+      entityId: firebaseUid,
+    });
   } catch (err) {
-    logCacheError('invalidateCachedProfile', err);
+    logCacheError("invalidateCachedProfile", err);
   }
 }
 
@@ -196,7 +283,7 @@ export async function getCachedSupabaseProfile(userId) {
     const raw = await redisClient.get(supabaseProfileKey(userId));
     return raw ? JSON.parse(raw) : null;
   } catch (err) {
-    logCacheError('getCachedSupabaseProfile', err);
+    logCacheError("getCachedSupabaseProfile", err);
     try {
       await redisClient.del(supabaseProfileKey(userId));
     } catch (delErr) {
@@ -217,14 +304,23 @@ export async function getCachedSupabaseProfile(userId) {
  *   its token.
  * @returns {Promise<void>}
  */
-export async function setCachedSupabaseProfile(userId, profile, ttlSeconds = TTL_SECONDS) {
+export async function setCachedSupabaseProfile(
+  userId,
+  profile,
+  ttlSeconds = TTL_SECONDS,
+) {
   const redisClient = getRedisClient();
   if (!redisClient || !userId || !profile) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
   try {
-    await redisClient.set(supabaseProfileKey(userId), JSON.stringify(profile), 'EX', ttlSeconds);
+    await redisClient.set(
+      supabaseProfileKey(userId),
+      JSON.stringify(profile),
+      "EX",
+      ttlSeconds,
+    );
   } catch (err) {
-    logCacheError('setCachedSupabaseProfile', err);
+    logCacheError("setCachedSupabaseProfile", err);
   }
 }
 
@@ -240,7 +336,139 @@ export async function invalidateCachedSupabaseProfile(userId) {
   if (!redisClient || !userId) return;
   try {
     await redisClient.del(supabaseProfileKey(userId));
+    _publishProfileInvalidation({
+      type: "INVALIDATE_KEY",
+      key: supabaseProfileKey(userId),
+      entityId: userId,
+    });
   } catch (err) {
-    logCacheError('invalidateCachedSupabaseProfile', err);
+    logCacheError("invalidateCachedSupabaseProfile", err);
+  }
+}
+
+// ─── Profile Service Cache (getProfile / getCustomerStats / getDriverDetails) ──
+
+/**
+ * Retrieves cached customer stats from Redis.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {Promise<object|null>}
+ */
+export async function getCachedCustomerStats(userId) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId) return null;
+  try {
+    const raw = await redisClient.get(customerStatsKey(userId));
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    logCacheError("getCachedCustomerStats", err);
+    try {
+      await redisClient.del(customerStatsKey(userId));
+    } catch (_) {}
+    return null;
+  }
+}
+
+/**
+ * Stores customer stats in the Redis cache.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @param {object} stats - The customer stats to cache.
+ * @param {number} [ttlSeconds] - TTL in seconds.
+ * @returns {Promise<void>}
+ */
+export async function setCachedCustomerStats(
+  userId,
+  stats,
+  ttlSeconds = TTL_SECONDS,
+) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId || !stats) return;
+  if (ttlSeconds < 1) ttlSeconds = 1;
+  try {
+    await redisClient.set(
+      customerStatsKey(userId),
+      JSON.stringify(stats),
+      "EX",
+      ttlSeconds,
+    );
+  } catch (err) {
+    logCacheError("setCachedCustomerStats", err);
+  }
+}
+
+/**
+ * Retrieves cached driver details from Redis.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {Promise<object|null>}
+ */
+export async function getCachedDriverDetails(userId) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId) return null;
+  try {
+    const raw = await redisClient.get(driverDetailsKey(userId));
+    return raw ? JSON.parse(raw) : null;
+  } catch (err) {
+    logCacheError("getCachedDriverDetails", err);
+    try {
+      await redisClient.del(driverDetailsKey(userId));
+    } catch (_) {}
+    return null;
+  }
+}
+
+/**
+ * Stores driver details in the Redis cache.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @param {object} details - The driver details to cache.
+ * @param {number} [ttlSeconds] - TTL in seconds.
+ * @returns {Promise<void>}
+ */
+export async function setCachedDriverDetails(
+  userId,
+  details,
+  ttlSeconds = TTL_SECONDS,
+) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId || !details) return;
+  if (ttlSeconds < 1) ttlSeconds = 1;
+  try {
+    await redisClient.set(
+      driverDetailsKey(userId),
+      JSON.stringify(details),
+      "EX",
+      ttlSeconds,
+    );
+  } catch (err) {
+    logCacheError("setCachedDriverDetails", err);
+  }
+}
+
+/**
+ * Invalidates ALL cached Supabase profile data for a user:
+ * profile, customer stats, and driver details.
+ * Use this on any profile mutation to ensure no stale data is served.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {Promise<void>}
+ */
+export async function invalidateCachedSupabaseProfileAll(userId) {
+  const redisClient = getRedisClient();
+  if (!redisClient || !userId) return;
+  try {
+    await Promise.all([
+      redisClient.del(supabaseProfileKey(userId)),
+      redisClient.del(customerStatsKey(userId)),
+      redisClient.del(driverDetailsKey(userId)),
+    ]);
+    _publishProfileInvalidation({
+      type: "INVALIDATE_PATTERN",
+      pattern: `user:profile:sb:${userId}*`,
+      entityId: userId,
+    });
+  } catch (err) {
+    logCacheError("invalidateCachedSupabaseProfileAll", err);
   }
 }

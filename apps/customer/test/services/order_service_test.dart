@@ -342,6 +342,9 @@ void main() {
       expect(draft.minCapacity, isNull);
       expect(draft.maxCapacity, isNull);
       expect(draft.materialType, isNull);
+    });
+  });
+
   group('submitRating', () {
     test('sends correct payload to POST /api/orders/:id/ratings', () async {
       when(() => apiClient.post(

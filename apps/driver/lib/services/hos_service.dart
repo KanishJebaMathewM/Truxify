@@ -3,11 +3,10 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'api_client.dart';
+
 class HosService {
-  static const String _defaultApiBaseUrl = String.fromEnvironment(
-    'TRUXIFY_API_BASE_URL',
-    defaultValue: 'http://localhost:5000',
-  );
+  static String get _defaultApiBaseUrl => ApiClient.defaultBaseUrl;
 
   /// Statuses: 'off_duty', 'on_duty', 'driving', 'resting'
   static Future<bool> updateStatus(String status) async {
@@ -47,7 +46,7 @@ class HosService {
       final response = await Supabase.instance.client
           .from('driver_details')
           .select('hos_status, accumulated_driving_minutes, accumulated_on_duty_minutes, shift_start_time')
-          .eq('driver_id', driverId)
+          .eq('user_id', driverId)
           .maybeSingle();
       
       return response;

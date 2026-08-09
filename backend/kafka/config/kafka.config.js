@@ -1,4 +1,5 @@
 import { Kafka } from 'kafkajs';
+import { context, propagation } from '@opentelemetry/api';
 import logger from '../../api/src/middleware/logger.js';
 
 const kafka = new Kafka({
@@ -43,6 +44,10 @@ export const CONSUMER_GROUPS = {
 };
 
 class KafkaConfig {
+  get kafka() {
+    return kafka;
+  }
+
   constructor() {
     this.producer = null;
     this.consumers = new Map();
@@ -56,6 +61,8 @@ class KafkaConfig {
       this.producer = kafka.producer({
         allowAutoTopicCreation: true,
         transactionTimeout: 30000,
+        enableIdempotence: true,
+        maxInFlightRequests: 5,
       });
       await this.producer.connect();
       this.isConnected = true;
@@ -127,6 +134,10 @@ class KafkaConfig {
   async publishEvent(topic, event, key = null) {
     try {
       const producer = await this.getProducer();
+
+      const traceHeaders = {};
+      propagation.inject(context.active(), traceHeaders);
+
       const message = {
         topic,
         messages: [
@@ -137,6 +148,7 @@ class KafkaConfig {
               timestamp: event.timestamp || new Date().toISOString(),
               version: '1.0',
             }),
+            headers: traceHeaders,
             timestamp: Date.now(),
           },
         ],
@@ -154,6 +166,10 @@ class KafkaConfig {
   async publishBatch(events) {
     try {
       const producer = await this.getProducer();
+
+      const traceHeaders = {};
+      propagation.inject(context.active(), traceHeaders);
+
       const messages = events.map(({ topic, event, key }) => ({
         topic,
         messages: [
@@ -164,6 +180,7 @@ class KafkaConfig {
               timestamp: event.timestamp || new Date().toISOString(),
               version: '1.0',
             }),
+            headers: traceHeaders,
             timestamp: Date.now(),
           },
         ],
@@ -185,8 +202,18 @@ class KafkaConfig {
       eachMessage: async ({ topic, partition, message }) => {
         try {
           const value = JSON.parse(message.value.toString());
+          const headers = message.headers || {};
+          const normalizedHeaders = {};
+          for (const [k, v] of Object.entries(headers)) {
+            normalizedHeaders[k] = Buffer.isBuffer(v) ? v.toString('utf-8') : String(v ?? '');
+          }
+          const parentContext = propagation.extract(context.active(), normalizedHeaders);
+
           logger.debug(`📥 Message received: ${topic}`, { key: message.key.toString() });
-          await messageHandler(topic, value, message);
+
+          await context.with(parentContext, async () => {
+            await messageHandler(topic, value, message);
+          });
         } catch (error) {
           logger.error(`❌ Error processing message from ${topic}:`, error);
           if (errorHandler) {
@@ -195,7 +222,6 @@ class KafkaConfig {
         }
       },
       eachBatch: async ({ batch }) => {
-        // Handle batch processing if needed
         logger.debug(`📦 Batch received: ${batch.topic}, ${batch.messages.length} messages`);
       },
     });
@@ -243,20 +269,29 @@ class KafkaConfig {
         logger.warn(`Topic ${topic} not found in consumer group offsets`);
         return;
       }
-      
+
+      const endOffsets = await admin.fetchTopicOffsets(topic);
+      const endByPartition = new Map(endOffsets.map(o => [o.partition, o.high]));
+
+      const partitions = [];
       for (const entry of topicData.partitions) {
         if (Number.isNaN(entry.partition) || entry.partition < 0) {
           logger.warn(`Skipping invalid partition: ${entry.partition}`);
           continue;
         }
-        await admin.setConsumerGroupOffset(
-          groupId,
-          { topic, partition: entry.partition },
-          'latest'
-        );
+        const offset = endByPartition.get(entry.partition);
+        if (offset === undefined) {
+          logger.warn(`No end offset found for partition ${entry.partition}, skipping`);
+          continue;
+        }
+        partitions.push({ partition: entry.partition, offset: String(offset) });
       }
-      
-      logger.info(`✅ Consumer offsets reset for ${groupId}`);
+
+      if (partitions.length > 0) {
+        await admin.setOffsets({ groupId, topic, partitions });
+      }
+
+      logger.info(`Consumer offsets reset for ${groupId}`);
     } finally {
       await admin.disconnect();
     }

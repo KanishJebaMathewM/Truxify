@@ -166,11 +166,39 @@ describe('GET /api/health/ready', () => {
 
   beforeEach(() => {
     app = buildApp();
+    mockSupabase = {
+      from: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({ error: null })
+    };
+    mockMongoDb = {
+      admin: () => ({
+        ping: vi.fn().mockResolvedValue(true)
+      })
+    };
+    mockRedisClient = {
+      ping: vi.fn().mockResolvedValue('PONG')
+    };
+    mockFirebaseAdmin = {};
+    process.env.POLYGON_RPC_URL = 'http://localhost:8545';
   });
 
   it('returns ready status with services information', async () => {
     const res = await request(app).get('/api/health/ready');
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('ready');
+  });
+});
+
+describe('GET /api/health/sentry-debug', () => {
+  let app;
+
+  beforeEach(() => {
+    app = buildApp();
+  });
+
+  it('triggers a Sentry debug error and returns 500', async () => {
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(500);
   });
 });

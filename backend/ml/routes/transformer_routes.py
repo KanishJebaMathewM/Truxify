@@ -55,7 +55,9 @@ async def forecast_demand(request: ForecastRequest):
         }
     except Exception as e:
         logger.error(f"Demand forecast failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/traffic/forecast")
 async def forecast_traffic(request: ForecastRequest):
@@ -78,7 +80,9 @@ async def forecast_traffic(request: ForecastRequest):
         }
     except Exception as e:
         logger.error(f"Traffic forecast failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/price/forecast")
 async def forecast_price(request: ForecastRequest):
@@ -101,7 +105,9 @@ async def forecast_price(request: ForecastRequest):
         }
     except Exception as e:
         logger.error(f"Price forecast failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/demand/train")
 async def train_demand(request: TrainRequest):
@@ -128,7 +134,9 @@ async def train_demand(request: TrainRequest):
         }
     except Exception as e:
         logger.error(f"Training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/traffic/train")
 async def train_traffic(request: TrainRequest):
@@ -154,7 +162,9 @@ async def train_traffic(request: TrainRequest):
         }
     except Exception as e:
         logger.error(f"Training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/price/train")
 async def train_price(request: TrainRequest):
@@ -180,7 +190,9 @@ async def train_price(request: TrainRequest):
         }
     except Exception as e:
         logger.error(f"Training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
 async def get_model_info():
@@ -213,4 +225,6 @@ async def get_model_info():
         }
     except Exception as e:
         logger.error(f"Model info failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

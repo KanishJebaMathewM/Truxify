@@ -1,7 +1,7 @@
 import express from 'express';
 import LayoutNode from './LayoutNode.js';
 import LayoutEngine from './LayoutEngine.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 

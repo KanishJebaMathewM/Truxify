@@ -1,6 +1,6 @@
 import axios from 'axios';
-import logger from '../../api/src/middleware/logger.js';
-import { supabase } from '../../api/src/config/db.js';
+import logger from '../../backend/api/src/middleware/logger.js';
+import { supabase } from '../../backend/api/src/config/db.js';
 import Redis from 'ioredis';
 
 class RegionService {
@@ -57,7 +57,7 @@ class RegionService {
     // ============ Health Checks ============
 
     async startHealthChecks() {
-        setInterval(async () => {
+        clearInterval(window.__interval); window.__interval = setInterval(async () => {
             await this.checkAllRegions();
         }, 10000); // Every 10 seconds
     }
@@ -249,7 +249,7 @@ class RegionService {
         
         for (const region of this.regions) {
             const count = await this.redis.get(`routing:${region.name}:count`);
-            routingStats[region.name] = parseInt(count) || 0;
+            routingStats[region.name] = parseInt(count, 10) || 0;
         }
         
         const health = await this.redis.get('regions:health');
@@ -273,7 +273,7 @@ class RegionService {
             
             const lastSync = await this.redis.get(`replication:${region.name}:last_sync`);
             if (lastSync) {
-                lag[region.name] = Date.now() - parseInt(lastSync);
+                lag[region.name] = Date.now() - parseInt(lastSync, 10);
             }
         }
         return lag;

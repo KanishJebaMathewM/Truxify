@@ -59,6 +59,8 @@ class OrderService {
     bool requiresRefrigeration = false,
     double? targetTemperatureMin,
     double? targetTemperatureMax,
+    String? driverId,
+    String? truckId,
   }) async {
     try {
       final body = await _apiClient.post(
@@ -79,6 +81,8 @@ class OrderService {
           if (requiresRefrigeration) 'requires_refrigeration': true,
           if (targetTemperatureMin != null) 'target_temperature_min': targetTemperatureMin,
           if (targetTemperatureMax != null) 'target_temperature_max': targetTemperatureMax,
+          if (driverId != null && driverId.isNotEmpty) 'driver_id': driverId,
+          if (truckId != null && truckId.isNotEmpty) 'truck_id': truckId,
         },
       ) as Map<String, dynamic>?;
 
@@ -194,6 +198,21 @@ class OrderService {
     }
   }
 
+
+
+  Future<List<Map<String, dynamic>>> fetchHistoryOrders() async {
+    try {
+      final body = await _apiClient.get(
+        '/api/orders/my/history',
+      );
+      return _historyFromResponse(body);
+    } on ApiException catch (e) {
+      throw StateError(e.message);
+    } catch (e) {
+      throw StateError('Failed to fetch history orders: $e');
+    }
+  }
+
   Future<List<Map<String, dynamic>>> searchTrucks({
     required double pickupLat,
     required double pickupLng,
@@ -231,7 +250,9 @@ class OrderService {
         throw StateError('Unexpected truck search response type');
       }
       final listBody = body;
-      return listBody.cast<Map<String, dynamic>>();
+      return listBody
+          .map((e) => e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{})
+          .toList(growable: false);
     } on ApiException catch (e) {
       throw StateError(e.message);
     } catch (e) {
@@ -352,6 +373,27 @@ class OrderService {
     } catch (e) {
       throw StateError('Failed to submit rating: $e');
     }
+  }
+
+  Future<Map<String, dynamic>> fetchMlEta({
+    required String tripId,
+    required double lat,
+    required double lng,
+  }) async {
+    try {
+      final body = await _apiClient.get(
+        '/api/ml/eta?tripId=${_encodePathSegment(tripId)}&lat=$lat&lng=$lng',
+      );
+      return body is Map<String, dynamic> ? body : <String, dynamic>{};
+    } on ApiException catch (e) {
+      throw StateError(e.message);
+    } catch (e) {
+      throw StateError('Failed to fetch ML ETA: $e');
+    }
+  }
+
+  void dispose() {
+    _apiClient.close();
   }
 
   Future<Map<String, dynamic>> fetchOrderRoute(String orderDisplayId) async {

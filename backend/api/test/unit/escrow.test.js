@@ -11,6 +11,7 @@
  * Run with:  npm test -- test/unit/escrow.test.js
  */
 import { describe, it, expect, vi } from 'vitest'
+import { ethers } from 'ethers'
 import {
   getEscrowBookingId,
   buildDepositTx,
@@ -18,8 +19,13 @@ import {
   submitEscrowRefund,
   confirmEscrowRefund,
   ESCROW_MATIC_PER_PAISA,
+  paisaToMaticWei,
   validateEscrowSetup,
-  isEscrowEnabled
+  isEscrowEnabled,
+  submitEscrowRaiseDispute,
+  submitEscrowResolveDispute,
+  submitEscrowResolveDisputeTimeout,
+  markEscrowBookingStarted,
 } from '../../src/services/escrow.js'
 
 describe('escrow service — getEscrowBookingId', () => {
@@ -49,17 +55,17 @@ describe('escrow service — getEscrowBookingId', () => {
   })
 
   it('ESCROW_MATIC_PER_PAISA parses the configured env var correctly', () => {
-    // process.env.ESCROW_MATIC_PER_PAISA is set to '0.01' in setup.js
-    expect(ESCROW_MATIC_PER_PAISA).toBe(0.01)
+    // process.env.ESCROW_MATIC_PER_PAISA is set to '0.000004' in setup.js
+    expect(ESCROW_MATIC_PER_PAISA).toBe(0.000004)
   })
 
-  it('ESCROW_MATIC_PER_PAISA defaults to 0.01 when env var is absent', async () => {
+  it('ESCROW_MATIC_PER_PAISA defaults to 0.000004 when env var is absent', async () => {
     const originalEnv = process.env.ESCROW_MATIC_PER_PAISA
     delete process.env.ESCROW_MATIC_PER_PAISA
 
     vi.resetModules()
     const { ESCROW_MATIC_PER_PAISA: defaultVal } = await import('../../src/services/escrow.js')
-    expect(defaultVal).toBe(0.01)
+    expect(defaultVal).toBe(0.000004)
 
     if (originalEnv !== undefined) {
       process.env.ESCROW_MATIC_PER_PAISA = originalEnv
@@ -85,22 +91,22 @@ describe('escrow service — getEscrowBookingId', () => {
 })
 
 describe('escrow service — paisaToMaticWei', () => {
-  it('converts paisa to wei using the default rate (0.01 MATIC/paisa)', () => {
-    // 100 paisa × 0.01 = 1 MATIC = 10^18 wei
+  it('converts paisa to wei using the configured rate (0.000004 MATIC/paisa)', () => {
+    // 100 paisa × 0.000004 = 0.0004 MATIC = 4 × 10^14 wei
     const wei = paisaToMaticWei(100);
-    expect(wei).toBe(1_000_000_000_000_000_000n);
+    expect(wei).toBe(400_000_000_000_000n);
   });
 
-  it('converts 1 paisa to 0.01 MATIC (10^16 wei)', () => {
+  it('converts 1 paisa to 0.000004 MATIC (4 × 10^12 wei)', () => {
     const wei = paisaToMaticWei(1);
     expect(typeof wei).toBe('bigint');
-    expect(wei).toBe(10_000_000_000_000_000n);
+    expect(wei).toBe(4_000_000_000_000n);
   });
 
-  it('converts 250000 paisa (₹2500) to 2500 MATIC', () => {
-    // 250000 × 0.01 = 2500 MATIC
+  it('converts 250000 paisa (₹2500) to 1 MATIC', () => {
+    // 250000 × 0.000004 = 1 MATIC
     const wei = paisaToMaticWei(250_000);
-    expect(wei).toBe(ethers.parseEther('2500'));
+    expect(wei).toBe(ethers.parseEther('1'));
   });
 
   it('returns 0n for 0 paisa', () => {
@@ -126,7 +132,29 @@ describe('escrow service — paisaToMaticWei', () => {
 
   it('handles string input for paisa', () => {
     const wei = paisaToMaticWei('100');
-    expect(wei).toBe(1_000_000_000_000_000_000n);
+    expect(wei).toBe(400_000_000_000_000n);
+  });
+
+  it('enforces the default 100 MATIC safety cap when env vars are absent', async () => {
+    const rateEnv = process.env.ESCROW_MATIC_PER_PAISA;
+    const capEnv = process.env.MAX_ESCROW_MATIC;
+    delete process.env.ESCROW_MATIC_PER_PAISA;
+    delete process.env.MAX_ESCROW_MATIC;
+
+    vi.resetModules();
+    const { paisaToMaticWei: defaultRateWei } = await import('../../src/services/escrow.js');
+
+    // 10,000,000 paisa (₹100k) × 0.000004 = 40 MATIC — a realistic large
+    // order that is now well under the default 100 MATIC cap, no RangeError.
+    expect(defaultRateWei(10_000_000)).toBe(ethers.parseEther('40'));
+    // An order far beyond the cap is rejected with a handled RangeError.
+    expect(() => defaultRateWei(100_000_000_000)).toThrow(RangeError);
+
+    if (rateEnv !== undefined) process.env.ESCROW_MATIC_PER_PAISA = rateEnv;
+    else delete process.env.ESCROW_MATIC_PER_PAISA;
+    if (capEnv !== undefined) process.env.MAX_ESCROW_MATIC = capEnv;
+    else delete process.env.MAX_ESCROW_MATIC;
+    vi.resetModules();
   });
 
   it('converts using a custom rate when env var is overridden', async () => {
@@ -266,6 +294,51 @@ describe('escrow service \u2014 submitEscrowRefund (contract unconfigured)', () 
   })
 })
 
+describe('escrow service \u2014 submitEscrowRaiseDispute (contract unconfigured)', () => {
+  it('returns txHash: null and a valid bookingId when contract is not initialised', async () => {
+    const result = await submitEscrowRaiseDispute('#FF20260601')
+    expect(result.txHash).toBeNull()
+    expect(typeof result.bookingId).toBe('string')
+    expect(result.bookingId.startsWith('0x')).toBe(true)
+  })
+
+  it('returns the same bookingId as getEscrowBookingId', async () => {
+    const result = await submitEscrowRaiseDispute('#FF20260602')
+    const expected = getEscrowBookingId('#FF20260602')
+    expect(result.bookingId).toBe(expected)
+  })
+})
+
+describe('escrow service \u2014 submitEscrowResolveDispute (contract unconfigured)', () => {
+  it('returns txHash: null and a valid bookingId when contract is not initialised', async () => {
+    const result = await submitEscrowResolveDispute('#FF20260603', '600000000000000000')
+    expect(result.txHash).toBeNull()
+    expect(typeof result.bookingId).toBe('string')
+    expect(result.bookingId.startsWith('0x')).toBe(true)
+  })
+
+  it('returns the same bookingId as getEscrowBookingId', async () => {
+    const result = await submitEscrowResolveDispute('#FF20260604', 0)
+    const expected = getEscrowBookingId('#FF20260604')
+    expect(result.bookingId).toBe(expected)
+  })
+})
+
+describe('escrow service \u2014 submitEscrowResolveDisputeTimeout (contract unconfigured)', () => {
+  it('returns txHash: null and a valid bookingId when contract is not initialised', async () => {
+    const result = await submitEscrowResolveDisputeTimeout('#FF20260605')
+    expect(result.txHash).toBeNull()
+    expect(typeof result.bookingId).toBe('string')
+    expect(result.bookingId.startsWith('0x')).toBe(true)
+  })
+
+  it('returns the same bookingId as getEscrowBookingId', async () => {
+    const result = await submitEscrowResolveDisputeTimeout('#FF20260606')
+    const expected = getEscrowBookingId('#FF20260606')
+    expect(result.bookingId).toBe(expected)
+  })
+})
+
 describe('escrow service \u2014 confirmEscrowRefund (contract unconfigured)', () => {
   it('throws when contract is not initialised', async () => {
     await expect(confirmEscrowRefund('0x' + 'a'.repeat(64))).rejects.toThrow(
@@ -284,5 +357,35 @@ describe('escrow service \u2014 validateEscrowSetup (contract unconfigured)', ()
   it('returns false when ESCROW_CONTRACT_ADDRESS env vars are missing', async () => {
     const result = await validateEscrowSetup()
     expect(result).toBe(false)
+  })
+})
+
+describe('escrow service — escrowRelease (contract unconfigured)', () => {
+  it('returns txHash: null and a valid bookingId when contract is not initialised', async () => {
+    const result = await escrowRelease('#FF20260607')
+    expect(result.txHash).toBeNull()
+    expect(typeof result.bookingId).toBe('string')
+    expect(result.bookingId.startsWith('0x')).toBe(true)
+  })
+
+  it('returns the same bookingId as getEscrowBookingId', async () => {
+    const result = await escrowRelease('#FF20260608')
+    const expected = getEscrowBookingId('#FF20260608')
+    expect(result.bookingId).toBe(expected)
+  })
+})
+
+describe('escrow service — markEscrowBookingStarted (contract unconfigured)', () => {
+  it('returns txHash: null and a valid bookingId when contract is not initialised', async () => {
+    const result = await markEscrowBookingStarted('#FF20260609')
+    expect(result.txHash).toBeNull()
+    expect(typeof result.bookingId).toBe('string')
+    expect(result.bookingId.startsWith('0x')).toBe(true)
+  })
+
+  it('returns the same bookingId as getEscrowBookingId', async () => {
+    const result = await markEscrowBookingStarted('#FF20260610')
+    const expected = getEscrowBookingId('#FF20260610')
+    expect(result.bookingId).toBe(expected)
   })
 })

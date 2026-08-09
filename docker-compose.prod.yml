@@ -34,6 +34,9 @@ services:
       REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
       ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
       ML_ENGINE_URL: http://ml-engine:8000
+      # Malware scanning
+      CLAMAV_HOST: clamav
+      CLAMAV_PORT: "3310"
     # Remove dev volumes — code is baked into the image
     volumes: []
     ports:
@@ -47,6 +50,9 @@ services:
         condition: service_healthy
       ml-engine:
         condition: service_started
+      clamav:
+        condition: service_healthy
+        required: false
     deploy:
       resources:
         limits:
@@ -65,6 +71,9 @@ services:
       - no-new-privileges:true
 
   # ─── ML Engine ─────────────────────────────────────────────────────────────
+  # Security: NOT published on the host network — reachable only by the API
+  # service on the internal Docker network (`http://ml-engine:8000`). All routes
+  # require the shared X-API-Key, and interactive docs are disabled in production.
   ml-engine:
     build:
       context: ./backend/ml
@@ -74,8 +83,7 @@ services:
       - .env
     environment:
       ML_API_KEY: ${ML_API_KEY:?ML_API_KEY is required}
-    ports:
-      - "${ML_PORT:-8001}:8000"
+      ENVIRONMENT: production
     volumes:
       # Remove dev code mount — code is baked into the production image
       # Persist trained models across restarts
@@ -113,6 +121,8 @@ services:
       - postgres_data:/var/lib/postgresql/data
       # Optional: mount init scripts
       # - ./docs/supabase_setup.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # Create the dedicated least-privilege n8n role/database (fresh volumes only).
+      - ./automation/n8n/init/01-create-n8n-db.sh:/docker-entrypoint-initdb.d/01-create-n8n-db.sh:ro
     deploy:
       resources:
         limits:
@@ -144,6 +154,8 @@ services:
       - .env
     environment:
       MONGO_INITDB_DATABASE: truxify_telemetry
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:?MONGO_ROOT_USER is required}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD is required}
     ports:
       - "${MONGO_PORT:-127.0.0.1:27017}:27017"
     volumes:
@@ -165,7 +177,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "mongosh", "--quiet", "--username", "${MONGO_ROOT_USER}", "--password", "${MONGO_ROOT_PASSWORD}", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -196,7 +208,7 @@ services:
     security_opt:
       - no-new-privileges:true
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -204,6 +216,7 @@ services:
     # Production Redis config
     command: >
       redis-server
+      --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
       --appendonly yes
       --appendfsync everysec
       --auto-aof-rewrite-percentage 100
@@ -215,6 +228,10 @@ services:
       --save 60 10000
 
   # ─── n8n Automation (Dispute Pipeline & ML Retraining) ────────────────────
+  # Security: NOT exposed on the host network — reachable only on the internal
+  # Docker network. User management is mandatory (owner setup required) and the
+  # service uses its own dedicated, least-privilege database instead of the
+  # application's `postgres` superuser-equivalent credentials.
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
     container_name: truxify-n8n
@@ -225,17 +242,19 @@ services:
       N8N_PORT: 5678
       N8N_PROTOCOL: https
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY is required}
+      # Fail to start unless user management + owner provisioning is enabled.
+      N8N_USER_MANAGEMENT_JWT_SECRET: ${N8N_USER_MANAGEMENT_JWT_SECRET:?N8N_USER_MANAGEMENT_JWT_SECRET is required}
+      N8N_USER_MANAGEMENT_DISABLED: "false"
+      # Dedicated least-privilege database (never the app's `truxify` DB).
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: db
       DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: truxify
-      DB_POSTGRESDB_USER: postgres
-      DB_POSTGRESDB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
+      DB_POSTGRESDB_DATABASE: truxify_n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:?N8N_DB_PASSWORD is required}
       EXECUTIONS_DATA_PRUNE: "true"
       EXECUTIONS_DATA_MAX_AGE: 336
       N8N_METRICS: "true"
-    ports:
-      - "${N8N_PORT:-5678}:5678"
     volumes:
       - n8n_data:/home/node/.n8n
     deploy:
@@ -264,6 +283,37 @@ services:
       retries: 5
       start_period: 60s
 
+  # ─── ClamAV (malware scanning daemon) ────────────────────────────────────
+  clamav:
+    image: clamav/clamav:1.4
+    container_name: truxify-clamav
+    ports:
+      - "${CLAMAV_PORT:-3310}:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    deploy:
+      resources:
+        limits:
+          cpus: "${CLAMAV_CPU_LIMIT:-1}"
+          memory: "${CLAMAV_MEM_LIMIT:-1G}"
+        reservations:
+          cpus: "${CLAMAV_CPU_RESERVATION:-0.5}"
+          memory: "${CLAMAV_MEM_RESERVATION:-512M}"
+    restart: unless-stopped
+    logging:
+      driver: "${LOG_DRIVER:-json-file}"
+      options:
+        max-size: "${LOG_MAX_SIZE:-10m}"
+        max-file: "${LOG_MAX_FILE:-3}"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --version || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
 # ============================================================================
 # Volumes
 # ============================================================================
@@ -278,6 +328,8 @@ volumes:
     name: truxify_ml_models
   n8n_data:
     name: truxify_n8n_data
+  clamav_data:
+    name: truxify_clamav_data
 
 # ============================================================================
 # Networks

@@ -1,17 +1,20 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 
 import 'api_client.dart';
+
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  debugPrint('[FCM] Background message: ${message.messageId}');
+  // Handle background data here
+}
 
 class FcmService {
   static final ApiClient apiClient = ApiClient();
   static bool _initialized = false;
   static StreamSubscription<String>? _tokenRefreshSub;
-
   static Future<void> initializeAndRegister() async {
     if (_initialized) return;
     _initialized = true;

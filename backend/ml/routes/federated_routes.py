@@ -38,7 +38,9 @@ async def start_round():
             'message': 'Not enough clients available'
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/server/aggregate")
 async def aggregate_weights():
@@ -50,7 +52,9 @@ async def aggregate_weights():
             'message': 'Weights aggregated successfully'
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/server/stats")
 async def get_server_stats():
@@ -62,7 +66,9 @@ async def get_server_stats():
             'data': stats
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/server/model")
 async def get_global_model():
@@ -74,7 +80,9 @@ async def get_global_model():
             'data': weights
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/client/register")
 async def register_client(request: TrainingRequest):
@@ -87,7 +95,9 @@ async def register_client(request: TrainingRequest):
             'client_id': request.client_id
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/client/train")
 async def train_client(request: TrainingRequest):
@@ -110,7 +120,9 @@ async def train_client(request: TrainingRequest):
             'client_id': request.client_id
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/client/participate")
 async def participate_in_round(request: TrainingRequest):
@@ -133,7 +145,9 @@ async def participate_in_round(request: TrainingRequest):
             'client_id': request.client_id
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/clients")
 async def get_clients():
@@ -146,4 +160,6 @@ async def get_clients():
             'count': len(clients)
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

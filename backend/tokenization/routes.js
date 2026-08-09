@@ -1,6 +1,6 @@
 import express from 'express';
 import tokenService from './token.service.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 

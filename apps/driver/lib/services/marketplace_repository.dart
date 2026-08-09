@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/app_models.dart';
@@ -9,6 +10,7 @@ import '../models/deadhead_recommendation.dart';
 import '../models/marketplace_models.dart';
 import 'api_client.dart';
 import 'driver_insights_service.dart';
+import 'secure_storage.dart';
 
 class MarketplaceRepository {
   MarketplaceRepository({
@@ -41,7 +43,7 @@ class MarketplaceRepository {
     try {
       return await FirebaseAuth.instance.currentUser?.getIdToken();
     } catch (e) {
-      print('Error: $e');
+      debugPrint('Firebase token error: $e');
       return null;
     }
   }
@@ -50,17 +52,22 @@ class MarketplaceRepository {
     try {
       return _client.auth.currentSession?.accessToken;
     } catch (e) {
-      print('Error: $e');
+      debugPrint('Supabase token error: $e');
       return null;
     }
   }
 
   Future<Map<String, String>> _authHeaders() async {
-    final accessToken = await _firebaseAccessToken() ?? _supabaseAccessToken();
+    final token = _supabaseAccessToken() ?? await _firebaseAccessToken();
+    if (token != null && token.isNotEmpty) {
+      // Persist to OS-backed secure storage for background sync and
+      // WebSocket reconnects (issue #5739).
+      unawaited(AuthTokenStore.persist(token));
+    }
     return <String, String>{
       'Content-Type': 'application/json',
-      if (accessToken != null && accessToken.isNotEmpty)
-        'Authorization': 'Bearer $accessToken',
+      if (token != null && token.isNotEmpty)
+        'Authorization': 'Bearer $token',
     };
   }
 
@@ -76,8 +83,21 @@ class MarketplaceRepository {
     }
   }
 
-  Future<List<LoadOffer>> fetchEnRouteLoads() async {
-    final path = '/api/orders/load-offers/en-route';
+  Future<List<LoadOffer>> fetchEnRouteLoads({
+    double? currentLat,
+    double? currentLng,
+    double maxDetourKm = 50,
+  }) async {
+    final queryParams = <String, String>{};
+    if (currentLat != null && currentLng != null) {
+      queryParams['current_lat'] = currentLat.toStringAsFixed(6);
+      queryParams['current_lng'] = currentLng.toStringAsFixed(6);
+      queryParams['max_detour_km'] = maxDetourKm.toStringAsFixed(1);
+    }
+    final query = queryParams.isNotEmpty
+        ? '?${queryParams.entries.map((e) => '${e.key}=${e.value}').join('&')}'
+        : '';
+    final path = '/api/orders/load-offers/en-route$query';
     try {
       final decoded = await _apiClient.get(path);
       if (decoded is! List) throw StateError('Unexpected response type');

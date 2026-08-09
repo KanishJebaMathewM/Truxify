@@ -6,7 +6,7 @@ class NotificationsScreen extends StatelessWidget {
   const NotificationsScreen({super.key, this.onItemTap});
 
   /// Called when a notification tile is tapped.
-  final ValueChanged<NotificationItem>? onItemTap;
+  final ValueChanged<shared.NotificationItem>? onItemTap;
 
   @override
   Widget build(BuildContext context) {

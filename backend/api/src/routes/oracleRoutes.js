@@ -7,6 +7,7 @@ import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateBody } from '../middleware/validate.js';
 import { oracleConfirmSchema, oracleVerifyCrosschainSchema } from '../validation/requestSchemas.js';
 import { PolicyError, policy } from '../security/policyEngine.js';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 const oracleVerificationLimiter = rateLimit({
@@ -15,6 +16,7 @@ const oracleVerificationLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
   store: createStore('rl:oracle-verification:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
 });
@@ -52,9 +54,10 @@ router.get('/status', authenticate, async (req, res) => {
       }
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[OracleRoutes] Status error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -82,9 +85,10 @@ router.post('/confirm', oracleVerificationLimiter, authenticate, validateBody(or
       });
     }
 
+    logger.error({ requestId: req.requestId }, '[OracleRoutes] Confirm error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -108,9 +112,10 @@ router.post('/verify-crosschain', oracleVerificationLimiter, authenticate, valid
       });
     }
 
+    logger.error({ requestId: req.requestId }, '[OracleRoutes] Verify-crosschain error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });

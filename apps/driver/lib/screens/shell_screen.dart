@@ -16,7 +16,7 @@ import 'earnings_screen.dart';
 import 'load_detail_screen.dart';
 import 'load_point_detail_screen.dart';
 import 'notifications_screen.dart';
-import 'profile_screen.dart';
+import 'driver_profile_screen.dart';
 import 'trip_detail_screen.dart';
 import 'trips_screen.dart';
 import 'my_truck_screen.dart';
@@ -24,6 +24,14 @@ import 'my_truck_screen.dart';
 import '../services/marketplace_repository.dart';
 import '../services/driver_earnings_service.dart';
 
+/// Bottom-nav shell that hosts the four primary driver screens.
+///
+/// Tab layout (issue #5708):
+///   0 – Home            (HomeScreen — map, current trip card, earnings summary)
+///   1 – Active Trip     (TripsScreen — list of active / recent trips)
+///   2 – Available Loads (EarningsScreen re-used as load board pending a
+///                        dedicated LoadBoardScreen; swap when ready)
+///   3 – Profile         (ProfileScreen)
 class ShellScreen extends StatefulWidget {
   const ShellScreen({
     super.key,
@@ -45,36 +53,43 @@ class _ShellScreenState extends State<ShellScreen> {
       GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _tripsNavigatorKey =
       GlobalKey<NavigatorState>();
-  final GlobalKey<NavigatorState> _earningsNavigatorKey =
+  final GlobalKey<NavigatorState> _loadsNavigatorKey =
       GlobalKey<NavigatorState>();
   final GlobalKey<NavigatorState> _profileNavigatorKey =
       GlobalKey<NavigatorState>();
+
   StreamSubscription? _weighStationSub;
-    final ValueNotifier<int> _currentIndex = ValueNotifier<int>(0);
+  final ValueNotifier<int> _currentIndex = ValueNotifier<int>(0);
   late final List<Widget> _tabs;
 
   @override
   void initState() {
     super.initState();
     WeighStationService.instance.initialize();
-    _weighStationSub = WeighStationService.instance.eventStream.listen((event) {
-      _showBypassAlert(event);
-    });
+    _weighStationSub =
+        WeighStationService.instance.eventStream.listen(_showBypassAlert);
 
     _tabs = [
+      // Tab 0 — Home
       _buildTabNavigator(
         _homeNavigatorKey,
         HomeScreen(
           marketplaceRepo: widget.marketplaceRepo ?? MarketplaceRepository(),
           earningsService: widget.earningsService ?? DriverEarningsService(),
           mockLocationText: widget.mockLocationText,
+          // Navigate to Trips tab (index 1) which hosts both loads and active trips.
+          onNavigateToLoads: () => _openTab(1),
+          onNavigateToActiveTrip: () => _openTab(1),
         ),
       ),
+      // Tab 1 — Active Trip
       _buildTabNavigator(_tripsNavigatorKey, const TripsScreen()),
-      _buildTabNavigator(_earningsNavigatorKey, const EarningsScreen()),
+      // Tab 2 — Available Loads (swap body for LoadBoardScreen when built)
+      _buildTabNavigator(_loadsNavigatorKey, const EarningsScreen()),
+      // Tab 3 — Profile
       _buildTabNavigator(
         _profileNavigatorKey,
-        ProfileScreen(
+        DriverProfileScreen(
           onOpenDocuments: () =>
               _profileNavigatorKey.currentState?.pushNamed(AppRoutes.documents),
           onSelectTab: _openTab,
@@ -122,7 +137,8 @@ class _ShellScreenState extends State<ShellScreen> {
     });
   }
 
-  void _onForegroundMessage(RemoteMessage message, NotificationPayload payload) {
+  void _onForegroundMessage(
+      RemoteMessage message, NotificationPayload payload) {
     if (!mounted) return;
     final title = payload.title ?? message.notification?.title ?? '';
     final body = payload.body ?? message.notification?.body ?? '';
@@ -134,7 +150,8 @@ class _ShellScreenState extends State<ShellScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (title.isNotEmpty)
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(title,
+                  style: const TextStyle(fontWeight: FontWeight.w600)),
             if (body.isNotEmpty) Text(body),
           ],
         ),
@@ -147,7 +164,8 @@ class _ShellScreenState extends State<ShellScreen> {
           },
         ),
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
@@ -156,30 +174,25 @@ class _ShellScreenState extends State<ShellScreen> {
     switch (route) {
       case NavigateToOrderDetail():
       case NavigateToLiveTracking():
-        _openTab(1);
+        _openTab(1); // Active Trip
+        break;
 
       case NavigateToLoadDetail():
-        _openTab(0);
+        _openTab(2); // Available Loads
+        break;
 
       case NavigateToEarnings():
-        _openTab(2);
-
       case NavigateToWallet():
-        _openTab(2);
+        _openTab(0); // Home (earnings summary is on the home card)
+        break;
 
       case NavigateToSupportTicket():
-        _openInHomeTab(() {
-          Navigator.of(context).push(
-            truxifyPageRoute((_) => const NotificationsScreen()),
-          );
-        });
-
       case NavigateToNotificationsList():
         _openInHomeTab(() {
-          Navigator.of(context).push(
-            truxifyPageRoute((_) => const NotificationsScreen()),
-          );
+          Navigator.of(context)
+              .push(truxifyPageRoute((_) => const NotificationsScreen()));
         });
+        break;
     }
   }
 
@@ -188,14 +201,11 @@ class _ShellScreenState extends State<ShellScreen> {
     navigate();
   }
 
-  void _openInTripsTab(VoidCallback navigate) {
-    _openTab(1);
-    navigate();
-  }
-
   @override
   void dispose() {
     _weighStationSub?.cancel();
+    FcmService.clearForegroundCallback();
+    FcmService.clearTapCallback();
     ForegroundNotificationHandler.dispose();
     _currentIndex.dispose();
     super.dispose();
@@ -210,24 +220,23 @@ class _ShellScreenState extends State<ShellScreen> {
     Map<String, dynamic> data,
   ) async {
     if (!mounted) return;
-
     switch (target) {
       case NotificationTarget.tripDetail:
-        _openTab(1); // Trips tab
+        _openTab(1); // Active Trip
         break;
       case NotificationTarget.earnings:
-        _openTab(2); // Earnings tab
+        _openTab(0); // Home (earnings card)
         break;
       case NotificationTarget.loadDetail:
-        _openTab(0); // Home tab
+        _openTab(2); // Available Loads
         break;
       case NotificationTarget.notifications:
       case NotificationTarget.orderDetail:
       case NotificationTarget.unknown:
-        _openTab(3); // Profile tab (notifications accessed from here)
+        _openTab(3); // Profile (notifications accessed from here)
         break;
       case NotificationTarget.documents:
-        _openTab(3); // Profile tab
+        _openTab(3);
         _profileNavigatorKey.currentState?.pushNamed(AppRoutes.documents);
         break;
     }
@@ -236,9 +245,7 @@ class _ShellScreenState extends State<ShellScreen> {
   Route<dynamic> _errorRoute() {
     return truxifyPageRoute(
       (context) => Scaffold(
-        body: Center(
-          child: Text(AppLocalizations.of(context)!.error),
-        ),
+        body: Center(child: Text(AppLocalizations.of(context)!.error)),
       ),
     );
   }
@@ -249,24 +256,17 @@ class _ShellScreenState extends State<ShellScreen> {
         return truxifyPageRoute((context) => const MyTruckScreen());
       case AppRoutes.tripDetail:
         final args = settings.arguments;
-        if (args is! Trip) {
-          return _errorRoute();
-        }
+        if (args is! Trip) return _errorRoute();
         return truxifyPageRoute((context) => TripDetailScreen(trip: args));
-
       case AppRoutes.documents:
         return truxifyPageRoute((context) => const DocumentsScreen());
       case AppRoutes.loadDetail:
         final args = settings.arguments;
-        if (args is! LoadOffer) {
-          return _errorRoute();
-        }
+        if (args is! LoadOffer) return _errorRoute();
         return truxifyPageRoute((context) => LoadDetailScreen(load: args));
       case AppRoutes.loadPointDetail:
         final args = settings.arguments;
-        if (args is! RouteMapPoint) {
-          return _errorRoute();
-        }
+        if (args is! RouteMapPoint) return _errorRoute();
         return truxifyPageRoute(
             (context) => LoadPointDetailScreen(point: args));
       case AppRoutes.weightCalculator:
@@ -275,7 +275,8 @@ class _ShellScreenState extends State<ShellScreen> {
         final args = settings.arguments as DestinationPickerArgs?;
         return truxifyPageRoute(
           (context) => DestinationPickerScreen(
-            title: args?.title ?? AppLocalizations.of(context)!.whereAreYouHeading,
+            title: args?.title ??
+                AppLocalizations.of(context)!.whereAreYouHeading,
             initialQuery: args?.initialQuery,
             initialPoint: args?.initialPoint,
           ),
@@ -292,13 +293,11 @@ class _ShellScreenState extends State<ShellScreen> {
         if (settings.name == '/' || settings.name == AppRoutes.shell) {
           return truxifyPageRoute((context) => root);
         }
-        final route = _routeFactory(settings);
-        return route ?? truxifyPageRoute((context) => root);
+        return _routeFactory(settings) ??
+            truxifyPageRoute((context) => root);
       },
     );
   }
-
-
 
   void _showBypassAlert(WeighStationEvent event) {
     if (!mounted) return;
@@ -308,15 +307,20 @@ class _ShellScreenState extends State<ShellScreen> {
       builder: (context) {
         final isBypass = event.action == 'BYPASS';
         return Dialog(
-          backgroundColor: isBypass ? const Color(0xFF1E4620) : const Color(0xFF5C1A1A),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          backgroundColor: isBypass
+              ? const Color(0xFF1E4620)
+              : const Color(0xFF5C1A1A),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           child: Padding(
             padding: const EdgeInsets.all(32.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  isBypass ? Icons.check_circle_outline : Icons.warning_amber_rounded,
+                  isBypass
+                      ? Icons.check_circle_outline
+                      : Icons.warning_amber_rounded,
                   size: 80,
                   color: Colors.white,
                 ),
@@ -334,10 +338,7 @@ class _ShellScreenState extends State<ShellScreen> {
                 Text(
                   'Station ID: ${event.stationId}\n${event.reason}',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    color: Colors.white70,
-                  ),
+                  style: const TextStyle(fontSize: 16, color: Colors.white70),
                 ),
                 const SizedBox(height: 32),
                 SizedBox(
@@ -346,21 +347,27 @@ class _ShellScreenState extends State<ShellScreen> {
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
-                      foregroundColor: isBypass ? const Color(0xFF1E4620) : const Color(0xFF5C1A1A),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      foregroundColor: isBypass
+                          ? const Color(0xFF1E4620)
+                          : const Color(0xFF5C1A1A),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
                     ),
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('ACKNOWLEDGE', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    child: const Text('ACKNOWLEDGE',
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
             ),
           ),
         );
-      }
+      },
     );
   }
 
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: ValueListenableBuilder<int>(
@@ -378,11 +385,12 @@ class _ShellScreenState extends State<ShellScreen> {
           decoration: BoxDecoration(
             color: Theme.of(context).colorScheme.surface,
             border: Border(
-                top: BorderSide(
-              color: Theme.of(context).brightness == Brightness.dark
-                  ? TruxifyColors.darkBorder
-                  : TruxifyColors.border,
-            )),
+              top: BorderSide(
+                color: Theme.of(context).brightness == Brightness.dark
+                    ? TruxifyColors.darkBorder
+                    : TruxifyColors.border,
+              ),
+            ),
           ),
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
           child: ValueListenableBuilder<int>(
@@ -392,25 +400,25 @@ class _ShellScreenState extends State<ShellScreen> {
                 children: [
                   _NavItem(
                     icon: Icons.home_rounded,
-                    label: AppLocalizations.of(context)!.home,
+                    label: 'Home',
                     selected: currentIndex == 0,
                     onTap: () => _openTab(0),
                   ),
                   _NavItem(
                     icon: Icons.route_rounded,
-                    label: AppLocalizations.of(context)!.trips,
+                    label: 'Active Trip',
                     selected: currentIndex == 1,
                     onTap: () => _openTab(1),
                   ),
                   _NavItem(
-                    icon: Icons.account_balance_wallet_outlined,
-                    label: AppLocalizations.of(context)!.earnings,
+                    icon: Icons.inventory_2_outlined,
+                    label: 'Loads',
                     selected: currentIndex == 2,
                     onTap: () => _openTab(2),
                   ),
                   _NavItem(
                     icon: Icons.person_rounded,
-                    label: AppLocalizations.of(context)!.profile,
+                    label: 'Profile',
                     selected: currentIndex == 3,
                     onTap: () => _openTab(3),
                   ),
@@ -423,6 +431,8 @@ class _ShellScreenState extends State<ShellScreen> {
     );
   }
 }
+
+// ── Bottom-nav item ────────────────────────────────────────────────────────────
 
 class _NavItem extends StatelessWidget {
   const _NavItem({
@@ -481,7 +491,7 @@ class _NavItem extends StatelessWidget {
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
                   color: selected
-                      ? (Theme.of(context).brightness == Brightness.dark
+                      ? (isDark
                           ? TruxifyColors.accent
                           : TruxifyColors.accentDark)
                       : TruxifyColors.adaptiveSecondaryText(context),

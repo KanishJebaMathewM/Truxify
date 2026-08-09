@@ -1,12 +1,13 @@
 import { EventEmitter } from 'events';
-import logger from '../../api/src/middleware/logger.js';
+import crypto from 'crypto';
+import logger from '../api/src/middleware/logger.js';
 
 class LayoutNode extends EventEmitter {
     constructor(config = {}) {
         super();
         
         // Node properties
-        this.id = config.id || `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        this.id = config.id || `node_${crypto.randomBytes(8).toString('hex')}`;
         this.type = config.type || 'container';
         this.parent = config.parent || null;
         this.children = [];

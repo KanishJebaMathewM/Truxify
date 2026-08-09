@@ -44,11 +44,13 @@ class PodRecord {
 
 class PodStorageService {
   static Database? _database;
+  static Future<Database>? _pendingInit;
   static const String tableName = 'pods';
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('pods_cache.db');
+    _pendingInit ??= _initDB('pods_cache.db');
+    _database = await _pendingInit;
     return _database!;
   }
 
@@ -103,4 +105,5 @@ class PodStorageService {
   }
 }
 
-final podStorageService = PodStorageService();
+// Mutable (not final) so tests can inject a fake instance.
+PodStorageService podStorageService = PodStorageService();

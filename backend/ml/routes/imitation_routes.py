@@ -5,6 +5,7 @@ import numpy as np
 from datetime import datetime
 import logging
 from imitation.model import ImitationLearningModel
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/imitation", tags=["Imitation Learning"])
@@ -41,7 +42,9 @@ async def train_behavioral_cloning(request: TrainRequest):
         }
     except Exception as e:
         logger.error(f"BC training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/train/irl")
 async def train_inverse_rl(request: TrainRequest):
@@ -66,7 +69,9 @@ async def train_inverse_rl(request: TrainRequest):
         }
     except Exception as e:
         logger.error(f"IRL training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/train/policy")
 async def train_policy(request: TrainRequest):
@@ -91,7 +96,9 @@ async def train_policy(request: TrainRequest):
         }
     except Exception as e:
         logger.error(f"Policy training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/predict")
 async def predict_action(state: List[float], safety_check: bool = True):
@@ -113,7 +120,9 @@ async def predict_action(state: List[float], safety_check: bool = True):
         }
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/safety/rules")
 async def get_safety_rules():
@@ -127,7 +136,9 @@ async def get_safety_rules():
         }
     except Exception as e:
         logger.error(f"Safety rules fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/safety/rules/add")
 async def add_safety_rule(rule: Dict):
@@ -141,7 +152,9 @@ async def add_safety_rule(rule: Dict):
         }
     except Exception as e:
         logger.error(f"Add safety rule failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
 async def get_model_info():
@@ -159,10 +172,13 @@ async def get_model_info():
         }
     except Exception as e:
         logger.error(f"Model info failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
 async def save_model(path: str = "models/imitation_model.pth"):
+    path = os.path.join("models", os.path.basename(path))
     """Save imitation learning model"""
     try:
         model.save(path)
@@ -173,10 +189,13 @@ async def save_model(path: str = "models/imitation_model.pth"):
         }
     except Exception as e:
         logger.error(f"Save failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
 async def load_model(path: str = "models/imitation_model.pth"):
+    path = os.path.join("models", os.path.basename(path))
     """Load imitation learning model"""
     try:
         model.load(path)
@@ -187,4 +206,6 @@ async def load_model(path: str = "models/imitation_model.pth"):
         }
     except Exception as e:
         logger.error(f"Load failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

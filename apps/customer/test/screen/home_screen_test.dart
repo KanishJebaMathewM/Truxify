@@ -1,33 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:truxify/controllers/app_controller.dart';
+import 'package:truxify/l10n/app_localizations.dart';
 import 'package:truxify/models/app_models.dart';
+import 'package:truxify/screens/home_screen.dart';
+import 'package:truxify/services/order_service.dart';
+import 'package:truxify/services/profile_service.dart';
+import 'package:truxify/widgets/shipment_card.dart';
 
-// Stub HomeScreen — replace with actual import
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Truxify')),
-      body: Column(
-        children: [
-          const Text('Active Shipments'),
-          ElevatedButton(
-            key: const Key('book_truck_btn'),
-            onPressed: () {},
-            child: const Text('Book a Truck'),
-          ),
-          ElevatedButton(
-            key: const Key('track_shipment_btn'),
-            onPressed: () {},
-            child: const Text('Track Shipment'),
-          ),
-        ],
-      ),
-    );
-  }
-}
+class MockOrderService extends Mock implements OrderService {}
+class MockProfileService extends Mock implements ProfileService {}
 
 List<RouteCardData> computeUsualRoutes(List<Map<String, dynamic>> history) {
   if (history.isEmpty) return const [];
@@ -104,26 +88,115 @@ class _TestRouteStats {
 }
 
 void main() {
+  late MockOrderService mockOrderService;
+  late MockProfileService mockProfileService;
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+    mockOrderService = MockOrderService();
+    mockProfileService = MockProfileService();
+
+    // Stub profile service
+    when(() => mockProfileService.fetchProfile()).thenAnswer((_) async => {
+      'full_name': 'Rajesh Kumar',
+    });
+    when(() => mockProfileService.fetchCustomerStats()).thenAnswer((_) async => {
+      'totalOrders': 15,
+      'totalSaved': 1200,
+    });
+
+    // Stub order service
+    when(() => mockOrderService.fetchActiveOrders()).thenAnswer((_) async => [
+      {
+        'id': 'order-1',
+        'display_id': 'TX1001',
+        'pickup_city': 'Surat',
+        'drop_city': 'Mumbai',
+        'driver_name': 'Suresh Kumar',
+        'truck_number': 'GJ-05-XX-1234',
+        'status': 'In Transit',
+        'estimated_arrival': '2h 15m',
+      }
+    ]);
+    when(() => mockOrderService.fetchHistoryOrders()).thenAnswer((_) async => [
+      {
+        'pickup_address': 'Surat, Gujarat',
+        'drop_address': 'Jaipur, Rajasthan',
+        'pickup_date': '2024-06-15',
+        'pickup_lat': 21.17,
+        'pickup_lng': 72.83,
+        'drop_lat': 26.91,
+        'drop_lng': 75.78,
+      }
+    ]);
+  });
+
+  Widget createTestWidget(WidgetTester tester, {
+    List<Map<String, dynamic>>? activeOrders,
+    Map<String, dynamic>? customerStats,
+  }) {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    if (activeOrders != null) {
+      when(() => mockOrderService.fetchActiveOrders()).thenAnswer((_) async => activeOrders);
+    }
+    if (customerStats != null) {
+      when(() => mockProfileService.fetchCustomerStats()).thenAnswer((_) async => customerStats);
+    }
+
+    return TruxifyScope(
+      controller: TruxifyController(),
+      child: MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: HomeScreen(
+          orderService: mockOrderService,
+          profileService: mockProfileService,
+        ),
+      ),
+    );
+  }
+
   group('HomeScreen Widget Tests', () {
-    testWidgets('renders app title', (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
-      expect(find.text('Truxify'), findsOneWidget);
+    testWidgets('renders active shipments list, quick stats, and Book a Truck CTA (Happy Path)', (tester) async {
+      await tester.pumpWidget(createTestWidget(tester));
+      await tester.pump(); // Start data loading
+      await tester.pump(); // Build with loaded data
+
+      // Verify active shipment card renders
+      expect(find.byType(ShipmentCard), findsOneWidget);
+      expect(find.text('Surat \u2192 Mumbai'), findsOneWidget);
+
+      // Verify quick stats render
+      expect(find.text('1'), findsOneWidget); // Active shipments count
+      expect(find.text('15'), findsOneWidget); // Total shipments
+      expect(find.text('1200'), findsOneWidget); // Savings
+
+      // Verify Book a Truck CTA button
+      expect(find.text('Book a Truck \u1f69b'), findsOneWidget);
     });
 
-    testWidgets('renders Book a Truck CTA button', (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
-      expect(find.byKey(const Key('book_truck_btn')), findsOneWidget);
-      expect(find.text('Book a Truck'), findsOneWidget);
-    });
+    testWidgets('renders empty state when no active bookings', (tester) async {
+      await tester.pumpWidget(createTestWidget(
+        tester,
+        activeOrders: [],
+      ));
+      await tester.pump(); // Start data loading
+      await tester.pump(); // Build with loaded data
 
-    testWidgets('renders Track Shipment button', (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
-      expect(find.byKey(const Key('track_shipment_btn')), findsOneWidget);
-    });
+      // Verify no shipment card renders
+      expect(find.byType(ShipmentCard), findsNothing);
 
-    testWidgets('renders Active Shipments section', (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
-      expect(find.text('Active Shipments'), findsOneWidget);
+      // Verify empty state text
+      expect(find.text('No active shipments'), findsOneWidget);
+
+      // Verify Book a Truck CTA button is still rendered
+      expect(find.text('Book a Truck \u1f69b'), findsOneWidget);
     });
   });
 
@@ -230,13 +303,6 @@ void main() {
       final routes = computeUsualRoutes(history);
       expect(routes.length, 1);
       expect(routes[0].tripCount, 2);
-    });
-  });
-
-  group('See All Navigation', () {
-    testWidgets('See All button exists in stub', (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: HomeScreen()));
-      expect(find.byKey(const Key('book_truck_btn')), findsOneWidget);
     });
   });
 

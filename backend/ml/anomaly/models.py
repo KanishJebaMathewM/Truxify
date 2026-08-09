@@ -112,7 +112,10 @@ class LSTMAutoencoder:
         if self.model is None:
             raise ValueError("Model not trained yet")
         
-        sequence = np.array(sequence).reshape(1, self.sequence_length, self.input_dim)
+        sequence = np.array(sequence)
+        if sequence.size == self.input_dim:
+            sequence = np.tile(sequence.reshape(1, self.input_dim), (self.sequence_length, 1))
+        sequence = sequence.reshape(1, self.sequence_length, self.input_dim)
         reconstruction = self.model.predict(sequence, verbose=0)
         error = np.mean(np.square(reconstruction - sequence))
         score = error / self.threshold if self.threshold else error

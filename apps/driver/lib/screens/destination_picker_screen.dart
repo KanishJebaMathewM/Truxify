@@ -155,7 +155,8 @@ class _DestinationPickerScreenState extends State<DestinationPickerScreen> {
                 ? 'Pinned location (${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)})'
                 : displayName;
       });
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[DestinationPickerScreen] Reverse geocode failed: $e');
       if (!mounted) {
         return;
       }

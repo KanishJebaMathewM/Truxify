@@ -34,7 +34,7 @@ spec:
   tls:
   - hosts:
     - truxify.com
-    - *.truxify.com
+    - "*.truxify.com"
     secretName: truxify-tls
   rules:
   - host: truxify.com

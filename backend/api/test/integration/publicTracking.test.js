@@ -294,6 +294,21 @@ describe('Tracking Routes', () => {
       expect(res.body.geometry.coordinates).toHaveLength(2);
       expect(res.body.properties.fallback).toBe(true);
     });
+
+    it('should reject route geometry when order coordinates are missing', async () => {
+      const shareRes = await request(app)
+        .post('/api/orders/%23FF20241205/share-tracking')
+        .set('x-user-id', 'customer-uuid-123')
+        .send({});
+
+      mockStore.orders[0].drop_lng = null;
+
+      const res = await request(app)
+        .get(`/api/public/tracking/${shareRes.body.token}/route`);
+
+      expect(res.status).toBe(422);
+      expect(res.body.error).toBe('Route coordinates are not available for this order');
+    });
   });
 
   describe('Security: No auth required for public endpoint', () => {

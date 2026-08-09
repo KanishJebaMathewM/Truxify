@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'controllers/app_controller.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/public_tracking_screen.dart';
@@ -23,6 +22,7 @@ class _TruxifyAppState extends State<TruxifyApp> {
     _controller = TruxifyController();
     _controller.addListener(_onControllerChanged);
     _controller.loadThemeMode();
+    _controller.loadLocale();
   }
 
   void _onControllerChanged() {
@@ -63,6 +63,7 @@ class _TruxifyAppState extends State<TruxifyApp> {
         theme: TruxifyTheme.light(),
         darkTheme: TruxifyTheme.dark(),
         themeMode: _controller.themeMode,
+        locale: _controller.locale,
         onGenerateRoute: _onGenerateRoute,
         localizationsDelegates: const [
           AppLocalizations.delegate,

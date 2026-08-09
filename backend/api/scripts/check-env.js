@@ -44,7 +44,7 @@ function parseEnvFile(filePath) {
 
 function checkNodeVersion() {
   const version = process.version;
-  const major = parseInt(version.slice(1).split(".")[0], 10);
+  const major = parseInt(version.slice(1, 10).split(".")[0], 10);
   return { version, major, ok: major >= 18 };
 }
 

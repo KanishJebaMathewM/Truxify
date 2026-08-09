@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Caches the most recently loaded trip list locally so drivers can still
@@ -35,7 +36,7 @@ class TripCache {
       });
       return sections;
     } catch (e) {
-      print('Error: $e');
+      debugPrint('TripCache decode error: $e');
       return <String, List<Map<String, dynamic>>>{};
     }
   }
@@ -99,7 +100,7 @@ class TripCache {
         savedAt: savedAt,
       );
     } catch (e) {
-      print('Error: $e');
+      debugPrint('TripCache load error: $e');
       return null;
     }
   }

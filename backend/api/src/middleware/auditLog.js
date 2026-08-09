@@ -115,16 +115,8 @@ export function auditLog(options = {}) {
       }
     };
 
-    // Hook into response finish to capture the final state and write the audit entry
-    const originalFinish = res.finish;
-    res.finish = function (...args) {
-      // Restore original finish to avoid double-hooking
-      res.finish = originalFinish;
-
-      // Run the original finish
-      const result = originalFinish.apply(this, args);
-
-      // Write audit entry asynchronously (fire-and-forget)
+    // Hook into response finish event to capture the final state and write the audit entry
+    res.on('finish', () => {
       writeAuditEntry(req, res, {
         action,
         overrideResourceType,
@@ -136,8 +128,7 @@ export function auditLog(options = {}) {
         logger.debug({ err }, '[AuditLog] Unhandled audit write error');
       });
 
-      return result;
-    };
+    });
 
     // Capture before-state synchronously, then proceed
     Promise.resolve(captureBeforeState())

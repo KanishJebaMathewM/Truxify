@@ -120,3 +120,180 @@ test('run function performs additions and removals correctly', async () => {
   assert.deepEqual(addedLabels[102], undefined);
   assert.deepEqual(removedLabels[102].sort(), ['gssoc:approved', 'level:beginner'].sort());
 });
+
+test('deduplicateTypeLabels keeps the dominant type label by file-change score', () => {
+  const { deduplicateTypeLabels } = require('./retro-labeler');
+  const rules = {
+    typeLabelPriority: [
+      'type:security', 'type:performance', 'type:bug', 'type:feature',
+      'type:refactor', 'type:testing', 'type:design', 'type:devops',
+      'type:docs', 'type:accessibility'
+    ],
+    pathRules: [
+      { pattern: '(^test/|/test/|\\.test\\.|_test\\.)', labels: ['type:testing'] },
+      { pattern: '(^docs/|README|CONTRIBUTING|\\.md$)', labels: ['type:docs'] }
+    ],
+    titleRules: [
+      { pattern: '^(test|tests)', labels: ['type:testing'] }
+    ]
+  };
+
+  const result = deduplicateTypeLabels({
+    currentLabels: [{ name: 'type:testing' }, { name: 'type:docs' }, { name: 'type:bug' }],
+    changedFiles: [
+      'backend/api/test/unit/a.test.js',
+      'backend/api/test/unit/b.test.js',
+      'docs/README.md'
+    ],
+    prTitle: 'test: add unit tests',
+    rules
+  });
+
+  assert.equal(result.toKeep, 'type:testing');
+  assert.deepEqual(result.toRemove.sort(), ['type:bug', 'type:docs'].sort());
+});
+
+test('deduplicateTypeLabels uses priority tiebreaker when scores are equal', () => {
+  const { deduplicateTypeLabels } = require('./retro-labeler');
+  const rules = {
+    typeLabelPriority: [
+      'type:security', 'type:performance', 'type:bug', 'type:feature',
+      'type:refactor', 'type:testing', 'type:design', 'type:devops',
+      'type:docs', 'type:accessibility'
+    ],
+    pathRules: [],
+    titleRules: []
+  };
+
+  const result = deduplicateTypeLabels({
+    currentLabels: [{ name: 'type:bug' }, { name: 'type:security' }],
+    changedFiles: [],
+    prTitle: 'misc change',
+    rules
+  });
+
+  assert.equal(result.toKeep, 'type:security');
+  assert.deepEqual(result.toRemove, ['type:bug']);
+});
+
+test('deduplicateTypeLabels returns no changes when 0 or 1 contested type labels', () => {
+  const { deduplicateTypeLabels } = require('./retro-labeler');
+  const rules = { typeLabelPriority: [
+    'type:security', 'type:performance', 'type:bug', 'type:feature',
+    'type:refactor', 'type:testing', 'type:design', 'type:devops',
+    'type:docs', 'type:accessibility'
+  ]};
+
+  const result = deduplicateTypeLabels({
+    currentLabels: [{ name: 'type:bug' }, { name: 'type:api' }],
+    changedFiles: [],
+    prTitle: 'fix: something',
+    rules
+  });
+
+  assert.equal(result.toKeep, 'type:bug');
+  assert.deepEqual(result.toRemove, []);
+});
+
+test('isRateLimitError correctly identifies HTTP 403 / 429 rate limit errors', () => {
+  const { isRateLimitError } = require('./retro-labeler');
+
+  assert.equal(isRateLimitError(null), false);
+  assert.equal(isRateLimitError(new Error('Normal error')), false);
+  
+  const err403 = new Error('API rate limit exceeded for installation');
+  err403.status = 403;
+  assert.equal(isRateLimitError(err403), true);
+
+  const err429 = new Error('Too many requests');
+  err429.status = 429;
+  assert.equal(isRateLimitError(err429), true);
+});
+
+test('run function handles rate limit error gracefully without crashing', async () => {
+  const { run } = require('./retro-labeler');
+  let warningLogged = false;
+
+  const mockRateLimitError = new Error('API rate limit exceeded for installation');
+  mockRateLimitError.status = 403;
+
+  const mockGithub = {
+    paginate: async () => {
+      throw mockRateLimitError;
+    },
+    rest: {
+      issues: {
+        listLabelsForRepo: () => {}
+      }
+    }
+  };
+
+  const mockContext = { repo: { owner: 'owner', repo: 'repo' } };
+  const mockCore = {
+    info: () => {},
+    warning: (msg) => {
+      if (msg.includes('rate limit exceeded')) warningLogged = true;
+    },
+    error: () => {}
+  };
+
+  const count = await run({
+    github: mockGithub,
+    context: mockContext,
+    core: mockCore,
+    dryRun: false
+  });
+
+  assert.equal(count, 0);
+  assert.equal(warningLogged, true);
+});
+
+test('run function filters PRs by sinceHours cutoff time', async () => {
+  const { run } = require('./retro-labeler');
+  let addedLabels = {};
+  const recentDate = new Date().toISOString();
+  const oldDate = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+  const mockGithub = {
+    paginate: async (fn) => {
+      if (fn === mockGithub.rest.issues.listLabelsForRepo) {
+        return [{ name: 'gssoc:approved' }, { name: 'level:beginner' }];
+      }
+      return [];
+    },
+    rest: {
+      issues: {
+        listLabelsForRepo: () => {},
+        createLabel: async () => {},
+        addLabels: async ({ issue_number, labels }) => {
+          addedLabels[issue_number] = labels;
+        },
+        removeLabel: async () => {}
+      },
+      pulls: {
+        list: async () => ({
+          data: [
+            { number: 201, title: 'Recent PR', labels: [], merged_at: recentDate, closed_at: recentDate, updated_at: recentDate, user: { login: 'human' } },
+            { number: 202, title: 'Old PR', labels: [], merged_at: oldDate, closed_at: oldDate, updated_at: oldDate, user: { login: 'human' } }
+          ]
+        })
+      }
+    }
+  };
+
+  const mockContext = { repo: { owner: 'owner', repo: 'repo' } };
+  const mockCore = { info: () => {}, warning: () => {}, error: () => {} };
+
+  const count = await run({
+    github: mockGithub,
+    context: mockContext,
+    core: mockCore,
+    dryRun: false,
+    sinceHours: 12
+  });
+
+  assert.equal(count, 1);
+  assert.ok(addedLabels[201]);
+  assert.equal(addedLabels[202], undefined);
+});
+

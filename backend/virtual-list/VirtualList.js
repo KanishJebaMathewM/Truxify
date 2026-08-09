@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import OverscanStrategy from './OverscanStrategy.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 class VirtualList extends EventEmitter {
     constructor(config = {}) {

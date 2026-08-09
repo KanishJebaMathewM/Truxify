@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import { v4 as uuidv4 } from 'uuid';
-import logger from '../../api/src/middleware/logger.js';
-import { supabase } from '../../api/src/config/db.js';
+import logger from '../api/src/middleware/logger.js';
+import { supabase } from '../api/src/config/db.js';
 
 class DAOService {
     constructor() {
@@ -14,10 +14,10 @@ class DAOService {
             'function joinDAO() external',
             'function leaveDAO() external',
             'function createProposal(string memory title, string memory description, bytes memory callData, address target, uint256 value, uint8 proposalType) external returns (uint256)',
-            'function castVote(uint256 proposalId, bool support, uint256 votingPower) external',
+            'function castVote(uint256 proposalId, bool support) external',
             'function executeProposal(uint256 proposalId) external',
             'function treasuryProposal(address recipient, uint256 amount, string memory reason) external returns (uint256)',
-            'function getProposal(uint256 proposalId) external view returns (tuple(uint256,address,string,string,bytes,address,uint256,uint256,uint256,uint256,uint256,bool,bool,uint8,uint8))',
+            'function getProposal(uint256 proposalId) external view returns (tuple(uint256,address,string,string,bytes,address,uint256,uint256,uint256,uint256,uint256,uint256,bool,bool,uint8,uint8))',
             'function getMember(address member) external view returns (tuple(address,uint256,uint256,bool,uint256,uint256))',
             'function getTotalProposals() external view returns (uint256)',
             'function getTotalMembers() external view returns (uint256)',
@@ -84,7 +84,16 @@ class DAOService {
             );
             const receipt = await tx.wait();
 
-            const proposalId = await this.dao.getTotalProposals();
+            // Parse proposal ID from ProposalCreated event
+            const eventLog = receipt.logs.find(log => {
+                try {
+                    const parsed = this.dao.interface.parseLog(log);
+                    return parsed.name === 'ProposalCreated';
+                } catch { return false; }
+            });
+            const proposalId = eventLog
+                ? this.dao.interface.parseLog(eventLog).args[0]
+                : (await this.dao.getTotalProposals()) - 1n;
 
             await this.storeProposal({
                 ...proposalData,
@@ -109,7 +118,6 @@ class DAOService {
             const tx = await this.dao.castVote(
                 proposalId,
                 support,
-                ethers.parseEther(votingPower?.toString() || '0'),
                 { gasLimit: 150000 }
             );
             const receipt = await tx.wait();

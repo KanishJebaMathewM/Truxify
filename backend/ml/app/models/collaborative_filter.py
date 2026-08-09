@@ -268,7 +268,6 @@ class CollaborativeFilter:
         self,
         user_id: str,
         booking_history: List[Dict[str, Any]],
-        rated_drivers: List[Dict[str, Any]],
         top_n: int = 5,
     ) -> Dict[str, Any]:
         """Return personalised load recommendations for *user_id*.
@@ -279,8 +278,6 @@ class CollaborativeFilter:
             Identifier for the requesting user.
         booking_history : list[dict]
             Past bookings (used for filtering already-seen loads).
-        rated_drivers : list[dict]
-            Drivers the user has rated (contextual signal, reserved for future use).
         top_n : int
             Number of recommendations to return.
 
@@ -299,7 +296,6 @@ class CollaborativeFilter:
         self,
         user_id: str,
         booking_history: List[Dict[str, Any]],
-        rated_loads: List[Dict[str, Any]],
         top_n: int = 5,
     ) -> Dict[str, Any]:
         """Return personalised truck recommendations for *user_id*.
@@ -310,8 +306,6 @@ class CollaborativeFilter:
             Identifier for the requesting user.
         booking_history : list[dict]
             Past bookings (used for filtering already-seen trucks).
-        rated_loads : list[dict]
-            Loads the user has rated (contextual signal, reserved for future use).
         top_n : int
             Number of recommendations to return.
 

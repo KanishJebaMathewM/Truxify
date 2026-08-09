@@ -1,6 +1,6 @@
 import express from 'express';
 import zkpService from './zkp.service.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 
@@ -35,10 +35,10 @@ router.post('/zkp/snark/verify', async (req, res) => {
 router.post('/zkp/transaction/private', async (req, res) => {
     try {
         const { nullifier, commitment, recipient, amount, proof } = req.body;
-        if (!nullifier || !recipient || !amount) {
+        if (!nullifier || !commitment || !recipient || !amount || !proof) {
             return res.status(400).json({
                 success: false,
-                error: 'nullifier, recipient, and amount required'
+                error: 'nullifier, commitment, recipient, amount, and proof required'
             });
         }
         const result = await zkpService.processPrivateTransaction({

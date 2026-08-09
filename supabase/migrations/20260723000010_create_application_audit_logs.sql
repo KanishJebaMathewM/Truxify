@@ -46,7 +46,7 @@ CREATE POLICY "Admins can read audit logs"
   USING (
     EXISTS (
       SELECT 1 FROM profiles
-      WHERE profiles.id = auth.uid()
+      WHERE profiles.id = get_profile_id()
       AND profiles.role = 'admin'
     )
   );

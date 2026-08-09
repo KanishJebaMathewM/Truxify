@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -28,6 +30,9 @@ class FcmService {
   static bool _initialized = false;
   static ForegroundMessageCallback? _foregroundCallback;
   static NotificationTapCallback? _tapCallback;
+  static StreamSubscription<String>? _tokenRefreshSubscription;
+  static StreamSubscription<RemoteMessage>? _foregroundSubscription;
+  static StreamSubscription<RemoteMessage>? _tapSubscription;
 
   /// Registers a callback for foreground messages.
   static void setForegroundCallback(ForegroundMessageCallback callback) {
@@ -47,6 +52,18 @@ class FcmService {
     _tapCallback = null;
   }
 
+  /// Cancels all FCM stream subscriptions. Should be called on sign-out or
+  /// when FCM listeners need to be reset to prevent duplicate handlers.
+  static void unregisterAll() {
+    _tokenRefreshSubscription?.cancel();
+    _tokenRefreshSubscription = null;
+    _foregroundSubscription?.cancel();
+    _foregroundSubscription = null;
+    _tapSubscription?.cancel();
+    _tapSubscription = null;
+    _initialized = false;
+  }
+
   /// Must be called once during app startup.
   /// Sets up all FCM message listeners and token registration.
   ///
@@ -58,8 +75,6 @@ class FcmService {
       debugPrint('[FCM] Already initialized, skipping.');
       return;
     }
-    _initialized = true;
-
     try {
       final messaging = FirebaseMessaging.instance;
 
@@ -83,7 +98,7 @@ class FcmService {
           await _sendTokenToBackend(token, apiClient: apiClient);
         }
 
-        messaging.onTokenRefresh.listen((newToken) async {
+        _tokenRefreshSubscription = messaging.onTokenRefresh.listen((newToken) async {
           await _sendTokenToBackend(newToken, apiClient: apiClient);
         });
       } else {
@@ -91,11 +106,13 @@ class FcmService {
       }
 
       // ── Foreground messages ──────────────────────────────────────
-      FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+      _foregroundSubscription = FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
 
       // ── Tap on background notification ──
-      FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+      _tapSubscription = FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+      _initialized = true;
     } catch (e) {
+      _initialized = false;
       debugPrint('[FCM] Initialization or registration failed: $e');
     }
   }

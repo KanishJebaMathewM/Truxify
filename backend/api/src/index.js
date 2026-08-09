@@ -1,49 +1,75 @@
+import wimBypassRouter from './routes/wimBypass.js';
 import express from 'express'
 import { corsMiddleware } from './middleware/cors.js'
+import { compressionMiddleware } from './config/compression.js'
 import helmet from 'helmet' // 🔒 ADDED HELMET IMPORT FOR ISSUES #361 & #944
 import http from 'http'
 import dotenv from 'dotenv'
+import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+dotenv.config({ path: path.resolve(__dirname, '../.env') })
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') })
 import hppProtection from './middleware/hppProtection.js';
 
 import { globalLimiter, authLimiter, healthLimiter } from './middleware/rateLimiter.js'
 import tripRoutes from './routes/tripRoutes.js'
 import deviceRoutes from './routes/deviceRoutes.js'
 import documentRoutes from './routes/documentRoutes.js'
+import securityHeaderDuplicates from './middleware/securityHeaderDuplicates.js';
+import cookieSecurityValidator from './middleware/cookieSecurityValidator.js';
 import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
 
-import { closeDbConnections, waitForMongoDb, validateConfig } from './config/db.js'
+import { closeDbConnections, waitForMongoDb, validateConfig, redisClient, supabaseAdmin } from './config/db.js'
 import { orderRepository } from './core/container.js'
-import { closeWebSocketServer, initWebSocketServer } from './sockets/tracker.js'
+import { OrderRepository } from './repositories/orderRepository.js'
+import { CacheManager } from './cache/CacheManager.js'
+import { closeWebSocketServer, initWebSocketServer, __testing as wsTesting } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
 import { validateEscrowSetup } from './services/escrow.js'
-import { startDlqWorker } from './workers/dlqWorker.js'
+
 
 import {
   requestIdMiddleware,
+  requestLogger,
   securityHeaders,
+  suspiciousRequests,
+  responseSanitizer,
 } from "./middleware/index.js";
-
 // Load REST routes
 import orderRoutes from './routes/orderRoutes.js'
 import driverRoutes from './routes/driverRoutes.js'
 import supportRoutes from './routes/supportRoutes.js'
 import profileRoutes from './routes/profileRoutes.js'
+import shipmentRoutes from './routes/shipmentRoutes.js'
 import loadRoutes from './routes/loadRoutes.js'
+import iotRoutes from './routes/iotRoutes.js'
 import deadheadRoutes from './routes/deadheadRoutes.js'
 import truckRoutes from './routes/truckRoutes.js'
 import authRoutes from './routes/authRoutes.js'
+import routeRoutes from './routes/routeRoutes.js'
 import healthRoutes from './routes/healthRoutes.js'
 import adminRoutes from './routes/adminRoutes.js'
 import lookupRoutes from './routes/lookupRoutes.js'
+import { getRoot, notFound } from './controllers/rootController.js'
 import webhookRoutes from './routes/webhookRoutes.js'
 import auditRoutes from './routes/auditRoutes.js'
+import paymentRoutes from './routes/paymentRoutes.js'
+import userRoutes from './routes/userRoutes.js'
+import voiceRoutes from './routes/voiceRoutes.js'
+import demandRoutes from './routes/demandRoutes.js'
+import escortWalletRoutes from './routes/escortWalletRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
 // ============================================================================
 import verificationRoutes from './routes/verificationRoutes.js'
 import oracleRoutes from './routes/oracleRoutes.js'
+import blockchainMonitoringRoutes from './routes/blockchainMonitoringRoutes.js'
 
 // ============================================================================
 // 🆕 GEOGRAPHIC SHARDING ROUTES
@@ -58,6 +84,16 @@ import shardManager from './services/sharding/ShardManager.js'
 // 🆕 WEBRTC P2P MESH NETWORK ROUTES
 // ============================================================================
 import webrtcRoutes from './routes/webrtcRoutes.js'
+
+// ============================================================================
+// 🆕 ROOT SUBSYSTEM ROUTES (eBPF, WASI, WASM, Snyk, Liquibase)
+// ============================================================================
+import ebpfRoutes from '../../../ebpf/routes.js'
+import wasiRoutes from '../../../wasi/routes.js'
+import wasmRoutes from '../../../wasm/routes.js'
+import snykRoutes from '../../../snyk/routes.js'
+import liquibaseRoutes from '../../../database/liquibase/routes.js'
+import earningsRouter from '../routes/earnings.js'
 import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 
 // ============================================================================
@@ -65,7 +101,9 @@ import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 // ============================================================================
 import fraudRoutes from './routes/fraudRoutes.js'
 import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
+import { authenticate } from './middleware/auth.js'
 import fraudDetection from './services/fraud/FraudDetectionService.js'
+import headerSizeMonitor from './middleware/headerSizeMonitor.js';
 
 // ============================================================================
 // 🆕 ZK-PROOFS FOR DRIVER KYC
@@ -74,30 +112,25 @@ import zkpRoutes from './routes/zkp.routes.js'
 
 
 // ============================================================================
-// 🆕 MULTI-CLOUD DISASTER RECOVERY
-// ============================================================================
-import drRoutes from '../../dr/routes.js'
-import multiCloudService from '../../dr/multi-cloud.service.js'
-
-// ============================================================================
 // 🆕 OPENTELEMETRY DISTRIBUTED TRACING
 // ============================================================================
 import tracing from './tracing/tracing.js'
 import { tracingMiddleware } from './middleware/tracingMiddleware.js'
-
-
 import logger from './middleware/logger.js'
 import { errorHandler } from './middleware/errorHandler.js'
 import { setupSwagger } from './config/swagger.js'
 import { correlationIdMiddleware } from './middleware/correlationId.js'
-import { requestIdMiddleware, requestLogger } from './middleware/requestId.js'
 import { requestCacheMiddleware } from './middleware/requestCacheMiddleware.js'
 import { requireJsonContent } from './middleware/contentType.js'
-import { initSentry, flushSentry, sentryErrorHandler } from './middleware/sentry.js'
+import { initSentry, flushSentry, sentryRequestHandler, captureException, sentryErrorHandler } from './middleware/sentry.js'
 import {
   startEscrowRefundReconciliation,
   stopEscrowRefundReconciliation
 } from './services/escrowRefundReconciliation.js'
+import {
+  startEscrowFundingReconciliation,
+  stopEscrowFundingReconciliation
+} from './services/escrowFundingReconciliation.js'
 import {
   startReputationReconciliation,
   stopReputationReconciliation,
@@ -110,6 +143,13 @@ import {
   startDlqWorker,
   stopDlqWorker,
 } from './workers/dlqWorker.js'
+import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
+import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
+import EscalationHandler from './services/blockchain/escalationHandler.js'
+import {
+  startWithdrawalSettlementWorker,
+  stopWithdrawalSettlementWorker
+} from './workers/withdrawalSettlementWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -130,10 +170,27 @@ try {
 }
 
 // ============================================================================
+// INITIALIZE DISTRIBUTED CACHE MANAGER
+// ============================================================================
+CacheManager.init(redisClient)
+
+// ============================================================================
+// BLOCKCHAIN MONITORING — singletons shared with blockchainMonitoringRoutes
+// ============================================================================
+const blockchainMetrics = new BlockchainMetrics()
+const escalationHandler = new EscalationHandler({})
+
+// ============================================================================
 // STARTUP VALIDATION — crash fast, not at request time
 // ============================================================================
 if (process.env.BYPASS_AUTH === 'true' && process.env.NODE_ENV !== 'development') {
   logger.fatal('BYPASS_AUTH is enabled outside development. This is a severe security misconfiguration. Set BYPASS_AUTH=false (or unset it), and set NODE_ENV=development if you need local testing.')
+  process.exit(1)
+}
+// ENABLE_TEST_AUTH allows plaintext x-user-id/x-user-role header impersonation
+// and must never be active outside a dedicated test harness (NODE_ENV=test).
+if (process.env.ENABLE_TEST_AUTH === 'true' && process.env.NODE_ENV !== 'test') {
+  logger.fatal('ENABLE_TEST_AUTH is enabled outside a test harness. This is a severe security misconfiguration — it trusts client-supplied identity headers. Only set it in NODE_ENV=test processes.')
   process.exit(1)
 }
 if (process.env.NODE_ENV === 'production' && !process.env.ML_API_KEY) {
@@ -146,6 +203,22 @@ if (process.env.NODE_ENV === 'production' && (!process.env.POLYGON_RPC_URL || !p
 }
 if (!process.env.DRIVER_LOGIN_OTP) {
   logger.warn('DRIVER_LOGIN_OTP is not set. Driver OTP login will be disabled until it is configured in production.')
+}
+if (!process.env.WEBHOOK_SECRET) {
+  logger.fatal('WEBHOOK_SECRET is not set. Escrow webhook signature verification cannot run and webhook requests will be rejected. Set WEBHOOK_SECRET and restart.')
+  process.exit(1)
+}
+
+// ============================================================================
+// 🆕 WEBHOOK VALIDATION
+// ============================================================================
+if (!process.env.WEBHOOK_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    logger.fatal('WEBHOOK_SECRET is not set. POST /api/webhooks/escrow would fail closed and reject all incoming webhooks. Set WEBHOOK_SECRET and restart.')
+    process.exit(1)
+  } else {
+    logger.warn('⚠️ WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
+  }
 }
 
 // ============================================================================
@@ -171,6 +244,11 @@ if (!process.env.CHAINLINK_ENABLED && !process.env.BACKUP_ORACLE_ENABLED) {
 if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST || 
     !process.env.SHARD_EAST_HOST || !process.env.SHARD_WEST_HOST) {
   logger.warn('⚠️ Shard hosts not fully configured. Using localhost defaults.')
+}
+
+if (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH || 
+    !process.env.SHARD_PASSWORD_EAST || !process.env.SHARD_PASSWORD_WEST) {
+  logger.warn('⚠️ Shard passwords not fully configured. Ensure all SHARD_PASSWORD_* env vars are set.')
 }
 
 
@@ -224,20 +302,15 @@ if (!process.env.ACTIVE_CLOUD) {
 // Validate escrow contract deployment — log warning if validation fails,
 // but don't crash (non-escrow functionality should still work).
 validateEscrowSetup().then((valid) => {
-  if (valid) {
-    logger.info('✅ Escrow contract deployment validated.')
-  } else {
-    logger.warn(
-      '⚠️  Escrow contract validation failed. Escrow operations will return ' +
-      '{ txData: null } and orders will proceed without on-chain protection. ' +
-      'Check ESCROW_CONTRACT_ADDRESS and the deployed contract.'
-    )
+  if (!valid) {
+    logger.warn('⚠️ Escrow setup validation failed. On-chain escrow features may not work correctly.')
   }
-})
+}).catch(err => logger.error({ err }, 'Escrow setup validation failed'))
 
 const app = express()
 const server = http.createServer(app)
-
+app.use(sentryRequestHandler());
+app.use(headerSizeMonitor);
 // Trust proxy required for rate-limiting behind load balancers/Docker.
 // TRUST_PROXY env var allows each deployment to set the correct proxy count:
 //   - Production (behind Nginx/ALB/Cloudflare) → 1 (default)
@@ -250,6 +323,8 @@ app.set('trust proxy', trustProxy)
 // 🔒 ADVANCED SECURITY HEADERS (HELMET CONFIGURATION)
 // Resolves missing security headers from Issues #361 and #944
 // ============================================================================
+app.use(securityHeaderDuplicates);
+app.use(cookieSecurityValidator);
 app.use(helmet({
   // Content Security Policy (CSP) - Prevents XSS and data injection
   contentSecurityPolicy: {
@@ -295,6 +370,14 @@ app.use(helmet({
 
 app.use(corsMiddleware)
 
+// ============================================================================
+// RESPONSE COMPRESSION
+// Registered after the security headers and before the routes that generate
+// large bodies. Clients that do not advertise Accept-Encoding: gzip continue
+// to receive identical uncompressed responses.
+// ============================================================================
+app.use(compressionMiddleware)
+
 // ── Production header sanitization (defense in depth) ────────────────
 // Even if a proxy or misconfiguration lets dev auth headers through,
 // strip them before they reach any route handler in production.
@@ -310,15 +393,16 @@ if (process.env.NODE_ENV === 'production') {
 // Payload parsers
 const jsonBodyLimit =
   process.env.JSON_BODY_LIMIT || '1mb';
-
 const urlEncodedBodyLimit =
   process.env.URLENCODED_BODY_LIMIT || '1mb';
-const jsonBodyLimit = process.env.JSON_BODY_LIMIT || '1mb';
 
 app.use(
   express.json({
     limit: jsonBodyLimit,
     strict: true,
+    verify: (req, _res, buf) => {
+      req.rawBody = buf.toString('utf8');
+    },
   })
 );
 
@@ -326,10 +410,6 @@ app.use(
   express.urlencoded({
     extended: true,
     limit: urlEncodedBodyLimit,
-app.use(
-  express.urlencoded({
-    extended: true,
-    limit: jsonBodyLimit,
   })
 );
 
@@ -357,16 +437,17 @@ app.use(correlationIdMiddleware)
 app.use(requestIdMiddleware)
 app.use(requestLogger)
 
+app.use(hppProtection)
+app.use(suspiciousRequests)
+
 // Enforce a known request content-type on mutating requests (POST/PUT/PATCH).
 // `requireJsonContent` only rejects unrecognized media types; the three
 // allowed types match the parsers registered above.
 app.use(requireJsonContent)
 
-// ============================================================================
-// 🆕 FRAUD DETECTION MIDDLEWARE (Global)
-// ============================================================================
-app.use(fraudDetectionMiddleware)
-app.use(networkAnalysisMiddleware)
+/// Fraud middleware is NOT registered globally here.
+// It is applied per-route after authenticate() so req.user is always set.
+// See individual route mounts below.
 
 // ============================================================================
 // RATE LIMITING
@@ -376,8 +457,8 @@ app.use('/api/health', healthRoutes)
 app.use('/api/v1/health', healthLimiter)
 app.use('/api/v1/health', healthRoutes)
 app.use('/api/', globalLimiter)
-app.use('/api/v1/trips', tripRoutes)
-
+app.use('/api/v1/trips', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, tripRoutes)
+app.use('/api/trips', tripRoutes)
 // ============================================================================
 // REQUEST-SCOPED CACHE — created per-request, destroyed after response.
 // Registers before all routes so every request handler benefits.
@@ -387,13 +468,23 @@ app.use('/api', requestCacheMiddleware)
 // ============================================================================
 // REST API ROUTING
 // ============================================================================
-app.use('/api/orders', orderRoutes)
+app.use('/api/orders', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, orderRoutes)
+app.use('/api/payments', authenticate, fraudDetectionMiddleware, networkAnalysisMiddleware, paymentRoutes)
 app.use('/api/driver', deadheadRoutes)
 app.use('/api/orders', trackingRoutes)
 app.use('/api/driver', driverRoutes)
+// Mounted here, with the other REST routes, so it sits behind the full
+// middleware chain — body parsers, correlation/request IDs, HPP protection,
+// content-type enforcement, fraud detection and the /api rate limiter.
+// Registering it earlier silently bypasses every one of them.
+app.use('/api/earnings', earningsRouter)
+app.use('/api/routes', routeRoutes)
+app.use('/api/v1/shipment', shipmentRoutes)
 app.use('/api/loads', loadRoutes)
+app.use('/api/iot', iotRoutes)
 app.use('/api/support', supportRoutes)
 app.use('/api/profile', profileRoutes)
+app.use('/api/users', userRoutes)
 app.use('/api/devices', deviceRoutes)
 app.use('/api/driver/documents', documentRoutes)
 app.use('/api/maintenance', maintenancePhotoRoutes)
@@ -403,12 +494,38 @@ app.use('/api/public', publicTrackingRoutes)
 app.use('/api/auth', authLimiter, authRoutes)
 app.use('/api/v1/admin', adminRoutes)
 app.use('/api/v1/admin/audit-logs', auditRoutes)
+app.use('/api/voice', voiceRoutes)
+app.use('/api/demand-heatmap', demandRoutes)
+app.use('/api/escorts/wallet', escortWalletRoutes)
+
+// ============================================================================
+// WEBHOOK ROUTES
+// ============================================================================
+app.use('/api/webhooks', webhookRoutes)
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
 // ============================================================================
 app.use('/api/verify', verificationRoutes)
 app.use('/api/oracle', oracleRoutes)
+app.use('/api/blockchain', (req, _res, next) => {
+  req.blockchainMetrics = blockchainMetrics;
+  req.escalationHandler = escalationHandler;
+  next();
+}, blockchainMonitoringRoutes)
+app.use('/api/webhooks', webhookRoutes)
+
+// ============================================================================
+// 🆕 BLOCKCHAIN MONITORING ROUTES
+// Attach the monitoring services and service-role client per request so the
+// handlers never fall back to the anon-key client (RLS would hide all rows).
+// ============================================================================
+app.use('/api/blockchain', (req, _res, next) => {
+  req.blockchainMetrics = blockchainMetrics
+  req.escalationHandler = escalationHandler
+  req.supabase = supabaseAdmin
+  next()
+}, blockchainMonitoringRoutes)
 
 // 🆕 Oracle Health Check Endpoint
 app.get('/api/oracle/health', (req, res) => {
@@ -454,6 +571,15 @@ app.get('/api/shard/health', async (req, res) => {
 // ============================================================================
 app.use('/api', webrtcRoutes)
 
+// ============================================================================
+// 🆕 ROOT SUBSYSTEM ROUTES (eBPF, WASI, WASM, Snyk, Liquibase)
+// ============================================================================
+app.use('/api', ebpfRoutes)
+app.use('/api', wasiRoutes)
+app.use('/api', wasmRoutes)
+app.use('/api', snykRoutes)
+app.use('/api', liquibaseRoutes)
+
 // 🆕 WebRTC Health Check Endpoint
 app.get('/api/webrtc/status', (req, res) => {
   res.json({
@@ -486,7 +612,7 @@ app.get('/api/fraud/health', (req, res) => {
 // ============================================================================
 // 🆕 ZK-PROOFS FOR DRIVER KYC ROUTES
 // ============================================================================
-app.use('/api', zkpRoutes)
+app.use('/api/zkp', zkpRoutes)
 
 // 🆕 ZK-Proof Health Check Endpoint
 app.get('/api/zkp/health', (req, res) => {
@@ -500,29 +626,6 @@ app.get('/api/zkp/health', (req, res) => {
 })
 
 
-
-// ============================================================================
-// 🆕 MULTI-CLOUD DISASTER RECOVERY ROUTES
-// ============================================================================
-app.use('/api', drRoutes)
-
-// 🆕 DR Health Check Endpoint
-app.get('/api/dr/health', async (req, res) => {
-  try {
-    const health = await multiCloudService.checkHealth();
-    res.json({
-      status: 'healthy',
-      data: health,
-      activeCloud: multiCloudService.activeCloud,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'unhealthy',
-      error: error.message
-    });
-  }
-})
 
 // ============================================================================
 // 🆕 OPENTELEMETRY HEALTH CHECK
@@ -542,17 +645,12 @@ app.get('/api/tracing/health', (req, res) => {
 setupSwagger(app)
 
 // Root route
-app.get('/', (req, res) => {
-  const wsHost = req.hostname || 'localhost'
-  const wsPort = process.env.PORT || 5000
-  res.send(`<h1>Truxify Backend API is running.</h1><p>Use WebSockets at <code>ws://${wsHost}:${wsPort}/ws/tracking</code></p>`)
-})
+app.get('/', getRoot)
+
+app.use(responseSanitizer)
 
 // Handling 404 Route Not Found
-app.use((req, res) => {
-  res.status(404).json({ error: 'Endpoint resource not found.' })
-})
-
+app.use(notFound)
 // Sentry error handler must come before the generic error handler;
 // it captures the exception automatically so we don't call captureException here.
 app.use(sentryErrorHandler())
@@ -566,6 +664,9 @@ app.use(errorHandler)
 await waitForMongoDb()
 initWebSocketServer(server, orderRepository)
 initLocationServer(server)
+
+// Expose WebSocket state for health aggregation
+globalThis.__truxify_wsState = wsTesting.getShutdownState()
 
 // ============================================================================
 // 🆕 WEBRTC SIGNALING SERVER INIT
@@ -591,10 +692,32 @@ server.listen(PORT, () => {
   logger.info(`🆕 ZK-Proof KYC Verification enabled with contract: ${process.env.KYC_VERIFIER_CONTRACT || 'not-deployed'}`)
 
 
-  startEscrowRefundReconciliation(orderRepository)
+  // Reconciliation workers sweep `orders` for stuck funding/refund states.
+  // They must run with the service-role client: the anon client has no RLS
+  // read access to `orders`, so an anon-backed repository would silently no-op.
+  const escrowReconciliationOrderRepository = supabaseAdmin
+    ? new OrderRepository(supabaseAdmin)
+    : orderRepository;
+  startEscrowRefundReconciliation(escrowReconciliationOrderRepository)
+  startEscrowReleaseReconciliation(escrowReconciliationOrderRepository)
+  startEscrowFundingReconciliation(escrowReconciliationOrderRepository)
   startReputationReconciliation(orderRepository)
   startDlqWorker()
+  startStaleOrderWorker(escrowReconciliationOrderRepository)
   startDocumentExpiryWorker()
+  startWithdrawalSettlementWorker()
+
+  // Register worker states for health aggregation
+  globalThis.__truxify_workers = {
+    escrowRefundReconciliation: true,
+    escrowReleaseReconciliation: true,
+    escrowFundingReconciliation: true,
+    reputationReconciliation: true,
+    dlqWorker: true,
+    staleOrderWorker: true,
+    documentExpiryWorker: true,
+    withdrawalSettlementWorker: true,
+  }
 })
 
 // ============================================================================
@@ -619,10 +742,13 @@ async function shutdown (signal) {
   // Stop background workers
   stopEscrowReleaseReconciliation()
   stopEscrowRefundReconciliation()
+  stopEscrowFundingReconciliation()
   stopReputationReconciliation()
   stopDlqWorker()
   stopDocumentExpiryWorker()
+  stopWithdrawalSettlementWorker()
   fraudDetection.destroy()
+  CacheManager.shutdown()
 
   const forceExit = setTimeout(() => {
     logger.error('[shutdown] Timeout exceeded — forcing exit.')
@@ -680,6 +806,8 @@ process.on('uncaughtException', async (err) => {
 
 process.on('unhandledRejection', async (reason) => {
   logger.error({ reason }, 'Unhandled promise rejection')
+  captureException(reason)
+  await flushSentry(2000)
   await shutdown('unhandledRejection')
 })
 
@@ -725,3 +853,5 @@ app.use((err, req, res, next) => {
 
   next(err);
 });
+
+app.use('/api/wim', wimBypassRouter);

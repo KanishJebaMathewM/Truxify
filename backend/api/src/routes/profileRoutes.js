@@ -35,6 +35,12 @@
  *       properties:
  *         full_name:
  *           type: string
+ *         phone:
+ *           type: string
+ *         email:
+ *           type: string
+ *         number_plate:
+ *           type: string
  *         language:
  *           type: string
  *         dark_mode:
@@ -100,10 +106,15 @@ import {
 } from '../services/profileService.js';
 import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
-import { invalidateCachedProfile, invalidateCachedSupabaseProfile } from '../lib/profileCache.js';
+import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
 import { auditLog } from '../middleware/auditLog.js';
 
 const router = express.Router();
+
+function sanitizeNumberPlate(plate) {
+  if (!plate || typeof plate !== 'string') return '';
+  return plate.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
 
 
 // Cache control middleware for profile endpoints
@@ -277,7 +288,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
   try {
     const { data: existing, error: checkErr } = await supabase
       .from('profiles')
-      .select('wallet_address, polygon_wallet_address')
+      .select('polygon_wallet_address')
       .eq('id', userId)
       .maybeSingle();
 
@@ -287,7 +298,6 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     const { error: updateErr } = await supabase
       .from('profiles')
       .update({
-        wallet_address: normalized,
         polygon_wallet_address: normalized,
       })
       .eq('id', userId);
@@ -314,9 +324,9 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
     if (req.user && req.user.id) {
       try {
-        await invalidateCachedSupabaseProfile(req.user.id);
+        await invalidateCachedSupabaseProfileAll(req.user.id);
       } catch (err) {
-        logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
+        logger.warn({ userId: req.user.id, err: err.message }, 'Failed to invalidate profile cache');
       }
     }
 
@@ -332,7 +342,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
  *   put:
  *     tags: [Profile]
  *     summary: Update profile
- *     description: Updates basic profile fields (full_name, language, dark_mode) and optionally driver online status. Invalidates Redis cache.
+ *     description: Updates basic profile fields (full_name, phone, email, language, dark_mode) and, for drivers, the online status and the truck number plate. Invalidates Redis cache.
  *     security:
  *       - BearerAuth: []
  *     requestBody:
@@ -354,30 +364,52 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
 router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), async (req, res) => {
   try {
     const userId = req.user.id;
-    const { full_name, language, dark_mode, is_online } = req.body;
+    const { full_name, language, dark_mode, is_online, phone, email, number_plate } = req.body;
     const role = req.user.role;
+
+    const profileUpdate = {};
+    if (full_name !== undefined) profileUpdate.full_name = full_name;
+    if (language !== undefined) profileUpdate.language = language;
+    if (dark_mode !== undefined) profileUpdate.dark_mode = dark_mode;
+    if (phone !== undefined) profileUpdate.phone = phone;
+    if (email !== undefined) profileUpdate.email = email;
 
     const { data, error } = await supabase
       .from('profiles')
-      .update({
-        full_name,
-        language,
-        dark_mode
-      })
+      .update(profileUpdate)
       .eq('id', userId)
       .select()
       .single();
 
     if (error) throw error;
-    if (role === 'driver' && typeof is_online === 'boolean') {
-      const { error: driverError } = await supabase
-      .from('driver_details')
-      .update({
-        is_online
-      })
-      .eq('user_id', userId);
+    if (role === 'driver') {
+      if (typeof is_online === 'boolean') {
+        const { error: driverError } = await supabase
+        .from('driver_details')
+        .update({
+          is_online
+        })
+        .eq('user_id', userId);
 
-      if (driverError) throw driverError;
+        if (driverError) throw driverError;
+      }
+
+      if (number_plate !== undefined) {
+        const normalizedPlate = sanitizeNumberPlate(number_plate);
+        const { error: truckError } = await supabase
+          .from('trucks')
+          .update({
+            number_plate: normalizedPlate
+          })
+          .eq('driver_id', userId);
+
+        if (truckError) {
+          if (truckError.code === '23505') {
+            return res.status(409).json({ error: 'A truck with this number plate is already registered.' });
+          }
+          throw truckError;
+        }
+      }
     }
 
     // Invalidate the profile cache so that the next request retrieves fresh profile data.
@@ -387,9 +419,9 @@ router.put('/', authenticate, userLimiter, validateBody(updateProfileSchema), as
     }
     if (req.user && req.user.id) {
       try {
-        await invalidateCachedSupabaseProfile(req.user.id);
+        await invalidateCachedSupabaseProfileAll(req.user.id);
       } catch (err) {
-        logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
+        logger.warn({ userId: req.user.id, err: err.message }, 'Failed to invalidate profile cache');
       }
     }
 
@@ -458,9 +490,9 @@ router.put('/fcm-token', authenticate, userLimiter, validateBody(updateFcmTokenS
     }
     if (req.user.id) {
       try {
-        await invalidateCachedSupabaseProfile(req.user.id);
+        await invalidateCachedSupabaseProfileAll(req.user.id);
       } catch (err) {
-        logger.warn('[profileRoutes] Failed to invalidate profile cache for user %s: %s', req.user.id, err.message);
+        logger.warn({ userId: req.user.id, err: err.message }, 'Failed to invalidate profile cache');
       }
     }
 
@@ -533,6 +565,18 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
       return res.status(500).json({ error: 'Failed to fetch statement records.', details: error.message });
     }
 
+    // Fetch the driver's name/phone so the statement PDF shows the real driver
+    // instead of the app-side 'Driver' fallback.
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('full_name, phone')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (profileError) {
+      return res.status(500).json({ error: 'Failed to fetch driver profile.', details: profileError.message });
+    }
+
     // Compute totals
     let totalBaseFreight = 0;
     let totalPlatformFees = 0;
@@ -566,11 +610,18 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
 
     if (format === 'csv') {
       // Optimize memory: construct CSV string directly using string builder/loop
+      const sanitizeCsvValue = (val) => {
+        let str = String(val);
+  if (/^[=+\-@\t\r]/.test(str)) {
+    str = `'` + str;
+  }
+        return `"${str.replace(/"/g, '""')}"`;
+      };
       const headers = ['ID', 'Order Display ID', 'Pickup Address', 'Drop Address', 'Pickup Date', 'Base Freight', 'Platform Fee', 'Toll Estimate', 'Net Earnings', 'Status'];
-      let csvString = headers.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',') + '\n';
+      let csvString = headers.map(val => sanitizeCsvValue(val)).join(',') + '\n';
       for (const t of tripsList) {
         const row = [t.id, t.order_display_id, t.pickup_address, t.drop_address, t.pickup_date, t.base_freight, t.platform_fee, t.toll_estimate, t.net_earnings, t.status];
-        csvString += row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(',') + '\n';
+        csvString += row.map(val => sanitizeCsvValue(val)).join(',') + '\n';
       }
       res.setHeader('Content-Type', 'text/csv');
       return res.send(csvString.trimEnd());
@@ -584,6 +635,10 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
     }
 
     res.json({
+      driver_name: profile?.full_name ?? null,
+      driver_phone: profile?.phone ?? null,
+      start_date: start_date ?? null,
+      end_date: end_date ?? null,
       summary: {
         total_trips: tripsList.length,
         total_base_freight: totalBaseFreight,
@@ -673,7 +728,7 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
 
     await Promise.all([
       profile.firebase_uid ? invalidateCachedProfile(profile.firebase_uid) : Promise.resolve(),
-      invalidateCachedSupabaseProfile(profile.id),
+      invalidateCachedSupabaseProfileAll(profile.id),
     ]);
 
     return res.json({ success: true, message: `Cache invalidated for user ${profile.id}.` });
@@ -682,6 +737,72 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
   }
 });
 
+
+// GET DRIVER PERFORMANCE STATISTICS
+router.get('/driver/performance-stats', authenticate, requirePolicy('profile:view-statement'), userLimiter, async (req, res) => {
+  const userId = req.user.id;
+
+  try {
+    // 1. Fetch completed orders / trips for stats
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('id, base_freight, created_at, status, distance_km, customer_rating, on_time')
+      .eq('driver_id', userId)
+      .in('status', ['delivered', 'payment_released']);
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: error.message });
+    }
+
+    const trips = orders || [];
+    const totalDeliveries = trips.length;
+    const totalDistance = trips.reduce((acc, t) => acc + (Number(t.distance_km) || 0), 0);
+    
+    // Calculate average rating
+    const ratings = trips.map(t => Number(t.customer_rating)).filter(r => !isNaN(r) && r > 0);
+    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : 0;
+
+    // Calculate on-time percentage
+    const onTimeCount = trips.filter(t => t.on_time !== false).length;
+    const onTimePercentage = totalDeliveries > 0 ? Number(((onTimeCount / totalDeliveries) * 100).toFixed(1)) : 0;
+
+    // Lifetime earnings
+    const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);
+
+    // Monthly summary (current month)
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const monthlyTrips = trips.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
+    const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);
+
+    const monthlyPerformanceSummary = {
+      month: currentMonth,
+      deliveriesCompleted: monthlyTrips.length,
+      earnings: Number(monthlyEarnings.toFixed(2))
+    };
+
+    // Achievement badges based on milestones
+    const badges = [];
+    if (totalDeliveries >= 1) badges.push({ id: 'first_trip', title: 'Road Warrior', description: 'Completed first delivery successfully' });
+    if (totalDeliveries >= 10) badges.push({ id: 'pro_driver', title: 'Logistics Pro', description: 'Completed 10+ deliveries' });
+    if (averageRating >= 4.5 && totalDeliveries >= 5) badges.push({ id: 'top_rated', title: 'Top Rated', description: 'Maintained 4.5+ star rating' });
+    if (totalDistance >= 500) badges.push({ id: 'long_hauler', title: 'Long Hauler', description: 'Traveled over 500 km' });
+
+    res.json({
+      totalDeliveries,
+      totalDistanceKm: Number(totalDistance.toFixed(1)),
+      averageRating,
+      onTimePercentage,
+      lifetimeEarnings: Number(lifetimeEarnings.toFixed(2)),
+      monthlyPerformanceSummary,
+      achievementBadges: badges
+    });
+  } catch (err) {
+    logger.error(err);
+    res.status(500).json({ error: 'Internal Server Error', details: err.message });
+  }
+});
+
 export default router;
+
 
 // Resolves #2046: DELETE /admin/cache/:userId endpoint

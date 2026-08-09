@@ -50,13 +50,13 @@
  */
 
 import express from 'express';
-import { supabase } from '../config/db.js';
-import { authenticate } from '../middleware/auth.js';
+import { supabaseAdmin } from '../config/db.js';
+import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
-import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
-import { validateParams } from '../middleware/validate.js';
+import { loadFilterQuerySchema, createLoadSchema } from '../validation/loadSchemas.js';
+import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
 import { paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 
@@ -151,17 +151,7 @@ function sanitizeLoadFilters(query) {
  */
 router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), async (req, res) => {
   try {
-    const filterResult = loadFilterQuerySchema.safeParse(req.query);
-    if (!filterResult.success) {
-      return res.status(400).json({
-        error: 'Validation failed',
-        details: filterResult.error.issues.map(issue => ({
-          field: issue.path.join('.') || 'query',
-          message: issue.message,
-        })),
-      });
-    }
-    const filters = filterResult.data;
+    const filters = req.query;
 
     const pageVal = req.query.page || '1';
     const limitVal = req.query.limit || '10';
@@ -203,7 +193,9 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
     const from = (page - 1) * limit;
     const to   = from + limit - 1;
 
-    let query = supabase
+    // load_offers is RLS-protected with all anon privileges revoked, so the
+    // marketplace board must read through the service-role client.
+    let query = supabaseAdmin
       .from('load_offers')
       .select('*', { count: 'exact' });
 
@@ -296,7 +288,7 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
       ...load,
       pickup: load.pickup_address,
       destination: load.drop_address,
-      estimated_price: load.freight_value / 100, // convert paisa to Rupees
+      estimated_price: load.freight_value / 100, // freight_value stored in paisa — divide by 100 for INR display
       vehicle_type: 'Truck'
     }));
 
@@ -310,6 +302,50 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
 
   } catch (err) {
     logger.error('Internal Server Error in GET /api/loads:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// 1.5 CREATE NEW LOAD OFFER (CUSTOMER)
+// POST /api/loads
+// ============================================================================
+router.post('/', authenticate, userLimiter, requireRole(['customer']), validateBody(createLoadSchema), async (req, res) => {
+  try {
+    const { origin, destination, weight_tons, expected_price, material_type } = req.body;
+
+    const pickupAddress = origin.address || 'Unknown Origin';
+    const dropAddress = destination.address || 'Unknown Destination';
+    const routeLabel = `${pickupAddress.split(',')[0]} \u2192 ${dropAddress.split(',')[0]}`;
+
+    const { data, error } = await supabaseAdmin
+      .from('load_offers')
+      .insert({
+        customer_id: req.user.id,
+        customer_name: req.user.fullName || 'Customer',
+        pickup_address: pickupAddress,
+        drop_address: dropAddress,
+        pickup_lat: origin.lat,
+        pickup_lng: origin.lng,
+        drop_lat: destination.lat,
+        drop_lng: destination.lng,
+        route_label: routeLabel,
+        weight: `${weight_tons} tonnes`,
+        freight_value: Math.round(parseFloat(expected_price) * 100), // user input in INR — multiply by 100 to store as paisa
+        goods_type: material_type || 'General',
+        status: 'available'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      logger.error('Failed to create load offer:', error);
+      return res.status(500).json({ error: 'Failed to create load offer', details: error.message });
+    }
+
+    res.status(201).json({ message: 'Load posted successfully', load: data });
+  } catch (err) {
+    logger.error('Internal Server Error in POST /api/loads:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -347,7 +383,7 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
  */
 router.get('/:id', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateParams(paramIdSchema), async (req, res) => {
   try {
-    const { data: load, error } = await supabase
+    const { data: load, error } = await supabaseAdmin
       .from('load_offers')
       .select('*')
       .eq('id', req.params.id)
@@ -367,7 +403,7 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('load-offer:browse')
       ...load,
       pickup: load.pickup_address,
       destination: load.drop_address,
-      estimated_price: load.freight_value / 100, // convert paisa to Rupees
+      estimated_price: load.freight_value / 100, // freight_value stored in paisa — divide by 100 for INR display
       vehicle_type: 'Truck'
     };
 

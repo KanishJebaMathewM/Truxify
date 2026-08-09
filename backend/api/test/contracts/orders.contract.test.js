@@ -81,7 +81,7 @@ const validOrder = {
   drop_address: '456 Drop Ave, Delhi',
   drop_lat: 28.7041,
   drop_lng: 77.1025,
-  pickup_date: '2026-06-10',
+  pickup_date: '2026-10-10',
   pickup_time: '09:00',
   goods_type: 'electronics',
   weight_tonnes: 10,
@@ -395,7 +395,7 @@ describe('POST /api/orders/:id/cancel — cancel order contract', () => {
       id: 'order-cancel-4',
       customer_id: CUSTOMER['x-user-id'],
       order_display_id: 'OD-REFUND-FAIL',
-      status: 'in_transit',
+      status: 'assigned',
       escrow_status: 'funded',
       cancellation_fee: 500,
     });

@@ -1,2 +1,92 @@
+name: Backend CI
 
-# Resolves #2054: Parallelize vitest suites
+on:
+  pull_request:
+    paths:
+      - "backend/api/**"
+      - ".github/workflows/backend-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/api/**"
+      - ".github/workflows/backend-ci.yml"
+
+concurrency:
+  group: truxify-backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    name: Backend Unit Tests (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: backend/api
+        run: npm install --workspaces=false --legacy-peer-deps --ignore-scripts
+
+      - name: Run unit tests (shard ${{ matrix.shard }}/4)
+        working-directory: backend/api
+        run: npx vitest run test/unit --shard=${{ matrix.shard }}/4
+
+  integration-tests:
+    name: Backend Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: unit-tests
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: truxify_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/truxify_test
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: backend/api
+        run: npm install --workspaces=false --legacy-peer-deps --ignore-scripts
+
+      - name: Run integration tests
+        working-directory: backend/api
+        run: npm run test:integration

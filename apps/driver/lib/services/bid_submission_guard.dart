@@ -16,4 +16,10 @@ class BidSubmissionGuard {
       _inFlight.remove(loadId);
     }
   }
+
+  bool isInFlight(String loadId) => _inFlight.contains(loadId);
+
+  int get pendingCount => _inFlight.length;
+
+  void clear() => _inFlight.clear();
 }

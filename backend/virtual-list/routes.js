@@ -1,6 +1,6 @@
 import express from 'express';
 import VirtualList from './VirtualList.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 
@@ -185,7 +185,7 @@ router.post('/virtual-list/item', (req, res) => {
 router.delete('/virtual-list/item/:index', (req, res) => {
     try {
         const { index } = req.params;
-        const result = list.removeItem(parseInt(index));
+        const result = list.removeItem(parseInt(index, 10));
         
         res.json({
             success: true,

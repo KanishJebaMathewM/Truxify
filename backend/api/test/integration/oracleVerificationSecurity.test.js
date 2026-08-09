@@ -1,3 +1,6 @@
+process.env.BYPASS_AUTH = 'true';
+process.env.ENABLE_TEST_AUTH = 'true';
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
@@ -65,8 +68,30 @@ vi.mock('../../src/core/container.js', () => ({
   verificationService: mockVerificationService,
 }));
 
+const mockDigilockerService = {
+  exchangeCode: vi.fn().mockResolvedValue({ access_token: 'mock_token', digilocker_id: 'mock_id' }),
+  verifyDocuments: vi.fn().mockResolvedValue({ verified: true, is_digilocker_verified: true }),
+};
+
+vi.mock('../../src/services/verification/DigilockerService.js', () => ({
+  default: mockDigilockerService,
+}));
+
+const mockSupabase = {
+  from: () => ({
+    select: () => ({
+      eq: () => ({
+        maybeSingle: async () => ({
+          data: { id: VALID_ORDER_ID, customer_id: 'user-1', driver_id: 'driver-1' },
+          error: null,
+        }),
+      }),
+    }),
+  }),
+};
+
 vi.mock('../../src/config/db.js', () => ({
-  supabase: null,
+  supabase: mockSupabase,
   firebaseAdmin: null,
   redisClient: null,
   mongoDb: null,
@@ -95,7 +120,7 @@ const USER_HEADERS = {
 };
 
 const DRIVER_HEADERS = {
-  'x-user-id': 'driver-1',
+  'x-user-id': VALID_DRIVER_ID,
   'x-user-role': 'driver',
 };
 
@@ -345,6 +370,42 @@ describe('Verification Routes — Authentication', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
+
+  it('POST /digilocker/token returns 401 without auth headers', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/digilocker/token')
+      .send({ code: 'valid_code' });
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /digilocker/token returns 200 with valid auth and code', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/digilocker/token')
+      .set(USER_HEADERS)
+      .send({ code: 'valid_code' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('POST /digilocker/verify returns 401 without auth headers', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/digilocker/verify')
+      .send({ accessToken: 'mock_token' });
+    expect(res.status).toBe(401);
+  });
+
+  it('POST /digilocker/verify returns 200 with valid auth and accessToken', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/digilocker/verify')
+      .set(USER_HEADERS)
+      .send({ accessToken: 'mock_token' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
 });
 
 describe('Verification Routes — Request Validation', () => {
@@ -402,6 +463,61 @@ describe('Verification Routes — Request Validation', () => {
       .set(DRIVER_HEADERS)
       .send({ driverId: VALID_DRIVER_ID, extra: 'nope' });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('Verification Routes — Document Check IDOR Guard', () => {
+  const OTHER_DRIVER_ID = '770e8400-e29b-41d4-a716-446655440002';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns 403 when a driver tries to check another driver\'s documents', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/documents/check')
+      .set(DRIVER_HEADERS)
+      .send({ driverId: OTHER_DRIVER_ID });
+
+    expect(res.status).toBe(403);
+    expect(mockVerificationService.checkDocumentIntegrity).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when a customer tries to check a driver\'s documents', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/documents/check')
+      .set(USER_HEADERS)
+      .send({ driverId: VALID_DRIVER_ID });
+
+    expect(res.status).toBe(403);
+    expect(mockVerificationService.checkDocumentIntegrity).not.toHaveBeenCalled();
+  });
+
+  it('returns 200 when a driver checks their own documents', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/documents/check')
+      .set(DRIVER_HEADERS)
+      .send({ driverId: VALID_DRIVER_ID });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(mockVerificationService.checkDocumentIntegrity).toHaveBeenCalledWith(VALID_DRIVER_ID);
+  });
+
+  it('returns 200 when an admin checks any driver\'s documents', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/documents/check')
+      .set('x-user-id', 'admin-uuid-999')
+      .set('x-user-role', 'admin')
+      .send({ driverId: OTHER_DRIVER_ID });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(mockVerificationService.checkDocumentIntegrity).toHaveBeenCalledWith(OTHER_DRIVER_ID);
   });
 });
 

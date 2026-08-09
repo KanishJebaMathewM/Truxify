@@ -1,11 +1,13 @@
 import { WebSocketServer } from 'ws';
-import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
+import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
 import { supabase, redisClient } from '../../config/db.js';
 
 class WebRTCSignalingServer {
   constructor(server) {
-    this.wss = new WebSocketServer({ server, path: '/webrtc' });
+    const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 4096;
+    this.wss = new WebSocketServer({ server, path: '/webrtc', maxPayload: MAX_WS_PAYLOAD_BYTES });
     this.redis = redisClient;
     this.peers = new Map(); // peerId -> { ws, location, meshId }
     this.meshes = new Map(); // meshId -> Set of peerIds
@@ -17,12 +19,18 @@ class WebRTCSignalingServer {
   }
 
   setupWebSocket() {
-    this.wss.on('connection', (ws, req) => {
+    this.wss.on('connection', async (ws, req) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
 
-      // Authenticate via token query parameter or Authorization header
-      const token = url.searchParams.get('token')
-        || req.headers.authorization?.replace('Bearer ', '');
+      // Reject tokens in the URL query string — they leak via logs, proxies,
+      // and browser history. Only the Authorization header is accepted.
+      if (url.searchParams.get('token')) {
+        logger.warn('WebRTC connection rejected: token provided in query string');
+        ws.close(4001, 'Token in URL is not allowed');
+        return;
+      }
+
+      const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
 
       if (!token) {
         logger.warn('WebRTC connection rejected: no token provided');
@@ -32,9 +40,9 @@ class WebRTCSignalingServer {
 
       let decoded;
       try {
-        decoded = jwt.verify(token, process.env.JWT_SECRET);
+        decoded = await verifyAuthToken(token);
       } catch (err) {
-        logger.warn(`WebRTC connection rejected: invalid token — ${err.message}`);
+        logger.warn(`WebRTC connection rejected: ${err.message}`);
         ws.close(4001, 'Invalid token');
         return;
       }
@@ -45,7 +53,7 @@ class WebRTCSignalingServer {
       // Store peer with authenticated user info
       this.peers.set(peerId, {
         ws,
-        userId: decoded.sub,
+        userId: decoded.id,
         role: decoded.role,
         location: null,
         meshId,
@@ -85,7 +93,7 @@ class WebRTCSignalingServer {
 
       // Handle errors to prevent process crash
       ws.on('error', (err) => {
-        logger.warn('WebSocket error for peer %s: %s', peerId, err.message);
+        logger.warn({ peerId, err: err.message }, 'WebSocket error for peer');
       });
 
       // Send connected peers list
@@ -99,16 +107,21 @@ class WebRTCSignalingServer {
 
     switch (message.type) {
       case 'location-update':
-        peer.location = message.location;
+        if (!this.isValidLocation(message.location)) {
+          logger.warn(`Invalid WebRTC location update dropped for peer ${peerId}`);
+          return;
+        }
+
+        peer.location = this.normalizeLocation(message.location);
         if (this.redis) {
           await this.redis.setex(
             `peer:${peerId}:location`,
             60,
-            JSON.stringify(message.location)
+            JSON.stringify(peer.location)
           );
         }
         // Relay location to nearby peers
-        this.relayLocation(peerId, message.location);
+        this.relayLocation(peerId, peer.location);
         break;
 
       case 'webrtc-offer':
@@ -206,6 +219,12 @@ class WebRTCSignalingServer {
       return;
     }
 
+    const peer = this.peers.get(peerId);
+    if (!peer) {
+      logger.warn(`[WebRTC] GPS data from unknown peer ${peerId}`);
+      return;
+    }
+
     const normalizedData = {
       ...data,
       location: this.normalizeLocation(data.location)
@@ -296,13 +315,13 @@ class WebRTCSignalingServer {
   }
 
   getOrCreateMesh() {
-    const meshId = `mesh_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const meshId = `mesh_${crypto.randomUUID()}`;
     this.meshes.set(meshId, new Set());
     return meshId;
   }
 
   generatePeerId() {
-    return `peer_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    return `peer_${crypto.randomUUID()}`;
   }
 
   startDiscovery() {
@@ -321,7 +340,14 @@ class WebRTCSignalingServer {
       this._discoveryInterval = null;
     }
     for (const [peerId, peer] of this.peers) {
-      try { peer.ws.close(1001, 'Server shutting down'); } catch {}
+      try {
+        peer.ws.close(1001, 'Server shutting down');
+      } catch (err) {
+        logger.warn(
+          { err },
+          '[WebRTC] Failed to close peer WebSocket during shutdown.'
+        );
+      }
     }
     this.peers.clear();
     this.meshes.clear();
@@ -371,7 +397,18 @@ class WebRTCSignalingServer {
     };
   }
 
-  async getOfflineGPSData(peerId, since) {
+  canUserAccessPeer(peerId, user) {
+    if (user?.role === 'admin') return true;
+
+    const peer = this.peers.get(peerId);
+    return Boolean(peer && peer.userId === user?.id);
+  }
+
+  async getOfflineGPSData(peerId, since, requestingUser) {
+    if (!requestingUser || !this.canUserAccessPeer(peerId, requestingUser)) {
+      logger.warn(`[WebRTC] Unauthorized offline GPS data access attempt for peer ${peerId}`);
+      return [];
+    }
     const { data } = await supabase
       .from('gps_offline_data')
       .select('*')
@@ -382,7 +419,11 @@ class WebRTCSignalingServer {
     return data || [];
   }
 
-  async syncOfflineData(peerId) {
+  async syncOfflineData(peerId, requestingUser) {
+    if (!requestingUser || !this.canUserAccessPeer(peerId, requestingUser)) {
+      logger.warn(`[WebRTC] Unauthorized sync offline data attempt for peer ${peerId}`);
+      return;
+    }
     // Mark data as synced for this peer
     await supabase
       .from('gps_offline_data')

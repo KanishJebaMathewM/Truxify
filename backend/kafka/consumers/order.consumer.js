@@ -1,16 +1,22 @@
 import kafka, { TOPICS, CONSUMER_GROUPS } from '../config/kafka.config.js';
+import processedEventRepository from '../repositories/processedEvent.repository.js';
+import deadLetterRepository from '../repositories/deadLetter.repository.js';
 import logger from '../../api/src/middleware/logger.js';
 
 class OrderConsumer {
-  constructor() {
+  constructor({ eventBus: externalEventBus } = {}) {
     this.handlers = new Map();
     this.initialized = false;
+    this._eventBus = externalEventBus || null;
+  }
+
+  setEventBus(eventBus) {
+    this._eventBus = eventBus;
   }
 
   async initialize() {
     if (this.initialized) return;
 
-    // Order service consumer
     await kafka.createConsumer(CONSUMER_GROUPS.ORDER_SERVICE, [
       TOPICS.ORDER_CREATED,
       TOPICS.ORDER_UPDATED,
@@ -23,7 +29,6 @@ class OrderConsumer {
       TOPICS.ESCROW_RELEASED,
     ]);
 
-    // Notification service consumer
     await kafka.createConsumer(CONSUMER_GROUPS.NOTIFICATION_SERVICE, [
       TOPICS.ORDER_CREATED,
       TOPICS.DRIVER_ASSIGNED,
@@ -32,7 +37,6 @@ class OrderConsumer {
       TOPICS.NOTIFICATION_SENT,
     ]);
 
-    // Analytics service consumer
     await kafka.createConsumer(CONSUMER_GROUPS.ANALYTICS_SERVICE, [
       TOPICS.ORDER_CREATED,
       TOPICS.ORDER_UPDATED,
@@ -45,7 +49,6 @@ class OrderConsumer {
       TOPICS.LOCATION_UPDATED,
     ]);
 
-    // Fraud service consumer
     await kafka.createConsumer(CONSUMER_GROUPS.FRAUD_SERVICE, [
       TOPICS.ORDER_CREATED,
       TOPICS.PAYMENT_CONFIRMED,
@@ -63,50 +66,153 @@ class OrderConsumer {
     this.handlers.get(topic).push(handler);
   }
 
+  registerHandlerViaEventBus(eventType, handler) {
+    if (this._eventBus) {
+      this._eventBus.subscribe(eventType, handler);
+      logger.info(`[OrderConsumer] Registered EventBus handler for "${eventType}"`);
+    } else {
+      logger.warn('[OrderConsumer] No EventBus set, falling back to direct handler registration');
+      this.registerHandler(eventType, handler);
+    }
+  }
+
   async startConsuming(groupId) {
     const consumer = await kafka.getConsumer(groupId);
     const handlers = this.handlers;
 
-    await kafka.consumeMessages(
-      groupId,
-      async (topic, message, rawMessage) => {
-        if (handlers.has(topic)) {
-          const topicHandlers = handlers.get(topic);
-          for (const handler of topicHandlers) {
-            try {
-              await handler(message, rawMessage);
-            } catch (error) {
-              logger.error(`Handler error for ${topic}:`, error);
-            }
+    const messageHandler = async (topic, message, rawMessage) => {
+      // Idempotency claim: only the first delivery of an event may apply side
+      // effects. Kafka redelivers messages on restarts/rebalances, so without
+      // this guard PAYMENT_CONFIRMED / TRIP_COMPLETED / ESCROW_RELEASED would
+      // be processed (and credit wallets) more than once.
+      const eventId = message?.metadata?.eventId || rawMessage?.key?.toString() || null;
+      if (eventId) {
+        const isNew = await processedEventRepository.claimProcessed(
+          topic,
+          eventId,
+          message?.orderId || message?.payload?.orderId || null
+        );
+        if (!isNew) {
+          logger.info(`[OrderConsumer] Skipping duplicate event ${eventId} on ${topic}`);
+          return;
+        }
+      }
+
+      if (handlers.has(topic)) {
+        const topicHandlers = handlers.get(topic);
+        for (const handler of topicHandlers) {
+          try {
+            await handler(message, rawMessage);
+          } catch (error) {
+            logger.error(`Handler error for ${topic}:`, error);
+            await this.storeDeadLetter(topic, rawMessage, error);
           }
         }
-      },
+      }
+
+      if (this._eventBus) {
+        const eventType = topic.replace(/\./g, '_').toUpperCase();
+        if (message && typeof message === 'object' && message.metadata) {
+          // Object form reuses the original event id so the in-process
+          // EventBus deduplication window applies to redelivered messages.
+          this._eventBus.publish(message, {
+            adapters: [],
+            source: `kafka:${groupId}`,
+          });
+        } else {
+          this._eventBus.publish(eventType, message, {
+            adapters: [],
+            source: `kafka:${groupId}`,
+          });
+        }
+      }
+    };
+
+    await kafka.consumeMessages(
+      groupId,
+      messageHandler,
       async (error, topic, message) => {
-        // Dead letter queue handling
         logger.error(`Dead letter: ${topic}`, { error: error.message });
-        // Store in DLQ for later processing
         await this.storeDeadLetter(topic, message, error);
       }
     );
   }
 
   async storeDeadLetter(topic, message, error) {
-    // Store dead letter messages in Redis or MongoDB
+    const rawValue = message?.value;
+    const serialized = Buffer.isBuffer(rawValue)
+      ? rawValue.toString()
+      : rawValue != null
+        ? String(rawValue)
+        : null;
+
     const dlqEntry = {
       topic,
-      message: message.value.toString(),
+      message: serialized,
       error: error.message,
       timestamp: new Date().toISOString(),
       retryCount: 0,
     };
-    
-    // In production, store in Redis list or MongoDB collection
-    logger.info(`📦 Dead letter stored for ${topic}`, dlqEntry);
+
+    const stored = await deadLetterRepository.store({
+      topic,
+      message: dlqEntry,
+      error: error.message,
+      retryCount: 0,
+    });
+
+    if (stored) {
+      logger.info(`📦 Dead letter persisted for ${topic} (id: ${stored.id})`);
+    } else {
+      logger.error(`📦 Dead letter for ${topic} could NOT be persisted — message dropped`, dlqEntry);
+    }
+  }
+
+  async replayDeadLetters({ topic = null, limit = 50 } = {}) {
+    const pending = await deadLetterRepository.listPending({ topic, limit });
+    const results = { attempted: pending.length, succeeded: 0, failed: 0 };
+
+    for (const entry of pending) {
+      const topicHandlers = this.handlers.get(entry.topic) || [];
+
+      // entry.message is the DLQ wrapper object
+      // ({ topic, message, error, timestamp, retryCount }); its `message` field
+      // holds the JSON-encoded original Kafka value. Handlers are registered
+      // for the original event shape, so replay must feed them the parsed
+      // event, not the wrapper.
+      let parsedMessage;
+      try {
+        const serialized = typeof entry.message === 'string'
+          ? entry.message
+          : entry.message?.message;
+        parsedMessage = JSON.parse(serialized);
+      } catch (error) {
+        logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}): message is not valid JSON:`, error);
+        await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        results.failed += 1;
+        continue;
+      }
+
+      try {
+        for (const handler of topicHandlers) {
+          await handler(parsedMessage, { value: parsedMessage });
+        }
+        await deadLetterRepository.markStatus(entry.id, 'replayed');
+        results.succeeded += 1;
+      } catch (error) {
+        logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}):`, error);
+        await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        results.failed += 1;
+      }
+    }
+
+    logger.info(`♻️ Dead letter replay complete`, results);
+    return results;
   }
 
   async startAllConsumers() {
     await this.initialize();
-    
+
     const consumerGroups = Object.values(CONSUMER_GROUPS);
     for (const groupId of consumerGroups) {
       try {

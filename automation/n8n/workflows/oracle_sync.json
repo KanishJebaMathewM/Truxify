@@ -1,0 +1,67 @@
+{
+  "name": "Truxify Idempotent Multi-Oracle Gas & Escrow Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "name": "Cron 5 Min",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://polygon-rpc.com",
+        "method": "POST",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "{\"jsonrpc\":\"2.0\",\"method\":\"eth_gasPrice\",\"params\":[],\"id\":1}"
+      },
+      "name": "Fetch Polygon Gas Price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const gasHex = items[0].json.result;\nconst gasGwei = parseInt(gasHex, 16) / 1e9;\nconst timestamp = Date.now();\nconst idempotencyKey = `gas_sync_${Math.floor(timestamp / 300000)}`;\n\nreturn [{ json: { gasGwei, idempotencyKey, timestamp } }];"
+      },
+      "name": "Compute Idempotency & Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [650, 300]
+    }
+  ],
+  "connections": {
+    "Cron 5 Min": {
+      "main": [
+        [
+          {
+            "node": "Fetch Polygon Gas Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Polygon Gas Price": {
+      "main": [
+        [
+          {
+            "node": "Compute Idempotency & Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

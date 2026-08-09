@@ -41,7 +41,7 @@ export async function recordOtpFailure(orderId) {
       const lockKey = `otp_lockout:${orderId}`;
 
       const count = await redisClient.incr(countKey);
-      if (count === 1) await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
+      await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
       if (count >= OTP_MAX_FAILED_ATTEMPTS) {
         await redisClient.set(lockKey, '1', 'EX', OTP_LOCKOUT_MINUTES * 60);
       }
@@ -72,11 +72,21 @@ export async function clearOtpState(orderId) {
   if (redisClient) {
     try {
       const countKey = `otp_failed_count:${orderId}`;
-      const lockKey = `otp_lockout:${orderId}`;
-      await redisClient.del(countKey, lockKey);
+      // Never delete otp_lockout — the lockout key self-expires via its own
+      // TTL, and clearing it here would let resend/regenerate paths reset the
+      // anti-brute-force guard on demand.
+      await redisClient.del(countKey);
       return;
     } catch (err) {
       logger.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);
+    }
+  }
+  const record = inMemoryOtpFailedAttempts.get(orderId);
+  if (record) {
+    record.count = 0;
+    if (record.lockedUntil) {
+      // Respect the lockout window; the record is dropped when it expires.
+      return;
     }
   }
   inMemoryOtpFailedAttempts.delete(orderId);
@@ -98,8 +108,13 @@ export class OrderNotificationService {
    * @returns {Promise<{otp: string|null, notified: boolean}>}
    */
   async sendOrderNotification({ type, orderId, orderDisplayId, customerId }) {
+    if (await checkOtpLockout(orderId)) {
+      logger.warn(`[OTP] Rejected OTP issuance for locked order ${orderId}`);
+      return { otp: null, notified: false };
+    }
+
+    const activeOtp = await getActiveDeliveryOtp(orderId);
     if (type === 'delivery_otp_in_transit') {
-      const activeOtp = await getActiveDeliveryOtp(orderId);
       if (activeOtp) {
         logger.warn(`[OTP] Driver attempted OTP regeneration for order ${orderId}`);
         return { otp: null, notified: false };
@@ -110,7 +125,10 @@ export class OrderNotificationService {
     const stored = await storeDeliveryOtp(orderId, otp, OTP_TTL_MINUTES);
     if (!stored) return { otp: null, notified: false };
 
-    await clearOtpState(orderId);
+    // Only a fresh issuance after the previous OTP expired may reset the
+    // failure counter; an active-OTP resend keeps it so repeated resends
+    // cannot zero out the brute-force budget.
+    if (!activeOtp) await clearOtpState(orderId);
 
     const notifResult = await sendDeliveryOtpNotification(customerId, orderDisplayId, otp);
 
@@ -118,7 +136,6 @@ export class OrderNotificationService {
       logger.warn(`[OrderNotification] Delivery OTP notification failed for order ${orderDisplayId} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
       if (type === 'delivery_otp_in_transit') {
         await this.orderRepository.updateOrder(orderId, {
-          notification_failed: true,
           updated_at: new Date().toISOString(),
         });
       }

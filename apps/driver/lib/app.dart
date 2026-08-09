@@ -11,6 +11,7 @@ import 'screens/login_screen.dart';
 import 'screens/otp_screen.dart';
 import 'screens/shell_screen.dart';
 import 'screens/splash_screen.dart';
+import 'screens/past_trips_screen.dart';
 import 'models/app_models.dart';
 import 'theme/app_theme.dart';
 import 'widgets/app_page_route.dart';
@@ -32,6 +33,7 @@ class _TruxifyAppState extends State<TruxifyApp> {
     _controller = TruxifyController();
     _controller.addListener(_onControllerChanged);
     _controller.loadThemeMode();
+    _controller.loadLocale();
   }
 
   void _onControllerChanged() {
@@ -55,6 +57,7 @@ class _TruxifyAppState extends State<TruxifyApp> {
         theme: TruxifyTheme.light(),
         darkTheme: TruxifyTheme.dark(),
         themeMode: _controller.themeMode,
+        locale: _controller.locale,
         localizationsDelegates: const [
           AppLocalizations.delegate,
           GlobalMaterialLocalizations.delegate,
@@ -126,6 +129,11 @@ class _TruxifyAppState extends State<TruxifyApp> {
                   initialQuery: args?.initialQuery,
                   initialPoint: args?.initialPoint,
                 ),
+              );
+
+            case AppRoutes.pastTrips:
+              return truxifyPageRoute(
+                (context) => const PastTripsScreen(),
               );
 
             default:

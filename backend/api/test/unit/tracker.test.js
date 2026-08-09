@@ -10,6 +10,7 @@ const dbMock = vi.hoisted(() => ({
     orders: [],
   },
   calls: [],
+  authUser: null,
 }));
 
 vi.mock('../../src/config/db.js', () => ({
@@ -17,6 +18,11 @@ vi.mock('../../src/config/db.js', () => ({
   redisClient: null,
   firebaseAdmin: null,
   supabase: {
+    auth: {
+      async getUser() {
+        return { data: { user: dbMock.authUser }, error: null };
+      },
+    },
     from(table) {
       const filters = [];
       return {
@@ -54,6 +60,7 @@ describe('tracker WebSocket telemetry authorization', () => {
   beforeEach(async () => {
     dbMock.store.orders = [];
     dbMock.calls = [];
+    dbMock.authUser = null;
     __testing.resetTrackingSubscriptions();
     const { supabase } = await import('../../src/config/db.js');
     const orderRepo = new OrderRepository(supabase);
@@ -146,6 +153,109 @@ describe('tracker WebSocket telemetry authorization', () => {
     await handleSubscribe(ws, { driver_id: 'driver-owner' });
 
     expect(sentMessages).toEqual([{ status: 'subscribed', target: 'driver-owner', reconnect_supported: true }]);
+  });
+});
+
+describe('tracker first-frame WebSocket auth (issue #5739)', () => {
+  const supabaseJwt = (() => {
+    const enc = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+    return `${enc({ alg: 'HS256', typ: 'JWT' })}.${enc({
+      iss: 'https://example.supabase.co/auth/v1',
+      sub: 'sb-user-1',
+    })}.signature`;
+  })();
+
+  function pendingSocket(sentMessages) {
+    return {
+      authenticated: false,
+      close: vi.fn(),
+      send(message) {
+        sentMessages.push(typeof message === 'string' ? JSON.parse(message) : message);
+      },
+    };
+  }
+
+  it('authenticates a pending socket via a first-frame auth event', async () => {
+    dbMock.authUser = { id: 'sb-user-1' };
+    dbMock.store.profiles = [{ id: 'sb-user-1', firebase_uid: 'fb-uid-1', role: 'driver', is_active: true }];
+    const sentMessages = [];
+    const ws = pendingSocket(sentMessages);
+
+    await handleTrackingMessage(ws, JSON.stringify({
+      event: 'auth',
+      data: { token: supabaseJwt },
+    }));
+
+    expect(ws.authenticated).toBe(true);
+    expect(ws.user).toEqual({ id: 'sb-user-1', uid: 'fb-uid-1', role: 'driver' });
+    expect(ws.driverId).toBe('sb-user-1');
+    expect(ws.close).not.toHaveBeenCalled();
+    expect(sentMessages).toEqual([
+      { status: 'authenticated', user_id: 'sb-user-1' },
+    ]);
+  });
+
+  it('accepts telemetry after first-frame auth completes', async () => {
+    dbMock.authUser = { id: 'sb-user-1' };
+    dbMock.store.profiles = [{ id: 'sb-user-1', firebase_uid: 'fb-uid-1', role: 'driver', is_active: true }];
+    const sentMessages = [];
+    const ws = pendingSocket(sentMessages);
+
+    await handleTrackingMessage(ws, JSON.stringify({
+      event: 'auth',
+      data: { token: supabaseJwt },
+    }));
+
+    await handleLocationPing(ws, {
+      driver_id: 'sb-user-1',
+      order_display_id: 'ORDER-AUTH',
+      latitude: 12.9716,
+      longitude: 77.5946,
+      speed: 40,
+      bearing: 90,
+    });
+
+    expect(ws.close).not.toHaveBeenCalled();
+    expect(sentMessages[0]).toEqual({ status: 'authenticated', user_id: 'sb-user-1' });
+  });
+
+  it('rejects a non-auth first message on a pending socket', async () => {
+    const sentMessages = [];
+    const ws = pendingSocket(sentMessages);
+
+    await handleTrackingMessage(ws, JSON.stringify({
+      event: 'location_ping',
+      data: { lat: 12.9, lng: 77.5 },
+    }));
+
+    expect(ws.authenticated).toBe(false);
+    expect(ws.close).toHaveBeenCalledWith(4001, 'Unauthorized: Authenticate first');
+    expect(sentMessages).toEqual([
+      { error: 'Unauthorized: Authenticate first', code: 4001 },
+    ]);
+  });
+
+  it('rejects an auth event without a token', async () => {
+    const sentMessages = [];
+    const ws = pendingSocket(sentMessages);
+
+    await handleTrackingMessage(ws, JSON.stringify({ event: 'auth', data: {} }));
+
+    expect(ws.authenticated).toBe(false);
+    expect(ws.close).toHaveBeenCalledWith(4001, 'Unauthorized: No token provided');
+  });
+
+  it('rejects an auth event with an invalid token', async () => {
+    const sentMessages = [];
+    const ws = pendingSocket(sentMessages);
+
+    await handleTrackingMessage(ws, JSON.stringify({
+      event: 'auth',
+      data: { token: 'not-a-valid-token' },
+    }));
+
+    expect(ws.authenticated).toBe(false);
+    expect(ws.close).toHaveBeenCalledWith(4001, 'Unauthorized: Firebase Auth is not configured');
   });
 });
 
@@ -328,8 +438,33 @@ describe('tracker WebSocket upgrade rate limiting', () => {
     });
 
     expect(allowed).toBe(true);
-    expect(incr).toHaveBeenCalledWith('ws:upgrade:203.0.113.10');
-    expect(expire).toHaveBeenCalledWith('ws:upgrade:203.0.113.10', 60);
+    // The spoofable X-Forwarded-For header must NOT be trusted for rate
+    // limiting — the TCP peer address is the key (issue #5828).
+    expect(incr).toHaveBeenCalledWith('ws:upgrade:10.0.0.2');
+    expect(expire).toHaveBeenCalledWith('ws:upgrade:10.0.0.2', 60);
+  });
+
+  it('ignores a spoofed X-Forwarded-For header when selecting the rate-limit key', async () => {
+    const incr = vi.fn().mockResolvedValue(1);
+    const expire = vi.fn().mockResolvedValue(1);
+    const ttl = vi.fn().mockResolvedValue(60);
+
+    vi.resetModules();
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: { incr, expire, ttl },
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { isWebSocketUpgradeAllowed } = await import('../../src/sockets/tracker.js');
+    await isWebSocketUpgradeAllowed({
+      headers: { 'x-forwarded-for': '1.2.3.4' },
+      socket: { remoteAddress: '198.51.100.9' },
+    });
+
+    expect(incr).toHaveBeenCalledWith('ws:upgrade:198.51.100.9');
+    expect(incr).not.toHaveBeenCalledWith('ws:upgrade:1.2.3.4');
   });
 
   it('blocks the sixth upgrade attempt for the same IP', async () => {
@@ -412,7 +547,7 @@ describe('tracker WebSocket upgrade rate limiting', () => {
     expect(expire).toHaveBeenCalledWith('ws:upgrade:198.51.100.12', 60);
   });
 
-  it('allows upgrades and logs when Redis rate limiting fails', async () => {
+  it('enforces the per-IP limit via the in-memory fallback when Redis rate limiting fails (no fail-open)', async () => {
     const errorSpy = vi.spyOn(logger, 'error').mockImplementation(() => {});
 
     vi.resetModules();
@@ -428,15 +563,40 @@ describe('tracker WebSocket upgrade rate limiting', () => {
     }));
 
     const { isWebSocketUpgradeAllowed } = await import('../../src/sockets/tracker.js');
-    const allowed = await isWebSocketUpgradeAllowed({
+    const request = {
       headers: {},
       socket: { remoteAddress: '203.0.113.30' },
-    });
+    };
 
-    expect(allowed).toBe(true);
+    for (let i = 0; i < 5; i++) {
+      await expect(isWebSocketUpgradeAllowed(request)).resolves.toBe(true);
+    }
+    await expect(isWebSocketUpgradeAllowed(request)).resolves.toBe(false);
+
     expect(errorSpy).toHaveBeenCalledWith('Redis WebSocket upgrade rate limit error:', 'redis down');
 
     errorSpy.mockRestore();
+  });
+
+  it('enforces the per-IP limit in memory when no Redis client is configured (no fail-open)', async () => {
+    vi.resetModules();
+    vi.doMock('../../src/config/db.js', () => ({
+      mongoDb: null,
+      redisClient: null,
+      firebaseAdmin: null,
+      supabase: null,
+    }));
+
+    const { isWebSocketUpgradeAllowed } = await import('../../src/sockets/tracker.js');
+    const request = {
+      headers: {},
+      socket: { remoteAddress: '198.51.100.40' },
+    };
+
+    for (let i = 0; i < 5; i++) {
+      await expect(isWebSocketUpgradeAllowed(request)).resolves.toBe(true);
+    }
+    await expect(isWebSocketUpgradeAllowed(request)).resolves.toBe(false);
   });
 
   it('rejects excessive upgrades with an HTTP 429 response', () => {
@@ -743,6 +903,44 @@ describe('handleLocationPing - main telemetry flow', () => {
     const locationUpdate = driverSubMessages.find(m => m.event === 'location_update');
     expect(locationUpdate).toBeTruthy();
     expect(locationUpdate.data.driver_id).toBe('driver-1');
+  });
+
+  it('rejects telemetry payload with out-of-range speed (issue #5758)', async () => {
+    const sentMessages = [];
+    const ws = {
+      driverId: 'driver-1',
+      send(msg) { sentMessages.push(JSON.parse(msg)); }
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      latitude: 12.9,
+      longitude: 77.5,
+      speed: 250,
+    });
+
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
+  });
+
+  it('rejects telemetry payload with over-long order_display_id (issue #5758)', async () => {
+    const sentMessages = [];
+    const ws = {
+      driverId: 'driver-1',
+      send(msg) { sentMessages.push(JSON.parse(msg)); }
+    };
+
+    await handleLocationPing(ws, {
+      driver_id: 'driver-1',
+      order_display_id: 'x'.repeat(100),
+      latitude: 12.9,
+      longitude: 77.5,
+    });
+
+    expect(sentMessages[0].error).toContain('Invalid telemetry payload');
+  });
+
+  it('caps the WebSocket max payload at 4 KB (issue #5758)', async () => {
+    expect(__testing.WS_MAX_PAYLOAD_BYTES).toBe(4096);
   });
 });
 
@@ -1057,7 +1255,8 @@ describe('tracker Redis subscription metadata', () => {
   });
 
   it('restores subscriptions from Redis on reconnect', async () => {
-    const smembers = vi.fn().mockResolvedValue(['driver-redis']);
+    const driverId = '123e4567-e89b-12d3-a456-426614174000';
+    const smembers = vi.fn().mockResolvedValue([driverId]);
     const persist = vi.fn().mockResolvedValue(1);
 
     vi.resetModules();
@@ -1076,17 +1275,17 @@ describe('tracker Redis subscription metadata', () => {
 
     const { __testing: redisTesting } = await import('../../src/sockets/tracker.js');
     const ws = {
-      user: { id: 'driver-redis', role: 'driver' },
-      driverId: 'driver-redis',
+      user: { id: driverId, role: 'driver' },
+      driverId: driverId,
       send: vi.fn(),
     };
 
     await redisTesting.restoreSubscriptions(ws);
 
-    expect(smembers).toHaveBeenCalledWith('user:subscriptions:driver-redis');
-    expect(persist).toHaveBeenCalledWith('user:subscriptions:driver-redis');
-    expect(redisTesting.getTrackingSubscriptions().get('driver-redis')?.has(ws)).toBe(true);
-    expect(ws.subscriptionTargets.has('driver-redis')).toBe(true);
+    expect(smembers).toHaveBeenCalledWith(`user:subscriptions:${driverId}`);
+    expect(persist).toHaveBeenCalledWith(`user:subscriptions:${driverId}`);
+    expect(redisTesting.getTrackingSubscriptions().get(driverId)?.has(ws)).toBe(true);
+    expect(ws.subscriptionTargets.has(driverId)).toBe(true);
   });
 
   it('does not restore unauthorized subscriptions and prunes stale Redis entries', async () => {

@@ -44,7 +44,7 @@ class HybridCrypto:
         # Combine keys
         hybrid_keys = {
             'classical': {
-                'public': hybrid_key['classical']['public'],
+                'public': self.classical_key.public_key(),
                 'private': self.classical_key
             },
             'quantum': self.quantum_key,
@@ -111,8 +111,10 @@ class HybridCrypto:
             )
             
             # Remove quantum secret from decrypted data
-            # In production: proper separation
-            return decrypted
+            quantum_secret_len = len(quantum_secret)
+            if len(decrypted) < quantum_secret_len:
+                raise ValueError("Decrypted payload is too short to contain the quantum secret")
+            return decrypted[:-quantum_secret_len]
             
         except Exception as e:
             logger.error(f"Hybrid decryption failed: {e}")

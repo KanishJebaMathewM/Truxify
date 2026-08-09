@@ -18,6 +18,7 @@ function createMockSupabase(store = {}) {
           order() { return this; },
           limit(n) { this._limit = n; return this; },
           single() { this._single = true; return this; },
+          maybeSingle() { this._maybeSingle = true; return this; },
           select(cols) { this._select = cols; return this; },
           insert(data) {
             this._mode = 'insert';
@@ -63,6 +64,9 @@ function createMockSupabase(store = {}) {
                 } else {
                   rows = rows.filter(r => r[f.col] === f.val);
                 }
+              }
+              if (this._maybeSingle) {
+                return resolve({ data: rows[0] || null, error: null });
               }
               if (this._single) {
                 return resolve({ data: rows[0] || null, error: rows[0] ? null : { message: 'not found' } });

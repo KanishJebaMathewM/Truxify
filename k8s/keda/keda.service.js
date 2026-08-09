@@ -1,5 +1,5 @@
 import axios from 'axios';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../../backend/api/src/middleware/logger.js';
 
 class KEDAService {
     constructor() {
@@ -7,6 +7,10 @@ class KEDAService {
         this.kafkaBootstrap = process.env.KAFKA_BOOTSTRAP || 'kafka-1:9092,kafka-2:9092,kafka-3:9092';
         
         logger.info('✅ KEDA Service initialized');
+    }
+
+    _sanitizePromqlInput(input) {
+        return input.replace(/[^a-zA-Z0-9_-]/g, '');
     }
 
     async getMetrics(metricName, query) {
@@ -70,7 +74,9 @@ class KEDAService {
 
     async getCPUUsage(namespace, deployment) {
         try {
-            const query = `sum(rate(container_cpu_usage_seconds_total{namespace="${namespace}",pod=~"${deployment}-.*"}[5m]))`;
+            const ns = this._sanitizePromqlInput(namespace);
+            const dep = this._sanitizePromqlInput(deployment);
+            const query = `sum(rate(container_cpu_usage_seconds_total{namespace="${ns}",pod=~"${dep}-.*"}[5m]))`;
             return await this.getMetrics('cpu_usage', query);
         } catch (error) {
             logger.error('CPU usage fetch failed:', error);
@@ -84,7 +90,9 @@ class KEDAService {
 
     async getMemoryUsage(namespace, deployment) {
         try {
-            const query = `sum(container_memory_usage_bytes{namespace="${namespace}",pod=~"${deployment}-.*"})`;
+            const ns = this._sanitizePromqlInput(namespace);
+            const dep = this._sanitizePromqlInput(deployment);
+            const query = `sum(container_memory_usage_bytes{namespace="${ns}",pod=~"${dep}-.*"})`;
             return await this.getMetrics('memory_usage', query);
         } catch (error) {
             logger.error('Memory usage fetch failed:', error);
@@ -98,7 +106,9 @@ class KEDAService {
 
     async getReplicaCount(namespace, deployment) {
         try {
-            const query = `kube_deployment_status_replicas{namespace="${namespace}",deployment="${deployment}"}`;
+            const ns = this._sanitizePromqlInput(namespace);
+            const dep = this._sanitizePromqlInput(deployment);
+            const query = `kube_deployment_status_replicas{namespace="${ns}",deployment="${dep}"}`;
             return await this.getMetrics('replica_count', query);
         } catch (error) {
             logger.error('Replica count fetch failed:', error);

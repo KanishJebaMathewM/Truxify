@@ -861,5 +861,26 @@
   "dark": "Dark",
   "@dark": {
     "description": "Dark theme option label"
+  },
+
+  "otpResent": "OTP resent successfully",
+  "@otpResent": {
+    "description": "Snackbar message shown when the OTP is resent to the driver's phone."
+  },
+
+  "resendOtpIn": "Resend in {seconds}s",
+  "@resendOtpIn": {
+    "description": "Countdown label shown while the resend cooldown timer is running.",
+    "placeholders": {
+      "seconds": {
+        "type": "int",
+        "description": "Number of seconds remaining before the resend button becomes active."
+      }
+    }
+  },
+
+  "resendOtp": "Resend OTP",
+  "@resendOtp": {
+    "description": "Label for the button that resends the OTP to the driver's phone."
   }
 }

@@ -1,9 +1,17 @@
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import { verifyDeliveryOtpHash } from '../services/notificationService.js';
+import { DeliveryVerificationService } from '../services/order/deliveryVerificationService.js';
 
-const DELIVERY_COMPLETED_STATUSES = new Set([
-  'delivered',
-  'payment_released',
+// Statuses that indicate a delivery is currently in progress and therefore
+// eligible for verification. Terminal states ('delivered', 'payment_released')
+// must NOT be used here: confirmDelivery runs BEFORE the order is marked
+// delivered, so a status check against those states could never confirm and
+// the 2-of-3 provider consensus would be unreachable.
+const DELIVERY_IN_PROGRESS_STATUSES = new Set([
+  'picked_up',
+  'in_transit',
+  'arriving',
 ]);
 
 class OracleService {
@@ -18,7 +26,7 @@ class OracleService {
     const otpResult = await this._verifyOTP(orderId, otp);
     providerResults.push(otpResult);
 
-    const gpsResult = this._verifyGPS(gpsCoordinates);
+    const gpsResult = await this._verifyGPS(orderId, gpsCoordinates);
     providerResults.push(gpsResult);
 
     const statusResult = await this._verifyOrderStatus(orderId);
@@ -42,30 +50,28 @@ class OracleService {
 
   async _verifyOTP(orderId, otp) {
     try {
-      const { data: order, error: orderErr } = await this.supabase
-        .from('orders')
-        .select('id, otp_verified')
-        .eq('id', orderId)
-        .maybeSingle();
-
-      if (orderErr) {
-        logger.warn('[OracleService] OTP verification DB error:', orderErr.message);
-        return { confirmed: false, provider: 'OTPVerifier', error: orderErr.message, timestamp: new Date().toISOString() };
-      }
-
-      if (!order) {
-        return { confirmed: false, provider: 'OTPVerifier', reason: 'Order not found', timestamp: new Date().toISOString() };
-      }
-
-      const { data: otpRecord } = await this.supabase
+      const { data: otpRecord, error: otpErr } = await this.supabase
         .from('delivery_otps')
-        .select('id, verified')
+        .select('id, otp_hash, otp_salt, expires_at')
         .eq('order_id', orderId)
-        .eq('verified', true)
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      const isVerified = order.otp_verified === true || (otpRecord && otpRecord.verified === true);
+      if (otpErr) {
+        logger.warn('[OracleService] OTP verification DB error:', otpErr.message);
+        return { confirmed: false, provider: 'OTPVerifier', error: otpErr.message, timestamp: new Date().toISOString() };
+      }
+
+      if (!otpRecord) {
+        return { confirmed: false, provider: 'OTPVerifier', reason: 'No OTP record found for order', timestamp: new Date().toISOString() };
+      }
+
+      if (otpRecord.expires_at && new Date(otpRecord.expires_at) <= new Date()) {
+        return { confirmed: false, provider: 'OTPVerifier', reason: 'OTP expired', timestamp: new Date().toISOString() };
+      }
+
+      const isVerified = verifyDeliveryOtpHash(otp, otpRecord);
 
       return {
         confirmed: isVerified,
@@ -78,18 +84,56 @@ class OracleService {
     }
   }
 
-  _verifyGPS(gpsCoordinates) {
+  async _verifyGPS(orderId, gpsCoordinates) {
     const hasValidCoords = gpsCoordinates &&
       typeof gpsCoordinates.lat === 'number' &&
       typeof gpsCoordinates.lng === 'number' &&
       gpsCoordinates.lat >= -90 && gpsCoordinates.lat <= 90 &&
       gpsCoordinates.lng >= -180 && gpsCoordinates.lng <= 180;
 
-    return {
-      confirmed: hasValidCoords === true,
-      provider: 'GPSVerifier',
-      timestamp: new Date().toISOString(),
-    };
+    if (!hasValidCoords) {
+      return {
+        confirmed: false,
+        provider: 'GPSVerifier',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    try {
+      const { data: order, error: orderErr } = await this.supabase
+        .from('orders')
+        .select('id, driver_id, drop_lat, drop_lng')
+        .eq('id', orderId)
+        .maybeSingle();
+
+      if (orderErr || !order) {
+        return {
+          confirmed: false,
+          provider: 'GPSVerifier',
+          reason: orderErr?.message || 'Order not found',
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // assertDriverAtDropoff(order, radiusM) resolves when the assigned
+      // driver's latest telemetry is fresh and inside the drop-off geofence;
+      // it throws a DomainError otherwise (missing/stale/out-of-range data).
+      const deliveryVerifier = new DeliveryVerificationService();
+      await deliveryVerifier.assertDriverAtDropoff(order);
+
+      return {
+        confirmed: true,
+        provider: 'GPSVerifier',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      return {
+        confirmed: false,
+        provider: 'GPSVerifier',
+        reason: error.message,
+        timestamp: new Date().toISOString(),
+      };
+    }
   }
 
   async _verifyOrderStatus(orderId) {
@@ -110,7 +154,7 @@ class OracleService {
       }
 
       return {
-        confirmed: DELIVERY_COMPLETED_STATUSES.has(order.status),
+        confirmed: DELIVERY_IN_PROGRESS_STATUSES.has(order.status),
         provider: 'StatusVerifier',
         timestamp: new Date().toISOString(),
       };

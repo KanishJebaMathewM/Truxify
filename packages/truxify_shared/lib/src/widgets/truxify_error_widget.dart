@@ -30,7 +30,7 @@ class TruxifyErrorWidget extends StatelessWidget {
       if (kDebugMode) {
         return ErrorWidget.withDetails(
           message: details.summary?.toString() ?? details.exception.toString(),
-          error: details.exception,
+          error: details.exception is FlutterError ? details.exception as FlutterError : null,
         );
       }
 

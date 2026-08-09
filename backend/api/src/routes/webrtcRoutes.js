@@ -105,7 +105,14 @@ router.get('/webrtc/offline/:peerId', authenticate, userLimiter, requirePolicy('
       });
     }
 
-    const data = await signaling.getOfflineGPSData(peerId, since);
+    if (!signaling.canUserAccessPeer(peerId, req.user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied for requested peer'
+      });
+    }
+
+    const data = await signaling.getOfflineGPSData(peerId, since, req.user);
     res.json({
       success: true,
       data
@@ -131,7 +138,14 @@ router.post('/webrtc/sync/:peerId', authenticate, userLimiter, requirePolicy('we
       });
     }
 
-    await signaling.syncOfflineData(peerId);
+    if (!signaling.canUserAccessPeer(peerId, req.user)) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied for requested peer'
+      });
+    }
+
+    await signaling.syncOfflineData(peerId, req.user);
     res.json({
       success: true,
       message: 'Offline data synced'

@@ -77,19 +77,23 @@ export async function reconcileFailedReputationUpdates() {
       }
 
       try {
-        await awardReputationPoints(row.driver_wallet, row.stars);
         const { error: deleteError } = await supabaseAdmin.from('reputation_failures').delete().eq('id', row.id);
         if (deleteError) {
-          throw new Error(`Award succeeded but failed to delete reconciled reputation failure ${row.id}: ${deleteError.message}`);
+          throw new Error(`Failed to claim reputation failure ${row.id} for processing: ${deleteError.message}`);
         }
+
+        await awardReputationPoints(row.driver_wallet, row.stars);
         logger.info(`[reputation-reconciliation] Successfully retried reputation update for ${row.driver_wallet}`);
       } catch (err) {
         const newRetryCount = (row.retry_count ?? 0) + 1;
-        await supabaseAdmin.from('reputation_failures').update({
+        await supabaseAdmin.from('reputation_failures').upsert({
+          id: row.id,
+          driver_wallet: row.driver_wallet,
+          stars: row.stars,
           retry_count: newRetryCount,
           last_error: err.message,
           last_attempt_at: new Date().toISOString(),
-        }).eq('id', row.id);
+        });
         logger.warn(`[reputation-reconciliation] Retry ${newRetryCount}/${MAX_RETRIES} failed for ${row.driver_wallet}: ${err.message}`);
       }
     }
@@ -97,14 +101,23 @@ export async function reconcileFailedReputationUpdates() {
     if (leaseExtender) {
       clearInterval(leaseExtender);
     }
+
     if (lockAcquired && redisClient) {
-      await redisClient.del(LOCK_KEY).catch(() => {});
+      try {
+        await redisClient.del(LOCK_KEY);
+        logger.debug('[reputation-reconciliation] Lock released successfully');
+      } catch (err) {
+        logger.error(
+          { err, lockKey: LOCK_KEY },
+          'Failed to release reputation reconciliation lock'
+        );
+      }
     }
+
     // Always reset running flag so fallback/single-instance logic doesn't permanently deadlock
     reconciliationRunning = false;
   }
 }
-
 export function startReputationReconciliation() {
   if (reconciliationTimer) return;
 
@@ -122,5 +135,4 @@ export function startReputationReconciliation() {
 export function stopReputationReconciliation() {
   if (!reconciliationTimer) return;
   clearInterval(reconciliationTimer);
-  reconciliationTimer = null;
-}
+  reconciliationTimer = null;}

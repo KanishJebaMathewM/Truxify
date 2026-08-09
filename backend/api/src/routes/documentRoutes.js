@@ -19,7 +19,9 @@ import multer from 'multer';
 import { uploadDriverDocument } from '../controllers/documentController.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
+import logger from '../middleware/logger.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
+import digilockerService from '../services/digilockerService.js';
 
 const router = express.Router();
 
@@ -71,5 +73,17 @@ const upload = multer({
  */
 // POST /api/driver/documents
 router.post('/', authenticate, userLimiter, requirePolicy('document:upload'), upload.single('document'), uploadDriverDocument);
+
+// POST /api/documents/verify-digilocker
+router.post('/verify-digilocker', authenticate, userLimiter, async (req, res) => {
+  try {
+    const code = req.body?.code;
+    const result = await digilockerService.verifyAndSyncDocuments(req.user.id, code);
+    res.json(result);
+  } catch (err) {
+    logger.error('[DocumentRoutes] Digilocker sync failed:', err.message);
+    res.status(500).json({ error: err.message || 'Internal Server Error' });
+  }
+});
 
 export default router;

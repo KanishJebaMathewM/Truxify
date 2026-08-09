@@ -29,7 +29,7 @@ describe('request validation middleware', () => {
       drop_lng: 77.1025,
       goods_type: 'electronics',
       weight_tonnes: 10,
-      pickup_date: '2026-06-10',
+      pickup_date: '2026-10-10',
     });
 
     expect(next).not.toHaveBeenCalled();
@@ -54,7 +54,7 @@ describe('request validation middleware', () => {
       drop_lng: 77.1025,
       goods_type: 'electronics',
       weight_tonnes: 10,
-      pickup_date: '2026-06-10',
+      pickup_date: '2026-10-10',
     });
 
     expect(next).not.toHaveBeenCalled();
@@ -79,7 +79,7 @@ describe('request validation middleware', () => {
       drop_lng: 77.1025,
       goods_type: 'electronics',
       weight_tonnes: 10,
-      pickup_date: '2026-06-10',
+      pickup_date: '2026-10-10',
     });
 
     expect(next).not.toHaveBeenCalled();
@@ -157,7 +157,7 @@ describe('request validation middleware', () => {
       drop_address: "New Delhi",
       drop_lng: 77.1025,
       weight_tonnes: 10,
-      pickup_date: '2026-06-10',
+      pickup_date: '2026-10-10',
       pickup_address: 'Mumbai',
       drop_address: 'Delhi',
       goods_type: 'electronics',

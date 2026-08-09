@@ -1,7 +1,7 @@
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:truxify_shared/truxify_shared.dart';
+import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
 
 import '../controllers/app_controller.dart';
 import '../l10n/app_localizations.dart';
@@ -13,6 +13,7 @@ import '../widgets/app_page_route.dart';
 import 'find_trucks_screen.dart';
 import 'home_screen.dart';
 import 'live_tracking_screen.dart';
+import 'my_documents_screen.dart';
 import 'notifications_screen.dart';
 import 'order_detail_screen.dart';
 import 'orders_screen.dart';
@@ -86,10 +87,29 @@ class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
       case NotificationTarget.orderDetail:
         await _navigateToOrderDetail(data);
         break;
+      case NotificationTarget.loadDetail:
+        // A new bid/load offer on one of the customer's posted loads — open
+        // the Orders tab where the load and its bids are visible.
+        _switchTab(2);
+        break;
+      case NotificationTarget.earnings:
+        // Payment released to the customer's wallet — open the Profile tab.
+        _switchTab(3);
+        break;
+      case NotificationTarget.documents:
+        // Document expiring/expired — open the documents screen.
+        _switchTab(3);
+        _profileNavigatorKey.currentState?.push(
+          MaterialPageRoute<void>(
+            builder: (_) => const MyDocumentsScreen(),
+          ),
+        );
+        break;
       case NotificationTarget.notifications:
         _navigateToNotifications();
         break;
-      default:
+      case NotificationTarget.tripDetail:
+      case NotificationTarget.unknown:
         _navigateToNotifications();
         break;
     }
@@ -224,6 +244,7 @@ class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
             ),
           );
         });
+        break;
 
       case NavigateToLiveTracking(:final orderId):
         _openInOrdersTab(() {
@@ -233,9 +254,11 @@ class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
             ),
           );
         });
+        break;
 
       case NavigateToWallet():
         _switchTab(3);
+        break;
 
       case NavigateToSupportTicket():
         // Navigate to notifications screen — support ticket detail is
@@ -245,6 +268,7 @@ class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
             AppPageRoute(builder: (_) => const NotificationsScreen()),
           );
         });
+        break;
 
       case NavigateToNotificationsList():
         _openInHomeTab(() {
@@ -252,6 +276,7 @@ class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
             AppPageRoute(builder: (_) => const NotificationsScreen()),
           );
         });
+        break;
 
       case NavigateToEarnings():
       case NavigateToLoadDetail():
@@ -262,6 +287,7 @@ class _TruxifyShellScreenState extends State<TruxifyShellScreen> {
             AppPageRoute(builder: (_) => const NotificationsScreen()),
           );
         });
+        break;
     }
   }
 

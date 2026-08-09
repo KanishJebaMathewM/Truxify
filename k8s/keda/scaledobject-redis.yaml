@@ -15,10 +15,12 @@ spec:
   cooldownPeriod: 300
   pollingInterval: 30
   triggers:
+  # REDIS_PASSWORD must be injected into the redis-deployment pod via a Secret
+  # (e.g. env: - name: REDIS_PASSWORD, valueFrom: { secretKeyRef: ... }).
   - type: redis
     metadata:
       address: redis-service:6379
-      password: ""
+      passwordFromEnv: REDIS_PASSWORD
       database: "0"
       listName: orders
       listLength: "100"
@@ -40,8 +42,10 @@ spec:
   cooldownPeriod: 300
   pollingInterval: 30
   triggers:
+  # POSTGRES_CONNECTION_STRING must be injected into the postgres-deployment pod
+  # via a Secret (envFrom: - secretRef) — no credentials in the manifest.
   - type: postgresql
     metadata:
-      connection: postgresql://postgres:password@postgres-service:5432/truxify
+      connectionFromEnv: POSTGRES_CONNECTION_STRING
       query: "SELECT COUNT(*) FROM orders WHERE status = 'PENDING';"
       targetQueryValue: "50"

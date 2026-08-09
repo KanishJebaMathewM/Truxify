@@ -2,43 +2,140 @@
   "name": "Document Integrity Check Workflow",
   "nodes": [
     {
-      "name": "Daily Trigger",
-      "type": "n8n-nodes-base.scheduleTrigger",
-      "position": [250, 300],
       "parameters": {
         "rule": {
-          "interval": [{"hours": 24}]
+          "interval": [
+            {
+              "hours": 24
+            }
+          ]
         }
-      }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "daily-trigger",
+      "name": "Daily Trigger"
     },
     {
-      "name": "Fetch Active Drivers",
-      "type": "n8n-nodes-base.httpRequest",
-      "position": [450, 300],
       "parameters": {
         "url": "http://api:5000/api/drivers/active",
-        "method": "GET",
-        "responseFormat": "json"
-      }
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        200,
+        0
+      ],
+      "id": "fetch-active-drivers",
+      "name": "Fetch Active Drivers"
     },
     {
-      "name": "Check Documents",
-      "type": "n8n-nodes-base.function",
-      "position": [650, 300],
       "parameters": {
-        "functionCode": "const drivers = $input.first().json.data;\nconst checkedDrivers = drivers.map(driver => ({\n  driverId: driver.id,\n  documentsChecked: ['RC', 'License', 'Insurance'],\n  status: 'verified',\n  timestamp: new Date().toISOString()\n}));\nreturn checkedDrivers;"
-      }
+        "mode": "runOnceForEachItem",
+        "jsCode": "const driver = $input.item.json;\nconst docs = driver.documents || [];\nconst requiredDocs = ['RC', 'License', 'Insurance'];\nconst missingOrTampered = [];\n\nfor (const docType of requiredDocs) {\n  const doc = docs.find(d => d.type === docType);\n  if (!doc) {\n    missingOrTampered.push({ type: docType, reason: 'missing' });\n  } else if (doc.status !== 'verified' || (doc.expiry_date && new Date(doc.expiry_date) < new Date())) {\n    missingOrTampered.push({ type: docType, reason: doc.status !== 'verified' ? 'unverified' : 'expired' });\n  }\n}\n\nreturn {\n  driver_id: driver.id || driver.driver_id,\n  driver_name: driver.name || 'Unknown',\n  has_issues: missingOrTampered.length > 0,\n  issues: missingOrTampered,\n  checked_at: new Date().toISOString()\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        0
+      ],
+      "id": "check-documents",
+      "name": "Check Documents"
     },
     {
-      "name": "Send Alert for Mismatch",
-      "type": "n8n-nodes-base.emailSend",
-      "position": [850, 300],
       "parameters": {
-        "fromEmail": "security@truxify.com",
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.has_issues}}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        600,
+        0
+      ],
+      "id": "filter-issues",
+      "name": "Has Mismatch or Expiry?"
+    },
+    {
+      "parameters": {
         "toEmail": "admin@truxify.com",
-        "subject": "Document Tampering Alert",
-        "text": "{{$json}}"
-      }
+        "subject": "⚠️ Document Tampering/Expiry Alert: Driver {{$json.driver_id}}",
+        "htmlFormat": true,
+        "message": "<h3>Document Verification Alert</h3><p>Driver ID: <strong>{{$json.driver_id}}</strong></p><p>Name: <strong>{{$json.driver_name}}</strong></p><p><strong>Issues Detected:</strong></p><pre>{{JSON.stringify($json.issues, null, 2)}}</pre><p>Checked at: {{$json.checked_at}}</p>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1.1,
+      "position": [
+        800,
+        -100
+      ],
+      "id": "send-alert",
+      "name": "Send Alert for Mismatch"
     }
-  ]
+  ],
+  "connections": {
+    "daily-trigger": {
+      "main": [
+        [
+          {
+            "node": "fetch-active-drivers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetch-active-drivers": {
+      "main": [
+        [
+          {
+            "node": "check-documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check-documents": {
+      "main": [
+        [
+          {
+            "node": "filter-issues",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "filter-issues": {
+      "main": [
+        [
+          {
+            "node": "send-alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {},
+  "versionId": "doc-integrity-v1",
+  "id": "document-integrity-workflow"
 }

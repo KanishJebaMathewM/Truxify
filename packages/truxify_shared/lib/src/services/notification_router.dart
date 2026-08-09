@@ -67,11 +67,7 @@ typedef NotificationNavigationCallback = Future<void> Function(
   Map<String, dynamic> data,
 );
 
-/// Resolves notification payloads into navigation actions.
-///
-/// This class is intentionally stateless and has only static methods so it
-/// can be used from any context without coupling to a specific navigation
-/// package or widget tree.
+/// Parses notification payloads and dispatches navigation.
 class NotificationRouter {
   NotificationRouter({required this.appType});
 
@@ -79,13 +75,15 @@ class NotificationRouter {
 
   static NotificationAppType _appType = NotificationAppType.customer;
 
+  static void Function(BuildContext context, NotificationRoute route)?
+      _navigateCallback;
+
   /// Sets the app type globally. Should be called once at app startup.
   static void setAppType(NotificationAppType type) {
     _appType = type;
   }
 
-  /// Resolves a [NotificationPayload] to a route based on the globally
-  /// configured app type.
+  /// Resolves a payload to a route based on the globally configured app type.
   static NotificationRoute resolve(NotificationPayload payload) {
     return _resolveForAppType(payload, _appType);
   }
@@ -138,12 +136,7 @@ class NotificationRouter {
     }
   }
 
-  /// Callback type used by apps to perform the actual navigation.
-  /// Each app provides its own implementation.
-  static void Function(BuildContext context, NotificationRoute route)? _navigateCallback;
-
   /// Registers a callback that performs the actual navigation for a route.
-  /// Each app (customer/driver) registers its own implementation.
   static void registerNavigateCallback(
     void Function(BuildContext context, NotificationRoute route) callback,
   ) {
@@ -157,7 +150,6 @@ class NotificationRouter {
   static bool get isCallbackRegistered => _navigateCallback != null;
 
   /// Executes navigation by invoking the registered callback.
-  /// The [context] is used by the app's callback to push routes.
   static void executeNavigation(BuildContext context, NotificationRoute route) {
     final callback = _navigateCallback;
     if (callback != null) {
@@ -166,8 +158,6 @@ class NotificationRouter {
       debugPrint('[NotificationRouter] No navigation callback registered.');
     }
   }
-
-  // ── FCM / raw data map navigation ──────────────────────────────────────
 
   /// Resolves the [NotificationTarget] from a raw data map (FCM data payload
   /// or [NotificationItem.metadata]).
@@ -183,7 +173,6 @@ class NotificationRouter {
       case 'payment':
       case 'payment_released':
         return NotificationTarget.earnings;
-      case 'new_trip':
       case 'load_offer':
         return NotificationTarget.loadDetail;
       case 'system':
@@ -215,9 +204,6 @@ class NotificationRouter {
   }
 
   /// Navigates to the appropriate screen using [callback].
-  ///
-  /// This is the main entry point for both FCM events and notification-list
-  /// tap handling.
   static Future<void> navigate(
     Map<String, dynamic> data,
     NotificationNavigationCallback callback,
@@ -230,7 +216,7 @@ class NotificationRouter {
     }
   }
 
-  /// Convenience: navigate from a [NotificationItem].
+  /// Convenience: navigate from an [NotificationItem].
   static Future<void> navigateFromItem(
     NotificationItem item,
     NotificationNavigationCallback callback,
@@ -242,7 +228,7 @@ class NotificationRouter {
     await navigate(data, callback);
   }
 
-  /// Navigates from a [RemoteMessage]'s data payload.
+  /// Navigates from an [RemoteMessage]'s data payload.
   static Future<void> navigateFromRemoteMessage(
     RemoteMessage message,
     NotificationNavigationCallback callback,

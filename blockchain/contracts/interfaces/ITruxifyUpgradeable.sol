@@ -16,4 +16,11 @@ interface ITruxifyUpgradeable {
     function daoApprovedUpgrades(address implementation) external view returns (bool);
     function emergencyUpgradeRequests(address implementation) external view returns (uint256);
     function EMERGENCY_UPGRADE_TIMELOCK() external view returns (uint256);
+    function UPGRADE_EXECUTION_DELAY() external view returns (uint256);
+    function setGovernanceToken(address token) external;
+    function setDAOQuorumBps(uint256 newQuorumBps) external;
+    function setApprovedImplementation(address implementation, bool approved) external;
+    function governanceToken() external view returns (address);
+    function daoQuorumBps() external view returns (uint256);
+    function approvedImplementations(address implementation) external view returns (bool);
 }

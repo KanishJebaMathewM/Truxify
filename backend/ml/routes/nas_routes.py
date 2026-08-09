@@ -48,7 +48,9 @@ async def search_architecture(request: SearchRequest):
         }
     except Exception as e:
         logger.error(f"Search failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/build-model")
 async def build_model(architecture: Dict):
@@ -68,7 +70,9 @@ async def build_model(architecture: Dict):
         }
     except Exception as e:
         logger.error(f"Model building failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/sample")
 async def sample_architecture():
@@ -83,7 +87,9 @@ async def sample_architecture():
         }
     except Exception as e:
         logger.error(f"Sampling failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/encode")
 async def encode_architecture(architecture: Dict):
@@ -101,7 +107,9 @@ async def encode_architecture(architecture: Dict):
         }
     except Exception as e:
         logger.error(f"Encoding failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/decode")
 async def decode_architecture(encoding: str):
@@ -119,7 +127,9 @@ async def decode_architecture(encoding: str):
         }
     except Exception as e:
         logger.error(f"Decoding failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/search-space")
 async def get_search_space():
@@ -141,7 +151,9 @@ async def get_search_space():
         }
     except Exception as e:
         logger.error(f"Search space fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/history")
 async def get_search_history():
@@ -159,4 +171,6 @@ async def get_search_history():
         }
     except Exception as e:
         logger.error(f"History fetch failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

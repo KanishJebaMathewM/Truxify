@@ -37,6 +37,9 @@ void ecall_encrypt_data(
     uint8_t* ciphertext,
     uint32_t* ciphertext_len
 ) {
+    if (plaintext_len == 0 || plaintext_len > sizeof(((secure_data_t*)0)->data)) {
+        return;
+    }
     // In production: use AES-GCM inside enclave
     // For demo: XOR encryption
     uint8_t key[32] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF};
@@ -54,6 +57,9 @@ void ecall_decrypt_data(
     uint8_t* plaintext,
     uint32_t* plaintext_len
 ) {
+    if (ciphertext_len == 0 || ciphertext_len > sizeof(((secure_data_t*)0)->data)) {
+        return;
+    }
     uint8_t key[32] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF};
     
     for (uint32_t i = 0; i < ciphertext_len; i++) {
@@ -71,7 +77,7 @@ sgx_status_t ecall_store_data(
         return SGX_ERROR_OUT_OF_MEMORY;
     }
     
-    if (data_len > 256) {
+    if (data_len == 0 || data_len > sizeof(secure_storage[storage_count].data)) {
         return SGX_ERROR_INVALID_PARAMETER;
     }
     

@@ -1,10 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:truxify_driver/services/api_client.dart';
 import 'package:truxify_driver/core/driver_session.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
+import 'package:truxify_shared/truxify_shared.dart';
 
 class DocumentsParseException implements Exception {
   const DocumentsParseException(this.message);
@@ -24,6 +30,7 @@ class DriverDocument {
     required this.validUntil,
     required this.statusTone,
     required this.statusLabel,
+    this.isGovtVerified = false,
   });
 
   final String id;
@@ -34,10 +41,12 @@ class DriverDocument {
   final String validUntil;
   final String statusTone;
   final String statusLabel;
+  final bool isGovtVerified;
 
   factory DriverDocument.fromMap(Map<String, dynamic> map) {
     final docType = map['doc_type'] as String? ?? '';
     final status = map['status'] as String? ?? 'pending';
+    final isGovtVerified = map['is_govt_verified'] == true;
 
     return DriverDocument(
       id: map['id']?.toString() ?? '',
@@ -53,6 +62,7 @@ class DriverDocument {
       validUntil: _formatDate(map['valid_until'] as String?),
       statusTone: _statusTone(status),
       statusLabel: 'Document No.',
+      isGovtVerified: isGovtVerified,
     );
   }
 
@@ -91,7 +101,8 @@ class DriverDocument {
       return '${dt.day.toString().padLeft(2, '0')}/'
           '${dt.month.toString().padLeft(2, '0')}/'
           '${dt.year}';
-    } catch (_) {
+    } catch (e) {
+      debugPrint('DocumentsScreen: failed to parse date "$raw": $e');
       return raw;
     }
   }
@@ -120,12 +131,421 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   SupabaseClient get _supabase => Supabase.instance.client;
 
   String? _selectedUploadType;
-  late final Future<List<DriverDocument>> _documentsFuture;
+  late Future<List<DriverDocument>> _documentsFuture;
+  bool _isDigilockerVerified = false;
 
   @override
   void initState() {
     super.initState();
+    _checkDigilockerStatus();
     _documentsFuture = _fetchDocuments();
+  }
+
+  Future<void> _checkDigilockerStatus() async {
+    try {
+      final client = Supabase.instance.client;
+      final userId = client.auth.currentUser?.id;
+      if (userId != null) {
+        final data = await client
+            .from('profiles')
+            .select('is_digilocker_verified')
+            .eq('id', userId)
+            .maybeSingle();
+        if (data != null && mounted) {
+          setState(() {
+            _isDigilockerVerified = data['is_digilocker_verified'] as bool? ?? false;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to check Digilocker status: $e');
+    }
+  }
+
+  Future<void> _startDigilockerOAuth(BuildContext context) async {
+    if (!_requireAuth(context)) return;
+
+    // Production builds must never run the fake Aadhaar/OTP theater or post a mock OAuth code.
+    if (kReleaseMode) {
+      await _startRealDigilockerLink(context);
+      return;
+    }
+
+    // Debug/profile only: optional local mock gated behind kDebugMode.
+    assert(() {
+      return true;
+    }());
+    if (!kDebugMode) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'DigiLocker OAuth requires the real backend endpoint. Use a debug build for local mock testing.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    final aadhaarController = TextEditingController();
+    final otpController = TextEditingController();
+    var otpSent = false;
+    var isVerifying = false;
+
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                backgroundColor: Theme.of(context).colorScheme.surface,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                title: Row(
+                  children: [
+                    const Icon(Icons.security_rounded, color: TruxifyColors.accent),
+                    const SizedBox(width: 10),
+                    Text(
+                      'DigiLocker Login (Debug)',
+                      style: GoogleFonts.dmSans(
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Debug mock only. Release builds use the real DigiLocker backend flow.',
+                      style: GoogleFonts.dmSans(fontSize: 13, color: TruxifyColors.secondaryText),
+                    ),
+                    const SizedBox(height: 16),
+                    if (!otpSent) ...[
+                      TextField(
+                        controller: aadhaarController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 12,
+                        decoration: InputDecoration(
+                          labelText: 'Aadhaar Number',
+                          hintText: 'Enter 12-digit Aadhaar',
+                          labelStyle: GoogleFonts.dmSans(color: TruxifyColors.secondaryText),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          counterText: '',
+                        ),
+                      ),
+                    ] else ...[
+                      Text(
+                        'Enter the 6-digit OTP sent to your Aadhaar-linked mobile number.',
+                        style: GoogleFonts.dmSans(fontSize: 13, color: TruxifyColors.secondaryText),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: otpController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 6,
+                        decoration: InputDecoration(
+                          labelText: 'Aadhaar OTP',
+                          hintText: 'Enter 6-digit OTP',
+                          labelStyle: GoogleFonts.dmSans(color: TruxifyColors.secondaryText),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          counterText: '',
+                        ),
+                      ),
+                    ],
+                    if (isVerifying) ...[
+                      const SizedBox(height: 16),
+                      const Center(child: CircularProgressIndicator(color: TruxifyColors.accent)),
+                    ],
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isVerifying ? null : () => Navigator.pop(dialogContext),
+                    child: Text('Cancel', style: GoogleFonts.dmSans(color: TruxifyColors.secondaryText)),
+                  ),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: TruxifyColors.accent,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: isVerifying
+                        ? null
+                        : () async {
+                            if (!otpSent) {
+                              if (aadhaarController.text.length < 12) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Please enter a valid 12-digit Aadhaar number')),
+                                );
+                                return;
+                              }
+                              setDialogState(() => isVerifying = true);
+                              await Future<void>.delayed(const Duration(seconds: 1));
+                              setDialogState(() {
+                                otpSent = true;
+                                isVerifying = false;
+                              });
+                              return;
+                            }
+                            if (otpController.text.length < 6) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Please enter the 6-digit OTP')),
+                              );
+                              return;
+                            }
+                            setDialogState(() => isVerifying = true);
+                            try {
+                              // Debug-only mock code — never used in release (gated above).
+                              final apiClient = ApiClient();
+                              final tokenRes = await apiClient.post('/api/verify/digilocker/token', {
+                                'code': 'mock_auth_code_from_oauth',
+                              });
+                              final accessToken = tokenRes['data']?['access_token'];
+                              if (accessToken == null) {
+                                throw Exception('Failed to get access token from DigiLocker');
+                              }
+                              final verifyRes = await apiClient.post('/api/verify/digilocker/verify', {
+                                'accessToken': accessToken,
+                                'userId': Supabase.instance.client.auth.currentUser?.id,
+                              });
+                              if (verifyRes['success'] == true) {
+                                if (dialogContext.mounted) Navigator.pop(dialogContext);
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('DigiLocker verification succeeded! Documents verified on-chain.'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                }
+                                await _checkDigilockerStatus();
+                                if (mounted) {
+                                  setState(() {
+                                    _documentsFuture = _fetchDocuments();
+                                  });
+                                }
+                              } else {
+                                throw Exception('Verification failed');
+                              }
+                            } catch (e) {
+                              if (dialogContext.mounted) Navigator.pop(dialogContext);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Verification failed: $e'), backgroundColor: Colors.red),
+                                );
+                              }
+                            }
+                          },
+                    child: Text(
+                      otpSent ? 'Verify' : 'Request OTP',
+                      style: GoogleFonts.dmSans(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+    } finally {
+      aadhaarController.dispose();
+      otpController.dispose();
+    }
+  }
+
+  /// Production DigiLocker link: paste a real OAuth code and POST to backend.
+  Future<void> _startRealDigilockerLink(BuildContext context) async {
+    final codeController = TextEditingController();
+    try {
+      final code = await showDialog<String>(
+        context: context,
+        barrierDismissible: true,
+        builder: (ctx) => AlertDialog(
+          title: const Text('DigiLocker Verification'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'DigiLocker OAuth must use the real backend endpoint. '
+                'Complete authorization with DigiLocker, then paste the authorization code here. '
+                'Mock OTP flows are disabled in release builds.',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: codeController,
+                decoration: const InputDecoration(
+                  hintText: 'Authorization code',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, codeController.text.trim()),
+              child: const Text('Verify'),
+            ),
+          ],
+        ),
+      );
+
+      if (code == null || code.isEmpty) return;
+      if (code == 'mock_auth_code_from_oauth') {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Mock DigiLocker codes are not allowed in release builds.'),
+              backgroundColor: TruxifyColors.error,
+            ),
+          );
+        }
+        return;
+      }
+
+      final session = Supabase.instance.client.auth.currentSession;
+      final token = session?.accessToken ?? '';
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/api/documents/verify-digilocker'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({'code': code}),
+      );
+
+      if (!context.mounted) return;
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Government documents linked successfully via DigiLocker.'),
+            backgroundColor: TruxifyColors.success,
+          ),
+        );
+        await _checkDigilockerStatus();
+        if (mounted) {
+          setState(() {
+            _documentsFuture = _fetchDocuments();
+          });
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('DigiLocker link failed (HTTP ${response.statusCode}).'),
+            backgroundColor: TruxifyColors.error,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('DigiLocker link failed: $e'),
+            backgroundColor: TruxifyColors.error,
+          ),
+        );
+      }
+    } finally {
+      codeController.dispose();
+    }
+  }
+
+  Widget _buildDigilockerVerificationCard(BuildContext context) {
+    if (_isDigilockerVerified) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.green.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.green.withValues(alpha: 0.3), width: 1.5),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.verified_rounded, color: Colors.green, size: 32),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'DigiLocker Verified',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Your Driving Licence, RC Book, and Insurance are securely verified on-chain.',
+                    style: GoogleFonts.dmSans(fontSize: 12, color: Colors.green.shade900),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: TruxifyColors.accent.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: TruxifyColors.accent.withValues(alpha: 0.25), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.document_scanner_rounded, color: TruxifyColors.accent, size: 28),
+              const SizedBox(width: 10),
+              Text(
+                'Instant DigiLocker Verification',
+                style: GoogleFonts.dmSans(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: TruxifyColors.accentDark,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Skip manual uploads! Fetch and verify your Driving Licence, RC Book, and Insurance directly from your government DigiLocker account.',
+            style: GoogleFonts.dmSans(
+              fontSize: 12,
+              color: TruxifyColors.secondaryText,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: TruxifyColors.accent,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              elevation: 0,
+            ),
+            onPressed: () => _startDigilockerOAuth(context),
+            icon: const Icon(Icons.login_rounded, size: 18),
+            label: Text(
+              'Link DigiLocker Account',
+              style: GoogleFonts.dmSans(fontSize: 13, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<List<DriverDocument>> _fetchDocuments() async {
@@ -160,6 +580,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 }
 
+  static String get _apiBaseUrl => ApiClient.defaultBaseUrl;
+
   bool _requireAuth(BuildContext context) {
     if (DriverSession.driverId.isNotEmpty) return true;
 
@@ -184,7 +606,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       context: context,
       isDismissible: false,
       enableDrag: false,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -322,7 +744,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -425,7 +847,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.white,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -592,7 +1014,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     return Scaffold(
       backgroundColor: TruxifyColors.background,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded,
@@ -711,6 +1133,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             return ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               children: [
+                _buildDigilockerVerificationCard(context),
                 ...documents.map((document) {
                   final isWarning = document.statusTone == 'warning';
                   return Padding(
@@ -738,17 +1161,25 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                                 decoration: BoxDecoration(
                                   color: isWarning
                                       ? TruxifyColors.warningLight
-                                      : TruxifyColors.accentLight,
+                                      : (document.isGovtVerified
+                                          ? Colors.green.shade50
+                                          : Colors.orange.shade50),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Text(
-                                  isWarning ? 'Expiring Soon' : 'Verified',
+                                  isWarning
+                                      ? 'Expiring Soon'
+                                      : (document.isGovtVerified
+                                          ? '✓ Govt Verified'
+                                          : 'Self-Uploaded (Unverified)'),
                                   style: GoogleFonts.dmSans(
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
                                     color: isWarning
                                         ? TruxifyColors.warning
-                                        : TruxifyColors.accentDark,
+                                        : (document.isGovtVerified
+                                            ? Colors.green.shade800
+                                            : Colors.orange.shade800),
                                   ),
                                 ),
                               ),

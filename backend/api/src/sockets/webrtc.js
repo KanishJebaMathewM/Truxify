@@ -15,7 +15,7 @@ export function getWebRTCSignaling() {
 
 export function closeWebRTCSignaling() {
   if (signalingServer) {
-    signalingServer.wss.close();
+    signalingServer.destroy();
     signalingServer = null;
   }
 }

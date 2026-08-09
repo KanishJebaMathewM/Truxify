@@ -53,6 +53,7 @@ class _PublicTrackingScreenState extends State<PublicTrackingScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -137,21 +138,30 @@ class _PublicTrackingScreenState extends State<PublicTrackingScreen> {
     final lat = _order?['pickup_lat'];
     final lng = _order?['pickup_lng'];
     if (lat == null || lng == null) return null;
-    return LatLng((lat as num).toDouble(), (lng as num).toDouble());
+    final parsedLat = double.tryParse(lat.toString());
+    final parsedLng = double.tryParse(lng.toString());
+    if (parsedLat == null || parsedLng == null) return null;
+    return LatLng(parsedLat, parsedLng);
   }
 
   LatLng? _getDropLatLng() {
     final lat = _order?['drop_lat'];
     final lng = _order?['drop_lng'];
     if (lat == null || lng == null) return null;
-    return LatLng((lat as num).toDouble(), (lng as num).toDouble());
+    final parsedLat = double.tryParse(lat.toString());
+    final parsedLng = double.tryParse(lng.toString());
+    if (parsedLat == null || parsedLng == null) return null;
+    return LatLng(parsedLat, parsedLng);
   }
 
   LatLng? _getDriverLatLng() {
     final lat = _driverLocation?['latitude'];
     final lng = _driverLocation?['longitude'];
     if (lat == null || lng == null) return null;
-    return LatLng((lat as num).toDouble(), (lng as num).toDouble());
+    final parsedLat = double.tryParse(lat.toString());
+    final parsedLng = double.tryParse(lng.toString());
+    if (parsedLat == null || parsedLng == null) return null;
+    return LatLng(parsedLat, parsedLng);
   }
 
   @override

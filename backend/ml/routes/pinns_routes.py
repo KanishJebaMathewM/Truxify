@@ -6,6 +6,7 @@ import numpy as np
 from datetime import datetime
 import logging
 from pinns.model import PhysicsInformedNN, PhysicsLoss, PINNTrainer
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/pinns", tags=["Physics-Informed Neural Networks"])
@@ -62,7 +63,9 @@ async def train_pinns(request: TrainRequest):
         }
     except Exception as e:
         logger.error(f"Training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/predict")
 async def predict_pinns(x: List[List[float]]):
@@ -75,13 +78,15 @@ async def predict_pinns(x: List[List[float]]):
             'success': True,
             'data': {
                 'predictions': predictions.tolist(),
-                'shape': predictions.shape
+                'shape': list(predictions.shape)
             },
             'timestamp': datetime.now().isoformat()
         }
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
 async def get_model_info():
@@ -103,10 +108,13 @@ async def get_model_info():
         }
     except Exception as e:
         logger.error(f"Model info failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
 async def save_model(path: str = "models/pinns_model.pth"):
+    path = os.path.join("models", os.path.basename(path))
     """Save PINN model"""
     try:
         trainer.save(path)
@@ -117,10 +125,13 @@ async def save_model(path: str = "models/pinns_model.pth"):
         }
     except Exception as e:
         logger.error(f"Save failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
 async def load_model(path: str = "models/pinns_model.pth"):
+    path = os.path.join("models", os.path.basename(path))
     """Load PINN model"""
     try:
         trainer.load(path)
@@ -131,4 +142,6 @@ async def load_model(path: str = "models/pinns_model.pth"):
         }
     except Exception as e:
         logger.error(f"Load failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

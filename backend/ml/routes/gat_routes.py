@@ -7,6 +7,7 @@ import networkx as nx
 from datetime import datetime
 import logging
 from gat.model import SpatialTemporalGAT, TrafficGraphBuilder, GATTrainer
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/gat", tags=["Graph Attention Networks"])
@@ -64,14 +65,16 @@ async def build_graph(request: GraphRequest):
             'data': {
                 'nodes': len(graph.nodes),
                 'edges': len(graph.edges),
-                'features': data.x.shape,
+                'features': list(data.x.shape),
                 'is_connected': nx.is_connected(graph)
             },
             'timestamp': datetime.now().isoformat()
         }
     except Exception as e:
         logger.error(f"Graph build failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/predict")
 async def predict_traffic(request: GraphRequest):
@@ -102,7 +105,9 @@ async def predict_traffic(request: GraphRequest):
         }
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/train")
 async def train_model(request: GraphRequest):
@@ -128,7 +133,9 @@ async def train_model(request: GraphRequest):
         }
     except Exception as e:
         logger.error(f"Training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
 async def get_model_info():
@@ -151,10 +158,13 @@ async def get_model_info():
         }
     except Exception as e:
         logger.error(f"Model info failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
 async def save_model(path: str = "models/gat_traffic.pth"):
+    path = os.path.join("models", os.path.basename(path))
     """Save GAT model"""
     try:
         trainer.save(path)
@@ -165,10 +175,13 @@ async def save_model(path: str = "models/gat_traffic.pth"):
         }
     except Exception as e:
         logger.error(f"Save failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
 async def load_model(path: str = "models/gat_traffic.pth"):
+    path = os.path.join("models", os.path.basename(path))
     """Load GAT model"""
     try:
         trainer.load(path)
@@ -179,4 +192,6 @@ async def load_model(path: str = "models/gat_traffic.pth"):
         }
     except Exception as e:
         logger.error(f"Load failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

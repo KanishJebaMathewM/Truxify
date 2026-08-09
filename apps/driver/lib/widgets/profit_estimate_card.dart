@@ -43,14 +43,17 @@ class _ProfitEstimateCardState extends State<ProfitEstimateCard> {
 
     try {
       final repo = MarketplaceRepository();
-      final prediction = await repo.predictLoadProfit(
-        load: widget.load,
-        truckMileageKmL: widget.truckMileageKmL,
-        fuelPricePerLitre: widget.fuelPricePerLitre,
-        tripDurationHours: duration,
-      );
-      repo.dispose();
-      if (mounted) setState(() { _prediction = prediction; _isLoading = false; });
+      try {
+        final prediction = await repo.predictLoadProfit(
+          load: widget.load,
+          truckMileageKmL: widget.truckMileageKmL,
+          fuelPricePerLitre: widget.fuelPricePerLitre,
+          tripDurationHours: duration,
+        );
+        if (mounted) setState(() { _prediction = prediction; _isLoading = false; });
+      } finally {
+        repo.dispose();
+      }
     } catch (_) {
       if (mounted) setState(() { _isLoading = false; _error = 'Prediction unavailable'; });
     }

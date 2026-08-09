@@ -6,7 +6,7 @@ import { measureExecution } from '../core/performanceMetrics.js';
 export const osrmBreaker = new CircuitBreaker(async (url, options) => {
   const response = await fetch(url, options);
   if (response.status >= 500) {
-    await response.text().catch(() => {});
+    await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
     throw new Error(`[OSRM] Request failed (${response.status})`);
   }
   return response;
@@ -16,32 +16,25 @@ export const osrmBreaker = new CircuitBreaker(async (url, options) => {
   resetTimeout: 30000
 });
 
-
-const RECOVERABLE_ERRORS = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'FETCH_ERR'];
-
-async function withRetry(fn, options = {}) {
-  const { retries = 2, baseDelay = 300, label = 'operation' } = options;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      if (attempt < retries && RECOVERABLE_ERRORS.some(e => err.code === e || err.message?.includes(e))) {
-        const delay = baseDelay * Math.pow(2, attempt);
-        logger.warn(`[osrm] ${label} failed (attempt ${attempt + 1}/${retries + 1}), retrying in ${delay}ms`);
-        await new Promise(r => setTimeout(r, delay));
-      } else {
-        throw err;
-      }
-    }
-  }
-}
-
 const DEFAULT_OSRM_BASE_URL = 'https://router.project-osrm.org';
 const DEFAULT_TIMEOUT_MS = 1500;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 500;
 const CACHE_TTL_SECONDS = 86400;
 const ROUTE_CACHE_TTL_SECONDS = 30;
+
+export const validateCoordinates = (pickupLat, pickupLng, dropLat, dropLng) => {
+  if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || 
+      !Number.isFinite(dropLat) || !Number.isFinite(dropLng)) {
+    return 'Invalid coordinates provided.';
+  }
+  if (pickupLat < -90 || pickupLat > 90) return 'pickup_lat must be between -90 and 90.';
+  if (pickupLng < -180 || pickupLng > 180) return 'pickup_lng must be between -180 and 180.';
+  if (dropLat < -90 || dropLat > 90) return 'drop_lat must be between -90 and 90.';
+  if (dropLng < -180 || dropLng > 180) return 'drop_lng must be between -180 and 180.';
+  
+  return null;
+};
 
 function parsePositiveNumber(value, fallback) {
   const parsed = Number(value);
@@ -59,7 +52,7 @@ function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
 }
 
 function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
-  const r = (n) => Number(n.toFixed(6));
+  const r = (n) => Number(n.toFixed(8));
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
@@ -77,7 +70,13 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
   if (redisClient) {
     try {
       const cached = await redisClient.get(cacheKey);
-      if (cached) return JSON.parse(cached);
+      // Only return cached result if it is a valid object.
+      // Stale null results (from transient failures) must not be served
+      // from cache — the next call should retry the OSRM API.
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed !== null) return parsed;
+      }
     } catch (err) {
       logger.error('[osrm] Redis get error:', err.message);
     }
@@ -98,7 +97,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
 
       if (!response.ok) {
         clearTimeout(timeout);
-        await response.text().catch(() => {});
+        await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
         if (response.status >= 500 && attempt < maxRetries - 1) {
           logger.warn({ status: response.status, attempt: attempt + 1, maxRetries }, 'Server error. Retrying...');
           await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
@@ -181,7 +180,13 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
   if (redisClient) {
     try {
       const cached = await redisClient.get(cacheKey);
-      if (cached) return JSON.parse(cached);
+      // Only return cached result if it is a valid object.
+      // Stale null results (from transient failures) must not be served
+      // from cache — the next call should retry the OSRM API.
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed !== null) return parsed;
+      }
     } catch (err) {
       logger.error('[osrm] Redis get error (geometry):', err.message);
     }
@@ -197,7 +202,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
       { signal: controller.signal },
     );
     if (!response.ok) {
-      await response.text().catch(() => {});
+      await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
       return null;
     }
 
@@ -230,8 +235,11 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
     return feature;
 
   } catch (err) {
-    logger.error('[osrm] Fetch error (geometry):', err.message);
-    if (err.message?.includes('Circuit open')) return null;
+    if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
+      logger.warn('[OSRM] Circuit is open during geometry fetch. Falling back.');
+      return null;
+    }
+    logger.error({ errMessage: err.message, stack: err.stack }, '[OSRM] Failed to fetch route geometry');
     return null;
   } finally {
     clearTimeout(timeout);

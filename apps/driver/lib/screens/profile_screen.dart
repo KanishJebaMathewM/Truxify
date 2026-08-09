@@ -11,8 +11,9 @@ import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/fcm_service.dart';
+import '../services/secure_storage.dart';
 import '../core/supabase_config.dart';
-import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen;
+import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen, FcmService;
 import 'notifications_screen.dart';
 import '../utils/validators.dart';
 
@@ -50,10 +51,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _fetchReputation();
   }
 
+  bool _initializedLanguage = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_initializedLanguage) {
+      final controller = TruxifyScope.of(context);
+      _currentLanguage = _nameForLanguageCode(controller.locale.languageCode);
+      _initializedLanguage = true;
+    }
+  }
+
+  String _nameForLanguageCode(String code) {
+    switch (code) {
+      case 'en': return 'English';
+      case 'hi': return 'Hindi';
+      case 'ta': return 'Tamil';
+      case 'kn': return 'Kannada';
+      case 'mr': return 'Marathi';
+      default: return 'English';
+    }
+  }
+
+  String _langCodeForName(String name) {
+    switch (name) {
+      case 'English': return 'en';
+      case 'Hindi': return 'hi';
+      case 'Tamil': return 'ta';
+      case 'Kannada': return 'kn';
+      case 'Marathi': return 'mr';
+      default: return 'en';
+    }
+  }
+
   @override
   void dispose() {
     super.dispose();
   }
+
+  bool _isDigilockerVerified = false;
 
   Future<void> _loadWalletAddress() async {
     try {
@@ -62,12 +99,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (userId != null) {
         final data = await client
             .from('profiles')
-            .select('polygon_wallet_address')
+            .select('polygon_wallet_address, full_name, phone, email, is_digilocker_verified')
             .eq('id', userId)
             .maybeSingle();
         if (data != null && mounted) {
           setState(() {
             _walletAddress = data['polygon_wallet_address']?.toString() ?? '';
+            _driverName = data['full_name']?.toString() ?? '';
+            _driverPhone = data['phone']?.toString() ?? '';
+            _driverEmail = data['email']?.toString() ?? '';
+            _isDigilockerVerified = data['is_digilocker_verified'] as bool? ?? false;
           });
         }
       }
@@ -103,9 +144,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         if (data is Map<String, dynamic>) {
           setState(() {
-            _platformRating = data['supabaseRating'] != null
-                ? (data['supabaseRating'] as num).toDouble()
-                : null;
+            _platformRating = (data['supabaseRating'] as num?)?.toDouble() ?? 0.0;
             _onChainScore = data['onChainScore'] != null
                 ? (data['onChainScore'] as num).toInt()
                 : null;
@@ -378,12 +417,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 16),
                   PrimaryButton(
                     label: AppLocalizations.of(context)!.applyLanguage,
-                    onPressed: () {
-                      setState(() {
-                        _currentLanguage = selectedLang;
-                      });
-                      Navigator.of(context).pop();
-                      ScaffoldMessenger.of(context).showSnackBar(
+                    onPressed: () async {
+                      final controller = TruxifyScope.of(context);
+                      final langCode = _langCodeForName(selectedLang);
+                      await controller.setLocale(langCode);
+                      if (mounted) {
+                        setState(() {
+                          _currentLanguage = selectedLang;
+                        });
+                        Navigator.of(context).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
                           content:
                               Text(AppLocalizations.of(context)!.languageSwitched),
@@ -765,13 +808,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _driverName,
-                        style: GoogleFonts.dmSans(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            _driverName,
+                            style: GoogleFonts.dmSans(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          if (_isDigilockerVerified) ...[
+                            const SizedBox(width: 6),
+                            const Icon(
+                              Icons.verified_user_rounded,
+                              color: Colors.greenAccent,
+                              size: 18,
+                            ),
+                          ],
+                        ],
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -943,6 +998,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
+                    'Past Trips',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'View completed trip history and earnings breakdown',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+                  ),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                  onTap: () => Navigator.of(context).pushNamed(AppRoutes.pastTrips),
+                ),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  title: Text(
                     AppLocalizations.of(context)!.documents,
                     style: GoogleFonts.dmSans(
                       fontSize: 14,
@@ -1012,9 +1093,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   subtitle: Text(
-                    _walletAddress.isNotEmpty
+                    _walletAddress.length >= 16
                         ? '${_walletAddress.substring(0, 10)}...${_walletAddress.substring(_walletAddress.length - 6)}'
-                        : AppLocalizations.of(context)!.notSet,
+                        : _walletAddress.isNotEmpty
+                            ? _walletAddress
+                            : AppLocalizations.of(context)!.notSet,
                     style: GoogleFonts.dmSans(
                       fontSize: 12,
                       color: TruxifyColors.adaptiveSecondaryText(context),
@@ -1128,6 +1211,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   await FcmService.clearToken();
 
                   await client.auth.signOut();
+
+                  // Remove the persisted auth token from OS-backed secure
+                  // storage so it cannot be reused after logout (issue #5739).
+                  await AuthTokenStore.clear();
                 }
 
                 if (!context.mounted) {

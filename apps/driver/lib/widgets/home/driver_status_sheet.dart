@@ -4,8 +4,10 @@ import '../../models/earnings_daily_model.dart';
 import '../../theme/app_theme.dart';
 import '../earnings_shimmer.dart';
 import 'metrics_error_card.dart';
-import 'shift_metrics_row.dart';
 
+/// Bottom sheet shown on the Home screen when no active trip is selected.
+/// Displays the driver online/offline toggle and today's earnings summary
+/// (gross, net after fuel/toll estimate, and trip count).
 class DriverStatusSheet extends StatelessWidget {
   const DriverStatusSheet({
     super.key,
@@ -19,6 +21,9 @@ class DriverStatusSheet extends StatelessWidget {
     required this.onToggleOnline,
     this.batteryLevel,
     this.isCharging = false,
+    this.hasActiveTrip = false,
+    this.onFindLoad,
+    this.onViewTrip,
   });
 
   final bool isOnline;
@@ -32,17 +37,31 @@ class DriverStatusSheet extends StatelessWidget {
   final int? batteryLevel;
   final bool isCharging;
 
+  /// Whether the driver currently has an active trip.
+  /// Controls visibility of the "View Active Trip" CTA.
+  final bool hasActiveTrip;
+
+  /// Called when the driver taps "Find New Load".
+  final VoidCallback? onFindLoad;
+
+  /// Called when the driver taps "View Active Trip".
+  final VoidCallback? onViewTrip;
+
   @override
   Widget build(BuildContext context) {
-    final payValue = todayEarnings != null
+    final gross = todayEarnings != null
         ? '₹${todayEarnings!.amount.toStringAsFixed(0)}'
         : '—';
-    final hoursValue = todayEarnings != null
-        ? '${todayEarnings!.hoursDriven.toStringAsFixed(1)} hrs'
+    final net = todayEarnings != null
+        ? '₹${todayEarnings!.netAmount.toStringAsFixed(0)}'
         : '—';
-    final ratingValue = driverRating != null
-        ? driverRating!.toStringAsFixed(2)
-        : '—';
+    final tripCountValue = todayEarnings != null
+        ? '${todayEarnings!.tripCount}'
+        : null;
+    // Net estimate: gross × 0.85 (accounts for ~15% fuel/toll costs).
+    final netValue = todayEarnings != null && todayEarnings!.amount > 0
+        ? 'Net ≈ ₹${(todayEarnings!.amount * 0.85).toStringAsFixed(0)}'
+        : null;
 
     return Container(
       decoration: BoxDecoration(
@@ -62,6 +81,7 @@ class DriverStatusSheet extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Online / Offline toggle ──────────────────────────────────────
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -105,7 +125,10 @@ class DriverStatusSheet extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 8),
+
+          const SizedBox(height: 4),
+
+          // Subtitle / radar text
           Text(
             !isOnline
                 ? 'Offline. Go online to receive load assignments.'
@@ -117,8 +140,10 @@ class DriverStatusSheet extends StatelessWidget {
               color: TruxifyColors.adaptiveSecondaryText(context),
             ),
           ),
+
+          // Battery indicator
           if (batteryLevel != null) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Row(
               children: [
                 Icon(
@@ -138,17 +163,70 @@ class DriverStatusSheet extends StatelessWidget {
               ],
             ),
           ],
+
           const SizedBox(height: 16),
+
+          // ── Today's Earnings card ────────────────────────────────────────
           if (isLoadingMetrics)
             const SummaryCardsShimmer()
           else if (metricsError != null)
-            const MetricsErrorCard()
+            MetricsErrorCard(errorMessage: metricsError)
           else
             ShiftMetricsRow(
               payValue: payValue,
               hoursValue: hoursValue,
               ratingValue: ratingValue,
+              tripCountValue: tripCountValue,
+              netValue: netValue,
             ),
+          // ── Quick CTA Buttons ─────────────────────────────────────────────
+          if (isOnline && (onFindLoad != null || (hasActiveTrip && onViewTrip != null))) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                if (onFindLoad != null)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      key: const Key('find_new_load_button'),
+                      onPressed: onFindLoad,
+                      icon: const Icon(Icons.search_rounded, size: 16),
+                      label: const Text('Find New Load'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        textStyle: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (hasActiveTrip && onViewTrip != null) ...[
+                  if (onFindLoad != null) const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      key: const Key('view_active_trip_button'),
+                      onPressed: onViewTrip,
+                      icon: const Icon(Icons.route_rounded, size: 16),
+                      label: const Text('Active Trip'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        textStyle: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -167,5 +245,57 @@ class DriverStatusSheet extends StatelessWidget {
     if (level <= 10) return TruxifyColors.errorRed;
     if (level <= 20) return TruxifyColors.warning;
     return TruxifyColors.success;
+  }
+}
+
+// ── Private metric card widget ────────────────────────────────────────────────
+
+class _EarningsMetricCard extends StatelessWidget {
+  const _EarningsMetricCard({
+    required this.icon,
+    required this.value,
+    required this.label,
+    this.valueKey,
+  });
+
+  final IconData icon;
+  final String value;
+  final String label;
+  final Key? valueKey;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+      decoration: BoxDecoration(
+        color: Theme.of(context).brightness == Brightness.dark
+            ? Theme.of(context).colorScheme.surfaceContainerHighest
+            : TruxifyColors.background,
+        border: Border.all(color: TruxifyColors.border),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 16, color: TruxifyColors.accent),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            key: valueKey,
+            style: GoogleFonts.dmSans(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          Text(
+            label,
+            style: GoogleFonts.dmSans(
+              fontSize: 9,
+              color: TruxifyColors.adaptiveSecondaryText(context),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

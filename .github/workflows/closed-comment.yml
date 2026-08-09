@@ -1,0 +1,47 @@
+# GitHub Actions Workflow: Issue Closed Comment
+name: Issue Closed Comment
+
+# Trigger execution whenever an issue transitions to the 'closed' state
+on:
+  issues:
+    types: [closed]
+
+# Minimum required permissions to post comments on repository issues
+permissions:
+  issues: write
+
+jobs:
+  comment-on-close:
+    name: Comment on Issue Closure
+    runs-on: ubuntu-latest
+    
+    steps:
+    # Step 1: Execute GitHub Script to post the automated response
+      - name: Post Closing Comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Extract issue context parameters
+            const issue = context.payload.issue;
+            const creator = issue.user.login;
+            
+            const repoName = context.repo.repo;
+
+            // Construct a customized Markdown message body for Truxify
+            let commentBody = `### Issue Closed\n\n` +
+                              `Thank you, @${creator}, for taking the time to report or engage with this issue in **Truxify**! 🛡️\n\n` +
+                              `Your input helps us manage our roadmap for building a transparent, blockchain-secured logistics ecosystem effectively.`;
+
+            commentBody += `\n\nIf you discover new edge cases, routing bottlenecks, or have ideas for enhancements, feel free to open a new issue. Happy coding! 🌟`;
+
+            // Call GitHub API to post the comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              
+              issue_number: issue.number,
+              body: commentBody
+            });
+
+          

@@ -17,7 +17,7 @@ export class EventBus<T = any> {
   }
   publish(event: string, data: T) {
     if (this.listeners.has(event)) {
-      this.listeners.get(event)!.forEach(cb => {
+      [...this.listeners.get(event)!].forEach(cb => {
         try {
           cb(data);
         } catch (error) {

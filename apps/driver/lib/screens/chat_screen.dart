@@ -3,7 +3,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
-import '../services/supabase_service.dart';
 
 class ChatScreen extends StatefulWidget {
   final Trip trip;
@@ -24,12 +23,12 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    _myUserId = SupabaseService.currentUserId ?? 'unknown';
+    _myUserId = Supabase.instance.client.auth.currentUser?.id ?? 'unknown';
     _setupSupabaseChannel();
   }
 
   void _setupSupabaseChannel() {
-    final orderId = widget.trip.id;
+    final orderId = widget.trip.id.replaceFirst(RegExp(r'^TX-'), '');
     _channel = Supabase.instance.client.channel('chat_$orderId');
 
     _channel!
@@ -37,7 +36,7 @@ class _ChatScreenState extends State<ChatScreen> {
         event: 'message',
         callback: (payload) {
           final data = payload;
-          if (data['senderId'] != _myUserId) {
+          if (data['senderId'] != _myUserId && mounted) {
             setState(() {
               _messages.insert(0, {
                 'text': data['text'],

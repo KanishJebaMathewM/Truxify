@@ -1,4 +1,7 @@
 import logger from '../middleware/logger.js';
+import { context, trace } from '@opentelemetry/api';
+import spanFactory from './telemetry/SpanFactory.js';
+import { ContextPropagator } from './telemetry/ContextPropagator.js';
 
 const DEFAULT_MAX_RETRIES = parseInt(process.env.SUPABASE_RETRY_MAX_RETRIES || '3', 10);
 const DEFAULT_BASE_DELAY_MS = parseInt(process.env.SUPABASE_RETRY_BASE_DELAY_MS || '100', 10);
@@ -16,7 +19,7 @@ const NETWORK_ERROR_CODES = new Set([
 ]);
 
 function isTransientHttpStatus(status) {
-  if (status == null) return false;
+  if (status === null) return false;
   if (status === 408) return true;
   if (status >= 500 && status <= 599) return true;
   if (status === 429 || status === 408) return true;
@@ -70,11 +73,18 @@ export async function executeWithRetry(asyncFn, options = {}) {
   const maxDelayMs = options.maxDelayMs ?? DEFAULT_MAX_DELAY_MS;
   const operation = options.operation || 'supabase_query';
 
+  const traceSnapshot = ContextPropagator.snapshot();
   let lastError;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await asyncFn();
+      return await ContextPropagator.restore(traceSnapshot, async () => {
+        if (attempt > 0) {
+          const span = spanFactory.startRetrySpan(operation, attempt, maxRetries);
+          span.end();
+        }
+        return await asyncFn();
+      });
     } catch (err) {
       lastError = err;
 

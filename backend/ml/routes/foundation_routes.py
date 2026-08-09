@@ -8,6 +8,7 @@ import logging
 
 from foundation.model import LogisticsFoundationModel, FoundationModelConfig, FoundationModelTrainer
 from foundation.data import LogisticsDataProcessor, LogisticsDatasetGenerator
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/foundation", tags=["Foundation Model"])
@@ -51,7 +52,9 @@ async def generate_data(request: GenerateDataRequest):
         }
     except Exception as e:
         logger.error(f"Data generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/data/prepare")
 async def prepare_data(file: UploadFile = File(...)):
@@ -79,7 +82,9 @@ async def prepare_data(file: UploadFile = File(...)):
         }
     except Exception as e:
         logger.error(f"Data preparation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/pretrain")
 async def pretrain_model(file: Optional[UploadFile] = None):
@@ -112,7 +117,9 @@ async def pretrain_model(file: Optional[UploadFile] = None):
         }
     except Exception as e:
         logger.error(f"Pretraining failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/finetune")
 async def finetune_model(
@@ -151,7 +158,9 @@ async def finetune_model(
         }
     except Exception as e:
         logger.error(f"Finetuning failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/predict")
 async def predict(text: str, task: str = 'classification'):
@@ -195,7 +204,9 @@ async def predict(text: str, task: str = 'classification'):
         }
     except Exception as e:
         logger.error(f"Prediction failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
 async def get_model_info():
@@ -218,10 +229,13 @@ async def get_model_info():
         }
     except Exception as e:
         logger.error(f"Model info failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
 async def save_model(path: str = "models/foundation_model.pth"):
+    path = os.path.join("models", os.path.basename(path))
     """Save foundation model"""
     try:
         trainer.save(path)
@@ -233,10 +247,13 @@ async def save_model(path: str = "models/foundation_model.pth"):
         }
     except Exception as e:
         logger.error(f"Save failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
 async def load_model(path: str = "models/foundation_model.pth"):
+    path = os.path.join("models", os.path.basename(path))
     """Load foundation model"""
     try:
         trainer.load(path)
@@ -248,4 +265,6 @@ async def load_model(path: str = "models/foundation_model.pth"):
         }
     except Exception as e:
         logger.error(f"Load failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

@@ -13,16 +13,22 @@ CREATE TABLE IF NOT EXISTS temperature_telemetry (
 -- Enable RLS for temperature_telemetry
 ALTER TABLE temperature_telemetry ENABLE ROW LEVEL SECURITY;
 
+-- Drivers and Customers can view telemetry for their loads. get_profile_id()
+-- maps the Firebase JWT sub to profiles.id, which is what load_offers
+-- customer_id/driver_id actually store (auth.uid() is the Firebase UID and
+-- would never match for Firebase-auth users).
 CREATE POLICY "Drivers and Customers can view telemetry for their loads" ON temperature_telemetry
-  FOR SELECT
+  FOR SELECT TO authenticated
   USING (
     EXISTS (
       SELECT 1 FROM load_offers
       WHERE load_offers.id = temperature_telemetry.load_id
-      AND (load_offers.customer_id = auth.uid() OR load_offers.driver_id = auth.uid())
+      AND (load_offers.customer_id = get_profile_id() OR load_offers.driver_id = get_profile_id())
     )
   );
 
+-- Only the service-role backend (which bypasses RLS) may insert telemetry.
+-- Direct anon/authenticated clients cannot forge readings for arbitrary loads.
 CREATE POLICY "API can insert telemetry" ON temperature_telemetry
-  FOR INSERT
-  WITH CHECK (true); -- Usually restricted to a service role or specific authenticated user in production
+  FOR INSERT TO service_role
+  WITH CHECK (true);

@@ -107,7 +107,19 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     _dateController = TextEditingController(text: _formatDateLabel(_selectedDate!));
     _timeController = TextEditingController(text: _formatTimeLabel(_selectedTime!));
     _customGoodsTypeController = TextEditingController();
+    _tempMinController = TextEditingController();
+    _tempMaxController = TextEditingController();
+
+    _pickupController.addListener(_onFormFieldChanged);
+    _dropController.addListener(_onFormFieldChanged);
+    _weightController.addListener(_onFormFieldChanged);
+    _lengthController.addListener(_onFormFieldChanged);
+    _widthController.addListener(_onFormFieldChanged);
+    _heightController.addListener(_onFormFieldChanged);
+    _customGoodsTypeController.addListener(_onFormFieldChanged);
+
     _loadSavedAddresses();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onFormFieldChanged());
   }
 
   @override
@@ -149,11 +161,19 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       _tempMinController.text = draft.targetTemperatureMin?.toString() ?? '';
       _tempMaxController.text = draft.targetTemperatureMax?.toString() ?? '';
       setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onFormFieldChanged());
     }
   }
 
   @override
   void dispose() {
+    _pickupController.removeListener(_onFormFieldChanged);
+    _dropController.removeListener(_onFormFieldChanged);
+    _weightController.removeListener(_onFormFieldChanged);
+    _lengthController.removeListener(_onFormFieldChanged);
+    _widthController.removeListener(_onFormFieldChanged);
+    _heightController.removeListener(_onFormFieldChanged);
+    _customGoodsTypeController.removeListener(_onFormFieldChanged);
     _pickupController.dispose();
     _dropController.dispose();
     _weightController.dispose();
@@ -256,11 +276,13 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       return;
     }
 
+    if (!mounted) return;
     setState(() {
       _selectedDate = DateUtils.dateOnly(pickedDate);
       _dateController.text = _formatDateLabel(_selectedDate!);
     });
 
+    _onFormFieldChanged();
     _formKey.currentState?.validate();
   }
 
@@ -275,6 +297,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       return;
     }
 
+    if (!mounted) return;
     setState(() {
       _selectedTime = pickedTime;
       _timeController.text = _formatTimeLabel(pickedTime);
@@ -312,6 +335,9 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       minCapacity: _filterMinCapacity > 0 ? _filterMinCapacity : null,
       maxCapacity: _filterMaxCapacity < 25 ? _filterMaxCapacity : null,
       materialType: _filterMaterialType != 'Any' ? _filterMaterialType : null,
+      requiresRefrigeration: _requirements.contains('Temperature control'),
+      targetTemperatureMin: double.tryParse(_tempMinController.text),
+      targetTemperatureMax: double.tryParse(_tempMaxController.text),
     );
   }
 
@@ -323,6 +349,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
     _dropController.text = pickup;
     _dropPoint = pickupPoint;
     setState(() {});
+    _onFormFieldChanged();
   }
 
   // ── Saved addresses ────────────────────────────────────────────────────
@@ -529,10 +556,8 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
       return 'Please select a future pickup date.';
     }
     final today = DateUtils.dateOnly(DateTime.now());
-    if (!_selectedDate!.isAfter(today.subtract(const Duration(days: 1)))) {
-      if (_selectedDate!.isBefore(today)) {
-        return 'Please select a future pickup date.';
-      }
+    if (_selectedDate!.isBefore(today)) {
+      return 'Please select a future pickup date.';
     }
     return null;
   }
@@ -558,6 +583,62 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
 
   void _onWeightChanged(String value) {
     setState(() => _weightErrorText = _validateWeight(value));
+  }
+
+  String? _validateDimension(String? value, String name) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) {
+      return '$name is required.';
+    }
+    final val = double.tryParse(text);
+    if (val == null) {
+      return 'Please enter a valid numeric $name.';
+    }
+    if (val <= 0) {
+      return '$name must be greater than 0.';
+    }
+    return null;
+  }
+
+  String? _validateCustomGoodsType(String? value) {
+    if (_goodsType == 'Other') {
+      final text = value?.trim() ?? '';
+      if (text.isEmpty) {
+        return 'Please describe your goods.';
+      }
+    }
+    return null;
+  }
+
+  bool _isFormValid = false;
+
+  void _onFormFieldChanged() {
+    if (!mounted) return;
+    final isPickupValid = _validatePickup(_pickupController.text) == null;
+    final isDropValid = _validateDrop(_dropController.text) == null;
+    final isDateValid = _validateDate(_dateController.text) == null;
+    final isWeightValid = _validateWeight(_weightController.text) == null;
+    final isLengthValid = _validateDimension(_lengthController.text, 'Length') == null;
+    final isWidthValid = _validateDimension(_widthController.text, 'Width') == null;
+    final isHeightValid = _validateDimension(_heightController.text, 'Height') == null;
+    final isCustomGoodsTypeValid = _validateCustomGoodsType(_customGoodsTypeController.text) == null;
+
+    final isValid = isPickupValid &&
+        isDropValid &&
+        isDateValid &&
+        isWeightValid &&
+        isLengthValid &&
+        isWidthValid &&
+        isHeightValid &&
+        isCustomGoodsTypeValid &&
+        _pickupPoint != null &&
+        _dropPoint != null;
+
+    if (isValid != _isFormValid) {
+      setState(() {
+        _isFormValid = isValid;
+      });
+    }
   }
 
   void _onFindTrucks() {
@@ -1140,14 +1221,20 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                       items: _goodsTypes
                           .map((type) => DropdownMenuItem(value: type, child: Text(type)))
                           .toList(),
-                      onChanged: (value) => setState(() => _goodsType = value ?? _goodsType),
+                      onChanged: (value) {
+                        setState(() {
+                          _goodsType = value ?? _goodsType;
+                        });
+                        _onFormFieldChanged();
+                      },
                       decoration: const InputDecoration(labelText: 'Goods Type'),
                     ),
                     if (_goodsType == 'Other') ...[
                       const SizedBox(height: 12),
-                      TextField(
+                      TextFormField(
                         controller: _customGoodsTypeController,
                         textCapitalization: TextCapitalization.sentences,
+                        validator: _validateCustomGoodsType,
                         decoration: const InputDecoration(
                           labelText: 'Describe your goods',
                           hintText: 'e.g. Chemicals, Scrap metal…',
@@ -1178,9 +1265,10 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: TextField(
+                          child: TextFormField(
                             controller: _lengthController,
                             keyboardType: TextInputType.number,
+                            validator: (v) => _validateDimension(v, 'Length'),
                             decoration: const InputDecoration(
                               labelText: 'Length (ft)',
                               hintText: '12',
@@ -1191,9 +1279,10 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: TextField(
+                          child: TextFormField(
                             controller: _widthController,
                             keyboardType: TextInputType.number,
+                            validator: (v) => _validateDimension(v, 'Width'),
                             decoration: const InputDecoration(
                               labelText: 'Width (ft)',
                               hintText: '6',
@@ -1204,9 +1293,10 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
                         ),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: TextField(
+                          child: TextFormField(
                             controller: _heightController,
                             keyboardType: TextInputType.number,
+                            validator: (v) => _validateDimension(v, 'Height'),
                             decoration: const InputDecoration(
                               labelText: 'Height (ft)',
                               hintText: '6',
@@ -1485,7 +1575,7 @@ class _FindTrucksScreenState extends State<FindTrucksScreen> {
 
               PrimaryButton(
                 label: _isLoading ? 'Finding Trucks...' : 'Find Trucks',
-                onPressed: _isLoading ? null : _onFindTrucks,
+                onPressed: (_isLoading || !_isFormValid) ? null : _onFindTrucks,
               ),
             ],
           ),

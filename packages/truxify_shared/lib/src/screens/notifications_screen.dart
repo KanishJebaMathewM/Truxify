@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/notification_item.dart';
@@ -6,13 +7,13 @@ import '../repositories/notification_repository.dart';
 import '../services/notification_router.dart';
 
 class NotificationsScreen extends StatefulWidget {
-  const NotificationsScreen({super.key, required this.userId, required this.repository, this.title = 'Notifications', this.onNotificationTap});
   const NotificationsScreen({
     super.key,
     required this.userId,
     required this.repository,
     this.title = 'Notifications',
     this.onItemTap,
+    this.onNotificationTap,
   });
 
   final String userId;
@@ -200,10 +201,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 : _items.isEmpty
                     ? ListView(
                         physics: const AlwaysScrollableScrollPhysics(),
-                        children: const [
-                          SizedBox(height: 250),
-                          Center(child: Text('No notifications yet')),
-                        ],
+                          children: [
+                            const SizedBox(height: 150),
+                            Lottie.asset('assets/lottie/no_notifications.json', width: 200, height: 200),
+                            const Center(child: Text('No notifications yet', style: TextStyle(color: Colors.grey, fontSize: 16))),
+                          ],
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.all(16),
@@ -214,7 +216,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           final item = _items[index];
                           final relativeTime = _formatRelativeTime(item.createdAt);
                           return ListTile(
-                            onTap: () => _onTileTap(item),
+                            onTap: () async {
+                              if (!item.isRead) await _markRead(item);
+                              widget.onNotificationTap?.call(item);
+                              widget.onItemTap?.call(item);
+                            },
                             tileColor: item.isRead ? null : Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.25),
                             leading: Icon(Icons.notifications_rounded, color: item.isRead ? null : Theme.of(context).colorScheme.primary),
                             title: Text(item.title),
@@ -225,10 +231,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                               ].join('\n'),
                             ),
                             isThreeLine: true,
-                            onTap: () {
-                              if (!item.isRead) _markRead(item);
-                              widget.onNotificationTap?.call(item);
-                            },
                             trailing: item.isRead
                                 ? const Icon(Icons.done_rounded)
                                 : TextButton(

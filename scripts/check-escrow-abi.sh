@@ -26,10 +26,14 @@ echo "🔍 Checking escrow ABI compatibility..."
 # Expected selectors (from backend/api/src/services/escrow.js)
 # These are keccak256(first 4 bytes) of the function signatures
 declare -A EXPECTED_SELECTORS
-EXPECTED_SELECTORS["createBooking(uint256,address)"]="cf5ba53f"
-EXPECTED_SELECTORS["releasePayment(uint256)"]="2d8e4a0b"
-EXPECTED_SELECTORS["cancelBooking(uint256)"]="66b71f1c"
-EXPECTED_SELECTORS["bookings(uint256)"]="dc97d7d3"
+EXPECTED_SELECTORS["createBooking(uint256,address)"]="490a3b30"
+EXPECTED_SELECTORS["releasePayment(uint256)"]="88685cd9"
+EXPECTED_SELECTORS["cancelBooking(uint256)"]="0dca825e"
+EXPECTED_SELECTORS["cancelWithPenalty(uint256,uint256)"]="ca9a63b1"
+EXPECTED_SELECTORS["raiseDispute(uint256)"]="a5c1674e"
+EXPECTED_SELECTORS["resolveDispute(uint256,uint256)"]="bdc84ac3"
+EXPECTED_SELECTORS["resolveDisputeTimeout(uint256)"]="333edf12"
+EXPECTED_SELECTORS["bookings(uint256)"]="1dab301e"
 
 # Check if cast (foundry) is available for selector computation
 HAS_CAST=false

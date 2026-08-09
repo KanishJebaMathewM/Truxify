@@ -93,19 +93,35 @@ class DoCalculus:
             data=data,
             treatment=treatments,
             outcome=outcomes,
-            graph=self._build_graph()
+            graph=self._build_graph(treatments, outcomes, data)
         )
         logger.info("✅ Causal model set")
-    
-    def _build_graph(self) -> str:
-        """Build graph structure"""
-        return """
-            digraph {
-                treatment -> outcome;
-                confounder -> treatment;
-                confounder -> outcome;
-            }
+
+    def _build_graph(self, treatments: List[str], outcomes: List[str], data: pd.DataFrame) -> str:
+        """Build graph structure using the real dataframe column names.
+
+        The previous implementation hardcoded placeholder nodes named
+        'treatment', 'outcome' and 'confounder', which never match the columns
+        passed to set_causal_model. DoWhy resolves treatment/outcome variables
+        by name, so identification always failed and every estimate silently
+        returned None. Any column that is neither a treatment nor an outcome is
+        treated as a potential common cause (confounder) of treatment/outcome.
         """
+        treatment_set = set(treatments)
+        outcome_set = set(outcomes)
+        confounders = [c for c in data.columns if c not in treatment_set and c not in outcome_set]
+
+        lines = []
+        for treatment in treatments:
+            for outcome in outcomes:
+                lines.append(f"    {treatment} -> {outcome};")
+        for confounder in confounders:
+            for treatment in treatments:
+                lines.append(f"    {confounder} -> {treatment};")
+            for outcome in outcomes:
+                lines.append(f"    {confounder} -> {outcome};")
+
+        return "digraph {\n" + "\n".join(lines) + "\n}"
     
     def estimate_ate(self, treatment: str, outcome: str) -> Dict:
         """Estimate Average Treatment Effect"""
@@ -129,7 +145,14 @@ class DoCalculus:
             return None
     
     def estimate_cate(self, treatment: str, outcome: str, features: List[str]) -> Dict:
-        """Estimate Conditional Average Treatment Effect"""
+        """Estimate the Average Treatment Effect (ATE).
+
+        DoWhy's ``backdoor.propensity_score_weighting`` with ``target_units="ate"`
+        produces a single population-level ATE, NOT a Conditional Average
+        Treatment Effect (CATE). The result is therefore returned under an honest
+        ``ate`` key. ``features`` is retained for API compatibility; it does not
+        condition the estimate, so callers must not interpret the value as a CATE.
+        """
         try:
             identified_estimand = self.causal_model.identify_effect()
             estimate = self.causal_model.estimate_effect(
@@ -137,35 +160,40 @@ class DoCalculus:
                 method_name="backdoor.propensity_score_weighting",
                 target_units="ate"
             )
-            
+
             return {
                 'treatment': treatment,
                 'outcome': outcome,
-                'cate': estimate.value,
-                'features': features
+                'ate': estimate.value,
+                'features': features,
             }
         except Exception as e:
-            logger.error(f"CATE estimation failed: {e}")
+            logger.error(f"ATE estimation failed: {e}")
             return None
-    
+
     def estimate_ite(self, treatment: str, outcome: str) -> Dict:
-        """Estimate Individual Treatment Effect"""
+        """Estimate the Average Treatment effect on the Treated (ATT).
+
+        ``target_units="att"`` produces a single aggregate ATT, not per-unit
+        Individual Treatment Effects, so the result is returned under an honest
+        ``att`` key. Callers that need true ITE must use per-unit/subpopulation
+        estimation instead.
+        """
         try:
             identified_estimand = self.causal_model.identify_effect()
             estimate = self.causal_model.estimate_effect(
                 identified_estimand,
                 method_name="backdoor.propensity_score_weighting",
-                target_units="att"  # Average Treatment on Treated
+                target_units="att"
             )
-            
+
             return {
                 'treatment': treatment,
                 'outcome': outcome,
-                'ite': estimate.value,
-                'effect_heterogeneity': 'high' if abs(estimate.value) > 0.6 else 'medium' if abs(estimate.value) > 0.3 else 'low'
+                'att': estimate.value,
             }
         except Exception as e:
-            logger.error(f"ITE estimation failed: {e}")
+            logger.error(f"ATT estimation failed: {e}")
             return None
 
 class CausalImpact:
@@ -178,15 +206,28 @@ class CausalImpact:
     
     def measure_impact(self, pre_data: np.ndarray, post_data: np.ndarray, intervention_point: int) -> Dict:
         """Measure impact of intervention"""
+        # The causalimpact library expects a single full data series with
+        # period indices that point into it, so the pre- and post-intervention
+        # arrays are combined into one series before analysis.
+        data = np.concatenate([pre_data, post_data])
+
+        # Reject intervention points outside the combined pre/post series so
+        # callers get an explicit error instead of a silently-null result.
+        if intervention_point < 0 or intervention_point >= len(data):
+            raise ValueError(
+                f"intervention_point {intervention_point} is outside the "
+                f"combined pre/post series of length {len(data)}"
+            )
+
         try:
             # Pre-intervention period
             pre_period = [0, intervention_point - 1]
-            post_period = [intervention_point, len(post_data) - 1]
+            post_period = [intervention_point, len(data) - 1]
             
             # Calculate counterfactual
             from causalimpact import CausalImpact
             
-            impact = CausalImpact(post_data, pre_period, post_period)
+            impact = CausalImpact(data, pre_period, post_period)
             impact.run()
             
             summary = impact.summary()

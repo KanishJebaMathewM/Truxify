@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 class RenderProfile {
     constructor(widgetName) {

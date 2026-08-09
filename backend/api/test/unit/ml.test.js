@@ -360,6 +360,41 @@ describe('ml service — predictPrice', () => {
     expect(result.estimated_price).toBe(3000);
     expect(result.currency).toBe('INR');
   });
+
+  it('rejects response where estimated_price is a string', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 'five thousand', currency: 'INR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction');
+  });
+
+  it('rejects response with invalid currency code', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 3000, currency: 'EUR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction');
+  });
+
+  it('uses default truck type medium_truck when undefined is passed explicitly', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 3000, currency: 'INR' })),
+    });
+
+    await predictPrice({ distanceKm: 50, cargoWeightKg: 200, truckType: undefined });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.truck_type).toBe('medium_truck');
+  });
 });
 
 describe('ml service — predictEta', () => {
@@ -670,6 +705,63 @@ describe('ml service — recommendLoads', () => {
     expect(body.booking_history).toEqual([]);
     expect(body.rated_drivers).toEqual([]);
     expect(body.top_n).toBe(5);
+  });
+
+  it('calls the /recommend/loads endpoint with correct URL and method', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ recommendations: [] })),
+    });
+
+    await recommendLoads({ userId: 'user-123' });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain('/recommend/loads');
+    expect(opts.method).toBe('POST');
+  });
+
+  it('throws with descriptive message on non-ok response', async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 500,
+      ok: false,
+      statusText: 'Internal Server Error',
+      text: () => Promise.resolve('Model not loaded'),
+    });
+
+    await expect(recommendLoads({ userId: 'user-123' }))
+      .rejects
+      .toThrow('[ML] Request failed (500)');
+  });
+
+  it('throws with descriptive message on 401/403 auth failure', async () => {
+    mockFetch.mockResolvedValueOnce({
+      status: 403,
+      ok: false,
+      statusText: 'Forbidden',
+      text: () => Promise.resolve('Forbidden'),
+    });
+
+    await expect(recommendLoads({ userId: 'user-123' }))
+      .rejects
+      .toThrow('[ML] Authentication failed (403)');
+  });
+
+  it('rejects when fetch throws (network error)', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network unreachable'));
+
+    await expect(recommendLoads({ userId: 'user-123' }))
+      .rejects
+      .toThrow('Network unreachable');
+  });
+
+  it('rejects when fetch times out', async () => {
+    const abortError = new DOMException('The operation was aborted.', 'AbortError');
+    mockFetch.mockRejectedValueOnce(abortError);
+
+    await expect(recommendLoads({ userId: 'user-123' }))
+      .rejects
+      .toThrow('aborted');
   });
 
   it('throws on missing ML_API_KEY', async () => {

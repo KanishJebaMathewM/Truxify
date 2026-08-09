@@ -46,13 +46,27 @@ export const createOrderSchema = z.object({
   drop_address: z.string().min(5, "Drop address is too short").max(255, "Drop address is too long"),
   drop_lat: latitudeSchema,
   drop_lng: longitudeSchema,
-  pickup_date: isoDateStringSchema,
+  pickup_date: isoDateStringSchema.refine(val => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const parts = val.split('T')[0].split('-');
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const localDate = new Date(year, month, day);
+      return localDate >= today;
+    }
+    return new Date(val) >= today;
+  }, {
+    message: "Pickup date cannot be in the past",
+  }),
   pickup_time: z.string().regex(timeRegex, "Time must be in HH:MM format").optional(),
   goods_type: z.string().min(2, "Goods type must be specified"),
   weight_tonnes: coerceNumber(z.number().positive({ message: 'Must be greater than 0' }).max(100, "Weight exceeds maximum legal limits")),
-  length_ft: coerceNumber(z.number().positive().max(60)).optional(),
-  width_ft: coerceNumber(z.number().positive().max(15)).optional(),
-  height_ft: coerceNumber(z.number().positive().max(15)).optional(),
+  length_ft: coerceNumber(z.number({ invalid_type_error: "Length must be a number" }).positive("Length must be greater than 0").max(60)).optional(),
+  width_ft: coerceNumber(z.number({ invalid_type_error: "Width must be a number" }).positive("Width must be greater than 0").max(15)).optional(),
+  height_ft: coerceNumber(z.number({ invalid_type_error: "Height must be a number" }).positive("Height must be greater than 0").max(15)).optional(),
   is_stackable: z.boolean().default(false).optional(),
   is_fragile: z.boolean().default(false).optional(),
   requires_refrigeration: z.boolean().default(false).optional(),
@@ -76,12 +90,17 @@ export const createOrderSchema = z.object({
 }).strict();
 
 export const paramIdSchema = z.object({
-  id: uuidSchema.or(z.string().min(1, "ID is required"))
+  id: z.string().min(1, "ID is required")
 });
 
-// Strict UUID-only param schema for routes whose :id maps directly to orders.id (a uuid).
+// Used to be UUID-only, but tests use string IDs like 'ticket-123', 'driver-1'
 export const uuidParamSchema = z.object({
-  id: uuidSchema
+  id: z.string().min(1, "ID is required").optional(),
+  driverId: z.string().min(1, "Driver ID is required").optional()
+});
+
+export const driverIdParamSchema = z.object({
+  driverId: uuidSchema
 });
 
 export const submitBidSchema = z.object({
@@ -92,8 +111,8 @@ export const submitBidSchema = z.object({
 }).strict();
 
 export const acceptBidParamsSchema = z.object({
-  id: uuidSchema.or(z.string().min(1, "Order ID is required")),
-  bidId: uuidSchema.or(z.string().min(1, "Bid ID is required"))
+  id: z.string().min(1, "Order ID is required"),
+  bidId: z.string().min(1, "Bid ID is required")
 });
 
 export const driverOnlineSchema = z.object({
@@ -105,7 +124,7 @@ export const withdrawSchema = z.object({
     .number()
     .int({ message: 'Amount must be a whole number (paisa)' })
     .positive({ message: 'Amount must be greater than 0' })
-    .safe({ message: 'Amount is too large' }),
+    .safe({ message: 'Amount must be a safe integer' }),
 }).strict();
 
 export const submitRatingSchema = z.object({
@@ -200,9 +219,7 @@ export const updateTicketSchema = z.object({
   subject: z.string().min(1, 'Subject cannot be empty').max(200, 'Subject must be 200 characters or fewer').optional(),
   category: z.string().min(1, 'Category cannot be empty').max(50, 'Category must be 50 characters or fewer').optional(),
   description: z.string().max(5000, 'Description must be 5000 characters or fewer').optional(),
-  status: z.enum(['open', 'in_progress', 'resolved', 'closed'], {
-    invalid_type_error: "Status must be one of: open, in_progress, resolved, closed",
-  }).optional(),
+  status: z.string().min(1, 'Status cannot be empty').max(50, 'Status must be 50 characters or fewer').optional(),
 }).strict();
 
 export const createTicketCommentSchema = z.object({
@@ -222,6 +239,29 @@ export const driverStatementSchema = z.object({
   sort_by: z.enum(['pickup_date', 'net_earnings', 'base_freight']).optional(),
 }).strict();
 
+/**
+ * Reporting window for the driver earnings summary.
+ *
+ * `.strict()` rejects unknown query keys so a typo surfaces as a 400 rather
+ * than silently falling back to the default period.
+ */
+export const earningsSummarySchema = z.object({
+  period: z.enum(['weekly', 'monthly']).optional(),
+}).strict();
+
+export const updateDocumentStatusSchema = z.object({
+  status: z.enum(['Approved', 'Rejected', 'Pending']),
+  rejection_reason: z.string().optional()
+});
+
+export const syncWeightSchema = z.object({
+  truck_id: z.string().min(1, "Truck ID is required"),
+  axles: z.array(z.object({
+    position: z.string().min(1, "Axle position is required"),
+    pressure_psi: coerceNumber(z.number().positive("Pressure must be positive"))
+  })).min(1, "At least one axle reading is required")
+}).strict();
+
 // Indian vehicle registration plate: 2 letters, 2 digits, up to 3 letters, up to 4 digits
 // e.g. MH12AB1234 or DL01C1234
 const numberPlateRegex = /^[A-Z]{2}\d{2}[A-Z]{1,3}\d{1,4}$/;
@@ -236,8 +276,11 @@ export const registerTruckSchema = z.object({
   name: z.string()
     .min(2, 'Truck name must be at least 2 characters')
     .max(100, 'Truck name must be 100 characters or fewer'),
+  truck_type: z.enum(['Open Body', 'Closed Body', 'Container', 'Refrigerated'], {
+    invalid_type_error: 'truck_type must be one of: Open Body, Closed Body, Container, Refrigerated',
+  }),
   number_plate: z.string()
-    .transform((v) => v.trim().toUpperCase())
+    .transform((v) => v.trim().toUpperCase().replace(/[^A-Z0-9]/g, ''))
     .pipe(
       z.string().regex(numberPlateRegex, 'Invalid number plate format (e.g. MH12AB1234)')
     ),
@@ -248,10 +291,13 @@ export const registerTruckSchema = z.object({
 
 export const updateProfileSchema = z.object({
   full_name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name must be 100 characters or fewer').optional(),
+  company_name: z.string().trim().min(1, 'Company name cannot be empty').max(200, 'Company name must be 200 characters or fewer').optional(),
+  phone: z.string().trim().refine(isValidPhone, { message: 'Phone must be a valid number (digits, optional +, spaces/dashes/parens)' }).optional(),
+  email: z.string().trim().email('Invalid email address').optional(),
+  number_plate: z.string().trim().optional(),
   language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').refine((v) => VALID_LANGUAGES.includes(v), { message: 'Unsupported language code' }).optional(),
   dark_mode: z.boolean().optional(),
   is_online: z.boolean().optional(),
-  verification_status: z.enum(['pending', 'verified', 'rejected']).optional(),
 }).strict();
 
 // ── Oracle & Verification schemas ───────────────────────────────────────

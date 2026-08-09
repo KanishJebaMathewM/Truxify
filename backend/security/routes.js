@@ -2,7 +2,7 @@ import express from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import rateLimit from 'express-rate-limit';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const execAsync = promisify(exec);
 const router = express.Router();

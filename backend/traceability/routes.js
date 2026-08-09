@@ -1,8 +1,48 @@
 import express from 'express';
 import traceService from './trace.service.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
+
+/**
+ * Middleware to validate user access to shipment
+ * CWE-639: Insecure Direct Object Reference prevention
+ */
+async function validateShipmentAccess(req, res, next) {
+    const { shipmentId } = req.params;
+    const userId = req.user?.id;
+    
+    if (!userId) {
+        logger.warn(`[SECURITY] Unauthorized shipment access attempt: ${shipmentId}`);
+        return res.status(401).json({
+            success: false,
+            error: 'Authentication required',
+            message: 'Please login to access shipment information'
+        });
+    }
+    
+    try {
+        const hasAccess = await traceService.verifyShipmentOwnership(shipmentId, userId);
+        
+        if (!hasAccess) {
+            logger.warn(`[SECURITY] IDOR attempt: User ${userId} tried to access shipment ${shipmentId}`);
+            return res.status(403).json({
+                success: false,
+                error: 'Access denied',
+                message: 'You do not have permission to view this shipment'
+            });
+        }
+        
+        next();
+    } catch (error) {
+        logger.error('[SECURITY] Error validating shipment access:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            message: 'Unable to verify access permissions'
+        });
+    }
+}
 
 // Create product
 router.post('/trace/product', async (req, res) => {
@@ -91,6 +131,18 @@ router.post('/trace/verify', async (req, res) => {
     }
 });
 
+// Get product trace
+router.get('/trace/product/trace/:productId', async (req, res) => {
+    try {
+        const { productId } = req.params;
+        const trace = await traceService.getProductTrace(productId);
+        res.json({ success: true, data: trace });
+    } catch (error) {
+        logger.error('Product trace error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Get product
 router.get('/trace/product/:productId', async (req, res) => {
     try {
@@ -103,26 +155,14 @@ router.get('/trace/product/:productId', async (req, res) => {
     }
 });
 
-// Get shipment
-router.get('/trace/shipment/:shipmentId', async (req, res) => {
+// Get shipment - PROTECTED with IDOR validation
+router.get('/trace/shipment/:shipmentId', validateShipmentAccess, async (req, res) => {
     try {
         const { shipmentId } = req.params;
         const shipment = await traceService.getShipment(shipmentId);
         res.json({ success: true, data: shipment });
     } catch (error) {
         logger.error('Shipment fetch error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Get product trace
-router.get('/trace/product/trace/:productId', async (req, res) => {
-    try {
-        const { productId } = req.params;
-        const trace = await traceService.getProductTrace(productId);
-        res.json({ success: true, data: trace });
-    } catch (error) {
-        logger.error('Product trace error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

@@ -1,67 +1,72 @@
-import { describe, it, expect } from 'vitest';
-import {
-  firebaseProfileKey,
-  supabaseProfileKey,
-  PROFILE_KEY_PREFIX,
-} from '../../src/cache/profileCacheKeys.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-describe('profileCacheKeys', () => {
-  describe('PROFILE_KEY_PREFIX', () => {
-    it('is "user:profile"', () => {
-      expect(PROFILE_KEY_PREFIX).toBe('user:profile');
-    });
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+describe('profileCacheKeys - CacheKeyBuilder integration', () => {
+  beforeEach(() => {
+    vi.resetModules();
   });
 
-  describe('firebaseProfileKey', () => {
-    it('generates correct key for a standard Firebase UID', () => {
-      expect(firebaseProfileKey('abc123def456')).toBe('user:profile:abc123def456');
-    });
-
-    it('generates correct key for a long Firebase UID', () => {
-      const uid = 'a'.repeat(128);
-      expect(firebaseProfileKey(uid)).toBe(`user:profile:${uid}`);
-    });
-
-    it('returns a string', () => {
-      expect(typeof firebaseProfileKey('uid')).toBe('string');
-    });
-
-    it('starts with the profile key prefix', () => {
-      expect(firebaseProfileKey('test')).toMatch(/^user:profile:/);
-    });
+  it('exports all original key generation functions', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    expect(typeof mod.firebaseProfileKey).toBe('function');
+    expect(typeof mod.supabaseProfileKey).toBe('function');
+    expect(typeof mod.customerStatsKey).toBe('function');
+    expect(typeof mod.driverDetailsKey).toBe('function');
   });
 
-  describe('supabaseProfileKey', () => {
-    it('generates correct key for a standard UUID', () => {
-      expect(supabaseProfileKey('550e8400-e29b-41d4-a716-446655440000'))
-        .toBe('user:profile:sb:550e8400-e29b-41d4-a716-446655440000');
-    });
-
-    it('generates correct key for a short ID', () => {
-      expect(supabaseProfileKey('short-id')).toBe('user:profile:sb:short-id');
-    });
-
-    it('returns a string', () => {
-      expect(typeof supabaseProfileKey('id')).toBe('string');
-    });
-
-    it('starts with the profile key prefix and sb namespace', () => {
-      expect(supabaseProfileKey('test')).toMatch(/^user:profile:sb:/);
-    });
+  it('exports PROFILE_KEY_PREFIX', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    expect(mod.PROFILE_KEY_PREFIX).toBe('user:profile');
   });
 
-  describe('key separation', () => {
-    it('Firebase and Supabase keys for the same ID are different', () => {
-      const id = '550e8400-e29b-41d4-a716-446655440000';
-      expect(firebaseProfileKey(id)).not.toBe(supabaseProfileKey(id));
-    });
+  it('firebaseProfileKey produces backward-compatible key', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    expect(mod.firebaseProfileKey('abc123')).toBe('user:profile:abc123');
+  });
 
-    it('Firebase key does not contain "sb:" segment', () => {
-      expect(firebaseProfileKey('test')).not.toContain(':sb:');
-    });
+  it('supabaseProfileKey produces backward-compatible key', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    expect(mod.supabaseProfileKey('user-456')).toBe('user:profile:sb:user-456');
+  });
 
-    it('Supabase key contains "sb:" segment', () => {
-      expect(supabaseProfileKey('test')).toContain(':sb:');
-    });
+  it('customerStatsKey produces backward-compatible key', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    expect(mod.customerStatsKey('user-456')).toBe('user:profile:sb:user-456:stats');
+  });
+
+  it('driverDetailsKey produces backward-compatible key', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    expect(mod.driverDetailsKey('user-456')).toBe('user:profile:sb:user-456:driver');
+  });
+
+  it('exports PROFILE_SUB_KEYS constants', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    expect(mod.PROFILE_SUB_KEYS).toEqual({ STATS: 'stats', DRIVER: 'driver' });
+  });
+
+  it('profileCacheKey produces backward-compatible key', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    const key = mod.profileCacheKey('user-789');
+    expect(key).toBe('user:profile:sb:user-789');
+  });
+
+  it('profileCacheKey with subKey produces correct key', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    const key = mod.profileCacheKey('user-789', 'stats');
+    expect(key).toBe('user:profile:sb:user-789:stats');
+  });
+
+  it('profileCacheKey matches the legacy Supabase profile key (writer == invalidator)', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    expect(mod.profileCacheKey('user-789')).toBe(mod.supabaseProfileKey('user-789'));
+  });
+
+  it('profileCacheKey with subKey matches the legacy sub-key helpers', async () => {
+    const mod = await import('../../src/cache/profileCacheKeys.js');
+    expect(mod.profileCacheKey('user-789', 'stats')).toBe(mod.customerStatsKey('user-789'));
+    expect(mod.profileCacheKey('user-789', 'driver')).toBe(mod.driverDetailsKey('user-789'));
   });
 });

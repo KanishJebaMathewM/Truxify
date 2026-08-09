@@ -1,6 +1,8 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'api_client.dart';
+import 'sync_engine.dart';
 
 class TripService {
   TripService({
@@ -184,6 +186,16 @@ class TripService {
     String stopId,
     String tripDisplayId,
   ) async {
+    final connectivityResults = await Connectivity().checkConnectivity();
+    if (connectivityResults.contains(ConnectivityResult.none)) {
+      await SyncEngine.queueEvent(
+        tripId: tripDisplayId,
+        eventType: 'markStopCompleted',
+        payload: {'stopId': stopId},
+      );
+      return;
+    }
+
     await verifyTripOwnership(tripDisplayId);
     final path = '/api/trips/${_encodePathSegment(tripDisplayId)}/stops/${_encodePathSegment(stopId)}/complete';
     try {

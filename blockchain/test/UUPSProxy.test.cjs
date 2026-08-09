@@ -35,7 +35,7 @@ async function expectRevert(promise, expectedMessage) {
 }
 
 describe("TruxifyUpgradeable", function () {
-  let truxify, implementation, v2Implementation;
+  let truxify, implementation, v2Implementation, daoToken;
   let owner, upgrader, daoMember, voter1, voter2, other;
 
   const ONE_DAY = 86_400;
@@ -70,18 +70,44 @@ describe("TruxifyUpgradeable", function () {
       await proxyContract.getAddress()
     );
 
+    // ── Governance token: voting power comes from token balance, not raw
+    //    address count (this is the Sybil-resistance fix). Mint the entire
+    //    supply (400) split evenly across the four voting participants used
+    //    below, so each has equal weight — mirroring the old "1 address = 1
+    //    vote" test ratios but now backed by real, non-free-to-mint weight.
+    const DAOToken = await ethers.getContractFactory("DAOToken");
+    daoToken = await DAOToken.deploy(
+      "Truxify DAO",
+      "TDAO",
+      ethers.parseEther("400")
+    );
+    await daoToken.waitForDeployment();
+    for (const voter of [daoMember, voter1, voter2, other]) {
+      await daoToken.transfer(voter.address, ethers.parseEther("100"));
+    }
+    await truxify.setGovernanceToken(await daoToken.getAddress());
+
     // ── Test-friendly DAO config ─────────────────────────────────────────
-    // Set quorum to 3 (voter1 + voter2 + daoMember) so we can reach it.
-    // Set threshold to 51% so majority is clear.
-    // Set voting period to minimum (1 day = 86400s). Use time.increase()
-    // in tests to fast-forward past it.
-    await truxify.setDAOQuorum(3);
+    // Quorum: 75% of the 400-token supply (300 tokens) must have voted —
+    // equivalent to "3 out of 4" of the old address-count quorum.
+    // Threshold: 51% so majority is clear.
+    // Voting period: minimum (1 day = 86400s). Use time.increase() in tests
+    // to fast-forward past it, plus UPGRADE_EXECUTION_DELAY (2 days) before
+    // an already-passed proposal can actually be executed.
+    await truxify.setDAOQuorumBps(7500);
     await truxify.setDAOThreshold(51);
     await truxify.setDAOVotingPeriod(86400);
 
     // Grant roles
     await truxify.grantUpgraderRole(upgrader.address);
     await truxify.grantDAORole(daoMember.address);
+
+    // Pre-approve the implementations used as upgrade targets in these tests.
+    await truxify.setApprovedImplementation(other.address, true);
+    await truxify.setApprovedImplementation(
+      await v2Implementation.getAddress(),
+      true
+    );
   });
 
   // ══════════════════════════════════════════════════════════════════
@@ -144,7 +170,7 @@ describe("TruxifyUpgradeable", function () {
       await truxify.connect(daoMember).vote(1, true);
 
       const proposal = await truxify.proposals(1);
-      expect(proposal.votesFor).to.equal(1n);
+      expect(proposal.votesFor).to.equal(ethers.parseEther("100"));
     });
 
     it("Should not allow double voting", async function () {
@@ -192,7 +218,7 @@ describe("TruxifyUpgradeable", function () {
         "Upgrade to new version"
       );
 
-      // Only 1 vote, quorum is 3
+      // Only 1 voter's weight (100/400 = 25%), quorum requires 75%
       await truxify.connect(daoMember).vote(1, true);
       await time.increase(86401);
 
@@ -224,8 +250,8 @@ describe("TruxifyUpgradeable", function () {
       const proposal = await truxify.proposals(1);
       expect(proposal.executed).to.be.true;
       expect(proposal.passed).to.be.false;
-      expect(proposal.votesFor).to.equal(2n);
-      expect(proposal.votesAgainst).to.equal(2n);
+      expect(proposal.votesFor).to.equal(ethers.parseEther("200"));
+      expect(proposal.votesAgainst).to.equal(ethers.parseEther("200"));
     });
   });
 
@@ -248,8 +274,10 @@ describe("TruxifyUpgradeable", function () {
       await truxify.connect(voter1).vote(1, true);
       await truxify.connect(voter2).vote(1, true);
 
-      // Fast-forward past voting period
+      // Fast-forward past voting period, then past the mandatory
+      // UPGRADE_EXECUTION_DELAY (2 days) that applies once a proposal passes.
       await time.increase(86401);
+      await time.increase(2 * ONE_DAY);
 
       // Execute proposal — this should perform the upgrade via upgradeToAndCall
       const result = await truxify.executeProposal(1);
@@ -266,6 +294,71 @@ describe("TruxifyUpgradeable", function () {
       const proposal = await truxify.proposals(1);
       expect(proposal.executed).to.be.true;
       expect(proposal.passed).to.be.true;
+    });
+
+    it("Should reject execution of a passed proposal before the mandatory execution timelock elapses", async function () {
+      const v2Address = await v2Implementation.getAddress();
+
+      await truxify.connect(daoMember).createProposal(v2Address, "Upgrade to V2");
+
+      // Unanimous approval — quorum and threshold are both satisfied.
+      await truxify.connect(daoMember).vote(1, true);
+      await truxify.connect(voter1).vote(1, true);
+      await truxify.connect(voter2).vote(1, true);
+
+      // Only fast-forward past the voting period — NOT the additional
+      // UPGRADE_EXECUTION_DELAY. Even though the proposal has technically
+      // passed, execution must still wait out the timelock.
+      await time.increase(86401);
+
+      await expectRevert(
+        truxify.executeProposal(1),
+        "Execution timelock not elapsed"
+      );
+    });
+
+    it("Should reject executeProposal from an account without UPGRADER_ROLE", async function () {
+      const v2Address = await v2Implementation.getAddress();
+
+      await truxify.connect(daoMember).createProposal(v2Address, "Upgrade to V2");
+      await truxify.connect(daoMember).vote(1, true);
+      await truxify.connect(voter1).vote(1, true);
+      await truxify.connect(voter2).vote(1, true);
+
+      await time.increase(86401);
+      await time.increase(2 * ONE_DAY);
+
+      // `other` has DAO_ROLE (can propose/vote) but not UPGRADER_ROLE —
+      // passing a vote should never be enough to execute the upgrade
+      // yourself; a privileged account must do it.
+      await expectRevert(
+        truxify.connect(other).executeProposal(1),
+        "AccessControlUnauthorizedAccount"
+      );
+    });
+
+    it("Should reject createProposal for an implementation that hasn't been approved by the admin", async function () {
+      const [, , , , , , unapproved] = await ethers.getSigners();
+
+      await expectRevert(
+        truxify.connect(daoMember).createProposal(unapproved.address, "Sneaky upgrade"),
+        "Implementation not approved"
+      );
+    });
+
+    it("Should reject voting from an address holding no governance tokens", async function () {
+      const v2Address = await v2Implementation.getAddress();
+      const [, , , , , , noTokens] = await ethers.getSigners();
+
+      await truxify.connect(daoMember).createProposal(v2Address, "Upgrade to V2");
+      await truxify.grantDAORole(noTokens.address);
+
+      // noTokens never received any DAOToken in beforeEach, so despite being
+      // a valid DAO_ROLE-holding address, it carries zero voting weight.
+      await expectRevert(
+        truxify.connect(noTokens).vote(1, true),
+        "No voting power"
+      );
     });
 
     it("Should reject upgrade via upgradeToAndCall() without DAO approval", async function () {
@@ -298,6 +391,7 @@ describe("TruxifyUpgradeable", function () {
       await truxify.connect(voter1).vote(1, true);
       await truxify.connect(voter2).vote(1, true);
       await time.increase(86401);
+      await time.increase(2 * ONE_DAY);
       await truxify.executeProposal(1);
 
       // Flag was cleared by executeProposal — trying upgradeToAndCall again should fail
@@ -504,15 +598,68 @@ describe("TruxifyUpgradeable", function () {
       );
     });
 
-    it("Should update quorum", async function () {
-      await truxify.setDAOQuorum(10);
-      expect(await truxify.daoQuorum()).to.equal(10n);
+    it("Should update quorum bps", async function () {
+      await truxify.setDAOQuorumBps(2000);
+      expect(await truxify.daoQuorumBps()).to.equal(2000n);
     });
 
-    it("Should reject zero quorum", async function () {
+    it("Should reject zero quorum bps", async function () {
       await expectRevert(
-        truxify.setDAOQuorum(0),
-        "Quorum must be > 0"
+        truxify.setDAOQuorumBps(0),
+        "Quorum bps must be 1-10000"
+      );
+    });
+
+    it("Should reject quorum bps above 10000 (100%)", async function () {
+      await expectRevert(
+        truxify.setDAOQuorumBps(10001),
+        "Quorum bps must be 1-10000"
+      );
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════
+  // Governance Token & Implementation Allowlist
+  // ══════════════════════════════════════════════════════════════════
+
+  describe("Governance Token & Implementation Allowlist", function () {
+    it("Should reject voting when no governance token has been configured", async function () {
+      // Deploy a fresh proxy that never had setGovernanceToken() called.
+      const TruxifyUpgradeable = await ethers.getContractFactory("TruxifyUpgradeable");
+      const freshImpl = await TruxifyUpgradeable.deploy();
+      await freshImpl.waitForDeployment();
+
+      const UUPSProxy = await ethers.getContractFactory("UUPSProxy");
+      const initData = freshImpl.interface.encodeFunctionData("initialize");
+      const freshProxy = await UUPSProxy.deploy(await freshImpl.getAddress(), initData);
+      await freshProxy.waitForDeployment();
+
+      const freshTruxify = await ethers.getContractAt(
+        "TruxifyUpgradeable",
+        await freshProxy.getAddress()
+      );
+
+      await freshTruxify.grantDAORole(daoMember.address);
+      await freshTruxify.setApprovedImplementation(other.address, true);
+      await freshTruxify.connect(daoMember).createProposal(other.address, "Upgrade");
+
+      await expectRevert(
+        freshTruxify.connect(daoMember).vote(1, true),
+        "Governance token not configured"
+      );
+    });
+
+    it("Should only allow DEFAULT_ADMIN_ROLE to set the governance token", async function () {
+      await expectRevert(
+        truxify.connect(other).setGovernanceToken(await daoToken.getAddress()),
+        "AccessControlUnauthorizedAccount"
+      );
+    });
+
+    it("Should only allow DEFAULT_ADMIN_ROLE to approve implementations", async function () {
+      await expectRevert(
+        truxify.connect(other).setApprovedImplementation(other.address, true),
+        "AccessControlUnauthorizedAccount"
       );
     });
   });

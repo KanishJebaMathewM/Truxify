@@ -54,6 +54,18 @@ def load_model(model_name: str) -> Optional[Any]:
 def model_exists(model_name: str) -> bool:
     return os.path.exists(get_model_path(model_name))
 
+def get_model_meta(model_name: str) -> Optional[dict]:
+    """Return the persisted metadata dict for a model, or None."""
+    path = get_meta_path(model_name)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        logger.warning("Failed to read metadata for model '%s'", model_name)
+        return None
+
 async def ensure_model_loaded(model_name: str, train_fn, *args, **kwargs) -> Optional[Any]:
     async with _get_lock(model_name):
         if not model_exists(model_name):

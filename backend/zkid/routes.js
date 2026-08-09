@@ -1,6 +1,6 @@
 import express from 'express';
 import zkidService from './zkid.service.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../api/src/middleware/logger.js';
 
 const router = express.Router();
 

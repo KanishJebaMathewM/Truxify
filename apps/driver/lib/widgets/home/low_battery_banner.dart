@@ -15,9 +15,7 @@ class LowBatteryBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = isCritical ? TruxifyColors.errorRed : TruxifyColors.warning;
-    final icon = isCritical
-        ? Icons.battery_alert_rounded
-        : Icons.battery_warning_rounded;
+    final icon = Icons.battery_alert_rounded;
     final text = isCritical
         ? 'Critical battery ($batteryLevel%). Connect charger immediately.'
         : 'Low battery ($batteryLevel%). Connect charger soon.';

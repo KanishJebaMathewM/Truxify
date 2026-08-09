@@ -1,5 +1,6 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify/widgets/order_card.dart';
 import 'package:truxify_shared/truxify_shared.dart';
@@ -18,9 +19,11 @@ import 'live_tracking_screen.dart';
 import 'order_detail_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:truxify_shared/shimmer_widget.dart';
+import '../utils/driver_utils.dart';
 
 class OrdersScreen extends StatefulWidget {
-  const OrdersScreen({super.key});
+  final OrderService? orderService;
+  const OrdersScreen({super.key, this.orderService});
 
   @override
   State<OrdersScreen> createState() => _OrdersScreenState();
@@ -41,7 +44,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   List<HistoryOrderData> _historyOrders = [];
   bool _isLoading = true;
 
-  // Status filter state
+  // Advanced filter & sort state
   String _selectedStatusFilter = 'All Trips';
   final List<String> _statusFilterOptions = [
     'All Trips',
@@ -51,6 +54,22 @@ class _OrdersScreenState extends State<OrdersScreen>
     'Delivered',
     'Cancelled',
   ];
+
+  DateTime? _startDate;
+  DateTime? _endDate;
+  String _selectedSort = 'Newest';
+  final List<String> _sortOptions = ['Newest', 'Oldest'];
+
+  void _resetFilters() {
+    setState(() {
+      _selectedStatusFilter = 'All Trips';
+      _startDate = null;
+      _endDate = null;
+      _selectedSort = 'Newest';
+      _searchQuery = '';
+      _searchController.clear();
+    });
+  }
 
   String _formatStatus(String status) {
     switch (status) {
@@ -81,7 +100,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   void initState() {
     super.initState();
 
-    _orderService = OrderService();
+    _orderService = widget.orderService ?? OrderService();
     _tabController = TabController(length: 2, vsync: this);
     _tabController.addListener(() {
       if (!_tabController.indexIsChanging) {
@@ -98,16 +117,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   }
 
   String _resolveDriverName(Map<String, dynamic> order) {
-    final profile = order['profiles'];
-    if (profile is Map<String, dynamic>) {
-      final name = profile['full_name']?.toString().trim();
-      if (name != null && name.isNotEmpty) return name;
-    }
-
-    final driverName = order['driver_name']?.toString().trim();
-    if (driverName != null && driverName.isNotEmpty) return driverName;
-
-    return 'Driver Assigned';
+    return DriverUtils.resolveDriverName(order);
   }
 
   Future<void> _loadOrders() async {
@@ -324,6 +334,7 @@ class _OrdersScreenState extends State<OrdersScreen>
           ),
           callback: (payload) {
             debugPrint('Realtime customer orders list update: ${payload.newRecord}');
+            if (!mounted) return;
             _loadOrders();
           },
         )
@@ -375,7 +386,7 @@ class _OrdersScreenState extends State<OrdersScreen>
 
   List<HistoryOrderData> get _filteredHistoryOrders {
     final query = _searchQuery.trim().toLowerCase();
-    var filtered = _historyOrders;
+    var filtered = List<HistoryOrderData>.from(_historyOrders);
 
     // Apply status filter
     if (_selectedStatusFilter != 'All Trips') {
@@ -384,7 +395,7 @@ class _OrdersScreenState extends State<OrdersScreen>
           .toList();
     }
 
-    // Apply search query filter
+    // Apply pickup / destination or general search query filter
     if (query.isNotEmpty) {
       filtered = filtered
           .where((order) => _orderMatches(query, [
@@ -395,9 +406,36 @@ class _OrdersScreenState extends State<OrdersScreen>
                 order.amount,
                 order.status,
                 order.truckNumber,
+                if (order.goodsType != null) order.goodsType!,
               ]))
           .toList();
     }
+
+    // Apply date range filter (based on date string parsing)
+    if (_startDate != null || _endDate != null) {
+      filtered = filtered.where((order) {
+        final parsedDate = DateTime.tryParse(order.date);
+        if (parsedDate == null) return true;
+        if (_startDate != null && parsedDate.isBefore(DateTime(_startDate!.year, _startDate!.month, _startDate!.day))) {
+          return false;
+        }
+        if (_endDate != null && parsedDate.isAfter(DateTime(_endDate!.year, _endDate!.month, _endDate!.day, 23, 59, 59))) {
+          return false;
+        }
+        return true;
+      }).toList();
+    }
+
+    // Apply sorting
+    filtered.sort((a, b) {
+      final dateA = DateTime.tryParse(a.date) ?? DateTime(1970);
+      final dateB = DateTime.tryParse(b.date) ?? DateTime(1970);
+      if (_selectedSort == 'Oldest') {
+        return dateA.compareTo(dateB);
+      }
+      // Default 'Newest'
+      return dateB.compareTo(dateA);
+    });
 
     return filtered;
   }
@@ -452,7 +490,15 @@ class _OrdersScreenState extends State<OrdersScreen>
                           itemBuilder: (context, index) => const ShimmerOrderCard(),
                         )
                       : _filteredActiveOrders.isEmpty
-                          ? Center(child: Text(AppLocalizations.of(context)!.noActiveOrders))
+                          ? Center(
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Lottie.asset('packages/truxify_shared/assets/lottie/no_trips.json', width: 200, height: 200),
+                                    Text(AppLocalizations.of(context)!.noActiveOrders, style: const TextStyle(color: Colors.grey, fontSize: 16)),
+                                  ],
+                                ),
+                              )
                           : ListView.separated(
                               padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
                               itemCount: _filteredActiveOrders.length,
@@ -488,7 +534,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                               child: Row(
                                 children: [
                                   Text(
-                                    AppLocalizations.of(context)!.filterStatus,
+                                    'Status',
                                     style: Theme.of(context)
                                         .textTheme
                                         .bodySmall
@@ -557,9 +603,7 @@ class _OrdersScreenState extends State<OrdersScreen>
                                               ? AppLocalizations.of(
                                                       context)!
                                                   .noHistoryOrders
-                                              : AppLocalizations.of(
-                                                      context)!
-                                                  .noMatchingTrips,
+                                              : 'No matching trips',
                                           textAlign: TextAlign.center,
                                           style: Theme.of(context)
                                               .textTheme

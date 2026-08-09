@@ -20,6 +20,9 @@ class RouteDraft {
     this.minCapacity,
     this.maxCapacity,
     this.materialType,
+    this.requiresRefrigeration,
+    this.targetTemperatureMin,
+    this.targetTemperatureMax,
   });
 
   final String pickup;
@@ -40,6 +43,9 @@ class RouteDraft {
   final double? minCapacity;
   final double? maxCapacity;
   final String? materialType;
+  final bool? requiresRefrigeration;
+  final double? targetTemperatureMin;
+  final double? targetTemperatureMax;
 }
 
 class ShipmentCardData {
@@ -101,8 +107,10 @@ class StatCardData {
 class TruckResultData {
   const TruckResultData({
     required this.driver,
+    this.driverId,
     required this.rating,
     required this.truck,
+    this.truckId,
     required this.capacity,
     this.freeSpacePercent = 0,
     required this.price,
@@ -114,6 +122,7 @@ class TruckResultData {
     this.platformFee,
     this.truckNumber,
     this.isAiEstimate = false,
+    this.isDigilockerVerified = false,
   });
 
   factory TruckResultData.fromJson(Map<String, dynamic> json) {
@@ -146,8 +155,10 @@ class TruckResultData {
 
     return TruckResultData(
       driver: json['driver'] as String? ?? 'Unknown Driver',
+      driverId: json['driverId'] as String? ?? json['driver_id'] as String?,
       rating: (json['rating'] as num?)?.toDouble() ?? 0.0,
       truck: json['truck'] as String? ?? 'Unknown Truck',
+      truckId: json['truckId'] as String? ?? json['truck_id'] as String?,
       capacity: json['capacity'] as String? ?? '',
       price: priceStr,
       eta: etaStr,
@@ -157,12 +168,15 @@ class TruckResultData {
       platformFee: platformFeeStr,
       truckNumber: json['truckNumber'] as String? ?? json['number_plate'] as String?,
       isAiEstimate: json['isAiEstimate'] as bool? ?? false,
+      isDigilockerVerified: json['isDigilockerVerified'] as bool? ?? false,
     );
   }
 
   final String driver;
+  final String? driverId;
   final double rating;
   final String truck;
+  final String? truckId;
   final String capacity;
   final int freeSpacePercent;
   final String price;
@@ -174,6 +188,7 @@ class TruckResultData {
   final String? platformFee;
   final String? truckNumber;
   final bool isAiEstimate;
+  final bool isDigilockerVerified;
 }
 
 class ActiveOrderData {
@@ -216,6 +231,10 @@ class HistoryOrderData {
     this.isStackable,
     this.isFragile,
     this.specialRequirements,
+    this.requiresRefrigeration,
+    this.targetTemperatureMin,
+    this.targetTemperatureMax,
+    this.escrowStatus,
   });
 
   final String orderId;
@@ -238,6 +257,7 @@ class HistoryOrderData {
   final bool? isStackable;
   final bool? isFragile;
   final String? specialRequirements;
+  final String? escrowStatus;
 }
 
 class TimelineStepData {

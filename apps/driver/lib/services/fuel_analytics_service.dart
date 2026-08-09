@@ -6,7 +6,7 @@ class FuelAnalyticsService {
   Future<Map<String, dynamic>> calculateAnalytics(double averageMpg) async {
     try {
       // Fetch all completed trips for this driver
-      final trips = await _tripService.fetchTrips(status: 'delivered');
+      final trips = await _tripService.fetchTrips(status: 'completed');
       
       double totalDistanceKm = 0;
       double totalPayout = 0;
@@ -19,16 +19,14 @@ class FuelAnalyticsService {
         final numericEarnings = double.tryParse(rawEarnings.replaceAll(RegExp(r'[^0-9.]'), '')) ?? 0.0;
         
         totalDistanceKm += numericDistance;
-        totalPayout += numericEarnings;
+        totalPayout += numericEarnings / 100; // earnings are in paisa
       }
 
-      // Convert KM to Miles (1 km = 0.621371 miles)
-      final totalDistanceMiles = totalDistanceKm * 0.621371;
-
-      // Fuel cost calculation (assume constant fuel price for demo e.g. $4.00 per gallon)
-      const fuelPricePerGallon = 4.0;
-      final fuelGallonsUsed = averageMpg > 0 ? (totalDistanceMiles / averageMpg) : 0;
-      final estimatedFuelCost = fuelGallonsUsed * fuelPricePerGallon;
+      // Fuel cost calculation (assume ₹ per litre, km/litre efficiency)
+      const fuelPricePerLitre = 90.0;
+      final kmPerLitre = averageMpg > 0 ? averageMpg * 1.60934 / 3.78541 : 0;
+      final fuelLitresUsed = kmPerLitre > 0 ? (totalDistanceKm / kmPerLitre) : 0;
+      final estimatedFuelCost = fuelLitresUsed * fuelPricePerLitre;
       
       final profitMargin = totalPayout > 0 
           ? ((totalPayout - estimatedFuelCost) / totalPayout) * 100 
@@ -36,16 +34,17 @@ class FuelAnalyticsService {
 
       // Provide sample points for a chart (last 5 trips)
       final chartPoints = <Map<String, dynamic>>[];
-      for (int i = 0; i < trips.length && i < 5; i++) {
+      final startIndex = trips.length > 5 ? trips.length - 5 : 0;
+      for (int i = startIndex; i < trips.length; i++) {
         final t = trips[i];
         final numDist = double.tryParse(t['distance']?.toString().replaceAll(RegExp(r'[^0-9.]'), '') ?? '0') ?? 0;
         final numEarn = double.tryParse(t['earnings']?.toString().replaceAll(RegExp(r'[^0-9.]'), '') ?? '0') ?? 0;
-        final miles = numDist * 0.621371;
-        final fCost = averageMpg > 0 ? (miles / averageMpg) * fuelPricePerGallon : 0;
+        final litresUsed = kmPerLitre > 0 ? (numDist / kmPerLitre) : 0;
+        final fCost = litresUsed * fuelPricePerLitre;
         
         chartPoints.add({
           'label': t['date'] ?? 'Trip',
-          'payout': numEarn,
+          'payout': numEarn / 100,
           'fuelCost': fCost,
         });
       }

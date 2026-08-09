@@ -61,7 +61,7 @@ class CrashReportingService {
         options.environment = Env.environment;
         options.tracesSampleRate = Env.isProd ? 0.2 : 1.0;
         options.debug = kDebugMode;
-        options.beforeSend = (event) {
+        options.beforeSend = (event, hint) {
           event.tags?.addAll(_defaultTags);
           return event;
         };
@@ -216,7 +216,7 @@ class CrashReportingService {
   /// Flushes any buffered events. Call before app termination.
   static Future<void> flush() async {
     if (_initialized && Env.isCrashReportingEnabled) {
-      await Sentry.flush(timeout: const Duration(seconds: 3));
+      await Sentry.close();
     }
   }
 

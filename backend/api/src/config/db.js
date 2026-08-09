@@ -28,6 +28,26 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 export let supabase = null;
 export let supabaseAdmin = null;
 
+// Connection health helpers
+export function isConnected() {
+  return supabase !== null;
+}
+
+export async function reconnect() {
+  logger.warn('[db] Reconnecting Supabase clients...');
+  supabase = null;
+  supabaseAdmin = null;
+  // Re-initialize (simplified - full reconnect would re-parse env vars)
+  if (supabaseUrl && supabaseAnonKey) {
+    supabase = createClient(supabaseUrl, supabaseAnonKey);
+  }
+  if (supabaseUrl && supabaseServiceKey) {
+    supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+  }
+}
+
+
+
 if (supabaseUrl && supabaseAnonKey) {
   try {
     supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -146,6 +166,10 @@ export async function waitForMongoDb() {
       ).catch(err => logger.error({ err }, 'Failed to create TTL index on telemetry'));
 
       mongoDb.collection('telemetry').createIndex(
+        { driver_id: 1, order_id: 1, timestamp: -1 }
+      ).catch(err => logger.error({ err }, 'Failed to create compound index on telemetry'));
+
+      mongoDb.collection('telemetry').createIndex(
         { location: '2dsphere' }
       ).catch(err => logger.error({ err }, 'Failed to create 2dsphere index on telemetry'));
       if (_mongoDbResolve) _mongoDbResolve();
@@ -228,7 +252,11 @@ if (serviceAccountRaw) {
   logger.warn('Firebase not configured. Skipping initialization.');
 }
 
+let _closeDbInProgress = false;
+
 export async function closeDbConnections() {
+  if (_closeDbInProgress) return;
+  _closeDbInProgress = true;
   if (supabase) {
     try {
       await supabase.removeAllChannels();
@@ -300,9 +328,24 @@ export async function closeDbConnections() {
  * Logs warnings for missing optional vars, throws for missing required vars.
  */
 export function validateConfig() {
-  const required = ['SUPABASE_URL', 'SUPABASE_ANON_KEY'];
-  const recommended = ['REDIS_URL', 'MONGODB_URI', 'FIREBASE_SERVICE_ACCOUNT_JSON', 'SUPABASE_SERVICE_ROLE_KEY'];
-  const missing = required.filter((key) => !process.env[key]);
+  // Required: core runtime dependencies. App cannot function without these.
+  const required = [
+    'SUPABASE_URL',
+    'SUPABASE_ANON_KEY',
+    'SUPABASE_SERVICE_ROLE_KEY',
+  ];
+  // Recommended: optional services that enhance functionality.
+  const recommended = [
+    'REDIS_URL',
+    'MONGODB_URI',
+    'FIREBASE_SERVICE_ACCOUNT_JSON',
+    'JWT_SECRET',
+    'SENTRY_DSN',
+  ];
+  const missing = required.filter((key) => {
+    const val = process.env[key];
+    return !val || val.trim().length === 0;
+  });
   const missingRecommended = recommended.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
@@ -315,19 +358,27 @@ export function validateConfig() {
     logger.warn(`Missing optional env vars (features disabled): ${missingRecommended.join(', ')}`);
   }
 
+  // Pricing rate-card validation
+  const pricingVars = [
+    'TRUXIFY_RATE_PER_TONNE_KM',
+    'TRUXIFY_FRAGILE_MULTIPLIER',
+    'TRUXIFY_STACKABLE_DISCOUNT',
+    'TRUXIFY_HANDLING_FEE',
+    'TRUXIFY_PLATFORM_FEE_PCT',
+    'TRUXIFY_FUEL_COST_PCT',
+    'TRUXIFY_TOLL_PER_KM',
+  ];
+  for (const key of pricingVars) {
+    const raw = process.env[key];
+    if (raw !== undefined && raw !== null && raw !== '') {
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) {
+        logger.warn(`[pricing] ${key}=${raw} is invalid — will use default at runtime`);
+      }
+    }
+  }
+
   logger.info('Config validation passed');
 }
 
-// Resolves #2050: Handle SIGINT and SIGTERM for graceful DB shutdown
-
-async function shutdown(signal) {
-  logger.info({ signal }, 'Received signal, starting graceful shutdown...');
-  await closeDbConnections();
-  logger.info('Graceful shutdown complete. Exiting...');
-  // Allow the event loop to drain so other shutdown handlers (WebSocket tracker,
-  // reconciliation timers, FraudDetectionService cleanup) can finish their work.
-  // unref'd timers will not prevent exit; the process will exit naturally.
-}
-
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+// Signal handlers are registered in index.js only to ensure coordinated shutdown.

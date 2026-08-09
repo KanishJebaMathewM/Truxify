@@ -97,4 +97,70 @@ it('succeeds when tx.from matches expectedSenderAddress', async () => {
     expect(result.error).toBeUndefined()
     expect(result.txHash).toBe(txHash)
 })
+
+it('rejects an already-funded booking created by a non-customer address', async () => {
+    mockBookings.mockResolvedValue({ amount: 1n, customer: '0x' + '7'.repeat(40), driver: driverAddr })
+    const result = await recordDepositTx(bookingId, txHash, someSender, driverAddr, '1')
+    expect(result.error).toMatch(/different wallet/i)
+})
+
+it('rejects an already-funded booking created for a different driver', async () => {
+    mockBookings.mockResolvedValue({ amount: 1n, customer: someSender, driver: '0x' + '8'.repeat(40) })
+    const result = await recordDepositTx(bookingId, txHash, someSender, driverAddr, '1')
+    expect(result.error).toMatch(/different driver/i)
+})
+
+it('rejects an already-funded booking whose amount differs from the expected amount', async () => {
+    mockBookings.mockResolvedValue({ amount: 1n, customer: someSender, driver: driverAddr })
+    const result = await recordDepositTx(bookingId, txHash, someSender, driverAddr, '100')
+    expect(result.error).toMatch(/does not match/i)
+    expect(result.code).toBe('DEPOSIT_AMOUNT_MISMATCH')
+})
+
+it('succeeds on an already-funded booking that matches customer, driver, and amount', async () => {
+    mockBookings.mockResolvedValue({ amount: 100n, customer: someSender, driver: driverAddr })
+    const result = await recordDepositTx(bookingId, txHash, someSender, driverAddr, '100')
+    expect(result.alreadyFunded).toBe(true)
+})
+
+it('rejects a deposit tx created for a different driver', async () => {
+    mockParseTransaction.mockReturnValue({
+        name: 'createBooking',
+        args: [BigInt(bookingId), '0x' + '8'.repeat(40)],
+    })
+    const result = await recordDepositTx(bookingId, txHash, someSender, driverAddr, '1')
+    expect(result.error).toMatch(/driver address does not match/i)
+})
+
+it('rejects a deposit tx whose value differs from the expected escrow amount (exact equality)', async () => {
+    mockGetTransaction.mockResolvedValue({
+        to: CONTRACT_ADDRESS,
+        data: '0xdeadbeef',
+        value: 1n,
+        from: someSender,
+    })
+    const result = await recordDepositTx(bookingId, txHash, someSender, driverAddr, '100')
+    expect(result.error).toMatch(/does not match/i)
+    expect(result.error).toMatch(/less than/i)
+    expect(result.code).toBe('DEPOSIT_AMOUNT_MISMATCH')
+})
+
+it('rejects a deposit tx that overpays the expected escrow amount', async () => {
+    mockGetTransaction.mockResolvedValue({
+        to: CONTRACT_ADDRESS,
+        data: '0xdeadbeef',
+        value: 1000n,
+        from: someSender,
+    })
+    const result = await recordDepositTx(bookingId, txHash, someSender, driverAddr, '100')
+    expect(result.error).toMatch(/does not match/i)
+    expect(result.error).toMatch(/greater than/i)
+    expect(result.code).toBe('DEPOSIT_AMOUNT_MISMATCH')
+})
+
+it('returns a 4xx-friendly error for a malformed booking ID instead of throwing', async () => {
+    const result = await recordDepositTx('escrow:#FF20260600', txHash, someSender, driverAddr, '1')
+    expect(result.error).toBeDefined()
+    expect(result.error).toMatch(/invalid booking id/i)
+})
 })

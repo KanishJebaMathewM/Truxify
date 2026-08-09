@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
-import logger from '../../api/src/middleware/logger.js';
-import { supabase } from '../../api/src/config/db.js';
+import logger from '../api/src/middleware/logger.js';
+import { supabase } from '../api/src/config/db.js';
 
 class TokenizationService {
     constructor() {
@@ -15,8 +15,9 @@ class TokenizationService {
             'function createTradeOrder(uint256 assetId, uint256 amount, uint256 price, string memory orderType) external',
             'function executeTradeOrder(uint256 assetId, uint256 orderIndex) external payable',
             'function cancelTradeOrder(uint256 assetId, uint256 orderIndex) external',
+            'function getTradeOrders(uint256 assetId) external view returns (tuple(uint256,uint256,address,address,uint256,uint256,uint256,string,bool,uint256,uint256)[])',
             'function getAsset(uint256 assetId) external view returns (tuple(uint256,string,string,string,uint256,uint256,uint256,uint256,address,bool,string,uint256,uint256))',
-            'function getFractionalOwnership(uint256 assetId, address owner) external view returns (tuple(address,uint256,uint256,uint256))',
+            'function getFractionalOwnership(uint256 assetId, address owner) external view returns (tuple(address,uint256,uint256,uint256,uint256))',
             'function getTotalAssets() external view returns (uint256)',
             'function getTotalTradeOrders() external view returns (uint256)'
         ];
@@ -62,12 +63,16 @@ class TokenizationService {
         }
     }
 
-    async purchaseFraction(assetId, amount, userAddress) {
+    async purchaseFraction(assetId, amount, userAddress, signer) {
         try {
             const asset = await this.getAsset(assetId);
+            if (!asset) {
+                throw new Error('Asset not found');
+            }
             const totalCost = parseFloat(asset.tokenPrice) * amount;
 
-            const tx = await this.token.purchaseFraction(
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
+            const tx = await userContract.purchaseFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),
                 {
@@ -167,9 +172,38 @@ class TokenizationService {
         }
     }
 
+    async getTradeOrder(assetId, orderIndex) {
+        try {
+            const orders = await this.token.getTradeOrders(assetId);
+
+            if (orderIndex < 0 || orderIndex >= orders.length) {
+                throw new Error(`Order index ${orderIndex} out of range for asset ${assetId}`);
+            }
+            const order = orders[orderIndex];
+            return {
+                orderId: order[0].toString(),
+                tokenId: order[1].toString(),
+                seller: order[2],
+                buyer: order[3],
+                amount: ethers.formatEther(order[4]),
+                price: ethers.formatEther(order[6]),
+                orderType: order[7],
+                isActive: order[8]
+            };
+        } catch (error) {
+            logger.error('Failed to get trade order:', error);
+            throw error;
+        }
+}
+
     async executeTradeOrder(assetId, orderIndex, buyerAddress) {
         try {
             const order = await this.getTradeOrder(assetId, orderIndex);
+
+            if (!order.isActive) {
+                throw new Error(`Trade order ${order.orderId} is not active`);
+            }
+
             const totalCost = parseFloat(order.price) * parseFloat(order.amount);
 
             const tx = await this.token.executeTradeOrder(
@@ -237,7 +271,8 @@ class TokenizationService {
                 owner: ownership[0],
                 tokenId: ownership[1].toString(),
                 amount: ethers.formatEther(ownership[2]),
-                purchasedAt: ownership[3].toString()
+                backedTokens: ethers.formatEther(ownership[3]),
+                purchasedAt: ownership[4].toString()
             };
         } catch (error) {
             logger.error('Fractional ownership fetch failed:', error);

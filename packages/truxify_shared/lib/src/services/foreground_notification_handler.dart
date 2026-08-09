@@ -72,8 +72,14 @@ class ForegroundNotificationHandler {
       MaterialBanner(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         leading: const Icon(Icons.notifications_rounded),
-        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        content: Text(body, maxLines: 2, overflow: TextOverflow.ellipsis),
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(title, style: const TextStyle(fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
+            if (body.isNotEmpty) Text(body, maxLines: 2, overflow: TextOverflow.ellipsis),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () {

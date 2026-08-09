@@ -8,10 +8,13 @@ export class OrderValidationService {
   }
 
   async findOrderByIdOrDisplayId(identifier, select = '*') {
-    const { data: byId, error: errId } = await this.supabase.from('orders').select(select).eq('id', identifier).maybeSingle();
+    const targetId = typeof identifier === 'string' && identifier.startsWith('TX-')
+      ? identifier.slice(3)
+      : identifier;
+    const { data: byId, error: errId } = await this.supabase.from('orders').select(select).eq('id', targetId).maybeSingle();
     if (errId) throw new DomainError(500, { error: 'Query failed.', details: errId.message });
     if (byId) return byId;
-    const { data: byDisplay, error: errDisplay } = await this.supabase.from('orders').select(select).eq('order_display_id', identifier).maybeSingle();
+    const { data: byDisplay, error: errDisplay } = await this.supabase.from('orders').select(select).eq('order_display_id', targetId).maybeSingle();
     if (errDisplay) throw new DomainError(500, { error: 'Query failed.', details: errDisplay.message });
     return byDisplay || null;
   }
@@ -157,9 +160,11 @@ export class OrderValidationService {
   }
 
   assertChangeDropAllowed(order) {
-    if (order.escrow_status === 'funded' || order.status !== 'pending') {
-      const reason = order.escrow_status === 'funded'
-        ? 'after escrow has been funded'
+    const escrowInFlight = order.escrow_status === 'funding' || order.escrow_status === 'funded';
+    const escrowPending = order.escrow_status === 'pending' || order.escrow_status === null;
+    if (!escrowPending || order.status !== 'pending') {
+      const reason = escrowInFlight
+        ? `after escrow ${order.escrow_status === 'funding' ? 'funding has been initiated' : 'has been funded'}`
         : `after order status is '${order.status}'`;
       throw new DomainError(409, {
         error: `Drop location cannot be changed ${reason}.`,
@@ -178,7 +183,7 @@ export class OrderValidationService {
     const { data: driver, error } = await this.supabase
       .from('driver_details')
       .select('accumulated_driving_minutes, accumulated_on_duty_minutes, hos_status')
-      .eq('driver_id', driverId)
+      .eq('user_id', driverId)
       .maybeSingle();
 
     if (error) {
@@ -190,7 +195,7 @@ export class OrderValidationService {
       const onDutyHours = (driver.accumulated_on_duty_minutes || 0) / 60;
 
       if (drivingHours >= 11 || onDutyHours >= 14) {
-        throw new DomainError(403, { 
+        throw new DomainError(403, {
           error: 'HoS Limit Exceeded: You have reached your maximum legal driving or on-duty hours for this shift. You must take a mandatory rest break before bidding on new loads.'
         });
       }

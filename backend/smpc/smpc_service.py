@@ -7,7 +7,6 @@ import logging
 from typing import List, Dict, Any, Tuple
 from datetime import datetime
 from cryptography.fernet import Fernet
-import pickle
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +72,11 @@ class SMPCProtocol:
         if not result or len(result) == 0:
             raise ValueError("Empty result from SMPC compute engine")
         try:
-            return pickle.loads(result)
-        except (pickle.UnpicklingError, EOFError, ImportError, TypeError) as e:
+            data = json.loads(result.decode())
+            if isinstance(data, list):
+                return tuple(data)
+            return data
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.error(f"SMPC deserialization failed: {e}")
             raise
 
@@ -110,7 +112,7 @@ class SMPCProtocol:
 
     def share_data(self, data: Any, parties: List[str]) -> Dict[str, bytes]:
         try:
-            data_bytes = pickle.dumps(data)
+            data_bytes = json.dumps(data).encode()
             data_int = int.from_bytes(data_bytes, 'big') % self.secret_sharing.prime
 
             shares = self.secret_sharing.generate_shares(
@@ -121,7 +123,7 @@ class SMPCProtocol:
 
             shares_dict = {}
             for i, party in enumerate(parties):
-                share_bytes = pickle.dumps(shares[i])
+                share_bytes = json.dumps(shares[i]).encode()
                 encrypted = self.cipher.encrypt(share_bytes)
                 shares_dict[party] = encrypted
 
@@ -193,16 +195,13 @@ class SMPCProtocol:
             raise
 
     def _sum_shares(self, shares: List[Tuple[int, int]]) -> int:
-        total = 0
-        for x, y in shares:
-            total = (total + y) % self.secret_sharing.prime
-        return total
+        return self.secret_sharing.reconstruct_secret(shares)
 
     def secure_aggregate(self, data_list: List[Any], operation: str = 'sum') -> Any:
         try:
             data_ints = []
             for data in data_list:
-                data_bytes = pickle.dumps(data)
+                data_bytes = json.dumps(data).encode()
                 data_int = int.from_bytes(data_bytes, 'big') % self.secret_sharing.prime
                 data_ints.append(data_int)
 

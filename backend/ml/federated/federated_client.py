@@ -52,16 +52,10 @@ class FederatedClient:
         """Register client with server"""
         self.redis.sadd('federated:clients', self.client_id)
         
-        # Set encryption key if not exists
-        if not self.redis.exists(f'federated:key:{self.client_id}'):
-            key = Fernet.generate_key()
-            self.redis.setex(
-                f'federated:key:{self.client_id}',
-                86400 * 7,  # 7 days
-                key
-            )
-        
-        self.encryption_key = self.redis.get(f'federated:key:{self.client_id}')
+        self.encryption_key = self.redis.get('federated:encryption_key')
+        if not self.encryption_key:
+            logger.warning('No server encryption key found in Redis; federated weight exchange will fail')
+            return
         self.cipher = Fernet(self.encryption_key)
     
     def _subscribe_updates(self):

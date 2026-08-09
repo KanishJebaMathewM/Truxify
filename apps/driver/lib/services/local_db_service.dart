@@ -6,12 +6,14 @@ import 'package:path_provider/path_provider.dart';
 class LocalDbService {
   static final LocalDbService instance = LocalDbService._init();
   static Database? _database;
+  static Future<Database>? _pendingInit;
 
   LocalDbService._init();
 
   Future<Database> get database async {
     if (_database != null) return _database!;
-    _database = await _initDB('truxify_driver.db');
+    _pendingInit ??= _initDB('truxify_driver.db');
+    _database = await _pendingInit;
     return _database!;
   }
 
@@ -21,7 +23,7 @@ class LocalDbService {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
@@ -45,11 +47,39 @@ CREATE TABLE pending_pods (
   sync_status $intType
 )
 ''');
+    await _createLocationQueueTable(db);
+  }
+
+  /// Durable offline queue for driver location pings and geofence milestones.
+  ///
+  /// Every row is one undelivered item that must survive application restarts.
+  /// Milestones use a stable `idempotency_key` (`milestone:{orderId}:{milestone}`)
+  /// which is UNIQUE so re-enqueueing the same logical milestone is a no-op.
+  /// Location rows use a `null` key (SQLite UNIQUE permits multiple NULLs) —
+  /// their dedup/coalescing is handled at the app layer.
+  Future<void> _createLocationQueueTable(Database db) async {
+    await db.execute('''
+CREATE TABLE IF NOT EXISTS location_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  driver_id TEXT,
+  order_id TEXT,
+  order_display_id TEXT,
+  milestone TEXT,
+  idempotency_key TEXT UNIQUE,
+  payload TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0
+)
+''');
   }
 
   Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await db.execute('ALTER TABLE pending_pods ADD COLUMN order_id TEXT');
+    }
+    if (oldVersion < 3) {
+      await _createLocationQueueTable(db);
     }
   }
 

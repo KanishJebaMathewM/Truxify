@@ -37,7 +37,7 @@ class _ChatScreenState extends State<ChatScreen> {
         event: 'message',
         callback: (payload) {
           final data = payload;
-          if (data['senderId'] != _myUserId) {
+          if (data['senderId'] != _myUserId && mounted) {
             setState(() {
               _messages.insert(0, {
                 'text': data['text'],

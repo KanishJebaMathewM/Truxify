@@ -9,8 +9,9 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from main import app
 from app.models.base import MODEL_STORAGE_DIR
+from app.models import price_prediction as pp
 
-client = TestClient(app)
+client = TestClient(app, headers={'X-API-Key': 'test_key'})
 
 
 def test_root():
@@ -120,7 +121,9 @@ def test_predict_demand_valid():
     assert data["model_version"] == "1.0.0"
 
 
-def test_predict_price_valid():
+def test_predict_price_valid(monkeypatch):
+    """Price model is gated: without a real-data model the endpoint is 503."""
+    monkeypatch.setattr(pp, "get_model_meta", lambda name: None)
     payload = {
         "distance_km": 500.0,
         "cargo_weight_kg": 10000.0,
@@ -129,23 +132,18 @@ def test_predict_price_valid():
         "route_destination": "Delhi",
     }
     response = client.post("/predict/price", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert "estimated_price" in data
-    assert isinstance(data["estimated_price"], float)
-    assert data["estimated_price"] > 0
-    assert data["currency"] == "INR"
+    assert response.status_code == 503
 
 
-def test_predict_price_minimal():
+def test_predict_price_minimal(monkeypatch):
+    """Backward-compat payload still gated at 503 without a real model."""
+    monkeypatch.setattr(pp, "get_model_meta", lambda name: None)
     payload = {
         "distance_km": 100.0,
         "cargo_weight_kg": 1000.0,
     }
     response = client.post("/predict/price", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["estimated_price"] > 0
+    assert response.status_code == 503
 
 
 def test_predict_price_invalid_distance():

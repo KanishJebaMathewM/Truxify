@@ -4,11 +4,20 @@ import rateLimit from 'express-rate-limit';
 import { TrackingTokenService } from '../services/trackingTokenService.js';
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import { validateParams } from '../middleware/validate.js';
 import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
+import { publicTrackingTokenSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
 const trackingTokenService = new TrackingTokenService({ supabase, logger });
+
+function parseFiniteCoordinate(value) {
+  if (value === null || value === undefined || value === '') return null;
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 // Rate limiter — generous for public consumers, strict per IP
 const publicLimiter = rateLimit({
@@ -27,18 +36,15 @@ const publicLimiter = rateLimit({
 router.get(
   '/tracking/:token',
   publicLimiter,
+  validateParams(publicTrackingTokenSchema),
   async (req, res) => {
     try {
       const { token } = req.params;
 
-      if (!token || token.length < 10) {
-        return res.status(400).json({ error: 'Invalid tracking token' });
-      }
-
       const validation = await trackingTokenService.validateToken(token);
 
       if (validation.reason === 'validation_error') {
-        return res.status(500).json({ error: 'Failed to validate tracking link' });
+        return res.status(400).json({ error: 'Invalid tracking token' });
       }
 
       if (!validation.valid) {
@@ -120,18 +126,15 @@ router.get(
 router.get(
   '/tracking/:token/route',
   publicLimiter,
+  validateParams(publicTrackingTokenSchema),
   async (req, res) => {
     try {
       const { token } = req.params;
 
-      if (!token || token.length < 10) {
-        return res.status(400).json({ error: 'Invalid tracking token' });
-      }
-
       const validation = await trackingTokenService.validateToken(token);
 
       if (validation.reason === 'validation_error') {
-        return res.status(500).json({ error: 'Failed to validate tracking link' });
+        return res.status(400).json({ error: 'Invalid tracking token' });
       }
 
       if (!validation.valid) {
@@ -155,11 +158,20 @@ router.get(
         return res.status(404).json({ error: 'Order not found' });
       }
 
+      const pickupLat = parseFiniteCoordinate(order.pickup_lat);
+      const pickupLng = parseFiniteCoordinate(order.pickup_lng);
+      const dropLat = parseFiniteCoordinate(order.drop_lat);
+      const dropLng = parseFiniteCoordinate(order.drop_lng);
+
+      if ([pickupLat, pickupLng, dropLat, dropLng].some((value) => value === null)) {
+        return res.status(422).json({ error: 'Route coordinates are not available for this order' });
+      }
+
       // Return simple pickup-to-drop route for public view
       // Full OSRM route is only available to authenticated users
       const coordinates = [
-        [order.pickup_lng, order.pickup_lat],
-        [order.drop_lng, order.drop_lat],
+        [pickupLng, pickupLat],
+        [dropLng, dropLat],
       ];
 
       return res.json({

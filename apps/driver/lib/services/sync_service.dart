@@ -10,12 +10,19 @@ typedef UploadProgressCallback = void Function(String status, {double? progress}
 
 class SyncService {
   static final SyncService instance = SyncService._init();
-  final TripService _tripService = TripService();
-  final ApiClient _apiClient = ApiClient();
+  TripService _tripService;
+  ApiClient _apiClient;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   bool _isSyncing = false;
 
-  SyncService._init();
+  SyncService._init()
+      : _tripService = TripService(),
+        _apiClient = ApiClient();
+
+  @visibleForTesting
+  SyncService.forTesting({TripService? tripService, ApiClient? apiClient})
+      : _tripService = tripService ?? TripService(),
+        _apiClient = apiClient ?? ApiClient();
 
   void startListening() {
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen((List<ConnectivityResult> results) {
@@ -50,13 +57,15 @@ class SyncService {
           await LocalDbService.instance.markPoDSynced(podId);
         } catch (e) {
           debugPrint('Failed to sync PoD $podId: $e');
-        try {
-          final stopId = pod['stop_id'] as String;
-          final tripId = pod['trip_display_id'] as String;
-          await _tripService.markStopCompleted(stopId, tripId);
-          await LocalDbService.instance.markPoDSynced(pod['id'] as int);
-        } catch (e) {
-          debugPrint('Failed to sync pod ${pod['id']}: $e');
+          try {
+            if (orderId != null && (photoPath != null || signaturePath != null)) {
+              await _uploadPodFiles(orderId, photoPath: photoPath, signaturePath: signaturePath);
+            }
+            await _tripService.markStopCompleted(stopId, tripId);
+            await LocalDbService.instance.markPoDSynced(podId);
+          } catch (retryErr) {
+            debugPrint('Retry also failed for pod $podId: $retryErr');
+          }
         }
       }
       debugPrint('Sync completed for ${pendingPoDs.length} items.');

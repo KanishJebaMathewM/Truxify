@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import '../config/app_config.dart';
 import 'http_client_factory.dart';
@@ -28,6 +29,20 @@ class ApiException implements Exception {
   String toString() => 'ApiException($statusCode): $message';
 }
 
+class RateLimitException extends ApiException {
+  const RateLimitException(
+    super.statusCode,
+    super.message, {
+    super.body,
+    required this.retryAfter,
+  });
+
+  final Duration retryAfter;
+
+  @override
+  String toString() =>
+      'RateLimitException($statusCode): $message (retry after ${retryAfter.inSeconds}s)';
+}
 /// Describes a single file to include in a multipart request.
 class MultipartFileInfo {
   const MultipartFileInfo({
@@ -47,6 +62,11 @@ class MultipartFileInfo {
 ///   - Injects `Authorization: Bearer <accessToken>` into every request.
 ///   - On HTTP 401, attempts `supabase.auth.refreshSession()` once and retries.
 ///   - If the retry still returns 401, throws [ApiAuthException].
+///   - Automatically injects a stable `X-Idempotency-Key` (UUID v4) on every
+///     POST, PUT, and PATCH request so the backend `requireIdempotency`
+///     middleware never rejects customer mutations with HTTP 400.
+///   - The key is generated *before* `_execute` so the automatic 401-retry
+///     sends the exact same key, preserving at-most-once semantics.
 ///   - Logs failures in debug mode via `dart:developer`.
 ///
 /// Usage:
@@ -73,6 +93,15 @@ class ApiClient {
   final String _baseUrl;
   final Duration _timeout;
 
+  /// Shared UUID generator — const so it is instantiated once per isolate.
+  static const _uuid = Uuid();
+
+  void close() {
+    if (_isClientOwned) {
+      _http.close();
+    }
+  }
+
   static String _getBaseUrl(String? overrideUrl) {
     if (overrideUrl != null) return overrideUrl;
     const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
@@ -90,7 +119,10 @@ class ApiClient {
     const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
     if (envUrl.isNotEmpty) return envUrl;
     if (kReleaseMode) throw StateError('TRUXIFY_API_BASE_URL must be set in release mode');
-    return 'http://localhost:5000';
+    
+    if (kIsWeb) return 'http://localhost:8080';
+    if (Platform.isAndroid) return 'http://10.0.2.2:8080';
+    return 'http://localhost:8080';
   }
 
   static String _normalise(String url) =>
@@ -101,6 +133,10 @@ class ApiClient {
   /// Firebase ID token for authenticated API requests.
   /// Falls back to Supabase session token if no Firebase user is signed in.
   String? _cachedFirebaseToken;
+
+  /// In-flight token refresh shared by concurrent callers so only one
+  /// refresh executes at a time (fixes #2919).
+  Completer<String?>? _pendingTokenRefresh;
 
   Future<String?> get _accessTokenAsync async {
     try {
@@ -136,74 +172,117 @@ class ApiClient {
   }
 
   Future<String?> _refreshedToken() async {
-    try {
-      final firebaseUser = FirebaseAuth.instance.currentUser;
-      if (firebaseUser != null) {
-        final token = await firebaseUser.getIdToken(true);
-        _cachedFirebaseToken = token;
-        return token;
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        developer.log(
-          '[ApiClient] Firebase token refresh failed: $e',
-          name: 'ApiClient',
-        );
-      }
+    // Deduplicate concurrent refresh attempts: only one caller performs
+    // the refresh; others await the same result.
+    if (_pendingTokenRefresh != null) {
+      return _pendingTokenRefresh!.future;
     }
-
+    final completer = Completer<String?>();
+    _pendingTokenRefresh = completer;
     try {
-      // Fall back to Supabase session refresh.
-      final res = await _supabase.auth.refreshSession();
-      return res.session?.accessToken;
-    } catch (e) {
-      if (kDebugMode) {
-        developer.log('[ApiClient] Token refresh failed: $e', name: 'ApiClient');
+      try {
+        final firebaseUser = FirebaseAuth.instance.currentUser;
+        if (firebaseUser != null) {
+          final token = await firebaseUser.getIdToken(true);
+          _cachedFirebaseToken = token;
+          completer.complete(token);
+          return token;
+        }
+      } catch (e) {
+        if (kDebugMode) {
+          developer.log(
+            '[ApiClient] Firebase token refresh failed: $e',
+            name: 'ApiClient',
+          );
+        }
       }
-      return null;
+
+      try {
+        // Fall back to Supabase session refresh.
+        final res = await _supabase.auth.refreshSession();
+        final token = res.session?.accessToken;
+        completer.complete(token);
+        return token;
+      } catch (e) {
+        if (kDebugMode) {
+          developer.log('[ApiClient] Token refresh failed: $e', name: 'ApiClient');
+        }
+        if (!completer.isCompleted) completer.complete(null);
+        return null;
+      }
+    } finally {
+      _pendingTokenRefresh = null;
     }
   }
 
   // ── Core request execution ────────────────────────────────────────
 
-  Future<http.Response> _execute(
-    Future<http.Response> Function(Map<String, String> headers) fn, {
-    Map<String, String>? additionalHeaders,
-    bool isRetry = false,
-  }) async {
-    // Ensure we have a fresh Firebase token before making the request.
-    if (!isRetry) {
-      await _accessTokenAsync;
-    }
-    final response = await fn(_headers(additionalHeaders: additionalHeaders)).timeout(_timeout);
-
-    if (response.statusCode == 401 && !isRetry) {
-      if (kDebugMode) {
-        developer.log(
-          '[ApiClient] 401 received — attempting token refresh',
-          name: 'ApiClient',
-        );
-      }
-
-      final newToken = await _refreshedToken();
-      if (newToken == null) {
-        throw const ApiAuthException(
-          'Session expired and token refresh failed. Please log in again.',
-        );
-      }
-
-      final retryResponse = await fn(_headers(token: newToken, additionalHeaders: additionalHeaders)).timeout(_timeout);
-      if (retryResponse.statusCode == 401) {
-        throw const ApiAuthException(
-          'Authentication failed after token refresh. Please log in again.',
-        );
-      }
-      return retryResponse;
-    }
-
-    return response;
+Future<http.Response> _execute(
+  Future<http.Response> Function(Map<String, String> headers) fn, {
+  Map<String, String>? additionalHeaders,
+  bool isRetry = false,
+}) async {
+  // Ensure we have a fresh Firebase token before making the request.
+  if (!isRetry) {
+    await _accessTokenAsync;
   }
 
+  final response = await fn(
+    _headers(additionalHeaders: additionalHeaders),
+  ).timeout(_timeout);
+
+  // Existing 401 handling (KEEP THIS)
+  if (response.statusCode == 401 && !isRetry) {
+    if (kDebugMode) {
+      developer.log(
+        '[ApiClient] 401 received — attempting token refresh',
+        name: 'ApiClient',
+      );
+    }
+
+    final newToken = await _refreshedToken();
+    if (newToken == null) {
+      throw const ApiAuthException(
+        'Session expired and token refresh failed. Please log in again.',
+      );
+    }
+
+    final retryResponse = await fn(
+      _headers(
+        token: newToken,
+        additionalHeaders: additionalHeaders,
+      ),
+    ).timeout(_timeout);
+
+    if (retryResponse.statusCode == 401) {
+      throw const ApiAuthException(
+        'Authentication failed after token refresh. Please log in again.',
+      );
+    }
+
+    return retryResponse;
+  }
+
+  // Handle rate limiting (429)
+  if (response.statusCode == 429 && !isRetry) {
+    final retryAfterHeader = response.headers['retry-after'];
+
+    int retrySeconds = int.tryParse(retryAfterHeader ?? '') ?? 1;
+
+    // Cap maximum wait time to 30 seconds
+    retrySeconds = retrySeconds.clamp(1, 30).toInt();
+
+    await Future.delayed(Duration(seconds: retrySeconds));
+
+    return await _execute(
+      fn,
+      additionalHeaders: additionalHeaders,
+      isRetry: true,
+    );
+  }
+
+  return response;
+}
   // ── URI building and path normalization ───────────────────────────
 
   Uri _buildUri(String path) {
@@ -256,32 +335,74 @@ class ApiClient {
     );
   }
 
-  Future<dynamic> post(String path, {Object? body, Map<String, String>? headers}) async {
+  /// Performs a POST request.
+  ///
+  /// Automatically injects a stable `X-Idempotency-Key` so the backend
+  /// `requireIdempotency` middleware never rejects the call with HTTP 400.
+  /// The key is generated once *before* [_execute], so the 401-retry path
+  /// sends the exact same key, preserving at-most-once semantics.
+  ///
+  /// Pass [idempotencyKey] explicitly when you need a caller-supplied key
+  /// (e.g. the user taps "retry" and you want to reuse the original key).
+  Future<dynamic> post(
+    String path, {
+    Object? body,
+    Map<String, String>? headers,
+    String? idempotencyKey,
+  }) async {
     final uri = _buildUri(path);
     final encoded = body != null ? jsonEncode(body) : null;
+    final key = idempotencyKey ?? _uuid.v4();
     final response = await _execute(
       (h) => _http.post(uri, headers: h, body: encoded),
-      additionalHeaders: headers,
+      additionalHeaders: {
+        'X-Idempotency-Key': key,
+        ...?headers,
+      },
     );
     return _decode(response);
   }
 
-  Future<dynamic> put(String path, {Object? body, Map<String, String>? headers}) async {
+  /// Performs a PUT request.
+  ///
+  /// Injects `X-Idempotency-Key` — see [post] for full semantics.
+  Future<dynamic> put(
+    String path, {
+    Object? body,
+    Map<String, String>? headers,
+    String? idempotencyKey,
+  }) async {
     final uri = _buildUri(path);
     final encoded = body != null ? jsonEncode(body) : null;
+    final key = idempotencyKey ?? _uuid.v4();
     final response = await _execute(
       (h) => _http.put(uri, headers: h, body: encoded),
-      additionalHeaders: headers,
+      additionalHeaders: {
+        'X-Idempotency-Key': key,
+        ...?headers,
+      },
     );
     return _decode(response);
   }
 
-  Future<dynamic> patch(String path, {Object? body, Map<String, String>? headers}) async {
+  /// Performs a PATCH request.
+  ///
+  /// Injects `X-Idempotency-Key` — see [post] for full semantics.
+  Future<dynamic> patch(
+    String path, {
+    Object? body,
+    Map<String, String>? headers,
+    String? idempotencyKey,
+  }) async {
     final uri = _buildUri(path);
     final encoded = body != null ? jsonEncode(body) : null;
+    final key = idempotencyKey ?? _uuid.v4();
     final response = await _execute(
       (h) => _http.patch(uri, headers: h, body: encoded),
-      additionalHeaders: headers,
+      additionalHeaders: {
+        'X-Idempotency-Key': key,
+        ...?headers,
+      },
     );
     return _decode(response);
   }
@@ -304,18 +425,21 @@ class ApiClient {
     required Map<String, String> fields,
     required List<MultipartFileInfo> files,
     Map<String, String>? headers,
+    String? idempotencyKey,
   }) async {
     final uri = _buildUri(path);
+    final key = idempotencyKey ?? _uuid.v4();
 
     Future<http.Response> doSend(String? token) async {
       final request = http.MultipartRequest('POST', uri);
       final authHeaders = <String, String>{
         'Accept-Language': ui.PlatformDispatcher.instance.locale.languageCode,
         if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        'X-Idempotency-Key': key,
         ...?headers,
       };
       request.headers.addAll(authHeaders);
-      fields.forEach(request.fields.add);
+      request.fields.addAll(fields);
       for (final f in files) {
         request.files.add(http.MultipartFile.fromBytes(
           f.fieldName,
@@ -391,6 +515,19 @@ class ApiClient {
       message = response.reasonPhrase ?? 'Unknown error';
     }
 
+    if (response.statusCode == 429) {
+        final retryAfterHeader = response.headers['retry-after'];
+
+        final retryAfterSeconds =
+            int.tryParse(retryAfterHeader ?? '') ?? 0;
+
+        throw RateLimitException(
+            response.statusCode,
+            message,
+            body: response.body,
+            retryAfter: Duration(seconds: retryAfterSeconds),
+        );
+    }
     throw ApiException(response.statusCode, message, body: response.body);
   }
 }

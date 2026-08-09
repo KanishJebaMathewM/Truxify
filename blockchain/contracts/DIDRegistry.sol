@@ -50,8 +50,12 @@ contract DIDRegistry is Ownable, Pausable {
     mapping(string => ServiceEndpoint[]) public didServiceEndpoints;
     mapping(string => VerificationMethod[]) public didVerificationMethods;
     mapping(bytes32 => Credential) public credentials;
+    mapping(address => uint256) public issuerNonces;
     mapping(address => string[]) public addressToDIDs;
     mapping(bytes32 => bool) public credentialRevoked;
+
+    // issuer => keccak256(credentialType) => authorized
+    mapping(address => mapping(bytes32 => bool)) public issuerAuthorizedForType;
 
     uint256 public totalDIDs;
     uint256 public totalCredentials;
@@ -65,8 +69,31 @@ contract DIDRegistry is Ownable, Pausable {
     event CredentialIssued(bytes32 indexed credentialId, address issuer, address subject);
     event CredentialRevoked(bytes32 indexed credentialId);
     event CredentialVerified(bytes32 indexed credentialId, bool isValid);
+    event IssuerAuthorizationUpdated(address indexed issuer, string credentialType, bool authorized);
 
     constructor() Ownable(msg.sender) {}
+
+    // ============ Issuer Authorization ============
+
+    // Only the registry owner may grant or revoke an address's ability to
+    // issue a specific credentialType. Without this, any address could mint
+    // a "KYC"/"DriverLicense"/etc. credential for any subject.
+    function setIssuerAuthorization(
+        address issuer,
+        string memory credentialType,
+        bool authorized
+    ) external onlyOwner {
+        require(issuer != address(0), "Invalid issuer");
+        require(bytes(credentialType).length > 0, "Credential type cannot be empty");
+
+        issuerAuthorizedForType[issuer][keccak256(bytes(credentialType))] = authorized;
+
+        emit IssuerAuthorizationUpdated(issuer, credentialType, authorized);
+    }
+
+    function isIssuerAuthorizedForType(address issuer, string memory credentialType) public view returns (bool) {
+        return issuerAuthorizedForType[issuer][keccak256(bytes(credentialType))];
+    }
 
     // ============ DID Management ============
 
@@ -168,15 +195,24 @@ contract DIDRegistry is Ownable, Pausable {
         bytes32 proofHash
     ) external returns (bytes32) {
         require(subject != address(0), "Invalid subject");
+        require(bytes(credentialType).length > 0, "Credential type cannot be empty");
+        require(
+            isIssuerAuthorizedForType(msg.sender, credentialType),
+            "Issuer not authorized for credential type"
+        );
 
+        uint256 nonce = issuerNonces[msg.sender]++;
         bytes32 credentialId = keccak256(
             abi.encodePacked(
                 block.timestamp,
                 msg.sender,
                 subject,
-                credentialType
+                credentialType,
+                nonce
             )
         );
+
+        require(credentials[credentialId].issuer == address(0), "Credential already exists");
 
         credentials[credentialId] = Credential({
             id: credentialId,
@@ -208,11 +244,12 @@ contract DIDRegistry is Ownable, Pausable {
 
     function verifyCredential(bytes32 credentialId) external view returns (bool) {
         Credential memory cred = credentials[credentialId];
-        
+
         bool isValid = (
             cred.issuer != address(0) &&
             !cred.revoked &&
-            cred.validUntil > block.timestamp
+            cred.validUntil > block.timestamp &&
+            isIssuerAuthorizedForType(cred.issuer, cred.credentialType)
         );
 
         return isValid;

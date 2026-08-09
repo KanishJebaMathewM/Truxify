@@ -71,7 +71,7 @@ class VerificationService {
     if (this.orderRepository) {
       const { data, error } = await this.orderRepository.findOrderById(
         orderId,
-        'id, order_display_id, status, customer_id, driver_id, truck_id, otp_verified, blockchain_tx_hash, escrow_status'
+        'id, order_display_id, status, customer_id, driver_id, truck_id, otp_verified, blockchain_tx_hash, escrow_status, pickup_lat, pickup_lng, drop_lat, drop_lng'
       );
       if (error) throw error;
       return data;

@@ -71,28 +71,19 @@ class EarningsExportService {
     return '$start-$end';
   }
 
-  pw.TextTheme _buildTheme() {
-    return pw.TextTheme(
-      headlineLarge: pw.TextStyle(
-        fontSize: 22,
-        fontWeight: pw.FontWeight.bold,
-        color: PdfColors.blue800,
-      ),
-      titleLarge: pw.TextStyle(
-        fontSize: 16,
-        fontWeight: pw.FontWeight.bold,
-        color: PdfColors.grey900,
-      ),
-      bodyLarge: pw.TextStyle(fontSize: 12, color: PdfColors.grey800),
-      bodyMedium: pw.TextStyle(fontSize: 10, color: PdfColors.grey600),
+  pw.ThemeData _buildTheme() {
+    return pw.ThemeData.withFont(
+      base: pw.Font.helvetica(),
+      bold: pw.Font.helveticaBold(),
     );
   }
 
-  pw.PageTheme _buildPageTheme(pw.TextTheme theme) {
+  pw.PageTheme _buildPageTheme(pw.ThemeData theme) {
     return pw.PageTheme(
       theme: theme,
       margin: const pw.EdgeInsets.all(36),
       buildBackground: (context) => pw.FullPage(
+        ignoreMargins: true,
         child: pw.Container(
           decoration: pw.BoxDecoration(
             border: pw.Border.all(color: PdfColors.blue100, width: 1),
@@ -181,7 +172,7 @@ class EarningsExportService {
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
           _dateChip('FROM', statement.startDate),
-          pw.Icon(pw.Icons.arrow_forward, color: PdfColors.blue400, size: 16),
+          pw.Text('->', style: pw.TextStyle(color: PdfColors.blue400, fontSize: 14)),
           _dateChip('TO', statement.endDate),
         ],
       ),

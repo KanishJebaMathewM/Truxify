@@ -12,6 +12,7 @@ import '../widgets/common_widgets.dart';
 import '../core/driver_session.dart';
 import '../widgets/maintenance_photo_picker.dart';
 import '../widgets/maintenance_photo_gallery.dart';
+import '../services/fuel_analytics_service.dart';
 
 class MyTruckScreen extends StatefulWidget {
   const MyTruckScreen({super.key});
@@ -940,10 +941,10 @@ class _FuelAnalyticsTabState extends State<_FuelAnalyticsTab> {
       return Center(child: Text(_error!, style: const TextStyle(color: TruxifyColors.error)));
     }
 
-    final totalPayout = _data!['totalPayout'] as double;
-    final estFuel = _data!['estimatedFuelCost'] as double;
-    final margin = _data!['profitMargin'] as double;
-    final chartPoints = _data!['chartPoints'] as List<Map<String, dynamic>>;
+    final totalPayout = (_data!['totalPayout'] as num?)?.toDouble() ?? 0.0;
+    final estFuel = (_data!['estimatedFuelCost'] as num?)?.toDouble() ?? 0.0;
+    final margin = (_data!['profitMargin'] as num?)?.toDouble() ?? 0.0;
+    final chartPoints = (_data!['chartPoints'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -954,9 +955,9 @@ class _FuelAnalyticsTabState extends State<_FuelAnalyticsTab> {
           // Summary Cards
           Row(
             children: [
-              Expanded(child: _StatCard(title: 'Total Payout', value: '\$${totalPayout.toStringAsFixed(2)}')),
+              Expanded(child: _StatCard(title: 'Total Payout', value: '₹${totalPayout.toStringAsFixed(2)}')),
               const SizedBox(width: 12),
-              Expanded(child: _StatCard(title: 'Est. Fuel', value: '\$${estFuel.toStringAsFixed(2)}')),
+              Expanded(child: _StatCard(title: 'Est. Fuel', value: '₹${estFuel.toStringAsFixed(2)}')),
             ],
           ),
           const SizedBox(height: 12),
@@ -984,7 +985,12 @@ class _FuelAnalyticsTabState extends State<_FuelAnalyticsTab> {
               child: Text('No recent trips to display'),
             ))
           else
-            ...chartPoints.map((p) => _buildChartBar(context, p['label'], p['payout'], p['fuelCost'])),
+            ...chartPoints.map((p) => _buildChartBar(
+              context,
+              (p['label'] as String?) ?? 'Unknown trip',
+              (p['payout'] as num?)?.toDouble() ?? 0.0,
+              (p['fuelCost'] as num?)?.toDouble() ?? 0.0,
+            )),
         ],
       ),
     );

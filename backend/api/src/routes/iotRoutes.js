@@ -1,22 +1,33 @@
 import express from 'express';
-import { supabase } from '../config/db.js';
+import rateLimit from 'express-rate-limit';
+import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { paramIdSchema } from '../validation/requestSchemas.js';
 import { authenticate } from '../middleware/auth.js';
+import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
 import { validateParams } from '../middleware/validate.js';
 import { z } from 'zod';
 
 const router = express.Router();
 
 const telemetrySchema = z.object({
-  temperature: z.number()
+  temperature: z.number().finite().min(-100).max(200)
+});
+const telemetryHistoryLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: safeIpKeyGenerator,
+  store: createStore('rl:iot-telemetry-history:'),
+  message: { error: 'Rate limit exceeded', retryAfter: 900 },
 });
 
 // ============================================================================
 // 1. POST TELEMETRY DATA (IoT)
 // POST /api/iot/telemetry/:id
 // ============================================================================
-router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async (req, res) => {
+router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validateParams(paramIdSchema), async (req, res) => {
   try {
     const parseResult = telemetrySchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -26,10 +37,12 @@ router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async
     const loadId = req.params.id;
     const { temperature } = parseResult.data;
 
-    // Check if load exists and has cold chain enabled
-    const { data: load, error: loadErr } = await supabase
+    // Check if load exists and has cold chain enabled.
+    // load_offers is RLS-protected (anon revoked), so this read must use the
+    // service-role client; ownership is enforced below against req.user.
+    const { data: load, error: loadErr } = await supabaseAdmin
       .from('load_offers')
-      .select('requires_refrigeration, target_temperature_min, target_temperature_max, customer_id')
+      .select('requires_refrigeration, target_temperature_min, target_temperature_max, customer_id, order_display_id')
       .eq('id', loadId)
       .maybeSingle();
 
@@ -46,12 +59,29 @@ router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async
       return res.status(400).json({ error: 'Load does not require refrigeration' });
     }
 
-    if (req.user.role !== 'admin' && load.customer_id !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied for this load' });
+    // Admins and provisioned IoT devices may always ingest telemetry.
+    // Everyone else must mirror GET authorization: the load owner OR the
+    // assigned driver. The driver is the party physically carrying the load
+    // and the only person able to record cold-chain readings in transit.
+    if (req.user.role !== 'admin' && req.user.role !== 'iot_device') {
+      let isAuthorized = load.customer_id === req.user.id;
+      if (!isAuthorized && load.order_display_id) {
+        const { data: order } = await supabaseAdmin
+          .from('orders')
+          .select('driver_id')
+          .eq('order_display_id', load.order_display_id)
+          .in('status', ['truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered'])
+          .maybeSingle();
+        isAuthorized = order?.driver_id === req.user.id;
+      }
+      if (!isAuthorized) {
+        return res.status(403).json({ error: 'Access denied for this load' });
+      }
     }
 
-    // Insert telemetry
-    const { error: insertErr } = await supabase
+    // Insert telemetry (service-role client: RLS only permits service_role to
+    // write temperature_telemetry, so the backend must use supabaseAdmin).
+    const { error: insertErr } = await supabaseAdmin
       .from('temperature_telemetry')
       .insert({
         load_id: loadId,
@@ -74,11 +104,11 @@ router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async
       // For MVP, we'll insert a notification immediately if it's not already spammed.
       // We can use the existing notifications table or system if one exists, but for now we'll just log.
       
-      await supabase.from('notifications').insert({
+      await supabaseAdmin.from('notifications').insert({
         user_id: load.customer_id,
         title: 'Temperature Alert',
         body: `Your cargo (Load ${loadId}) is out of the safe temperature range. Current temp: ${temperature}°C.`,
-        notif_type: 'cold_chain_alert',
+        notif_type: 'system',
         metadata: {
           load_id: loadId,
           temperature,
@@ -95,16 +125,52 @@ router.post('/telemetry/:id', authenticate, validateParams(paramIdSchema), async
   }
 });
 
-// ============================================================================
+// =====================================================================
 // 2. GET TELEMETRY DATA
 // GET /api/iot/telemetry/:id
-// ============================================================================
-router.get('/telemetry/:id', validateParams(paramIdSchema), async (req, res) => {
+// =====================================================================
+router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validateParams(paramIdSchema), async (req, res) => {
+  const loadId = req.params.id;
+
   try {
-    const { data, error } = await supabase
+    const { data: load, error: loadErr } = await supabaseAdmin
+      .from('load_offers')
+      .select('customer_id, order_display_id')
+      .eq('id', loadId)
+      .maybeSingle();
+
+    if (loadErr) {
+      logger.error('Failed to fetch load for telemetry authorization:', loadErr);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (!load) {
+      return res.status(404).json({ error: 'Load not found' });
+    }
+
+    if (req.user.role !== 'admin') {
+      let isAuthorized = load.customer_id === req.user.id;
+
+      if (!isAuthorized && load.order_display_id) {
+        const { data: order } = await supabaseAdmin
+          .from('orders')
+          .select('driver_id')
+          .eq('order_display_id', load.order_display_id)
+          .in('status', ['truck_assigned', 'en_route_pickup', 'arrived_pickup', 'picked_up', 'in_transit', 'arriving', 'delivered'])
+          .maybeSingle();
+
+        isAuthorized = order?.driver_id === req.user.id;
+      }
+
+      if (!isAuthorized) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+    }
+
+    const { data, error } = await supabaseAdmin
       .from('temperature_telemetry')
       .select('*')
-      .eq('load_id', req.params.id)
+      .eq('load_id', loadId)
       .order('recorded_at', { ascending: false })
       .limit(20);
       

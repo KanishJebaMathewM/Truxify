@@ -420,7 +420,7 @@ pw.Widget _priceLine(String label, String amount, {bool isBold = false}) =>
             amount,
             style: pw.TextStyle(
               fontSize: 10,
-              fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.w600,
+              fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
               color: isBold
                   ? _InvoiceColors.accentDark
                   : _InvoiceColors.primaryText,

@@ -12,6 +12,7 @@ import logging
 
 from nerf.model import NeRFNetwork, NeRFRenderer, NeRFTrainer
 from nerf.camera import create_spiral_poses, create_orbital_poses
+import os
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/nerf", tags=["Neural Radiance Fields"])
@@ -74,7 +75,9 @@ async def render_spiral(request: RenderRequest):
         }
     except Exception as e:
         logger.error(f"Spiral render failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/render/orbital")
 async def render_orbital(request: RenderRequest):
@@ -115,7 +118,9 @@ async def render_orbital(request: RenderRequest):
         }
     except Exception as e:
         logger.error(f"Orbital render failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/train")
 async def train_nerf(
@@ -157,10 +162,13 @@ async def train_nerf(
         }
     except Exception as e:
         logger.error(f"Training failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/save")
 async def save_model(path: str = "models/nerf.pth"):
+    path = os.path.join("models", os.path.basename(path))
     """Save NeRF model"""
     try:
         trainer.save(path)
@@ -171,10 +179,13 @@ async def save_model(path: str = "models/nerf.pth"):
         }
     except Exception as e:
         logger.error(f"Save failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/load")
 async def load_model(path: str = "models/nerf.pth"):
+    path = os.path.join("models", os.path.basename(path))
     """Load NeRF model"""
     try:
         trainer.load(path)
@@ -185,7 +196,9 @@ async def load_model(path: str = "models/nerf.pth"):
         }
     except Exception as e:
         logger.error(f"Load failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/model-info")
 async def get_model_info():
@@ -204,4 +217,6 @@ async def get_model_info():
         }
     except Exception as e:
         logger.error(f"Model info failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Internal error: {e}")
+
+        raise HTTPException(status_code=500, detail="Internal server error")

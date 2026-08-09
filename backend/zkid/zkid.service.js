@@ -1,8 +1,8 @@
 import { ethers } from 'ethers';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
-import logger from '../../api/src/middleware/logger.js';
-import { supabase } from '../../api/src/config/db.js';
+import logger from '../api/src/middleware/logger.js';
+import { supabase } from '../api/src/config/db.js';
 
 class ZKIDService {
     constructor() {
@@ -159,9 +159,20 @@ class ZKIDService {
             );
             const receipt = await tx.wait();
 
-            const requestId = ethers.keccak256(
-                ethers.toUtf8Bytes(`${identityHash}:${credentialHash}:${Date.now()}`)
-            );
+            // Derive the request id from the on-chain event if present,
+            // otherwise anchor it to the actual transaction hash instead of
+            // fabricating a keccak of a client-side timestamp
+            let requestId = null;
+            for (const log of receipt.logs) {
+                const parsed = this.zkid.interface.parseLog(log);
+                if (parsed && /request/i.test(parsed.name)) {
+                    requestId = parsed.args[0]?.toString?.() ?? null;
+                    break;
+                }
+            }
+            if (!requestId) {
+                requestId = receipt.hash;
+            }
 
             await this.storeVerificationRequest({
                 requestId,
@@ -174,7 +185,6 @@ class ZKIDService {
             return {
                 success: true,
                 requestId,
-                verified: true,
                 txHash: receipt.hash
             };
         } catch (error) {

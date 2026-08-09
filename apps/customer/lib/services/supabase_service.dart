@@ -45,15 +45,15 @@ class SupabaseService {
     return client.auth.signInWithPassword(email: email, password: password);
   }
 
-  static Future<AuthResponse> signInWithOtp(String phone) async {
-    return client.auth.signInWithOtp(phone: phone);
+  static Future<void> signInWithOtp(String phone) async {
+    await client.auth.signInWithOtp(phone: phone);
   }
 
   static Future<void> signOut() async {
     await client.auth.signOut();
   }
 
-  static Future<PostgrestResponse> executeRawQuery(String table, {
+  static Future<dynamic> executeRawQuery(String table, {
     String? select,
     String? eqColumn,
     dynamic eqValue,
@@ -61,7 +61,7 @@ class SupabaseService {
     bool? ascending,
     String? orderColumn,
   }) async {
-    var query = client.from(table).select(select ?? '*');
+    dynamic query = client.from(table).select(select ?? '*');
     if (eqColumn != null && eqValue != null) {
       query = query.eq(eqColumn, eqValue);
     }
@@ -81,11 +81,21 @@ class SupabaseService {
     String? filterColumn,
     dynamic filterValue,
   }) {
-    var filter = RealtimeListenTypes.postgresChanges;
     var channel = client.channel('$table-changes');
     channel.onPostgresChanges(
       table: table,
       schema: 'public',
+      event: PostgresChangeEvent.values.firstWhere(
+        (e) => e.name == event,
+        orElse: () => PostgresChangeEvent.all,
+      ),
+      filter: filterColumn != null && filterValue != null
+          ? PostgresChangeFilter(
+              type: PostgresChangeFilterType.eq,
+              column: filterColumn,
+              value: filterValue,
+            )
+          : null,
       callback: (payload) => onEvent(payload.newRecord),
     );
     channel.subscribe();

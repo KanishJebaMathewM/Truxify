@@ -1,6 +1,6 @@
 import express from 'express';
 import vitessService from './vitess.service.js';
-import logger from '../../api/src/middleware/logger.js';
+import logger from '../../backend/api/src/middleware/logger.js';
 
 const router = express.Router();
 
@@ -32,7 +32,7 @@ router.get('/vitess/orders/customer/:customerId', async (req, res) => {
     try {
         const { customerId } = req.params;
         const { limit } = req.query;
-        const result = await vitessService.getOrdersByCustomer(customerId, parseInt(limit) || 100);
+        const result = await vitessService.getOrdersByCustomer(customerId, parseInt(limit, 10) || 100);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Get orders error:', error);

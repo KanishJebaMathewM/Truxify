@@ -20,6 +20,11 @@ export function normalizePhone(phone) {
   const isInternational = phone.trim().startsWith('+');
   let digits = phone.replace(/[^\d]/g, '');
 
+  // Strip a leading 0 used for national dialing (e.g. 0919876543210)
+  if (digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+
   // Remove country code prefix if present (91 for India)
   if (digits.startsWith('91') && digits.length === 12) {
     digits = digits.slice(2);

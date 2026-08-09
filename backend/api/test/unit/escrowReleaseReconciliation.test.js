@@ -1,20 +1,31 @@
 /**
  * Unit tests for backend/api/src/services/escrowReleaseReconciliation.js
  *
+ * The reconciler heals the release→finalize window: an on-chain release that
+ * succeeded but whose `complete_trip_tx` never ran. It sweeps
+ * `release_failed`/`released`/`funded` orders, consults the on-chain booking
+ * (source of truth), persists release evidence via the service-role repository
+ * and finalizes the trip with `complete_trip_tx` (service_role, no OTP).
+ *
  * Coverage:
- *   - reconcilePendingEscrowReleases: skips when Redis lock is held by another instance
- *   - reconcilePendingEscrowReleases: returns early when no failed orders exist
- *   - reconcilePendingEscrowReleases: processes a single release order successfully
- *   - reconcilePendingEscrowReleases: handles escrowRelease throwing and increments retry count
- *   - reconcilePendingEscrowReleases: escalates after MAX_RETRIES attempts
- *   - reconcilePendingEscrowReleases: cleans up Redis lock in finally block
- *   - startEscrowReleaseReconciliation / stopEscrowReleaseReconciliation: timer lifecycle
+ *   - no repository / no supabaseAdmin → skip cycle
+ *   - Redis unavailable → LockAcquisitionError → skip cycle
+ *   - global lock held by another instance → skip batch
+ *   - no pending orders → early return
+ *   - on-chain released → persist evidence + complete_trip_tx (p_otp_id null)
+ *   - release_failed + not on-chain → retry escrowRelease then finalize
+ *   - funded + not on-chain → never auto-release
+ *   - complete_trip_tx error → record attempt error, do not credit
+ *   - already-finalized orders skipped (idempotent)
+ *   - per-order + global lock cleanup
+ *   - timer lifecycle
  *
  * Run with:  npm run test:unit -- test/unit/escrowReleaseReconciliation.test.js
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockEscrowRelease = vi.hoisted(() => vi.fn());
+const mockGetEscrowBooking = vi.hoisted(() => vi.fn());
 
 const mockLogger = vi.hoisted(() => ({
   info: vi.fn(),
@@ -23,57 +34,34 @@ const mockLogger = vi.hoisted(() => ({
   debug: vi.fn(),
 }));
 
-const mockRedisClient = vi.hoisted(() => ({
-  set: vi.fn(),
-  del: vi.fn(),
-}));
+const mockAcquireLock = vi.hoisted(() => vi.fn());
+const mockReleaseLock = vi.hoisted(() => vi.fn());
+const mockRenewLock = vi.hoisted(() => vi.fn());
 
-// Supabase mock — creates a chainable from().select().eq().lt().limit() query builder
-function makeEqFn(result) {
-  return vi.fn(() => ({
-    eq: vi.fn(() => Promise.resolve(result)),
-  }));
-}
-
-function makeUpdateMock() {
-  return vi.fn(() => ({
-    eq: makeEqFn({ error: null }),
-  }));
-}
-
-function makeSupabaseMock(failedOrdersData) {
-  return {
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          lt: vi.fn(() => ({
-            limit: vi.fn(() => Promise.resolve({ data: failedOrdersData, error: null })),
-          })),
-        })),
-      })),
-      rpc: vi.fn(() => Promise.resolve({ data: 'claimed', error: null })),
-      update: makeUpdateMock(),
-    })),
-  };
-}
-
-const mockSupabase = vi.hoisted(() => makeSupabaseMock([]));
+// Mutable via getter so individual tests can simulate an unconfigured admin client.
+const mockSupabaseAdmin = vi.hoisted(() => ({ available: true }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: mockLogger,
 }));
 
+vi.mock('../../src/config/db.js', () => ({
+  get supabaseAdmin() {
+    return mockSupabaseAdmin.available ? mockSupabaseAdmin : null;
+  },
+}));
+
+vi.mock('../../src/lib/redisLock.js', () => ({
+  acquireLock: mockAcquireLock,
+  releaseLock: mockReleaseLock,
+  renewLock: mockRenewLock,
+  LockAcquisitionError: class LockAcquisitionError extends Error {},
+}));
+
 vi.mock('../../src/services/escrow.js', () => ({
   escrowRelease: mockEscrowRelease,
-}));
-
-vi.mock('../../src/config/db.js', () => ({
-  supabase: mockSupabase,
-  redisClient: mockRedisClient,
-}));
-
-vi.mock('os', () => ({
-  default: { hostname: () => 'test-host' },
+  getEscrowBooking: mockGetEscrowBooking,
+  getEscrowBookingId: (displayId) => displayId,
 }));
 
 import {
@@ -81,101 +69,217 @@ import {
   startEscrowReleaseReconciliation,
   stopEscrowReleaseReconciliation,
 } from '../../src/services/escrowReleaseReconciliation.js';
+import { LockAcquisitionError } from '../../src/lib/redisLock.js';
+
+const GLOBAL_LOCK_KEY = 'escrow:release:reconciliation:lock';
+
+function makeOrderRepositoryMock(overrides = {}) {
+  const repo = {
+    findPendingEscrowReleases: vi.fn(async () => ({ data: [], error: null })),
+    findOrderById: vi.fn(async () => ({ data: null, error: null })),
+    updateOrder: vi.fn(async () => ({ data: null, error: null })),
+    executeRpc: vi.fn(async () => ({ data: null, error: null })),
+    ...overrides,
+  };
+  return repo;
+}
+
+function releasedOrder(overrides = {}) {
+  return {
+    id: 'order-1',
+    order_display_id: 'ORD-001',
+    status: 'arriving',
+    escrow_status: 'released',
+    escrow_disabled: false,
+    escrow_booking_id: null,
+    escrow_release_attempts: 0,
+    release_tx_hash: '0xabc',
+    ...overrides,
+  };
+}
 
 describe('escrowReleaseReconciliation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockSupabaseAdmin.available = true;
+    mockAcquireLock.mockResolvedValue('lock-token');
+    mockReleaseLock.mockResolvedValue(true);
+    mockRenewLock.mockResolvedValue(true);
+    mockGetEscrowBooking.mockResolvedValue({ paid: true });
   });
 
-  function withFailedOrders(orders) {
-    // supabase.rpc() is called directly on the supabase client
-    mockSupabase.rpc = vi.fn(() => Promise.resolve({ data: 'claimed', error: null }));
+  it('skips the cycle when no OrderRepository is provided', async () => {
+    await reconcilePendingEscrowReleases(undefined);
 
-    // Build a query builder object that supabase.from() returns
-    const queryBuilder = {
-      update: vi.fn(() => ({
-        eq: vi.fn(() => Promise.resolve({ error: null })),
-      })),
-    };
-    const selectChain = {
-      eq: vi.fn(() => ({
-        lt: vi.fn(() => ({
-          limit: vi.fn(() => Promise.resolve({ data: orders, error: null })),
-        })),
-      })),
-    };
-    queryBuilder.select = vi.fn(() => selectChain);
-
-    mockSupabase.from = vi.fn(() => queryBuilder);
-  }
-
-  it('skips when Redis lock is held by another instance', async () => {
-    mockRedisClient.set.mockResolvedValueOnce(null);
-
-    await reconcilePendingEscrowReleases();
-
-    expect(mockLogger.info).toHaveBeenCalledWith(
-      '[escrow-release-reconciliation] Lock held by another instance, skipping.'
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('No OrderRepository provided'),
     );
-    expect(mockSupabase.from).toHaveBeenCalledTimes(0);
+    expect(mockAcquireLock).not.toHaveBeenCalled();
   });
 
-  it('returns early when no failed orders exist', async () => {
-    mockRedisClient.set.mockResolvedValueOnce('lock-value');
-    mockRedisClient.del.mockResolvedValueOnce(1);
+  it('skips the cycle when supabaseAdmin is not configured', async () => {
+    mockSupabaseAdmin.available = false;
 
-    await reconcilePendingEscrowReleases();
+    await reconcilePendingEscrowReleases(makeOrderRepositoryMock());
 
-    expect(mockLogger.info).toHaveBeenCalledWith(
-      '[escrow-release-reconciliation] No pending release failures found.'
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('supabaseAdmin not available'),
+    );
+    expect(mockAcquireLock).not.toHaveBeenCalled();
+  });
+
+  it('skips the cycle when Redis is unavailable (LockAcquisitionError)', async () => {
+    mockAcquireLock.mockRejectedValue(new LockAcquisitionError(GLOBAL_LOCK_KEY, 'Redis down'));
+
+    await reconcilePendingEscrowReleases(makeOrderRepositoryMock());
+
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Redis unavailable'),
+      expect.any(String),
     );
   });
 
-  it('successfully processes a release order', async () => {
-    mockRedisClient.set.mockResolvedValueOnce('lock-value');
-    mockRedisClient.del.mockResolvedValueOnce(1);
-    withFailedOrders([{ id: 'order-1', order_display_id: 'ORD-001', escrow_release_attempts: 0 }]);
-    mockEscrowRelease.mockResolvedValueOnce({ txHash: '0xtxhash123' });
+  it('skips the batch when the global lock is held by another instance', async () => {
+    mockAcquireLock.mockResolvedValue(null);
+    const repo = makeOrderRepositoryMock();
 
-    await reconcilePendingEscrowReleases();
+    await reconcilePendingEscrowReleases(repo);
 
-    // escrowRelease should be called for a successful release
-    expect(mockEscrowRelease.mock.calls.length).toBeGreaterThan(0);
+    expect(mockLogger.info).toHaveBeenCalledWith(
+      expect.stringContaining('Global lock held by another instance'),
+    );
+    expect(repo.findPendingEscrowReleases).not.toHaveBeenCalled();
+    expect(mockReleaseLock).not.toHaveBeenCalled();
   });
 
-  it('handles escrowRelease throwing and increments retry count', async () => {
-    mockRedisClient.set.mockResolvedValueOnce('lock-value');
-    mockRedisClient.del.mockResolvedValueOnce(1);
-    withFailedOrders([{ id: 'order-1', order_display_id: 'ORD-001', escrow_release_attempts: 0 }]);
-    mockEscrowRelease.mockRejectedValueOnce(new Error('RPC timeout'));
+  it('returns early when there are no pending orders', async () => {
+    const repo = makeOrderRepositoryMock();
 
-    await reconcilePendingEscrowReleases();
+    await reconcilePendingEscrowReleases(repo);
 
-    // On error the code calls logger.warn for retry backoff
-    expect(mockLogger.warn.mock.calls.length).toBeGreaterThan(0);
+    expect(repo.findPendingEscrowReleases).toHaveBeenCalledOnce();
+    expect(mockAcquireLock).toHaveBeenCalledWith(GLOBAL_LOCK_KEY, expect.any(Number));
+    expect(mockReleaseLock).toHaveBeenCalled();
   });
 
-  it('escalates after MAX_RETRIES (10) attempts', async () => {
-    mockRedisClient.set.mockResolvedValueOnce('lock-value');
-    mockRedisClient.del.mockResolvedValueOnce(1);
-    withFailedOrders([{ id: 'order-1', order_display_id: 'ORD-001', escrow_release_attempts: 9 }]);
-    mockEscrowRelease.mockRejectedValueOnce(new Error('persistent failure'));
+  it('finalizes an on-chain released order: persists evidence then calls complete_trip_tx without an OTP', async () => {
+    const repo = makeOrderRepositoryMock();
+    repo.findPendingEscrowReleases.mockResolvedValue({ data: [releasedOrder()], error: null });
+    repo.findOrderById.mockResolvedValue({ data: releasedOrder(), error: null });
+    mockGetEscrowBooking.mockResolvedValue({ paid: true });
 
-    await reconcilePendingEscrowReleases();
+    await reconcilePendingEscrowReleases(repo);
 
-    expect(mockLogger.error.mock.calls[0][0]).toContain('has failed 10 times');
-    expect(mockLogger.error.mock.calls[0][0]).toContain('Escalating to manual review');
+    // Release evidence persisted via service-role repository
+    expect(repo.updateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({
+        escrow_status: 'released',
+        release_tx_hash: '0xabc',
+        escrow_release_error: null,
+      }),
+    );
+
+    // complete_trip_tx invoked as service_role with p_otp_id null
+    expect(repo.executeRpc).toHaveBeenCalledWith(
+      'complete_trip_tx',
+      { p_order_id: 'order-1', p_otp_id: null, p_release_tx_hash: '0xabc' },
+      mockSupabaseAdmin,
+    );
+
+    // Per-order lock acquired and released
+    expect(mockAcquireLock).toHaveBeenCalledWith('escrow_lock:order-1', expect.any(Number));
+    expect(mockReleaseLock).toHaveBeenCalledWith('escrow_lock:order-1', 'lock-token');
   });
 
-  it('cleans up Redis lock in finally block', async () => {
-    mockRedisClient.set.mockResolvedValueOnce('lock-value');
-    mockRedisClient.del.mockResolvedValueOnce(1);
-    withFailedOrders([{ id: 'order-1', order_display_id: 'ORD-001', escrow_release_attempts: 0 }]);
-    mockEscrowRelease.mockResolvedValueOnce({ txHash: '0xtxhash123' });
+  it('retries the release for release_failed orders not on-chain, then finalizes', async () => {
+    const repo = makeOrderRepositoryMock();
+    repo.findPendingEscrowReleases.mockResolvedValue({
+      data: [releasedOrder({ escrow_status: 'release_failed', release_tx_hash: null })],
+      error: null,
+    });
+    repo.findOrderById.mockResolvedValue({
+      data: releasedOrder({ escrow_status: 'release_failed', release_tx_hash: null }),
+      error: null,
+    });
+    mockGetEscrowBooking.mockResolvedValue({ paid: false });
+    mockEscrowRelease.mockResolvedValue({ txHash: '0xretry' });
 
-    await reconcilePendingEscrowReleases();
+    await reconcilePendingEscrowReleases(repo);
 
-    expect(mockRedisClient.del).toHaveBeenCalled();
+    expect(mockEscrowRelease).toHaveBeenCalledWith('ORD-001');
+    expect(repo.executeRpc).toHaveBeenCalledWith(
+      'complete_trip_tx',
+      { p_order_id: 'order-1', p_otp_id: null, p_release_tx_hash: '0xretry' },
+      mockSupabaseAdmin,
+    );
+  });
+
+  it('never auto-releases a funded order that is not released on-chain', async () => {
+    const repo = makeOrderRepositoryMock();
+    repo.findPendingEscrowReleases.mockResolvedValue({
+      data: [releasedOrder({ escrow_status: 'funded', release_tx_hash: null })],
+      error: null,
+    });
+    repo.findOrderById.mockResolvedValue({
+      data: releasedOrder({ escrow_status: 'funded', release_tx_hash: null }),
+      error: null,
+    });
+    mockGetEscrowBooking.mockResolvedValue({ paid: false });
+
+    await reconcilePendingEscrowReleases(repo);
+
+    expect(mockEscrowRelease).not.toHaveBeenCalled();
+    expect(repo.executeRpc).not.toHaveBeenCalled();
+    expect(repo.updateOrder).not.toHaveBeenCalled();
+  });
+
+  it('records the attempt error and never credits when complete_trip_tx fails', async () => {
+    const repo = makeOrderRepositoryMock();
+    repo.findPendingEscrowReleases.mockResolvedValue({ data: [releasedOrder()], error: null });
+    repo.findOrderById.mockResolvedValue({ data: releasedOrder(), error: null });
+    repo.executeRpc.mockResolvedValue({ data: null, error: { message: 'gate rejected' } });
+
+    await reconcilePendingEscrowReleases(repo);
+
+    expect(repo.executeRpc).toHaveBeenCalled();
+    expect(repo.updateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({ escrow_release_attempts: 1 }),
+    );
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining('Finalization failed'),
+      expect.any(String),
+    );
+  });
+
+  it('skips orders already finalized (status = payment_released)', async () => {
+    const repo = makeOrderRepositoryMock();
+    repo.findPendingEscrowReleases.mockResolvedValue({
+      data: [releasedOrder({ status: 'payment_released' })],
+      error: null,
+    });
+    repo.findOrderById.mockResolvedValue({
+      data: releasedOrder({ status: 'payment_released' }),
+      error: null,
+    });
+
+    await reconcilePendingEscrowReleases(repo);
+
+    expect(mockGetEscrowBooking).not.toHaveBeenCalled();
+    expect(repo.executeRpc).not.toHaveBeenCalled();
+  });
+
+  it('releases both the global and per-order locks in the finally block', async () => {
+    const repo = makeOrderRepositoryMock();
+    repo.findPendingEscrowReleases.mockResolvedValue({ data: [releasedOrder()], error: null });
+    repo.findOrderById.mockResolvedValue({ data: releasedOrder(), error: null });
+    repo.executeRpc.mockResolvedValue({ data: null, error: { message: 'boom' } });
+
+    await reconcilePendingEscrowReleases(repo);
+
+    expect(mockReleaseLock).toHaveBeenCalledWith('escrow_lock:order-1', 'lock-token');
+    expect(mockReleaseLock).toHaveBeenCalledWith(GLOBAL_LOCK_KEY, 'lock-token');
   });
 });
 
@@ -185,7 +289,7 @@ describe('timer lifecycle', () => {
     const mockSetInterval = vi.fn((fn, ms) => originalSetInterval(fn, ms));
     global.setInterval = mockSetInterval;
 
-    startEscrowReleaseReconciliation();
+    startEscrowReleaseReconciliation(makeOrderRepositoryMock());
     stopEscrowReleaseReconciliation();
 
     expect(mockSetInterval).toHaveBeenCalled();
@@ -197,7 +301,7 @@ describe('timer lifecycle', () => {
     const mockClearInterval = vi.fn();
     global.clearInterval = mockClearInterval;
 
-    startEscrowReleaseReconciliation();
+    startEscrowReleaseReconciliation(makeOrderRepositoryMock());
     stopEscrowReleaseReconciliation();
 
     expect(mockClearInterval).toHaveBeenCalled();

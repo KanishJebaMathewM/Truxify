@@ -28,6 +28,7 @@ pub struct DriverData {
     pub lng: f64,
     pub speed: f64,
     pub status: String,
+    pub rating: f64,
 }
 
 #[wasm_bindgen]
@@ -118,7 +119,7 @@ pub fn validate_otp(input_otp: &str, correct_otp: &str) -> bool {
 pub fn filter_drivers(drivers: Vec<DriverData>, min_rating: f64) -> Vec<DriverData> {
     drivers
         .into_iter()
-        .filter(|d| d.status != "offline")
+        .filter(|d| d.status != "offline" && d.rating >= min_rating)
         .collect()
 }
 
@@ -137,7 +138,11 @@ pub fn hash_data(data: &str) -> String {
 
 #[wasm_bindgen]
 pub fn compress_data(data: &[u8]) -> Vec<u8> {
-    // Simple compression at edge
+    // Simple compression at edge. Empty input must not underflow data.len()-1.
+    if data.is_empty() {
+        return Vec::new();
+    }
+
     let mut compressed = Vec::new();
     let mut count = 1;
     

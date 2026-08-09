@@ -18,6 +18,7 @@ class ZKPService {
             'function verifySTARK(bytes calldata proof, bytes calldata publicInputs) external view returns (bool)',
             'function createPrivateTransaction(address recipient, uint256 amount, bytes memory encryptedData) external',
             'function getTransaction(bytes32 txId) external view returns (tuple(bytes32,bytes32,address,uint256,uint256,bool))',
+            'function getTransactionCount() external view returns (uint256)',
             'function getMerkleRoot() external view returns (bytes32)',
             'function isNullifierUsed(bytes32 nullifier) external view returns (bool)'
         ];
@@ -175,9 +176,13 @@ class ZKPService {
             );
             const receipt = await tx.wait();
 
-            // Get transaction ID from logs
-            const txId = ethers.keccak256(
-                ethers.toUtf8Bytes(`${Date.now()}:${recipient}:${amount}`)
+            // Reconstruct the on-chain transaction id instead of fabricating one from Date.now()
+            // Contract: txId = keccak256(abi.encodePacked(block.timestamp, transactionCounter))
+            const block = await this.provider.getBlock(receipt.blockNumber);
+            const counter = await this.zkp.getTransactionCount();
+            const txId = ethers.solidityPackedKeccak256(
+                ["uint256", "uint256"],
+                [block.timestamp, counter]
             );
 
             await this.storeTransaction({

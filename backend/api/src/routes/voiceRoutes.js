@@ -66,12 +66,13 @@ router.post('/query', authenticate, userLimiter, upload.single('file'), async (r
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const host = req.headers.host;
     if (result.audio_url && result.audio_url.startsWith('/')) {
-      result.audio_url = `${protocol}://${host}${result.audio_url}`;
+      const baseUrl = process.env.PUBLIC_BASE_URL || `${protocol}://${host}`;
+      result.audio_url = `${baseUrl}${result.audio_url}`;
     }
     
     res.json(result);
   } catch (err) {
-    logger.error('Voice AI query failed:', err);
+    logger.error({ requestId: req.requestId, query: req.body?.query }, 'Voice AI query failed:', err);
     res.status(500).json({ error: err.message || 'Internal Server Error' });
   }
 });
@@ -81,6 +82,11 @@ router.get('/audio/:id', authenticate, userLimiter, (req, res) => {
   if (!entry) {
     return res.status(404).json({ error: 'Audio not found' });
   }
+
+  if (!entry.userId || (entry.userId !== req.user.id && req.user.role !== 'admin')) {
+    return res.status(403).json({ error: 'Access Denied: You do not have permission to access this audio.' });
+  }
+
   res.set('Content-Type', 'audio/mpeg');
   res.send(entry.buffer);
 });

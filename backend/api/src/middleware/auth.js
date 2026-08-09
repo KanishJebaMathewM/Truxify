@@ -30,7 +30,9 @@ export async function verifyAuthToken(token) {
   let decoded;
   try {
     decoded = jwt.decode(token);
-  } catch (err) {}
+  } catch (err) {
+    // jwt.decode returns null for malformed or invalid tokens, which is handled in subsequent checks
+  }
 
   const isSupabaseToken =
     decoded &&
@@ -77,22 +79,48 @@ export async function verifyAuthToken(token) {
     const decodedToken = await firebaseAdmin.auth().verifyIdToken(token, true);
     firebaseUid = decodedToken.uid;
 
-    if (!supabase) {
-      throw new Error("Supabase client is not configured on this server.");
-    }
+    // Calculate token remaining lifetime to clamp cache TTL
+    const nowSec = Math.floor(Date.now() / 1000);
+    const tokenExp = decodedToken.exp || (nowSec + TTL_SECONDS);
+    const tokenRemaining = tokenExp - nowSec;
 
-    const userClient = createUserClient?.(token) || supabase;
-    const { data: profile, error } = await userClient
-      .from("profiles")
-      .select("id, firebase_uid, role, full_name, phone")
-      .eq("firebase_uid", firebaseUid)
-      .eq("is_active", true)
-      .maybeSingle();
+    // Try reading from cache first for Firebase path
+    const cached = await getCachedProfile(firebaseUid);
+    if (cached && isValidCachedProfile(firebaseUid, cached)) {
+      if (cached.isActive === false) {
+        throw new Error("User profile not found or inactive.");
+      }
+      userProfile = cached;
+    } else {
+      if (!supabase) {
+        throw new Error("Supabase client is not configured on this server.");
+      }
 
-    if (error) {
-      throw new Error("Database query failed verification: " + error.message);
+      const userClient = createUserClient?.(token) || supabase;
+      const { data: profile, error } = await userClient
+        .from("profiles")
+        .select("id, firebase_uid, role, full_name, phone")
+        .eq("firebase_uid", firebaseUid)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error("Database query failed verification: " + error.message);
+      }
+      userProfile = profile;
+
+      if (userProfile) {
+        const cacheTtl = Math.min(TTL_SECONDS, Math.max(1, tokenRemaining));
+        await setCachedProfile(firebaseUid, {
+          id: userProfile.id,
+          uid: userProfile.firebase_uid,
+          role: userProfile.role,
+          fullName: userProfile.full_name,
+          phone: userProfile.phone,
+          isActive: true,
+        }, cacheTtl);
+      }
     }
-    userProfile = profile;
   }
 
   if (!userProfile) {
@@ -121,11 +149,10 @@ export async function authenticate(req, res, next) {
   // Strip dev-only authentication headers before any logic runs.
   // This ensures they cannot be used even if BYPASS_AUTH is accidentally
   // enabled or a proxy misconfiguration exposes them.
-  if (
-    process.env.NODE_ENV === "production" ||
-    !bypassAuth ||
-    (process.env.NODE_ENV === "test" && !testAuthEnabled)
-  ) {
+  // This block runs unconditionally in production — the bypass path below
+  // only handles test impersonation via testAuthEnabled; the headers are
+  // always removed so no bypass header can ever survive a production deploy.
+  if (process.env.NODE_ENV === "production") {
     delete req.headers["x-user-id"];
     delete req.headers["x-user-role"];
     delete req.headers["x-user-name"];
@@ -248,12 +275,10 @@ export async function authenticate(req, res, next) {
         error: authError,
       } = await supabase.auth.getUser(token);
       if (authError || !user) {
-        return res
-          .status(401)
-          .json({
-            error: "Invalid or expired Supabase authentication token.",
-            details: authError?.message,
-          });
+        return res.status(401).json({
+          error: "Invalid or expired Supabase authentication token.",
+          details: authError?.message,
+        });
       }
       supabaseUserId = user.id;
       // Bind the profile lookup to the caller's JWT: profiles RLS grants reads
@@ -288,23 +313,18 @@ export async function authenticate(req, res, next) {
         .maybeSingle();
 
       if (error) {
-        return res
-          .status(500)
-          .json({
-            error: "Database query failed verification",
-            details: error.message,
-          });
+        return res.status(500).json({
+          error: "Database query failed verification",
+          details: error.message,
+        });
       }
       userProfile = profile;
     } else {
       // Firebase Verification
       if (!firebaseAdmin) {
-        return res
-          .status(500)
-          .json({
-            error:
-              "Firebase Auth verification is not configured on this server.",
-          });
+        return res.status(500).json({
+          error: "Firebase Auth verification is not configured on this server.",
+        });
       }
       const decodedToken = await firebaseAdmin
         .auth()
@@ -353,12 +373,10 @@ export async function authenticate(req, res, next) {
         .maybeSingle();
 
       if (error) {
-        return res
-          .status(500)
-          .json({
-            error: "Database query failed verification",
-            details: error.message,
-          });
+        return res.status(500).json({
+          error: "Database query failed verification",
+          details: error.message,
+        });
       }
       userProfile = profile;
     }
@@ -471,6 +489,8 @@ export function requireRole(allowedRoles) {
     );
   }
 
+  const sanitizedAllowedRoles = allowedRoles.map(r => typeof r === "string" ? r.trim() : r);
+
   return (req, res, next) => {
     if (!req.user) {
       return res
@@ -478,20 +498,25 @@ export function requireRole(allowedRoles) {
         .json({ error: "Not authenticated: req.user is missing." });
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    const userRole =
+      typeof req.user.role === "string" ? req.user.role.trim() : "";
+    if (!sanitizedAllowedRoles.includes(userRole)) {
       const requestId = req.requestId || req.id;
-      logger.warn({
-        event: 'AUTH_DENIAL',
-        action: `requireRole(${allowedRoles.join(',')})`,
-        userId: req.user.id,
-        userRole: req.user.role,
-        allowedRoles,
-        requestId,
-      }, `[Auth] Role denied: user=${req.user.id} role=${req.user.role} not in [${allowedRoles}]`);
+      logger.warn(
+        {
+          event: "AUTH_DENIAL",
+          action: `requireRole(${sanitizedAllowedRoles.join(",")})`,
+          userId: req.user.id,
+          userRole: req.user.role,
+          allowedRoles: sanitizedAllowedRoles,
+          requestId,
+        },
+        `[Auth] Role denied: user=${req.user.id} role=${req.user.role} not in [${sanitizedAllowedRoles.join(",")}]`,
+      );
 
       return res.status(403).json({
-        error: 'Forbidden: Insufficient privileges.',
-        details: `Your account role '${req.user.role}' is not authorized to access this resource.`
+        error: "Forbidden: Insufficient privileges.",
+        details: `Your account role '${req.user.role}' is not authorized to access this resource.`,
       });
     }
 

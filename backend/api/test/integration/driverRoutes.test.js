@@ -41,6 +41,7 @@ describe('Driver Routes', () => {
     m.store.wallet_transactions = [];
     m.store.earnings_daily = [];
     m.store.trucks = [];
+    m.store.orders = [];
     m.calls.length = 0;
   });
 
@@ -109,6 +110,26 @@ describe('Driver Routes', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.truck.id).toBe('truck-1');
+  });
+
+  it('GET /ltl/optimize-route rejects malformed current coordinates', async () => {
+    const res = await request(buildApp())
+      .get('/api/drivers/ltl/optimize-route?lat=12abc&lng=77.5946')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Valid lat and lng query parameters are required.');
+    expect(m.calls.some((call) => call.table === 'orders')).toBe(false);
+  });
+
+  it('GET /ltl/optimize-route rejects out-of-range current coordinates', async () => {
+    const res = await request(buildApp())
+      .get('/api/drivers/ltl/optimize-route?lat=999&lng=77.5946')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Valid lat and lng query parameters are required.');
+    expect(m.calls.some((call) => call.table === 'orders')).toBe(false);
   });
 
   it('GET /trips enriches escrow_status from the underlying order', async () => {

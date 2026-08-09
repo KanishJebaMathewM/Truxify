@@ -1,3 +1,12 @@
+
+class EscrowAmountMismatchError extends Error {
+  constructor(expectedWei, actualWei) {
+    super(`Escrow deposit amount mismatch: expected ${expectedWei} Wei, received ${actualWei} Wei.`);
+    this.name = 'EscrowAmountMismatchError';
+    this.code = 'ESCROW_AMOUNT_MISMATCH';
+  }
+}
+
 /**
  * Polygon Blockchain — Escrow Payment Service
  *
@@ -9,7 +18,10 @@
  * relayer wallet (RELAYER_WALLET_PRIVATE_KEY) calls releasePayment
  * and cancelBooking. createBooking() is sent by the **customer's wallet**
  * directly — the contract requires msg.sender == customer to
- * prevent the relayer from bearing the escrow cost.
+ * prevent the relayer from bearing the escrow cost — but the call is only
+ * valid with an owner-signed EIP-191 commitment binding the customer wallet,
+ * bookingId, and a per-customer nonce, so a third party cannot front-run a
+ * pending bookingId (issue #7734). buildDepositTx() mints that commitment.
  *
  * The buildDepositTx() function below builds the deposit transaction
  * and returns it as an unsigned populated transaction so the
@@ -33,8 +45,9 @@ import logger from '../middleware/logger.js'
 import { measureExecution } from '../core/performanceMetrics.js'
 
 const ESCROW_ABI = [
-  'function createBooking(uint256 bookingId, address payable driver) external payable',
+  'function createBooking(uint256 bookingId, address payable driver, bytes signature) external payable',
   'function lockPayment(uint256 bookingId, address payable customer, address payable driver) external payable',
+  'function commitmentNonces(address customer) external view returns (uint256)',
   'function releasePayment(uint256 bookingId) external',
   'function cancelBooking(uint256 bookingId) external',
   'function cancelWithPenalty(uint256 bookingId, uint256 driverFee) external',
@@ -61,12 +74,14 @@ const MAX_ESCROW_MATIC = parseEnvFloat(process.env.MAX_ESCROW_MATIC, '100', 'MAX
 
 /** @type {ethers.Contract | null} */
 let escrowContract = null
+/** @type {ethers.Wallet | null} */
+let relayerWallet = null
 
 if (rpcUrl && contractAddress && relayerPrivateKey) {
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const relayer  = new ethers.Wallet(relayerPrivateKey, provider);
-    escrowContract = new ethers.Contract(contractAddress, ESCROW_ABI, relayer);
+    relayerWallet = new ethers.Wallet(relayerPrivateKey, provider);
+    escrowContract = new ethers.Contract(contractAddress, ESCROW_ABI, relayerWallet);
     logger.info('✅ Polygon Escrow contract client initialised.');
     logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
@@ -142,23 +157,123 @@ export async function validateEscrowSetup () {
 }
 
 /**
- * Convert an amount in paisa to its equivalent MATIC wei value
- * using the configured ESCROW_MATIC_PER_PAISA rate.
+ * Canonical wei-per-paisa scale derived from the configured escrow rate.
+ * For the default ESCROW_MATIC_PER_PAISA=0.000004 this is exactly
+ * 4_000_000_000_000n wei per paisa. All paisa↔wei conversions in the escrow
+ * pipeline MUST use exact integer arithmetic (never floating point) so that
+ * the amount the app records, the amount the customer deposits, and the
+ * amount released to the driver can never diverge due to rounding.
+ */
+export const PAISA_WEI_SCALE = BigInt(Math.round(ESCROW_MATIC_PER_PAISA * 1e18));
+
+/**
+ * Tolerance (in wei) used when comparing amounts that may have been written
+ * by different code versions. Stored escrow_amount_wei values written by the
+ * legacy floating-point conversion deviate from the exact integer conversion
+ * by at most ±256 wei for real order sizes (≤ ~250,000 paisa), far below
+ * 1 gwei. A tolerance this large can never mask a real under/over-deposit.
+ */
+export const ESCROW_AMOUNT_TOLERANCE_WEI = 1_000_000_000n; // 1 gwei
+
+/**
+ * Convert an amount in paisa to its equivalent MATIC wei value using the
+ * configured ESCROW_MATIC_PER_PAISA rate, with exact integer arithmetic.
  *
- * @param {number|string} paisa - Amount in paisa (e.g. 5000 = ₹50)
+ * @param {number|string|bigint} paisa - Amount in paisa (e.g. 5000 = ₹50)
  * @returns {bigint} Amount in wei
  * @throws {RangeError} If paisa is negative, NaN, or exceeds safety cap
  */
 export function paisaToMaticWei(paisa) {
-  const amount = Number(paisa);
-  if (!Number.isFinite(amount) || amount < 0) {
+  const numeric = Number(paisa);
+  if (!Number.isFinite(numeric) || numeric < 0) {
     throw new RangeError(`Invalid paisa amount: ${paisa}`);
   }
-  const matic = amount * ESCROW_MATIC_PER_PAISA;
-  if (matic > MAX_ESCROW_MATIC) {
+  const paisaBig = BigInt(Math.round(numeric));
+  const maticWei = paisaBig * PAISA_WEI_SCALE;
+  const maxMaticWei = BigInt(Math.round(MAX_ESCROW_MATIC * 1e18));
+  if (maticWei > maxMaticWei) {
+    const matic = maticWei / 1_000_000_000_000_000_000n;
     throw new RangeError(`Deposit ${matic} MATIC exceeds safety cap of ${MAX_ESCROW_MATIC} MATIC (${paisa} paisa @ ${ESCROW_MATIC_PER_PAISA} MATIC/paisa)`);
   }
-  return ethers.parseEther(matic.toFixed(18));
+  return maticWei;
+}
+
+/**
+ * Convert an amount in wei back to paisa using the canonical scale.
+ * Rounding is floored; intended for audit/display, not for authoritative
+ * payout math (which must always derive from the integer paisa amount).
+ *
+ * @param {string|bigint|number} wei - Amount in wei
+ * @returns {bigint} Amount in paisa
+ */
+export function maticWeiToPaisa(wei) {
+  return BigInt(wei) / PAISA_WEI_SCALE;
+}
+
+/**
+ * Whether |a - b| ≤ toleranceWei (both coerced to BigInt). Used to compare
+ * the same monetary figure persisted by different code versions without
+ * letting small legacy rounding differences block legit flows.
+ *
+ * @param {string|bigint|number} a
+ * @param {string|bigint|number} b
+ * @param {string|bigint|number} [toleranceWei] - default 1 gwei
+ * @returns {boolean}
+ */
+export function weiWithinTolerance(a, b, toleranceWei = ESCROW_AMOUNT_TOLERANCE_WEI) {
+  const aBig = BigInt(a);
+  const bBig = BigInt(b);
+  const diff = aBig > bBig ? aBig - bBig : bBig - aBig;
+  return diff <= BigInt(toleranceWei);
+}
+
+/**
+ * Resolve the authoritative escrow deposit amount for an order and cross-check
+ * the stored wei figure against the server-written bid-acceptance context.
+ *
+ * `orders.escrow_amount_wei` is the persisted authoritative figure, but it was
+ * not client-write-protected before this work, so it is cross-checked against
+ * `pending_bid_acceptance.bid_amount` (which IS server-write-protected). If the
+ * two disagree beyond tolerance the row is treated as tampered and the deposit
+ * is rejected (fail closed) rather than trusting either value.
+ *
+ * @param {object} order - Order row with escrow_amount_wei / pending_bid_acceptance
+ * @returns {{expectedAmountWei: bigint} | {error: string, code: string}}
+ */
+export function resolveExpectedDepositAmount(order) {
+  const storedWei = order?.escrow_amount_wei;
+  const pendingBidAmount = order?.pending_bid_acceptance?.bid_amount;
+
+  if (storedWei != null && pendingBidAmount != null) {
+    let stored;
+    try {
+      stored = BigInt(storedWei);
+    } catch (err) {
+      return { error: 'Escrow amount on file is not a valid integer', code: 'ESCROW_AMOUNT_INVALID' };
+    }
+    const fromBid = paisaToMaticWei(pendingBidAmount);
+    if (!weiWithinTolerance(stored, fromBid)) {
+      return {
+        error: `Escrow amount on file (${stored} wei) is inconsistent with the accepted bid (${pendingBidAmount} paisa = ${fromBid} wei).`,
+        code: 'ESCROW_AMOUNT_INCONSISTENT',
+      };
+    }
+    return { expectedAmountWei: stored };
+  }
+
+  if (storedWei != null) {
+    try {
+      return { expectedAmountWei: BigInt(storedWei) };
+    } catch (err) {
+      return { error: 'Escrow amount on file is not a valid integer', code: 'ESCROW_AMOUNT_INVALID' };
+    }
+  }
+
+  if (pendingBidAmount != null) {
+    return { expectedAmountWei: paisaToMaticWei(pendingBidAmount) };
+  }
+
+  return { error: 'No escrow amount is recorded for this order. Deposit cannot be verified.', code: 'ESCROW_AMOUNT_MISSING' };
 }
 
 /**
@@ -207,7 +322,10 @@ export function getEscrowBookingId (orderDisplayId) {
 
 /**
  * Query the escrow contract's bookings mapping for a given booking ID.
- * Used by escrowFundingReconciliation to check on-chain booking state.
+ * Used by escrowFundingReconciliation and the release reconciler to check
+ * the authoritative on-chain booking state.
+ * Used by escrowFundingReconciliation and the payout amount checks to read
+ * the authoritative on-chain state for a booking.
  *
  * @param {string} escrowBookingId — bytes32 hash (result of getEscrowBookingId)
  * @returns {Promise<{customer: string, driver: string, amount: bigint, status: number, paid: boolean, started: boolean, createdAt: bigint} | null>}
@@ -242,18 +360,19 @@ export async function getEscrowBooking(escrowBookingId) {
  * backend can confirm the on-chain deposit.
  *
  * @param {string} orderDisplayId
+ * @param {string} customerWalletAddress — 0x-prefixed Polygon address of the customer (the signer of the deposit tx)
  * @param {string} driverWalletAddress   — 0x-prefixed Polygon address of the driver
  * @param {string} amountWei             — amount in wei (string or bigint)
  * @returns {Promise<{txData: object|null, bookingId: string}>}
  */
-export async function buildDepositTx (orderDisplayId, driverWalletAddress, amountWei) {
+export async function buildDepositTx (orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
   return measureExecution('EscrowService.buildDepositTx', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
   if (!escrowContract) {
     return { txData: null, bookingId }
   }
 
-  if (!ethers.isAddress(driverWalletAddress)) {
+  if (!ethers.isAddress(driverWalletAddress) || !ethers.isAddress(customerWalletAddress)) {
     return { txData: null, bookingId }
   }
   if (!amountWei || BigInt(amountWei) <= 0n) {
@@ -262,9 +381,22 @@ export async function buildDepositTx (orderDisplayId, driverWalletAddress, amoun
 
   let txData
   try {
+    // Owner-signed EIP-191 commitment binding chain, contract, customer,
+    // bookingId and the customer's next nonce. Without it the contract
+    // rejects createBooking, so a third party cannot front-run the slot
+    // (issue #7734).
+    const network = await escrowContract.runner.provider.getNetwork()
+    const nonce = await escrowContract.commitmentNonces(customerWalletAddress)
+    const commitment = ethers.solidityPackedKeccak256(
+      ['uint256', 'address', 'address', 'uint256', 'uint256'],
+      [network.chainId, contractAddress, customerWalletAddress, bookingId, nonce]
+    )
+    const signature = await relayerWallet.signMessage(ethers.getBytes(commitment))
+
     txData = await escrowContract.createBooking.populateTransaction(
       bookingId,
       driverWalletAddress,
+      signature,
       {
         value: amountWei
       }
@@ -278,6 +410,16 @@ export async function buildDepositTx (orderDisplayId, driverWalletAddress, amoun
   });
 }
 
+/**
+ * Wait for an on-chain deposit transaction to be confirmed and verify its details.
+ *
+ * @param {string} bookingId
+ * @param {string} txHash
+ * @param {string|null} expectedSenderAddress
+ * @param {string|null} expectedDriverAddress
+ * @param {string|null} expectedAmountWei
+ * @returns {Promise<{txHash?: string, bookingId?: string, error?: string, alreadyFunded?: boolean}>}
+ */
 export async function recordDepositTx (bookingId, txHash, expectedSenderAddress = null, expectedDriverAddress = null, expectedAmountWei = null) {
   return measureExecution('EscrowService.recordDepositTx', async () => {
   if (!escrowContract) {
@@ -288,10 +430,11 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
   }
 
   // Idempotency: check if this booking already has a funded escrow on-chain.
-  // createBooking is callable by anyone, so an already-existing booking must be
-  // verified to have been created by the registered customer — and, when the
-  // expected values are persisted on the order, for the assigned driver and
-  // for at least the expected escrow amount — before it is accepted as funded.
+  // createBooking now requires an owner-signed commitment (issue #7734), but an
+  // already-existing booking is still verified to have been created by the
+  // registered customer — and, when the expected values are persisted on the
+  // order, for the assigned driver and for at least the expected escrow amount
+  // — before it is accepted as funded.
   try {
     const booking = await escrowContract.bookings(bookingId)
     if (booking && booking.amount > 0n) {
@@ -304,8 +447,11 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
       if (expectedDriverAddress && booking.driver.toLowerCase() !== expectedDriverAddress.toLowerCase()) {
         return { error: 'Existing booking was created for a different driver than the one assigned to this order' }
       }
-      if (expectedAmountWei !== null && booking.amount < BigInt(expectedAmountWei)) {
-        return { error: 'Existing booking is underfunded for the expected escrow amount of this order' }
+      if (expectedAmountWei !== null && booking.amount !== BigInt(expectedAmountWei)) {
+        return {
+          error: `Existing booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(expectedAmountWei)} wei) of this order`,
+          code: 'DEPOSIT_AMOUNT_MISMATCH',
+        }
       }
       logger.info(`[escrow] Booking ${bookingId} already has a funded escrow — idempotency skip.`)
       return { txHash, bookingId, alreadyFunded: true }
@@ -360,13 +506,20 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
     return { error: 'Transaction sender does not match the registered customer wallet for this order' }
   }
 
-  // Verify the booking was created for the assigned driver and with at least
-  // the expected escrow amount when those are persisted for the order.
+  // Verify the booking was created for the assigned driver and funded with
+  // EXACTLY the expected escrow amount when those are persisted for the
+  // order. Exact equality (not >=) rejects both under- and over-payments:
+  // a client that deposits Y ≠ X against an accepted bid of X must not be
+  // allowed to re-anchor the payout amount.
   if (expectedDriverAddress && txDriver.toLowerCase() !== expectedDriverAddress.toLowerCase()) {
     return { error: 'Transaction driver address does not match the assigned driver for this order' }
   }
-  if (expectedAmountWei !== null && BigInt(tx.value) < BigInt(expectedAmountWei)) {
-    return { error: 'Transaction value is less than the expected escrow amount for this order' }
+  if (expectedAmountWei !== null && BigInt(tx.value) !== BigInt(expectedAmountWei)) {
+    const direction = BigInt(tx.value) < BigInt(expectedAmountWei) ? 'less than' : 'greater than';
+    return {
+      error: `Transaction value (${BigInt(tx.value)} wei) does not match the expected escrow amount (${BigInt(expectedAmountWei)} wei) for this order — deposited amount is ${direction} expected`,
+      code: 'DEPOSIT_AMOUNT_MISMATCH',
+    }
   }
 
   logger.info(`[escrow] deposit confirmed for booking ${bookingId} in block ${receipt.blockNumber}`)
@@ -375,9 +528,9 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
 }
 
 /**
- * Mark a booking as started on-chain after the goods are loaded (picked_up).
- * This is required so cancelBooking / cancelWithPenalty revert for a full
- * refund once the trip has begun.
+ * Mark an escrow booking as started on-chain once the trip has begun, so
+ * cancelBooking / cancelWithPenalty revert and a full refund is blocked
+ * (issue #5768).
  *
  * @param {string} orderDisplayId
  * @returns {Promise<{txHash: string|null, bookingId: string, waitForConfirmation?: Function, error?: string}>}
@@ -417,10 +570,17 @@ export async function markEscrowBookingStarted (orderDisplayId) {
  * Release escrowed funds to the driver after successful delivery verification.
  * Must be called by an authorised relayer.
  *
+ * Payout defense-in-depth: when `expectedAmountWei` is provided, the on-chain
+ * booking amount is verified against it BEFORE the release transaction is
+ * submitted. A booking funded with an amount that does not match the app's
+ * authoritative amount is never released — the funds stay locked so the
+ * anomaly can be resolved instead of paying the driver a wrong amount.
+ *
  * @param {string} orderDisplayId
- * @returns {Promise<{txHash: string|null, bookingId: string}>}
+ * @param {string|bigint|null} [expectedAmountWei] - authoritative app amount
+ * @returns {Promise<{txHash: string|null, bookingId: string, alreadyReleased?: boolean, error?: string, code?: string}>}
  */
-export async function escrowRelease (orderDisplayId) {
+export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
   return measureExecution('EscrowService.escrowRelease', async () => {
   const bookingId = getEscrowBookingId(orderDisplayId)
 
@@ -435,8 +595,25 @@ export async function escrowRelease (orderDisplayId) {
       logger.info(`[escrow] Already released for booking ${orderDisplayId}, skipping.`)
       return { txHash: null, bookingId, alreadyReleased: true }
     }
+    if (booking && expectedAmountWei !== null && booking.amount !== BigInt(expectedAmountWei)) {
+      logger.error(
+        `[escrow] Booking ${orderDisplayId} amount (${booking.amount} wei) does not match expected ${BigInt(expectedAmountWei)} wei — refusing to release.`
+      )
+      return {
+        txHash: null,
+        bookingId,
+        error: `On-chain booking amount (${booking.amount} wei) does not match the expected escrow amount (${BigInt(expectedAmountWei)} wei). Refusing to release payment.`,
+        code: 'DEPOSIT_AMOUNT_MISMATCH',
+      }
+    }
   } catch (err) {
-    logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with release.`)
+    logger.error(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}`)
+    return {
+      txHash: null,
+      bookingId,
+      error: err.message,
+      code: 'ESCROW_STATUS_UNAVAILABLE',
+    }
   }
 
   try {
@@ -511,6 +688,15 @@ export async function confirmEscrowRefund (txHash) {
   });
 }
 
+/**
+ * Lock payment in escrow for a specific booking.
+ *
+ * @param {string} orderDisplayId
+ * @param {string} customerWalletAddress
+ * @param {string} driverWalletAddress
+ * @param {string} amountWei
+ * @returns {Promise<{txHash: string|null, bookingId: string, error?: string}>}
+ */
 export async function escrowLockPayment(orderDisplayId, customerWalletAddress, driverWalletAddress, amountWei) {
   return measureExecution('EscrowService.escrowLockPayment', async () => {
     const bookingId = getEscrowBookingId(orderDisplayId);
@@ -540,10 +726,14 @@ export async function escrowLockPayment(orderDisplayId, customerWalletAddress, d
   });
 }
 
-export function bookingIdFromUuid (orderId) {
-  return getEscrowBookingId(orderId)
-}
 
+/**
+ * Submit an escrow cancellation with a penalty fee awarded to the driver.
+ *
+ * @param {string} orderDisplayId
+ * @param {string|bigint} driverFeeWei
+ * @returns {Promise<{txHash: string|null, bookingId: string, error?: string, waitForConfirmation?: Function}>}
+ */
 export async function submitEscrowCancelWithPenalty (orderDisplayId, driverFeeWei) {
   return measureExecution('EscrowService.submitEscrowCancelWithPenalty', async () => {
     const bookingId = getEscrowBookingId(orderDisplayId)
@@ -574,13 +764,6 @@ export async function submitEscrowCancelWithPenalty (orderDisplayId, driverFeeWe
   })
 }
 
-export async function releaseEscrowFunds (orderDisplayId) {
-  return escrowRelease(orderDisplayId)
-}
-
-export async function escrowRefund (orderDisplayId) {
-  return submitEscrowRefund(orderDisplayId)
-}
 
 /**
  * Submit an escrow dispute raise and return its hash before confirmation.
@@ -693,3 +876,19 @@ export async function submitEscrowResolveDisputeTimeout (orderDisplayId) {
     }
   })
 }
+export const lockPayment = escrowLockPayment;
+
+
+
+async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
+  const bookingOnChain = await escrowContract.bookings(bookingId);
+  const onChainAmountBN = BigInt(bookingOnChain.amount.toString());
+  const expectedWeiBN = BigInt(expectedWei);
+  return {
+    valid: onChainAmountBN >= expectedWeiBN,
+    onChainAmount: onChainAmountBN.toString(),
+    expectedAmount: expectedWeiBN.toString()
+  };
+}
+
+module.exports.verifyOnChainEscrowBalance = verifyOnChainEscrowBalance;

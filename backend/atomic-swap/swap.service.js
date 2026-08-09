@@ -19,6 +19,8 @@ class AtomicSwapService {
             'function refundCrossChainSwap(uint256 swapId) external',
             'function getSwap(uint256 swapId) external view returns (tuple(uint256,address,address,address,uint256,bytes32,uint256,bool,bool,uint256,bytes32))',
             'function getCrossChainSwap(uint256 swapId) external view returns (tuple(uint256,uint256,uint256,address,address,address,uint256,bytes32,uint256,bool,bool,bytes32,bytes32))',
+            'function getSwapCount() external view returns (uint256)',
+            'function getCrossChainSwapCount() external view returns (uint256)',
             'function isHashLockUsed(bytes32 hashLock) external view returns (bool)'
         ];
 
@@ -29,12 +31,29 @@ class AtomicSwapService {
 
     // ============ Hash Lock Generation ============
 
+    // Derive the swap id from the swap-opened event emitted in the receipt,
+    // falling back to the transaction hash. The previously used
+    // getSwapCount()/getCrossChainSwapCount() are not part of the ABI.
+    async extractSwapId(receipt) {
+        for (const log of receipt.logs || []) {
+            const parsed = this.swap.interface.parseLog(log);
+            if (parsed && /swap/i.test(parsed.name) && parsed.args.length > 0) {
+                const id = parsed.args[0];
+                if (id && typeof id.toString === 'function') {
+                    return id.toString();
+                }
+                return String(id);
+            }
+        }
+        return receipt.hash;
+    }
+
     generateHashLock(secret) {
         return ethers.keccak256(ethers.toUtf8Bytes(secret));
     }
 
     generateSecret() {
-        return crypto.randomBytes(32).toString('hex');
+        return '0x' + crypto.randomBytes(32).toString('hex');
     }
 
     // ============ Swap Operations ============
@@ -56,7 +75,7 @@ class AtomicSwapService {
             );
             const receipt = await tx.wait();
 
-            const swapId = await this.swap.getSwapCount();
+            const swapId = await this.extractSwapId(receipt);
 
             await this.storeSwap({
                 swapId,
@@ -147,7 +166,7 @@ class AtomicSwapService {
             );
             const receipt = await tx.wait();
 
-            const swapId = await this.swap.getCrossChainSwapCount();
+            const swapId = await this.extractSwapId(receipt);
 
             await this.storeCrossChainSwap({
                 swapId,

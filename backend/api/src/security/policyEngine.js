@@ -133,6 +133,7 @@ const POLICIES = {
 
   'ebpf:manage':               { roles: [ROLES.ADMIN] },
   'snyk:manage':               { roles: [ROLES.ADMIN] },
+  'wasi:manage':               { roles: [ROLES.ADMIN] },
 };
 
 export class PolicyEngine {

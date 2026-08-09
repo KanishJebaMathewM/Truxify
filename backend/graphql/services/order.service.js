@@ -1,9 +1,11 @@
-﻿import { ApolloServer } from '@apollo/server';
+import { ApolloServer } from '@apollo/server';
 import { startStandaloneServer } from '@apollo/server/standalone';
 import { buildSubgraphSchema } from '@apollo/federation';
 import { gql } from 'graphql-tag';
 import { supabase } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
+import { generateOrderDisplayId } from '../../api/src/lib/orderDisplayId.js';
+import { createLoaders } from '../gateway/authContext.js';
 
 const ADMIN_ROLES = new Set(['ADMIN', 'admin']);
 
@@ -25,7 +27,19 @@ function mapOrder(row) {
         ...row,
         customerId: row.customerId ?? row.customer_id,
         driverId: row.driverId ?? row.driver_id,
-        cargoType: row.cargoType ?? row.cargo_type,
+        cargoType: row.cargoType ?? row.goods_type,
+        weight: row.weight ?? row.weight_tonnes,
+        amount: row.amount ?? row.total_amount,
+        pickup: {
+            lat: row.pickup_lat,
+            lng: row.pickup_lng,
+            address: row.pickup_address,
+        },
+        dropoff: {
+            lat: row.drop_lat,
+            lng: row.drop_lng,
+            address: row.drop_address,
+        },
         createdAt: row.createdAt ?? row.created_at,
         updatedAt: row.updatedAt ?? row.updated_at,
     };
@@ -38,7 +52,7 @@ const ORDER_STATUS_TO_DB = {
     IN_TRANSIT: 'in_transit',
     COMPLETED: 'delivered',
     CANCELLED: 'cancelled',
-    DISPUTED: 'cancelled',
+    DISPUTED: 'disputed',
 };
 
 function toDbStatus(status) {
@@ -196,12 +210,17 @@ const resolvers = {
                 .from('orders')
                 .insert([{
                     customer_id: customerId,
-                    pickup: input.pickup,
-                    dropoff: input.dropoff,
-                    weight: input.weight,
-                    distance: input.distance,
-                    cargo_type: input.cargoType,
-                    amount: input.amount,
+                    order_display_id: generateOrderDisplayId(),
+                    pickup_address: input.pickup?.address,
+                    pickup_lat: input.pickup?.lat,
+                    pickup_lng: input.pickup?.lng,
+                    drop_address: input.dropoff?.address,
+                    drop_lat: input.dropoff?.lat,
+                    drop_lng: input.dropoff?.lng,
+                    goods_type: input.cargoType,
+                    weight_tonnes: input.weight,
+                    total_amount: input.amount,
+                    pickup_date: new Date().toISOString().slice(0, 10),
                     status: toDbStatus(input.status) || 'pending',
                     created_at: new Date().toISOString()
                 }])
@@ -215,8 +234,12 @@ const resolvers = {
             const currentUser = requireUser(user);
             const updates = {
                 status: toDbStatus(input.status),
-                pickup: input.pickup || undefined,
-                dropoff: input.dropoff || undefined,
+                pickup_address: input.pickup?.address ?? undefined,
+                pickup_lat: input.pickup?.lat ?? undefined,
+                pickup_lng: input.pickup?.lng ?? undefined,
+                drop_address: input.dropoff?.address ?? undefined,
+                drop_lat: input.dropoff?.lat ?? undefined,
+                drop_lng: input.dropoff?.lng ?? undefined,
                 updated_at: new Date().toISOString()
             };
 
@@ -265,27 +288,31 @@ const resolvers = {
             // Fetch driver from driver service
             return { id: order.driverId };
         },
-        payment: async (order) => {
-            // Fetch payment from payment service
-            const { data, error } = await supabase
-                .from('payments')
-                .select('*')
-                .eq('order_id', order.id)
-                .single();
-            
-            if (error) return null;
-            return data;
+        payment: async (order, _, context) => {
+            if (!context.loaders) {
+                const { data, error } = await supabase
+                    .from('payments')
+                    .select('*')
+                    .eq('order_id', order.id)
+                    .single();
+                
+                if (error) return null;
+                return data;
+            }
+            return context.loaders.paymentLoader.load(order.id);
         },
-        trip: async (order) => {
-            // Fetch trip from trip service
-            const { data, error } = await supabase
-                .from('trips')
-                .select('*')
-                .eq('order_id', order.id)
-                .single();
-            
-            if (error) return null;
-            return data;
+        trip: async (order, _, context) => {
+            if (!context.loaders) {
+                const { data, error } = await supabase
+                    .from('trips')
+                    .select('*')
+                    .eq('order_id', order.id)
+                    .single();
+                
+                if (error) return null;
+                return data;
+            }
+            return context.loaders.tripLoader.load(order.id);
         }
     }
 };
@@ -297,7 +324,17 @@ async function startOrderService() {
     });
 
     const { url } = await startStandaloneServer(server, {
-        listen: { port: 4001 }
+        listen: { port: 4001 },
+        context: async ({ req }) => {
+            const id = req.headers['x-user-id'];
+            const role = req.headers['x-user-role'];
+            const user = id ? { id, role } : null;
+            
+            return {
+                user,
+                loaders: createLoaders(supabase)
+            };
+        }
     });
 
     logger.info(`âœ… Order GraphQL service running at ${url}`);

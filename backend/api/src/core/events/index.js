@@ -6,7 +6,7 @@ export { EventSubscriber } from './EventSubscriber.js';
 export { EventHandler } from './EventHandler.js';
 
 import eventBus, { EventBus } from './EventBus.js';
-export { EventBus };
+export { EventBus, eventBus };
 export default eventBus;
 
 export { KafkaAdapter } from './adapters/KafkaAdapter.js';

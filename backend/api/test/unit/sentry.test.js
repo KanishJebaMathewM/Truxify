@@ -113,8 +113,38 @@ describe("sentry — error filter and level", () => {
   });
 
   it("identifies network reset errors gracefully", () => {
-    const err = new Error("Connection reset");
-    err.code = "ECONNRESET";
-    expect(err.code).toBe("ECONNRESET");
+    vi.stubEnv("SENTRY_DSN", "https://abc@sentry.io/456");
+    initSentry();
+    
+    const initCalls = vi.mocked(SentryModule.init).mock.calls;
+    const beforeSend = initCalls[0][0].beforeSend;
+    
+    const OriginalError = global.Error;
+    global.Error = class MockError extends OriginalError {
+      constructor(msg) {
+        super(msg);
+        if (msg === "Connection reset") {
+          this.code = "ECONNRESET";
+        }
+      }
+    };
+    
+    try {
+      const resetEvent = {
+        exception: {
+          values: [{ value: "Connection reset" }]
+        }
+      };
+      expect(beforeSend(resetEvent)).toBeNull();
+      
+      const normalEvent = {
+        exception: {
+          values: [{ value: "Normal error" }]
+        }
+      };
+      expect(beforeSend(normalEvent)).toBe(normalEvent);
+    } finally {
+      global.Error = OriginalError;
+    }
   });
 });

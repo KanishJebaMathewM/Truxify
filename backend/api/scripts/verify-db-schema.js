@@ -11,6 +11,7 @@ const REQUIRED_RPC_FUNCTIONS = [
   'complete_trip_tx',
   'submit_rating_tx',
   'cancel_order_tx',
+  'cancel_stale_order_tx',
   'release_escrow_tx',
   'refund_escrow_tx',
   'update_trip_status_tx',

@@ -60,6 +60,7 @@ m.supabase.rpc = vi.fn().mockImplementation(async (fnName, args) => {
 
 vi.mock("../../src/config/db.js", () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
   createUserClient: () => m.supabase,
   firebaseAdmin: null,
   get redisClient() {
@@ -244,7 +245,7 @@ describe("POST /api/orders/:id/verify-delivery — delivery verification contrac
     expectContract(res, 200);
     expect(res.body).toHaveProperty("message");
     expect(typeof res.body.message).toBe("string");
-    expect(res.body.message).toMatch(/Delivery verified successfully/i);
+    expect(res.body.message).toMatch(/Delivery confirmed/i);
   });
 
   it("200: releases funded escrow and completes the trip", async () => {

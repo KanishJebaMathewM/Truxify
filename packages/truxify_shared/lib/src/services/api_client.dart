@@ -270,7 +270,7 @@ Future<http.Response> _execute(
     int retrySeconds = int.tryParse(retryAfterHeader ?? '') ?? 1;
 
     // Cap maximum wait time to 30 seconds
-    retrySeconds = retrySeconds.clamp(1, 30);
+    retrySeconds = retrySeconds.clamp(1, 30).toInt();
 
     await Future.delayed(Duration(seconds: retrySeconds));
 

@@ -34,6 +34,7 @@ import {
   paisaToMaticWei,
   isEscrowEnabled,
   escrowLockPayment,
+  resolveExpectedDepositAmount,
 } from '../services/escrow.js';
 import { sendPushNotification } from '../services/notificationService.js';
 import upiPaymentService from '../services/payment/UpiPaymentService.js';
@@ -99,6 +100,7 @@ router.post(
   '/upi-intent',
   authenticate,
   lockLimiter,
+  requireIdempotency(3600),
   validateBody(upiIntentSchema),
   async (req, res) => {
     try {
@@ -135,8 +137,11 @@ router.post(
       const amountPaisa = order.total_amount || 0;
       const amountInr = (amountPaisa / 100).toFixed(2);
 
-      // Platform UPI ID from env (falls back to demo value for dev)
-      const platformUpiId = process.env.PLATFORM_UPI_ID || 'truxify@upi';
+      const platformUpiId = process.env.PLATFORM_UPI_ID?.trim();
+      if (!platformUpiId) {
+        logger.error('[payments] PLATFORM_UPI_ID is not configured; cannot generate UPI intent');
+        return res.status(503).json({ error: 'UPI payments are not configured on the server.' });
+      }
       const orderRef = order.order_display_id;
 
       // Standard UPI deep-link format (works with GPay, PhonePe, Paytm, BHIM)
@@ -192,7 +197,7 @@ router.post(
   validateBody(lockPaymentSchema),
   auditLog({ action: 'payment:lock', resourceType: 'escrow' }),
   async (req, res) => {
-    const { order_id, tx_hash, wallet_address } = req.body;
+    const { order_id, tx_hash } = req.body;
     const lockKey = `payment_lock:${order_id}`;
 
     // lockValue holds the owner UUID returned by acquireLock.
@@ -215,7 +220,7 @@ router.post(
       try {
         order = await orderValidationService.findOrderByIdOrDisplayId(
           order_id,
-          'id, order_display_id, customer_id, driver_id, total_amount, escrow_status, escrow_booking_id, wallet_address'
+          'id, order_display_id, customer_id, driver_id, total_amount, escrow_status, escrow_booking_id, wallet_address, escrow_driver_wallet, escrow_amount_wei, pending_bid_acceptance'
         );
       } catch (err) {
         return res.status(500).json({ error: 'Failed to fetch order.' });
@@ -246,37 +251,67 @@ router.post(
         });
       }
 
-      // 3. Derive the on-chain booking ID
+      // 3. The deposit may only be locked while the order is in 'funding'
+      //    state. A lock must never be accepted for an order that was not
+      //    staged for escrow funding.
+      if (order.escrow_status !== 'funding') {
+        return res.status(409).json({
+          error: `Cannot lock payment — escrow must be in 'funding' state, current status: ${order.escrow_status}`,
+        });
+      }
+
+      // 4. Derive the on-chain booking ID
       const bookingId = order.escrow_booking_id || getEscrowBookingId(order.order_display_id);
 
-      // 4. Verify the deposit transaction on-chain (or skip if escrow not enabled)
-      if (isEscrowEnabled()) {
-        const senderAddress = wallet_address || order.wallet_address;
-        const result = await recordDepositTx(bookingId, tx_hash, senderAddress);
+      // 5. Verify the deposit transaction on-chain against the order's escrow
+      //    booking: the sender must be the authenticated customer's profile
+      //    wallet (never a client-supplied wallet_address), the booking must
+      //    be created for the assigned driver, and funded with at least the
+      //    expected escrow amount. The client-supplied tx_hash is never
+      //    trusted without on-chain verification (no dev trust path).
+      const { data: customerProfile } = await orderRepository.findCustomerWallet(req.user.id);
+      const senderAddress = customerProfile?.polygon_wallet_address ?? null;
+      if (!senderAddress) {
+        return res.status(422).json({
+          error: 'No Polygon wallet is registered on your profile. Add a wallet before locking escrow payment.',
+          code: 'WALLET_REQUIRED',
+        });
+      }
 
-        if (result.error) {
-          logger.warn(`[payments] recordDepositTx failed for ${order.order_display_id}: ${result.error}`);
-          return res.status(422).json({
-            error: `Transaction verification failed: ${result.error}`,
-            hint: 'Ensure the transaction is confirmed on Polygon and the wallet address matches your profile.',
-          });
-        }
+      // Resolve the authoritative expected deposit amount (cross-checked
+      // against the server-written bid context). If it cannot be resolved the
+      // deposit is rejected — the amount on-chain must always equal the amount
+      // the app recorded for this order.
+      const resolvedAmount = resolveExpectedDepositAmount(order);
+      if (resolvedAmount.error) {
+        return res.status(422).json({ error: resolvedAmount.error, code: resolvedAmount.code });
+      }
+      const expectedAmountWei = resolvedAmount.expectedAmountWei;
 
-        logger.info(`[payments] Deposit verified on-chain for ${order.order_display_id}`);
-      } else {
-        // Dev/staging mode — skip on-chain verification, trust the client tx_hash
-        logger.warn(`[payments] Escrow not configured — accepting tx_hash ${tx_hash} on trust (dev mode)`);
+      const result = await recordDepositTx(
+        bookingId,
+        tx_hash,
+        senderAddress,
+        order.escrow_driver_wallet ?? null,
+        expectedAmountWei
+      );
+
+      if (result.error) {
+        logger.warn(`[payments] recordDepositTx failed for ${order.order_display_id}: ${result.error}`);
+        return res.status(422).json({
+          error: `Transaction verification failed: ${result.error}`,
+          code: result.code,
+          hint: 'Ensure the transaction is confirmed on Polygon and the wallet address matches your profile.',
+        });
       }
 
       // 5. Update escrow_status → funded
-      const { error: updateErr } = await orderRepository.updateOrder(
+      const { error: updateErr } = await orderRepository.updateOrderWithFilter(
         order.id,
         {
           escrow_status: 'funded',
           escrow_booking_id: bookingId,
           escrow_tx_hash: tx_hash,
-          escrow_deposited_at: new Date().toISOString(),
-          wallet_address: wallet_address || order.wallet_address,
           updated_at: new Date().toISOString(),
         },
         [{ op: 'neq', column: 'escrow_status', value: 'funded' }]
@@ -289,13 +324,13 @@ router.post(
         });
       }
 
-      // 6. Notify assigned driver that payment is now locked
+      // 7. Notify assigned driver that payment is now locked
       if (order.driver_id) {
         sendPushNotification(
           order.driver_id,
           '💰 Payment Locked',
           `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
-          'payment_locked',
+          'payment',
           { order_display_id: order.order_display_id, tx_hash }
         ).catch(err => logger.warn('[payments] Driver FCM push failed:', err.message));
       }

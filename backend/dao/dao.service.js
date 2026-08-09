@@ -17,7 +17,7 @@ class DAOService {
             'function castVote(uint256 proposalId, bool support) external',
             'function executeProposal(uint256 proposalId) external',
             'function treasuryProposal(address recipient, uint256 amount, string memory reason) external returns (uint256)',
-            'function getProposal(uint256 proposalId) external view returns (tuple(uint256,address,string,string,bytes,address,uint256,uint256,uint256,uint256,uint256,bool,bool,uint8,uint8))',
+            'function getProposal(uint256 proposalId) external view returns (tuple(uint256,address,string,string,bytes,address,uint256,uint256,uint256,uint256,uint256,uint256,bool,bool,uint8,uint8))',
             'function getMember(address member) external view returns (tuple(address,uint256,uint256,bool,uint256,uint256))',
             'function getTotalProposals() external view returns (uint256)',
             'function getTotalMembers() external view returns (uint256)',

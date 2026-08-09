@@ -21,11 +21,11 @@ const ESCROW_RESET_GUARD_FILTERS = [
 ];
 
 export class BidAcceptanceService {
-  constructor({ orderRepository, buildDepositTxFn, escrowDepositFn, recordDepositTxFn, escrowRefundFn, logger, notificationDispatcher }) {
+  constructor({ orderRepository, buildDepositTxFn, escrowDepositFn, recordDepositTxFn, submitEscrowRefundFn, logger, notificationDispatcher }) {
     this.orderRepository = orderRepository;
     this.buildDepositTxFn = buildDepositTxFn || escrowDepositFn || (async () => ({ bookingId: 'mock-booking-id' }));
     this.recordDepositTxFn = recordDepositTxFn;
-    this.escrowRefundFn = escrowRefundFn;
+    this.submitEscrowRefundFn = submitEscrowRefundFn;
     this.logger = logger;
     this.notificationDispatcher = notificationDispatcher;
   }
@@ -155,7 +155,7 @@ export class BidAcceptanceService {
             recovery: 'Configure ESCROW_MATIC_PER_PAISA / MAX_ESCROW_MATIC or contact support for a larger escrow limit.',
           });
         }
-        const depositTx = await this.buildDepositTxFn(order.order_display_id, freshDriverWallet, amountWei);
+        const depositTx = await this.buildDepositTxFn(order.order_display_id, freshCustomerWallet, freshDriverWallet, amountWei);
         const bookingId = depositTx?.bookingId || getEscrowBookingId(order.order_display_id);
 
         // Guard against silent escrow disable: if buildDepositTx returned

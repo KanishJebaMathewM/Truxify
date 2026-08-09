@@ -487,3 +487,4 @@ class RenderScheduler extends EventEmitter {
 }
 
 export default RenderScheduler;
+export { Priority };

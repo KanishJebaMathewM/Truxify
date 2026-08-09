@@ -16,7 +16,7 @@ const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1); // evict 10
 // default 120s gives a comfortable margin. Overridable per deployment.
 const LOCK_TTL_MS = Number(process.env.IDEMPOTENCY_LOCK_TTL_MS) || 120_000;
 
-const cleanupTimer = clearInterval(window.__interval); window.__interval = setInterval(() => {
+let cleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of inMemoryStore) {
     if (entry.expiresAt <= now) {
@@ -72,16 +72,19 @@ function readAndParse(str) {
 }
 
 export function requireIdempotency(ttlSeconds = 3600) {
-  const ttlMs = ttlSeconds * 1000;
+  // Guard against invalid TTL: use default of 3600 if not a positive integer.
+  const safeTtlSeconds = Number.isInteger(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : 3600;
+  const ttlMs = safeTtlSeconds * 1000;
 
   return async function idempotencyMiddleware(req, res, next) {
     const idempotencyKey = req.headers['x-idempotency-key'];
 
-    if (!idempotencyKey) {
+    // Guard against non-string idempotency key: return 400 if not a string.
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey) {
       if (process.env.NODE_ENV === 'test') {
         return next();
       }
-      return res.status(400).json({ error: 'X-Idempotency-Key header is required for this action.' });
+      return res.status(400).json({ error: 'X-Idempotency-Key must be a non-empty string.' });
     }
 
     const key = cacheKey(req, idempotencyKey);
@@ -121,7 +124,12 @@ export function requireIdempotency(ttlSeconds = 3600) {
 
             const lockStillHeld = await redisClient.get(lockKey);
             if (!lockStillHeld) {
-              break; // Lock released but cache empty
+              const finalRaw = await redisClient.get(key);
+              const finalCached = finalRaw ? readAndParse(finalRaw) : null;
+              if (finalCached) {
+                return res.status(finalCached.statusCode).json(finalCached.body);
+              }
+              break; // Lock released but cache genuinely empty
             }
 
             retries--;

@@ -32,7 +32,7 @@ const {
   buildDepositTx,
   recordDepositTx,
   escrowRelease,
-  escrowRefund,
+  submitEscrowRefund,
 } = await import('../../src/services/escrow.js');
 
 // Restore environment variables
@@ -127,21 +127,21 @@ describe('escrowRelease() — no-contract fallback', () => {
   });
 });
 
-describe('escrowRefund() — no-contract fallback', () => {
+describe('submitEscrowRefund() — no-contract fallback', () => {
   it('returns {txHash: null, bookingId} when contract not initialised', async () => {
-    const result = await escrowRefund(ORDER_ID_A);
+    const result = await submitEscrowRefund(ORDER_ID_A);
     expect(result.txHash).toBeNull();
     expect(result.bookingId).toBe(getEscrowBookingId(ORDER_ID_A));
   });
 
   it('bookingId matches getEscrowBookingId() for the same order', async () => {
-    const result = await escrowRefund(ORDER_ID_B);
+    const result = await submitEscrowRefund(ORDER_ID_B);
     expect(result.bookingId).toBe(getEscrowBookingId(ORDER_ID_B));
   });
 
   it('is idempotent — multiple calls return same bookingId', async () => {
-    const r1 = await escrowRefund(ORDER_ID_A);
-    const r2 = await escrowRefund(ORDER_ID_A);
+    const r1 = await submitEscrowRefund(ORDER_ID_A);
+    const r2 = await submitEscrowRefund(ORDER_ID_A);
     expect(r1.bookingId).toBe(r2.bookingId);
   });
 });

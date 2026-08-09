@@ -19,7 +19,12 @@ import {
   recordOtpFailure,
   clearOtpState,
 } from "./orderNotificationService.js";
-import { escrowRelease as defaultEscrowRelease } from "../escrow.js";
+import {
+  escrowRelease as defaultEscrowRelease,
+  resolveExpectedDepositAmount,
+  paisaToMaticWei,
+  weiWithinTolerance,
+} from "../escrow.js";
 import logger from "../../middleware/logger.js";
 import { OrderTimelineService } from "./orderTimelineService.js";
 
@@ -45,6 +50,11 @@ function toEpochMs(value) {
 export class DeliveryVerificationService {
   constructor(orderRepository, deps = {}) {
     this.orderRepository = orderRepository;
+    // All financial/release evidence writes MUST go through the service_role
+    // client: the anon-key client has no RLS policy on `orders` and
+    // `escrow_status`/`escrow_release_*` are REVOKE UPDATE from anon, so
+    // persisting via it would be a silent no-op and break reconciliation.
+    this.adminOrderRepository = deps.adminOrderRepository || null;
     this.orderTimelineService =
       deps.orderTimelineService || new OrderTimelineService(supabase);
     this.notificationService = deps.notificationService || {
@@ -56,6 +66,15 @@ export class DeliveryVerificationService {
     };
     this.escrowReleaseFn = deps.escrowReleaseFn || defaultEscrowRelease;
     this.trackingTokenService = deps.trackingTokenService || null;
+  }
+
+  /**
+   * Repository used for release-path DB writes (escrow status, release hash,
+   * guard updates, wallet description). Falls back to the read repository when
+   * no service-role repository was injected (tests, unconfigured admin client).
+   */
+  get _writeRepository() {
+    return this.adminOrderRepository || this.orderRepository;
   }
 
   async validateDeliveryOtp({ orderId, driverId, otp }) {
@@ -71,7 +90,7 @@ export class DeliveryVerificationService {
         const { data: order, error: orderErr } =
           await this.orderRepository.findOrderById(
             orderId,
-            "id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status, release_tx_hash, drop_lat, drop_lng, toll_estimate, base_freight, platform_fee, total_amount",
+            "id, order_display_id, driver_id, customer_id, escrow_status, escrow_amount_wei, escrow_release_attempts, status, release_tx_hash, drop_lat, drop_lng, toll_estimate, base_freight, platform_fee, total_amount",
           );
 
         if (orderErr || !order) {
@@ -257,7 +276,6 @@ export class DeliveryVerificationService {
             `[DeliveryVerificationService] Delivery OTP notification failed for order ${orderDisplayId} — FCM error: ${notifResult.fcm?.error || "unknown"}`,
           );
           await this.orderRepository.updateOrder(orderId, {
-            notification_failed: true,
             updated_at: new Date().toISOString(),
           });
         }
@@ -329,19 +347,21 @@ export class DeliveryVerificationService {
         // The release gate must never be satisfied by self-reported coordinates.
         // assertDriverAtDropoff() proves physical presence using only telemetry
         // that was authenticated at ingestion and bound to this driver/order.
-        await this.assertDriverAtDropoff(
-          order,
-          geofenceRadiusM ?? DELIVERY_GEOFENCE_RADIUS_KM * 1000,
-        );
+        // The radius is clamped to the server default so a client-supplied
+        // NaN/negative/oversized value can never bypass the distance check.
+        const maxRadiusM = DELIVERY_GEOFENCE_RADIUS_KM * 1000;
+        const radiusM =
+          geofenceRadiusM != null &&
+          Number.isFinite(geofenceRadiusM) &&
+          geofenceRadiusM > 0
+            ? Math.min(geofenceRadiusM, maxRadiusM)
+            : maxRadiusM;
+        await this.assertDriverAtDropoff(order, radiusM);
 
         // Record the geofence confirmation and the (non-authoritative) claimed
         // position for audit. This is a flag only — escrow is not released here.
         await this.orderRepository
           .updateOrder(orderId, {
-            geofence_confirmed: true,
-            geofence_confirmed_at: new Date().toISOString(),
-            geofence_driver_lat: driverLat,
-            geofence_driver_lng: driverLng,
             updated_at: new Date().toISOString(),
           })
           .catch((err) =>
@@ -469,21 +489,103 @@ export class DeliveryVerificationService {
           try {
             const releaseResult = await this.escrowReleaseFn(
               order.order_display_id,
+          // Payout defense-in-depth: resolve the authoritative escrow amount
+          // and verify it is consistent with the payout figure (total_amount)
+          // BEFORE any on-chain release. The actual on-chain booking amount is
+          // then enforced by escrowReleaseFn against the same expected figure,
+          // so a booking funded with Y ≠ X can never be released while the app
+          // pays the driver X from its own funds.
+          let expectedAmountWei = null;
+          const resolvedAmount = resolveExpectedDepositAmount(order);
+          if (resolvedAmount.expectedAmountWei != null) {
+            expectedAmountWei = resolvedAmount.expectedAmountWei;
+            if (order.total_amount != null) {
+              const fromTotal = paisaToMaticWei(order.total_amount);
+              if (!weiWithinTolerance(expectedAmountWei, fromTotal)) {
+                const details = `escrow_amount_wei=${expectedAmountWei} wei vs total_amount=${order.total_amount} paisa (${fromTotal} wei)`;
+                logger.error(
+                  "[escrow] Escrow amount mismatch before release for order",
+                  orderId,
+                  ":",
+                  details,
+                );
+                await this.orderRepository
+                  .updateOrder(orderId, {
+                    escrow_status: "release_failed",
+                    escrow_release_error: `ESCROW_AMOUNT_MISMATCH: ${details}`,
+                    updated_at: new Date().toISOString(),
+                  })
+                  .catch((err) =>
+                    logger.warn(
+                      "[escrow] Failed to record amount mismatch:",
+                      err.message,
+                    ),
+                  );
+                throw new DomainError(409, {
+                  error:
+                    "Escrow amount mismatch detected. Payment cannot be released.",
+                  code: "ESCROW_AMOUNT_MISMATCH",
+                  details,
+                });
+              }
+            }
+          } else {
+            logger.warn(
+              `[escrow] Order ${orderId} has no authoritative escrow amount on file — skipping on-chain amount verification on release (legacy row).`,
+            );
+          }
+
+          try {
+            const releaseResult = await this.escrowReleaseFn(
+              order.order_display_id,
+              expectedAmountWei,
             );
             if (releaseResult.txHash) {
               releaseTxHash = releaseResult.txHash;
             } else if (releaseResult.alreadyReleased) {
               escrowAlreadyReleased = true;
+            } else if (releaseResult.code === "DEPOSIT_AMOUNT_MISMATCH") {
+              await this.orderRepository
+                .updateOrder(orderId, {
+                  escrow_status: "release_failed",
+                  escrow_release_error: String(releaseResult.error).slice(0, 1000),
+                  updated_at: new Date().toISOString(),
+                })
+                .catch((err) =>
+                  logger.warn(
+                    "[escrow] Failed to record release amount mismatch:",
+                    err.message,
+                  ),
+                );
+              throw new DomainError(409, {
+                error:
+                  releaseResult.error ||
+                  "On-chain escrow amount does not match the expected amount. Payment cannot be released.",
+                code: "DEPOSIT_AMOUNT_MISMATCH",
+                retryable: false,
+              });
             } else {
               throw new Error("Escrow release returned no transaction hash");
             }
           } catch (releaseErr) {
+            if (releaseErr instanceof DomainError) throw releaseErr;
             logger.error(
               "[escrow] Blockchain release failed for order",
               orderId,
               ":",
               releaseErr.message,
             );
+            await this.orderRepository
+              .updateOrder(orderId, {
+                escrow_release_error: String(releaseErr.message).slice(0, 1000),
+                updated_at: new Date().toISOString(),
+              })
+              .catch((err) =>
+                logger.warn(
+                  "[escrow] Failed to record release failure:",
+                  err.message,
+                ),
+              );
             throw new DomainError(503, {
               error:
                 "Blockchain escrow release failed. Payment cannot be processed. Please retry.",
@@ -497,6 +599,7 @@ export class DeliveryVerificationService {
           // retries with a NULL release hash.
           if (releaseTxHash || escrowAlreadyReleased) {
             const { error: persistReleaseErr } =
+              await this._writeRepository.updateOrder(orderId, {
               await this.orderRepository.updateOrder(orderId, {
                 escrow_status: "released",
                 escrow_release_error: null,
@@ -514,10 +617,40 @@ export class DeliveryVerificationService {
         } else if (order.escrow_status === "released") {
           // Release was confirmed in a previous attempt — reuse the persisted hash.
           releaseTxHash = order.release_tx_hash || null;
-        } else {
-          logger.info(
-            `[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`,
+        }
+
+        // Re-check that the escrow actually released after this attempt. This
+        // is what makes the stuck-escrow retry safe: token revocation and the
+        // "Payment Released" push below only run once releaseTxHash /
+        // escrowAlreadyReleased confirm the on-chain release, or the order was
+        // already "released". If the release failed again, the driver is told
+        // the retry failed instead of being notified that they are paid while
+        // the funds remain stuck on-chain.
+        const releaseConfirmed = Boolean(
+          releaseTxHash ||
+            escrowAlreadyReleased ||
+            order.escrow_status === "released",
+        );
+        if (!releaseConfirmed) {
+          logger.error(
+            `[verify-delivery] On-chain escrow release not confirmed for order ${orderId} (escrow_status=${order.escrow_status}) — aborting before notification.`,
           );
+          await this.orderRepository
+            .updateOrder(orderId, {
+              escrow_release_error: `ESCROW_NOT_RELEASED: on-chain release not confirmed (escrow_status=${order.escrow_status})`,
+              updated_at: new Date().toISOString(),
+            })
+            .catch((err) =>
+              logger.warn(
+                "[escrow] Failed to record unconfirmed release:",
+                err.message,
+              ),
+            );
+          throw new DomainError(503, {
+            error:
+              "On-chain escrow release was not confirmed. Payment cannot be processed. Please retry.",
+            retryable: true,
+          });
         }
 
         // 2. Execute Postgres RPC to complete the trip AFTER blockchain success
@@ -525,7 +658,7 @@ export class DeliveryVerificationService {
         let tripData = null;
 
         if (!isRetryForStuckEscrow) {
-          const guardResult = await this.orderRepository.updateOrderGuardStatus(
+          const guardResult = await this._writeRepository.updateOrderGuardStatus(
             orderId,
             { updated_at: new Date().toISOString() },
             ["cancelled", "payment_released"],
@@ -597,8 +730,16 @@ export class DeliveryVerificationService {
           });
         } else {
           logger.info(
-            `[verify-delivery] Retry for stuck escrow for order ${orderId} by driver ${driverId}`,
+            `[verify-delivery] Retry for stuck escrow for order ${orderId} by driver ${driverId} — release confirmed (tx_hash=${releaseTxHash || "alreadyReleased"}).`,
           );
+          // The verified OTP is consumed on the retry path too so it cannot be
+          // replayed by a later attempt. It is only consumed after the release
+          // is confirmed, so a failed release leaves the OTP intact for the
+          // next retry instead of force-rotating it.
+          await this.completeDeliveryOtp({
+            otpRecordId: otpRecord.id,
+            orderId,
+          });
         }
 
         // The trip is complete (payment_released) — kill any active public
@@ -618,7 +759,7 @@ export class DeliveryVerificationService {
             resolvedDriverIdForPush,
             "✅ Payment Released",
             `Payment Released ✓ ${amountInr} credited for order ${order.order_display_id}`,
-            "payment_released",
+            "payment",
             {
               order_display_id: order.order_display_id,
               release_tx_hash: releaseTxHash || "",
@@ -632,7 +773,7 @@ export class DeliveryVerificationService {
         let escrowUpdateFailed = false;
         if (releaseTxHash || escrowAlreadyReleased) {
           const { error: releaseUpdateErr } =
-            await this.orderRepository.updateOrder(orderId, {
+            await this._writeRepository.updateOrder(orderId, {
               escrow_status: "released",
               escrow_release_error: null,
               escrow_released_at: new Date().toISOString(),
@@ -651,7 +792,7 @@ export class DeliveryVerificationService {
               tripData?.order_display_id || order.order_display_id;
             if (resolvedDriverId) {
               const { error: walletErr } =
-                await this.orderRepository.updateWalletTransaction(
+                await this._writeRepository.updateWalletTransaction(
                   resolvedDriverId,
                   resolvedDisplayId,
                   { description: `Escrow payout for ${resolvedDisplayId}` },

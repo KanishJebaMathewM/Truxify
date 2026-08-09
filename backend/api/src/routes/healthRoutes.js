@@ -121,7 +121,17 @@ function checkFirebase() {
 }
 
 async function checkEscrow() {
+  try {
+  try {
   const result = await checkEscrowHealth();
+  } catch (err) {
+    logger.error('[Health] checkEscrow failed:', err?.message || err);
+    return { status: 'failed', detail: err?.message || 'Unknown error' };
+  }
+  } catch (err) {
+    logger.error('[Health] checkEscrow failed:', err?.message || err);
+    return { status: 'failed', detail: err?.message || 'Unknown error' };
+  }
   return result.status;
 }
 

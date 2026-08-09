@@ -229,7 +229,8 @@ router.get('/faqs', async (req, res) => {
 
     res.json(faqs || []);
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -362,7 +363,8 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
       ticket,
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -466,7 +468,8 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -531,7 +534,8 @@ router.get('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:view
 
     res.json(ticket);
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -607,6 +611,14 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
       return res.status(400).json({ error: 'Cannot update a closed ticket.' });
     }
 
+    const isAdmin = req.user.role === 'admin';
+    const hasRestrictedOwnerUpdate = [subject, description, category].some((value) => value !== undefined);
+    if (!isAdmin && hasRestrictedOwnerUpdate) {
+      return res.status(403).json({
+        error: 'Access Denied: Only admins can update ticket content or category.',
+      });
+    }
+
     const updates = { updated_at: new Date().toISOString() };
 
     if (subject !== undefined) {
@@ -629,9 +641,14 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
     }
 
     if (status !== undefined) {
-      const normalizedStatus = status.toLowerCase().trim();
+      const statusResult = parseTicketStatus(status);
+      if (statusResult.error) {
+        return res.status(400).json({ error: statusResult.error });
+      }
+
+      const normalizedStatus = statusResult.value;
       const USER_ALLOWED_STATUSES = ['closed'];
-      if (req.user.role !== 'admin' && normalizedStatus !== ticket.status) {
+      if (!isAdmin && normalizedStatus !== ticket.status) {
         if (!USER_ALLOWED_STATUSES.includes(normalizedStatus)) {
           return res.status(403).json({
             error: 'Access Denied: Only admins can change ticket status.',
@@ -660,7 +677,8 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
       ticket: updatedTicket,
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -779,7 +797,8 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
       },
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -889,7 +908,8 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('t
       comment,
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -997,7 +1017,8 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ti
 
     res.json(comments || []);
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 

@@ -131,7 +131,9 @@ class GraphNetworkBuilder:
                 data.get('fuel', 0) / 100,
                 data.get('congestion', 0)
             ])
-        
+
+        self.node_map = node_map
+
         return {
             'node_features': torch.tensor(node_features, dtype=torch.float),
             'edge_indices': torch.tensor(edge_indices, dtype=torch.long).t().contiguous(),
@@ -149,11 +151,14 @@ class GraphNetworkBuilder:
     def get_pytorch_data(self):
         """Convert to PyTorch Geometric Data object"""
         features = self.extract_features()
-        return Data(
+        data = Data(
             x=features['node_features'],
             edge_index=features['edge_indices'],
             edge_attr=features['edge_features']
         )
+        data.graph = self.graph
+        data.node_map = self.node_map
+        return data
 
 class RouteOptimizer:
     """GNN-based Route Optimizer"""
@@ -210,7 +215,8 @@ class RouteOptimizer:
         route = []
         current = start
         visited = set()
-        
+        node_map = getattr(graph_data, 'node_map', None)
+
         while current != end and len(visited) < 100:
             visited.add(current)
             neighbors = graph_data.graph.neighbors(current)
@@ -228,7 +234,8 @@ class RouteOptimizer:
                     current, 
                     neighbor, 
                     objectives,
-                    graph_data
+                    graph_data,
+                    node_map
                 )
                 
                 if score < best_score:
@@ -251,7 +258,7 @@ class RouteOptimizer:
         
         return route
     
-    def _calculate_score(self, embeddings, current, neighbor, objectives, graph_data):
+    def _calculate_score(self, embeddings, current, neighbor, objectives, graph_data, node_map=None):
         """Calculate route score using GNN embeddings"""
         score = 0
         edge_data = graph_data.graph[current][neighbor]
@@ -267,7 +274,11 @@ class RouteOptimizer:
                 score += weights.get(obj, 1.0) * edge_data[obj]
         
         # Add embedding distance
-        emb_dist = np.linalg.norm(embeddings[current] - embeddings[neighbor])
+        if node_map is None:
+            node_map = graph_data.node_map
+        emb_dist = np.linalg.norm(
+            embeddings[node_map[current]] - embeddings[node_map[neighbor]]
+        )
         score += 0.1 * emb_dist
         
         return score

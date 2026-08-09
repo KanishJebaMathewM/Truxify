@@ -1,5 +1,4 @@
 import { ethers } from 'ethers';
-import { v4 as uuidv4 } from 'uuid';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
 
@@ -18,7 +17,8 @@ class TraceabilityService {
             'function getProduct(uint256 productId) external view returns (tuple(uint256,string,string,string,address,uint256,uint256,bool,string,bytes32))',
             'function getShipment(uint256 shipmentId) external view returns (tuple(uint256,uint256,address,address,uint256,uint256,string,string,bytes32,bool))',
             'function getProductEvents(uint256 productId) external view returns (tuple(uint256,uint256,uint256,string,string,string,address,uint256,bytes32)[])',
-            'function getProductTrace(uint256 productId) external view returns (tuple(uint256,string,string,string,address,uint256,uint256,bool,string,bytes32), tuple(uint256,uint256,uint256,string,string,string,address,uint256,bytes32)[], tuple(uint256,uint256,address,uint256,bool,string,bytes32)[])'
+            'function getProductTrace(uint256 productId) external view returns (tuple(uint256,string,string,string,address,uint256,uint256,bool,string,bytes32), tuple(uint256,uint256,uint256,string,string,string,address,uint256,bytes32)[], tuple(uint256,uint256,address,uint256,bool,string,bytes32)[])',
+            'event ProductCreated(uint256 indexed productId, string name, address indexed manufacturer)'
         ];
 
         this.contract = new ethers.Contract(this.contractAddress, this.contractABI, this.wallet);
@@ -34,15 +34,6 @@ class TraceabilityService {
                 ethers.toUtf8Bytes(JSON.stringify(productData))
             );
 
-            const productId = uuidv4();
-
-            await this.storeProduct({
-                ...productData,
-                productId,
-                productHash,
-                txHash: ''
-            });
-
             const tx = await this.contract.createProduct(
                 productData.name,
                 productData.description || '',
@@ -53,11 +44,15 @@ class TraceabilityService {
             );
             const receipt = await tx.wait();
 
-            const { error } = await supabase
-                .from('trace_products')
-                .update({ tx_hash: receipt.hash })
-                .eq('product_id', productId);
-            if (error) logger.error('Failed to update txHash:', error);
+            // Use the on-chain productId emitted by ProductCreated instead of fabricating a uuid
+            const productId = this._parseProductCreated(receipt);
+
+            await this.storeProduct({
+                ...productData,
+                productId,
+                productHash,
+                txHash: receipt.hash
+            });
 
             logger.info(`✅ Product created: ${productId}`);
             return {
@@ -70,6 +65,20 @@ class TraceabilityService {
             logger.error('Product creation failed:', error);
             throw error;
         }
+    }
+
+    _parseProductCreated(receipt) {
+        for (const log of receipt.logs) {
+            try {
+                const parsed = this.contract.interface.parseLog(log);
+                if (parsed && parsed.name === 'ProductCreated') {
+                    return parsed.args[0].toString();
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        throw new Error('ProductCreated event not found in receipt');
     }
 
     // ============ Shipment Management ============
@@ -355,6 +364,50 @@ class TraceabilityService {
                 created_at: new Date().toISOString()
             }]);
         if (error) throw error;
+    }
+
+    /**
+     * Verify if a user owns or has access to a shipment
+     * CWE-639: Insecure Direct Object Reference prevention
+     */
+    async verifyShipmentOwnership(shipmentId, userId) {
+        try {
+            // First try to get from blockchain
+            const shipment = await this.contract.getShipment(shipmentId);
+            
+            // User is owner if they are the sender or receiver
+            const sender = shipment[2].toLowerCase();
+            const receiver = shipment[3].toLowerCase();
+            const userIdLower = userId.toLowerCase();
+            
+            if (sender === userIdLower || receiver === userIdLower) {
+                return true;
+            }
+            
+            // Also check in database for additional access controls
+            const { data: dbShipment } = await supabase
+                .from('trace_shipments')
+                .select('user_id, allowed_users')
+                .eq('shipment_id', shipmentId)
+                .single();
+            
+            if (dbShipment) {
+                // Owner has access
+                if (dbShipment.user_id === userId) {
+                    return true;
+                }
+                // Check allowed users list
+                const allowedUsers = dbShipment.allowed_users || [];
+                if (allowedUsers.includes(userId)) {
+                    return true;
+                }
+            }
+            
+            return false;
+        } catch (error) {
+            logger.error(`[SECURITY] Ownership verification failed for shipment ${shipmentId}:`, error);
+            return false;
+        }
     }
 
     // ============ Statistics ============

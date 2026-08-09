@@ -129,7 +129,7 @@ export async function createProfile(profileData) {
   return measureExecution('ProfileService.createProfile', async () => {
   if (!supabase) throw new Error('Supabase client not configured');
   const { data, error } = await supabase.from('profiles').insert(profileData).select().single();
-  if (error) throw error;
+  if (error) { logger.error("[ProfileService] createProfile error:", error?.message || error); throw error; }
   return data;
   });
 }
@@ -138,7 +138,7 @@ export async function updateProfile(userId, updateData) {
   return measureExecution('ProfileService.updateProfile', async () => {
   if (!supabase) throw new Error('Supabase client not configured');
   const { data, error } = await supabase.from('profiles').update(updateData).eq('id', userId).select().single();
-  if (error) throw error;
+  if (error) { logger.error("[ProfileService] createProfile error:", error?.message || error); throw error; }
   return data;
   });
 }

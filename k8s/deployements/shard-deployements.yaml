@@ -32,7 +32,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: truxify-secrets
-              key: SHARD_PASSWORD
+              key: SHARD_PASSWORD_NORTH
         - name: POSTGRES_DB
           value: truxify_north
         ports:
@@ -86,7 +86,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: truxify-secrets
-              key: SHARD_PASSWORD
+              key: SHARD_PASSWORD_SOUTH
         - name: POSTGRES_DB
           value: truxify_south
         ports:
@@ -140,7 +140,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: truxify-secrets
-              key: SHARD_PASSWORD
+              key: SHARD_PASSWORD_EAST
         - name: POSTGRES_DB
           value: truxify_east
         ports:
@@ -194,7 +194,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: truxify-secrets
-              key: SHARD_PASSWORD
+              key: SHARD_PASSWORD_WEST
         - name: POSTGRES_DB
           value: truxify_west
         ports:

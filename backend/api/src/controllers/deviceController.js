@@ -23,15 +23,17 @@ function validatePlatform(platform) {
  * are not confused with validation failures.
  */
 function normalizeMetadata(metadata) {
-  if (metadata === undefined || metadata === null) return null;
+  if (metadata === undefined || metadata === null) {
+    return { data: {}, error: null };
+  }
   if (typeof metadata !== 'object' || Array.isArray(metadata)) {
-    return null;
+    return { data: null, error: 'metadata must be an object' };
   }
   const prototype = Object.getPrototypeOf(metadata);
   if (prototype !== Object.prototype && prototype !== null) {
-    return null;
+    return { data: null, error: 'metadata must be an object' };
   }
-  return metadata;
+  return { data: metadata, error: null };
 }
 
 /**
@@ -56,9 +58,11 @@ export async function registerDeviceToken(req, res, next) {
       return next(new ValidationError(platErr));
     }
 
-    const normalizedMetadata = normalizeMetadata(metadata);
-    if (normalizedMetadata === null) {
-      return res.status(400).json({ error: 'metadata must be a plain object' });
+    const { data: normalizedMetadata, error: metadataErr } = normalizeMetadata(metadata);
+    if (metadataErr) {
+      return res.status(400).json(
+        errorResponse('VALIDATION_ERROR', metadataErr)
+      );
     }
 
     const { data: existingDevice, error: lookupError } = await supabase
@@ -103,6 +107,7 @@ export async function registerDeviceToken(req, res, next) {
 
 /**
  * Unregister an FCM token for a user device, e.g. on logout.
+ * Updates profiles.fcm_token to fallback to another active device token if available.
  */
 export async function unregisterDeviceToken(req, res, next) {
   try {
@@ -133,37 +138,33 @@ export async function unregisterDeviceToken(req, res, next) {
       return next(new AppError('Failed to unregister device', 500));
     }
 
-    if (!deletedRows || deletedRows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        error: 'Device token not found for this user'
-      });
+    // Query remaining device tokens for this user to fallback
+    const { data: remainingDevice, error: remainingError } = await supabase
+      .from('user_devices')
+      .select('fcm_token')
+      .eq('user_id', userId)
+      .limit(1)
+      .maybeSingle();
+
+    if (remainingError) {
+      logger.error('[DeviceController] Failed to check remaining devices:', remainingError.message);
     }
 
-    // Only clear profile fcm_token if no other active devices remain for this user
-    const { data: remainingDevices } = await supabase
-      .from('user_devices')
-      .select('id')
-      .eq('user_id', userId)
-      .not('fcm_token', 'is', null)
-      .limit(1);
+    const nextToken = remainingDevice?.fcm_token || null;
 
-    if (!remainingDevices || remainingDevices.length === 0) {
-      const { error: profileClearError } = await supabase
-        .from('profiles')
-        .update({
-          fcm_token: null,
-          fcm_token_updated_at: new Date().toISOString(),
-        })
-        .eq('id', userId)
-        .eq('fcm_token', fcmToken);
+    const { error: profileSyncError } = await supabase
+      .from('profiles')
+      .update({
+        fcm_token: nextToken,
+        fcm_token_updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
 
-      if (profileClearError) {
-        logger.error(
-          '[DeviceController] Device token removed but failed to clear profiles.fcm_token:',
-          profileClearError.message
-        );
-      }
+    if (profileSyncError) {
+      logger.error(
+        '[DeviceController] Device token removed but failed to sync profiles.fcm_token:',
+        profileSyncError.message
+      );
     }
 
     return res.json({

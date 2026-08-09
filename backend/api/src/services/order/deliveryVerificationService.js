@@ -575,6 +575,17 @@ export class DeliveryVerificationService {
               ":",
               releaseErr.message,
             );
+            await this.orderRepository
+              .updateOrder(orderId, {
+                escrow_release_error: String(releaseErr.message).slice(0, 1000),
+                updated_at: new Date().toISOString(),
+              })
+              .catch((err) =>
+                logger.warn(
+                  "[escrow] Failed to record release failure:",
+                  err.message,
+                ),
+              );
             throw new DomainError(503, {
               error:
                 "Blockchain escrow release failed. Payment cannot be processed. Please retry.",
@@ -604,14 +615,42 @@ export class DeliveryVerificationService {
             }
           }
         } else if (order.escrow_status === "released") {
-        // 1. Database and Trip State Verification/Execution First
-        if (order.escrow_status === "released") {
           // Release was confirmed in a previous attempt — reuse the persisted hash.
           releaseTxHash = order.release_tx_hash || null;
-        } else {
-          logger.info(
-            `[escrow] Escrow not funded (status: ${order.escrow_status}) — skipping on-chain release.`,
+        }
+
+        // Re-check that the escrow actually released after this attempt. This
+        // is what makes the stuck-escrow retry safe: token revocation and the
+        // "Payment Released" push below only run once releaseTxHash /
+        // escrowAlreadyReleased confirm the on-chain release, or the order was
+        // already "released". If the release failed again, the driver is told
+        // the retry failed instead of being notified that they are paid while
+        // the funds remain stuck on-chain.
+        const releaseConfirmed = Boolean(
+          releaseTxHash ||
+            escrowAlreadyReleased ||
+            order.escrow_status === "released",
+        );
+        if (!releaseConfirmed) {
+          logger.error(
+            `[verify-delivery] On-chain escrow release not confirmed for order ${orderId} (escrow_status=${order.escrow_status}) — aborting before notification.`,
           );
+          await this.orderRepository
+            .updateOrder(orderId, {
+              escrow_release_error: `ESCROW_NOT_RELEASED: on-chain release not confirmed (escrow_status=${order.escrow_status})`,
+              updated_at: new Date().toISOString(),
+            })
+            .catch((err) =>
+              logger.warn(
+                "[escrow] Failed to record unconfirmed release:",
+                err.message,
+              ),
+            );
+          throw new DomainError(503, {
+            error:
+              "On-chain escrow release was not confirmed. Payment cannot be processed. Please retry.",
+            retryable: true,
+          });
         }
 
         // 2. Execute Postgres RPC to complete the trip AFTER blockchain success
@@ -691,8 +730,16 @@ export class DeliveryVerificationService {
           });
         } else {
           logger.info(
-            `[verify-delivery] Retry for stuck escrow for order ${orderId} by driver ${driverId}`,
+            `[verify-delivery] Retry for stuck escrow for order ${orderId} by driver ${driverId} — release confirmed (tx_hash=${releaseTxHash || "alreadyReleased"}).`,
           );
+          // The verified OTP is consumed on the retry path too so it cannot be
+          // replayed by a later attempt. It is only consumed after the release
+          // is confirmed, so a failed release leaves the OTP intact for the
+          // next retry instead of force-rotating it.
+          await this.completeDeliveryOtp({
+            otpRecordId: otpRecord.id,
+            orderId,
+          });
         }
 
         // The trip is complete (payment_released) — kill any active public

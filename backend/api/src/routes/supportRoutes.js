@@ -229,7 +229,8 @@ router.get('/faqs', async (req, res) => {
 
     res.json(faqs || []);
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -362,7 +363,8 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
       ticket,
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -466,7 +468,8 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -531,7 +534,8 @@ router.get('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:view
 
     res.json(ticket);
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -673,7 +677,8 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
       ticket: updatedTicket,
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -792,7 +797,8 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
       },
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -902,7 +908,8 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('t
       comment,
     });
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 
@@ -1010,7 +1017,8 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ti
 
     res.json(comments || []);
   } catch (err) {
-    res.status(500).json({ error: 'Internal Server Error' });
+    logger.error("[SupportRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: err?.message || "Internal Server Error" });
   }
 });
 

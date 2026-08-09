@@ -22,9 +22,15 @@ class WebRTCSignalingServer {
     this.wss.on('connection', async (ws, req) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
 
-      // Authenticate via token query parameter or Authorization header
-      const token = url.searchParams.get('token')
-        || req.headers.authorization?.replace('Bearer ', '');
+      // Reject tokens in the URL query string — they leak via logs, proxies,
+      // and browser history. Only the Authorization header is accepted.
+      if (url.searchParams.get('token')) {
+        logger.warn('WebRTC connection rejected: token provided in query string');
+        ws.close(4001, 'Token in URL is not allowed');
+        return;
+      }
+
+      const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
 
       if (!token) {
         logger.warn('WebRTC connection rejected: no token provided');

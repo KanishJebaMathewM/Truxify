@@ -89,7 +89,10 @@ describe('Pricing Service Unit Tests', () => {
       expect(result.platformFee).toBe(4000);
       expect(result.totalAmount).toBe(104000);
       expect(result.fuelCost).toBe(36000);
-      expect(result.netProfit).toBe(24000);
+
+      // netProfit = 80000 - 36000 = 44000 (toll is recovered from the customer
+      // in totalAmount, so it must not be subtracted a second time)
+      expect(result.netProfit).toBe(44000);
     });
 
     it('applies fragile multiplier correctly', () => {
@@ -186,6 +189,14 @@ describe('Pricing Service Unit Tests', () => {
       expect(result.tollEstimate).toBeGreaterThanOrEqual(0);
     });
 
+    it('does not subtract the toll from netProfit (toll is recovered from the customer)', () => {
+      const result = computeOrderPricing(defaultInput, mockRateCard);
+      // tollEstimate is non-zero (200 * 100 = 20000) and is already included in
+      // totalAmount, so netProfit must equal baseFreight - fuelCost only.
+      expect(result.tollEstimate).toBeGreaterThan(0);
+      expect(result.netProfit).toBe(result.baseFreight - result.fuelCost);
+    });
+
     it('does not return NaN in any field for valid inputs', () => {
       const result = computeOrderPricing(defaultInput);
       expect(Number.isFinite(result.baseFreight)).toBe(true);
@@ -194,6 +205,18 @@ describe('Pricing Service Unit Tests', () => {
       expect(Number.isFinite(result.totalAmount)).toBe(true);
       expect(Number.isFinite(result.fuelCost)).toBe(true);
       expect(Number.isFinite(result.netProfit)).toBe(true);
+    });
+
+    it('netProfit does not subtract tollEstimate since toll is a pass-through in totalAmount', () => {
+      // Using defaultInput: baseFreight=80000, fuelCost=36000, tollEstimate=20000
+      // totalAmount = 80000 + 20000 + 4000 = 104000 (toll included)
+      // netProfit should = baseFreight - fuelCost = 80000 - 36000 = 44000
+      // NOT baseFreight - fuelCost - tollEstimate = 80000 - 36000 - 20000 = 24000
+      const result = computeOrderPricing(defaultInput, mockRateCard);
+      expect(result.netProfit).toBe(44000);
+      expect(result.netProfit).toBe(result.baseFreight - result.fuelCost);
+      // Verify toll is still in totalAmount
+      expect(result.totalAmount).toBe(result.baseFreight + result.tollEstimate + result.platformFee);
     });
   });
 

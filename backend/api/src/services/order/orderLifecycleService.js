@@ -580,7 +580,6 @@ export class OrderLifecycleService {
         // total_amount using the same canonical paisa→wei conversion the rest
         // of the escrow pipeline uses.
         const newAmountWei = paisaToMaticWei(pricing.totalAmount);
-        const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
 
         const updates = {
           drop_address,
@@ -679,7 +678,7 @@ export class OrderLifecycleService {
           throw new DomainError(409, { error: 'Cannot cancel: the shipment has already been picked up and is in transit.' });
         }
 
-        const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(currentOrder.escrow_status);
+        const requiresRefund = ['funding', 'funded', 'refund_pending', 'refund_failed'].includes(currentOrder.escrow_status);
         const penaltyBps = currentOrder.status === 'truck_assigned'
           ? 1000
           : ['arrived_pickup', 'picked_up', 'in_transit', 'delivered'].includes(currentOrder.status)
@@ -809,6 +808,7 @@ export class OrderLifecycleService {
             const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
             await this.orderRepository.updateOrder(currentOrder.id, {
               status: 'cancelled',
+              cancellation_fee: cancellationFee,
               escrow_status: nextEscrowStatus,
               refund_tx_hash: refundTxHash,
               escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
@@ -1053,7 +1053,7 @@ async function createOrderTransactional({ idempotencyKey, orderData, timelineDat
 
     return data;
   } catch (err) {
-    console.error(`[TRANSACTIONAL_ORDER_ERROR] Key ${idempotencyKey}:`, err.message);
+    logger.error({ err: err.message, key: idempotencyKey }, 'TRANSACTIONAL_ORDER_ERROR');
     throw err;
   }
 }

@@ -59,6 +59,8 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       return res.status(400).json({ error: 'Load does not require refrigeration' });
     }
 
+    if (req.user.role !== 'admin' && req.user.role !== 'iot_device') {
+      return res.status(403).json({ error: 'Access denied: IoT device authorization required' });
     // Mirror GET authorization: allow the load owner OR the assigned driver.
     // The driver is the party physically carrying the load and the only person
     // able to record cold-chain readings in transit.

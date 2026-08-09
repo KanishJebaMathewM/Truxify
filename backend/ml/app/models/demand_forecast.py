@@ -15,6 +15,12 @@ MODEL_NAME = "demand_forecast"
 # Module-level cache to avoid reloading from disk on every call
 _model_cache = None
 
+
+def reset_model_cache():
+    """Reset the in-memory model cache so the next prediction loads from disk."""
+    global _model_cache
+    _model_cache = None
+
 # NOTE: This module currently trains on synthetic (randomly generated) data
 # as a placeholder. Replace generate_synthetic_demand_data() with a real
 # data pipeline that loads historical trip/demand data from PostgreSQL or
@@ -90,9 +96,9 @@ def train_demand_forecast_model() -> dict:
     }
 
     save_model((model, scaler), MODEL_NAME, metrics)
-    # Invalidate the in-memory cache so the next predict_demand call reloads the
-    # freshly trained model instead of continuing to score with the stale one.
-    _model_cache = None
+    # Invalidate the in-memory cache so the next predict_demand call
+    # loads the newly trained model instead of the stale cached copy
+    reset_model_cache()
     logger.info("Demand forecast model trained. R2: %.3f, MAE: %.3f", r2, mae)
     return metrics
 

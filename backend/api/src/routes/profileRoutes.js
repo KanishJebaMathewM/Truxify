@@ -565,6 +565,18 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
       return res.status(500).json({ error: 'Failed to fetch statement records.', details: error.message });
     }
 
+    // Fetch the driver's name/phone so the statement PDF shows the real driver
+    // instead of the app-side 'Driver' fallback.
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('full_name, phone')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (profileError) {
+      return res.status(500).json({ error: 'Failed to fetch driver profile.', details: profileError.message });
+    }
+
     // Compute totals
     let totalBaseFreight = 0;
     let totalPlatformFees = 0;
@@ -623,6 +635,10 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
     }
 
     res.json({
+      driver_name: profile?.full_name ?? null,
+      driver_phone: profile?.phone ?? null,
+      start_date: start_date ?? null,
+      end_date: end_date ?? null,
       summary: {
         total_trips: tripsList.length,
         total_base_freight: totalBaseFreight,
@@ -740,15 +756,15 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
 
     const trips = orders || [];
     const totalDeliveries = trips.length;
-    const totalDistance = trips.reduce((acc, t) => acc + (Number(t.distance_km) || 12.5), 0);
+    const totalDistance = trips.reduce((acc, t) => acc + (Number(t.distance_km) || 0), 0);
     
     // Calculate average rating
     const ratings = trips.map(t => Number(t.customer_rating)).filter(r => !isNaN(r) && r > 0);
-    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : 4.8;
+    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : 0;
 
     // Calculate on-time percentage
     const onTimeCount = trips.filter(t => t.on_time !== false).length;
-    const onTimePercentage = totalDeliveries > 0 ? Number(((onTimeCount / totalDeliveries) * 100).toFixed(1)) : 100.0;
+    const onTimePercentage = totalDeliveries > 0 ? Number(((onTimeCount / totalDeliveries) * 100).toFixed(1)) : 0;
 
     // Lifetime earnings
     const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);

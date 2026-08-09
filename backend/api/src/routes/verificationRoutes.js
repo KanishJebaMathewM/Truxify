@@ -188,6 +188,7 @@ router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, r
 
 const KYC_ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png'];
 const KYC_MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const OCR_HTTP_TIMEOUT_MS = 15000; // ML OCR can run long on large images
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -254,6 +255,7 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
       headers: {
         'X-API-Key': mlApiKey,
       },
+      signal: AbortSignal.timeout(OCR_HTTP_TIMEOUT_MS),
     });
 
     if (!mlResponse.ok) {
@@ -287,6 +289,9 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
       data: ocrData
     });
   } catch (error) {
+    if (error?.name === 'AbortError') {
+      return res.status(504).json({ success: false, error: 'OCR service timed out. Please try again.' });
+    }
     res.status(500).json({
       success: false,
       error: error.message

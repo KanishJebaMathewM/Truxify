@@ -1,5 +1,7 @@
 import { WASI } from '@wasmer/wasi';
 import fs from 'fs';
+import http from 'http';
+import https from 'https';
 import path from 'path';
 import logger from '../backend/api/src/middleware/logger.js';
 
@@ -135,7 +137,6 @@ class WASIRuntime {
             const result = instance.exports[functionName](...args);
 
             return result;
-
         } catch (error) {
             logger.error('Function execution failed:', error);
             throw error;
@@ -215,6 +216,103 @@ class WASIRuntime {
             imports.env = env;
         }
         return { imports, bind: (instance) => { instanceRef.current = instance; } };
+    }
+
+    async readFile(instanceId, filePath) {
+        this.validatePath(filePath);
+        return fs.readFileSync(filePath, 'utf8');
+    }
+
+    async writeFile(instanceId, filePath, content) {
+        this.validatePath(filePath);
+        fs.writeFileSync(filePath, content);
+        return { success: true };
+    }
+
+    async listDirectory(instanceId, filePath) {
+        this.validatePath(filePath);
+        const entries = fs.readdirSync(filePath, { withFileTypes: true });
+        return entries.map((entry) => {
+            const stat = fs.statSync(path.join(filePath, entry.name));
+            return {
+                name: entry.name,
+                size: stat.size,
+                is_dir: stat.isDirectory(),
+                modified: Math.floor(stat.mtimeMs / 1000),
+            };
+        });
+    }
+
+    async createDirectory(instanceId, filePath) {
+        this.validatePath(filePath);
+        fs.mkdirSync(filePath, { recursive: true });
+        return { success: true };
+    }
+
+    async deleteFile(instanceId, filePath) {
+        this.validatePath(filePath);
+        fs.rmSync(filePath, { force: true });
+        return { success: true };
+    }
+
+    async httpRequest(instanceId, url, method, headers, body) {
+        this.validateUrl(url);
+        return this._performRequest({ url, method, headers, body });
+    }
+
+    _performRequest({ url, method, headers, body }) {
+        return new Promise((resolve, reject) => {
+            const parsed = new URL(url);
+            const client = parsed.protocol === 'https:' ? https : http;
+            const options = {
+                hostname: parsed.hostname,
+                port: parsed.port || (parsed.protocol === 'https:' ? 443 : 80),
+                path: parsed.pathname + parsed.search,
+                method: method || 'GET',
+                headers: headers || {},
+            };
+            const req = client.request(options, (res) => {
+                let data = '';
+                res.setEncoding('utf8');
+                res.on('data', (chunk) => {
+                    data += chunk;
+                });
+                res.on('end', () => {
+                    resolve({
+                        status: res.statusCode,
+                        headers: Object.entries(res.headers).map(([k, v]) => `${k}: ${v}`),
+                        body: data,
+                    });
+                });
+            });
+            req.on('error', reject);
+            if (body) req.write(typeof body === 'string' ? body : JSON.stringify(body));
+            req.end();
+        });
+    }
+
+    async getTime(instanceId) {
+        return await this.executeFunction(instanceId, 'wasi_get_time');
+    }
+
+    async getTimeMs(instanceId) {
+        return await this.executeFunction(instanceId, 'wasi_get_time_ms');
+    }
+
+    async sleep(instanceId, ms) {
+        return await this.executeFunction(instanceId, 'wasi_sleep', ms);
+    }
+
+    async getProcessId(instanceId) {
+        return await this.executeFunction(instanceId, 'wasi_get_process_id');
+    }
+
+    async getEnvVar(instanceId, name) {
+        return await this.executeFunction(instanceId, 'wasi_get_env_var', name);
+    }
+
+    async getCurrentDir(instanceId) {
+        return process.cwd();
     }
 
     validatePath(requestedPath) {

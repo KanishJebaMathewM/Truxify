@@ -766,13 +766,13 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
     const onTimeCount = trips.filter(t => t.on_time !== false).length;
     const onTimePercentage = totalDeliveries > 0 ? Number(((onTimeCount / totalDeliveries) * 100).toFixed(1)) : 0;
 
-    // Lifetime earnings
-    const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);
+    // Lifetime earnings (base_freight is stored in paisa; report in rupees)
+    const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     // Monthly summary (current month)
     const currentMonth = new Date().toISOString().slice(0, 7);
     const monthlyTrips = trips.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
-    const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);
+    const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     const monthlyPerformanceSummary = {
       month: currentMonth,

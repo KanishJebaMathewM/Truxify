@@ -1,6 +1,6 @@
 import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { confirmEscrowRefund, submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei } from './escrow.js';
+import { confirmEscrowRefund, submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei, getEscrowBooking, getEscrowBookingId } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import os from 'os';
 
@@ -120,6 +120,25 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
         let receipt;
 
         if (!refundTxHash) {
+          // Issue #8891: verify the on-chain booking state before choosing the
+          // cancel path. TruxifyEscrow.cancelBooking now reverts for started
+          // bookings, and cancelWithPenalty also reverts on started bookings,
+          // so submitting either would waste gas and revert on every retry.
+          // Escalate for manual review instead of retrying forever.
+          const escrowBooking = await getEscrowBooking(getEscrowBookingId(order.order_display_id));
+          if (escrowBooking && escrowBooking.started) {
+            logger.error(
+              `[escrow-reconciliation] Order ${order.order_display_id} booking is started on-chain — full-refund/penalty cancel is not allowed; escalating to manual review.`
+            );
+            await orderRepository.updateOrder(order.id, {
+              escrow_refund_attempts: MAX_RETRIES,
+              escrow_refund_error: 'Booking started on-chain — cancel/refund reverted; requires manual review.',
+              reconciled_by: null,
+              updated_at: new Date().toISOString(),
+            });
+            continue;
+          }
+
           const cancellationFee = Number(order.cancellation_fee ?? 0);
           let driverFeeWei = 0n;
           if (cancellationFee > 0) {

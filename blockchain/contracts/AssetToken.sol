@@ -444,6 +444,21 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         _transfer(msg.sender, to, amount);
     }
 
+    /// @notice Disabled. TXAT fractions are tracked per-asset in the
+    ///         fractionalOwnership ledger (and their buy-back backing in
+    ///         backedTokens), so plain ERC20 transfers would move tokens
+    ///         without updating that ledger and desynchronize it from the
+    ///         ERC20 balance. Use transferWithCompliance(assetId, to, amount)
+    ///         instead, which keeps the ledgers in sync.
+    function transfer(address, uint256) public virtual override returns (bool) {
+        revert("AssetToken: plain ERC20 transfers disabled - use transferWithCompliance(assetId, to, amount)");
+    }
+
+    /// @notice Disabled for the same reason as transfer().
+    function transferFrom(address, address, uint256) public virtual override returns (bool) {
+        revert("AssetToken: plain ERC20 transferFrom disabled - use transferWithCompliance(assetId, to, amount)");
+    }
+
     // ============ View Functions ============
 
     function getAsset(uint256 assetId) external view returns (Asset memory) {

@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
-import { supabase } from '../api/src/config/db.js';
+import { supabase, supabaseAdmin } from '../api/src/config/db.js';
 
 class DIDService {
     constructor() {
@@ -263,14 +263,14 @@ class DIDService {
     }
 
     async storeDID(data) {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
             .from('dids')
             .insert([{ did: data.did, owner: data.owner, public_key: data.publicKey, created_at: new Date().toISOString() }]);
         if (error) throw error;
     }
 
     async storeCredential(data) {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
             .from('credentials')
             .insert([{
                 credential_id: data.credentialId,
@@ -286,7 +286,7 @@ class DIDService {
     }
 
     async updateCredentialStatus(credentialId, revoked) {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
             .from('credentials')
             .update({ revoked, revoked_at: new Date().toISOString() })
             .eq('credential_id', credentialId);
@@ -294,8 +294,8 @@ class DIDService {
     }
 
     async getDIDStats() {
-        const { data: dids, error: didsErr } = await supabase.from('dids').select('*').order('created_at', { ascending: false }).limit(100);
-        const { data: credentials, error: credsErr } = await supabase.from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
+        const { data: dids, error: didsErr } = await (supabaseAdmin || supabase).from('dids').select('*').order('created_at', { ascending: false }).limit(100);
+        const { data: credentials, error: credsErr } = await (supabaseAdmin || supabase).from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
 
         if (didsErr || credsErr) {
             logger.error('Failed to fetch DID stats', { didsErr, credsErr });

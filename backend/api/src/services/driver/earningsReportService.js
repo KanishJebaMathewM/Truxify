@@ -117,21 +117,27 @@ export function parseDistanceKm(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-const DAYS_OF_WEEK = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
 /**
- * Earnings bucketed by weekday for the past seven days.
+ * Daily earnings bucketed by calendar date for a reporting period.
+ *
+ * Every bucket is one real calendar date (`YYYY-MM-DD`), so trips from
+ * different weeks never merge into the same bar. The frame follows the
+ * period the route queried: `day` → 1 bar, `week` → 7 bars,
+ * `month` → 30 bars.
  *
  * @param {Array<object>} trips
- * @param {Date} [now]
+ * @param {object} [options]
+ * @param {'day'|'week'|'month'} [options.period='week']
+ * @param {Date} [options.now]
  * @returns {Array<{day: string, earnings: number}>}
  */
-export function buildWeeklyChart(trips, now = new Date()) {
+export function buildWeeklyChart(trips, { period = 'week', now = new Date() } = {}) {
+  const frameDays = period === 'day' ? 1 : period === 'month' ? 30 : 7;
   const buckets = {};
-  for (let i = 6; i >= 0; i -= 1) {
+  for (let i = frameDays - 1; i >= 0; i -= 1) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
-    buckets[DAYS_OF_WEEK[d.getDay()]] = 0;
+    buckets[toDateKey(d)] = 0;
   }
 
   for (const trip of Array.isArray(trips) ? trips : []) {
@@ -139,9 +145,9 @@ export function buildWeeklyChart(trips, now = new Date()) {
     if (Number.isNaN(tripDate.getTime())) {
       continue;
     }
-    const label = DAYS_OF_WEEK[tripDate.getDay()];
-    if (buckets[label] !== undefined) {
-      buckets[label] += toAmount(trip.total_earnings);
+    const key = toDateKey(tripDate);
+    if (buckets[key] !== undefined) {
+      buckets[key] += toAmount(trip.total_earnings);
     }
   }
 

@@ -1604,7 +1604,7 @@ router.get('/:id/earnings', authenticate, userLimiter, requirePolicy('driver:vie
       logger.warn('Failed to fetch trips for deadhead analysis:', adjacentError.message);
     }
 
-    const weeklyChart = buildWeeklyChart(trips);
+    const weeklyChart = buildWeeklyChart(trips, { period });
     const totalKm = sumDistanceKm(trips);
     const deadheadTripsSaved = countDeadheadTripsSaved(adjacentTrips);
 

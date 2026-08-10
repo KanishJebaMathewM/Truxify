@@ -53,7 +53,7 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
       .eq('is_active', true);
       
     if (driversErr) {
-      logger.error('Error fetching active drivers:', driversErr.message);
+      logger.error({ requestId: req.requestId }, 'Error fetching active drivers:', driversErr.message);
       return res.status(500).json({ error: 'Failed to fetch drivers count.' });
     }
 
@@ -63,7 +63,7 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
       .eq('status', 'pending');
       
     if (ordersErr) {
-      logger.error('Error fetching pending orders:', ordersErr.message);
+      logger.error({ requestId: req.requestId }, 'Error fetching pending orders:', ordersErr.message);
       return res.status(500).json({ error: 'Failed to fetch pending orders.' });
     }
 
@@ -80,7 +80,7 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
       .in('status', ['delivered', 'payment_released']);
       
     if (revErr) {
-      logger.error('Error fetching revenue:', revErr.message);
+      logger.error({ requestId: req.requestId }, 'Error fetching revenue:', revErr.message);
       return res.status(500).json({ error: 'Failed to fetch revenue.' });
     }
     
@@ -92,7 +92,7 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
       total_revenue_today: totalRevenue
     });
   } catch (err) {
-    logger.error('Admin dashboard error:', err);
+    logger.error({ requestId: req.requestId }, 'Admin dashboard error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

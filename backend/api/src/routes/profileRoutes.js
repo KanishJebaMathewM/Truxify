@@ -756,15 +756,26 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
 
     const trips = orders || [];
     const totalDeliveries = trips.length;
-    const totalDistance = trips.reduce((acc, t) => acc + (Number(t.distance_km) || 0), 0);
-    
-    // Calculate average rating
-    const ratings = trips.map(t => Number(t.customer_rating)).filter(r => !isNaN(r) && r > 0);
-    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : 0;
 
-    // Calculate on-time percentage
-    const onTimeCount = trips.filter(t => t.on_time !== false).length;
-    const onTimePercentage = totalDeliveries > 0 ? Number(((onTimeCount / totalDeliveries) * 100).toFixed(1)) : 0;
+    // Distance — orders without a recorded distance_km are excluded, never guessed
+    const distancedTrips = trips.filter(t => t.distance_km !== null && t.distance_km !== undefined);
+    const totalDistance = distancedTrips.reduce((acc, t) => acc + (Number(t.distance_km) || 0), 0);
+
+    // Average rating — orders without a recorded rating are excluded, never guessed
+    const ratedTrips = trips.filter(t => t.customer_rating !== null && t.customer_rating !== undefined);
+    const ratings = ratedTrips.map(t => Number(t.customer_rating)).filter(r => !isNaN(r) && r > 0);
+    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : null;
+
+    // On-time percentage — an unset (null) on_time flag is not proof of being on-time
+    const onTimeTrips = trips.filter(t => t.on_time !== null && t.on_time !== undefined);
+    const onTimeCount = onTimeTrips.filter(t => t.on_time === true).length;
+    const onTimePercentage = onTimeTrips.length > 0 ? Number(((onTimeCount / onTimeTrips.length) * 100).toFixed(1)) : null;
+
+    const insufficientData = {
+      distanceKm: distancedTrips.length < totalDeliveries,
+      rating: ratedTrips.length === 0,
+      onTime: onTimeTrips.length === 0,
+    };
 
     // Lifetime earnings
     const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);
@@ -794,7 +805,8 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       onTimePercentage,
       lifetimeEarnings: Number(lifetimeEarnings.toFixed(2)),
       monthlyPerformanceSummary,
-      achievementBadges: badges
+      achievementBadges: badges,
+      insufficientData,
     });
   } catch (err) {
     logger.error(err);

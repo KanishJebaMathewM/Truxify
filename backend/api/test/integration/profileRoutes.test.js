@@ -56,6 +56,7 @@ describe('Profile Routes', () => {
     m.store.profiles = [];
     m.store.customer_stats = [];
     m.store.driver_details = [];
+    m.store.orders = [];
     m.calls.length = 0;
     vi.clearAllMocks();
   });
@@ -652,10 +653,48 @@ describe('Profile Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body.totalDeliveries).toBe(0);
       expect(res.body.totalDistanceKm).toBe(0);
-      expect(res.body.averageRating).toBe(0);
-      expect(res.body.onTimePercentage).toBe(0);
+      expect(res.body.averageRating).toBeNull();
+      expect(res.body.onTimePercentage).toBeNull();
       expect(res.body.lifetimeEarnings).toBe(0);
       expect(res.body.achievementBadges).toEqual([]);
+      expect(res.body.insufficientData).toEqual({ distanceKm: false, rating: true, onTime: true });
+    });
+
+    it('does not count null distance/rating/on_time as real data', async () => {
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      m.store.orders.push(
+        {
+          id: 'order-incomplete',
+          driver_id: 'driver-uuid-456',
+          status: 'delivered',
+          distance_km: null,
+          customer_rating: null,
+          on_time: null,
+          base_freight: 1000,
+          created_at: `${currentMonth}-05T00:00:00Z`,
+        },
+        {
+          id: 'order-complete',
+          driver_id: 'driver-uuid-456',
+          status: 'payment_released',
+          distance_km: 10,
+          customer_rating: 5,
+          on_time: true,
+          base_freight: 2000,
+          created_at: `${currentMonth}-10T00:00:00Z`,
+        }
+      );
+
+      const res = await request(buildApp())
+        .get('/api/profile/driver/performance-stats')
+        .set(DRIVER_HEADERS);
+
+      expect(res.status).toBe(200);
+      expect(res.body.totalDeliveries).toBe(2);
+      expect(res.body.totalDistanceKm).toBe(10);
+      expect(res.body.averageRating).toBe(5);
+      expect(res.body.onTimePercentage).toBe(100);
+      expect(res.body.insufficientData).toEqual({ distanceKm: true, rating: false, onTime: false });
     });
   });
 });

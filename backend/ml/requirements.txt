@@ -19,7 +19,7 @@ scipy==1.11.3
 tensorflow==2.13.0
 
 # --- Deep Learning (PyTorch) ---
-torch==2.13.0
+torch==2.5.1
 torch_geometric==2.5.0
 
 # --- Async / HTTP ---

@@ -1,7 +1,7 @@
 # ============================================================================
 # Truxify ML Engine - Dependencies
 # ============================================================================
-# Core constraint: tensorflow==2.13.0 requires numpy<1.24,>=1.22
+# Core constraint: tensorflow==2.16.1 requires numpy>=1.23.5
 # All versions below are tested for mutual compatibility.
 # ============================================================================
 
@@ -12,11 +12,11 @@ pydantic==2.11.1
 python-multipart==0.0.31
 
 # --- ML / Scientific Computing ---
-numpy==1.23.5
+numpy>=1.24.0
 pandas==2.1.4
 scikit-learn==1.9.0
 scipy==1.11.3
-tensorflow==2.13.0
+tensorflow==2.16.1
 
 # --- Deep Learning (PyTorch) ---
 torch==2.13.0

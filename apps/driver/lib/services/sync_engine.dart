@@ -82,20 +82,21 @@ class SyncEngine {
   /// Flushes the queue to the backend.
   static Future<void> attemptSync() async {
     if (_isSyncing) return;
-    final connectivityResults = await Connectivity().checkConnectivity();
-    if (connectivityResults.contains(ConnectivityResult.none)) return;
-
-    final db = await database;
-    final events = await db.query('sync_queue', orderBy: 'occurred_at ASC');
-    if (events.isEmpty) return;
-
     _isSyncing = true;
     try {
+      final connectivityResults = await Connectivity().checkConnectivity();
+      if (connectivityResults.contains(ConnectivityResult.none)) return;
+
+      final db = await database;
+      final events = await db.query('sync_queue', orderBy: 'occurred_at ASC');
+      if (events.isEmpty) return;
+
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
       final token = await user.getIdToken();
 
-      final idempotencyKey = const Uuid().v4();
+      final eventIds = events.map((e) => e['id'] as String).toList()..sort();
+      final idempotencyKey = eventIds.join(',');
 
       final requestBody = {
         'idempotencyKey': idempotencyKey,

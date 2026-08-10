@@ -374,7 +374,9 @@ class FraudDetectionService {
           batch.map(id => `customer_id.eq.${id}`).join(',') +
           ',' +
           batch.map(id => `driver_id.eq.${id}`).join(',')
-        );
+        )
+        .limit(1000)
+        .order('id');
 
       if (error) {
         logger.error('Failed to load batch user fraud connections:', error.message);

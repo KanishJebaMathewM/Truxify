@@ -1,19 +1,38 @@
 import didService from '../../../did/did.service.js';
 import logger from '../middleware/logger.js';
-import { validationResult } from 'express-validator';
-import { AppError } from '../errors/AppError.js';
+import { supabase } from '../config/db.js';
+import { AppError } from '../utils/errors.js';
 
 export const loadCredential = async (req, res, next) => {
     try {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
-        }
-
         const { subject, credentialType, schema, validUntil } = req.body;
-        
+
         // subject is the Escort Driver's address or DID
         // credentialType: e.g., 'EscortCertification', 'Insurance', 'StatePermit'
+
+        // Only an admin (authority) may issue credentials for another subject.
+        // Any other user may only load a credential for their own wallet, so a
+        // plain customer cannot forge an escort's compliance record.
+        if (req.user.role !== 'admin') {
+            const { data: profile, error: profileErr } = await supabase
+                .from('profiles')
+                .select('polygon_wallet_address')
+                .eq('id', req.user.id)
+                .maybeSingle();
+
+            if (profileErr) {
+                throw new AppError('Failed to verify wallet identity', 500);
+            }
+
+            const callerWallet = profile?.polygon_wallet_address;
+            if (!callerWallet || callerWallet.toLowerCase() !== String(subject).toLowerCase()) {
+                throw new AppError('You can only issue credentials for your own wallet address', 403);
+            }
+        }
+
+        if (validUntil !== undefined && Number(validUntil) < Math.floor(Date.now() / 1000)) {
+            throw new AppError('validUntil must not be in the past', 400);
+        }
 
         const result = await didService.issueCredential(
             subject,
@@ -38,11 +57,6 @@ export const loadCredential = async (req, res, next) => {
 
 export const handshake = async (req, res, next) => {
     try {
-        const errors = validationResult(req);
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
-        }
-
         const { escorts } = req.body;
         
         if (!Array.isArray(escorts) || escorts.length === 0) {

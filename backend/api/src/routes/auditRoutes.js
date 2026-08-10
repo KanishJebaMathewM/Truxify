@@ -1,4 +1,3 @@
-import logger from '../middleware/logger.js';
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';

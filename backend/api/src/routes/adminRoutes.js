@@ -53,7 +53,7 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
       .eq('is_active', true);
       
     if (driversErr) {
-      logger.error({ requestId: req.requestId }, 'Error fetching active drivers:', driversErr.message);
+      logger.error({ event: 'ADMIN_DASHBOARD_DRIVERS_ERROR', requestId: req.requestId || req.id, error: driversErr && driversErr.message }, 'Error fetching active drivers');
       return res.status(500).json({ error: 'Failed to fetch drivers count.' });
     }
 
@@ -63,7 +63,7 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
       .eq('status', 'pending');
       
     if (ordersErr) {
-      logger.error({ requestId: req.requestId }, 'Error fetching pending orders:', ordersErr.message);
+      logger.error({ event: 'ADMIN_DASHBOARD_ORDERS_ERROR', requestId: req.requestId || req.id, error: ordersErr && ordersErr.message }, 'Error fetching pending orders');
       return res.status(500).json({ error: 'Failed to fetch pending orders.' });
     }
 
@@ -80,11 +80,11 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
       .in('status', ['delivered', 'payment_released']);
       
     if (revErr) {
-      logger.error({ requestId: req.requestId }, 'Error fetching revenue:', revErr.message);
+      logger.error({ event: 'ADMIN_DASHBOARD_REVENUE_ERROR', requestId: req.requestId || req.id, error: revErr && revErr.message }, 'Error fetching revenue');
       return res.status(500).json({ error: 'Failed to fetch revenue.' });
     }
     
-    const totalRevenue = (todayOrders || []).reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0);
+    const totalRevenue = todayOrders.reduce((sum, order) => sum + (order.total_amount || 0), 0);
 
     res.json({
       active_drivers: activeDrivers || 0,
@@ -92,7 +92,7 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
       total_revenue_today: totalRevenue
     });
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Admin dashboard error:', err);
+    logger.error({ event: 'ADMIN_DASHBOARD_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Admin dashboard error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

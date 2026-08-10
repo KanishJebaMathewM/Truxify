@@ -1727,8 +1727,13 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
   try {
     const userId = req.user.id;
 
+    // Read through the caller's authenticated client so RLS lets the driver
+    // see their own profile, driver_details (including kyc_status), truck
+    // and documents. The shared anon client is denied on all of these.
+    const db = createUserClient(req.token);
+
     // 1. Fetch base profile
-    const { data: profile, error: profileErr } = await supabase
+    const { data: profile, error: profileErr } = await db
       .from('profiles')
       .select('id, full_name, phone, email')
       .eq('id', userId)
@@ -1739,7 +1744,7 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
     }
 
     // 2. Fetch driver details
-    const { data: details, error: detailsErr } = await supabase
+    const { data: details, error: detailsErr } = await db
       .from('driver_details')
       .select('rating, total_trips, completion_rate, is_online, kyc_status, truck_id')
       .eq('user_id', userId)
@@ -1748,7 +1753,7 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
     // 3. Fetch truck details if assigned
     let truck = null;
     if (details && details.truck_id) {
-      const { data: truckData } = await supabase
+      const { data: truckData } = await db
         .from('trucks')
         .select('*')
         .eq('id', details.truck_id)
@@ -1757,7 +1762,7 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
     }
 
     // 4. Fetch documents and map their status
-    const { data: docs } = await supabase
+    const { data: docs } = await db
       .from('driver_documents')
       .select('document_type, status, is_govt_verified')
       .eq('driver_id', userId);

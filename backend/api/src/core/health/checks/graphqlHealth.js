@@ -17,6 +17,7 @@ async function check() {
     if (err.message?.includes('not_configured') || err.message?.includes('fetch failed') || err.code === 'ECONNREFUSED') {
       return { status: HealthStatus.DEGRADED, message: 'not_reachable' };
     }
+    logger.warn({ err: err.message, check: NAME }, 'GraphQL health probe failed');
     return { status: HealthStatus.UNHEALTHY, message: err.message };
   }
 }

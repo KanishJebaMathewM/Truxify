@@ -3,6 +3,7 @@ import logger from '../middleware/logger.js';
 import { submitEscrowRefund, getEscrowBooking } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
+import { FUNDING_SCAN_PAGE_SIZE } from '../repositories/orderRepository.js';
 
 // Two-phase acceptance sweeper (#5724): orders that reached escrow_status
 // 'funding' but whose escrow deposit never lands within the funding TTL are
@@ -237,23 +238,31 @@ export async function reconcileStaleFunding(orderRepository) {
     const fundingTtlMs = (Number.isFinite(ttlMinutes) && ttlMinutes > 0 ? ttlMinutes : DEFAULT_FUNDING_TTL_MINUTES) * 60 * 1000;
     const cutoff = new Date(Date.now() - fundingTtlMs).toISOString();
 
-    const { data: staleOrders, error } = await orderRepository.findStaleFundingOrders(cutoff);
-    if (error) {
-      logger.error('[escrow-funding] Failed to load stale funding orders:', error.message);
-      return;
-    }
-
-    for (const order of staleOrders ?? []) {
-      if (!dueForRetry(order)) continue;
-      if (globalLockAcquired && redisClient) {
-        try {
-          await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-        } catch (err) {
-          logger.warn('[escrow-funding] Failed to refresh lock:', err.message);
-        }
+    let cursor = null;
+    let page = [];
+    do {
+      const { data, error } = await orderRepository.findStaleFundingOrders(cutoff, { after: cursor });
+      if (error) {
+        logger.error('[escrow-funding] Failed to load stale funding orders:', error.message);
+        return;
       }
-      await finalizeOrRevert(order, orderRepository);
-    }
+
+      page = data || [];
+      if (page.length === 0) break;
+      cursor = page[page.length - 1].updated_at;
+
+      for (const order of page) {
+        if (!dueForRetry(order)) continue;
+        if (globalLockAcquired && redisClient) {
+          try {
+            await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
+          } catch (err) {
+            logger.warn('[escrow-funding] Failed to refresh lock:', err.message);
+          }
+        }
+        await finalizeOrRevert(order, orderRepository);
+      }
+    } while (page.length === FUNDING_SCAN_PAGE_SIZE);
   } finally {
     if (globalLockAcquired && redisClient) {
       try {

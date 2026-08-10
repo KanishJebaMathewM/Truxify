@@ -3,6 +3,8 @@ import { executeWithRetry, isRetryable } from '../core/retry.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import { buildPagination } from '../utils/pagination.js';
 
+export const FUNDING_SCAN_PAGE_SIZE = 1000;
+
 export class OrderRepository {
   constructor(supabase) {
     this.supabase = supabase;
@@ -585,13 +587,24 @@ export class OrderRepository {
       }), 'cancelStaleOrder');
   }
 
-  async findStaleFundingOrders(cutoff) {
-    return this._retryableQuery(() => this.supabase
-      .from('orders')
-      .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
-      .eq('escrow_status', 'funding')
-      .not('pending_bid_acceptance', 'is', null)
-      .or(`escrow_funding_started_at.lt.${cutoff},and(escrow_funding_started_at.is.null,updated_at.lt.${cutoff})`), 'findStaleFundingOrders');
+  async findStaleFundingOrders(cutoff, { after = null, limit = FUNDING_SCAN_PAGE_SIZE } = {}) {
+    return this._retryableQuery(() => {
+      let builder = this.supabase
+        .from('orders')
+        .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
+        .eq('escrow_status', 'funding')
+        .not('pending_bid_acceptance', 'is', null)
+        .or(`escrow_funding_started_at.lt.${cutoff},and(escrow_funding_started_at.is.null,updated_at.lt.${cutoff})`);
+
+      if (after) {
+        builder = builder.gt('updated_at', after);
+      }
+
+      return builder
+        .order('updated_at', { ascending: true })
+        .order('id', { ascending: true })
+        .limit(limit);
+    }, 'findStaleFundingOrders');
   }
 
   // ===================================================================

@@ -123,5 +123,40 @@ describe('escrowFundingReconciliation', () => {
         'DB error'
       );
     });
+
+    it('pages through a full page of stale orders using the updated_at cursor', async () => {
+      mockRedisClient.set.mockResolvedValue('locked');
+
+      const fullPage = Array.from({ length: 1000 }, (_, i) => ({
+        id: `order-${i}`,
+        order_display_id: `DIS-${i}`,
+        escrow_status: 'funding',
+        escrow_booking_id: null,
+        escrow_funding_attempts: 0,
+        escrow_funding_last_attempt_at: null,
+        pending_bid_acceptance: null,
+        updated_at: new Date(Date.UTC(2026, 0, 1) + i * 1000).toISOString(),
+      }));
+      const tail = [{
+        ...fullPage[0],
+        id: 'order-tail',
+        order_display_id: 'DIS-tail',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      }];
+
+      mockOrderRepository.findStaleFundingOrders
+        .mockResolvedValueOnce({ data: fullPage, error: null })
+        .mockResolvedValueOnce({ data: tail, error: null });
+
+      const { acquireLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValue(null);
+
+      await reconcileStaleFunding(mockOrderRepository);
+
+      expect(mockOrderRepository.findStaleFundingOrders).toHaveBeenCalledTimes(2);
+      const calls = mockOrderRepository.findStaleFundingOrders.mock.calls;
+      expect(calls[0][1]).toEqual({ after: null });
+      expect(calls[1][1]).toEqual({ after: fullPage[fullPage.length - 1].updated_at });
+    });
   });
 });

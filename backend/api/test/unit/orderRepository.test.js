@@ -147,3 +147,41 @@ describe('OrderRepository.updateOrderWithFilter', () => {
     ]);
   });
 });
+
+describe('OrderRepository.findStaleFundingOrders', () => {
+  function buildFundingStub(trace) {
+    const builder = {
+      select() { return this; },
+      eq() { return this; },
+      not() { return this; },
+      or() { return this; },
+      gt(column, value) { trace.gt = [column, value]; return this; },
+      order(column, opts) { trace.order = [...(trace.order || []), [column, opts]]; return this; },
+      limit(value) { trace.limit = value; return this; },
+      then(resolve) { return resolve({ data: [], error: null }); },
+    };
+    return { from: vi.fn(() => builder) };
+  }
+
+  it('applies a deterministic order and a page-size limit', async () => {
+    const trace = {};
+    const repo = new OrderRepository(buildFundingStub(trace));
+
+    await repo.findStaleFundingOrders('2026-01-01T00:00:00.000Z');
+
+    expect(trace.order).toEqual([
+      ['updated_at', { ascending: true }],
+      ['id', { ascending: true }],
+    ]);
+    expect(trace.limit).toBe(1000);
+  });
+
+  it('adds an updated_at cursor filter when after is provided', async () => {
+    const trace = {};
+    const repo = new OrderRepository(buildFundingStub(trace));
+
+    await repo.findStaleFundingOrders('2026-01-01T00:00:00.000Z', { after: '2026-02-01T00:00:00.000Z' });
+
+    expect(trace.gt).toEqual(['updated_at', '2026-02-01T00:00:00.000Z']);
+  });
+});

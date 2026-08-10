@@ -332,7 +332,7 @@ contract AssetToken is ERC20, ERC20Burnable, Ownable, Pausable, ReentrancyGuard 
         require(order.expiresAt > block.timestamp, "Order expired");
         require(order.seller != msg.sender, "Cannot buy own order");
 
-        uint256 totalCost = order.amount * order.price;
+        uint256 totalCost = (order.amount * order.price) / 1e18;
         require(msg.value >= totalCost, "Insufficient payment");
 
         // Increment buyer's fractional ownership. The escrowed tokens keep

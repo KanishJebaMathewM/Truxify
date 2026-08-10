@@ -118,7 +118,11 @@ class TransactionMonitor {
   }
 
   setUser(userId, email, metadata = {}) {
-    Sentry.setUser({ id: userId, email, ...metadata });
+    if (userId === undefined || userId === null) {
+      logger.warn('[TransactionMonitor] setUser called without a userId — skipping.');
+      return;
+    }
+    Sentry.setUser({ id: userId, email: email ?? undefined, ...metadata });
   }
 
   setTag(key, value) {

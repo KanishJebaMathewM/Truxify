@@ -127,9 +127,8 @@ export async function processDocumentExpiryBatch() {
 
       let documents = [];
       try {
-        // Paginate through the window using .range() to handle PostgREST's
-        // 1000-row cap — without pagination, documents beyond row 1000 never
-        // receive expiry reminders.
+        // Paginate through the window to handle PostgREST's 1000-row cap —
+        // without pagination, documents beyond row 1000 never receive reminders.
         const PAGE_SIZE = 1000;
         let offset = 0;
         let hasMore = true;
@@ -142,7 +141,7 @@ export async function processDocumentExpiryBatch() {
             .gte('valid_until', windowStart.toISOString())
             .lte('valid_until', windowEnd.toISOString())
             .order('valid_until', { ascending: true })
-            .range(offset, offset + PAGE_SIZE - 1);
+            .then(q => q.range(offset, offset + PAGE_SIZE - 1));
 
           if (error) {
             logger.error(`[document-expiry] Failed to query documents for ${window.label} window (offset=${offset}):`, error.message);

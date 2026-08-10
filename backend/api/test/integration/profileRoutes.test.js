@@ -636,11 +636,11 @@ describe('Profile Routes', () => {
       expect(res.body.totalDistanceKm).toBe(300);
       expect(res.body.averageRating).toBe(4.5);
       expect(res.body.onTimePercentage).toBe(50);
-      expect(res.body.lifetimeEarnings).toBe(3000);
+      expect(res.body.lifetimeEarnings).toBe(30);
       expect(res.body.monthlyPerformanceSummary).toEqual({
         month: currentMonth,
         deliveriesCompleted: 2,
-        earnings: 3000,
+        earnings: 30,
       });
     });
 

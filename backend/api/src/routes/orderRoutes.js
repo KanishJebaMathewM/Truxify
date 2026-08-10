@@ -255,6 +255,43 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
 );
 
 // ============================================================================
+// 1. CREATE ORDER (CUSTOMER) — POST /api/orders
+// ============================================================================
+/**
+ * @openapi
+ * /api/orders:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Create a new order
+ *     description: Creates an order with server-computed pricing, a default timeline, and a load-board offer.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateOrderRequest'
+ *     responses:
+ *       201:
+ *         description: Order created
+ *       400:
+ *         description: Validation failed
+ */
+router.post('/', authenticate, userLimiter, requirePolicy('order:create'), validateBody(createOrderSchema), async (req, res) => {
+  try {
+    const result = await orderLifecycleService.createOrder(req.user.id, req.user.fullName, req.body);
+    return res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Create order exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
 // 13c. DRIVER OTP CONFIRM ALIAS — POST /api/deliveries/:id/confirm-otp
 // ============================================================================
 /**
@@ -600,7 +637,6 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   }
 
   try {
-    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status, total_amount');
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);

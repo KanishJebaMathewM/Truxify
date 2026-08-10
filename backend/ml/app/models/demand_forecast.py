@@ -1,4 +1,5 @@
 import logging
+import os
 import numpy as np
 from typing import List, Optional
 from sklearn.ensemble import GradientBoostingRegressor
@@ -69,7 +70,35 @@ FEATURE_NAMES = [
 # current production MAE by at least this fraction. A small positive
 # tolerance (rather than requiring strict improvement) avoids flapping
 # between near-identical models on noisy synthetic data.
-PROMOTION_MAE_IMPROVEMENT_THRESHOLD = 0.01
+#
+# Configurable via the PROMOTION_MAE_IMPROVEMENT_THRESHOLD env var so the
+# gate can be tuned per-environment without a code change; falls back to
+# the 0.01 default if unset, unparsable, or negative.
+DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD = 0.01
+
+
+def _load_promotion_mae_improvement_threshold() -> float:
+    raw = os.environ.get("PROMOTION_MAE_IMPROVEMENT_THRESHOLD", str(DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD))
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid PROMOTION_MAE_IMPROVEMENT_THRESHOLD=%r; falling back to default %.4f.",
+            raw, DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD,
+        )
+        return DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD
+
+    if value < 0:
+        logger.warning(
+            "PROMOTION_MAE_IMPROVEMENT_THRESHOLD=%s is negative; falling back to default %.4f.",
+            value, DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD,
+        )
+        return DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD
+
+    return value
+
+
+PROMOTION_MAE_IMPROVEMENT_THRESHOLD = _load_promotion_mae_improvement_threshold()
 
 
 def train_demand_forecast_model() -> dict:

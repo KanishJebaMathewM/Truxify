@@ -1446,7 +1446,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                 : null,
                             onStartTrip: () async {
                               if (_activeTripId == null) {
-                                setState(() => _isTripStarted = true);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        AppLocalizations.of(context)!
+                                            .failedToStartTrip,
+                                      ),
+                                    ),
+                                  );
+                                }
                                 return;
                               }
                               try {
@@ -1457,26 +1466,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                     _activeTripStatus = 'EN-ROUTE';
                                   });
                                 }
-                                try {
-                                  await _tripService
-                                      .startTrip(_activeTripId!);
-                                  if (mounted) {
-                                    setState(() {
-                                      _isTripStarted = true;
-                                      _activeTripStatus = 'EN-ROUTE';
-                                    });
-                                  }
-                                } catch (e) {
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
-                                      SnackBar(
-                                          content: Text(
-                                              'Failed to start trip: $e')),
-                                    );
-                                  }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        AppLocalizations.of(context)!
+                                            .failedToStartTrip,
+                                      ),
+                                    ),
+                                  );
                                 }
-                              },
+                              }
+                            },
                               onCompleteTrip: _completeRide,
                               onCancel: _clearDestination,
                               onOpenMaps: _openGoogleMapsRoute,
@@ -2235,18 +2237,33 @@ class _HomeScreenState extends State<HomeScreen> {
               backgroundColor: TruxifyColors.accent,
               onConfirmed: () async {
                 if (_activeTripId == null) {
-                  setState(() => _isTripStarted = true);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          AppLocalizations.of(context)!.failedToStartTrip,
+                        ),
+                      ),
+                    );
+                  }
                   return;
                 }
                 try {
                   await _tripService.startTrip(_activeTripId!);
                   if (mounted) {
-                    setState(() => _isTripStarted = true);
+                    setState(() {
+                      _isTripStarted = true;
+                      _activeTripStatus = 'EN-ROUTE';
+                    });
                   }
                 } catch (e) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(AppLocalizations.of(context)!.failedToStartTrip)),
+                      SnackBar(
+                        content: Text(
+                          AppLocalizations.of(context)!.failedToStartTrip,
+                        ),
+                      ),
                     );
                   }
                 }

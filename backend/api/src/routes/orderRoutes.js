@@ -210,6 +210,9 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
     return res.status(400).json({ error: 'Invalid driver_lat or driver_lng' });
   }
 
+  if (!id || !id.trim()) {
+    return res.status(400).json({ error: 'Invalid order id' });
+  }
   let geofenceRadiusM;
   if (geofence_radius_m !== undefined) {
     geofenceRadiusM = parseFloat(geofence_radius_m);

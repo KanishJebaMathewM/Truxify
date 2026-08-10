@@ -1743,8 +1743,14 @@ router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, r
   try {
     const { type, capacityWeight, capacityVolume, registrationNumber } = req.body;
 
+    const VALID_TRUCK_TYPES = ['Open Body', 'Closed Body', 'Container', 'Refrigerated'];
+
     if (!type || !registrationNumber) {
       return res.status(400).json({ error: 'type and registrationNumber are required.' });
+    }
+
+    if (!VALID_TRUCK_TYPES.includes(type)) {
+      return res.status(400).json({ error: 'type must be one of: Open Body, Closed Body, Container, Refrigerated.' });
     }
 
     // Check if driver has an existing truck assigned
@@ -1767,9 +1773,8 @@ router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, r
         .from('trucks')
         .update({
           truck_type: type,
-          capacity_weight_tonnes: capacityWeight || 0,
-          capacity_volume_m3: capacityVolume || 0,
-          registration_number: registrationNumber,
+          max_capacity_tons: capacityWeight || 0,
+          number_plate: registrationNumber,
           updated_at: new Date().toISOString()
         })
         .eq('id', truckId)
@@ -1785,10 +1790,8 @@ router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, r
         .insert({
           driver_id: req.user.id,
           truck_type: type,
-          capacity_weight_tonnes: capacityWeight || 0,
-          capacity_volume_m3: capacityVolume || 0,
-          registration_number: registrationNumber,
-          is_active: true
+          max_capacity_tons: capacityWeight || 0,
+          number_plate: registrationNumber
         })
         .select('*')
         .single();

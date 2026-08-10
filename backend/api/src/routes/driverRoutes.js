@@ -1571,7 +1571,8 @@ router.get('/:id/earnings', authenticate, userLimiter, requirePolicy('driver:vie
         .eq('driver_id', id)
         .eq('status', 'completed')
         .gte('trip_date', toDateKey(cutoff))
-        .order('trip_date', { ascending: false }),
+        .order('trip_date', { ascending: false })
+        .limit(1000),
       supabase
         .from('trips')
         .select('*', { count: 'exact', head: true })

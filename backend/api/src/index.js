@@ -31,6 +31,7 @@ import { closeWebSocketServer, initWebSocketServer, __testing as wsTesting } fro
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
 import { validateEscrowSetup } from './services/escrow.js'
+import digilockerService from './services/digilockerService.js'
 
 
 import {
@@ -310,6 +311,15 @@ validateEscrowSetup().then((valid) => {
     logger.warn('⚠️ Escrow setup validation failed. On-chain escrow features may not work correctly.')
   }
 }).catch(err => logger.error({ err }, 'Escrow setup validation failed'))
+
+// Validate DocumentRegistry/KYCVerifier contract wiring — a mismatched
+// DOCUMENT_REGISTRY_CONTRACT / KYC_VERIFIER_CONTRACT_ADDRESS must fail loudly
+// instead of silently skipping the DigiLocker on-chain write.
+digilockerService.validateSetup().then((valid) => {
+  if (!valid) {
+    logger.warn('⚠️ DigiLocker contract setup validation failed. On-chain document verification may not work correctly.')
+  }
+}).catch(err => logger.error({ err }, 'DigiLocker contract setup validation failed'))
 
 const app = express()
 const server = http.createServer(app)

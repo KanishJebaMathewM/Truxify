@@ -411,10 +411,11 @@ class WebRTCSignalingServer {
     }
     const { data } = await supabase
       .from('gps_offline_data')
-      .select('*')
+      .select('peerId, latitude, longitude, timestamp, speed, heading')
       .eq('peerId', peerId)
       .gt('timestamp', since || 0)
-      .order('timestamp', { ascending: true });
+      .order('timestamp', { ascending: true })
+      .limit(1000);
     
     return data || [];
   }

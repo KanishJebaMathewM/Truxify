@@ -1390,6 +1390,12 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
     }
 
     const status = await checkBypassEligibility(driverId, lat, lng);
+    // Fail closed: without a real WIM provider the result is explicitly
+    // unsupported — never present a fabricated BYPASS/PULL_IN verdict as
+    // authoritative.
+    if (status.supported === false || status.action === 'UNSUPPORTED') {
+      return res.status(503).json(status);
+    }
     return res.status(200).json(status);
   } catch (err) {
     logger.error(`[weigh-station] Error getting bypass status for driver ${req.user.id}: ${err.message}`);

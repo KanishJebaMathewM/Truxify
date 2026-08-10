@@ -113,7 +113,7 @@ router.get(
         driver_location: publicDriverLocation,
       });
     } catch (err) {
-      logger.error({ err }, 'Error fetching public tracking data');
+      logger.error({ err, requestId: req.requestId }, 'Error fetching public tracking data');
       return res.status(500).json({ error: 'Failed to load tracking information' });
     }
   }
@@ -183,7 +183,7 @@ router.get(
         properties: { fallback: true },
       });
     } catch (err) {
-      logger.error({ err }, 'Error fetching public route data');
+      logger.error({ err, requestId: req.requestId }, 'Error fetching public route data');
       return res.status(500).json({ error: 'Failed to load route information' });
     }
   }

@@ -47,7 +47,27 @@
         0
       ],
       "id": "freeze-escrow",
-      "name": "Freeze Smart Contract Escrow"
+      "name": "Freeze Smart Contract Escrow",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escrow Alert: Freeze Smart Contract Escrow Failed for Trip {{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}",
+        "textBody": "=CRITICAL: The Freeze Smart Contract Escrow step failed after 3 retries for Trip {{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}. Smart contract payment was not frozen. Immediate manual intervention required.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        200,
+        -200
+      ],
+      "id": "alert-admin-freeze-failed",
+      "name": "Alert Admin — Escrow Freeze Failed"
     },
     {
       "parameters": {
@@ -227,7 +247,27 @@
         200
       ],
       "id": "release-or-refund",
-      "name": "Release or Refund Smart Contract Escrow"
+      "name": "Release or Refund Smart Contract Escrow",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escrow Alert: Release or Refund Escrow Failed for Trip {{$json.body.record.id}}",
+        "textBody": "=CRITICAL: The Release or Refund Smart Contract Escrow step failed after 3 retries for Trip {{$json.body.record.id}}. Smart contract payment was not released/refunded. Immediate manual intervention required.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        400,
+        200
+      ],
+      "id": "alert-admin-release-failed",
+      "name": "Alert Admin — Escrow Release Failed"
     }
   ],
   "connections": {
@@ -247,6 +287,13 @@
         [
           {
             "node": "fetch-evidence",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "alert-admin-freeze-failed",
             "type": "main",
             "index": 0
           }
@@ -313,6 +360,18 @@
         [
           {
             "node": "release-or-refund",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "release-or-refund": {
+      "main": [
+        [],
+        [
+          {
+            "node": "alert-admin-release-failed",
             "type": "main",
             "index": 0
           }

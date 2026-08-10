@@ -218,7 +218,8 @@ class KeyManagementService {
           .select('*')
           .eq('user_id', userId)
           .eq('wallet_address', walletAddress)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(10);
 
         if (error) {
           logger.error('[KeyManagementService] Failed to fetch rotation history:', error);

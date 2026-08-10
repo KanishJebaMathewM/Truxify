@@ -585,14 +585,16 @@ export class OrderRepository {
       }), 'cancelStaleOrder');
   }
 
-  async findStaleFundingOrders(cutoff) {
+  async findStaleFundingOrders(cutoff, { offset = 0, limit = 1000 } = {}) {
     return this._retryableQuery(() => this.supabase
       .from('orders')
       .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
       .eq('escrow_status', 'funding')
       .not('pending_bid_acceptance', 'is', null)
       .or('escrow_funding_attempts.lt.10,escrow_funding_attempts.is.null')
-      .or(`escrow_funding_started_at.lt.${cutoff},and(escrow_funding_started_at.is.null,updated_at.lt.${cutoff})`), 'findStaleFundingOrders');
+      .or(`escrow_funding_started_at.lt.${cutoff},and(escrow_funding_started_at.is.null,updated_at.lt.${cutoff})`)
+      .order('updated_at', { ascending: true })
+      .range(offset, offset + Math.max(1, limit) - 1), 'findStaleFundingOrders');
   }
 
   // ===================================================================

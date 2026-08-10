@@ -123,5 +123,31 @@ describe('escrowFundingReconciliation', () => {
         'DB error'
       );
     });
+
+    it('pages through the stale set in bounded chunks until a short page', async () => {
+      mockRedisClient.set.mockResolvedValue('locked');
+
+      const fullPage = Array.from({ length: 1000 }, (_, i) => ({
+        id: `order-${i}`,
+        order_display_id: `DIS-${i}`,
+        escrow_status: 'funding',
+        escrow_funding_attempts: 10, // >= MAX_ATTEMPTS, so nothing is processed
+        escrow_funding_last_attempt_at: null,
+        pending_bid_acceptance: null,
+      }));
+      mockOrderRepository.findStaleFundingOrders
+        .mockResolvedValueOnce({ data: fullPage, error: null })
+        .mockResolvedValueOnce({ data: [fullPage[0]], error: null });
+
+      await reconcileStaleFunding(mockOrderRepository);
+
+      expect(mockOrderRepository.findStaleFundingOrders).toHaveBeenCalledTimes(2);
+      expect(mockOrderRepository.findStaleFundingOrders).toHaveBeenNthCalledWith(
+        1, expect.any(String), { offset: 0, limit: 1000 }
+      );
+      expect(mockOrderRepository.findStaleFundingOrders).toHaveBeenNthCalledWith(
+        2, expect.any(String), { offset: 1000, limit: 1000 }
+      );
+    });
   });
 });

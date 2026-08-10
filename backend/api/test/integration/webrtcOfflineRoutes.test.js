@@ -52,12 +52,30 @@ describe('WebRTC offline routes', () => {
 
   it('returns offline GPS data for an accessible peer', async () => {
     signalingMock.canUserAccessPeer.mockReturnValue(true);
-    signalingMock.getOfflineGPSData.mockResolvedValue([{ peerId: 'peer-1' }]);
+    signalingMock.getOfflineGPSData.mockResolvedValue([{ id: 'row-1', data: {}, timestamp: 1234, synced: false }]);
+
+    const res = await request(buildApp()).get('/api/webrtc/offline/peer-1?since=100');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([{ id: 'row-1', data: {}, timestamp: 1234, synced: false }]);
+    expect(signalingMock.getOfflineGPSData).toHaveBeenCalledWith('peer-1', 100, { id: 'user-1', role: 'driver' });
+  });
+
+  it('rejects offline GPS reads without a since timestamp', async () => {
+    signalingMock.canUserAccessPeer.mockReturnValue(true);
 
     const res = await request(buildApp()).get('/api/webrtc/offline/peer-1');
 
-    expect(res.status).toBe(200);
-    expect(res.body.data).toEqual([{ peerId: 'peer-1' }]);
-    expect(signalingMock.getOfflineGPSData).toHaveBeenCalledWith('peer-1', undefined);
+    expect(res.status).toBe(400);
+    expect(signalingMock.getOfflineGPSData).not.toHaveBeenCalled();
+  });
+
+  it('rejects offline GPS reads with a negative since timestamp', async () => {
+    signalingMock.canUserAccessPeer.mockReturnValue(true);
+
+    const res = await request(buildApp()).get('/api/webrtc/offline/peer-1?since=-5');
+
+    expect(res.status).toBe(400);
+    expect(signalingMock.getOfflineGPSData).not.toHaveBeenCalled();
   });
 });

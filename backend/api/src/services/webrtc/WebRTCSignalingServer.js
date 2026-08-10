@@ -4,6 +4,8 @@ import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
 import { supabase, redisClient } from '../../config/db.js';
 
+const OFFLINE_GPS_PAGE_SIZE = 1000;
+
 class WebRTCSignalingServer {
   constructor(server) {
     const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 4096;
@@ -411,11 +413,12 @@ class WebRTCSignalingServer {
     }
     const { data } = await supabase
       .from('gps_offline_data')
-      .select('*')
+      .select('id, data, timestamp, synced')
       .eq('peerId', peerId)
-      .gt('timestamp', since || 0)
-      .order('timestamp', { ascending: true });
-    
+      .gt('timestamp', since)
+      .order('timestamp', { ascending: true })
+      .limit(OFFLINE_GPS_PAGE_SIZE);
+
     return data || [];
   }
 

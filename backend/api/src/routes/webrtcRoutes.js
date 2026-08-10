@@ -95,7 +95,6 @@ router.get('/webrtc/nearby', authenticate, userLimiter, requirePolicy('webrtc:vi
 router.get('/webrtc/offline/:peerId', authenticate, userLimiter, requirePolicy('webrtc:view-offline'), async (req, res) => {
   try {
     const { peerId } = req.params;
-    const { since } = req.query;
 
     const signaling = getWebRTCSignaling();
     if (!signaling) {
@@ -112,7 +111,15 @@ router.get('/webrtc/offline/:peerId', authenticate, userLimiter, requirePolicy('
       });
     }
 
-    const data = await signaling.getOfflineGPSData(peerId, since, req.user);
+    const parsedSince = parseFiniteNumber(req.query.since);
+    if (parsedSince === null || parsedSince < 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'since is required and must be a non-negative timestamp'
+      });
+    }
+
+    const data = await signaling.getOfflineGPSData(peerId, parsedSince, req.user);
     res.json({
       success: true,
       data

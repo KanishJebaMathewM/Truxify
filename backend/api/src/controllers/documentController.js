@@ -24,6 +24,9 @@ const MIME_EXTENSION_MAP = Object.freeze({
   'image/heic': 'heic',
 });
 
+const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB limit
+const SCAN_TIMEOUT_MS = 10000; // 10 seconds timeout for malware scanning
+
 /**
  * Handles a driver KYC document upload. The file itself is validated
  * server-side by inspecting its magic bytes (see lib/documentValidation.js)
@@ -54,6 +57,19 @@ export async function uploadDriverDocument(req, res) {
       return res.status(400).json({
         error: `documentType must be one of: ${ALLOWED_DOCUMENT_TYPES.join(', ')}`,
       });
+    }
+
+    // Retrieve existing document of the same type for this driver
+    const { data: existingDoc, error: checkError } = await supabase
+      .from('driver_documents')
+      .select('id, storage_path')
+      .eq('driver_id', driverId)
+      .eq('document_type', documentType)
+      .maybeSingle();
+
+    if (checkError) {
+      logger.error('[DocumentController] Failed to query existing document:', checkError.message);
+      return res.status(500).json({ error: 'Failed to verify existing documents' });
     }
 
     let verifiedMimeType;

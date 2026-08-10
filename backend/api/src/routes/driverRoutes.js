@@ -456,7 +456,7 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
  *   get:
  *     tags: [Driver]
  *     summary: Get earnings summary for charts
- *     description: Returns aggregated daily earnings data for the specified number of days (max 365).
+ *     description: Returns aggregated daily earnings data for the specified number of days (max 365) or for an explicit start_date/end_date window.
  *     security:
  *       - BearerAuth: []
  *     parameters:
@@ -467,7 +467,19 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
  *           default: 30
  *           minimum: 1
  *           maximum: 365
- *         description: Number of days to include
+ *         description: Number of trailing days to include (ignored when start_date/end_date are provided)
+ *       - in: query
+ *         name: start_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Inclusive start of the earnings window (YYYY-MM-DD)
+ *       - in: query
+ *         name: end_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Inclusive end of the earnings window (YYYY-MM-DD)
  *     responses:
  *       200:
  *         description: Earnings data array
@@ -479,25 +491,58 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
  *         description: Invalid days parameter
  */
 router.get('/earnings/summary', authenticate, userLimiter, requirePolicy('driver:view-earnings'), async (req, res) => {
-  const daysParam = req.query.days ?? '30';
-  const limitDays = typeof daysParam === 'string' ? Number(daysParam) : NaN;
-
-  if (!Number.isInteger(limitDays) || limitDays < 1 || limitDays > 365) {
-    return res.status(400).json({
-      error: 'days must be an integer between 1 and 365'
-    });
-  }
+  const { start_date: startDate, end_date: endDate } = req.query;
 
   try {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - (limitDays - 1));
+    let windowFilter;
 
-    const { data: summary, error } = await supabase
+    if (startDate !== undefined || endDate !== undefined) {
+      if (!startDate || !endDate) {
+        return res.status(400).json({
+          error: 'start_date and end_date must both be provided'
+        });
+      }
+      if (Number.isNaN(Date.parse(startDate)) || Number.isNaN(Date.parse(endDate))) {
+        return res.status(400).json({
+          error: 'start_date and end_date must be valid dates'
+        });
+      }
+      if (startDate > endDate) {
+        return res.status(400).json({
+          error: 'start_date must not be after end_date'
+        });
+      }
+      windowFilter = { start: startDate, end: endDate };
+    } else {
+      const daysParam = req.query.days ?? '30';
+      const limitDays = typeof daysParam === 'string' ? Number(daysParam) : NaN;
+
+      if (!Number.isInteger(limitDays) || limitDays < 1 || limitDays > 365) {
+        return res.status(400).json({
+          error: 'days must be an integer between 1 and 365'
+        });
+      }
+
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - (limitDays - 1));
+      windowFilter = { start: cutoff.toISOString().split('T')[0] };
+    }
+
+    let query = supabase
       .from('earnings_daily')
       .select('day_date, amount, trip_count, hours_driven')
-      .eq('driver_id', req.user.id)
-      .gte('day_date', cutoff.toISOString().split('T')[0])
-      .order('day_date', { ascending: true });
+      .eq('driver_id', req.user.id);
+
+    if (windowFilter.start) {
+      query = query.gte('day_date', windowFilter.start);
+    }
+    // Inclusive start, exclusive end — matches the driver app's client-side
+    // window filter (`!date.isBefore(start) && date.isBefore(end)`).
+    if (windowFilter.end) {
+      query = query.lt('day_date', windowFilter.end);
+    }
+
+    const { data: summary, error } = await query.order('day_date', { ascending: true });
 
     if (error) {
       return res.status(500).json({ error: 'Failed to fetch earnings summary.', details: error.message });

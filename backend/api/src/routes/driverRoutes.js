@@ -580,20 +580,24 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
 
     if (error) return res.status(500).json({ error: 'Failed to fetch trips.', details: error.message });
 
-    // Enrich trips with escrow_status from orders and stars from ratings
-    const tripDisplayIds = (trips || []).map(t => t.trip_display_id).filter(Boolean);
+    // Enrich trips with escrow_status from orders and stars from ratings.
+    // trip_display_id is stored as 'TX-' || orders.order_display_id, so strip
+    // the prefix before matching against the unprefixed order_display_id column.
+    const orderDisplayIds = (trips || [])
+      .map(t => (t.trip_display_id || '').startsWith('TX-') ? t.trip_display_id.slice(3) : t.trip_display_id)
+      .filter(Boolean);
     let escrowMap = {};
     let ratingsMap = {};
-    if (tripDisplayIds.length > 0) {
+    if (orderDisplayIds.length > 0) {
       const [ordersRes, ratingsRes] = await Promise.all([
         supabase
           .from('orders')
           .select('order_display_id, escrow_status')
-          .in('order_display_id', tripDisplayIds),
+          .in('order_display_id', orderDisplayIds),
         supabase
           .from('ratings')
           .select('order_display_id, stars')
-          .in('order_display_id', tripDisplayIds)
+          .in('order_display_id', orderDisplayIds)
       ]);
 
       if (ordersRes.data) {
@@ -604,11 +608,14 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
       }
     }
 
-    const enrichedTrips = (trips || []).map(t => ({
-      ...t,
-      escrow_status: escrowMap[t.trip_display_id] || 'pending',
-      stars: ratingsMap[t.trip_display_id] || null
-    }));
+    const enrichedTrips = (trips || []).map(t => {
+      const orderDisplayId = (t.trip_display_id || '').startsWith('TX-') ? t.trip_display_id.slice(3) : t.trip_display_id;
+      return {
+        ...t,
+        escrow_status: escrowMap[orderDisplayId] || 'pending',
+        stars: ratingsMap[orderDisplayId] || null
+      };
+    });
 
     res.json({
       page,

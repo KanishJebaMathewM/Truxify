@@ -1,6 +1,6 @@
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const ANOMALY_THRESHOLDS = {
@@ -109,12 +109,12 @@ class AnomalyDetectionService {
 
   async getUserAverageWithdrawal(userId, walletAddress) {
     try {
-      const { data, error } = await supabase
-        .from('transactions')
+      const { data, error } = await (supabaseAdmin || supabase)
+        .from('wallet_transactions')
         .select('amount')
-        .eq('user_id', userId)
-        .eq('wallet_address', walletAddress)
-        .eq('type', 'withdrawal')
+        .eq('driver_id', userId)
+        .eq('txn_type', 'withdrawal')
+        .eq('status', 'confirmed')
         .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
         .order('created_at', { ascending: false })
         .limit(ANOMALY_STATS_MAX_ROWS);
@@ -133,12 +133,12 @@ class AnomalyDetectionService {
 
   async getUserWithdrawalStdDev(userId, walletAddress) {
     try {
-      const { data, error } = await supabase
-        .from('transactions')
+      const { data, error } = await (supabaseAdmin || supabase)
+        .from('wallet_transactions')
         .select('amount')
-        .eq('user_id', userId)
-        .eq('wallet_address', walletAddress)
-        .eq('type', 'withdrawal')
+        .eq('driver_id', userId)
+        .eq('txn_type', 'withdrawal')
+        .eq('status', 'confirmed')
         .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
         .order('created_at', { ascending: false })
         .limit(ANOMALY_STATS_MAX_ROWS);
@@ -182,11 +182,12 @@ class AnomalyDetectionService {
     try {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
-      const { count, error } = await supabase
-        .from('transactions')
+      const { count, error } = await (supabaseAdmin || supabase)
+        .from('wallet_transactions')
         .select('id', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .eq('wallet_address', walletAddress)
+        .eq('driver_id', userId)
+        .eq('txn_type', 'withdrawal')
+        .eq('status', 'confirmed')
         .gte('created_at', tenMinutesAgo);
 
       if (error) {
@@ -213,32 +214,10 @@ class AnomalyDetectionService {
   }
 
   async detectUnusualDestination(userId, walletAddress, transaction) {
-    if (!ANOMALY_THRESHOLDS.UNUSUAL_DESTINATION || !transaction.toAddress) {
-      return null;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('id')
-        .eq('user_id', userId)
-        .eq('to_address', transaction.toAddress)
-        .limit(1);
-
-      if (!error && data && data.length > 0) {
-        return null;
-      }
-
-      return {
-        type: 'UNUSUAL_DESTINATION',
-        severity: 'MEDIUM',
-        destination: transaction.toAddress,
-        message: `First transfer to new address: ${transaction.toAddress.slice(0, 10)}...`,
-      };
-    } catch (err) {
-      logger.error('[AnomalyDetectionService] Unusual destination detection failed:', err.message);
-      return null;
-    }
+    // The withdrawal ledger (wallet_transactions) does not persist destination
+    // addresses, so destination history cannot be checked against the database.
+    // Skip the check instead of querying the missing `transactions` table.
+    return null;
   }
 
   calculateRiskLevel(anomalies) {

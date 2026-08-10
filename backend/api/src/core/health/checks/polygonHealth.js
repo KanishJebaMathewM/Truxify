@@ -1,4 +1,5 @@
 import { HealthStatus, executeCheck } from '../HealthCheck.js';
+import logger from '../../../middleware/logger.js';
 
 const NAME = 'polygon';
 const PROBE_TIMEOUT_MS = 4000;
@@ -46,13 +47,16 @@ function check() {
         blockNumber,
       },
     }))
-    .catch((err) => ({
-      status: HealthStatus.UNHEALTHY,
-      message: `configured_but_unreachable: ${err.message}`,
-      metadata: {
-        rpcUrl: redactUrl(rpcUrl),
-      },
-    }));
+    .catch((err) => {
+      logger.warn({ err: err.message, check: NAME }, 'Polygon RPC health probe failed');
+      return {
+        status: HealthStatus.UNHEALTHY,
+        message: `configured_but_unreachable: ${err.message}`,
+        metadata: {
+          rpcUrl: redactUrl(rpcUrl),
+        },
+      };
+    });
 }
 
 export default function polygonHealth(opts) {

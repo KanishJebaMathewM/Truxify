@@ -236,6 +236,15 @@ class DigilockerService {
     for (const doc of documents) {
       const docHash = '0x' + crypto.createHash('sha256').update(doc.data).digest('hex');
 
+      let validUntil = null;
+      try {
+        const parsedData = typeof doc.data === 'string' ? JSON.parse(doc.data) : doc.data;
+        validUntil = parsedData?.validity || parsedData?.expiry || null;
+      } catch {
+        // DigiLocker payloads are not always JSON (e.g. raw XML/PDF text);
+        // without a parseable validity date we simply leave valid_until null.
+      }
+
       const { data: profile } = await supabase
         .from('profiles')
         .select('polygon_wallet_address')
@@ -264,6 +273,7 @@ class DigilockerService {
           is_verified: true,
           verification_source: isMock ? 'digilocker_mock' : 'digilocker',
           blockchain_tx_hash: txHash,
+          valid_until: validUntil || null,
           updated_at: new Date().toISOString()
         }, { onConflict: 'driver_id,document_type' })
         .select()

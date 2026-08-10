@@ -145,7 +145,15 @@ router.post('/webrtc/sync/:peerId', authenticate, userLimiter, requirePolicy('we
       });
     }
 
-    await signaling.syncOfflineData(peerId, req.user);
+    const ackedIds = req.body?.ackedIds;
+    if (!Array.isArray(ackedIds) || ackedIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'ackedIds is required and must be a non-empty array of row ids the client received'
+      });
+    }
+
+    await signaling.syncOfflineData(peerId, ackedIds, req.user);
     res.json({
       success: true,
       message: 'Offline data synced'

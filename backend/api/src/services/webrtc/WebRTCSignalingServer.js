@@ -419,17 +419,22 @@ class WebRTCSignalingServer {
     return data || [];
   }
 
-  async syncOfflineData(peerId, requestingUser) {
+  async syncOfflineData(peerId, ackedIds, requestingUser) {
     if (!requestingUser || !this.canUserAccessPeer(peerId, requestingUser)) {
       logger.warn(`[WebRTC] Unauthorized sync offline data attempt for peer ${peerId}`);
       return;
     }
-    // Mark data as synced for this peer
+    if (!Array.isArray(ackedIds) || ackedIds.length === 0) {
+      logger.warn(`[WebRTC] Sync for peer ${peerId} skipped: no acknowledged row ids provided`);
+      return;
+    }
+    // Mark only the rows the client actually acknowledged as synced, never
+    // the peer's entire unsynced backlog.
     await supabase
       .from('gps_offline_data')
       .update({ synced: true })
       .eq('peerId', peerId)
-      .eq('synced', false);
+      .in('id', ackedIds);
   }
 }
 

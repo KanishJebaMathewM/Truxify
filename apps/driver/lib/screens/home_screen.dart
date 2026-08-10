@@ -27,7 +27,7 @@ import '../core/app_routes.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_models.dart';
 import '../models/earnings_daily_model.dart';
-import '../screens/delivery_otp_screen.dart';
+import 'delivery_otp_screen.dart';
 import '../services/driver_earnings_service.dart';
 import '../services/geocode_service.dart';
 import '../services/marketplace_repository.dart';

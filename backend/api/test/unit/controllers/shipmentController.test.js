@@ -32,6 +32,7 @@ describe('shipmentController.getShipmentDetails', () => {
     createUserClientMock.mockReturnValue(client);
 
     const req = {
+      query: {},
       token: 'user-jwt',
       params: { shipmentId: 'ship_1' },
       user: { id: 'user_1' },
@@ -51,6 +52,7 @@ describe('shipmentController.getShipmentDetails', () => {
     createUserClientMock.mockReturnValue(client);
 
     const req = {
+      query: {},
       token: 'driver-jwt',
       params: { shipmentId: 'ship_1' },
       user: { id: 'driver_1' },
@@ -67,6 +69,7 @@ describe('shipmentController.getShipmentDetails', () => {
     createUserClientMock.mockReturnValue(buildClient(null, { message: 'not found' }));
 
     const req = {
+      query: {},
       token: 'user-jwt',
       params: { shipmentId: 'missing' },
       user: { id: 'user_1' },
@@ -83,6 +86,7 @@ describe('shipmentController.getShipmentDetails', () => {
     createUserClientMock.mockReturnValue(buildClient({ id: 'ship_1', customer_id: 'user_1', driver_id: 'driver_1' }, null));
 
     const req = {
+      query: {},
       token: 'stranger-jwt',
       params: { shipmentId: 'ship_1' },
       user: { id: 'stranger' },
@@ -95,7 +99,7 @@ describe('shipmentController.getShipmentDetails', () => {
   });
 
   it('returns 400 when shipmentId is missing', async () => {
-    const req = { token: 'user-jwt', params: {}, user: { id: 'user_1' } };
+    const req = { query: {}, token: 'user-jwt', params: {}, user: { id: 'user_1' } };
     const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
 
     await getShipmentDetails(req, res);

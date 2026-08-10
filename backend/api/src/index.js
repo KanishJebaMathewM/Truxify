@@ -144,6 +144,7 @@ import {
   stopDlqWorker,
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
+import { startDevicePruningWorker } from './workers/devicePruningWorker.js'
 import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
 import EscalationHandler from './services/blockchain/escalationHandler.js'
 import {
@@ -704,6 +705,7 @@ server.listen(PORT, () => {
   startReputationReconciliation(orderRepository)
   startDlqWorker()
   startStaleOrderWorker(escrowReconciliationOrderRepository)
+  startDevicePruningWorker()
   startDocumentExpiryWorker()
   startWithdrawalSettlementWorker()
 
@@ -715,6 +717,7 @@ server.listen(PORT, () => {
     reputationReconciliation: true,
     dlqWorker: true,
     staleOrderWorker: true,
+    devicePruningWorker: true,
     documentExpiryWorker: true,
     withdrawalSettlementWorker: true,
   }

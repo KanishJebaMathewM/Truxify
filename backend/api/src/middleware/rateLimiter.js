@@ -150,7 +150,7 @@ export function userKeyGenerator(req) {
  * Returns a rate-limit handler that logs to Sentry and responds with 429.
  */
 function sentryAlertHandler(limiterName) {
-  return (req, res) => {
+  return (req, res, next, options) => {
     logger.warn(
       {
         requestId: req.requestId,
@@ -162,9 +162,10 @@ function sentryAlertHandler(limiterName) {
       `Rate limit exceeded (${limiterName})`,
     );
     Sentry.captureMessage(`Rate limit exceeded: ${limiterName}`, "warning");
+    const retryAfter = options?.message?.retryAfter ?? 60;
     res.status(429).json({
       error: "Rate limit exceeded",
-      retryAfter: 60,
+      retryAfter,
     });
   };
 }

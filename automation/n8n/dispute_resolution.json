@@ -51,7 +51,7 @@
     },
     {
       "parameters": {
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/={{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/dispute-evidence",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/{{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/dispute-evidence",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "options": {}
@@ -117,7 +117,7 @@
     },
     {
       "parameters": {
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/={{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/status",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/{{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/status",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",

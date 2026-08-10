@@ -127,19 +127,34 @@ export async function processDocumentExpiryBatch() {
 
       let documents = [];
       try {
-        const { data, error } = await supabaseAdmin
-          .from('documents')
-          .select('id, user_id, doc_type, valid_until')
-          .not('valid_until', 'is', null)
-          .gte('valid_until', windowStart.toISOString())
-          .lte('valid_until', windowEnd.toISOString());
+        // Paginate through the window using .range() to handle PostgREST's
+        // 1000-row cap — without pagination, documents beyond row 1000 never
+        // receive expiry reminders.
+        const PAGE_SIZE = 1000;
+        let offset = 0;
+        let hasMore = true;
 
-        if (error) {
-          logger.error(`[document-expiry] Failed to query documents for ${window.label} window:`, error.message);
-          continue;
+        while (hasMore) {
+          const { data, error, count } = await supabaseAdmin
+            .from('documents')
+            .select('id, user_id, doc_type, valid_until', { count: 'exact' })
+            .not('valid_until', 'is', null)
+            .gte('valid_until', windowStart.toISOString())
+            .lte('valid_until', windowEnd.toISOString())
+            .order('valid_until', { ascending: true })
+            .range(offset, offset + PAGE_SIZE - 1);
+
+          if (error) {
+            logger.error(`[document-expiry] Failed to query documents for ${window.label} window (offset=${offset}):`, error.message);
+            hasMore = false;
+            continue;
+          }
+
+          const page = data || [];
+          documents.push(...page);
+          offset += PAGE_SIZE;
+          hasMore = page.length === PAGE_SIZE && (!count || offset < count);
         }
-
-        documents = data || [];
       } catch (err) {
         logger.error(`[document-expiry] Error querying documents for ${window.label} window:`, err.message);
         continue;

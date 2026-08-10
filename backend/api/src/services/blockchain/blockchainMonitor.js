@@ -107,7 +107,7 @@ class BlockchainMonitor {
           this.lastBlockScanned = currentBlock;
         }
       } catch (err) {
-        logger.error('[BlockchainMonitor] Polling error:', err.message);
+        logger.error({ err: err.message }, '[BlockchainMonitor] Polling error:');
         Sentry.captureException(err);
       }
     }, pollInterval);
@@ -128,7 +128,7 @@ class BlockchainMonitor {
 
         this.metricsService?.recordBlockScan(toBlock - fromBlock + 1);
       } catch (err) {
-        logger.error(`[BlockchainMonitor] Error scanning blocks ${fromBlock}-${toBlock}:`, err.message);
+        logger.error({ err: err.message, fromBlock, toBlock }, `[BlockchainMonitor] Error scanning blocks ${fromBlock}-${toBlock}:`);
         this.metricsService?.recordBlockScanError();
         Sentry.captureException(err);
       }
@@ -147,7 +147,7 @@ class BlockchainMonitor {
         await handler(parsed.args, log);
       }
     } catch (err) {
-      logger.error('[BlockchainMonitor] Log parsing error:', err.message);
+      logger.error({ err: err.message }, '[BlockchainMonitor] Log parsing error:');
     }
   }
 
@@ -273,7 +273,7 @@ class BlockchainMonitor {
           created_at: new Date().toISOString(),
         }]);
     } catch (err) {
-      logger.error('[BlockchainMonitor] Failed to store event:', err.message);
+      logger.error({ err: err.message, type: alert.type }, '[BlockchainMonitor] Failed to store event:');
     }
   }
 

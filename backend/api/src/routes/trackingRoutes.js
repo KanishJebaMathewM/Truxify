@@ -65,7 +65,7 @@ router.post(
 
       // Block sharing for terminal orders
       const terminalStatuses = ['delivered', 'cancelled', 'payment_released'];
-      if (terminalStatuses.includes(order.status)) {
+      if (!order.status || terminalStatuses.includes(order.status)) {
         return res.status(400).json({ error: 'Cannot share tracking for completed or cancelled orders' });
       }
 
@@ -86,7 +86,7 @@ router.post(
         expiresAt: tokenData.expires_at,
       });
     } catch (err) {
-      logger.error({ err, orderId: req.params.id }, 'Error generating tracking share link');
+      logger.error({ err, orderId: req.params.id, requestId: req.requestId }, 'Error generating tracking share link');
       return res.status(500).json({ error: 'Failed to generate tracking link' });
     }
   }
@@ -124,7 +124,7 @@ router.post(
 
       return res.json({ success: true, message: 'All tracking links revoked' });
     } catch (err) {
-      logger.error({ err, orderId: req.params.id }, 'Error revoking tracking tokens');
+      logger.error({ err, orderId: req.params.id, requestId: req.requestId }, 'Error revoking tracking tokens');
       return res.status(500).json({ error: 'Failed to revoke tracking links' });
     }
   }

@@ -104,7 +104,7 @@ router.post('/request-bypass', async (req, res) => {
             wimPacket: signedPacket,
         });
     } catch (error) {
-        logger.error('[WIM] request-bypass error:', error.message);
+        logger.error({ err: error.message, requestId: req.requestId }, '[WIM] request-bypass error:');
         return res.status(500).json({ error: error.message });
     }
 });

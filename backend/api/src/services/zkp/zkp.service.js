@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { acquireLock, releaseLock, LockAcquisitionError } from '../../lib/redisLock.js';
 
 /**
@@ -114,8 +114,8 @@ class ZKPService {
   }
 
   async getUserAddress(userId) {
-    const { data, error } = await supabase
-      .from('users')
+    const { data, error } = await (supabaseAdmin || supabase)
+      .from('profiles')
       .select('wallet_address')
       .eq('id', userId)
       .single();
@@ -124,7 +124,7 @@ class ZKPService {
   }
 
   async storeProof(userId, proofData) {
-    const { error } = await supabase
+    const { error } = await (supabaseAdmin || supabase)
       .from('zk_proofs')
       .insert([{
         user_id: userId,
@@ -136,8 +136,8 @@ class ZKPService {
   }
 
   async updateVerificationStatus(userId, verified, txHash) {
-    const { error } = await supabase
-      .from('users')
+    const { error } = await (supabaseAdmin || supabase)
+      .from('profiles')
       .update({
         kyc_verified: verified,
         kyc_verified_at: new Date().toISOString(),
@@ -164,8 +164,8 @@ class ZKPService {
    * an on-chain call and sufficient for the idempotency guard).
    */
   async isVerifiedInDb(userId) {
-    const { data, error } = await supabase
-      .from('users')
+    const { data, error } = await (supabaseAdmin || supabase)
+      .from('profiles')
       .select('kyc_verified')
       .eq('id', userId)
       .single();
@@ -269,7 +269,7 @@ class ZKPService {
   }
 
   async logVerification(userId, result) {
-    const { error } = await supabase
+    const { error } = await (supabaseAdmin || supabase)
       .from('kyc_audit_logs')
       .insert([{
         user_id: userId,
@@ -283,8 +283,8 @@ class ZKPService {
 
   async getVerificationStats() {
     const [verifiedResult, unverifiedResult] = await Promise.all([
-      supabase.from('users').select('id', { count: 'exact', head: true }).eq('kyc_verified', true),
-      supabase.from('users').select('id', { count: 'exact', head: true }).eq('kyc_verified', false),
+      (supabaseAdmin || supabase).from('profiles').select('id', { count: 'exact', head: true }).eq('kyc_verified', true),
+      (supabaseAdmin || supabase).from('profiles').select('id', { count: 'exact', head: true }).eq('kyc_verified', false),
     ]);
     if (verifiedResult.error) throw verifiedResult.error;
     if (unverifiedResult.error) throw unverifiedResult.error;

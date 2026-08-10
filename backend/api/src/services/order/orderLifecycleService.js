@@ -1034,7 +1034,7 @@ async function createOrderTransactional({ idempotencyKey, orderData, timelineDat
   }
 
   try {
-    const { data, error } = await db.rpc('create_order_tx', {
+    const { data, error } = await supabaseAdmin.rpc('create_order_tx', {
       p_idempotency_key: idempotencyKey,
       p_order_data: orderData,
       p_timeline_data: timelineData || { status: 'created', details: { note: 'Order initialized' } },

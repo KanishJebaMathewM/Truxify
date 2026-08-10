@@ -38,7 +38,7 @@ router.get('/shards/status', authenticate, userLimiter, requirePolicy('shard:vie
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);
+    logger.error({ requestId: req.requestId, err: error?.message || error }, '[ShardRoutes] Error:');
     res.status(500).json({
       success: false,
       error: 'Internal Server Error'
@@ -80,7 +80,7 @@ router.get('/shards/location', authenticate, userLimiter, requirePolicy('shard:v
       }
     });
   } catch (error) {
-    logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);
+    logger.error({ requestId: req.requestId, err: error?.message || error }, '[ShardRoutes] Error:');
     res.status(500).json({
       success: false,
       error: 'Internal Server Error'
@@ -103,7 +103,7 @@ router.get('/shards/:shardName/orders', authenticate, userLimiter, requirePolicy
       shard: shardName
     });
   } catch (error) {
-    logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);
+    logger.error({ requestId: req.requestId, err: error?.message || error }, '[ShardRoutes] Error:');
     res.status(500).json({
       success: false,
       error: 'Internal Server Error'
@@ -126,7 +126,7 @@ router.get('/shards/all/orders', authenticate, userLimiter, requirePolicy('shard
       }
     });
   } catch (error) {
-    logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);
+    logger.error({ requestId: req.requestId, err: error?.message || error }, '[ShardRoutes] Error:');
     res.status(500).json({
       success: false,
       error: 'Internal Server Error'

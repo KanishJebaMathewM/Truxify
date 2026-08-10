@@ -112,7 +112,7 @@ export class FuelAdvisorService {
 
       return count > 0 ? totalLoad / count : 50;
     } catch (err) {
-      this.logger?.error(`[FuelAdvisorService] Error computing engine load: ${err.message}`);
+      this.logger?.error({ err: err.message, truckId }, '[FuelAdvisorService] Error computing engine load');
       return 50; // Fallback
     }
   }

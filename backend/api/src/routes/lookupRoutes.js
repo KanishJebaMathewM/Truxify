@@ -76,8 +76,19 @@ async function getCachedOrFetch(key, fetchFn) {
     return data;
   })();
 
+  // Bound the fetch so a hung database call cannot pin the in-flight slot
+  // (and the request) forever. On timeout the key is released and the next
+  // caller retries against the source.
+  const FETCH_TIMEOUT_MS = CACHE_TTL_SEC * 1000 + 5000;
+  const bounded = Promise.race([
+    fetchPromise,
+    new Promise((_, reject) => {
+      setTimeout(() => reject(new Error(`lookup fetch timed out for ${key}`)), FETCH_TIMEOUT_MS);
+    }),
+  ]);
+
   // Atomic check-and-set: only first caller wins
-  const actual = inflight.get(key) || inflight.set(key, fetchPromise).get(key);
+  const actual = inflight.get(key) || inflight.set(key, bounded).get(key);
   setTimeout(() => inflight.delete(key), 30000);
   try {
     return await actual;

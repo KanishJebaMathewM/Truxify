@@ -963,14 +963,6 @@ export async function handleLocationPing(ws, data, req) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: normalizedValidationErrors }));
   }
 
-  // Schema-validate and sanitize the telemetry payload before further
-  // processing (issue #5758). Enforces field ranges and string lengths that
-  // the inline guards above do not cover.
-  const validationErrors = validateTelemetryPayload(data);
-  if (validationErrors) {
-    return ws.send(JSON.stringify({ error: 'Invalid telemetry payload', details: validationErrors }));
-  }
-
   // Cross-field validation: require at least one complete coordinate pair.
   const hasLatLng = data.lat !== undefined && data.lng !== undefined;
   const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;

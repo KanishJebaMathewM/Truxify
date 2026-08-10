@@ -15,6 +15,17 @@ const ALLOWED_DOCUMENT_TYPES = Object.freeze([
   'other',
 ]);
 
+// Mirrors the multer limit in routes/documentRoutes.js, which reads the same
+// env var and falls back to the same 8MB. multer rejects oversized multipart
+// bodies before the controller runs; this is the guard for the buffer itself,
+// whose length can disagree with the reported size.
+const MAX_FILE_SIZE_BYTES =
+  Number(process.env.MULTIPART_FILE_LIMIT_BYTES) || 8 * 1024 * 1024;
+
+// Mirrors the scanner's own deadline in lib/malwareScanner.js, so the
+// AbortController below cannot fire before or long after the scanner gives up.
+const SCAN_TIMEOUT_MS = Number(process.env.SCAN_TIMEOUT_MS) || 30000;
+
 const MIME_EXTENSION_MAP = Object.freeze({
   'application/pdf': 'pdf',
   'image/png': 'png',
@@ -123,6 +134,33 @@ export async function uploadDriverDocument(req, res) {
       });
     }
 
+    // A driver re-uploading the same document type supersedes the previous
+    // one: the metadata row below is updated in place and the superseded file
+    // removed once the new row is committed. Ordered newest-first and limited
+    // to one row because there is no unique constraint on
+    // (driver_id, document_type) — see the create_driver_documents migration.
+    const { data: existingDoc, error: lookupError } = await supabase
+      .from('driver_documents')
+      .select('id, storage_path')
+      .eq('driver_id', driverId)
+      .eq('document_type', documentType)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (lookupError) {
+      logger.error(
+        '[DocumentController] Failed to look up existing document:',
+        lookupError.message,
+      );
+      return res.status(500).json({ error: 'Failed to store document' });
+    }
+
+    // Captured before the row is updated below: the update rewrites
+    // storage_path, so reading it afterwards would point at the file that was
+    // just uploaded rather than the one being replaced.
+    const supersededStoragePath = existingDoc?.storage_path ?? null;
+
     const storagePath = `${driverId}/${documentType}-${Date.now()}.${extension}`;
 
     const { error: storageError } = await supabase.storage
@@ -191,10 +229,10 @@ export async function uploadDriverDocument(req, res) {
     }
 
     // Clean up old file from storage to prevent orphaned files
-    if (existingDoc?.storage_path) {
+    if (supersededStoragePath) {
       await supabase.storage
         .from('driver-documents')
-        .remove([existingDoc.storage_path])
+        .remove([supersededStoragePath])
         .catch((cleanupErr) => {
           logger.warn('[DocumentController] Failed to delete superseded storage file:', cleanupErr.message);
         });

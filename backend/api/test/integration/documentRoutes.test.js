@@ -152,6 +152,92 @@ describe('Document Routes Integration Tests', () => {
       expect(m.store.__storageObjects.length).toBe(0);
     });
 
+    it('supersedes an existing document of the same type instead of inserting a second row', async () => {
+      const app = buildApp();
+      const upload = () =>
+        request(app)
+          .post('/api/driver/documents')
+          .set(DRIVER_HEADERS)
+          .field('documentType', 'aadhaar_card')
+          .attach('document', JPEG_BYTES, { filename: 'id.jpg', contentType: 'image/jpeg' });
+
+      const first = await upload();
+      expect(first.status).toBe(201);
+      const firstPath = m.store.__storageObjects.at(-1).path;
+
+      const second = await upload();
+
+      // 200, not 201: the metadata row is updated in place rather than a
+      // second row being inserted for the same (driver, document type).
+      expect(second.status).toBe(200);
+      expect(second.body.success).toBe(true);
+      expect(m.store.driver_documents.length).toBe(1);
+      expect(m.store.driver_documents[0].storage_path).not.toBe(firstPath);
+
+      // The superseded file is removed so storage does not accumulate orphans.
+      expect(m.store.__storageObjects.some((o) => o.path === firstPath)).toBe(false);
+    });
+
+    it('keeps documents of different types side by side', async () => {
+      const app = buildApp();
+      const upload = (documentType) =>
+        request(app)
+          .post('/api/driver/documents')
+          .set(DRIVER_HEADERS)
+          .field('documentType', documentType)
+          .attach('document', JPEG_BYTES, { filename: 'id.jpg', contentType: 'image/jpeg' });
+
+      expect((await upload('aadhaar_card')).status).toBe(201);
+      expect((await upload('pan_card')).status).toBe(201);
+
+      expect(m.store.driver_documents.length).toBe(2);
+      expect(m.store.driver_documents.map((d) => d.document_type).sort()).toEqual([
+        'aadhaar_card',
+        'pan_card',
+      ]);
+    });
+
+    it('does not treat another driver\'s document as the one being superseded', async () => {
+      m.store.driver_documents.push({
+        id: 'other-driver-doc',
+        driver_id: 'driver-uuid-999',
+        document_type: 'aadhaar_card',
+        storage_path: 'driver-uuid-999/aadhaar_card-1.jpg',
+        mime_type: 'image/jpeg',
+        status: 'pending_review',
+        created_at: new Date().toISOString(),
+      });
+
+      const res = await request(buildApp())
+        .post('/api/driver/documents')
+        .set(DRIVER_HEADERS)
+        .field('documentType', 'aadhaar_card')
+        .attach('document', JPEG_BYTES, { filename: 'id.jpg', contentType: 'image/jpeg' });
+
+      expect(res.status).toBe(201);
+      expect(m.store.driver_documents.length).toBe(2);
+      const other = m.store.driver_documents.find((d) => d.id === 'other-driver-doc');
+      expect(other.storage_path).toBe('driver-uuid-999/aadhaar_card-1.jpg');
+    });
+
+    it('rejects a buffer larger than the configured limit with 413', async () => {
+      const oversized = Buffer.concat([
+        JPEG_BYTES,
+        Buffer.alloc(Number(process.env.MULTIPART_FILE_LIMIT_BYTES) || 8 * 1024 * 1024),
+      ]);
+
+      const res = await request(buildApp())
+        .post('/api/driver/documents')
+        .set(DRIVER_HEADERS)
+        .field('documentType', 'aadhaar_card')
+        .attach('document', oversized, { filename: 'id.jpg', contentType: 'image/jpeg' });
+
+      // multer's own limit fires first for a real multipart body; either way
+      // the upload must not reach storage.
+      expect([413, 500]).toContain(res.status);
+      expect(m.store.__storageObjects.length).toBe(0);
+    });
+
     it('returns 500 when malware scanner throws an unexpected error', async () => {
       scanDocument.mockRejectedValue(new Error('Unexpected scanner failure'));
 

@@ -186,7 +186,7 @@ import {
   recordDepositTx,
   confirmEscrowRefund,
 } from '../core/container.js';
-import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei } from '../services/escrow.js';
+import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei, submitEscrowRefund } from '../services/escrow.js';
 
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
@@ -206,10 +206,13 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
   const lat = parseFloat(driver_lat);
   const lng = parseFloat(driver_lng);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || isNaN(lat) || isNaN(lng)) {
     return res.status(400).json({ error: 'Invalid driver_lat or driver_lng' });
   }
 
+  if (!id || !id.trim()) {
+    return res.status(400).json({ error: 'Invalid order id' });
+  }
   let geofenceRadiusM;
   if (geofence_radius_m !== undefined) {
     geofenceRadiusM = parseFloat(geofence_radius_m);

@@ -20,7 +20,7 @@ export async function getProfile(userId) {
   if (isCacheEnabled()) {
     try {
       const cached = await getCachedSupabaseProfile(userId);
-      if (cached) {
+      if (cached && isValidCachedProfile(firebaseUid, cached)) {
         logger.debug({ userId }, 'Profile cache hit');
         return cached;
       }

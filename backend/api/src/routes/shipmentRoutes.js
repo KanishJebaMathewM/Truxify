@@ -23,6 +23,7 @@ import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { getShipmentDetails } from '../controllers/shipmentController.js';
 import { globalLimiter } from '../middleware/rateLimiter.js';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
@@ -30,6 +31,15 @@ const router = express.Router();
 // GET /api/v1/shipment/details
 // Authenticated — fetches shipment details, ensuring user is authorized.
 // ──────────────────────────────────────────────────────────────────────────
-router.get('/details', authenticate, globalLimiter, getShipmentDetails);
+router.get('/details', authenticate, globalLimiter, async (req, res, next) => {
+  try {
+    await getShipmentDetails(req, res, next);
+  } catch (err) {
+    logger.error({ requestId: req.requestId, err: err.message }, 'Shipment details handler error');
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  }
+});
 
 export default router;

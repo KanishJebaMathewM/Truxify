@@ -1,4 +1,4 @@
-import { supabase } from '../config/db.js';
+import { createUserClient, supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
 export const getShipmentDetails = async (req, res) => {
@@ -8,8 +8,10 @@ export const getShipmentDetails = async (req, res) => {
       return res.status(400).json({ error: 'shipmentId is required' });
     }
 
+    const db = createUserClient(req.token) || supabase;
+
     // Fetch the order (shipment) from the database
-    const { data: shipment, error } = await supabase
+    const { data: shipment, error } = await db
       .from('orders')
       .select('*')
       .eq('id', shipmentId)

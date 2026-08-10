@@ -104,7 +104,7 @@ import {
   getCustomerStats,
   getDriverDetails
 } from '../services/profileService.js';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
 import { auditLog } from '../middleware/auditLog.js';
@@ -755,15 +755,32 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
 });
 
 
+// Great-circle (Haversine) distance in km between pickup and drop coordinates.
+// The orders table has no distance_km column, so distance is derived from the
+// real route coordinates instead.
+function haversineDistanceKm(pickupLat, pickupLng, dropLat, dropLng) {
+  if ([pickupLat, pickupLng, dropLat, dropLng].some(c => c === null || c === undefined)) {
+    return 0;
+  }
+
+  const toRad = deg => (deg * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(dropLat - pickupLat);
+  const dLng = toRad(dropLng - pickupLng);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(pickupLat)) * Math.cos(toRad(dropLat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * earthRadiusKm * Math.asin(Math.sqrt(a));
+}
+
 // GET DRIVER PERFORMANCE STATISTICS
 router.get('/driver/performance-stats', authenticate, requirePolicy('profile:view-statement'), userLimiter, async (req, res) => {
   const userId = req.user.id;
 
   try {
     // 1. Fetch completed orders / trips for stats
-    const { data: orders, error } = await supabase
+    const { data: orders, error } = await (supabaseAdmin || supabase)
       .from('orders')
-      .select('id, base_freight, created_at, status, distance_km, customer_rating, on_time')
+      .select('id, base_freight, created_at, status, pickup_lat, pickup_lng, drop_lat, drop_lng')
       .eq('driver_id', userId)
       .in('status', ['delivered', 'payment_released']);
 
@@ -774,24 +791,34 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
     const trips = orders || [];
     const totalDeliveries = trips.length;
 
-    // Distance — orders without a recorded distance_km are excluded, never guessed
-    const distancedTrips = trips.filter(t => t.distance_km !== null && t.distance_km !== undefined);
-    const totalDistance = distancedTrips.reduce((acc, t) => acc + (Number(t.distance_km) || 0), 0);
+    // Distance — orders has no distance_km column; derive it from the route
+    // coordinates (pickup/drop are always present on orders).
+    const totalDistance = trips.reduce((acc, t) => acc + haversineDistanceKm(t.pickup_lat, t.pickup_lng, t.drop_lat, t.drop_lng), 0);
 
-    // Average rating — orders without a recorded rating are excluded, never guessed
-    const ratedTrips = trips.filter(t => t.customer_rating !== null && t.customer_rating !== undefined);
-    const ratings = ratedTrips.map(t => Number(t.customer_rating)).filter(r => !isNaN(r) && r > 0);
-    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : null;
+    // Average rating — orders has no customer_rating column; derive it from the
+    // ratings table (stars 1-5).
+    const { data: ratingRows, error: ratingError } = await (supabaseAdmin || supabase)
+      .from('ratings')
+      .select('stars')
+      .eq('driver_id', userId);
 
-    // On-time percentage — an unset (null) on_time flag is not proof of being on-time
-    const onTimeTrips = trips.filter(t => t.on_time !== null && t.on_time !== undefined);
-    const onTimeCount = onTimeTrips.filter(t => t.on_time === true).length;
-    const onTimePercentage = onTimeTrips.length > 0 ? Number(((onTimeCount / onTimeTrips.length) * 100).toFixed(1)) : null;
+    let averageRating = null;
+    if (!ratingError && ratingRows && ratingRows.length > 0) {
+      const validRatings = ratingRows.map(r => Number(r.stars)).filter(r => !isNaN(r) && r > 0);
+      if (validRatings.length > 0) {
+        averageRating = Number((validRatings.reduce((a, b) => a + b, 0) / validRatings.length).toFixed(1));
+      }
+    }
+
+    // On-time percentage — no table stores scheduled vs actual arrival times, so
+    // it cannot be computed from real data; report as insufficient data rather
+    // than guessing.
+    const onTimePercentage = null;
 
     const insufficientData = {
-      distanceKm: distancedTrips.length < totalDeliveries,
-      rating: ratedTrips.length === 0,
-      onTime: onTimeTrips.length === 0,
+      distanceKm: trips.length === 0,
+      rating: !ratingRows || ratingRows.length === 0,
+      onTime: true,
     };
 
     // Lifetime earnings (base_freight is stored in paisa; report in rupees)

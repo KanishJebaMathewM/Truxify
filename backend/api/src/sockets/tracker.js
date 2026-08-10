@@ -948,6 +948,12 @@ export async function handleLocationPing(ws, data, req) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat and lng are required'] }));
   }
 
+  // Normalize the alternate latitude/longitude names into the canonical
+  // lat/lng keys so schema validation, sanitization and persistence
+  // downstream all operate on the resolved coordinates.
+  data.lat = lat;
+  data.lng = lng;
+
   // Fix 3 + dead-code fix: run the payload through the schema validator/
   const normalizedForValidation = {
     lat,

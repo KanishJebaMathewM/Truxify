@@ -10,6 +10,7 @@ import {
   DEADHEAD_COLUMNS,
   DEADHEAD_MAX_GAP_DAYS,
   DEADHEAD_MAX_ROWS,
+  EARNINGS_MAX_ROWS,
   EARNINGS_TRIP_COLUMNS,
   buildWeeklyChart,
   countDeadheadTripsSaved,
@@ -54,6 +55,12 @@ describe('column selection', () => {
   it('caps the deadhead scan', () => {
     expect(DEADHEAD_MAX_ROWS).toBeGreaterThan(0);
     expect(Number.isFinite(DEADHEAD_MAX_ROWS)).toBe(true);
+  });
+
+  it('caps the period earnings query at the PostgREST response limit', () => {
+    expect(EARNINGS_MAX_ROWS).toBeGreaterThan(0);
+    expect(EARNINGS_MAX_ROWS).toBeLessThanOrEqual(1000);
+    expect(Number.isFinite(EARNINGS_MAX_ROWS)).toBe(true);
   });
 });
 

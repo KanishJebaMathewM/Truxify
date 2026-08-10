@@ -32,6 +32,13 @@ export const DEADHEAD_MAX_GAP_DAYS = 3;
  */
 export const DEADHEAD_MAX_ROWS = 1000;
 
+/**
+ * Defensive row cap on the period earnings query. PostgREST silently caps a
+ * single response at 1000 rows, so without an explicit limit a driver with
+ * more than 1000 completed trips in a month would get truncated totals.
+ */
+export const EARNINGS_MAX_ROWS = 1000;
+
 /** Supported reporting periods and how far back each looks. */
 const PERIODS = new Set(['day', 'week', 'month']);
 

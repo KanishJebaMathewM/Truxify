@@ -135,6 +135,7 @@ import { requirePolicy } from '../middleware/requirePolicy.js';
 import {
   DEADHEAD_COLUMNS,
   DEADHEAD_MAX_ROWS,
+  EARNINGS_MAX_ROWS,
   EARNINGS_TRIP_COLUMNS,
   buildWeeklyChart,
   countDeadheadTripsSaved,
@@ -1571,7 +1572,8 @@ router.get('/:id/earnings', authenticate, userLimiter, requirePolicy('driver:vie
         .eq('driver_id', id)
         .eq('status', 'completed')
         .gte('trip_date', toDateKey(cutoff))
-        .order('trip_date', { ascending: false }),
+        .order('trip_date', { ascending: false })
+        .limit(EARNINGS_MAX_ROWS),
       supabase
         .from('trips')
         .select('*', { count: 'exact', head: true })

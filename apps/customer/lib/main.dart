@@ -6,9 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'app.dart';
 import 'constants/firebase_config.dart';
 import 'constants/supabase_config.dart';
+import 'providers/language_provider.dart';
 
 void main() async {
   // Ensure Flutter engine is initialized.
@@ -66,7 +68,8 @@ void main() async {
 
   // Wrap runApp in a guarded zone to capture uncaught async errors.
   runZonedGuarded(() {
-    runApp(const TruxifyApp());
+    final languageProvider = LanguageProvider();
+    runApp(TruxifyApp(languageProvider: languageProvider));
   }, (error, stackTrace) {
     CrashReportingService.captureException(
       error,

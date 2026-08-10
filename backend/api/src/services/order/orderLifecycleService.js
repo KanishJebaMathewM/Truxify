@@ -578,7 +578,7 @@ export class OrderLifecycleService {
         // against at deposit time and on release), so it must track
         // total_amount using the same canonical paisa→wei conversion the rest
         // of the escrow pipeline uses.
-        const newAmountWei = paisaToMaticWei(pricing.totalAmount);
+        const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
 
         const updates = {
           drop_address,

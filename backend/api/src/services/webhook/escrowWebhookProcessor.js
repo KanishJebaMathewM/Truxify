@@ -21,7 +21,6 @@ async function findOrderByIdOrDisplayId(orderId) {
   if (!orderId) {
     throw new Error('Missing orderId in escrow webhook payload');
   }
-
   const columns = 'id, order_display_id, driver_id, escrow_status, release_tx_hash, refund_tx_hash';
 
   if (UUID_REGEX.test(orderId)) {
@@ -149,6 +148,9 @@ async function handleBookingCancelled(payload) {
   const now = new Date().toISOString();
 
   if (order.escrow_status === 'refunded') {
+    if (payload.txHash && !order.refund_tx_hash) {
+      await requireDb().from('orders').update({ refund_tx_hash: payload.txHash }).eq('id', order.id);
+    }
     logger.info(`[Webhook] Order ${order.order_display_id} already refunded — duplicate delivery ignored.`);
     return;
   }
@@ -184,6 +186,13 @@ async function handleWithdrawalSettled(payload) {
   // If the order already reflects the intended terminal state, short-circuit.
   const targetStatus = isRefund ? 'refunded' : 'released';
   if (order.escrow_status === targetStatus) {
+    if (txHash) {
+      if (isRefund && !order.refund_tx_hash) {
+        await requireDb().from('orders').update({ refund_tx_hash: txHash }).eq('id', order.id);
+      } else if (!isRefund && !order.release_tx_hash) {
+        await requireDb().from('orders').update({ release_tx_hash: txHash }).eq('id', order.id);
+      }
+    }
     if (!isRefund) {
       await reconcileWalletLedger(order, txHash);
     }
@@ -206,7 +215,11 @@ async function handleWithdrawalSettled(payload) {
   const { error } = await requireDb()
     .from('orders')
     .update({
-      ...settlement,
+      escrow_status: isRefund ? 'refunded' : 'released',
+      release_tx_hash: isRefund ? undefined : (txHash || order.release_tx_hash || null),
+      refund_tx_hash: isRefund ? (txHash || order.refund_tx_hash || null) : undefined,
+      escrow_released_at: isRefund ? undefined : now,
+      escrow_release_error: isRefund ? undefined : null,
       updated_at: now,
     })
     .eq('id', order.id)

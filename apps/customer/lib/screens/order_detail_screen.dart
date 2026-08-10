@@ -208,6 +208,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     ? orderMap['profiles']['phone']?.toString()
                     : null),
             escrowStatus: orderMap['escrow_status']?.toString(),
+            pickupLat: (orderMap['pickup_lat'] as num?)?.toDouble(),
+            pickupLng: (orderMap['pickup_lng'] as num?)?.toDouble(),
+            dropLat: (orderMap['drop_lat'] as num?)?.toDouble(),
+            dropLng: (orderMap['drop_lng'] as num?)?.toDouble(),
           );
           // Trigger rating flow if status becomes completed and rating dialog hasn't been shown yet
           final orderStatus = orderMap['status']?.toString() ?? '';
@@ -654,6 +658,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 draft: RouteDraft(
                   pickup: pickup,
                   drop: drop,
+                  pickupLat: _currentOrder.pickupLat,
+                  pickupLng: _currentOrder.pickupLng,
+                  dropLat: _currentOrder.dropLat,
+                  dropLng: _currentOrder.dropLng,
                   dateLabel: _currentOrder.date,
                   goodsType: _currentOrder.goodsType ?? 'General',
                   weightTonnes: _currentOrder.weightTonnes ?? '0',

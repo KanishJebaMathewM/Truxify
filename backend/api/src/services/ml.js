@@ -158,8 +158,12 @@ export async function predictPrice({
     trafficMultiplier = 1.0,
 } = {}) {
   guardMlApiKey();
-  
-  const cacheKey = JSON.stringify({ distanceKm, cargoWeightKg, truckType, routeOrigin, routeDestination, trafficMultiplier });
+
+  const safeMultiplier = (typeof trafficMultiplier === 'number' && Number.isFinite(trafficMultiplier) && trafficMultiplier > 0)
+      ? Math.min(Math.max(trafficMultiplier, 0.5), 3.0)
+      : 1.0;
+
+  const cacheKey = JSON.stringify({ distanceKm, cargoWeightKg, truckType, routeOrigin, routeDestination, trafficMultiplier: safeMultiplier });
   const cached = priceCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
@@ -171,7 +175,7 @@ export async function predictPrice({
       truck_type: truckType,
       route_origin: routeOrigin,
       route_destination: routeDestination,
-      traffic_multiplier: trafficMultiplier,
+      traffic_multiplier: safeMultiplier,
   };
 
   const response = await fetch(url, {
@@ -183,25 +187,42 @@ export async function predictPrice({
 
   const raw = await handleResponse(response);
 
-  const validated = validatePricePrediction(raw);
-  if (!validated.ok) {
+  const initialValidation = validatePricePrediction(raw);
+  if (!initialValidation.ok) {
       logger.warn({
-          reason: validated.reason,
-          detail: validated.detail,
+          reason: initialValidation.reason,
+          detail: initialValidation.detail,
           response_keys: raw && typeof raw === 'object' ? Object.keys(raw) : typeof raw,
       }, '[ML] Price prediction rejected by validator');
-      throw new Error(`[ML] Invalid prediction: ${validated.reason} — ${validated.detail}`);
+      throw new Error(`[ML] Invalid prediction: ${initialValidation.reason} — ${initialValidation.detail}`);
+  }
+
+  const adjustedPrice = initialValidation.validated.estimated_price * safeMultiplier;
+  const revalidated = validatePricePrediction({
+      ...raw,
+      estimated_price: adjustedPrice,
+      min_price: typeof raw?.min_price === 'number' ? raw.min_price * safeMultiplier : undefined,
+      max_price: typeof raw?.max_price === 'number' ? raw.max_price * safeMultiplier : undefined,
+  });
+
+  if (!revalidated.ok) {
+      logger.warn({
+          reason: revalidated.reason,
+          detail: revalidated.detail,
+          adjusted_price: adjustedPrice,
+      }, '[ML] Surge-adjusted price prediction rejected by validator');
+      throw new Error(`[ML] Invalid prediction: ${revalidated.reason} — ${revalidated.detail}`);
   }
 
   logger.debug({
-      estimated_price_inr: validated.validated.estimated_price,
-      confidence: validated.validated.confidence,
+      estimated_price_inr: revalidated.validated.estimated_price,
+      confidence: revalidated.validated.confidence,
   }, '[ML] Price prediction validated successfully');
 
   const result = {
-      ...validated.validated,
-      estimatedPricePaisa: convertToPaisa(validated.validated.estimated_price * trafficMultiplier),
-      estimatedPriceInr: validated.validated.estimated_price * trafficMultiplier,
+      ...revalidated.validated,
+      estimatedPricePaisa: convertToPaisa(revalidated.validated.estimated_price),
+      estimatedPriceInr: revalidated.validated.estimated_price,
   };
   priceCache.set(cacheKey, result);
   return result;

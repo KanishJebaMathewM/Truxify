@@ -435,6 +435,18 @@ export function createSupabaseMock(initialStore = {}) {
     supabase,
     store,
     calls,
+    /**
+     * Return the mock to its initial state. Needed by suites that build the
+     * mock once at module scope — the usual shape when it has to be visible
+     * to a hoisted vi.mock factory — and clear it between tests instead of
+     * constructing a fresh one.
+     */
+    reset() {
+      for (const table of Object.keys(store)) delete store[table];
+      Object.assign(store, initialStore);
+      calls.length = 0;
+      for (const key of Object.keys(programmed)) delete programmed[key];
+    },
     programError(msg = 'mock error')    { programmed.nextError    = { message: msg }; },
     programErrorFor(table, mode, msg = 'mock error') {
       programmed.matchingErrors ??= [];

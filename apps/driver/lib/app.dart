@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'controllers/app_controller.dart';
 import 'core/app_routes.dart';
-import 'l10n/app_localizations.dart';
+import 'l10n/app_localizations.dart' as app_loc;
+import 'providers/language_provider.dart';
 import 'screens/documents_screen.dart';
 import 'screens/destination_picker_screen.dart';
 import 'screens/load_detail_screen.dart';
@@ -19,7 +21,8 @@ import 'theme/app_theme.dart';
 import 'widgets/app_page_route.dart';
 
 class TruxifyApp extends StatefulWidget {
-  const TruxifyApp({super.key});
+  const TruxifyApp({super.key, this.languageProvider});
+  final LanguageProvider? languageProvider;
 
   @override
   State<TruxifyApp> createState() => _TruxifyAppState();
@@ -27,13 +30,16 @@ class TruxifyApp extends StatefulWidget {
 
 class _TruxifyAppState extends State<TruxifyApp> {
   late final TruxifyController _controller;
+  late final LanguageProvider _languageProvider;
 
   @override
   void initState() {
     super.initState();
 
     _controller = TruxifyController();
+    _languageProvider = widget.languageProvider ?? LanguageProvider();
     _controller.addListener(_onControllerChanged);
+    _languageProvider.addListener(_onControllerChanged);
     _controller.loadThemeMode();
     _controller.loadLocale();
   }
@@ -45,6 +51,7 @@ class _TruxifyAppState extends State<TruxifyApp> {
   @override
   void dispose() {
     _controller.removeListener(_onControllerChanged);
+    _languageProvider.removeListener(_onControllerChanged);
     _controller.dispose();
     super.dispose();
   }
@@ -85,6 +92,31 @@ class _TruxifyAppState extends State<TruxifyApp> {
           Locale('kn', ''),
           Locale('mr', ''),
         ],
+    return LanguageProviderScope(
+      provider: _languageProvider,
+      child: TruxifyScope(
+        controller: _controller,
+        child: ListenableBuilder(
+          listenable: _languageProvider,
+          builder: (context, _) {
+            return MaterialApp(
+            debugShowCheckedModeBanner: false,
+            onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
+            theme: TruxifyTheme.light(),
+            darkTheme: TruxifyTheme.dark(),
+            themeMode: _controller.themeMode,
+            locale: _languageProvider.currentLocale,
+            localizationsDelegates: const [
+              AppLocalizations.delegate,
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            supportedLocales: const [
+              Locale('en'),
+              Locale('hi'),
+              Locale('ta'),
+            ],
         initialRoute: AppRoutes.splash,
         onGenerateRoute: (settings) {
           switch (settings.name) {
@@ -157,7 +189,9 @@ class _TruxifyAppState extends State<TruxifyApp> {
           }
         },
         navigatorObservers: const [],
-      ),
+      );
+    },
+    ),
     );
   }
 }

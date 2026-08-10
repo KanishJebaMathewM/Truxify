@@ -27,7 +27,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from app.models.eta_prediction import eta_predictor
-from fastapi import HTTPException
 
 from app.models.demand_forecast import (
     predict_demand,
@@ -101,11 +100,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["X-API-Key", "Content-Type"],
 )
-
-
-@app.get("/sentry-debug")
-async def trigger_error():
-    division_by_zero = 1 / 0
 
 
 @app.on_event("startup")

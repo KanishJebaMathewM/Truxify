@@ -337,7 +337,7 @@ async function startOrderService() {
         }
     });
 
-    logger.info(`âœ… Order GraphQL service running at ${url}`);
+   logger.info(`OK Order GraphQL service running at ${url}`);
     return { url };
 }
 

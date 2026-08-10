@@ -85,7 +85,7 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     logger.info('✅ Polygon Escrow contract client initialised.');
     logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
-    logger.error('❌ Failed to initialise Escrow contract client:', err.message)
+    logger.error({ event: 'ESCROW_INIT_ERROR', error: err && err.message }, 'Failed to initialise Escrow contract client')
     Sentry.captureException(err)
   }
 } else {
@@ -131,7 +131,7 @@ export async function validateEscrowSetup () {
     }
     logger.info(`[escrow] ✅ Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
   } catch (err) {
-    logger.error(`[escrow] ❌ Failed to query bytecode at ${address}: ${err.message}`)
+    logger.error({ event: 'ESCROW_BYTECODE_QUERY_ERROR', address, error: err && err.message }, `[escrow] Failed to query bytecode at ${address}`)
     return false
   }
 

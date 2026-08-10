@@ -25,14 +25,14 @@ export default function () {
           lng: 77.1025,
         })
       );
-
-      socket.setTimeout(() => {
-        socket.close();
-      }, 10000);
     });
+
+    socket.setTimeout(() => {
+      socket.close();
+    }, 10000);
   });
 
   check(res, {
-    'connected successfully': (r) => r && r.status === 101,
+    'websocket connection status is 101': (r) => r && r.status === 101,
   });
 }

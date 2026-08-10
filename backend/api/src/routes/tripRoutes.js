@@ -141,6 +141,66 @@ function deepSanitize(obj, keys) {
   return clean;
 }
 
+/**
+ * Replays an offline 'markStopCompleted' event so a stop completed while the
+ * driver was offline is actually persisted once the batch syncs. Mirrors the
+ * online PUT /api/trips/:id/stops/:stopId/complete behaviour.
+ */
+async function replayMarkStopCompleted(tripId, payload) {
+  const stopId = payload?.stopId;
+  if (!stopId) {
+    logger.warn('[SyncEngine] markStopCompleted event missing stopId');
+    return;
+  }
+
+  const { data: stop, error: stopErr } = await supabaseAdmin
+    .from('trip_stops')
+    .select('id, is_completed')
+    .eq('id', stopId)
+    .eq('trip_display_id', tripId)
+    .maybeSingle();
+  if (stopErr) {
+    logger.error('[SyncEngine] Failed to fetch stop for markStopCompleted replay:', stopErr.message);
+    return;
+  }
+  if (!stop || stop.is_completed) return;
+
+  const { error: updateErr } = await supabaseAdmin
+    .from('trip_stops')
+    .update({
+      is_completed: true,
+      is_current: false,
+      status_label: 'Delivered',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', stop.id);
+  if (updateErr) {
+    logger.error('[SyncEngine] Failed to complete stop during replay:', updateErr.message);
+    return;
+  }
+
+  // Advance the current-stop marker to the next uncompleted stop.
+  const { data: nextStops, error: nextErr } = await supabaseAdmin
+    .from('trip_stops')
+    .select('id')
+    .eq('trip_display_id', tripId)
+    .eq('is_completed', false)
+    .order('sort_order', { ascending: true })
+    .limit(1);
+  if (nextErr) {
+    logger.error('[SyncEngine] Failed to resolve next stop during replay:', nextErr.message);
+  } else if (nextStops && nextStops.length > 0) {
+    await supabaseAdmin
+      .from('trip_stops')
+      .update({
+        is_current: true,
+        status_label: 'In Progress',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', nextStops[0].id);
+  }
+}
+
 // Schema for an individual Trip Event from the Flutter offline database
 const tripEventSchema = z.object({
   id: z.string().min(1, "Event ID is required"),
@@ -266,20 +326,28 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
       const tripIds = [...new Set(events.map(event => event.trip_id).filter(Boolean))];
 
       if (tripIds.length > 0) {
+        // Trip ids sent by the app are trip display ids ('TX-' + order display id),
+        // not the orders.id uuid. Map them back to the bare order display id before
+        // looking up the owning order, otherwise every batch is rejected with 403.
+        const orderDisplayIds = tripIds.map(tripId =>
+          typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId
+        );
+
         const { data: ownedOrders, error: ownershipError } = await supabase
           .from('orders')
-          .select('id, driver_id, customer_id')
-          .in('id', tripIds);
+          .select('order_display_id, driver_id, customer_id')
+          .in('order_display_id', orderDisplayIds);
 
         if (ownershipError) {
           logger.error('[SyncEngine] Failed to verify trip ownership:', ownershipError.message);
           return res.status(500).json({ error: 'Internal Server Error' });
         }
 
-        const orderById = new Map((ownedOrders || []).map(order => [order.id, order]));
+        const orderByDisplayId = new Map((ownedOrders || []).map(order => [order.order_display_id, order]));
 
         for (const tripId of tripIds) {
-          const order = orderById.get(tripId);
+          const orderDisplayId = typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId;
+          const order = orderByDisplayId.get(orderDisplayId);
           const isDriver = order?.driver_id === userId;
           const isCustomer = order?.customer_id === userId;
           if (!order || (!isDriver && !isCustomer)) {
@@ -306,14 +374,6 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     }
 
     const recordsToInsert = events.map(event => {
-      const lat = event.payload?.lat !== undefined ? Number(event.payload.lat) : null;
-      const lng = event.payload?.lng !== undefined ? Number(event.payload.lng) : null;
-
-      if (lat === null || lng === null || !Number.isFinite(lat) || !Number.isFinite(lng)) {
-        logger.warn('[SyncEngine] Skipping event with invalid coordinates:', { eventId: event.id, lat, lng });
-        return null;
-      }
-
       const safeMetadata = deepSanitize(event.payload, SENSITIVE_FIELDS);
 
       return {
@@ -322,28 +382,32 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
         trip_id: event.trip_id || null,
         event_type: event.type,
         event_timestamp: event.occurred_at,
-        latitude: lat,
-        longitude: lng,
+        latitude: event.payload?.lat !== undefined ? Number(event.payload.lat) : null,
+        longitude: event.payload?.lng !== undefined ? Number(event.payload.lng) : null,
         metadata: safeMetadata,
         created_at: new Date().toISOString()
       };
     });
 
     // 3. Bulk Insert / Upsert into the trip_events table
-    // Filter out null records (events with invalid coordinates)
-    const validRecords = recordsToInsert.filter(Boolean);
-
-    // 4. Bulk Insert / Upsert into the trip_events table
     // Upsert ensures that if a specific event ID already exists, it just updates it
     // rather than failing the whole batch.
     const { error: insertError } = await supabase
       .from('trip_events')
-      .upsert(validRecords, { onConflict: 'event_id' });
+      .upsert(recordsToInsert, { onConflict: 'event_id' });
 
     if (insertError) {
       logger.error('[SyncEngine] Bulk Insert Failed:', insertError.message);
       // Return 500 so the Flutter app knows to apply exponential backoff and retry later
       return res.status(500).json({ error: 'Database failed to process batch.' });
+    }
+
+    // 3.5 Replay actionable trip events (e.g. offline stop completions) so an
+    // event queued while offline has its effect applied once connectivity returns.
+    for (const event of events) {
+      if (event.type === 'markStopCompleted' && event.trip_id) {
+        await replayMarkStopCompleted(event.trip_id, event.payload || {});
+      }
     }
 
     // 4. Log the successful batch using the idempotency key
@@ -498,10 +562,29 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
       eventsQuery = eventsQuery.eq('event_type', type);
     }
 
-    if (min_lat !== undefined) eventsQuery = eventsQuery.gte('latitude', Number(min_lat));
-    if (max_lat !== undefined) eventsQuery = eventsQuery.lte('latitude', Number(max_lat));
-    if (min_lng !== undefined) eventsQuery = eventsQuery.gte('longitude', Number(min_lng));
-    if (max_lng !== undefined) eventsQuery = eventsQuery.lte('longitude', Number(max_lng));
+    const coordParams = [
+      { raw: min_lat, min: -90, max: 90, label: 'min_lat' },
+      { raw: max_lat, min: -90, max: 90, label: 'max_lat' },
+      { raw: min_lng, min: -180, max: 180, label: 'min_lng' },
+      { raw: max_lng, min: -180, max: 180, label: 'max_lng' },
+    ];
+    const parsedCoords = {};
+    for (const { raw, min, max, label } of coordParams) {
+      if (raw === undefined) continue;
+      if (typeof raw !== 'string' || raw.trim() === '') {
+        return res.status(400).json({ error: `Query parameter ${label} must be a number.` });
+      }
+      const parsed = Number(raw);
+      if (!Number.isFinite(parsed) || parsed < min || parsed > max) {
+        return res.status(400).json({ error: `Query parameter ${label} must be a number within [${min}, ${max}].` });
+      }
+      parsedCoords[label] = parsed;
+    }
+
+    if (parsedCoords.min_lat !== undefined) eventsQuery = eventsQuery.gte('latitude', parsedCoords.min_lat);
+    if (parsedCoords.max_lat !== undefined) eventsQuery = eventsQuery.lte('latitude', parsedCoords.max_lat);
+    if (parsedCoords.min_lng !== undefined) eventsQuery = eventsQuery.gte('longitude', parsedCoords.min_lng);
+    if (parsedCoords.max_lng !== undefined) eventsQuery = eventsQuery.lte('longitude', parsedCoords.max_lng);
 
     const { data: events, error: eventsErr, count } = await eventsQuery
       .order('event_timestamp', { ascending: isAscending })

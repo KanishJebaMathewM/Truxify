@@ -23,6 +23,19 @@ const DEFAULT_RETRY_BASE_DELAY_MS = 500;
 const CACHE_TTL_SECONDS = 86400;
 const ROUTE_CACHE_TTL_SECONDS = 30;
 
+export const validateCoordinates = (pickupLat, pickupLng, dropLat, dropLng) => {
+  if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || 
+      !Number.isFinite(dropLat) || !Number.isFinite(dropLng)) {
+    return 'Invalid coordinates provided.';
+  }
+  if (pickupLat < -90 || pickupLat > 90) return 'pickup_lat must be between -90 and 90.';
+  if (pickupLng < -180 || pickupLng > 180) return 'pickup_lng must be between -180 and 180.';
+  if (dropLat < -90 || dropLat > 90) return 'drop_lat must be between -90 and 90.';
+  if (dropLng < -180 || dropLng > 180) return 'drop_lng must be between -180 and 180.';
+  
+  return null;
+};
+
 function parsePositiveNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
@@ -65,7 +78,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
         if (parsed !== null) return parsed;
       }
     } catch (err) {
-      logger.error('[osrm] Redis get error:', err.message);
+      logger.error({ event: 'OSRM_REDIS_GET_ERROR', error: err && err.message }, '[osrm] Redis get error');
     }
   }
 
@@ -109,7 +122,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
         try {
           await redisClient.set(cacheKey, JSON.stringify(result), 'EX', CACHE_TTL_SECONDS);
         } catch (err) {
-          logger.error('[osrm] Redis set error:', err.message);
+          logger.error({ event: 'OSRM_REDIS_SET_ERROR', error: err && err.message }, '[osrm] Redis set error');
         }
       }
 
@@ -175,7 +188,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
         if (parsed !== null) return parsed;
       }
     } catch (err) {
-      logger.error('[osrm] Redis get error (geometry):', err.message);
+      logger.error({ event: 'OSRM_REDIS_GET_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Redis get error (geometry)');
     }
   }
 

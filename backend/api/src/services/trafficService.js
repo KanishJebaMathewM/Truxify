@@ -47,7 +47,7 @@ export async function getLiveTrafficMultiplier(pickupLat, pickupLng) {
 
     return 1.0;
   } catch (error) {
-    logger.error(`[TrafficService] Error fetching live traffic data: ${error.message}`);
+    logger.error({ err: error }, '[TrafficService] Error fetching live traffic data');
     // Fail open, return normal multiplier
     return 1.0;
   }

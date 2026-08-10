@@ -168,12 +168,15 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen>
         dropLat: finalDropLat,
         dropLng: finalDropLng,
         pickupTime: widget.draft.dateLabel,
+        pickupDate: widget.draft.pickupDate,
         goodsType: widget.draft.goodsType + (_isPassengerMode ? ' + Passenger' : ''),
         weightTonnes: double.tryParse(widget.draft.weightTonnes) ?? 0,
         paymentMethodId: _selectedPayment?.id,
         requiresRefrigeration: widget.draft.requiresRefrigeration ?? false,
         targetTemperatureMin: widget.draft.targetTemperatureMin,
         targetTemperatureMax: widget.draft.targetTemperatureMax,
+        driverId: widget.truck.driverId,
+        truckId: widget.truck.truckId,
       );
 
       _createdOrderId = orderId;

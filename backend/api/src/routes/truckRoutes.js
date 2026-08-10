@@ -92,6 +92,11 @@ import { predictPrice } from '../services/ml.js';
 import { getLiveTrafficMultiplier } from '../services/trafficService.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import logger from '../middleware/logger.js';
+import { FuelAdvisorService } from '../services/fuelAdvisorService.js';
+import { WeatherService } from '../services/weatherService.js';
+
+const weatherService = new WeatherService({ logger });
+const fuelAdvisorService = new FuelAdvisorService({ supabase, weatherService, logger });
 
 const DEFAULT_TRUCK_TYPES = ['Open Body', 'Closed Body', 'Container', 'Refrigerated'];
 
@@ -578,11 +583,11 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
               $maxDistance: maxDistanceMeters
             }
           }
-        }).toArray();
+        }).limit(200).toArray();
 
         nearbyDriverIds = [...new Set(nearbyTelemetry.map(t => t.driver_id))];
       } catch (mongoErr) {
-        logger.error('MongoDB telemetry search error:', mongoErr.message);
+        logger.error({ event: 'TRUCK_MONGO_TELEMETRY_ERROR', requestId: req.requestId || req.id, error: mongoErr && mongoErr.message }, 'MongoDB telemetry search error');
       }
     }
 
@@ -601,7 +606,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       .in('user_id', nearbyDriverIds);
 
     if (driversErr) {
-      logger.error('Driver search error:', driversErr.message);
+      logger.error({ event: 'TRUCK_DRIVER_SEARCH_ERROR', requestId: req.requestId || req.id, error: driversErr && driversErr.message }, 'Driver search error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -618,12 +623,12 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     ]);
 
     if (trucksRes.error) {
-      logger.error('Truck enrichment lookup error:', trucksRes.error.message);
+      logger.error({ event: 'TRUCK_ENRICHMENT_ERROR', requestId: req.requestId || req.id, error: trucksRes.error && trucksRes.error.message }, 'Truck enrichment lookup error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
     if (profilesRes.error) {
-      logger.error('Driver profile enrichment lookup error:', profilesRes.error.message);
+      logger.error({ event: 'TRUCK_PROFILE_ENRICHMENT_ERROR', requestId: req.requestId || req.id, error: profilesRes.error && profilesRes.error.message }, 'Driver profile enrichment lookup error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -689,7 +694,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
 
     res.json(responseResults);
   } catch (err) {
-    logger.error('Truck search error:', err.message);
+    logger.error({ event: 'TRUCK_SEARCH_ERROR', requestId: req.requestId || req.id, error: err && err.message }, 'Truck search error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -746,5 +751,75 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
 });
 
 export default router;
+
+// ============================================================================
+// INTELLIGENT FUEL ADVISOR
+// ============================================================================
+/**
+ * @openapi
+ * /api/trucks/{id}/fuel-advisor:
+ *   get:
+ *     tags: [Trucks]
+ *     summary: Intelligent Fuel Advisor
+ *     description: Recommends the best biodiesel blend based on upcoming weather and recent engine load profile.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Truck ID
+ *       - in: query
+ *         name: destination_lat
+ *         required: true
+ *         schema:
+ *           type: number
+ *         description: Latitude of destination
+ *       - in: query
+ *         name: destination_lng
+ *         required: true
+ *         schema:
+ *           type: number
+ *         description: Longitude of destination
+ *     responses:
+ *       200:
+ *         description: Recommendation object
+ *       400:
+ *         description: Missing or invalid destination coordinates
+ */
+router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
+  const truckId = req.params.id;
+  const destinationLat = Number(req.query.destination_lat);
+  const destinationLng = Number(req.query.destination_lng);
+
+  if (!Number.isFinite(destinationLat) || !Number.isFinite(destinationLng)) {
+    return res.status(400).json({ error: 'Missing or invalid destination_lat or destination_lng' });
+  }
+
+  // Ensure truck belongs to the caller (if driver) or caller is admin
+  if (req.user.role === 'driver') {
+    const { data: truck, error: truckErr } = await supabase
+      .from('trucks')
+      .select('id')
+      .eq('id', truckId)
+      .eq('driver_id', req.user.id)
+      .single();
+
+    if (truckErr || !truck) {
+      return res.status(403).json({ error: 'Forbidden: Truck does not belong to you or does not exist' });
+    }
+  }
+
+  try {
+    const recommendation = await fuelAdvisorService.getFuelRecommendation(truckId, destinationLat, destinationLng);
+    return res.status(200).json(recommendation);
+  } catch (error) {
+    logger.error(`[fuel-advisor] Error computing recommendation for truck ${truckId}: ${error.message}`);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 // Resolves #2053: Prevent race conditions in truck allocation

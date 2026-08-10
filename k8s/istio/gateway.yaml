@@ -1,6 +1,3 @@
-
-﻿apiVersion: networking.istio.io/v1beta1
-
 apiVersion: networking.istio.io/v1beta1
 
 kind: Gateway
@@ -30,7 +27,8 @@ spec:
     - "*.truxify.com"
     tls:
       mode: SIMPLE
-      credentialName: truxify-cert---
+      credentialName: truxify-cert
+---
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
 metadata:
@@ -50,7 +48,7 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 5000
+          number: 80
   - match:
     - uri:
         prefix: /docs
@@ -58,4 +56,4 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 5000
+          number: 80

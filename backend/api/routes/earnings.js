@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabase } from '../src/config/db.js';
+import { createUserClient } from '../src/config/db.js';
 import { authenticate } from '../src/middleware/auth.js';
 import { userLimiter } from '../src/middleware/rateLimiter.js';
 import { requirePolicy } from '../src/middleware/requirePolicy.js';
@@ -57,7 +57,12 @@ router.get(
     try {
       const periodStart = getPeriodStart(period);
 
-      const { data: trips, error } = await supabase
+      // Query trips through the caller's user-scoped client so the trips RLS
+      // policy (driver_id = get_profile_id()) sees the authenticated driver's
+      // identity. The shared anon client has no identity and can never return
+      // the driver's rows.
+      const userClient = createUserClient(req.token);
+      const { data: trips, error } = await userClient
         .from('trips')
         .select('trip_display_id, trip_date, distance, total_earnings, fuel_deducted')
         .eq('driver_id', driverId)

@@ -10,14 +10,14 @@ class MEVService {
         this.escrowAddress = process.env.MEV_ESCROW_ADDRESS;
         
         this.escrowABI = [
-            'function createEscrow(address driver, bytes32 secretHash) external payable',
-            'function releaseEscrowWithProof(uint256 escrowId, bytes32 secret, bytes calldata proof) external',
-            'function disputeEscrowWithProof(uint256 escrowId, bytes calldata proof) external',
-            'function createCommitment(bytes32 secretHash) external',
-            'function revealCommitment(bytes32 secret) external',
-            'function submitFlashbotsBundle(uint256 escrowId, bytes calldata bundleData) external',
-            'function getMEVProtectionLevel(uint256 escrowId) external view returns (uint256)',
-            'function getEscrow(uint256 escrowId) external view returns (tuple(address,address,uint256,bool,bool,uint256,uint256,bytes32,uint256,bool,bytes32))'
+            'function createProtectedDeposit(address payable driver, bytes32 secretHash) external payable returns (uint256)',
+            'function releaseDepositPrivate(uint256 depositId, bytes32 preimage) external',
+            'function refundDeposit(uint256 depositId) external',
+            'function depositCount() external view returns (uint256)',
+            'function deposits(uint256 depositId) external view returns (address shipper, address driver, uint256 amount, bool released, uint256 blockMin, bytes32 secretHash)',
+            'event DepositCreated(uint256 indexed depositId, address indexed shipper, address indexed driver, uint256 amount)',
+            'event DepositReleasedMEV(uint256 indexed depositId, address indexed driver, uint256 amount)',
+            'event DepositRefunded(uint256 indexed depositId, address indexed shipper, uint256 amount)'
         ];
 
         this.escrow = new ethers.Contract(
@@ -42,23 +42,20 @@ class MEVService {
                 ethers.toUtf8Bytes(secret)
             );
             
-            const tx = await this.escrow.createCommitment(secretHash, {
-                gasLimit: 100000
-            });
-            const receipt = await tx.wait();
-            
-            // Store commitment
+            // Store commitment. The contract does not expose a commitment
+            // function; the secretHash is embedded in the deposit via
+            // createProtectedDeposit.
             await this.storeCommitment({
                 userId,
                 secretHash,
-                txHash: receipt.hash
+                txHash: null
             });
             
             logger.info(`✅ Commitment created for user ${userId}`);
             return {
                 success: true,
                 secretHash,
-                txHash: receipt.hash
+                txHash: null
             };
         } catch (error) {
             logger.error('Commitment creation failed:', error);
@@ -78,11 +75,10 @@ class MEVService {
                 ethers.toUtf8Bytes(secret)
             );
             
-            // Create escrow with MEV protection. The contract's createEscrow
-            // takes (address driver, bytes32 secretHash) — the secretHash is
-            // stored on-chain as the escrow's commit hash, so no separate
-            // commit hash argument is passed.
-            const tx = await this.escrow.createEscrow(
+            // Create MEV-protected deposit. The contract exposes
+            // createProtectedDeposit(address payable driver, bytes32 secretHash);
+            // the secretHash is stored on-chain as the deposit's commit hash.
+            const tx = await this.escrow.createProtectedDeposit(
                 driver,
                 secretHash,
                 { 
@@ -92,8 +88,8 @@ class MEVService {
             );
             const receipt = await tx.wait();
             
-            // Get escrow ID from logs
-            const escrowId = await this.getEscrowCount();
+            // Get real deposit ID from the emitted DepositCreated event
+            const escrowId = this._parseDepositCreated(receipt);
             
             await this.storeEscrow({
                 escrowId,
@@ -119,14 +115,27 @@ class MEVService {
         }
     }
 
+    _parseDepositCreated(receipt) {
+        for (const log of receipt.logs) {
+            try {
+                const parsed = this.escrow.interface.parseLog(log);
+                if (parsed && parsed.name === 'DepositCreated') {
+                    return parsed.args.depositId.toString();
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        throw new Error('DepositCreated event not found in receipt');
+    }
+
     // ============ Release with MEV Protection ============
 
-    async releaseEscrow(escrowId, secret, proof) {
+    async releaseEscrow(escrowId, secret) {
         try {
-            const tx = await this.escrow.releaseEscrowWithProof(
+            const tx = await this.escrow.releaseDepositPrivate(
                 escrowId,
                 secret,
-                proof,
                 { gasLimit: 150000 }
             );
             const receipt = await tx.wait();
@@ -201,10 +210,10 @@ class MEVService {
 
     async getMEVProtectionLevel(escrowId) {
         try {
-            const level = await this.escrow.getMEVProtectionLevel(escrowId);
+            const deposit = await this.escrow.deposits(escrowId);
             return {
                 escrowId,
-                protectionLevel: level.toString(),
+                protectionLevel: deposit.released ? 0 : 1,
                 timestamp: new Date().toISOString()
             };
         } catch (error) {
@@ -217,7 +226,7 @@ class MEVService {
 
     async getEscrowCount() {
         try {
-            const count = await this.escrow.escrowCounter();
+            const count = await this.escrow.depositCount();
             return count.toString();
         } catch (error) {
             logger.error('Escrow count fetch failed:', error);
@@ -227,19 +236,14 @@ class MEVService {
 
     async getEscrowDetails(escrowId) {
         try {
-            const escrow = await this.escrow.getEscrow(escrowId);
+            const escrow = await this.escrow.deposits(escrowId);
             return {
                 customer: escrow[0],
                 driver: escrow[1],
                 amount: ethers.formatEther(escrow[2]),
                 released: escrow[3],
-                disputed: escrow[4],
-                createdAt: escrow[5].toString(),
-                releasedAt: escrow[6].toString(),
-                commitHash: escrow[7],
-                revealDeadline: escrow[8].toString(),
-                revealed: escrow[9],
-                secret: escrow[10]
+                blockMin: escrow[4].toString(),
+                secretHash: escrow[5]
             };
         } catch (error) {
             logger.error('Escrow details fetch failed:', error);

@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const PAYMENT_RECEIVED_EVENT = 'PaymentReceived(address indexed driver, uint256 amount, uint256 timestamp)';
@@ -264,7 +264,7 @@ class BlockchainMonitor {
 
   async storeEvent(alert) {
     try {
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('blockchain_monitoring_events')
         .insert([{
           type: alert.type,

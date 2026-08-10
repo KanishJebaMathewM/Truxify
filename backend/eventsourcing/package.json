@@ -1,12 +1,24 @@
 {
   "name": "truxify-eventsourcing",
   "version": "1.0.0",
-  "dependencies": {
-    "uuid": "^14.0.1"
-  },
+  "description": "Truxify event-sourcing store: optimistic concurrency, snapshot-based replay and read-model rebuilds",
   "type": "module",
   "main": "event-store.js",
+  "exports": {
+    ".": "./event-store.js",
+    "./core": "./event-sourcing-core.js",
+    "./errors": "./errors.js"
+  },
+  "engines": {
+    "node": ">=18.13.0"
+  },
   "scripts": {
-    "start": "node event-store.js"
+    "start": "node event-store.js",
+    "dev": "node --watch event-store.js",
+    "test": "node --test test/",
+    "test:watch": "node --test --watch test/"
+  },
+  "dependencies": {
+    "uuid": "^14.0.1"
   }
 }

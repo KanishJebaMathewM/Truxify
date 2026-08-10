@@ -32,22 +32,22 @@ services:
       SHARD_NORTH_PORT: 5432
       SHARD_NORTH_DB: truxify_north
       SHARD_NORTH_USER: postgres
-      SHARD_NORTH_PASSWORD: ${SHARD_PASSWORD:?SHARD_PASSWORD is required}
+      SHARD_PASSWORD_NORTH: ${SHARD_PASSWORD:?SHARD_PASSWORD is required}
       SHARD_SOUTH_HOST: shard-south
       SHARD_SOUTH_PORT: 5432
       SHARD_SOUTH_DB: truxify_south
       SHARD_SOUTH_USER: postgres
-      SHARD_SOUTH_PASSWORD: ${SHARD_PASSWORD:?SHARD_PASSWORD is required}
+      SHARD_PASSWORD_SOUTH: ${SHARD_PASSWORD:?SHARD_PASSWORD is required}
       SHARD_EAST_HOST: shard-east
       SHARD_EAST_PORT: 5432
       SHARD_EAST_DB: truxify_east
       SHARD_EAST_USER: postgres
-      SHARD_EAST_PASSWORD: ${SHARD_PASSWORD:?SHARD_PASSWORD is required}
+      SHARD_PASSWORD_EAST: ${SHARD_PASSWORD:?SHARD_PASSWORD is required}
       SHARD_WEST_HOST: shard-west
       SHARD_WEST_PORT: 5432
       SHARD_WEST_DB: truxify_west
       SHARD_WEST_USER: postgres
-      SHARD_WEST_PASSWORD: ${SHARD_PASSWORD:?SHARD_PASSWORD is required}
+      SHARD_PASSWORD_WEST: ${SHARD_PASSWORD:?SHARD_PASSWORD is required}
       # Malware scanning
       CLAMAV_HOST: clamav
       CLAMAV_PORT: "3310"

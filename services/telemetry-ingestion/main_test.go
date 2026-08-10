@@ -37,6 +37,15 @@ func TestSweepDrivers(t *testing.T) {
 	if _, ok := pingRateLimit.Load("driver-stale"); ok {
 		t.Errorf("expected driver-stale to be evicted from pingRateLimit")
 	}
+
+	// activeDrivers and pingRateLimit are package-level sync.Maps shared by
+	// every test in this file, so clean up what this one stored.
+	activeDrivers.Delete("driver-fresh")
+	activeDrivers.Delete("driver-stale")
+	pingRateLimit.Delete("driver-fresh")
+	pingRateLimit.Delete("driver-stale")
+}
+
 func TestSweepDriversEvictsStaleRetainsFresh(t *testing.T) {
 	now := time.Now()
 	staleAge := driverTTL + time.Minute

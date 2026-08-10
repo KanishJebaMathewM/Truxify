@@ -55,8 +55,8 @@ import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
-import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
-import { validateParams, validateQuery } from '../middleware/validate.js';
+import { loadFilterQuerySchema, createLoadSchema } from '../validation/loadSchemas.js';
+import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
 import { paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 
@@ -149,7 +149,7 @@ function sanitizeLoadFilters(query) {
  *       400:
  *         description: Validation error
  */
-router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), async (req, res) => {
+router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateQuery(loadFilterQuerySchema), async (req, res) => {
   try {
     const filters = req.query;
 
@@ -258,6 +258,9 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
       query = query.lte('freight_value', Math.round(filters.max_price * 100));
     }
     if (filters.distance !== undefined) {
+      // Include NULL extra_distance_km rows: most load offers are not
+      // en-route opportunities and leave this column NULL, so a plain
+      // .lte() would silently drop them (see issue #1943).
       query = query.or(`extra_distance_km.is.null,extra_distance_km.lte.${filters.distance}`);
     }
 
@@ -274,7 +277,15 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
 
     const ascending = filters.order === 'asc';
 
-    query = query.order(sortBy, { ascending }).range(from, to);
+    // Add an id tie-breaker (same direction) so pagination stays stable when
+    // multiple rows share the same sort key. The composite index
+    // (status, created_at DESC, id DESC) satisfies this ordering from the
+    // index alone, with no sort node.
+    query = query.order(sortBy, { ascending });
+    if (sortBy !== 'id') {
+      query = query.order('id', { ascending });
+    }
+    query = query.range(from, to);
 
     const { data: loads, error, count } = await query;
 
@@ -310,29 +321,9 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
 // 1.5 CREATE NEW LOAD OFFER (CUSTOMER)
 // POST /api/loads
 // ============================================================================
-router.post('/', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
+router.post('/', authenticate, userLimiter, requireRole(['customer']), validateBody(createLoadSchema), async (req, res) => {
   try {
     const { origin, destination, weight_tons, expected_price, material_type } = req.body;
-
-    if (!origin || !origin.lat || !origin.lng) {
-      return res.status(400).json({ error: 'Origin with lat/lng is required' });
-    }
-    if (!destination || !destination.lat || !destination.lng) {
-      return res.status(400).json({ error: 'Destination with lat/lng is required' });
-    }
-
-    const parsedWeight = Number(weight_tons);
-    if (weight_tons === undefined || weight_tons === null || Number.isNaN(parsedWeight)) {
-      return res.status(400).json({ error: 'Valid weight_tons is required' });
-    }
-    if (parsedWeight <= 0) {
-      return res.status(400).json({ error: 'weight_tons must be a positive number' });
-    }
-
-    const parsedPrice = Number(expected_price);
-    if (expected_price === undefined || expected_price === null || Number.isNaN(parsedPrice)) {
-      return res.status(400).json({ error: 'Valid expected_price is required' });
-    }
 
     const pickupAddress = origin.address || 'Unknown Origin';
     const dropAddress = destination.address || 'Unknown Destination';

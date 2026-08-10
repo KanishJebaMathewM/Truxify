@@ -85,7 +85,7 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     logger.info('✅ Polygon Escrow contract client initialised.');
     logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
-    logger.error('❌ Failed to initialise Escrow contract client:', err.message)
+    logger.error({ event: 'ESCROW_INIT_ERROR', error: err && err.message }, 'Failed to initialise Escrow contract client')
     Sentry.captureException(err)
   }
 } else {
@@ -131,7 +131,7 @@ export async function validateEscrowSetup () {
     }
     logger.info(`[escrow] ✅ Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
   } catch (err) {
-    logger.error(`[escrow] ❌ Failed to query bytecode at ${address}: ${err.message}`)
+    logger.error({ event: 'ESCROW_BYTECODE_QUERY_ERROR', address, error: err && err.message }, `[escrow] Failed to query bytecode at ${address}`)
     return false
   }
 
@@ -475,6 +475,11 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
     return { error: 'Transaction destination is not the Escrow contract' }
   }
 
+  // Critical Security Check: Verify tx.value (deposit amount)
+  if (expectedAmountWei && BigInt(tx.value) < BigInt(expectedAmountWei)) {
+    return { error: `Transaction value ${tx.value} wei is less than expected ${expectedAmountWei} wei` }
+  }
+
   let decoded
   try {
     decoded = escrowContract.interface.parseTransaction({ data: tx.data, value: tx.value })
@@ -569,7 +574,13 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
       }
     }
   } catch (err) {
-    logger.warn(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}, proceeding with release.`)
+    logger.error(`[escrow] Failed to check escrow status for ${orderDisplayId}: ${err.message}`)
+    return {
+      txHash: null,
+      bookingId,
+      error: err.message,
+      code: 'ESCROW_STATUS_UNAVAILABLE',
+    }
   }
 
   try {
@@ -589,43 +600,6 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
   });
 }
 
-/**
- * Marks the on-chain booking as started, which is required for the escrow
- * release/withdraw logic to proceed.
- *
- * @param {string} orderDisplayId — display ID of the order, e.g. "#FF20260521"
- * @returns {Promise<{txHash: string | null, bookingId: string, error?: string}>}
- */
-export async function markEscrowBookingStarted(orderDisplayId) {
-  return measureExecution('EscrowService.markEscrowBookingStarted', async () => {
-    const bookingId = getEscrowBookingId(orderDisplayId)
-
-    if (!escrowContract) {
-      logger.warn('[escrow] Contract not initialised — skipping markBookingStarted.')
-      return { txHash: null, bookingId }
-    }
-
-    try {
-      const tx = await escrowContract.markBookingStarted(bookingId)
-      logger.info(`[escrow] markBookingStarted tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
-      return {
-        txHash: tx.hash,
-        bookingId,
-        waitForConfirmation: async () => {
-          const receipt = await tx.wait(1)
-          if (!receipt || receipt.status === 0) {
-            throw new Error('Escrow markBookingStarted transaction reverted or was not found.')
-          }
-          logger.info(`[escrow] markBookingStarted confirmed for booking ${orderDisplayId} in block ${receipt.blockNumber}`)
-          return receipt
-        },
-      }
-    } catch (err) {
-      logger.error(`[escrow] markBookingStarted failed for booking ${orderDisplayId}: ${err.message}`)
-      return { txHash: null, bookingId, error: err.message }
-    }
-  })
-}
 
 /**
  * Submit an escrow refund and return its hash before confirmation.
@@ -874,7 +848,7 @@ export const lockPayment = escrowLockPayment;
 
 
 
-async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
+export async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
   const bookingOnChain = await escrowContract.bookings(bookingId);
   const onChainAmountBN = BigInt(bookingOnChain.amount.toString());
   const expectedWeiBN = BigInt(expectedWei);
@@ -884,5 +858,3 @@ async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
     expectedAmount: expectedWeiBN.toString()
   };
 }
-
-module.exports.verifyOnChainEscrowBalance = verifyOnChainEscrowBalance;

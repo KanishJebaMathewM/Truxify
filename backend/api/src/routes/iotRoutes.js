@@ -47,7 +47,7 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       .maybeSingle();
 
     if (loadErr) {
-      logger.error('Failed to fetch load for telemetry:', loadErr);
+      logger.error({ event: 'IOT_LOAD_FETCH_ERROR', requestId: req.requestId || req.id, loadId, error: loadErr && (loadErr.message || String(loadErr)) }, 'Failed to fetch load for telemetry');
       return res.status(500).json({ error: 'Database error' });
     }
 
@@ -59,12 +59,11 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       return res.status(400).json({ error: 'Load does not require refrigeration' });
     }
 
+    // Admins and provisioned IoT devices may always ingest telemetry.
+    // Everyone else must mirror GET authorization: the load owner OR the
+    // assigned driver. The driver is the party physically carrying the load
+    // and the only person able to record cold-chain readings in transit.
     if (req.user.role !== 'admin' && req.user.role !== 'iot_device') {
-      return res.status(403).json({ error: 'Access denied: IoT device authorization required' });
-    // Mirror GET authorization: allow the load owner OR the assigned driver.
-    // The driver is the party physically carrying the load and the only person
-    // able to record cold-chain readings in transit.
-    if (req.user.role !== 'admin') {
       let isAuthorized = load.customer_id === req.user.id;
       if (!isAuthorized && load.order_display_id) {
         const { data: order } = await supabaseAdmin
@@ -90,7 +89,7 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
       });
 
     if (insertErr) {
-      logger.error('Failed to insert telemetry:', insertErr);
+      logger.error({ event: 'IOT_TELEMETRY_INSERT_ERROR', requestId: req.requestId || req.id, loadId, error: insertErr && (insertErr.message || String(insertErr)) }, 'Failed to insert telemetry');
       return res.status(500).json({ error: 'Database error' });
     }
 
@@ -116,12 +115,12 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
           target_temperature_min: load.target_temperature_min,
           target_temperature_max: load.target_temperature_max
         }
-      }).catch(err => logger.error('Failed to send notification:', err));
+      }).catch(err => logger.error({ event: 'IOT_NOTIFICATION_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Failed to send temperature alert notification'));
     }
 
     return res.status(201).json({ success: true, message: 'Telemetry recorded' });
   } catch (err) {
-    logger.error('Internal server error in IoT telemetry route:', err);
+    logger.error({ event: 'IOT_TELEMETRY_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Internal server error in IoT telemetry route');
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -141,7 +140,7 @@ router.get('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePara
       .maybeSingle();
 
     if (loadErr) {
-      logger.error('Failed to fetch load for telemetry authorization:', loadErr);
+      logger.error({ event: 'IOT_AUTH_LOAD_FETCH_ERROR', requestId: req.requestId || req.id, loadId, error: loadErr && (loadErr.message || String(loadErr)) }, 'Failed to fetch load for telemetry authorization');
       return res.status(500).json({ error: 'Database error' });
     }
 

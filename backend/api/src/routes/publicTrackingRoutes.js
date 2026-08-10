@@ -2,13 +2,21 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 
 import { TrackingTokenService } from '../services/trackingTokenService.js';
-import { supabase } from '../config/db.js';
+import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
+import { validateParams } from '../middleware/validate.js';
 import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
+import { publicTrackingTokenSchema } from '../validation/requestSchemas.js';
 
 const router = express.Router();
 
-const trackingTokenService = new TrackingTokenService({ supabase, logger });
+// The public tracking endpoints are unauthenticated, so they must resolve
+// tracking tokens and order data through the service-role client, which
+// bypasses RLS. The token store migration documents this architecture:
+// "The public GET endpoint uses the service_role key (bypasses RLS) and
+// performs its own authorization checks". Authorization is still enforced at
+// the app level (hashed-token lookup, expiry/revocation, order-status guards).
+const trackingTokenService = new TrackingTokenService({ supabase: supabaseAdmin, logger });
 
 function parseFiniteCoordinate(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -34,13 +42,14 @@ const publicLimiter = rateLimit({
 router.get(
   '/tracking/:token',
   publicLimiter,
+  validateParams(publicTrackingTokenSchema),
   async (req, res) => {
     try {
-      const { token } = req.params;
-
-      if (!token || token.length < 10) {
-        return res.status(400).json({ error: 'Invalid tracking token' });
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Tracking service not available' });
       }
+
+      const { token } = req.params;
 
       const validation = await trackingTokenService.validateToken(token);
 
@@ -127,13 +136,14 @@ router.get(
 router.get(
   '/tracking/:token/route',
   publicLimiter,
+  validateParams(publicTrackingTokenSchema),
   async (req, res) => {
     try {
-      const { token } = req.params;
-
-      if (!token || token.length < 10) {
-        return res.status(400).json({ error: 'Invalid tracking token' });
+      if (!supabaseAdmin) {
+        return res.status(503).json({ error: 'Tracking service not available' });
       }
+
+      const { token } = req.params;
 
       const validation = await trackingTokenService.validateToken(token);
 
@@ -147,7 +157,7 @@ router.get(
 
       const { orderDisplayId } = validation;
 
-      const { data: order, error: orderError } = await supabase
+      const { data: order, error: orderError } = await supabaseAdmin
         .from('orders')
         .select('pickup_lat, pickup_lng, drop_lat, drop_lng, driver_id')
         .eq('order_display_id', orderDisplayId)

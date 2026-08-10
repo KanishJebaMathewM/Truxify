@@ -326,6 +326,9 @@ router.get('/categories', (_req, res) => {
  */
 router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSchema), async (req, res) => {
   const subject = normalizeRequiredText(req.body.subject);
+  if (!subject) {
+    return res.status(400).json({ error: 'subject is required and cannot be empty' });
+  }
   const category = normalizeRequiredText(req.body.category);
   const description = normalizeRequiredText(req.body.description) || subject;
 

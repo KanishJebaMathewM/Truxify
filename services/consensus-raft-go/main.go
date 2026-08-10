@@ -413,7 +413,15 @@ func (rn *RaftNode) sendHeartbeats() {
 			newMatch := res.request.PrevLogIndex + uint64(len(res.request.Entries))
 			if newMatch > rn.matchIndex[res.url] {
 				rn.matchIndex[res.url] = newMatch
-				rn.nextIndex[res.url] = newMatch + 1
+			}
+			// nextIndex must never lag matchIndex+1. Repairing it separately
+			// matters when a stale failure response has already decremented
+			// nextIndex below what the follower is known to hold: newMatch
+			// would then not exceed matchIndex, and nesting this update inside
+			// that check would leave nextIndex stuck low forever, re-sending
+			// entries the follower already has on every heartbeat.
+			if next := rn.matchIndex[res.url] + 1; next > rn.nextIndex[res.url] {
+				rn.nextIndex[res.url] = next
 			}
 		} else if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
 			// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.

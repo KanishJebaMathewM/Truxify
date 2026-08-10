@@ -10,6 +10,15 @@ const ANOMALY_THRESHOLDS = {
   UNUSUAL_DESTINATION: true, // New wallet destination
 };
 
+/**
+ * Defensive row cap on the 30-day withdrawal statistic pulls. PostgREST
+ * silently caps a single response at 1000 rows, so without an explicit
+ * bound the average/std-dev baseline would be computed from a truncated,
+ * non-deterministic sample for wallets with more than 1000 withdrawals in
+ * the window. Ordered by recency so the cap keeps the newest rows.
+ */
+const ANOMALY_STATS_MAX_ROWS = 1000;
+
 const ANOMALY_SEVERITY = {
   LOW: 'LOW',
   MEDIUM: 'MEDIUM',
@@ -106,7 +115,9 @@ class AnomalyDetectionService {
         .eq('user_id', userId)
         .eq('wallet_address', walletAddress)
         .eq('type', 'withdrawal')
-        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+        .order('created_at', { ascending: false })
+        .limit(ANOMALY_STATS_MAX_ROWS);
 
       if (error || !data || data.length === 0) {
         return ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 2;
@@ -128,7 +139,9 @@ class AnomalyDetectionService {
         .eq('user_id', userId)
         .eq('wallet_address', walletAddress)
         .eq('type', 'withdrawal')
-        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString());
+        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
+        .order('created_at', { ascending: false })
+        .limit(ANOMALY_STATS_MAX_ROWS);
 
       if (error || !data || data.length < 2) {
         return ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 4;
@@ -169,18 +182,18 @@ class AnomalyDetectionService {
     try {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
-      const { data, error } = await supabase
+      const { count, error } = await supabase
         .from('transactions')
-        .select('id')
+        .select('id', { count: 'exact', head: true })
         .eq('user_id', userId)
         .eq('wallet_address', walletAddress)
         .gte('created_at', tenMinutesAgo);
 
-      if (error || !data) {
+      if (error) {
         return null;
       }
 
-      const transferCount = data.length;
+      const transferCount = count || 0;
 
       if (transferCount >= ANOMALY_THRESHOLDS.MULTIPLE_TRANSFERS) {
         return {

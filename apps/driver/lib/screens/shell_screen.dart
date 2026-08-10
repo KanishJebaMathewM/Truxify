@@ -175,13 +175,16 @@ class _ShellScreenState extends State<ShellScreen> {
       case NavigateToOrderDetail():
       case NavigateToLiveTracking():
         _openTab(1); // Active Trip
+        break;
 
       case NavigateToLoadDetail():
         _openTab(2); // Available Loads
+        break;
 
       case NavigateToEarnings():
       case NavigateToWallet():
         _openTab(0); // Home (earnings summary is on the home card)
+        break;
 
       case NavigateToSupportTicket():
       case NavigateToNotificationsList():
@@ -189,6 +192,7 @@ class _ShellScreenState extends State<ShellScreen> {
           Navigator.of(context)
               .push(truxifyPageRoute((_) => const NotificationsScreen()));
         });
+        break;
     }
   }
 
@@ -297,15 +301,18 @@ class _ShellScreenState extends State<ShellScreen> {
 
   void _showBypassAlert(WeighStationEvent event) {
     if (!mounted) return;
+    final isUnsupported = event.action == 'UNSUPPORTED' || event.simulated;
+    final isBypass = !isUnsupported && event.action == 'BYPASS';
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) {
-        final isBypass = event.action == 'BYPASS';
         return Dialog(
-          backgroundColor: isBypass
-              ? const Color(0xFF1E4620)
-              : const Color(0xFF5C1A1A),
+          backgroundColor: isUnsupported
+              ? const Color(0xFF6B5900)
+              : isBypass
+                  ? const Color(0xFF1E4620)
+                  : const Color(0xFF5C1A1A),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
           child: Padding(
@@ -314,15 +321,21 @@ class _ShellScreenState extends State<ShellScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  isBypass
-                      ? Icons.check_circle_outline
-                      : Icons.warning_amber_rounded,
+                  isUnsupported
+                      ? Icons.info_outline
+                      : isBypass
+                          ? Icons.check_circle_outline
+                          : Icons.warning_amber_rounded,
                   size: 80,
                   color: Colors.white,
                 ),
                 const SizedBox(height: 24),
                 Text(
-                  isBypass ? 'BYPASS CLEARED' : 'PULL IN REQUIRED',
+                  isUnsupported
+                      ? 'SIMULATED PREVIEW — NOT A REGULATORY VERDICT'
+                      : isBypass
+                          ? 'BYPASS CLEARED'
+                          : 'PULL IN REQUIRED',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     fontSize: 28,
@@ -332,7 +345,9 @@ class _ShellScreenState extends State<ShellScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Station ID: ${event.stationId}\n${event.reason}',
+                  isUnsupported
+                      ? event.reason
+                      : 'Station ID: ${event.stationId}\n${event.reason}',
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 16, color: Colors.white70),
                 ),
@@ -343,9 +358,11 @@ class _ShellScreenState extends State<ShellScreen> {
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
-                      foregroundColor: isBypass
-                          ? const Color(0xFF1E4620)
-                          : const Color(0xFF5C1A1A),
+                      foregroundColor: isUnsupported
+                          ? const Color(0xFF6B5900)
+                          : isBypass
+                              ? const Color(0xFF1E4620)
+                              : const Color(0xFF5C1A1A),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(16)),
                     ),

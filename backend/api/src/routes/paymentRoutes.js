@@ -26,6 +26,7 @@ import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock, LockAcquisitionError } from '../lib/redisLock.js';
 import { auditLog } from '../middleware/auditLog.js';
 import logger from '../middleware/logger.js';
+import { createStore } from '../middleware/rateLimiter.js';
 import { orderRepository, orderValidationService } from '../core/container.js';
 import { supabase } from '../config/db.js';
 import {
@@ -47,6 +48,8 @@ const router = express.Router();
 const PAYMENT_LOCK_TTL_MS = 30_000; // 30 seconds
 
 // ─── Rate Limiters ────────────────────────────────────────────────────────────
+// Redis-backed stores so multi-replica deploys share one budget (MemoryStore
+// would allow N× the limit across N API pods).
 
 const lockLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -54,6 +57,7 @@ const lockLimiter = rateLimit({
   message: { error: 'Too many payment requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:payment-lock:'),
 });
 
 const statusLimiter = rateLimit({
@@ -61,6 +65,7 @@ const statusLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:payment-status:'),
 });
 
 // ─── Validation Schemas ───────────────────────────────────────────────────────

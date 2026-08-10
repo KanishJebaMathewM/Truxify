@@ -4,8 +4,10 @@ const parseNumber = (value, fallback) => {
 };
 
 const parseNumberList = (value, fallback) => {
-  if (!value) return fallback;
-  const parsed = value.split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (value === undefined || value === null) return fallback;
+  const trimmed = String(value).trim();
+  if (trimmed === '') return fallback;
+  const parsed = trimmed.split(',').map((entry) => entry.trim()).filter(Boolean);
   return parsed.length > 0 ? parsed : fallback;
 };
 

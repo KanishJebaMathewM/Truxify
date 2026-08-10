@@ -288,7 +288,7 @@ const aggregator = createDefaultAggregator();
  *       503:
  *         description: One or more critical services degraded
  */
-router.get('/full', healthLimiter, async (_req, res) => {
+router.get('/full', healthLimiter, async (req, res) => {
   try {
     const result = await aggregator.aggregate();
     // 200 = system operational (healthy or degraded with non-critical failures)
@@ -296,7 +296,10 @@ router.get('/full', healthLimiter, async (_req, res) => {
     const httpStatus = result.status === 'unhealthy' ? 503 : 200;
     return res.status(httpStatus).json(result);
   } catch (err) {
-    logger.error('[health] Aggregated health check failed:', err.message);
+    logger.error(
+      { event: 'HEALTH_AGGREGATION_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+      '[health] Aggregated health check failed',
+    );
     return res.status(500).json({
       status: 'unhealthy',
       timestamp: new Date().toISOString(),

@@ -320,7 +320,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
 
     if (req.user && req.user.uid) {
-      try { await invalidateCachedProfile(req.user.uid); } catch (_) { logger.error('Cache invalidation failed', _); }
+      try { await invalidateCachedProfile(req.user.uid); } catch (err) { logger.error({ event: 'PROFILE_CACHE_INVALIDATE_ERROR', userId: req.user.uid, error: err && (err.message || String(err)) }, 'Cache invalidation failed'); }
     }
     if (req.user && req.user.id) {
       try {

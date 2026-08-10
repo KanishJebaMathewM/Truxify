@@ -1,4 +1,5 @@
 import { HealthStatus, executeCheck } from '../HealthCheck.js';
+import logger from '../../../middleware/logger.js';
 
 const NAME = 'workers';
 
@@ -14,6 +15,7 @@ function check() {
   if (activeWorkers.length === 0) {
     // No worker states were registered: fail closed instead of reporting a
     // process with no running background workers as healthy.
+    logger.warn({ check: NAME, workerCount: 0 }, 'Health check: no registered workers');
     return {
       status: HealthStatus.UNHEALTHY,
       message: 'no_registered_workers',
@@ -22,6 +24,9 @@ function check() {
   }
 
   const allRunning = activeWorkers.every((w) => w.running);
+  if (!allRunning) {
+    logger.warn({ check: NAME, workers: activeWorkers }, 'Health check: one or more workers not running');
+  }
   return {
     status: allRunning ? HealthStatus.HEALTHY : HealthStatus.DEGRADED,
     metadata: {

@@ -22,6 +22,12 @@ const oracleVerificationLimiter = rateLimit({
 });
 
 async function authorizeOrderAccess(req, orderId) {
+  if (!orderId || typeof orderId !== 'string' || orderId.trim() === '') {
+    const err = new Error('Order ID is required');
+    err.status = 400;
+    throw err;
+  }
+
   const { data: order, error } = await supabase
     .from('orders')
     .select('id, customer_id, driver_id')

@@ -139,7 +139,7 @@ router.post(
 
       const platformUpiId = process.env.PLATFORM_UPI_ID?.trim();
       if (!platformUpiId) {
-        logger.error('[payments] PLATFORM_UPI_ID is not configured; cannot generate UPI intent');
+        logger.error({ event: 'PAYMENT_UPI_NOT_CONFIGURED', orderId: order_id }, '[payments] PLATFORM_UPI_ID is not configured; cannot generate UPI intent');
         return res.status(503).json({ error: 'UPI payments are not configured on the server.' });
       }
       const orderRef = order.order_display_id;
@@ -164,7 +164,10 @@ router.post(
         escrow_enabled: isEscrowEnabled(),
       });
     } catch (err) {
-      logger.error('[payments] upi-intent error:', err.message);
+      logger.error(
+        { event: 'PAYMENT_UPI_INTENT_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+        '[payments] upi-intent error',
+      );
       return res.status(500).json({ error: 'Internal Server Error' });
     }
   }
@@ -419,7 +422,10 @@ router.get(
         escrow_enabled: isEscrowEnabled(),
       });
     } catch (err) {
-      logger.error('[payments] status error:', err.message);
+      logger.error(
+        { event: 'PAYMENT_STATUS_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+        '[payments] status error',
+      );
       return res.status(500).json({ error: 'Internal Server Error' });
     }
   }

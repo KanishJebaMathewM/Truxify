@@ -104,9 +104,10 @@ router.get('/order/:orderId', orderVerificationLimiter, authenticate, validatePa
       });
     }
 
+    logger.error({ requestId: req.requestId, err: error.message, orderId }, '[VerificationRoutes] Order verification failed');
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -137,9 +138,10 @@ router.post('/documents/check', documentCheckLimiter, authenticate, validateBody
       data: result
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId, err: error.message }, '[VerificationRoutes] Document check failed');
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -156,9 +158,10 @@ router.post('/digilocker/token', digilockerLimiter, authenticate, async (req, re
       data: tokenResult
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId, err: error.message }, '[VerificationRoutes] DigiLocker token exchange failed');
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -179,9 +182,10 @@ router.post('/digilocker/verify', digilockerLimiter, authenticate, async (req, r
       data: verificationResult
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId, err: error.message }, '[VerificationRoutes] DigiLocker verification failed');
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });

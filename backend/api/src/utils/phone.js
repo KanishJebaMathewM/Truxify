@@ -16,7 +16,7 @@ export function normalizePhone(phone) {
     return null;
   }
 
-  // Strip all non-digit characters
+  // Handle the E.164 + prefix explicitly before stripping digits
   let digits = phone.replace(/[^\d]/g, '');
 
   // Strip a leading trunk prefix 0 (e.g. 0919876543210 -> 919876543210)

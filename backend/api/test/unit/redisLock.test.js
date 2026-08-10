@@ -205,6 +205,12 @@ describe('renewLock', () => {
     expect(await renewLock('test:key', '', 5000)).toBe(false);
     expect(await renewLock('test:key', null, 5000)).toBe(false);
   });
+
+  it('returns false (does not throw) when Redis eval throws during renewal', async () => {
+    redisHolder.client = makeRedis({ throwOn: 'eval' });
+
+    await expect(renewLock('test:key', 'uuid', 5000)).resolves.toBe(false);
+  });
 });
 
 // ─── Integration-style: guarded mutation must be rejected when Redis is down ──
@@ -291,20 +297,134 @@ describe('Critical section protection — Redis down must block the operation', 
     expect(mutationPerformed).toBe(false);
     expect(status).toBe(409);
   });
-
-
-describe('redisLock lock expiry and release behavior', () => {
-  it('acquireLock returns false when lock is already held', async () => {
-    const RedisLock = (await import('../../src/lib/redisLock.js')).default;
-    const lock = new RedisLock('test-lock');
-    // When Redis client is not available, acquire should return false
-  });
-
-  it('releaseLock handles not-held lock gracefully (no-op)', async () => {
-    const RedisLock = (await import('../../src/lib/redisLock.js')).default;
-    const lock = new RedisLock('test-lock');
-    // Releasing a lock not held should be a no-op, not throw
-  });
 });
 
+// ─── Owner-aware lifecycle with a deterministic in-memory Redis ─────────────
+//
+// These tests exercise the full acquire → renew → expire → re-acquire →
+// release sequence against a fake Redis whose clock can be advanced manually,
+// so lock-stealing and TTL-expiry scenarios are deterministic. They prove the
+// "previous owner must never delete the new owner's lock" guarantee end to end.
+
+/**
+ * Minimal in-memory Redis fake implementing exactly the commands redisLock
+ * uses — `SET … PX … NX` plus the two owner-checked Lua scripts (renew and
+ * release) — with a manually-controllable clock for deterministic expiry.
+ */
+function makeInMemoryRedis() {
+  const entries = new Map(); // key -> { value, expiresAtMs | null }
+  let clock = 0;
+
+  // Returns the live entry for a key, lazily dropping it once its TTL lapses.
+  function alive(key) {
+    const entry = entries.get(key);
+    if (!entry) return null;
+    if (entry.expiresAtMs !== null && clock >= entry.expiresAtMs) {
+      entries.delete(key);
+      return null;
+    }
+    return entry;
+  }
+
+  return {
+    set: vi.fn(async (key, value, mode, num, nx) => {
+      // set(key, value, 'PX', ttlMs, 'NX') — NX must reject if the key is held.
+      if (nx === 'NX' && alive(key)) return null;
+      const ttlMs = mode === 'PX' ? Number(num) : null;
+      entries.set(key, { value, expiresAtMs: ttlMs === null ? null : clock + ttlMs });
+      return 'OK';
+    }),
+    eval: vi.fn(async (script, numKeys, key, token, ttlArg) => {
+      // Owner-checked Lua: only acts when the stored value matches the token.
+      const entry = alive(key);
+      if (!entry || entry.value !== token) return 0;
+      if (script.includes('PEXPIRE')) {
+        entry.expiresAtMs = clock + Number(ttlArg);
+      } else if (script.includes('DEL')) {
+        entries.delete(key);
+      }
+      return 1;
+    }),
+    advance(ms) {
+      clock += ms;
+    },
+  };
+}
+
+describe('redisLock owner-aware lifecycle', () => {
+  afterEach(() => {
+    redisHolder.client = null;
+  });
+
+  it('only the owner can renew the lock (non-owner renewal is rejected)', async () => {
+    const redis = makeInMemoryRedis();
+    redisHolder.client = redis;
+
+    const token = await acquireLock('test:key', 10_000);
+    expect(token).toBeTruthy();
+
+    expect(await renewLock('test:key', token, 10_000)).toBe(true);
+    expect(await renewLock('test:key', 'another-replica-token', 10_000)).toBe(false);
+
+    // Even the original owner cannot renew once the lock has expired.
+    redis.advance(10_001);
+    expect(await renewLock('test:key', token, 10_000)).toBe(false);
+  });
+
+  it('only the owner can release the lock (non-owner release is rejected)', async () => {
+    const redis = makeInMemoryRedis();
+    redisHolder.client = redis;
+
+    const token = await acquireLock('test:key', 10_000);
+
+    expect(await releaseLock('test:key', 'another-replica-token')).toBe(false);
+    expect(await releaseLock('test:key', token)).toBe(true);
+    expect(await releaseLock('test:key', token)).toBe(false); // already released
+  });
+
+  it('an expired lock can be acquired by another replica', async () => {
+    const redis = makeInMemoryRedis();
+    redisHolder.client = redis;
+
+    const first = await acquireLock('test:key', 10_000);
+    expect(first).toBeTruthy();
+    expect(await acquireLock('test:key', 10_000)).toBeNull(); // held while alive
+
+    redis.advance(10_001); // first owner's TTL lapses
+
+    const second = await acquireLock('test:key', 10_000);
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
+  });
+
+  it('an old owner can never delete the new owner lock', async () => {
+    const redis = makeInMemoryRedis();
+    redisHolder.client = redis;
+
+    const oldToken = await acquireLock('test:key', 10_000);
+    redis.advance(10_001); // old owner stalls past its TTL
+
+    const newToken = await acquireLock('test:key', 10_000);
+    expect(newToken).toBeTruthy();
+
+    // Old owner reaches its finally block with a stale token: the release must
+    // be rejected atomically and must not touch the new owner's lock.
+    expect(await releaseLock('test:key', oldToken)).toBe(false);
+
+    // The new owner's lock is intact: it can renew and release normally.
+    expect(await renewLock('test:key', newToken, 10_000)).toBe(true);
+    expect(await releaseLock('test:key', newToken)).toBe(true);
+  });
+
+  it('renewal keeps the lock alive across its TTL (no premature expiry)', async () => {
+    const redis = makeInMemoryRedis();
+    redisHolder.client = redis;
+
+    const token = await acquireLock('test:key', 10_000);
+    redis.advance(9_000);
+    expect(await renewLock('test:key', token, 10_000)).toBe(true);
+    redis.advance(9_000);
+    // Renewed, so it is still alive well past the original TTL.
+    expect(await acquireLock('test:key', 10_000)).toBeNull();
+  });
 });

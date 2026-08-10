@@ -210,7 +210,7 @@ class KeyManagementService {
     });
   }
 
-  async getKeyRotationHistory(userId, walletAddress) {
+  async getKeyRotationHistory(userId, walletAddress, limit = 10) {
     return measureExecution('KeyManagementService.getKeyRotationHistory', async () => {
       try {
         const { data: history, error } = await supabase
@@ -218,7 +218,8 @@ class KeyManagementService {
           .select('*')
           .eq('user_id', userId)
           .eq('wallet_address', walletAddress)
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(limit);
 
         if (error) {
           logger.error('[KeyManagementService] Failed to fetch rotation history:', error);

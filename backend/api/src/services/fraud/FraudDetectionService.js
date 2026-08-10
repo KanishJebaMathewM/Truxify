@@ -362,28 +362,36 @@ class FraudDetectionService {
     if (safeIds.length === 0) return {};
 
     const BATCH_SIZE = 100;
+    const PAGE_SIZE = 1000;
     const allOrders = [];
 
     // Query in batches to avoid unbounded OR filter URL-length limits
     for (let i = 0; i < safeIds.length; i += BATCH_SIZE) {
       const batch = safeIds.slice(i, i + BATCH_SIZE);
-      const { data: batchOrders, error } = await supabaseAdmin
-        .from('orders')
-        .select('customer_id, driver_id')
-        .or(
-          batch.map(id => `customer_id.eq.${id}`).join(',') +
-          ',' +
-          batch.map(id => `driver_id.eq.${id}`).join(',')
-        );
+      const batchFilter = batch.map(id => `customer_id.eq.${id}`).join(',') + ',' +
+        batch.map(id => `driver_id.eq.${id}`).join(',');
 
-      if (error) {
-        logger.error('Failed to load batch user fraud connections:', error.message);
-        return {};
-      }
+      // Each batch's row set is paged too, since a single prolific user can
+      // still push one batch past PostgREST's 1000-row response cap.
+      let offset = 0;
+      let page = [];
+      do {
+        const { data: batchOrders, error } = await supabaseAdmin
+          .from('orders')
+          .select('customer_id, driver_id')
+          .or(batchFilter)
+          .order('id', { ascending: true })
+          .range(offset, offset + PAGE_SIZE - 1);
 
-      if (Array.isArray(batchOrders)) {
-        allOrders.push(...batchOrders);
-      }
+        if (error) {
+          logger.error('Failed to load batch user fraud connections:', error.message);
+          return {};
+        }
+
+        page = Array.isArray(batchOrders) ? batchOrders : [];
+        allOrders.push(...page);
+        offset += page.length;
+      } while (page.length === PAGE_SIZE);
     }
 
     if (!Array.isArray(allOrders)) {

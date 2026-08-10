@@ -172,6 +172,9 @@ export const CacheKeyBuilder = {
    * @returns {{ namespace: string, version: string|null, entityId: string, subKey: string|null }}
    */
   parse(key) {
+    if (typeof key !== 'string' || key.length === 0) {
+      return { namespace: null, version: null, entityId: null, subKey: null };
+    }
     const parts = key.split(SEP);
     return {
       namespace: parts[0] || null,

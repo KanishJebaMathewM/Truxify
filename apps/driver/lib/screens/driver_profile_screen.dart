@@ -42,6 +42,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   double _capacityVolume = 0.0;
   String? _registrationNumber;
 
+  // Badges
+  List<Map<String, dynamic>> _badges = [];
+
   // Documents
   Map<String, String> _documents = {
     'rc_book': 'Missing',
@@ -86,6 +89,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           _capacityWeight = (truck['capacity_weight_tonnes'] as num?)?.toDouble() ?? (truck['capacityWeight'] as num?)?.toDouble() ?? 0.0;
           _capacityVolume = (truck['capacity_volume_m3'] as num?)?.toDouble() ?? (truck['capacityVolume'] as num?)?.toDouble() ?? 0.0;
           _registrationNumber = truck['registration_number']?.toString() ?? truck['registrationNumber']?.toString();
+
+          final parsedBadges = details['badges'] as List<dynamic>? ?? [];
+          _badges = parsedBadges.map((e) => Map<String, dynamic>.from(e as Map)).toList();
 
           _documents = {
             'rc_book': docs['rc_book']?.toString() ?? 'Missing',
@@ -587,6 +593,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
             ),
             const SizedBox(height: 16),
 
+            // Badges Card
+            _buildBadgesCard(),
+
             // Truck Details Card
             Card(
               elevation: 4,
@@ -656,6 +665,61 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildBadgesCard() {
+    if (_badges.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      children: [
+        Card(
+          elevation: 4,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Achievements',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+                const Divider(height: 16),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _badges.map((badge) {
+                    return Chip(
+                      avatar: Text(badge['icon']?.toString() ?? '🏆', style: const TextStyle(fontSize: 16)),
+                      label: Text(
+                        badge['label']?.toString() ?? 'Badge',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      backgroundColor: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.grey.shade900
+                          : Colors.amber.shade50,
+                      side: BorderSide(
+                        color: Colors.amber.shade200,
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 

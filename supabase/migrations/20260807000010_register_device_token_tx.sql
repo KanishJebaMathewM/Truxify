@@ -53,3 +53,4 @@ $$;
 REVOKE EXECUTE ON FUNCTION register_device_token(uuid, text, text, jsonb, uuid) FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION register_device_token(uuid, text, text, jsonb, uuid) FROM anon;
 REVOKE EXECUTE ON FUNCTION register_device_token(uuid, text, text, jsonb, uuid) FROM authenticated;
+GRANT EXECUTE ON FUNCTION register_device_token(uuid, text, text, jsonb, uuid) TO service_role;

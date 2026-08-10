@@ -5,6 +5,7 @@ const supabaseMock = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: supabaseMock.supabase,
+  supabaseAdmin: supabaseMock.supabase,
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({

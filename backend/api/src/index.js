@@ -245,13 +245,13 @@ if (!process.env.CHAINLINK_ENABLED && !process.env.BACKUP_ORACLE_ENABLED) {
 // ============================================================================
 // 🆕 SHARDING VALIDATION
 // ============================================================================
-if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST || 
-    !process.env.SHARD_EAST_HOST || !process.env.SHARD_WEST_HOST) {
+if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST ||
+  !process.env.SHARD_EAST_HOST || !process.env.SHARD_WEST_HOST) {
   logger.warn('⚠️ Shard hosts not fully configured. Using localhost defaults.')
 }
 
-if (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH || 
-    !process.env.SHARD_PASSWORD_EAST || !process.env.SHARD_PASSWORD_WEST) {
+if (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH ||
+  !process.env.SHARD_PASSWORD_EAST || !process.env.SHARD_PASSWORD_WEST) {
   logger.warn('⚠️ Shard passwords not fully configured. Ensure all SHARD_PASSWORD_* env vars are set.')
 }
 
@@ -714,6 +714,8 @@ server.listen(PORT, () => {
   startStaleOrderWorker(escrowReconciliationOrderRepository)
   startDocumentExpiryWorker()
   startWithdrawalSettlementWorker()
+  import { startOutboxRelayWorker } from './workers/outboxRelayWorker.js'
+  startOutboxRelayWorker()
 
   // Register worker states for health aggregation
   globalThis.__truxify_workers = {
@@ -736,7 +738,7 @@ const SHUTDOWN_TIMEOUT_MS = 10_000
 /** @type {boolean} */
 let shuttingDown = false
 
-async function shutdown (signal) {
+async function shutdown(signal) {
   // Guard against recursive shutdown calls (e.g. an error inside shutdown
   // triggering uncaughtException while we're already shutting down).
   if (shuttingDown) {
@@ -755,6 +757,8 @@ async function shutdown (signal) {
   stopDlqWorker()
   stopDocumentExpiryWorker()
   stopWithdrawalSettlementWorker()
+  import { stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
+  stopOutboxRelayWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()
 

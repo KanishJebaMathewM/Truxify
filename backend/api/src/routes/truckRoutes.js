@@ -587,7 +587,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
 
         nearbyDriverIds = [...new Set(nearbyTelemetry.map(t => t.driver_id))];
       } catch (mongoErr) {
-        logger.error('MongoDB telemetry search error:', mongoErr.message);
+        logger.error({ event: 'TRUCK_MONGO_TELEMETRY_ERROR', requestId: req.requestId || req.id, error: mongoErr && mongoErr.message }, 'MongoDB telemetry search error');
       }
     }
 
@@ -606,7 +606,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       .in('user_id', nearbyDriverIds);
 
     if (driversErr) {
-      logger.error('Driver search error:', driversErr.message);
+      logger.error({ event: 'TRUCK_DRIVER_SEARCH_ERROR', requestId: req.requestId || req.id, error: driversErr && driversErr.message }, 'Driver search error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -623,12 +623,12 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     ]);
 
     if (trucksRes.error) {
-      logger.error('Truck enrichment lookup error:', trucksRes.error.message);
+      logger.error({ event: 'TRUCK_ENRICHMENT_ERROR', requestId: req.requestId || req.id, error: trucksRes.error && trucksRes.error.message }, 'Truck enrichment lookup error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
     if (profilesRes.error) {
-      logger.error('Driver profile enrichment lookup error:', profilesRes.error.message);
+      logger.error({ event: 'TRUCK_PROFILE_ENRICHMENT_ERROR', requestId: req.requestId || req.id, error: profilesRes.error && profilesRes.error.message }, 'Driver profile enrichment lookup error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -694,7 +694,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
 
     res.json(responseResults);
   } catch (err) {
-    logger.error('Truck search error:', err.message);
+    logger.error({ event: 'TRUCK_SEARCH_ERROR', requestId: req.requestId || req.id, error: err && err.message }, 'Truck search error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

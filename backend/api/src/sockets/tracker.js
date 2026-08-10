@@ -11,8 +11,8 @@ import { ebpfLoader } from '../../../../ebpf/loader.js';
 import { createLocationEventBus } from './locationEventBus.js';
 
 const TELEMETRY_SCHEMA = {
-  lat: { type: 'number', required: true, min: -90, max: 90 },
-  lng: { type: 'number', required: true, min: -180, max: 180 },
+  lat: { type: 'number', required: false, min: -90, max: 90 },
+  lng: { type: 'number', required: false, min: -180, max: 180 },
   latitude: { type: 'number', required: false, min: -90, max: 90 },
   longitude: { type: 'number', required: false, min: -180, max: 180 },
   driver_id: { type: 'string', required: false, minLen: 1, maxLen: 64 },
@@ -26,6 +26,14 @@ const TELEMETRY_SCHEMA = {
 
 function validateTelemetryPayload(data) {
   const errors = [];
+
+  const hasLatLng = data.lat !== undefined && data.lat !== null && data.lng !== undefined && data.lng !== null;
+  const hasLatLong = data.latitude !== undefined && data.latitude !== null && data.longitude !== undefined && data.longitude !== null;
+  
+  if (!hasLatLng && !hasLatLong) {
+    errors.push('At least one coordinate pair (lat/lng or latitude/longitude) is required');
+  }
+
   for (const [field, rules] of Object.entries(TELEMETRY_SCHEMA)) {
     const value = data[field];
     if (rules.required && (value === undefined || value === null)) {

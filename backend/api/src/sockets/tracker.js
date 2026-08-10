@@ -943,7 +943,17 @@ export async function handleLocationPing(ws, data, req) {
   const lat = data.lat !== undefined ? data.lat : data.latitude;
   const lng = data.lng !== undefined ? data.lng : data.longitude;
 
-  // Reject frames with null or undefined coordinates before validation
+  // Cross-field validation: require at least one complete coordinate pair.
+  const hasLatLng = data.lat !== undefined && data.lng !== undefined;
+  const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;
+  if (!hasLatLng && !hasLatLong) {
+    return ws.send(JSON.stringify({
+      error: 'Invalid telemetry payload',
+      details: ['At least one coordinate pair (lat+lng or latitude+longitude) is required.']
+    }));
+  }
+
+  // Reject frames with null or undefined resolved coordinates before schema validation
   if (lat === null || lat === undefined || lng === null || lng === undefined) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat and lng are required'] }));
   }
@@ -961,16 +971,6 @@ export async function handleLocationPing(ws, data, req) {
   const normalizedValidationErrors = validateTelemetryPayload(normalizedForValidation);
   if (normalizedValidationErrors) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: normalizedValidationErrors }));
-  }
-
-  // Cross-field validation: require at least one complete coordinate pair.
-  const hasLatLng = data.lat !== undefined && data.lng !== undefined;
-  const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;
-  if (!hasLatLng && !hasLatLong) {
-    return ws.send(JSON.stringify({
-      error: 'Invalid telemetry payload',
-      details: ['At least one coordinate pair (lat+lng or latitude+longitude) is required.']
-    }));
   }
 
   const sanitized = sanitizeTelemetryData(data);

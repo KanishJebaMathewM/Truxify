@@ -345,8 +345,14 @@ runs:
         out_path     = sys.argv[3]
         theme_desc   = sys.argv[4]
 
+        import os
         try:
-            flutter_out = open(flutter_file).read()
+            with open(flutter_file, 'r') as f:
+                lines = f.readlines()
+            
+            basename = os.path.basename(file_path)
+            relevant_lines = [line.strip() for line in lines if basename in line]
+            flutter_out = "\n".join(relevant_lines) if relevant_lines else "(none)"
         except Exception:
             flutter_out = "(none)"
 
@@ -423,12 +429,13 @@ runs:
           R_HTTP=$(cat "$R_STATUS" 2>/dev/null || echo "000")
 
           # ── Gemini fallback to OpenRouter / backoff ─────────────────────────
-          if is_quota_err "$G_RAW" || [ "$G_HTTP" != "200" ]; then
-            if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+          local g_attempt=1
+          while { is_quota_err "$G_RAW" || [ "$G_HTTP" != "200" ]; } && [ $g_attempt -le 3 ]; do
+            if [ $g_attempt -eq 1 ] && [ -n "${OPENROUTER_API_KEY:-}" ]; then
               echo "  Gemini failed/quota exceeded (HTTP $G_HTTP) — trying OpenRouter fallback..." >&2
               OP_FILE="_op_${APP}_${IDX}.json"
               jq -n --rawfile prompt "$PROMPT_FILE" \
-                --arg model "google/gemini-3-flash-preview" \
+                --arg model "anthropic/claude-3.5-haiku" \
                 '{model:$model,max_tokens:2048,temperature:0.05,messages:[{role:"user",content:$prompt}]}' \
                 > "$OP_FILE"
 
@@ -437,23 +444,30 @@ runs:
               rm -f "$OP_FILE"
             fi
 
-            # If it's still not 200 (fallback failed/missing), do standard retry
+            if [ "$G_HTTP" != "200" ] && ! is_quota_err "$G_RAW" && [ "$G_HTTP" != "429" ] && [ "$G_HTTP" != "000" ]; then
+               # If it's not a quota/rate-limit error (e.g. 400 Bad Request), wait and retry might not help, but we'll fallback to wait
+               true
+            fi
+
             if [ "$G_HTTP" != "200" ]; then
               WAIT=$(get_retry_wait "$G_RAW")
-              echo "  Gemini / OpenRouter failed (HTTP $G_HTTP) — waiting ${WAIT}s then retrying..." >&2
+              echo "  Gemini / OpenRouter failed (HTTP $G_HTTP) — waiting ${WAIT}s then retrying (Attempt $g_attempt/3)..." >&2
               sleep "$WAIT"
               call_gemini_to_file "$GP_FILE" "$G_RAW" "$G_STATUS"
               G_HTTP=$(cat "$G_STATUS" 2>/dev/null || echo "000")
             fi
-          fi
+            g_attempt=$((g_attempt+1))
+          done
 
-          # ── Groq rate limit backoff + retry once ────────────────────────────
-          if [ "$R_HTTP" = "429" ]; then
-            echo "  Groq rate limit — waiting 30s then retrying..." >&2
+          # ── Groq rate limit backoff + retry ────────────────────────────
+          local r_attempt=1
+          while [ "$R_HTTP" = "429" ] && [ $r_attempt -le 3 ]; do
+            echo "  Groq rate limit — waiting 30s then retrying (Attempt $r_attempt/3)..." >&2
             sleep 30
             call_groq_to_file "$RP_FILE" "$R_RAW" "$R_STATUS"
             R_HTTP=$(cat "$R_STATUS" 2>/dev/null || echo "000")
-          fi
+            r_attempt=$((r_attempt+1))
+          done
 
           # ── Extract text from raw API responses ─────────────────────────────
           G_TEXT="_g_txt_${APP}_${IDX}.txt"

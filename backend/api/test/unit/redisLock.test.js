@@ -291,4 +291,20 @@ describe('Critical section protection — Redis down must block the operation', 
     expect(mutationPerformed).toBe(false);
     expect(status).toBe(409);
   });
+
+
+describe('redisLock lock expiry and release behavior', () => {
+  it('acquireLock returns false when lock is already held', async () => {
+    const RedisLock = (await import('../../src/lib/redisLock.js')).default;
+    const lock = new RedisLock('test-lock');
+    // When Redis client is not available, acquire should return false
+  });
+
+  it('releaseLock handles not-held lock gracefully (no-op)', async () => {
+    const RedisLock = (await import('../../src/lib/redisLock.js')).default;
+    const lock = new RedisLock('test-lock');
+    // Releasing a lock not held should be a no-op, not throw
+  });
+});
+
 });

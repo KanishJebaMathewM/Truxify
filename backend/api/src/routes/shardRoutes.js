@@ -88,6 +88,29 @@ router.get('/shards/location', authenticate, userLimiter, requirePolicy('shard:v
   }
 });
 
+// Cross-shard query (registered before /shards/:shardName/orders so "all" is not captured as a shard name)
+router.get('/shards/all/orders', authenticate, userLimiter, requirePolicy('shard:query-orders'), crossShardQuery, async (req, res) => {
+  try {
+    const results = await req.executeCrossShard(
+      'SELECT COUNT(*) as total FROM orders'
+    );
+    const total = results.reduce((sum, r) => sum + parseInt(r.data[0]?.total || 0), 0);
+    res.json({
+      success: true,
+      data: {
+        total,
+        shards: results
+      }
+    });
+  } catch (error) {
+    logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);
+    res.status(500).json({
+      success: false,
+      error: 'Internal Server Error'
+    });
+  }
+});
+
 // Get orders from specific shard
 router.get('/shards/:shardName/orders', authenticate, userLimiter, requirePolicy('shard:query-orders'), shardMiddleware, async (req, res) => {
   try {
@@ -101,29 +124,6 @@ router.get('/shards/:shardName/orders', authenticate, userLimiter, requirePolicy
       success: true,
       data: rows,
       shard: shardName
-    });
-  } catch (error) {
-    logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal Server Error'
-    });
-  }
-});
-
-// Cross-shard query
-router.get('/shards/all/orders', authenticate, userLimiter, requirePolicy('shard:query-orders'), crossShardQuery, async (req, res) => {
-  try {
-    const results = await req.executeCrossShard(
-      'SELECT COUNT(*) as total FROM orders'
-    );
-    const total = results.reduce((sum, r) => sum + parseInt(r.data[0]?.total || 0), 0);
-    res.json({
-      success: true,
-      data: {
-        total,
-        shards: results
-      }
     });
   } catch (error) {
     logger.error({ requestId: req.requestId }, '[ShardRoutes] Error:', error?.message || error);

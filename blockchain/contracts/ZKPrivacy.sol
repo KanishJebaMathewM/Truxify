@@ -223,10 +223,13 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
 
     // ============ zk-STARKs Transparent ============
 
+    // `public` rather than `external`: processSTARKTransaction calls this
+    // internally, and Solidity cannot resolve an external function by plain
+    // name. The external ABI entry is unchanged.
     function verifySTARK(
         bytes calldata proof,
         bytes calldata publicInputs
-    ) external view returns (bool) {
+    ) public view returns (bool) {
         require(proof.length > 0, "ZKPrivacy: Empty proof");
         require(publicInputs.length > 0, "ZKPrivacy: Empty publicInputs");
         require(verifier != address(0), "ZKPrivacy: Verifier not set");

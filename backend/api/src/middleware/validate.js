@@ -1,3 +1,5 @@
+import logger from './logger.js';
+
 export function formatValidationIssues(error) {
   return error.issues.map((issue) => ({
     field: issue.path.length > 0 ? issue.path.join(".") : "body",
@@ -31,6 +33,10 @@ export function validateBody(schema) {
     const result = schema.safeParse(req.body);
 
     if (!result.success) {
+      logger.warn(
+        { event: 'VALIDATION_ERROR', type: 'body', requestId: req.requestId || req.id, details: formatValidationIssues(result.error) },
+        'Body validation failed',
+      );
       return res.status(400).json({
         error: "Validation failed",
         details: formatValidationIssues(result.error),
@@ -47,6 +53,10 @@ export function validateParams(schema) {
     const result = schema.safeParse(req.params);
 
     if (!result.success) {
+      logger.warn(
+        { event: 'VALIDATION_ERROR', type: 'params', requestId: req.requestId || req.id, details: formatValidationIssues(result.error) },
+        'Params validation failed',
+      );
       return res.status(400).json({
         error: "Validation failed",
         details: formatValidationIssues(result.error),
@@ -64,6 +74,10 @@ export function validateQuery(schema) {
       const result = schema.safeParse(req.query);
 
       if (!result.success) {
+        logger.warn(
+          { event: 'VALIDATION_ERROR', type: 'query', requestId: req.requestId || req.id, details: formatValidationIssues(result.error) },
+          'Query validation failed',
+        );
         return res.status(400).json({
           error: "Validation failed",
           details: formatValidationIssues(result.error),

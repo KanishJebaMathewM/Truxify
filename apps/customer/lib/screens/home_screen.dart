@@ -118,6 +118,11 @@ class _HomeScreenState extends State<HomeScreen> {
     return 'Good evening';
   }
 
+  String _formatSavingsValue() {
+    final totalSaved = (_customerStats?['totalSaved'] as num?)?.toDouble() ?? 0;
+    return '₹${(totalSaved / 100).toStringAsFixed(totalSaved % 100 == 0 ? 0 : 2)}';
+  }
+
   void _showComingSoon(BuildContext context, String title) {
     ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(AppLocalizations.of(context)!.comingSoon(title))));
@@ -443,8 +448,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       StatCard(
                                         title: AppLocalizations.of(context)!
                                             .savings,
-                                        value:
-                                            '${_customerStats?['totalSaved'] ?? 0}',
+                                        value: _formatSavingsValue(),
                                         icon: Icons.savings_rounded,
                                       ),
                                     ],
@@ -477,8 +481,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           title:
                                               AppLocalizations.of(context)!
                                                   .savings,
-                                          value:
-                                              '${_customerStats?['totalSaved'] ?? 0}',
+                                          value: _formatSavingsValue(),
                                           icon: Icons.savings_rounded,
                                         ),
                                       ),

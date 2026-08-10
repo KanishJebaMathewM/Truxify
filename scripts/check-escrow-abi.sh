@@ -26,7 +26,7 @@ echo "🔍 Checking escrow ABI compatibility..."
 # Expected selectors (from backend/api/src/services/escrow.js)
 # These are keccak256(first 4 bytes) of the function signatures
 declare -A EXPECTED_SELECTORS
-EXPECTED_SELECTORS["createBooking(uint256,address)"]="490a3b30"
+EXPECTED_SELECTORS["createBooking(uint256,address,bytes)"]="0bb7aa51"
 EXPECTED_SELECTORS["releasePayment(uint256)"]="88685cd9"
 EXPECTED_SELECTORS["cancelBooking(uint256)"]="0dca825e"
 EXPECTED_SELECTORS["cancelWithPenalty(uint256,uint256)"]="ca9a63b1"

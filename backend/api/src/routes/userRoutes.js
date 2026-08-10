@@ -44,8 +44,7 @@ const fcmTokenSchema = z.object({
   fcmToken: z
     .string({ required_error: 'fcmToken is required' })
     .min(10, 'fcmToken must be at least 10 characters')
-    .max(4096, 'fcmToken must be at most 4096 characters')
-    .regex(/^[a-zA-Z0-9\-_:]+$/, 'fcmToken contains invalid characters'),
+    .max(4096, 'fcmToken must be at most 4096 characters'),
 });
 
 // ============================================================================

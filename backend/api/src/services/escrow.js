@@ -85,7 +85,7 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     logger.info('✅ Polygon Escrow contract client initialised.');
     logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
-    logger.error('❌ Failed to initialise Escrow contract client:', err.message)
+    logger.error({ event: 'ESCROW_INIT_ERROR', error: err && err.message }, 'Failed to initialise Escrow contract client')
     Sentry.captureException(err)
   }
 } else {
@@ -131,7 +131,7 @@ export async function validateEscrowSetup () {
     }
     logger.info(`[escrow] ✅ Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
   } catch (err) {
-    logger.error(`[escrow] ❌ Failed to query bytecode at ${address}: ${err.message}`)
+    logger.error({ event: 'ESCROW_BYTECODE_QUERY_ERROR', address, error: err && err.message }, `[escrow] Failed to query bytecode at ${address}`)
     return false
   }
 
@@ -475,6 +475,11 @@ export async function recordDepositTx (bookingId, txHash, expectedSenderAddress 
     return { error: 'Transaction destination is not the Escrow contract' }
   }
 
+  // Critical Security Check: Verify tx.value (deposit amount)
+  if (expectedAmountWei && BigInt(tx.value) < BigInt(expectedAmountWei)) {
+    return { error: `Transaction value ${tx.value} wei is less than expected ${expectedAmountWei} wei` }
+  }
+
   let decoded
   try {
     decoded = escrowContract.interface.parseTransaction({ data: tx.data, value: tx.value })
@@ -632,6 +637,7 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
   }
   });
 }
+
 
 /**
  * Submit an escrow refund and return its hash before confirmation.
@@ -880,7 +886,7 @@ export const lockPayment = escrowLockPayment;
 
 
 
-async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
+export async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
   const bookingOnChain = await escrowContract.bookings(bookingId);
   const onChainAmountBN = BigInt(bookingOnChain.amount.toString());
   const expectedWeiBN = BigInt(expectedWei);
@@ -890,5 +896,3 @@ async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
     expectedAmount: expectedWeiBN.toString()
   };
 }
-
-module.exports.verifyOnChainEscrowBalance = verifyOnChainEscrowBalance;

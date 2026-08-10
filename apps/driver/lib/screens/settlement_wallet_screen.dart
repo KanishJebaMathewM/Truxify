@@ -113,7 +113,6 @@ class _SettlementWalletScreenState extends State<SettlementWalletScreen> {
                   itemCount: _contracts.length,
                   itemBuilder: (context, index) {
                     final contract = _contracts[index];
-                    final isReady = contract.isGeofenceConfirmed && !contract.isPodUploaded; // Simplified logic for mock UI
                     final isReleased = contract.status == 'RELEASED';
 
                     return Card(
@@ -151,7 +150,7 @@ class _SettlementWalletScreenState extends State<SettlementWalletScreen> {
                                   backgroundColor: isReleased ? Colors.grey[300] : Colors.blueAccent,
                                   foregroundColor: isReleased ? Colors.grey[600] : Colors.white,
                                 ),
-                                child: Text(isReleased ? 'FUNDS RELEASED' : 'UPLOAD POD & TRIGGER PAYOUT'),
+                                child: Text(isReleased ? 'FUNDS RELEASED' : 'TRIGGER PAYOUT'),
                               ),
                             )
                           ],

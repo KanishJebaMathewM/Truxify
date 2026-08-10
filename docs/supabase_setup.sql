@@ -1627,6 +1627,7 @@ begin
   update trips
     set status   = 'completed',
         end_time = p_end_time,
+        net_earnings = p_net_earnings,
         updated_at = now()
     where trip_display_id = p_trip_display_id;
 
@@ -1730,10 +1731,13 @@ begin
     raise exception 'No active trip found for this order — cannot complete trip';
   end if;
 
-  -- Update trip record
+  -- Update trip record, persisting net_earnings so the sum-based earnings
+  -- readers (driverEarningsService, statements, driver app) report the payout
+  -- the wallet credit below actually made (issue #8941)
   update trips
   set status = 'completed',
       end_time = to_char(now(), 'HH24:MI'),
+      net_earnings = v_order.total_amount,
       updated_at = now()
   where trip_display_id = v_trip_display_id;
 

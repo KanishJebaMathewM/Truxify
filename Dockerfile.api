@@ -1,13 +1,36 @@
+# Root-context image build for the API, referenced by k8s/README.md and
+# snyk/snyk-github-actions.yaml:
+#
+#   docker build -t truxify/api:latest -f Dockerfile.api .
+#
+# Mirrors backend/api/Dockerfile, which docker-compose builds with
+# ./backend/api as its context.
 FROM node:20-alpine
 
 WORKDIR /app
 
-COPY backend/api/package*.json ./
-RUN npm ci --only=production
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -S appuser -u 1001 -G appgroup
 
-COPY backend/api/src ./src
-COPY backend/api/.env ./
+COPY backend/api/package.json ./
+
+# `npm install`, not `npm ci`: backend/api is an npm workspace with no
+# package-lock.json of its own, and no lockfile is committed at the
+# repository root either, so `npm ci` has nothing to install from.
+# --legacy-peer-deps matches backend/api/Dockerfile and the CI workflows.
+RUN npm install --omit=dev --legacy-peer-deps
+
+COPY --chown=appuser:appgroup backend/api/src ./src
+
+# No .env is copied. Configuration is supplied at runtime through the
+# container environment (k8s Secret / ConfigMap, or `docker run --env-file`),
+# so credentials never become part of an image layer.
+
+USER appuser
 
 EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD ["node", "-e", "fetch('http://localhost:5000/api/health/live').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"]
 
 CMD ["node", "src/index.js"]

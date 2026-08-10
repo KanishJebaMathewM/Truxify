@@ -8,8 +8,8 @@ import { createLocationEventBus } from './locationEventBus.js';
 import telemetryBuffer from './telemetryBuffer.js';
 
 const TELEMETRY_SCHEMA = {
-  lat: { type: 'number', required: true, min: -90, max: 90 },
-  lng: { type: 'number', required: true, min: -180, max: 180 },
+  lat: { type: 'number', required: false, min: -90, max: 90 },
+  lng: { type: 'number', required: false, min: -180, max: 180 },
   latitude: { type: 'number', required: false, min: -90, max: 90 },
   longitude: { type: 'number', required: false, min: -180, max: 180 },
   driver_id: { type: 'string', required: false, minLen: 1, maxLen: 64 },
@@ -23,6 +23,14 @@ const TELEMETRY_SCHEMA = {
 
 function validateTelemetryPayload(data) {
   const errors = [];
+
+  const hasLatLng = data.lat !== undefined && data.lat !== null && data.lng !== undefined && data.lng !== null;
+  const hasLatLong = data.latitude !== undefined && data.latitude !== null && data.longitude !== undefined && data.longitude !== null;
+  
+  if (!hasLatLng && !hasLatLong) {
+    errors.push('At least one coordinate pair (lat/lng or latitude/longitude) is required');
+  }
+
   for (const [field, rules] of Object.entries(TELEMETRY_SCHEMA)) {
     const value = data[field];
     if (rules.required && (value === undefined || value === null)) {
@@ -185,6 +193,7 @@ const DRIVER_ORDER_CACHE_KEY_PREFIX = 'driver:active-order:';
  * Returns { orderId, orderDisplayId } or null on miss / error.
  */
 async function getCachedDriverOrder(driverId) {
+  if (!driverId) return null;
   if (!redisClient) return null;
   try {
     const cached = await redisClient.get(`${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`);
@@ -192,7 +201,7 @@ async function getCachedDriverOrder(driverId) {
       return JSON.parse(cached);
     }
   } catch (err) {
-    logger.error('Redis driver order cache get error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache get error');
   }
   return null;
 }
@@ -201,6 +210,7 @@ async function getCachedDriverOrder(driverId) {
  * Store the driver → active order mapping in Redis.
  */
 async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
+  if (!driverId) return;
   if (!redisClient || !orderId) return;
   try {
     await redisClient.set(
@@ -210,7 +220,7 @@ async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
       DRIVER_ORDER_CACHE_TTL_SECONDS,
     );
   } catch (err) {
-    logger.error('Redis driver order cache set error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache set error');
   }
 }
 
@@ -218,11 +228,12 @@ async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
  * Invalidate cached active order for a driver.
  */
 async function invalidateDriverOrderCache(driverId) {
+  if (!driverId) return;
   if (!redisClient) return;
   try {
     await redisClient.del(`${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`);
   } catch (err) {
-    logger.error('Redis driver order cache invalidate error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache invalidate error');
   }
 }
 
@@ -418,7 +429,7 @@ async function authenticateWs(ws, token) {
     }
     ws.authenticated = true;
     await restoreSubscriptions(ws);
-    logger.info(`✅ WS Authenticated user: ${ws.user.id}`);
+    logger.info({ userId: ws.user.id }, 'WS Authenticated user');
   } catch (err) {
     logger.error({ err }, 'WS Auth failed');
     ws.send(JSON.stringify({ error: 'Unauthorized: Invalid token', code: 4001 }));
@@ -594,14 +605,14 @@ export function initWebSocketServer(server, orderRepository) {
     });
 
     ws.on('close', () => {
-      logger.info('🔌 WebSocket connection closed.');
+      logger.info('WebSocket connection closed');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
       })();
     });
 
     ws.on('error', (err) => {
-      logger.error('🔌 WebSocket client error:', err.message);
+      logger.error({ err }, 'WebSocket client error');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
       })();
@@ -634,7 +645,7 @@ export function initWebSocketServer(server, orderRepository) {
       };
       ws.authenticated = true;
       logger.warn({ event: 'WS_BYPASS_AUTH_USED', driverId: ws.driverId, role: ws.user.role }, 'WS Auth bypassed via DEV_ACCESS_TOKEN');
-      logger.info('🔌 New WebSocket connection established on /ws/tracking');
+      logger.info('New WebSocket connection established on /ws/tracking');
       return;
     }
 
@@ -650,13 +661,13 @@ export function initWebSocketServer(server, orderRepository) {
       }
     }, WS_AUTH_TIMEOUT_MS);
     ws.once('close', () => clearTimeout(authTimeout));
-    logger.info('🔌 New WebSocket connection established on /ws/tracking (awaiting first-frame auth)');
+    logger.info('New WebSocket connection established on /ws/tracking (awaiting first-frame auth)');
   });
 
   wsHeartbeatInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        logger.info('🔌 Terminating unresponsive WebSocket client.');
+        logger.info('Terminating unresponsive WebSocket client');
         return ws.terminate();
       }
       ws.isAlive = false;
@@ -746,7 +757,7 @@ export async function handleTrackingMessage(ws, message, req) {
             status: 'authenticated',
             user_id: ws.user?.id ?? ws.driverId,
           }));
-          logger.info('🔌 New WebSocket connection established on /ws/tracking (first-frame auth)');
+          logger.info('New WebSocket connection established on /ws/tracking (first-frame auth)');
         }
         return;
       }
@@ -839,14 +850,6 @@ export async function handleLocationPing(ws, data, req) {
   const normalizedValidationErrors = validateTelemetryPayload(normalizedForValidation);
   if (normalizedValidationErrors) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: normalizedValidationErrors }));
-  }
-
-  // Schema-validate and sanitize the telemetry payload before further
-  // processing (issue #5758). Enforces field ranges and string lengths that
-  // the inline guards above do not cover.
-  const validationErrors = validateTelemetryPayload(data);
-  if (validationErrors) {
-    return ws.send(JSON.stringify({ error: 'Invalid telemetry payload', details: validationErrors }));
   }
 
   // Cross-field validation: require at least one complete coordinate pair.
@@ -1191,7 +1194,7 @@ export async function handleSubscribe(ws, data) {
     }
   }
 
-  logger.info(`🔌 Client subscribed to telemetry updates for: "${targetId}"`);
+  logger.info({ targetId }, 'Client subscribed to telemetry updates');
   ws.send(JSON.stringify({ status: 'subscribed', target: targetId, reconnect_supported: true }));
 }
 
@@ -1266,7 +1269,7 @@ async function handleUnsubscribe(ws, data) {
       }
     }
 
-    logger.info(`🔌 Client unsubscribed from updates for: "${targetId}"`);
+    logger.info({ targetId }, 'Client unsubscribed from updates');
     ws.send(JSON.stringify({ status: 'unsubscribed', target: targetId }));
   }
 }
@@ -1275,7 +1278,7 @@ async function removeClientFromAllSubscriptions(ws) {
   trackingSubscriptions.forEach((clients, key) => {
     if (clients.has(ws)) {
       clients.delete(ws);
-      logger.info(`🔌 Removed socket subscription from "${key}" due to disconnect.`);
+      logger.info({ key }, 'Removed socket subscription due to disconnect');
     }
     if (clients.size === 0) {
       trackingSubscriptions.delete(key);
@@ -1290,7 +1293,7 @@ async function removeClientFromAllSubscriptions(ws) {
               supabase.removeChannel(channel);
             }
             locationChannels.delete(uuidKey);
-            logger.info(`🔌 Removed Supabase Realtime channel for order "${uuidKey}" on last subscriber disconnect.`);
+            logger.info({ uuidKey }, 'Removed Supabase Realtime channel on last subscriber disconnect');
           }
         }
         displayIdToLocationChannelKeys.delete(key);

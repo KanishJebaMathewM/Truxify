@@ -5,14 +5,12 @@ import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { validateBody } from '../middleware/validate.js';
 import { shareTrackingSchema } from '../validation/requestSchemas.js';
-import { supabase, redisClient } from '../config/db.js';
+import { createUserClient } from '../config/db.js';
 import { TrackingTokenService } from '../services/trackingTokenService.js';
 import logger from '../middleware/logger.js';
 import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
 
 const router = express.Router();
-
-const trackingTokenService = new TrackingTokenService({ supabase, logger });
 
 // Rate limiters
 const publicTrackingLimiter = rateLimit({
@@ -48,8 +46,13 @@ router.post(
       const orderDisplayId = req.params.id;
       const userId = req.user.id;
 
+      // Run the ownership pre-check and token writes through a per-request
+      // client carrying the caller's identity so RLS resolves correctly.
+      const userClient = createUserClient(req.token);
+      const trackingTokenService = new TrackingTokenService({ supabase: userClient, logger });
+
       // Verify the order exists and belongs to the requesting customer
-      const { data: order, error: orderError } = await supabase
+      const { data: order, error: orderError } = await userClient
         .from('orders')
         .select('order_display_id, customer_id, status')
         .eq('order_display_id', orderDisplayId)
@@ -106,7 +109,10 @@ router.post(
       const orderDisplayId = req.params.id;
       const userId = req.user.id;
 
-      const { data: order, error: orderError } = await supabase
+      const userClient = createUserClient(req.token);
+      const trackingTokenService = new TrackingTokenService({ supabase: userClient, logger });
+
+      const { data: order, error: orderError } = await userClient
         .from('orders')
         .select('order_display_id, customer_id')
         .eq('order_display_id', orderDisplayId)

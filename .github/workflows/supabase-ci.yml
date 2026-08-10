@@ -27,6 +27,9 @@ jobs:
           fi
           echo "No duplicate CREATE TABLE definitions."
 
+      - name: Check SECURITY DEFINER functions pin search_path
+        run: python3 scripts/check-definer-search-path.py
+
       - name: Setup Supabase CLI
         uses: supabase/setup-cli@v1
         with:

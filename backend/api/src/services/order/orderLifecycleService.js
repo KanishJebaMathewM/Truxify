@@ -578,7 +578,7 @@ export class OrderLifecycleService {
         // against at deposit time and on release), so it must track
         // total_amount using the same canonical paisa→wei conversion the rest
         // of the escrow pipeline uses.
-        const newAmountWei = paisaToMaticWei(pricing.totalAmount);
+        const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
 
         const updates = {
           drop_address,
@@ -1034,7 +1034,7 @@ async function createOrderTransactional({ idempotencyKey, orderData, timelineDat
   }
 
   try {
-    const { data, error } = await db.rpc('create_order_tx', {
+    const { data, error } = await supabaseAdmin.rpc('create_order_tx', {
       p_idempotency_key: idempotencyKey,
       p_order_data: orderData,
       p_timeline_data: timelineData || { status: 'created', details: { note: 'Order initialized' } },
@@ -1056,5 +1056,3 @@ async function createOrderTransactional({ idempotencyKey, orderData, timelineDat
     throw err;
   }
 }
-
-module.exports.createOrderTransactional = createOrderTransactional;

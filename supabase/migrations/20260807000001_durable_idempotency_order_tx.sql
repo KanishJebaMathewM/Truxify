@@ -11,6 +11,19 @@ CREATE TABLE IF NOT EXISTS order_idempotency_records (
 
 CREATE INDEX IF NOT EXISTS idx_order_idempotency_status ON order_idempotency_records(status);
 
+-- The idempotency records hold per-tenant order data and must not be
+-- reachable over REST. Every tenant table in this repo is RLS-protected;
+-- this one was created without RLS, leaving it world-readable/writable and
+-- allowing cross-tenant key enumeration and replay poisoning. Restrict it to
+-- backend-only (service_role) access so the arbitration RPC stays the sole
+-- authority on idempotency state.
+ALTER TABLE order_idempotency_records ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "service role only" ON order_idempotency_records
+  FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+REVOKE ALL ON order_idempotency_records FROM anon, authenticated;
+
 -- Extend or replace create_order_tx RPC for single atomic database transaction
 CREATE OR REPLACE FUNCTION create_order_tx(
     p_idempotency_key TEXT,

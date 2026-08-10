@@ -4,6 +4,8 @@ import { ethers } from 'ethers';
 import { supabase } from '../config/db.js';
 import logger from '../middleware/logger.js';
 
+const DIGILOCKER_TIMEOUT_MS = 10000;
+
 class DigilockerService {
   constructor() {
     this.clientId = process.env.DIGILOCKER_CLIENT_ID;
@@ -26,7 +28,7 @@ class DigilockerService {
         ];
         this.contract = new ethers.Contract(contractAddress, this.contractABI, this.wallet);
       } catch (err) {
-        logger.error('Failed to initialize DocumentRegistry/KYC contract:', err.message);
+        logger.error({ err }, 'Failed to initialize DocumentRegistry/KYC contract');
       }
     } else {
       logger.warn('DocumentRegistry/KYC contract not configured: missing RPC, key, or contract address');
@@ -56,7 +58,8 @@ class DigilockerService {
           client_secret: this.clientSecret,
           redirect_uri: this.redirectUri
         }, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: DIGILOCKER_TIMEOUT_MS
         });
         return {
           access_token: tokenResponse.data.access_token,
@@ -64,7 +67,7 @@ class DigilockerService {
           name: tokenResponse.data.name || 'DigiLocker User'
         };
       } catch (err) {
-        logger.error('[DigilockerService] OAuth exchange failed:', err.message);
+        logger.error({ err }, '[DigilockerService] OAuth exchange failed');
         return { success: false, error: err.message };
       }
     }
@@ -172,11 +175,12 @@ class DigilockerService {
           client_secret: this.clientSecret,
           redirect_uri: this.redirectUri
         }, {
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          timeout: DIGILOCKER_TIMEOUT_MS
         });
         tokenData = tokenResponse.data;
       } catch (err) {
-        logger.error('Digilocker token exchange failed:', err.message);
+        logger.error({ err }, 'Digilocker token exchange failed');
         throw new Error('Digilocker token exchange failed: ' + err.message, { cause: err });
       }
     }
@@ -205,14 +209,16 @@ class DigilockerService {
     } else {
       try {
         const listResponse = await axios.get('https://api.digitallocker.gov.in/public/oauth2/1/files/issued', {
-          headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
+          headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
+          timeout: DIGILOCKER_TIMEOUT_MS
         });
         const files = listResponse.data?.items || [];
 
         for (const file of files) {
           if (file.doctype === 'ADLNK' || file.doctype === 'DRVLC') {
             const docResponse = await axios.get(`https://api.digitallocker.gov.in/public/oauth2/1/file/${file.uri}`, {
-              headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
+              headers: { 'Authorization': `Bearer ${tokenData.access_token}` },
+              timeout: DIGILOCKER_TIMEOUT_MS
             });
             documents.push({
               type: file.doctype === 'DRVLC' ? 'driving_licence' : 'rc_book',
@@ -221,7 +227,7 @@ class DigilockerService {
           }
         }
       } catch (err) {
-        logger.error('Failed to fetch DigiLocker documents:', err.message);
+        logger.error({ err }, 'Failed to fetch DigiLocker documents');
         throw new Error('Failed to fetch DigiLocker documents: ' + err.message, { cause: err });
       }
     }
@@ -245,7 +251,7 @@ class DigilockerService {
           await tx.wait();
           txHash = tx.hash;
         } catch (err) {
-          logger.error(`Blockchain registration failed for ${doc.type}:`, err.message);
+          logger.error({ err, docType: doc.type }, 'Blockchain registration failed');
         }
       }
 
@@ -264,7 +270,7 @@ class DigilockerService {
         .single();
 
       if (dbErr) {
-        logger.error(`Database record failed for ${doc.type}:`, dbErr.message);
+        logger.error({ err: dbErr, docType: doc.type }, 'Database record failed');
       } else {
         syncResults.push(docRecord);
       }

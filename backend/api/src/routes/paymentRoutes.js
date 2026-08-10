@@ -26,8 +26,9 @@ import { requireIdempotency } from '../middleware/idempotency.js';
 import { acquireLock, releaseLock, LockAcquisitionError } from '../lib/redisLock.js';
 import { auditLog } from '../middleware/auditLog.js';
 import logger from '../middleware/logger.js';
+import { createStore } from '../middleware/rateLimiter.js';
 import { orderRepository, orderValidationService } from '../core/container.js';
-import { supabase } from '../config/db.js';
+import { supabase, createUserClient } from '../config/db.js';
 import {
   recordDepositTx,
   getEscrowBookingId,
@@ -35,6 +36,7 @@ import {
   isEscrowEnabled,
   escrowLockPayment,
   resolveExpectedDepositAmount,
+  submitEscrowRefund,
 } from '../services/escrow.js';
 import { sendPushNotification } from '../services/notificationService.js';
 import upiPaymentService from '../services/payment/UpiPaymentService.js';
@@ -47,6 +49,8 @@ const router = express.Router();
 const PAYMENT_LOCK_TTL_MS = 30_000; // 30 seconds
 
 // ─── Rate Limiters ────────────────────────────────────────────────────────────
+// Redis-backed stores so multi-replica deploys share one budget (MemoryStore
+// would allow N× the limit across N API pods).
 
 const lockLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -54,6 +58,7 @@ const lockLimiter = rateLimit({
   message: { error: 'Too many payment requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:payment-lock:'),
 });
 
 const statusLimiter = rateLimit({
@@ -61,6 +66,7 @@ const statusLimiter = rateLimit({
   max: 60,
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:payment-status:'),
 });
 
 // ─── Validation Schemas ───────────────────────────────────────────────────────
@@ -139,7 +145,7 @@ router.post(
 
       const platformUpiId = process.env.PLATFORM_UPI_ID?.trim();
       if (!platformUpiId) {
-        logger.error('[payments] PLATFORM_UPI_ID is not configured; cannot generate UPI intent');
+        logger.error({ event: 'PAYMENT_UPI_NOT_CONFIGURED', orderId: order_id }, '[payments] PLATFORM_UPI_ID is not configured; cannot generate UPI intent');
         return res.status(503).json({ error: 'UPI payments are not configured on the server.' });
       }
       const orderRef = order.order_display_id;
@@ -164,7 +170,10 @@ router.post(
         escrow_enabled: isEscrowEnabled(),
       });
     } catch (err) {
-      logger.error('[payments] upi-intent error:', err.message);
+      logger.error(
+        { event: 'PAYMENT_UPI_INTENT_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+        '[payments] upi-intent error',
+      );
       return res.status(500).json({ error: 'Internal Server Error' });
     }
   }
@@ -324,8 +333,88 @@ router.post(
         });
       }
 
-      // 7. Notify assigned driver that payment is now locked
-      if (order.driver_id) {
+      const pending = order.pending_bid_acceptance;
+      if (pending) {
+        const { error: acceptErr } = await orderRepository.executeRpc('accept_bid_tx', {
+          p_bid_id: pending.bid_id,
+          p_order_id: order.id,
+          p_load_id: pending.load_id,
+          p_driver_id: pending.driver_id,
+          p_truck_id: pending.truck_id,
+          p_driver_name: pending.driver_name,
+          p_driver_rating: pending.driver_rating,
+          p_truck_number: pending.truck_number,
+          p_bid_amount: pending.bid_amount,
+          p_order_display_id: pending.order_display_id,
+          p_expected_version: pending.version,
+          p_escrow_booking_id: bookingId,
+        }, req.token ? createUserClient(req.token) : undefined);
+
+        if (acceptErr) {
+          logger.error('[payments] accept_bid_tx failed after lock:', acceptErr.message);
+          let refundResult;
+          try {
+            refundResult = await submitEscrowRefund(order.order_display_id);
+          } catch (refundErr) {
+            logger.error('[payments] Escrow refund also failed:', refundErr.message);
+            refundResult = { error: refundErr.message };
+          }
+          let refundConfirmed = !!(refundResult && !refundResult.error && refundResult.txHash);
+          if (refundConfirmed && typeof refundResult.waitForConfirmation === 'function') {
+            try {
+              await refundResult.waitForConfirmation();
+            } catch (confirmErr) {
+              logger.error('[payments] Escrow refund confirmation failed:', confirmErr.message);
+              refundResult = { error: confirmErr.message, txHash: refundResult.txHash };
+              refundConfirmed = false;
+            }
+          } else if (refundConfirmed && typeof refundResult.waitForConfirmation !== 'function') {
+            refundConfirmed = false;
+            refundResult = {
+              error: refundResult.error || 'escrow refund confirmation is unavailable',
+              txHash: refundResult.txHash,
+            };
+          }
+
+          if (!refundConfirmed) {
+            const refundError = refundResult?.error || 'escrow refund was not submitted';
+            await orderRepository.updateOrder(order.id, {
+              escrow_status: 'funding',
+              escrow_funding_error: `escrow refund pending: ${refundError}`,
+            }).catch((stateErr) => {
+              logger.error('[payments] Failed to mark escrow refund pending:', stateErr.message);
+            });
+            return res.status(503).json({
+              error: 'Payment locked but the driver assignment could not be finalized. The escrow refund is pending and will be completed automatically. Please try again shortly.',
+              details: `${acceptErr.message}; escrow refund: ${refundError}`,
+            });
+          }
+
+          await orderRepository.revertEscrowStatus(order.id).catch((revertErr) => {
+            logger.error('[payments] Failed to revert escrow status:', revertErr.message);
+          });
+          return res.status(409).json({
+            error: 'Payment locked but the driver assignment could not be finalized. The escrow deposit has been refunded. Please try again.',
+            details: acceptErr.message,
+          });
+        }
+
+        sendPushNotification(
+          pending.driver_id,
+          'Bid Accepted!',
+          `Your bid for order ${pending.order_display_id} has been accepted. You are now assigned to this load.`,
+          'order_update',
+          { orderId: order.id, orderDisplayId: pending.order_display_id }
+        ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err.message}`));
+
+        sendPushNotification(
+          pending.driver_id,
+          '💰 Payment Locked',
+          `Customer payment for order ${order.order_display_id} is now locked in escrow. Proceed with delivery.`,
+          'payment',
+          { order_display_id: order.order_display_id, tx_hash }
+        ).catch(err => logger.warn('[payments] Driver FCM push failed:', err.message));
+      } else if (order.driver_id) {
         sendPushNotification(
           order.driver_id,
           '💰 Payment Locked',
@@ -419,7 +508,10 @@ router.get(
         escrow_enabled: isEscrowEnabled(),
       });
     } catch (err) {
-      logger.error('[payments] status error:', err.message);
+      logger.error(
+        { event: 'PAYMENT_STATUS_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+        '[payments] status error',
+      );
       return res.status(500).json({ error: 'Internal Server Error' });
     }
   }

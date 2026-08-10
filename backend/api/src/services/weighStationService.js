@@ -5,24 +5,21 @@
  */
 
 const SIMULATED_NETWORK_DELAY_MS = 800;
-const PULL_IN_PROBABILITY = 0.2;
 const STATION_ID_RANGE = 1000;
 
 const checkBypassEligibility = async (driverId, lat, lng) => {
-  // Simulate network delay
-  await new Promise(resolve => setTimeout(resolve, SIMULATED_NETWORK_DELAY_MS));
-
-  // Determine bypass (80% chance) vs pull in (20% chance)
-  const isBypass = Math.random() > PULL_IN_PROBABILITY;
-  
-  // Randomly assign an ID for the station for logging
-  const stationId = 'WS-' + Math.floor(Math.random() * STATION_ID_RANGE);
-
+  // No real WIM/bypass provider (Drivewyze/PrePass) is integrated. The
+  // previous implementation returned a Math.random() coin-flip presented as a
+  // regulatory verdict, which a driver could legally rely on. There is no real
+  // integration to call, so this fails closed and reports itself as
+  // unsupported instead of inventing a BYPASS/PULL_IN decision.
   return {
-    action: isBypass ? 'BYPASS' : 'PULL_IN',
-    stationId,
-    reason: isBypass ? 'Excellent safety score.' : 'Random inspection required.',
-    timestamp: new Date().toISOString()
+    action: 'UNSUPPORTED',
+    supported: false,
+    simulated: true,
+    stationId: null,
+    reason: 'Weigh-in-motion bypass is not available: no WIM provider is configured. This is not a regulatory verdict.',
+    timestamp: new Date().toISOString(),
   };
 };
 

@@ -149,6 +149,10 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
     throw new RangeError(`weightTonnes must be a positive number, got ${weightTonnes}`);
   }
 
+  if (pickupLat == null || pickupLng == null || dropLat == null || dropLng == null) {
+    throw new TypeError('computeOrderPricing: pickupLat, pickupLng, dropLat, and dropLng are required and cannot be null');
+  }
+
   const fallbackDistanceKm = haversineKm(pickupLat, pickupLng, dropLat, dropLng);
   const distanceKm = Number.isFinite(roadDistanceKm) && roadDistanceKm >= 0
     ? roadDistanceKm

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createSupabaseMock } from '../helpers/supabaseMock.js';
+import notificationService from '../../src/services/notificationService.js';
 import { DomainError } from '../../src/services/order/domainError.js';
 
 const supabaseMock = createSupabaseMock();
@@ -339,4 +340,18 @@ describe('sendPushNotification', () => {
     });
     expect(result.success).toBe(true);
   });
+
+  describe('FCM edge cases', () => {
+    it('returns null when userId is null in getFcmTokenForUser', async () => {
+      const result = await notificationService.getFcmTokenForUser(null);
+      expect(result).toBeNull();
+    });
+
+    it('returns error result when fcmToken is empty in sendFcmNotification', async () => {
+      const result = await notificationService.sendFcmNotification(null, '', { title: 'Test', body: 'Test body' });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('No FCM token');
+    });
+  });
+
 });

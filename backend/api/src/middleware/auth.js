@@ -272,7 +272,10 @@ export async function authenticate(req, res, next) {
     try {
       decoded = jwt.decode(token);
     } catch (err) {
-      // ignore decoding errors and let verification handle it
+      logger.warn(
+        { event: 'JWT_DECODE_ERROR', requestId: req.requestId || req.id },
+        'JWT decode failed',
+      );
     }
 
     const isSupabaseToken =

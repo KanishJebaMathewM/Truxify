@@ -69,9 +69,6 @@ loaded_models: set[str] = set()
 
 import os
 
-MAX_CONCURRENT_INFERENCE = int(os.getenv("MAX_CONCURRENT_INFERENCE", "10"))
-INFERENCE_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_INFERENCE)
-
 app = FastAPI(
     title="Truxify ML Engine",
     description="ML prediction service for load matching, pricing, ETA, and route optimization",
@@ -442,7 +439,6 @@ async def predict_demand_endpoint(input: DemandForecastInput, _auth=Depends(veri
         # auto-train on first use); run it off the event loop so it cannot
         # stall unrelated requests or /health.
         demand = await run_inference(predict_demand, features)
-        demand = await asyncio.to_thread(predict_demand, features)
         if demand is None:
             raise HTTPException(status_code=503, detail="Model not available")
         return DemandForecastOutput(predicted_demand=demand)
@@ -560,7 +556,6 @@ async def packing_endpoint(input: PackingInput, _auth=Depends(verify_api_key)):
         # 3-D bin packing and nearest-neighbour sequencing are CPU-bound; run
         # off the event loop so large packing jobs cannot stall the service.
         result = await run_inference(optimise_packing, packages, truck, addresses)
-        result = await asyncio.to_thread(optimise_packing, packages, truck, addresses)
         return PackingOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -656,7 +651,6 @@ async def deadhead_endpoint(input: DeadheadInput, _auth=Depends(verify_api_key))
         result = await run_inference(
             find_return_loads, driver_dest, truck_specs, input.arrival_time, loads
         )
-        result = await asyncio.to_thread(find_return_loads, driver_dest, truck_specs, input.arrival_time, loads)
         return DeadheadOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
@@ -682,7 +676,6 @@ async def mid_trip_endpoint(input: MidTripInput, _auth=Depends(verify_api_key)):
         result = await run_inference(
             find_mid_trip_loads, current_loc, route, capacity, loads
         )
-        result = await asyncio.to_thread(find_mid_trip_loads, current_loc, route, capacity, loads)
         return MidTripOutput(**result)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

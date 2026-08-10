@@ -38,7 +38,8 @@ class SupabaseQueryBuilder {
     this._payload = null;       // for insert / rpc
     this._select = '*';
     this._filters = [];         // [{col, op, val}]
-    this._order = null;         // {col, ascending}
+    this._order = null;         // {col, ascending} — last .order() call
+    this._orders = [];          // [{col, ascending}] — every .order() call
     this._limit = null;
     this._single = false;
     this._maybeSingle = false;
@@ -85,7 +86,9 @@ class SupabaseQueryBuilder {
   not(col, op, val) { this._filters.push({ col, op: `not:${op}`, val }); return this; }
   or(spec) { this._filters.push({ col: null, op: 'or', val: spec }); return this; }
   order(col, opts = {}) {
-    this._order = { col, ascending: opts.ascending !== false };
+    const entry = { col, ascending: opts.ascending !== false };
+    this._orders.push(entry);
+    this._order = entry;
     return this;
   }
   limit(n) { this._limit = n; return this; }
@@ -218,6 +221,7 @@ class SupabaseQueryBuilder {
       select: this._select,
       filters: this._filters,
       order: this._order,
+      orders: this._orders,
       limit: this._limit,
       single: this._single,
       maybeSingle: this._maybeSingle,
@@ -327,9 +331,15 @@ class SupabaseQueryBuilder {
       for (const f of this._filters) {
         rows = rows.filter(r => this._matches(r, f));
       }
-      if (this._order) {
-        const { col, ascending } = this._order;
-        rows.sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (ascending ? 1 : -1));
+      if (this._orders.length) {
+        rows.sort((a, b) => {
+          for (const { col, ascending } of this._orders) {
+            if (a[col] === b[col]) continue;
+            const cmp = a[col] > b[col] ? 1 : -1;
+            return ascending ? cmp : -cmp;
+          }
+          return 0;
+        });
       }
       const totalCount = rows.length;
       if (this._range) {

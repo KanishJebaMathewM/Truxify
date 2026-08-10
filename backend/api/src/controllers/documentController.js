@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { supabase } from '../config/db.js';
+import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import {
   validateDocumentBuffer,
@@ -24,6 +24,9 @@ const MIME_EXTENSION_MAP = Object.freeze({
   'image/heic': 'heic',
 });
 
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
+const SCAN_TIMEOUT_MS = 5000;
+
 /**
  * Handles a driver KYC document upload. The file itself is validated
  * server-side by inspecting its magic bytes (see lib/documentValidation.js)
@@ -37,6 +40,12 @@ export async function uploadDriverDocument(req, res) {
     if (!driverId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
+
+    if (!supabaseAdmin) {
+      logger.error('[DocumentController] Service-role Supabase client is not configured');
+      return res.status(503).json({ error: 'Document storage is not configured on the server.' });
+    }
+    const client = supabaseAdmin;
 
     if (!req.file) {
       return res.status(400).json({ error: 'A document file is required' });
@@ -116,6 +125,19 @@ export async function uploadDriverDocument(req, res) {
       clearTimeout(timeoutId);
     }
 
+    // Check if driver already has an existing document record for this documentType
+    const { data: existingDoc, error: checkError } = await client
+      .from('driver_documents')
+      .select('id, storage_path')
+      .eq('driver_id', driverId)
+      .eq('document_type', documentType)
+      .maybeSingle();
+
+    if (checkError) {
+      logger.error('[DocumentController] Failed to check for existing document:', checkError.message);
+      return res.status(500).json({ error: 'Failed to process document' });
+    }
+
     const extension = MIME_EXTENSION_MAP[verifiedMimeType];
     if (!extension) {
       return res.status(422).json({
@@ -125,7 +147,7 @@ export async function uploadDriverDocument(req, res) {
 
     const storagePath = `${driverId}/${documentType}-${Date.now()}.${extension}`;
 
-    const { error: storageError } = await supabase.storage
+    const { error: storageError } = await client.storage
       .from('driver-documents')
       .upload(storagePath, req.file.buffer, {
         contentType: verifiedMimeType,
@@ -142,7 +164,7 @@ export async function uploadDriverDocument(req, res) {
 
     if (existingDoc) {
       // Update existing record (Supersede)
-      const { data: updatedRecord, error: updateErr } = await supabase
+      const { data: updatedRecord, error: updateErr } = await client
         .from('driver_documents')
         .update({
           storage_path: storagePath,
@@ -158,7 +180,7 @@ export async function uploadDriverDocument(req, res) {
       dbError = updateErr;
     } else {
       // Insert new document record
-      const { data: insertedRecord, error: insertErr } = await supabase
+      const { data: insertedRecord, error: insertErr } = await client
         .from('driver_documents')
         .insert({
           driver_id: driverId,
@@ -176,7 +198,7 @@ export async function uploadDriverDocument(req, res) {
 
     if (dbError) {
       logger.error('[DocumentController] Failed to record document metadata:', dbError.message);
-      await supabase.storage.from('driver-documents').remove([storagePath]).catch((storageCleanErr) => {
+      await client.storage.from('driver-documents').remove([storagePath]).catch((storageCleanErr) => {
         logger.error('[DocumentController] Failed to clean up document storage path:', storageCleanErr.message);
       });
 
@@ -192,7 +214,7 @@ export async function uploadDriverDocument(req, res) {
 
     // Clean up old file from storage to prevent orphaned files
     if (existingDoc?.storage_path) {
-      await supabase.storage
+      await client.storage
         .from('driver-documents')
         .remove([existingDoc.storage_path])
         .catch((cleanupErr) => {

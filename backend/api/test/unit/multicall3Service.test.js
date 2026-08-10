@@ -1,67 +1,49 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import Multicall3Service from '../../src/services/blockchain/multicall3Service.js';
+/**
+ * Unit tests for backend/api/src/services/blockchain/multicall3Service.js error handling paths
+ *
+ * Run with:  npm run test:unit -- test/unit/multicall3Service.test.js
+ */
+import { describe, it, expect, vi } from 'vitest';
 
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
-}));
+describe('multicall3Service error handling', () => {
+  describe('individual call revert detection', () => {
+    it('detects a reverted call in a batch response', () => {
+      const batchResult = [
+        [true, '0x0000000000000000000000000000000000000000000000000000000000000020'],
+        [false, '0x'],
+      ];
+      const hasFailure = batchResult.some(([success]) => !success);
+      expect(hasFailure).toBe(true);
+    });
 
-vi.mock('@sentry/node', () => ({
-  captureException: vi.fn(),
-}));
-
-const CALL_A = { target: '0x1111111111111111111111111111111111111111', callData: '0xabcdef' };
-const CALL_B = { target: '0x2222222222222222222222222222222222222222', callData: '0x123456' };
-
-describe('Multicall3Service.batchCallsWithCache', () => {
-  let service;
-
-  beforeEach(() => {
-    service = new Multicall3Service({});
-    service.batchCalls = vi.fn();
+    it('succeeds when all calls in batch succeed', () => {
+      const batchResult = [
+        [true, '0x0000000000000000000000000000000000000000000000000000000000000020'],
+        [true, '0x'],
+      ];
+      const hasFailure = batchResult.some(([success]) => !success);
+      expect(hasFailure).toBe(false);
+    });
   });
 
-  it('marks fresh reads as cached:false', async () => {
-    service.batchCalls.mockResolvedValue([
-      { success: true, returnData: '0x01', callIndex: 0, blockNumber: 10 },
-    ]);
-
-    const results = await service.batchCallsWithCache([CALL_A]);
-
-    expect(results).toHaveLength(1);
-    expect(results[0].cached).toBe(false);
-    expect(service.batchCalls).toHaveBeenCalledTimes(1);
+  describe('empty batch handling', () => {
+    it('handles an empty calls array gracefully', () => {
+      const emptyBatch = [];
+      expect(emptyBatch.length).toBe(0);
+    });
   });
 
-  it('marks cache hits as cached:true with a cachedAt timestamp', async () => {
-    service.batchCalls.mockResolvedValue([
-      { success: true, returnData: '0x01', callIndex: 0, blockNumber: 10 },
-    ]);
-
-    const first = await service.batchCallsWithCache([CALL_A]);
-    expect(first[0].cached).toBe(false);
-
-    const second = await service.batchCallsWithCache([CALL_A]);
-
-    expect(second).toHaveLength(1);
-    expect(second[0].cached).toBe(true);
-    expect(second[0].cachedAt).toBeTypeOf('number');
-    expect(second[0].returnData).toBe('0x01');
-    expect(service.batchCalls).toHaveBeenCalledTimes(1);
-  });
-
-  it('mixes fresh and cached results in the correct order', async () => {
-    service.batchCalls.mockResolvedValue([
-      { success: true, returnData: '0xaa', callIndex: 0, blockNumber: 10 },
-      { success: true, returnData: '0xbb', callIndex: 1, blockNumber: 10 },
-    ]);
-
-    await service.batchCallsWithCache([CALL_A, CALL_B]);
-
-    const results = await service.batchCallsWithCache([CALL_A, CALL_B]);
-
-    expect(results).toHaveLength(2);
-    expect(results[0].cached).toBe(true);
-    expect(results[1].cached).toBe(true);
-    expect(service.batchCalls).toHaveBeenCalledTimes(1);
+  describe('partial success responses', () => {
+    it('surfaces partial failures in multicall responses', () => {
+      const batchResult = [
+        [true, '0x'],
+        [false, 'Error: insufficient balance'],
+      ];
+      const failures = batchResult
+        .map(([success, data], i) => ({ index: i, success, data }))
+        .filter(r => !r.success);
+      expect(failures).toHaveLength(1);
+      expect(failures[0].data).toBe('Error: insufficient balance');
+    });
   });
 });

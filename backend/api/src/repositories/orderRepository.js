@@ -571,7 +571,7 @@ export class OrderRepository {
       .select('id')
       .eq('status', 'pending')
       .lt('created_at', cutoff)
-      .neq('escrow_status', 'funding')
+      .or('escrow_status.is.null,escrow_status.neq.funding')
       .limit(limit), 'findStalePendingOrders');
   }
 
@@ -591,6 +591,7 @@ export class OrderRepository {
       .select('id, order_display_id, customer_id, escrow_booking_id, escrow_amount_wei, pending_bid_acceptance, escrow_funding_attempts, escrow_funding_last_attempt_at')
       .eq('escrow_status', 'funding')
       .not('pending_bid_acceptance', 'is', null)
+      .or('escrow_funding_attempts.lt.10,escrow_funding_attempts.is.null')
       .or(`escrow_funding_started_at.lt.${cutoff},and(escrow_funding_started_at.is.null,updated_at.lt.${cutoff})`), 'findStaleFundingOrders');
   }
 

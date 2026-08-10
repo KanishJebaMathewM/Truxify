@@ -111,4 +111,31 @@ describe('apiResponse helpers', () => {
       });
     });
   });
+
+
+describe('paginated edge cases', () => {
+  it('handles page 0 gracefully', () => {
+    const result = paginated([{ id: 1 }], 0, 10, 1);
+    expect(result.pagination.page).toBe(0);
+    expect(result.pagination.totalPages).toBe(1);
+    expect(result.pagination.hasPrevPage).toBe(false);
+    expect(result.pagination.hasNextPage).toBe(false);
+  });
+
+  it('handles page greater than totalPages', () => {
+    const result = paginated([], 100, 10, 50);
+    expect(result.pagination.page).toBe(100);
+    expect(result.pagination.totalPages).toBe(5);
+    expect(result.pagination.hasNextPage).toBe(false);
+    expect(result.pagination.hasPrevPage).toBe(true);
+  });
+
+  it('handles total=0 gracefully', () => {
+    const result = paginated([], 1, 10, 0);
+    expect(result.pagination.totalPages).toBe(0);
+    expect(result.pagination.hasNextPage).toBe(false);
+    expect(result.pagination.hasPrevPage).toBe(false);
+  });
+});
+
 });

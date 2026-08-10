@@ -439,6 +439,45 @@ export async function sendFcmNotification(userId, notification, data = {}) {
 // ============================================================================
 // Delivery-OTP subsystem (unchanged)
 // ============================================================================
+export async function sendPushNotification(userId, title, body, notifType = 'order_update', data = {}) {
+  if (!userId || !title || !body) {
+    logger.warn('[NotificationService] sendPushNotification skipped — missing required fields.');
+    return { success: false, error: 'Missing required fields' };
+  }
+
+  let dbSuccess = false;
+  try {
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot persist notification.');
+    } else {
+      const { error } = await supabaseAdmin.from('notifications').insert({
+        user_id: userId,
+        title,
+        body,
+        notif_type: notifType,
+        metadata: data
+      });
+
+      if (error) {
+        logger.error({ err: error }, '[NotificationService] Database insert failed');
+      } else {
+        logger.info(`[NotificationService] Notification inserted for user ${userId}`);
+        dbSuccess = true;
+      }
+    }
+  } catch (dbErr) {
+    logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');
+  }
+
+  let fcmResult;
+  try {
+    fcmResult = await sendFcmNotification(userId, { title, body }, data);
+  } catch (err) {
+    logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
+  }
+
+  return { success: true, persisted: dbSuccess, fcm: fcmResult };
+}
 
 export const hashDeliveryOtp = hashOtp;
 export const verifyDeliveryOtpHash = verifyOtpHash;
@@ -521,7 +560,7 @@ export async function verifyDeliveryOtp(otpId) {
       .maybeSingle();
 
     if (error) {
-      console.error('Error inserting notification:', error);
+      logger.error({ err: error }, '[NotificationService] Error inserting notification');
       throw error;
     }
 
@@ -666,3 +705,17 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
 
   return { success: dbSuccess || fcmResult?.success, fcm: fcmResult };
 }
+    // Return the actual push-delivery result so callers can branch on it.
+    // The notification row is persisted independently of push delivery, so
+    // overall success is driven by the FCM outcome.
+    const fcmOk = Boolean(fcmResult?.success);
+    return {
+      success: fcmOk,
+      dbSuccess,
+      fcm: {
+        success: fcmOk,
+        messageId: fcmResult?.messageId ?? null,
+        error: fcmResult?.error ?? (fcmResult ? null : 'Unexpected sendFcmNotification error'),
+      },
+    };
+  }

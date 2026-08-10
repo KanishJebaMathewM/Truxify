@@ -30,6 +30,8 @@ class SyncEngine {
   final int maxRetries;
   final int batchSize;
 
+  bool _isSyncing = false;
+
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   final Connectivity _connectivity = Connectivity();
 
@@ -48,6 +50,16 @@ class SyncEngine {
   }
 
   Future<int> syncPending() async {
+    if (_isSyncing) return 0;
+    _isSyncing = true;
+    try {
+      return await _syncPendingInternal();
+    } finally {
+      _isSyncing = false;
+    }
+  }
+
+  Future<int> _syncPendingInternal() async {
     final pending = await db.pendingEvents(limit: batchSize);
     if (pending.isEmpty) {
       return 0;

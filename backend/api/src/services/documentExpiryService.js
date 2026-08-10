@@ -134,14 +134,19 @@ export async function processDocumentExpiryBatch() {
         let hasMore = true;
 
         while (hasMore) {
-          const { data, error, count } = await supabaseAdmin
+          // Fetch one page of documents (PostgREST caps at 1000 rows per response).
+          // If the result has exactly PAGE_SIZE rows, fetch the next page recursively
+          // until fewer rows are returned (end of window) or the count is exhausted.
+          const result = await supabaseAdmin
             .from('documents')
             .select('id, user_id, doc_type, valid_until', { count: 'exact' })
             .not('valid_until', 'is', null)
             .gte('valid_until', windowStart.toISOString())
             .lte('valid_until', windowEnd.toISOString())
             .order('valid_until', { ascending: true })
-            .then(q => q.range(offset, offset + PAGE_SIZE - 1));
+            .range(offset, offset + PAGE_SIZE - 1);
+
+          const { data, error, count } = result;
 
           if (error) {
             logger.error(`[document-expiry] Failed to query documents for ${window.label} window (offset=${offset}):`, error.message);

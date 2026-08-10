@@ -10,6 +10,8 @@ function makeBuilder(result) {
     lte() { return this; },
     eq() { return this; },
     maybeSingle() { return this; },
+    order() { return this; },
+    range() { return this; },
     then(resolve) { return resolve(result); },
   };
   return builder;

@@ -7,12 +7,12 @@ import '../core/app_routes.dart';
 import '../core/config.dart';
 import '../data/mock_data.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/language_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/common_widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/fcm_service.dart';
 import '../services/secure_storage.dart';
-import '../services/truck_repository.dart';
 import '../core/supabase_config.dart';
 import 'package:truxify_shared/truxify_shared.dart' hide NotificationsScreen, FcmService;
 import 'notifications_screen.dart';
@@ -103,7 +103,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             .select('polygon_wallet_address, full_name, phone, email, is_digilocker_verified')
             .eq('id', userId)
             .maybeSingle();
-        final truck = await TruckRepository().fetchTruckForDriver(userId);
         if (data != null && mounted) {
           setState(() {
             _walletAddress = data['polygon_wallet_address']?.toString() ?? '';
@@ -111,7 +110,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _driverPhone = data['phone']?.toString() ?? '';
             _driverEmail = data['email']?.toString() ?? '';
             _isDigilockerVerified = data['is_digilocker_verified'] as bool? ?? false;
-            _truckNumber = truck?.numberPlate ?? '';
           });
         }
       }
@@ -321,58 +319,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 20),
               PrimaryButton(
                 label: AppLocalizations.of(context)!.saveChanges,
-                onPressed: () async {
+                onPressed: () {
                   if (formKey.currentState?.validate() ?? false) {
-                    final messenger = ScaffoldMessenger.of(context);
-                    final navigator = Navigator.of(context);
-                    final successMessage =
-                        AppLocalizations.of(context)!.profileUpdatedSuccessfully;
-                    final apiClient =
-                        ApiClient(timeout: AppConfig.profileUpdateTimeout);
-                    try {
-                      await apiClient.put(
-                        '/api/profile',
-                        body: <String, String>{
-                          'full_name': nameController.text.trim(),
-                          'phone': phoneController.text.trim(),
-                          'email': emailController.text.trim(),
-                          'number_plate': truckNumberController.text.trim(),
-                        },
-                      );
-                    } on ApiException catch (e) {
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text(e.message),
-                          backgroundColor: TruxifyColors.errorRed,
-                        ),
-                      );
-                      return;
-                    } catch (e) {
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text('Failed to save profile: $e'),
-                          backgroundColor: TruxifyColors.errorRed,
-                        ),
-                      );
-                      return;
-                    } finally {
-                      apiClient.dispose();
-                    }
-                    if (!mounted) return;
                     setState(() {
                       _driverName = nameController.text.trim();
                       _driverPhone = phoneController.text.trim();
                       _driverEmail = emailController.text.trim();
                       _truckNumber = truckNumberController.text.trim();
                     });
-                    navigator.pop();
-                    messenger.showSnackBar(
-                      SnackBar(
-                        content: Text(successMessage),
-                        backgroundColor: TruxifyColors.success,
-                      ),
-                    );
-                  }
+                    Navigator.of(context).pop();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(AppLocalizations.of(context)!.profileUpdatedSuccessfully),
+                      backgroundColor: TruxifyColors.success,
+                    ),
+                  );
+                }
                 },
               ),
             ],
@@ -458,7 +420,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     label: AppLocalizations.of(context)!.applyLanguage,
                     onPressed: () async {
                       final controller = TruxifyScope.of(context);
+                      final languageProvider = LanguageProvider.of(context);
                       final langCode = _langCodeForName(selectedLang);
+                      languageProvider.changeLocale(langCode);
                       await controller.setLocale(langCode);
                       if (mounted) {
                         setState(() {
@@ -1037,6 +1001,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
+                    'Past Trips',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    'View completed trip history and earnings breakdown',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 12,
+                      color: TruxifyColors.adaptiveSecondaryText(context),
+                    ),
+                  ),
+                  trailing: Icon(Icons.chevron_right_rounded,
+                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                  onTap: () => Navigator.of(context).pushNamed(AppRoutes.pastTrips),
+                ),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
+                ListTile(
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                  title: Text(
                     AppLocalizations.of(context)!.documents,
                     style: GoogleFonts.dmSans(
                       fontSize: 14,
@@ -1128,7 +1118,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   contentPadding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
                   title: Text(
-                    AppLocalizations.of(context)!.languageLabel,
+                    AppLocalizations.of(context)!.language,
                     style: GoogleFonts.dmSans(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
@@ -1142,8 +1132,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       color: TruxifyColors.adaptiveSecondaryText(context),
                     ),
                   ),
-                  trailing: Icon(Icons.chevron_right_rounded,
-                      color: TruxifyColors.adaptiveSecondaryText(context)),
+                  trailing: DropdownButton<String>(
+                    value: ['en', 'hi', 'ta'].contains(_langCodeForName(_currentLanguage))
+                        ? _langCodeForName(_currentLanguage)
+                        : 'en',
+                    underline: const SizedBox(),
+                    items: [
+                      DropdownMenuItem(
+                        value: 'en',
+                        child: Text(AppLocalizations.of(context)!.english),
+                      ),
+                      DropdownMenuItem(
+                        value: 'hi',
+                        child: Text(AppLocalizations.of(context)!.hindi),
+                      ),
+                      DropdownMenuItem(
+                        value: 'ta',
+                        child: Text(AppLocalizations.of(context)!.tamil),
+                      ),
+                    ],
+                    onChanged: (newCode) async {
+                      if (newCode != null) {
+                        final languageProvider = LanguageProvider.of(context);
+                        final controller = TruxifyScope.of(context);
+                        languageProvider.changeLocale(newCode);
+                        await controller.setLocale(newCode);
+                        if (mounted) {
+                          setState(() {
+                            _currentLanguage = _nameForLanguageCode(newCode);
+                          });
+                        }
+                      }
+                    },
+                  ),
                   onTap: () => _showLanguageSheet(context),
                 ),
                 Divider(

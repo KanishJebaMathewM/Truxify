@@ -1,3 +1,4 @@
+import { ethers } from 'ethers';
 import { supabaseAdmin } from '../../config/db.js';
 import logger from '../../middleware/logger.js';
 
@@ -20,7 +21,6 @@ async function findOrderByIdOrDisplayId(orderId) {
   if (!orderId) {
     throw new Error('Missing orderId in escrow webhook payload');
   }
-
   const columns = 'id, order_display_id, driver_id, escrow_status, release_tx_hash, refund_tx_hash';
 
   if (UUID_REGEX.test(orderId)) {
@@ -68,9 +68,60 @@ async function reconcileWalletLedger(order, txHash) {
   }
 }
 
+async function getPolygonProvider() {
+  const rpcUrl = process.env.POLYGON_RPC_URL;
+  if (!rpcUrl) {
+    throw new Error('POLYGON_RPC_URL is not configured for Polygon receipt validation');
+  }
+  return new ethers.JsonRpcProvider(rpcUrl);
+}
+
+async function verifyPolygonTransactionReceipt(txHash) {
+  if (!txHash) {
+    throw new Error('Missing transaction hash for Polygon receipt validation');
+  }
+  logger.info(`[Webhook] Verifying Polygon transaction receipt for tx: ${txHash}`);
+
+  const provider = await getPolygonProvider();
+  const receipt = await provider.getTransactionReceipt(txHash);
+  if (!receipt) {
+    throw new Error(`Polygon transaction receipt not found for tx: ${txHash}`);
+  }
+
+  const status = receipt.status;
+  if (status !== 1 && status !== 1n) {
+    throw new Error(`Polygon transaction failed or reverted (status=${status}) for tx: ${txHash}`);
+  }
+
+  const escrowAddress = process.env.ESCROW_CONTRACT_ADDRESS;
+  if (escrowAddress && receipt.to) {
+    if (String(receipt.to).toLowerCase() !== String(escrowAddress).toLowerCase()) {
+      throw new Error(
+        `Transaction ${txHash} was not sent to the configured escrow contract (${escrowAddress})`
+      );
+    }
+  }
+
+  return true;
+}
+
 async function handlePaymentReleased(payload) {
+  if (payload.txHash) {
+    await verifyPolygonTransactionReceipt(payload.txHash);
+  }
   const order = await findOrderByIdOrDisplayId(payload.orderId);
   const now = new Date().toISOString();
+
+  // Idempotency: a release event is only ever emitted once per booking
+  // on-chain, but the DLQ may re-deliver it after a crash. If the order is
+  // already released, the order-level effect already happened — still confirm
+  // the (idempotent) wallet ledger so a crash between the order update and the
+  // wallet update is healed, then short-circuit without re-applying effects.
+  if (order.escrow_status === 'released') {
+    await reconcileWalletLedger(order, payload.txHash || order.release_tx_hash);
+    logger.info(`[Webhook] Order ${order.order_display_id} already released — duplicate delivery ignored.`);
+    return;
+  }
 
   const { error } = await requireDb()
     .from('orders')
@@ -95,6 +146,14 @@ async function handlePaymentReleased(payload) {
 async function handleBookingCancelled(payload) {
   const order = await findOrderByIdOrDisplayId(payload.orderId);
   const now = new Date().toISOString();
+
+  if (order.escrow_status === 'refunded') {
+    if (payload.txHash && !order.refund_tx_hash) {
+      await requireDb().from('orders').update({ refund_tx_hash: payload.txHash }).eq('id', order.id);
+    }
+    logger.info(`[Webhook] Order ${order.order_display_id} already refunded — duplicate delivery ignored.`);
+    return;
+  }
 
   const { error } = await requireDb()
     .from('orders')
@@ -123,11 +182,42 @@ async function handleWithdrawalSettled(payload) {
 
   const isRefund = ['refund_pending', 'refund_failed'].includes(order.escrow_status);
 
+  // Idempotency: the same withdrawal webhook may be delivered more than once.
+  // If the order already reflects the intended terminal state, short-circuit.
+  const targetStatus = isRefund ? 'refunded' : 'released';
+  if (order.escrow_status === targetStatus) {
+    if (txHash) {
+      if (isRefund && !order.refund_tx_hash) {
+        await requireDb().from('orders').update({ refund_tx_hash: txHash }).eq('id', order.id);
+      } else if (!isRefund && !order.release_tx_hash) {
+        await requireDb().from('orders').update({ release_tx_hash: txHash }).eq('id', order.id);
+      }
+    }
+    if (!isRefund) {
+      await reconcileWalletLedger(order, txHash);
+    }
+    logger.info(`[Webhook] Order ${order.order_display_id} already ${targetStatus} — duplicate delivery ignored.`);
+    return;
+  }
+
+  // Persist the settlement hash under the column that matches the outcome, so
+  // the on-chain evidence survives on the order either way. Falls back to any
+  // hash already on file when the webhook payload omits one.
+  const settlement = isRefund
+    ? { escrow_status: 'refunded', refund_tx_hash: txHash || order.refund_tx_hash || null }
+    : {
+        escrow_status: 'released',
+        release_tx_hash: txHash || order.release_tx_hash || null,
+        escrow_released_at: now,
+        escrow_release_error: null,
+      };
+
   const { error } = await requireDb()
     .from('orders')
     .update({
       escrow_status: isRefund ? 'refunded' : 'released',
-      [isRefund ? 'refund_tx_hash' : 'release_tx_hash']: txHash || order.release_tx_hash || order.refund_tx_hash || null,
+      release_tx_hash: isRefund ? undefined : (txHash || order.release_tx_hash || null),
+      refund_tx_hash: isRefund ? (txHash || order.refund_tx_hash || null) : undefined,
       escrow_released_at: isRefund ? undefined : now,
       escrow_release_error: isRefund ? undefined : null,
       updated_at: now,

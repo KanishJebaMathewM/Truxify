@@ -160,21 +160,23 @@ class SimulationEngine:
         metrics = {}
         recommendations = []
         
-        # Run simulation
-        for i in range(duration // 60):
-            if random.random() < 0.1:
-                asset_id = random.choice(list(self.twin.assets.keys()))
-                event_type = random.choice(['pickup', 'dropoff', 'delay', 'arrival'])
-                
-                event = LogisticsEvent(
-                    id=f"sim_{int(datetime.now().timestamp())}_{i}",
-                    type=event_type,
-                    timestamp=datetime.now(),
-                    asset_id=asset_id,
-                    location={'lat': random.uniform(20, 30), 'lng': random.uniform(70, 80)},
-                    metadata={'scenario': scenario_id}
-                )
-                events.append(event)
+        # Run simulation. An empty asset set is a valid initial state: skip
+        # event generation entirely rather than crashing random.choice.
+        if self.twin.assets:
+            for i in range(duration // 60):
+                if random.random() < 0.1:
+                    asset_id = random.choice(list(self.twin.assets.keys()))
+                    event_type = random.choice(['pickup', 'dropoff', 'delay', 'arrival'])
+
+                    event = LogisticsEvent(
+                        id=f"sim_{int(datetime.now().timestamp())}_{i}",
+                        type=event_type,
+                        timestamp=datetime.now(),
+                        asset_id=asset_id,
+                        location={'lat': random.uniform(20, 30), 'lng': random.uniform(70, 80)},
+                        metadata={'scenario': scenario_id}
+                    )
+                    events.append(event)
         
         # Calculate metrics
         metrics = self._calculate_metrics(events, scenario['params'])

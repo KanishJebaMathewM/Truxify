@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' as ll;
@@ -245,15 +246,26 @@ class _TripsScreenState extends State<TripsScreen> {
 
     if (currentStop.isEmpty) return;
 
+    // The trips API returns the order this trip serves via the trip's
+    // `order_id` column. Resolve it so the captured PoD is uploaded with a
+    // real order id instead of being silently skipped by SyncService.
+    final tripRow = _trips.firstWhere(
+      (t) => t['trip_display_id']?.toString() == tripId,
+      orElse: () => <String, dynamic>{},
+    );
+    final orderId = tripRow['order_id']?.toString();
+
     if (!mounted) return;
     await Navigator.of(context).push(MaterialPageRoute(
       builder: (context) => ProofOfDeliveryScreen(
         tripDisplayId: currentStop['trip_display_id'].toString(),
         stopId: currentStop['id'].toString(),
+        orderId: orderId,
         onComplete: (photoPath, signPath) async {
           await SyncService.instance.queueOrSyncPoD(
             tripDisplayId: currentStop['trip_display_id'].toString(),
             stopId: currentStop['id'].toString(),
+            orderId: orderId,
             photoPath: photoPath,
             signaturePath: signPath,
           );
@@ -1799,7 +1811,8 @@ class _MarketplaceBody extends StatelessWidget {
         padding: const EdgeInsets.all(16),
         children: [
           SizedBox(height: 80),
-          Center(child: Text(AppLocalizations.of(context)!.noLoadsAvailable)),
+          Lottie.asset('packages/truxify_shared/assets/lottie/no_trips.json', width: 200, height: 200),
+          Center(child: Text(AppLocalizations.of(context)!.noLoadsAvailable, style: TextStyle(color: Colors.grey, fontSize: 16))),
         ],
       );
     }

@@ -2,8 +2,14 @@ import express from 'express';
 import wasiRuntime from './wasi-runtime.js';
 import rateLimit from 'express-rate-limit';
 import logger from '../backend/api/src/middleware/logger.js';
+import { authenticate } from '../backend/api/src/middleware/auth.js';
+import { requirePolicy } from '../backend/api/src/middleware/requirePolicy.js';
 
 const router = express.Router();
+
+// The WASI runtime can read files, make HTTP requests and instantiate WASM —
+// keep it isolated from the public API: authenticated admin-only.
+router.use(authenticate, requirePolicy('wasi:manage'));
 
 // Rate limiters
 const wasiActionLimiter = rateLimit({
@@ -32,7 +38,7 @@ router.post('/wasi/load', wasiActionLimiter, async (req, res) => {
 router.post('/wasi/file/read', wasiActionLimiter, async (req, res) => {
     try {
         const { instanceId, path } = req.body;
-        const content = await wasiRuntime.readFile(path);
+        const content = await wasiRuntime.readFile(instanceId, path);
         res.json({ success: true, data: { content } });
     } catch (error) {
         logger.error('Read error:', error);
@@ -43,7 +49,7 @@ router.post('/wasi/file/read', wasiActionLimiter, async (req, res) => {
 router.post('/wasi/file/write', wasiActionLimiter, async (req, res) => {
     try {
         const { instanceId, path, content } = req.body;
-        const result = await wasiRuntime.writeFile(path, content);
+        const result = await wasiRuntime.writeFile(instanceId, path, content);
         res.json({ success: true, data: { result } });
     } catch (error) {
         logger.error('Write error:', error);
@@ -54,7 +60,7 @@ router.post('/wasi/file/write', wasiActionLimiter, async (req, res) => {
 router.post('/wasi/file/list', wasiActionLimiter, async (req, res) => {
     try {
         const { instanceId, path } = req.body;
-        const files = await wasiRuntime.listDirectory(path);
+        const files = await wasiRuntime.listDirectory(instanceId, path);
         res.json({ success: true, data: { files } });
     } catch (error) {
         logger.error('List error:', error);
@@ -65,8 +71,8 @@ router.post('/wasi/file/list', wasiActionLimiter, async (req, res) => {
 // Network operations
 router.post('/wasi/http', wasiActionLimiter, async (req, res) => {
     try {
-        const { url, method, headers, body } = req.body;
-        const response = await wasiRuntime.httpRequest(url, method, headers, body);
+        const { instanceId, url, method, headers, body } = req.body;
+        const response = await wasiRuntime.httpRequest(instanceId, url, method, headers, body);
         res.json({ success: true, data: response });
     } catch (error) {
         logger.error('HTTP error:', error);
@@ -77,8 +83,9 @@ router.post('/wasi/http', wasiActionLimiter, async (req, res) => {
 // Time operations
 router.get('/wasi/time', async (req, res) => {
     try {
-        const time = await wasiRuntime.getTime();
-        const timeMs = await wasiRuntime.getTimeMs();
+        const { instanceId } = req.query;
+        const time = await wasiRuntime.getTime(instanceId);
+        const timeMs = await wasiRuntime.getTimeMs(instanceId);
         res.json({ success: true, data: { time, timeMs } });
     } catch (error) {
         logger.error('Time error:', error);
@@ -89,8 +96,9 @@ router.get('/wasi/time', async (req, res) => {
 // System operations
 router.get('/wasi/system', async (req, res) => {
     try {
-        const pid = await wasiRuntime.getProcessId();
-        const cwd = await wasiRuntime.getCurrentDir();
+        const { instanceId } = req.query;
+        const pid = await wasiRuntime.getProcessId(instanceId);
+        const cwd = await wasiRuntime.getCurrentDir(instanceId);
         res.json({ success: true, data: { pid, cwd } });
     } catch (error) {
         logger.error('System error:', error);

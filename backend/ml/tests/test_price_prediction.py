@@ -216,3 +216,35 @@ def test_predict_price_auth_valid(monkeypatch):
         headers={"X-API-Key": "test-secret-key"},
     )
     assert response.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Async weather multiplier tests
+# ---------------------------------------------------------------------------
+
+def test_get_weather_multiplier_returns_float():
+    """_get_weather_multiplier (sync) returns a float multiplier without blocking."""
+    result = pp._get_weather_multiplier("")  # empty city returns 1.0 immediately
+    assert isinstance(result, float)
+    assert result == 1.0
+
+
+def test_get_weather_multiplier_async_no_api_key(monkeypatch):
+    """_get_weather_multiplier_async returns 1.0 when OPENWEATHERMAP_API_KEY is not set."""
+    monkeypatch.delenv("OPENWEATHERMAP_API_KEY", raising=False)
+    import asyncio
+    async def run():
+        async with pp.httpx.AsyncClient() as client:
+            return await pp._get_weather_multiplier_async(client, "London")
+    result = asyncio.run(run())
+    assert result == 1.0
+
+
+def test_get_weather_multiplier_async_empty_city():
+    """_get_weather_multiplier_async returns 1.0 for empty city."""
+    import asyncio
+    async def run():
+        async with pp.httpx.AsyncClient() as client:
+            return await pp._get_weather_multiplier_async(client, "")
+    result = asyncio.run(run())
+    assert result == 1.0

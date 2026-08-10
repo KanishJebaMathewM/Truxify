@@ -1,10 +1,10 @@
-import { supabase } from '../api/src/config/db.js';
-import logger from '../api/src/middleware/logger.js';
+import { supabaseAdmin } from '../../api/src/config/db.js';
+import logger from '../../api/src/middleware/logger.js';
 
 class DeadLetterRepository {
   async store({ topic, message, error, retryCount = 0 }) {
     try {
-      const { data, error: dbError } = await supabase
+      const { data, error: dbError } = await supabaseAdmin
         .from('kafka_dead_letters')
         .insert({
           topic,
@@ -26,7 +26,7 @@ class DeadLetterRepository {
 
   async listPending({ topic = null, limit = 50 } = {}) {
     try {
-      let query = supabase
+      let query = supabaseAdmin
         .from('kafka_dead_letters')
         .select('*')
         .eq('status', 'pending')
@@ -52,7 +52,7 @@ class DeadLetterRepository {
       };
 
       if (incrementRetry) {
-        const { data: current, error: fetchError } = await supabase
+        const { data: current, error: fetchError } = await supabaseAdmin
           .from('kafka_dead_letters')
           .select('retry_count')
           .eq('id', id)
@@ -61,7 +61,7 @@ class DeadLetterRepository {
         update.retry_count = (current?.retry_count || 0) + 1;
       }
 
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('kafka_dead_letters')
         .update(update)
         .eq('id', id);

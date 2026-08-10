@@ -944,7 +944,7 @@ class _FuelAnalyticsTabState extends State<_FuelAnalyticsTab> {
     final totalPayout = (_data!['totalPayout'] as num?)?.toDouble() ?? 0.0;
     final estFuel = (_data!['estimatedFuelCost'] as num?)?.toDouble() ?? 0.0;
     final margin = (_data!['profitMargin'] as num?)?.toDouble() ?? 0.0;
-    final chartPoints = _data!['chartPoints'] as List<Map<String, dynamic>>;
+    final chartPoints = (_data!['chartPoints'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -985,7 +985,12 @@ class _FuelAnalyticsTabState extends State<_FuelAnalyticsTab> {
               child: Text('No recent trips to display'),
             ))
           else
-            ...chartPoints.map((p) => _buildChartBar(context, p['label'], p['payout'], p['fuelCost'])),
+            ...chartPoints.map((p) => _buildChartBar(
+              context,
+              (p['label'] as String?) ?? 'Unknown trip',
+              (p['payout'] as num?)?.toDouble() ?? 0.0,
+              (p['fuelCost'] as num?)?.toDouble() ?? 0.0,
+            )),
         ],
       ),
     );

@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
 import { supabase } from '../../config/db.js';
@@ -144,7 +145,7 @@ class StateDivergenceDetector {
 
   async handleDivergence(divergenceResult) {
     return measureExecution('StateDivergenceDetector.handleDivergence', async () => {
-      const divergenceId = `div_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const divergenceId = `div_${crypto.randomBytes(16).toString('hex')}`;
 
       await this.logDivergence(divergenceId, divergenceResult);
       await this.alertOnDivergence(divergenceId, divergenceResult);
@@ -273,7 +274,7 @@ class StateDivergenceDetector {
 
   async reconcileState(oldState, newState) {
     return measureExecution('StateDivergenceDetector.reconcileState', async () => {
-      const reconciliationId = `recon_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const reconciliationId = `recon_${crypto.randomBytes(16).toString('hex')}`;
 
       const reconciliation = {
         reconciliationId,

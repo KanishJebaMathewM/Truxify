@@ -1,3 +1,4 @@
+import logger from '../middleware/logger.js';
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -6,6 +7,7 @@ import { supabaseAdmin } from '../config/db.js';
 import { auditLog } from '../middleware/auditLog.js';
 import { auditLogService } from '../services/auditLogService.js';
 import { validateQuery } from '../middleware/validate.js';
+import logger from '../middleware/logger.js';
 import { z } from 'zod';
 
 const router = express.Router();
@@ -199,7 +201,8 @@ router.get('/', authenticate, userLimiter, requirePolicy('admin:view-audit-logs'
 
     res.json(result);
   } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch audit logs.', details: err.message });
+    logger.error({ requestId: req.requestId }, "[AuditRoutes] Error:", err?.message || err);
+    res.status(500).json({ error: "Failed to fetch audit logs.", details: err?.message || err.message });
   }
 });
 

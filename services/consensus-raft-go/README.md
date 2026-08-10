@@ -8,7 +8,7 @@ This directory contains the **Go Raft Distributed Consensus Engine** designed fo
 
 - **Distributed State Machine**: Guarantees linearizable order state transitions (`CREATED` $\rightarrow$ `DISPATCHED` $\rightarrow$ `COMPLETED`) across multi-cloud regions.
 - **Leader Election & Heartbeats**: Nodes start as `FOLLOWER`, campaign for leadership via `RequestVote` RPCs, and keep leadership with `AppendEntries` heartbeats and term bumps (Raft paper §5).
-- **Atomic Log Replication**: Appends transactional state transition entries into an append-only WAL log.
+- **Atomic Log Replication**: Appends transactional state transition entries into an append-only WAL log and replicates them to a quorum of followers (AppendEntries + `nextIndex`/`matchIndex` tracking) before advancing `CommitIndex`. `/commit` returns success only once the entry is replicated to a quorum and committed.
 - **Quorum-Aware Health**: `/api/v1/raft/status` reports `HEALTHY_CLUSTER` only when a leader has quorum; `NO_LEADER`, `ELECTION_IN_PROGRESS`, and `UNHEALTHY_CLUSTER` are reported otherwise.
 
 ---
@@ -18,7 +18,7 @@ This directory contains the **Go Raft Distributed Consensus Engine** designed fo
 | Endpoint | Method | Description |
 | :--- | :--- | :--- |
 | `/api/v1/raft/status` | `GET` | Returns node role, current term, leader id, log length, quorum, and cluster health. |
-| `/api/v1/raft/commit` | `POST` | Commits an order entry. Only the leader may commit; without quorum it returns `503`, and non-leaders return `409` with the current `leader_id`. |
+| `/api/v1/raft/commit` | `POST` | Commits an order entry. The leader appends the entry, replicates it to followers via `AppendEntries`, and advances `CommitIndex` only once a quorum acknowledges it — success is returned only after the entry is committed (and the updated commit index is propagated). Non-leaders return `409` with the current `leader_id`; without quorum it returns `503`. |
 | `/api/v1/raft/vote` | `POST` | Internal Raft `RequestVote` RPC used during elections. |
 | `/api/v1/raft/append` | `POST` | Internal Raft `AppendEntries` (heartbeat) RPC used by the leader. |
 

@@ -1,8 +1,14 @@
 import express from 'express';
 import snykService from './snyk.service.js';
 import logger from '../backend/api/src/middleware/logger.js';
+import { authenticate } from '../backend/api/src/middleware/auth.js';
+import { requirePolicy } from '../backend/api/src/middleware/requirePolicy.js';
 
 const router = express.Router();
+
+// Every /snyk/* route uses the production SNYK_TOKEN to scan, read
+// vulnerability data, and open fix PRs — authenticated admin-only.
+router.use(authenticate, requirePolicy('snyk:manage'));
 
 // Scan dependencies
 router.post('/snyk/scan/dependencies', async (req, res) => {

@@ -1,11 +1,13 @@
 import { WebSocketServer } from 'ws';
+import crypto from 'crypto';
 import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
 import { supabase, redisClient } from '../../config/db.js';
 
 class WebRTCSignalingServer {
   constructor(server) {
-    this.wss = new WebSocketServer({ server, path: '/webrtc' });
+    const MAX_WS_PAYLOAD_BYTES = parseInt(process.env.WS_MAX_PAYLOAD_BYTES, 10) || 4096;
+    this.wss = new WebSocketServer({ server, path: '/webrtc', maxPayload: MAX_WS_PAYLOAD_BYTES });
     this.redis = redisClient;
     this.peers = new Map(); // peerId -> { ws, location, meshId }
     this.meshes = new Map(); // meshId -> Set of peerIds
@@ -20,9 +22,15 @@ class WebRTCSignalingServer {
     this.wss.on('connection', async (ws, req) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
 
-      // Authenticate via token query parameter or Authorization header
-      const token = url.searchParams.get('token')
-        || req.headers.authorization?.replace('Bearer ', '');
+      // Reject tokens in the URL query string — they leak via logs, proxies,
+      // and browser history. Only the Authorization header is accepted.
+      if (url.searchParams.get('token')) {
+        logger.warn('WebRTC connection rejected: token provided in query string');
+        ws.close(4001, 'Token in URL is not allowed');
+        return;
+      }
+
+      const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
 
       if (!token) {
         logger.warn('WebRTC connection rejected: no token provided');
@@ -307,13 +315,13 @@ class WebRTCSignalingServer {
   }
 
   getOrCreateMesh() {
-    const meshId = `mesh_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const meshId = `mesh_${crypto.randomUUID()}`;
     this.meshes.set(meshId, new Set());
     return meshId;
   }
 
   generatePeerId() {
-    return `peer_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    return `peer_${crypto.randomUUID()}`;
   }
 
   startDiscovery() {

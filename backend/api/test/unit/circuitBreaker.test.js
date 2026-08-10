@@ -43,6 +43,28 @@ describe('CircuitBreaker Unit Tests', () => {
     expect(fn).toHaveBeenCalledTimes(1); // Function not invoked when OPEN
   });
 
+  it('cleans up half-open timer when reset is called externally', () => {
+    const breaker = new CircuitBreaker('testTimerCleanup', {
+      failureThreshold: 1,
+      resetTimeoutMs: 10000,
+      fallback: () => 'fallback',
+    });
+
+    // Open the circuit via onFailure (threshold=1 so first failure opens it)
+    breaker.onFailure(new Error('Fail'), []);
+
+    // Verify timer was scheduled
+    expect(breaker._halfOpenTimer).not.toBeNull();
+    expect(breaker.state).toBe(CircuitState.OPEN);
+
+    // Call reset externally (simulating an external/manual reset)
+    breaker.reset();
+
+    // Timer should be cleared
+    expect(breaker._halfOpenTimer).toBeNull();
+    expect(breaker.state).toBe(CircuitState.CLOSED);
+  });
+
   it('transitions to HALF_OPEN after resetTimeoutMs expires', async () => {
     const breaker = new CircuitBreaker('testHalfOpenBreaker', {
       failureThreshold: 1,

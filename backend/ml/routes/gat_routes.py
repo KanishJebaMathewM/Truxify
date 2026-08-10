@@ -65,7 +65,7 @@ async def build_graph(request: GraphRequest):
             'data': {
                 'nodes': len(graph.nodes),
                 'edges': len(graph.edges),
-                'features': data.x.shape,
+                'features': list(data.x.shape),
                 'is_connected': nx.is_connected(graph)
             },
             'timestamp': datetime.now().isoformat()

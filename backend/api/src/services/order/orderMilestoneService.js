@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import {
   sendDeliveryOtpNotification,
   storeDeliveryOtp,
@@ -138,7 +138,6 @@ export class OrderMilestoneService {
             `[OrderRoutes] Delivery OTP notification failed for order ${order.order_display_id} — FCM error: ${notifResult.fcm?.error || 'unknown'}`
           );
           await this.orderRepository.updateOrder(orderId, {
-            notification_failed: true,
             updated_at: new Date().toISOString()
           });
         }
@@ -244,7 +243,7 @@ export class OrderMilestoneService {
           p_otp_id: otpRecord.id,
           p_release_tx_hash: releaseTxHash
         },
-        userClient
+        supabaseAdmin
       );
       if (rpcErr) {
         logger.error('complete_trip_tx RPC failed:', rpcErr.message);

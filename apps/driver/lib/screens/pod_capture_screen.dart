@@ -80,7 +80,7 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
         createdAt: DateTime.now().millisecondsSinceEpoch,
       );
 
-      await podStorageService.insertPod(pod);
+      final podId = await podStorageService.insertPod(pod);
 
       final List<ConnectivityResult> connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult.contains(ConnectivityResult.none)) {
@@ -100,7 +100,7 @@ class _PodCaptureScreenState extends State<PodCaptureScreen> {
             photoPath: savedPhotoPath,
             signaturePath: savedSignaturePath,
           );
-          await podStorageService.markAsSynced(pod.id!);
+          await podStorageService.markAsSynced(podId);
           setState(() => _uploadStatus = 'Upload complete!');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(

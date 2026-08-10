@@ -10,7 +10,7 @@ vi.mock('../../../src/services/escrow.js', async (importOriginal) => {
   return {
     ...actual,
     escrowDeposit: vi.fn(),
-    escrowRefund: vi.fn(),
+    submitEscrowRefund: vi.fn(),
   };
 });
 
@@ -19,18 +19,18 @@ describe('BidAcceptanceService', () => {
   let orderRepository;
   let service;
   let escrowDeposit;
-  let escrowRefund;
+  let submitEscrowRefund;
 
   beforeEach(async () => {
     supabaseMock = createSupabaseMock();
-    const { escrowDeposit: escrowDepositFn, escrowRefund: escrowRefundFn } = await import('../../../src/services/escrow.js');
+    const { escrowDeposit: escrowDepositFn, submitEscrowRefund: submitEscrowRefundFn } = await import('../../../src/services/escrow.js');
     escrowDeposit = escrowDepositFn;
-    escrowRefund = escrowRefundFn;
+    submitEscrowRefund = submitEscrowRefundFn;
 
     escrowDeposit.mockResolvedValue({ txData: { to: '0xcontract', data: '0xabcd' }, bookingId: 'escrow:ORDER-001' });
-    escrowRefund.mockResolvedValue({ txHash: '0x456' });
+    submitEscrowRefund.mockResolvedValue({ txHash: '0x456' });
     escrowDeposit.mockClear();
-    escrowRefund.mockClear();
+    submitEscrowRefund.mockClear();
 
     orderRepository = new OrderRepository(supabaseMock.supabase);
 
@@ -38,7 +38,7 @@ describe('BidAcceptanceService', () => {
       orderRepository,
       supabase: supabaseMock.supabase,
       escrowDepositFn: escrowDeposit,
-      escrowRefundFn: escrowRefund,
+      escrowRefundFn: submitEscrowRefund,
       logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
       notificationDispatcher: vi.fn().mockResolvedValue(undefined),
     });
@@ -53,6 +53,8 @@ describe('BidAcceptanceService', () => {
       vehicle_id: null,
       status: 'pending',
       version: 1,
+      escrow_status: null,
+      pending_bid_acceptance: null,
     }];
     supabaseMock.store.load_bids = [{
       id: 'bid-1',
@@ -293,5 +295,247 @@ describe('BidAcceptanceService', () => {
     await expect(service.acceptBid({ orderId: 'order-1', bidId: 'bid-1', customerId: 'customer-1' })).rejects.toMatchObject({
       status: 502,
     });
+  });
+
+  it('rejects a second bid acceptance after the escrow is already funded', async () => {
+    supabaseMock.store.orders = [{
+      id: 'order-1',
+      order_display_id: 'ORDER-001',
+      customer_id: 'customer-1',
+      driver_id: 'driver-1',
+      vehicle_id: 'truck-1',
+      status: 'active',
+      version: 2,
+      escrow_status: 'funded',
+      pending_bid_acceptance: null,
+      escrow_booking_id: 'escrow:ORDER-001',
+    }];
+    supabaseMock.store.load_bids = [{
+      id: 'bid-1',
+      load_id: 'offer-1',
+      order_id: 'order-1',
+      driver_id: 'driver-1',
+      version: 1,
+      bid_amount: 50000,
+      status: 'pending',
+      created_at: '2024-01-01T00:00:00.000Z',
+    }];
+    supabaseMock.store.load_offers = [{
+      id: 'offer-1',
+      order_display_id: 'ORDER-001',
+    }];
+    supabaseMock.store.profiles = [
+      {
+        id: 'driver-1',
+        full_name: 'Jane Driver',
+        polygon_wallet_address: '0xdriver',
+      },
+      {
+        id: 'customer-1',
+        polygon_wallet_address: '0xcustomer',
+      },
+    ];
+    supabaseMock.store.driver_details = [{
+      user_id: 'driver-1',
+      polygon_wallet_address: '0xdriver',
+      rating: 4.8,
+      truck_id: 'truck-1',
+    }];
+    supabaseMock.store.trucks = [{
+      id: 'truck-1',
+      name: 'Big Rig',
+      number_plate: 'ABC-123',
+    }];
+
+    await expect(service.acceptBid({ orderId: 'order-1', bidId: 'bid-1', customerId: 'customer-1' })).rejects.toMatchObject({
+      status: 409,
+    });
+
+    // The guard must fire before any mutation: no deposit tx is built and the
+    // funded booking reference is left untouched.
+    expect(escrowDeposit).not.toHaveBeenCalled();
+    expect(supabaseMock.store.orders[0].escrow_status).toBe('funded');
+    expect(supabaseMock.store.orders[0].escrow_booking_id).toBe('escrow:ORDER-001');
+  });
+
+  it('rejects bid acceptance after the escrow has been released', async () => {
+    supabaseMock.store.orders = [{
+      id: 'order-1',
+      order_display_id: 'ORDER-001',
+      customer_id: 'customer-1',
+      driver_id: 'driver-1',
+      vehicle_id: 'truck-1',
+      status: 'payment_released',
+      version: 2,
+      escrow_status: 'released',
+      pending_bid_acceptance: null,
+      escrow_booking_id: 'escrow:ORDER-001',
+    }];
+    supabaseMock.store.load_bids = [{
+      id: 'bid-1',
+      load_id: 'offer-1',
+      order_id: 'order-1',
+      driver_id: 'driver-1',
+      version: 1,
+      bid_amount: 50000,
+      status: 'pending',
+      created_at: '2024-01-01T00:00:00.000Z',
+    }];
+    supabaseMock.store.load_offers = [{
+      id: 'offer-1',
+      order_display_id: 'ORDER-001',
+    }];
+    supabaseMock.store.profiles = [
+      {
+        id: 'driver-1',
+        full_name: 'Jane Driver',
+        polygon_wallet_address: '0xdriver',
+      },
+      {
+        id: 'customer-1',
+        polygon_wallet_address: '0xcustomer',
+      },
+    ];
+    supabaseMock.store.driver_details = [{
+      user_id: 'driver-1',
+      polygon_wallet_address: '0xdriver',
+      rating: 4.8,
+      truck_id: 'truck-1',
+    }];
+    supabaseMock.store.trucks = [{
+      id: 'truck-1',
+      name: 'Big Rig',
+      number_plate: 'ABC-123',
+    }];
+
+    await expect(service.acceptBid({ orderId: 'order-1', bidId: 'bid-1', customerId: 'customer-1' })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(escrowDeposit).not.toHaveBeenCalled();
+    expect(supabaseMock.store.orders[0].escrow_status).toBe('released');
+  });
+
+  it('rejects bid acceptance when the order is in a terminal state', async () => {
+    supabaseMock.store.orders = [{
+      id: 'order-1',
+      order_display_id: 'ORDER-001',
+      customer_id: 'customer-1',
+      driver_id: null,
+      vehicle_id: null,
+      status: 'cancelled',
+      version: 1,
+      escrow_status: 'pending',
+      pending_bid_acceptance: null,
+    }];
+    supabaseMock.store.load_bids = [{
+      id: 'bid-1',
+      load_id: 'offer-1',
+      order_id: 'order-1',
+      driver_id: 'driver-1',
+      version: 1,
+      bid_amount: 50000,
+      status: 'pending',
+      created_at: '2024-01-01T00:00:00.000Z',
+    }];
+    supabaseMock.store.load_offers = [{
+      id: 'offer-1',
+      order_display_id: 'ORDER-001',
+    }];
+    supabaseMock.store.profiles = [
+      {
+        id: 'driver-1',
+        full_name: 'Jane Driver',
+        polygon_wallet_address: '0xdriver',
+      },
+      {
+        id: 'customer-1',
+        polygon_wallet_address: '0xcustomer',
+      },
+    ];
+    supabaseMock.store.driver_details = [{
+      user_id: 'driver-1',
+      polygon_wallet_address: '0xdriver',
+      rating: 4.8,
+      truck_id: 'truck-1',
+    }];
+    supabaseMock.store.trucks = [{
+      id: 'truck-1',
+      name: 'Big Rig',
+      number_plate: 'ABC-123',
+    }];
+
+    await expect(service.acceptBid({ orderId: 'order-1', bidId: 'bid-1', customerId: 'customer-1' })).rejects.toMatchObject({
+      status: 409,
+    });
+    expect(escrowDeposit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a concurrent double-accept that already reserved a bid', async () => {
+    // Simulates the loser of a TOCTOU race: another acceptBid already wrote
+    // pending_bid_acceptance, but this request re-read a stale order with
+    // escrow_status still 'pending'. The conditional UPDATE must match no row
+    // (pending_bid_acceptance is no longer null) instead of overwriting it.
+    supabaseMock.store.orders = [{
+      id: 'order-1',
+      order_display_id: 'ORDER-001',
+      customer_id: 'customer-1',
+      driver_id: null,
+      vehicle_id: null,
+      status: 'pending',
+      version: 1,
+      escrow_status: 'pending',
+      pending_bid_acceptance: {
+        bid_id: 'bid-0',
+        load_id: 'offer-1',
+        driver_id: 'driver-2',
+        version: 1,
+        order_display_id: 'ORDER-001',
+      },
+    }];
+    supabaseMock.store.load_bids = [{
+      id: 'bid-1',
+      load_id: 'offer-1',
+      order_id: 'order-1',
+      driver_id: 'driver-1',
+      version: 1,
+      bid_amount: 50000,
+      status: 'pending',
+      created_at: '2024-01-01T00:00:00.000Z',
+    }];
+    supabaseMock.store.load_offers = [{
+      id: 'offer-1',
+      order_display_id: 'ORDER-001',
+    }];
+    supabaseMock.store.profiles = [
+      {
+        id: 'driver-1',
+        full_name: 'Jane Driver',
+        polygon_wallet_address: '0xdriver',
+      },
+      {
+        id: 'customer-1',
+        polygon_wallet_address: '0xcustomer',
+      },
+    ];
+    supabaseMock.store.driver_details = [{
+      user_id: 'driver-1',
+      polygon_wallet_address: '0xdriver',
+      rating: 4.8,
+      truck_id: 'truck-1',
+    }];
+    supabaseMock.store.trucks = [{
+      id: 'truck-1',
+      name: 'Big Rig',
+      number_plate: 'ABC-123',
+    }];
+
+    await expect(service.acceptBid({ orderId: 'order-1', bidId: 'bid-1', customerId: 'customer-1' })).rejects.toMatchObject({
+      status: 409,
+    });
+
+    // The existing acceptance must not be overwritten.
+    expect(supabaseMock.store.orders[0].pending_bid_acceptance).toMatchObject({ bid_id: 'bid-0' });
+    expect(supabaseMock.store.orders[0].escrow_status).toBe('pending');
+    expect(supabaseMock.calls.some(call => call.rpc === 'accept_bid_tx')).toBe(false);
   });
 });

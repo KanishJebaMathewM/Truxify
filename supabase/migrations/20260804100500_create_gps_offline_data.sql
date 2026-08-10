@@ -13,11 +13,14 @@ CREATE INDEX IF NOT EXISTS gps_offline_data_peer_idx
   ON gps_offline_data ("peerId");
 
 -- Service uses the anon client on behalf of authenticated users.
+-- Ownership is scoped to the caller via get_profile_id() so that users can
+-- only read/write their own offline GPS rows (see 20240101000000_rls.sql).
 ALTER TABLE gps_offline_data ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY gps_offline_data_authenticated_all
+DROP POLICY IF EXISTS gps_offline_data_authenticated_all ON gps_offline_data;
+CREATE POLICY gps_offline_data_owner
   ON gps_offline_data
   FOR ALL
   TO authenticated
-  USING (true)
-  WITH CHECK (true);
+  USING ("peerId" = get_profile_id()::text)
+  WITH CHECK ("peerId" = get_profile_id()::text);

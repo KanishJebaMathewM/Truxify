@@ -1,372 +1,134 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.19;
+pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 
-contract StateChannel is Ownable, ReentrancyGuard, Pausable {
+/**
+ * @title StateChannel
+ * @dev Off-chain state channel dispute settlement and unilateral exit contract for Truxify freight micro-payments.
+ */
+contract StateChannel is ReentrancyGuard {
     using ECDSA for bytes32;
-
-    // ============ Structs ============
+    using MessageHashUtils for bytes32;
 
     struct Channel {
-        uint256 id;
-        address participantA;
-        address participantB;
+        address userA;
+        address userB;
         uint256 balanceA;
         uint256 balanceB;
-        uint256 nonce;
-        uint256 createdAt;
-        uint256 lastUpdated;
-        uint256 challengePeriod;
-        bool isOpen;
-        bool isSettled;
-        bytes32 latestStateHash;
+        uint256 sequence;
+        uint256 challengeExpiry;
+        bool isDisputed;
+        bool isClosed;
     }
 
-    struct State {
-        uint256 channelId;
-        uint256 balanceA;
-        uint256 balanceB;
-        uint256 nonce;
-        bytes32 stateHash;
-        uint256 timestamp;
-    }
-
-    struct Dispute {
-        uint256 channelId;
-        address challenger;
-        bytes32 stateHash;
-        uint256 startedAt;
-        bool resolved;
-    }
-
-    // ============ State Variables ============
-
-    mapping(uint256 => Channel) public channels;
-    mapping(uint256 => State[]) public channelStates;
-    mapping(uint256 => Dispute) public disputes;
-    mapping(address => uint256[]) public userChannels;
-    mapping(uint256 => mapping(address => uint256)) public pendingWithdrawals;
-    mapping(uint256 => uint256) public channelClosesAt;
-
+    mapping(bytes32 => Channel) public channels;
     uint256 public channelCounter;
     uint256 public constant CHALLENGE_PERIOD = 1 days;
-    uint256 public constant SETTLEMENT_PERIOD = 7 days;
 
-    // Events
-    event ChannelOpened(uint256 indexed channelId, address indexed participantA, address indexed participantB);
-    event ChannelFunded(uint256 indexed channelId, address indexed participant, uint256 amount);
-    event StateUpdated(uint256 indexed channelId, uint256 nonce, bytes32 stateHash);
-    event ChannelClosed(uint256 indexed channelId, uint256 finalBalanceA, uint256 finalBalanceB);
-    event DisputeRaised(uint256 indexed channelId, address indexed challenger);
-    event DisputeResolved(uint256 indexed channelId, bool resolved);
-    event BatchSettled(uint256 indexed channelId, uint256 count);
-    event Withdrawal(uint256 indexed channelId, address indexed participant, uint256 amount);
+    event ChannelOpened(bytes32 indexed channelId, address indexed userA, address indexed userB, uint256 deposit);
+    event DisputeInitiated(bytes32 indexed channelId, uint256 sequence, uint256 challengeExpiry);
+    event ChannelClosed(bytes32 indexed channelId, uint256 finalBalanceA, uint256 finalBalanceB);
 
-    // ============ Constructor ============
-
-    constructor() Ownable(msg.sender) {}
-
-    // ============ Channel Management ============
-
-    function openChannel(address participantB) external whenNotPaused returns (uint256) {
-        require(participantB != address(0), "Invalid participant");
-        require(participantB != msg.sender, "Cannot open channel with self");
+    function openChannel(address userB) external payable returns (bytes32 channelId) {
+        require(msg.value > 0, "Deposit required");
+        require(userB != address(0), "Invalid user B");
 
         channelCounter++;
-        uint256 channelId = channelCounter;
-
+        channelId = keccak256(abi.encodePacked(msg.sender, userB, block.timestamp, channelCounter));
+        require(channels[channelId].userA == address(0), "Channel exists");
         channels[channelId] = Channel({
-            id: channelId,
-            participantA: msg.sender,
-            participantB: participantB,
-            balanceA: 0,
+            userA: msg.sender,
+            userB: userB,
+            balanceA: msg.value,
             balanceB: 0,
-            nonce: 0,
-            createdAt: block.timestamp,
-            lastUpdated: block.timestamp,
-            challengePeriod: CHALLENGE_PERIOD,
-            isOpen: true,
-            isSettled: false,
-            latestStateHash: bytes32(0)
+            sequence: 0,
+            challengeExpiry: 0,
+            isDisputed: false,
+            isClosed: false
         });
 
-        userChannels[msg.sender].push(channelId);
-        userChannels[participantB].push(channelId);
-
-        emit ChannelOpened(channelId, msg.sender, participantB);
-        return channelId;
+        emit ChannelOpened(channelId, msg.sender, userB, msg.value);
     }
 
-    function fundChannel(uint256 channelId) external payable whenNotPaused {
+    function initiateUnilateralExit(
+        bytes32 channelId,
+        uint256 sequence,
+        uint256 balanceA,
+        uint256 balanceB,
+        bytes memory sig
+    ) external nonReentrant {
         Channel storage channel = channels[channelId];
-        require(channel.isOpen, "Channel not open");
-        require(!channel.isSettled, "Channel settled");
-        require(msg.sender == channel.participantA || msg.sender == channel.participantB, "Not participant");
-        require(msg.value > 0, "Amount must be > 0");
+        require(!channel.isClosed, "Channel closed");
+        require(msg.sender == channel.userA || msg.sender == channel.userB, "Not participant");
+        require(sequence >= channel.sequence, "Stale sequence");
+        require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
 
-        if (msg.sender == channel.participantA) {
-            channel.balanceA += msg.value;
+        bytes32 stateHash = keccak256(abi.encodePacked(channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
+        
+        if (msg.sender == channel.userA) {
+            require(stateHash.recover(sig) == channel.userB, "Invalid signature from userB");
         } else {
-            channel.balanceB += msg.value;
+            require(stateHash.recover(sig) == channel.userA, "Invalid signature from userA");
         }
 
-        channel.lastUpdated = block.timestamp;
+        channel.sequence = sequence;
+        channel.balanceA = balanceA;
+        channel.balanceB = balanceB;
+        channel.isDisputed = true;
+        channel.challengeExpiry = block.timestamp + CHALLENGE_PERIOD;
 
-        emit ChannelFunded(channelId, msg.sender, msg.value);
+        emit DisputeInitiated(channelId, sequence, channel.challengeExpiry);
     }
 
-    // ============ Off-Chain Transactions ============
-
-    function updateState(
-        uint256 channelId,
-        uint256 newBalanceA,
-        uint256 newBalanceB,
-        uint256 nonce,
-        bytes memory signatureA,
-        bytes memory signatureB
-    ) external whenNotPaused {
+    function cooperativeClose(
+        bytes32 channelId,
+        uint256 balanceA,
+        uint256 balanceB,
+        bytes memory sigA,
+        bytes memory sigB
+    ) external nonReentrant {
         Channel storage channel = channels[channelId];
-        require(channel.isOpen || (!channel.isSettled && block.timestamp <= channelClosesAt[channelId]), "Channel not open or challenge period expired");
-        require(!channel.isSettled, "Channel settled");
-        require(nonce > channel.nonce, "Invalid nonce");
+        require(!channel.isClosed, "Channel already closed");
+        require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
 
-        // Verify total balance
-        uint256 totalBalance = channel.balanceA + channel.balanceB;
-        require(newBalanceA + newBalanceB == totalBalance, "Invalid balances");
+        bytes32 stateHash = keccak256(abi.encodePacked(channelId, channel.sequence + 1, balanceA, balanceB)).toEthSignedMessageHash();
+        require(stateHash.recover(sigA) == channel.userA, "Invalid sig A");
+        require(stateHash.recover(sigB) == channel.userB, "Invalid sig B");
 
-        // Create state hash
-        bytes32 stateHash = keccak256(abi.encodePacked(
-            channelId,
-            newBalanceA,
-            newBalanceB,
-            nonce
-        ));
+        channel.isClosed = true;
 
-        // Verify signatures
-        require(_verifySignature(stateHash, signatureA, channel.participantA), "Invalid signature A");
-        require(_verifySignature(stateHash, signatureB, channel.participantB), "Invalid signature B");
+        (bool sentA, ) = channel.userA.call{value: balanceA}("");
+        require(sentA, "Transfer A failed");
 
-        // Update channel
-        channel.balanceA = newBalanceA;
-        channel.balanceB = newBalanceB;
-        channel.nonce = nonce;
-        channel.latestStateHash = stateHash;
-        channel.lastUpdated = block.timestamp;
+        (bool sentB, ) = channel.userB.call{value: balanceB}("");
+        require(sentB, "Transfer B failed");
 
-        // Store state
-        channelStates[channelId].push(State({
-            channelId: channelId,
-            balanceA: newBalanceA,
-            balanceB: newBalanceB,
-            nonce: nonce,
-            stateHash: stateHash,
-            timestamp: block.timestamp
-        }));
-
-        emit StateUpdated(channelId, nonce, stateHash);
+        emit ChannelClosed(channelId, balanceA, balanceB);
     }
 
-    function _verifySignature(
-        bytes32 hash,
-        bytes memory signature,
-        address signer
-    ) internal pure returns (bool) {
-        bytes32 prefixedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
-        address recovered = prefixedHash.recover(signature);
-        return recovered == signer;
-    }
-
-    // ============ Channel Closure ============
-
-    function closeChannel(uint256 channelId) external whenNotPaused {
+    function finalizeExit(bytes32 channelId) external nonReentrant {
         Channel storage channel = channels[channelId];
-        require(channel.isOpen, "Channel not open");
-        require(!channel.isSettled, "Channel settled");
-        require(msg.sender == channel.participantA || msg.sender == channel.participantB, "Not participant");
+        require(channel.isDisputed, "No active dispute");
+        require(block.timestamp >= channel.challengeExpiry, "Challenge period active");
+        require(!channel.isClosed, "Already closed");
 
-        channel.isOpen = false;
-        channel.lastUpdated = block.timestamp;
-        channelClosesAt[channelId] = block.timestamp + CHALLENGE_PERIOD;
+        // Effects-before-interactions: pay out first so a failed transfer
+        // reverts the whole call instead of leaving isClosed set with funds
+        // stuck (issue #7736).
+        uint256 amountA = channel.balanceA;
+        uint256 amountB = channel.balanceB;
 
-        // Capture final balances before settlement
-        uint256 finalBalanceA = channel.balanceA;
-        uint256 finalBalanceB = channel.balanceB;
+        (bool sentA, ) = channel.userA.call{value: amountA}("");
+        require(sentA, "Transfer A failed");
 
-        // Emit event before zeroing balances
-        emit ChannelClosed(channelId, finalBalanceA, finalBalanceB);
+        (bool sentB, ) = channel.userB.call{value: amountB}("");
+        require(sentB, "Transfer B failed");
+
+        channel.isClosed = true;
+
+        emit ChannelClosed(channelId, amountA, amountB);
     }
-
-    function settleChannel(uint256 channelId) external whenNotPaused {
-        Channel storage channel = channels[channelId];
-        require(!channel.isOpen, "Channel still open");
-        require(!channel.isSettled, "Already settled");
-        require(channelClosesAt[channelId] > 0, "Channel not closed");
-        require(block.timestamp > channelClosesAt[channelId], "Challenge period not elapsed");
-        require(msg.sender == channel.participantA || msg.sender == channel.participantB, "Not participant");
-
-        _settleChannel(channelId);
-    }
-
-    function _settleChannel(uint256 channelId) internal {
-        Channel storage channel = channels[channelId];
-        require(!channel.isSettled, "Already settled");
-
-        if (channel.balanceA > 0) {
-            pendingWithdrawals[channelId][channel.participantA] += channel.balanceA;
-        }
-        if (channel.balanceB > 0) {
-            pendingWithdrawals[channelId][channel.participantB] += channel.balanceB;
-        }
-
-        channel.isSettled = true;
-        channel.balanceA = 0;
-        channel.balanceB = 0;
-    }
-
-    function withdraw(uint256 channelId) external nonReentrant {
-        uint256 amount = pendingWithdrawals[channelId][msg.sender];
-        require(amount > 0, "Nothing to withdraw");
-        pendingWithdrawals[channelId][msg.sender] = 0;
-        (bool success, ) = msg.sender.call{value: amount}("");
-        require(success, "Withdraw failed");
-        emit Withdrawal(channelId, msg.sender, amount);
-    }
-
-    // ============ Dispute Resolution ============
-
-    function raiseDispute(uint256 channelId, bytes32 stateHash) external whenNotPaused {
-        Channel storage channel = channels[channelId];
-        require(channel.isOpen, "Channel not open");
-        require(!channel.isSettled, "Channel settled");
-        require(msg.sender == channel.participantA || msg.sender == channel.participantB, "Not participant");
-        require(disputes[channelId].challenger == address(0), "Dispute already raised");
-
-        disputes[channelId] = Dispute({
-            channelId: channelId,
-            challenger: msg.sender,
-            stateHash: stateHash,
-            startedAt: block.timestamp,
-            resolved: false
-        });
-
-        // Freeze channel
-        channel.isOpen = false;
-
-        emit DisputeRaised(channelId, msg.sender);
-    }
-
-    function resolveDispute(uint256 channelId, bytes memory proof) external onlyOwner {
-    Dispute storage dispute = disputes[channelId];
-    require(dispute.challenger != address(0), "No dispute");
-    require(!dispute.resolved, "Already resolved");
-    require(block.timestamp >= dispute.startedAt + SETTLEMENT_PERIOD, "Settlement period not elapsed");
-
-    Channel storage channel = channels[channelId];
-
-    // Decode proof: (balanceA, balanceB, nonce, signatureA, signatureB)
-    (uint256 proofBalanceA, uint256 proofBalanceB, uint256 proofNonce, bytes memory sigA, bytes memory sigB) =
-        abi.decode(proof, (uint256, uint256, uint256, bytes, bytes));
-
-    // Verify that balances sum to the channel's total
-    uint256 totalBalance = channel.balanceA + channel.balanceB;
-    require(proofBalanceA + proofBalanceB == totalBalance, "Invalid proof balances");
-
-    // The disputed state must be at least as recent as the last state the
-    // contract already knows about via updateState — this stops a stale,
-    // mutually-signed state from overriding a newer one.
-    require(proofNonce >= channel.nonce, "Stale disputed state");
-
-    // Use the exact same state encoding as updateState so a dispute proof
-    // is nothing more than a (channelId, balanceA, balanceB, nonce) state
-    // that both channel participants actually signed off on.
-    bytes32 stateHash = keccak256(abi.encodePacked(
-        channelId, proofBalanceA, proofBalanceB, proofNonce
-    ));
-
-    // Require BOTH participants' signatures on the SAME state. A proof
-    // signed only by the challenger (the previous behaviour) let either
-    // party fabricate an arbitrary payout and win by default.
-    require(_verifySignature(stateHash, sigA, channel.participantA), "Invalid signature A");
-    require(_verifySignature(stateHash, sigB, channel.participantB), "Invalid signature B");
-
-    dispute.resolved = true;
-
-    // Only move the channel state forward — never backward — and only to
-    // a state number that is provably authoritative (signed by both
-    // participants above).
-    if (proofNonce > channel.nonce) {
-        channel.balanceA = proofBalanceA;
-        channel.balanceB = proofBalanceB;
-        channel.nonce = proofNonce;
-        channel.latestStateHash = stateHash;
-    }
-
-    _settleChannel(channelId);
-
-    emit DisputeResolved(channelId, true);
-}
-
-    // ============ Batch Settlement ============
-
-    function batchSettle(uint256[] calldata channelIds) external onlyOwner {
-        uint256 count = 0;
-        for (uint256 i = 0; i < channelIds.length; i++) {
-            if (channels[channelIds[i]].isOpen && !channels[channelIds[i]].isSettled) {
-                _settleChannel(channelIds[i]);
-                count++;
-            }
-        }
-
-        emit BatchSettled(block.timestamp, count);
-    }
-
-    // ============ View Functions ============
-
-    function getChannel(uint256 channelId) external view returns (Channel memory) {
-        return channels[channelId];
-    }
-
-    function getChannelStates(uint256 channelId) external view returns (State[] memory) {
-        return channelStates[channelId];
-    }
-
-    function getUserChannels(address user) external view returns (uint256[] memory) {
-        return userChannels[user];
-    }
-
-    function getChannelBalance(uint256 channelId, address participant) external view returns (uint256) {
-        Channel storage channel = channels[channelId];
-        if (participant == channel.participantA) {
-            return channel.balanceA;
-        } else if (participant == channel.participantB) {
-            return channel.balanceB;
-        }
-        return 0;
-    }
-
-    function isChannelActive(uint256 channelId) external view returns (bool) {
-        return channels[channelId].isOpen && !channels[channelId].isSettled;
-    }
-
-    function getDispute(uint256 channelId) external view returns (Dispute memory) {
-        return disputes[channelId];
-    }
-
-    // ============ Emergency Functions ============
-
-    function pause() external onlyOwner {
-        _pause();
-    }
-
-    function unpause() external onlyOwner {
-        _unpause();
-    }
-
-    // ============ Receive ============
-
-    receive() external payable {}
 }

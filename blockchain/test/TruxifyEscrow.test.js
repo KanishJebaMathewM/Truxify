@@ -511,13 +511,21 @@ describe("TruxifyEscrow", function () {
         .to.be.revertedWith("TruxifyEscrow: Penalty exceeds escrow");
     });
 
-    it("reverts once the trip has started", async function () {
-      const { escrow, owner, bookingId } = await loadFixture(deployWithBookingFixture);
+    it("allows cancellation with penalty even after the trip has started", async function () {
+      const { escrow, owner, customer, driver, bookingId, amount } = await loadFixture(deployWithBookingFixture);
+      const driverFee = ethers.parseEther("0.2");
 
       await escrow.connect(owner).markBookingStarted(bookingId);
 
-      await expect(escrow.connect(owner).cancelWithPenalty(bookingId, ethers.parseEther("0.1")))
-        .to.be.revertedWith("TruxifyEscrow: Trip already started");
+      await expect(escrow.connect(owner).cancelWithPenalty(bookingId, driverFee))
+        .to.emit(escrow, "CancellationPenaltyApplied")
+        .withArgs(bookingId, driver.address, driverFee, customer.address, amount - driverFee);
+
+      const booking = await escrow.getBooking(bookingId);
+      expect(booking.status).to.equal(2); // Cancelled
+      expect(booking.paid).to.be.true;
+      expect(await escrow.pendingWithdrawals(driver.address)).to.equal(driverFee);
+      expect(await escrow.pendingWithdrawals(customer.address)).to.equal(amount - driverFee);
     });
   });
 

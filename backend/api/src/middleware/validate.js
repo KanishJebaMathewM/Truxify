@@ -1,6 +1,6 @@
-function formatValidationIssues(error) {
-  return error.issues.map(issue => ({
-    field: issue.path.length > 0 ? issue.path.join('.') : 'body',
+export function formatValidationIssues(error) {
+  return error.issues.map((issue) => ({
+    field: issue.path.length > 0 ? issue.path.join(".") : "body",
     message: issue.message,
   }));
 }
@@ -8,14 +8,20 @@ function formatValidationIssues(error) {
 export function validateArray(schema) {
   return (req, res, next) => {
     if (!Array.isArray(req.body)) {
-      return res.status(400).json({ error: 'Expected an array in request body' });
+      return res
+        .status(400)
+        .json({ error: "Expected an array in request body" });
     }
-    const results = req.body.map(item => schema.safeParse(item));
-    const errors = results.filter(r => !r.success).map(r => formatValidationIssues(r.error));
+    const results = req.body.map((item) => schema.safeParse(item));
+    const errors = results
+      .filter((r) => !r.success)
+      .map((r) => formatValidationIssues(r.error));
     if (errors.length > 0) {
-      return res.status(400).json({ error: 'Array validation failed', details: errors.flat() });
+      return res
+        .status(400)
+        .json({ error: "Array validation failed", details: errors.flat() });
     }
-    req.body = results.map(r => r.data);
+    req.body = results.map((r) => r.data);
     return next();
   };
 }
@@ -26,7 +32,7 @@ export function validateBody(schema) {
 
     if (!result.success) {
       return res.status(400).json({
-        error: 'Validation failed',
+        error: "Validation failed",
         details: formatValidationIssues(result.error),
       });
     }
@@ -42,7 +48,7 @@ export function validateParams(schema) {
 
     if (!result.success) {
       return res.status(400).json({
-        error: 'Validation failed',
+        error: "Validation failed",
         details: formatValidationIssues(result.error),
       });
     }
@@ -59,14 +65,14 @@ export function validateQuery(schema) {
 
       if (!result.success) {
         return res.status(400).json({
-          error: 'Validation failed',
+          error: "Validation failed",
           details: formatValidationIssues(result.error),
         });
       }
 
       // req.query may be a read-only getter in some Node.js / express versions;
       // define it as a configurable writable property before assigning.
-      Object.defineProperty(req, 'query', {
+      Object.defineProperty(req, "query", {
         value: result.data,
         writable: true,
         configurable: true,
@@ -75,7 +81,7 @@ export function validateQuery(schema) {
       return next();
     } catch (err) {
       return res.status(500).json({
-        error: 'Internal query validation error',
+        error: "Internal query validation error",
         details: err.message,
       });
     }

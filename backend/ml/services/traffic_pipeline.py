@@ -96,11 +96,6 @@ class TrafficPipeline:
             logger.info("Creating new LSTM model")
             return self._create_lstm_model()
 
-    def close(self):
-        """Dispose database connections and close Redis connection."""
-        self.engine.dispose()
-        self.redis.close()
-    
     def _create_lstm_model(self):
         """Create LSTM model for ETA prediction"""
         model = models.Sequential([
@@ -199,7 +194,7 @@ class TrafficPipeline:
                     return {
                         'duration': duration,
                         'speed': route.get('distance', {}).get('value', 0) / duration if duration > 0 else 50,
-                        'congestion': 1 - (duration / normal_duration) if normal_duration > 0 else 0
+                        'congestion': (1 - normal_duration / duration) if duration > 0 else 0
                     }
         return {}
     
@@ -311,10 +306,23 @@ class TrafficPipeline:
                     datetime.now().weekday()
                 ]])
                 
-                # Predict ETA
-                eta_seconds = self.predict_eta(features)
-                
-                if eta_seconds is not None:
+                # Predict traffic speed (km/h) with the LSTM.
+                predicted_speed_kmh = self.predict_eta(features)
+
+                if predicted_speed_kmh is not None:
+                    # The model predicts speed, not duration. Convert the
+                    # predicted speed into an ETA in seconds using the route
+                    # distance so the value is meaningful as a travel time.
+                    osrm_data = await self._fetch_osrm_data(current_location, destination)
+                    route_distance_m = float(osrm_data.get('distance') or 0)
+                    if route_distance_m > 0 and predicted_speed_kmh > 0:
+                        # Convert speed from km/h to m/s, then divide distance_m by speed_mps to get seconds.
+                        # Incorrect: (route_distance_m / 1000.0) / (speed_kmh / 3.6) mixes km with m/s, off by 1000x.
+                        eta_seconds = route_distance_m / (predicted_speed_kmh / 3.6)
+                    else:
+                        # Fall back to the routing engine's duration estimate.
+                        eta_seconds = float(osrm_data.get('duration') or 0)
+
                     eta_minutes = eta_seconds / 60
                     eta_string = str(timedelta(seconds=int(eta_seconds)))
                     

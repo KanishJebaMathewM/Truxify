@@ -15,9 +15,9 @@ class TokenizationService {
             'function createTradeOrder(uint256 assetId, uint256 amount, uint256 price, string memory orderType) external',
             'function executeTradeOrder(uint256 assetId, uint256 orderIndex) external payable',
             'function cancelTradeOrder(uint256 assetId, uint256 orderIndex) external',
-            'function getTradeOrder(uint256 assetId, uint256 orderIndex) external view returns (tuple(address,uint256,uint256,uint256,bool))',
+            'function getTradeOrders(uint256 assetId) external view returns (tuple(uint256,uint256,address,address,uint256,uint256,uint256,string,bool,uint256,uint256)[])',
             'function getAsset(uint256 assetId) external view returns (tuple(uint256,string,string,string,uint256,uint256,uint256,uint256,address,bool,string,uint256,uint256))',
-            'function getFractionalOwnership(uint256 assetId, address owner) external view returns (tuple(address,uint256,uint256,uint256))',
+            'function getFractionalOwnership(uint256 assetId, address owner) external view returns (tuple(address,uint256,uint256,uint256,uint256))',
             'function getTotalAssets() external view returns (uint256)',
             'function getTotalTradeOrders() external view returns (uint256)'
         ];
@@ -174,23 +174,36 @@ class TokenizationService {
 
     async getTradeOrder(assetId, orderIndex) {
         try {
-            const order = await this.token.getTradeOrder(assetId, orderIndex);
+            const orders = await this.token.getTradeOrders(assetId);
+
+            if (orderIndex < 0 || orderIndex >= orders.length) {
+                throw new Error(`Order index ${orderIndex} out of range for asset ${assetId}`);
+            }
+            const order = orders[orderIndex];
             return {
-                maker: order.maker,
-                price: ethers.formatEther(order.price),
-                amount: ethers.formatEther(order.amount),
-                filled: order.filled,
-                orderId: order.orderId
+                orderId: order[0].toString(),
+                tokenId: order[1].toString(),
+                seller: order[2],
+                buyer: order[3],
+                amount: ethers.formatEther(order[4]),
+                price: ethers.formatEther(order[6]),
+                orderType: order[7],
+                isActive: order[8]
             };
         } catch (error) {
             logger.error('Failed to get trade order:', error);
             throw error;
         }
-    }
+}
 
     async executeTradeOrder(assetId, orderIndex, buyerAddress) {
         try {
             const order = await this.getTradeOrder(assetId, orderIndex);
+
+            if (!order.isActive) {
+                throw new Error(`Trade order ${order.orderId} is not active`);
+            }
+
             const totalCost = parseFloat(order.price) * parseFloat(order.amount);
 
             const tx = await this.token.executeTradeOrder(
@@ -258,7 +271,8 @@ class TokenizationService {
                 owner: ownership[0],
                 tokenId: ownership[1].toString(),
                 amount: ethers.formatEther(ownership[2]),
-                purchasedAt: ownership[3].toString()
+                backedTokens: ethers.formatEther(ownership[3]),
+                purchasedAt: ownership[4].toString()
             };
         } catch (error) {
             logger.error('Fractional ownership fetch failed:', error);

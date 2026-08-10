@@ -1,4 +1,3 @@
-﻿apiVersion: networking.istio.io/v1beta1
 apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
 metadata:
@@ -15,14 +14,13 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 5000
+          number: 80
       weight: 90
     - destination:
         host: api-service-v2
         port:
           number: 5000
       weight: 10
-
     retries:
       attempts: 3
       perTryTimeout: 2s
@@ -43,7 +41,7 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 5000
+          number: 80
       weight: 100
   - match:
     - uri:
@@ -52,5 +50,4 @@ spec:
     - destination:
         host: api-service
         port:
-          number: 5000
-
+          number: 80

@@ -1,6 +1,6 @@
 import { redisClient, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { escrowRefund, getEscrowBooking } from './escrow.js';
+import { submitEscrowRefund, getEscrowBooking } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
 
@@ -36,10 +36,45 @@ async function finalizeOrRevert(order, orderRepository) {
 
   try {
     const booking = await getEscrowBooking(order.escrow_booking_id);
+    const bookingAmount = booking?.amount;
+    const bookingFunded = booking && bookingAmount != null && bookingAmount > 0n;
 
-    if (booking && booking.paid) {
-      // The deposit DID land on-chain. Heal the acceptance by running
-      // accept_bid_tx as the backend (service_role).
+    // An on-chain booking only counts as "the deposit landed" if it is funded
+    // with EXACTLY the authoritative amount recorded for the order. A booking
+    // funded with any other amount must never finalize the acceptance — the
+    // order is reverted and the deposit refunded instead.
+    let mismatchReason = null;
+    if (bookingFunded && order.escrow_amount_wei != null) {
+      const expectedWei = BigInt(order.escrow_amount_wei);
+      if (bookingAmount !== expectedWei) {
+        mismatchReason = `booking amount ${bookingAmount} wei does not match expected ${expectedWei} wei`;
+        logger.error(`[escrow-funding] Order ${order.order_display_id} ${mismatchReason} — reverting instead of healing.`);
+      }
+    }
+
+    if (bookingFunded && !mismatchReason && order.status === 'cancelled') {
+      logger.info(`[escrow-funding] Order ${order.order_display_id} is cancelled but deposit landed on-chain. Triggering refund.`);
+      try {
+        await submitEscrowRefund(order.order_display_id);
+        await orderRepository.updateOrder(order.id, {
+          escrow_status: 'refunded',
+          escrow_refund_error: null,
+          updated_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        logger.error(`[escrow-funding] Failed to refund cancelled order ${order.order_display_id}: ${err.message}`);
+        await orderRepository.updateOrder(order.id, {
+          escrow_status: 'refund_failed',
+          escrow_refund_error: err.message,
+          updated_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    if (bookingFunded && !mismatchReason) {
+      // The deposit DID land on-chain with the correct amount. Heal the
+      // acceptance by running accept_bid_tx as the backend (service_role).
       const pending = order.pending_bid_acceptance;
       if (pending) {
         const { error: acceptErr } = await orderRepository.executeRpc('accept_bid_tx', {
@@ -71,7 +106,7 @@ async function finalizeOrRevert(order, orderRepository) {
           pending.driver_id,
           'Bid Accepted!',
           `Your bid for order ${pending.order_display_id} has been accepted. You are now assigned to this load.`,
-          'bid_accepted',
+          'order_update',
           { orderId: order.id, orderDisplayId: pending.order_display_id }
         ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err.message}`));
       }
@@ -85,13 +120,57 @@ async function finalizeOrRevert(order, orderRepository) {
       return;
     }
 
-    // Deposit never landed (or booking could not be read). Release the driver.
-    let refundError = null;
+    // Deposit never landed (or the amount does not match the authoritative
+    // figure). Release the driver and refund the incorrect deposit.
+    // submitEscrowRefund resolves with { error } / missing txHash on chain
+    // failures instead of throwing — only clear funding after confirmation.
+    let refundResult;
     try {
-      await escrowRefund(order.order_display_id);
+      refundResult = await submitEscrowRefund(order.order_display_id);
     } catch (err) {
-      refundError = err.message;
+      refundResult = { txHash: null, error: err.message };
       logger.error(`[escrow-funding] Refund failed for ${order.order_display_id}: ${err.message}`);
+    }
+
+    if (refundResult?.error || !refundResult?.txHash) {
+      const refundError = refundResult?.error || 'escrow refund was not submitted';
+      logger.error(
+        `[escrow-funding] Skipping funding clear for ${order.order_display_id}: refund not confirmed (${refundError})`
+      );
+      await orderRepository.updateOrderWithFilter(order.id, {
+        escrow_funding_error: mismatchReason
+          ? `ESCROW_AMOUNT_MISMATCH: ${mismatchReason}; refund pending: ${refundError}`
+          : `refund pending: ${refundError}`,
+        escrow_funding_last_attempt_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'id', value: order.id },
+      ], 'id').catch((err) => {
+        logger.error(`[escrow-funding] Failed to record refund pending for ${order.order_display_id}: ${err.message}`);
+      });
+      return;
+    }
+
+    try {
+      await refundResult.waitForConfirmation();
+    } catch (err) {
+      logger.error(
+        `[escrow-funding] Refund confirmation failed for ${order.order_display_id}: ${err.message}`
+      );
+      await orderRepository.updateOrderWithFilter(order.id, {
+        escrow_funding_error: mismatchReason
+          ? `ESCROW_AMOUNT_MISMATCH: ${mismatchReason}; refund confirmation failed: ${err.message}`
+          : `refund confirmation failed: ${err.message}`,
+        escrow_funding_last_attempt_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }, [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'id', value: order.id },
+      ], 'id').catch((stateErr) => {
+        logger.error(`[escrow-funding] Failed to record confirmation failure for ${order.order_display_id}: ${stateErr.message}`);
+      });
+      return;
     }
 
     const { error: revertErr } = await orderRepository.updateOrderWithFilter(order.id, {
@@ -100,7 +179,9 @@ async function finalizeOrRevert(order, orderRepository) {
       pending_bid_acceptance: null,
       escrow_funding_attempts: 0,
       escrow_funding_last_attempt_at: null,
-      escrow_funding_error: refundError ? `refund failed: ${refundError}` : null,
+      escrow_funding_error: mismatchReason
+        ? `ESCROW_AMOUNT_MISMATCH: ${mismatchReason}`
+        : null,
       updated_at: new Date().toISOString(),
     }, [
       { op: 'eq', column: 'escrow_status', value: 'funding' },
@@ -114,7 +195,7 @@ async function finalizeOrRevert(order, orderRepository) {
         order.customer_id,
         'Bid Acceptance Expired',
         `The escrow deposit for order ${order.order_display_id} was not completed in time, so the driver is no longer reserved. You can accept a bid again.`,
-        'BID_ACCEPTANCE_EXPIRED',
+        'order_update',
         { orderId: order.id }
       ).catch((err) => logger.error(`[FCM] Failed to notify customer of expired bid acceptance: ${err.message}`));
       logger.info(`[escrow-funding] Order ${order.order_display_id} reverted to pending (funding TTL expired).`);

@@ -11,6 +11,7 @@ class AppRoutes {
   static const earnings = '/earnings';
   static const tripDetail = '/trip-detail';
   static const weightCalculator = '/weight-calculator';
+  static const pastTrips = '/past-trips';
 }
 
 class RouteParams {

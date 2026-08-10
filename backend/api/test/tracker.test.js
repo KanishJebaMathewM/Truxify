@@ -21,6 +21,7 @@ const {
   handleLocationPing,
   handleSubscribe,
   closeWebSocketServer,
+  isMessageRateLimited,
   __testing,
 } = await import('../src/sockets/tracker.js');
 
@@ -63,6 +64,40 @@ describe('tracker', () => {
         await expect(isWebSocketUpgradeAllowed(req)).resolves.toBe(true);
       }
       await expect(isWebSocketUpgradeAllowed(req)).resolves.toBe(false);
+    });
+  });
+
+  describe('isMessageRateLimited', () => {
+    it('falls back to the in-memory limiter when Redis is unavailable and never fails open', async () => {
+      const ws = makeWs({ socketId: 'socket-rate-1' });
+      for (let i = 0; i < 10; i++) {
+        await expect(isMessageRateLimited(ws)).resolves.toBe(false);
+      }
+      // The 11th message inside the same 1-second window is limited.
+      await expect(isMessageRateLimited(ws)).resolves.toBe(true);
+    });
+
+    it('limits sockets independently (per-socket window)', async () => {
+      const wsA = makeWs({ socketId: 'socket-rate-a' });
+      const wsB = makeWs({ socketId: 'socket-rate-b' });
+      for (let i = 0; i < 10; i++) {
+        await isMessageRateLimited(wsA);
+      }
+      await expect(isMessageRateLimited(wsA)).resolves.toBe(true);
+      // A fresh socket has its own clean budget.
+      for (let i = 0; i < 10; i++) {
+        await expect(isMessageRateLimited(wsB)).resolves.toBe(false);
+      }
+    });
+
+    it('rate-limited messages are dropped before processing', async () => {
+      const ws = makeWs({ socketId: 'socket-rate-drop' });
+      for (let i = 0; i < 10; i++) {
+        await handleTrackingMessage(ws, 'ping');
+      }
+      ws.send.mockClear();
+      await handleTrackingMessage(ws, 'ping');
+      expect(ws.send).not.toHaveBeenCalled();
     });
   });
 

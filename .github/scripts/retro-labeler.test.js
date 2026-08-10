@@ -248,3 +248,52 @@ test('run function handles rate limit error gracefully without crashing', async 
   assert.equal(warningLogged, true);
 });
 
+test('run function filters PRs by sinceHours cutoff time', async () => {
+  const { run } = require('./retro-labeler');
+  let addedLabels = {};
+  const recentDate = new Date().toISOString();
+  const oldDate = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+  const mockGithub = {
+    paginate: async (fn) => {
+      if (fn === mockGithub.rest.issues.listLabelsForRepo) {
+        return [{ name: 'gssoc:approved' }, { name: 'level:beginner' }];
+      }
+      return [];
+    },
+    rest: {
+      issues: {
+        listLabelsForRepo: () => {},
+        createLabel: async () => {},
+        addLabels: async ({ issue_number, labels }) => {
+          addedLabels[issue_number] = labels;
+        },
+        removeLabel: async () => {}
+      },
+      pulls: {
+        list: async () => ({
+          data: [
+            { number: 201, title: 'Recent PR', labels: [], merged_at: recentDate, closed_at: recentDate, updated_at: recentDate, user: { login: 'human' } },
+            { number: 202, title: 'Old PR', labels: [], merged_at: oldDate, closed_at: oldDate, updated_at: oldDate, user: { login: 'human' } }
+          ]
+        })
+      }
+    }
+  };
+
+  const mockContext = { repo: { owner: 'owner', repo: 'repo' } };
+  const mockCore = { info: () => {}, warning: () => {}, error: () => {} };
+
+  const count = await run({
+    github: mockGithub,
+    context: mockContext,
+    core: mockCore,
+    dryRun: false,
+    sinceHours: 12
+  });
+
+  assert.equal(count, 1);
+  assert.ok(addedLabels[201]);
+  assert.equal(addedLabels[202], undefined);
+});
+

@@ -25,6 +25,13 @@ class LocationService {
     _searchCache[query.toLowerCase().trim()] = results;
   }
 
+  static void _cacheReverse(String cacheKey, String address) {
+    if (_reverseCache.length >= _maxCacheSize) {
+      _reverseCache.remove(_reverseCache.keys.first);
+    }
+    _reverseCache[cacheKey] = address;
+  }
+
   Future<List<LocationSuggestion>> searchPlaces(String query) async {
     final trimmed = query.trim();
     if (trimmed.length < 3) {
@@ -86,9 +93,11 @@ class LocationService {
   }
 
   Future<String> resolveAddress(LatLng point) async {
-    final cacheKey = '${point.latitude.toStringAsFixed(4)},${point.longitude.toStringAsFixed(4)}';
+    final cacheKey = '${point.latitude.toStringAsFixed(6)},${point.longitude.toStringAsFixed(6)}';
     if (_reverseCache.containsKey(cacheKey)) {
-      return _reverseCache[cacheKey]!;
+      final cachedValue = _reverseCache.remove(cacheKey)!;
+      _reverseCache[cacheKey] = cachedValue;
+      return cachedValue;
     }
     final uri = Uri.https(
       _host,
@@ -115,7 +124,7 @@ class LocationService {
     if (decoded is! Map<String, dynamic>) throw Exception('Reverse lookup failed: unexpected response type');
     final displayName = (decoded['display_name'] as String?)?.trim();
     if (displayName != null && displayName.isNotEmpty) {
-      _reverseCache[cacheKey] = displayName;
+      _cacheReverse(cacheKey, displayName);
       return displayName;
     }
 

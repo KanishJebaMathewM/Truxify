@@ -37,5 +37,4 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
-startGraphQL();
-.catch(err => console.error("Promise.all failed:", err));
+startGraphQL().catch(err => console.error("startGraphQL failed:", err));

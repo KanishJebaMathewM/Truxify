@@ -1,7 +1,7 @@
 import kafka, { TOPICS, CONSUMER_GROUPS } from '../config/kafka.config.js';
 import processedEventRepository from '../repositories/processedEvent.repository.js';
 import deadLetterRepository from '../repositories/deadLetter.repository.js';
-import logger from '../api/src/middleware/logger.js';
+import logger from '../../api/src/middleware/logger.js';
 
 class OrderConsumer {
   constructor({ eventBus: externalEventBus } = {}) {
@@ -174,11 +174,28 @@ class OrderConsumer {
 
     for (const entry of pending) {
       const topicHandlers = this.handlers.get(entry.topic) || [];
-      const parsedMessage = entry.message;
+
+      // entry.message is the DLQ wrapper object
+      // ({ topic, message, error, timestamp, retryCount }); its `message` field
+      // holds the JSON-encoded original Kafka value. Handlers are registered
+      // for the original event shape, so replay must feed them the parsed
+      // event, not the wrapper.
+      let parsedMessage;
+      try {
+        const serialized = typeof entry.message === 'string'
+          ? entry.message
+          : entry.message?.message;
+        parsedMessage = JSON.parse(serialized);
+      } catch (error) {
+        logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}): message is not valid JSON:`, error);
+        await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        results.failed += 1;
+        continue;
+      }
 
       try {
         for (const handler of topicHandlers) {
-          await handler(parsedMessage, { value: parsedMessage?.message });
+          await handler(parsedMessage, { value: parsedMessage });
         }
         await deadLetterRepository.markStatus(entry.id, 'replayed');
         results.succeeded += 1;

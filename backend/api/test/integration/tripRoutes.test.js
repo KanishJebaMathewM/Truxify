@@ -7,6 +7,7 @@ const m = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
     supabase: m.supabase,
+    supabaseAdmin: m.supabase,
     firebaseAdmin: null,
     redisClient: null,
     mongoDb: null,
@@ -119,7 +120,7 @@ describe('Trip Routes', () => {
             });
 
         expect(res.status).toBe(200);
-        expect(res.body.message).toBe('Empty batch received, nothing to process.');
+        expect(res.body.error).toBe('Empty batch received, nothing to process.');
     });
 
     it('POST /events/batch returns 202 when batch was already processed', async () => {
@@ -135,7 +136,7 @@ describe('Trip Routes', () => {
             .send(validPayload);
 
         expect(res.status).toBe(202);
-        expect(res.body.message).toBe('Batch already processed.');
+        expect(res.body.error).toBe('Batch already processed.');
     });
 
     it('POST /events/batch inserts trip events and logs processed batch', async () => {
@@ -324,8 +325,8 @@ describe('Trip Routes', () => {
                 ],
             });
 
-        expect(res.status).toBe(422);
-        expect(res.body.error).toContain('Unprocessable Entity: Invalid event payload for type gpsUpdate');
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe('Invalid coordinate data');
     });
 
     it('POST /events/batch inserts trip events and strips sensitive fields from metadata', async () => {
@@ -377,6 +378,60 @@ describe('Trip Routes', () => {
         expect(upsertCall.payload[0].metadata).not.toHaveProperty('secret');
         expect(upsertCall.payload[0].metadata).not.toHaveProperty('password');
         expect(upsertCall.payload[0].metadata.lat).toBe(19.076);
+    });
+
+    it('POST /events/batch inserts non-telemetry events (otpDelivery) with NULL coordinates', async () => {
+        const originalFrom = m.supabase.from.bind(m.supabase);
+        m.supabase.from = table => {
+            const builder = originalFrom(table);
+            if (table === 'trip_events') {
+                builder.upsert = vi.fn(async payload => {
+                    m.calls.push({
+                        table: 'trip_events',
+                        mode: 'upsert',
+                        payload,
+                    });
+                    m.store.trip_events.push(...payload);
+                    return { data: payload, error: null };
+                });
+            }
+            return builder;
+        };
+
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send({
+                idempotencyKey: 'batch-otp-delivery',
+                events: [
+                    {
+                        id: 'event-otp',
+                        trip_id: 'trip-1',
+                        type: 'otpDelivery',
+                        occurred_at: new Date().toISOString(),
+                        payload: {
+                            stopId: 'stop-1',
+                        },
+                    },
+                ],
+            });
+
+        m.supabase.from = originalFrom;
+
+        expect(res.status).toBe(202);
+        const upsertCall = m.calls.find(
+            c => c.table === 'trip_events' && c.mode === 'upsert' && c.payload[0].event_id === 'event-otp'
+        );
+        expect(upsertCall).toBeTruthy();
+        expect(upsertCall.payload[0]).toEqual(
+            expect.objectContaining({
+                event_id: 'event-otp',
+                event_type: 'otpDelivery',
+                latitude: null,
+                longitude: null,
+                metadata: { stopId: 'stop-1' },
+            })
+        );
     });
 });
 
@@ -534,5 +589,31 @@ describe('GET /api/trips/:id/events', () => {
     expect(res.status).toBe(200);
     expect(res.body.events).toHaveLength(1);
     expect(res.body.events[0].event_id).toBe('ev-in');
+  });
+
+  it('returns 400 for a non-numeric coordinate query param', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: '11111111-1111-4111-a111-111111111111', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+    );
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/11111111-1111-4111-a111-111111111111/events?min_lat=abc')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('min_lat must be a number');
+  });
+
+  it('returns 400 for an out-of-range coordinate query param', async () => {
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: '11111111-1111-4111-a111-111111111111', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+    );
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/11111111-1111-4111-a111-111111111111/events?max_lng=200')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('max_lng must be a number within [-180, 180]');
   });
 });

@@ -3,8 +3,8 @@ import { startStandaloneServer } from '@apollo/server/standalone';
 import { buildSubgraphSchema } from '@apollo/federation';
 import { gql } from 'graphql-tag';
 import DataLoader from 'dataloader';
-import { supabase } from '../api/src/config/db.js';
-import logger from '../api/src/middleware/logger.js';
+import { supabase } from '../../api/src/config/db.js';
+import logger from '../../api/src/middleware/logger.js';
 
 const typeDefs = gql`
     extend type Query {

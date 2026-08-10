@@ -37,6 +37,9 @@ REVOKE ALL ON TABLE public.webhook_failures FROM anon;
 REVOKE ALL ON TABLE public.reputation_failures FROM anon;
 REVOKE ALL ON TABLE public.tracking_tokens FROM anon;
 REVOKE ALL ON TABLE public.temperature_telemetry FROM anon;
+REVOKE ALL ON TABLE public.behavioral_profiles FROM anon;
+REVOKE ALL ON TABLE public.fraud_risk_scores FROM anon;
+REVOKE ALL ON TABLE public.fraud_review_queue FROM anon;
 
 -- Note: RLS policies should still be enabled and strictly defined 
 -- for authenticated users, but revoking from anon adds an extra layer 

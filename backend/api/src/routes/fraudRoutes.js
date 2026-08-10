@@ -75,7 +75,14 @@ router.post('/fraud/review/:reviewId/resolve', authenticate, userLimiter, requir
   try {
     const { reviewId } = req.params;
     const { action, notes } = req.body;
-    
+
+    if (!action || typeof action !== 'string') {
+      return res.status(400).json({
+        success: false,
+        error: 'action is required and must be a string'
+      });
+    }
+
     const result = await fraudDetection.resolveReview(reviewId, action, notes);
     res.json({
       success: true,

@@ -1,5 +1,5 @@
 import express from 'express';
-import { supabase } from '../config/db.js';
+import { createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -16,7 +16,12 @@ const router = express.Router();
 router.get('/', authenticate, userLimiter, requirePolicy('demand:view-heatmap'), async (req, res) => {
   try {
     // 1. Fetch recent load offers (historical/current volume)
-    const { data: loads, error } = await supabase
+    // Read through the caller's user-scoped client so the load_offers RLS
+    // policy (status = 'available' OR customer_id = get_profile_id()) sees the
+    // authenticated user's identity. The shared anon client has no identity and
+    // can never return the offers.
+    const userClient = createUserClient(req.token);
+    const { data: loads, error } = await userClient
       .from('load_offers')
       .select('pickup_address, drop_address, status, pickup_lat, pickup_lng')
       .in('status', ['available', 'claimed'])

@@ -1,6 +1,8 @@
 import logger from '../../middleware/logger.js';
 import { redisClient, supabaseAdmin } from '../../config/db.js';
 
+const CONNECTION_PAGE_SIZE = 1000;
+
 class FraudDetectionService {
   constructor() {
     this.redis = redisClient;
@@ -329,28 +331,32 @@ class FraudDetectionService {
     const safeUserId = this.sanitizeUserId(userId);
     if (!safeUserId) return [];
     // Get all connections (orders, trips, shared routes)
-    const { data: orders, error } = await supabaseAdmin
-      .from('orders')
-      .select('customer_id, driver_id')
-      .or(`customer_id.eq.${safeUserId},driver_id.eq.${safeUserId}`);
-
-    if (error) {
-      logger.error('Failed to load user fraud connections:', error);
-      return [];
-    }
-
-    if (!Array.isArray(orders)) {
-      return [];
-    }
-
     const connections = new Set();
-    orders.forEach(order => {
-      if (order.customer_id === userId && order.driver_id) {
-        connections.add(order.driver_id);
-      } else if (order.driver_id === userId && order.customer_id) {
-        connections.add(order.customer_id);
+    let offset = 0;
+    let page = [];
+    do {
+      const { data: orders, error } = await supabaseAdmin
+        .from('orders')
+        .select('customer_id, driver_id')
+        .or(`customer_id.eq.${safeUserId},driver_id.eq.${safeUserId}`)
+        .order('id', { ascending: true })
+        .range(offset, offset + CONNECTION_PAGE_SIZE - 1);
+
+      if (error) {
+        logger.error('Failed to load user fraud connections:', error);
+        return [];
       }
-    });
+
+      page = Array.isArray(orders) ? orders : [];
+      page.forEach(order => {
+        if (order.customer_id === userId && order.driver_id) {
+          connections.add(order.driver_id);
+        } else if (order.driver_id === userId && order.customer_id) {
+          connections.add(order.customer_id);
+        }
+      });
+      offset += page.length;
+    } while (page.length === CONNECTION_PAGE_SIZE);
 
     return Array.from(connections);
   }

@@ -67,17 +67,6 @@ const router = express.Router();
  *       429:
  *         description: Rate limited
  */
-// Device token validation helper
-function validateDeviceToken(token) {
-  if (!token || typeof token !== 'string') {
-    return { valid: false, error: 'Device token is required and must be a string' };
-  }
-  if (token.length < 10 || token.length > 1024) {
-    return { valid: false, error: 'Device token length must be between 10 and 1024 characters' };
-  }
-  return { valid: true };
-}
-
 // POST /api/devices/register
 router.post('/register', authenticate, deviceLimiter, validateBody(registerDeviceSchema), registerDeviceToken);
 

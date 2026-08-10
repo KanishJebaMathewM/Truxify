@@ -27,6 +27,7 @@ import '../core/app_routes.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_models.dart';
 import '../models/earnings_daily_model.dart';
+import '../screens/delivery_otp_screen.dart';
 import '../services/driver_earnings_service.dart';
 import '../services/geocode_service.dart';
 import '../services/marketplace_repository.dart';
@@ -936,45 +937,59 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _completeRide() async {
-    if (_activeTripId != null) {
-      try {
-        final stops = await _tripService.fetchTripStops(_activeTripId!);
-        final currentStop =
-            stops.where((s) => s['is_current'] == true).firstOrNull;
-        if (currentStop != null) {
-          await _tripService.markStopCompleted(
-              currentStop['id'].toString(), _activeTripId!);
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(
-                    AppLocalizations.of(context)!.failedToCompleteTrip)),
-          );
-        }
-        return;
+    final orderId = _activeOrderId ?? _activeTripId;
+    final orderDisplayId = _activeTripId ?? _activeOrderId;
+    if (orderId == null || orderDisplayId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.failedToCompleteTrip),
+          ),
+        );
       }
+      return;
     }
+
+    final dropPoint = _destination?.point;
+    final amountInr = _activeTripPayout.isNotEmpty
+        ? _activeTripPayout.replaceAll('₹', '').trim()
+        : null;
+
+    final completed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => DeliveryOtpScreen(
+          orderId: orderId,
+          orderDisplayId: orderDisplayId,
+          dropLat: dropPoint?.latitude,
+          dropLng: dropPoint?.longitude,
+          amountInr: amountInr,
+        ),
+      ),
+    );
+
+    if (completed != true || !mounted) {
+      return;
+    }
+
     _clearDestination();
     WeighStationService.instance.resetAlertedStations();
-    if (mounted) {
-      setState(() {
-        _activeTripId = null;
-        _isTripStarted = false;
-        _activeTripEta = '';
-        _activeTripProgress = 0.0;
-        _activeTripStatus = '';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              AppLocalizations.of(context)!.tripCompletedNetEarnings('')),
-          backgroundColor: TruxifyColors.success,
+    setState(() {
+      _activeTripId = null;
+      _activeOrderId = null;
+      _isTripStarted = false;
+      _activeTripEta = '';
+      _activeTripProgress = 0.0;
+      _activeTripStatus = '';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          AppLocalizations.of(context)!.tripCompletedNetEarnings(''),
         ),
-      );
-      _loadDashboardMetrics();
-    }
+        backgroundColor: TruxifyColors.success,
+      ),
+    );
+    _loadDashboardMetrics();
   }
 
   Future<void> _checkPendingPods() async {

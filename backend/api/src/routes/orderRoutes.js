@@ -736,7 +736,6 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
 
     const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
       escrow_status: 'funded',
-      escrow_status: 'funded',
     }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
 
     if (updateErr) {

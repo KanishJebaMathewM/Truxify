@@ -9,16 +9,100 @@ import 'package:share_plus/share_plus.dart';
 
 import '../models/earnings_statement_model.dart';
 
+typedef ShareXFilesFunction = Future<void> Function(List<XFile> files, {String? text});
+
 class EarningsExportService {
-  Future<void> shareCsv(String csvContent, String filename) async {
-    final tempDir = Directory.systemTemp;
-    final file = File('${tempDir.path}/$filename');
-    await file.writeAsString(csvContent);
+  static const String _tempFilePrefix = 'earnings_export_';
+  static const Duration _staleThreshold = Duration(minutes: 10);
+
+  final ShareXFilesFunction _shareXFiles;
+
+  EarningsExportService({
+    ShareXFilesFunction? shareXFiles,
+  }) : _shareXFiles = shareXFiles ?? _defaultShareXFiles;
+
+  static Future<void> _defaultShareXFiles(List<XFile> files, {String? text}) async {
+    await Share.shareXFiles(files, text: text);
+  }
+
+  /// Cleans up stale earnings export temporary files in [tempDir].
+  ///
+  /// Only deletes files matching [_tempFilePrefix] or 'earnings_export' that are older
+  /// than [_staleThreshold] relative to [now]. Unrelated files remain untouched.
+  Future<void> cleanOldExports({DateTime? now, Directory? customTempDir}) async {
     try {
-      await Share.shareXFiles([XFile(file.path)], text: 'Earnings Statement');
-    } finally {
-      await file.delete().catchError((_) {});
+      final tempDir = customTempDir ?? Directory.systemTemp;
+      if (!await tempDir.exists()) return;
+
+      final currentTime = now ?? DateTime.now();
+      final entities = tempDir.listSync();
+
+      for (final entity in entities) {
+        if (entity is File) {
+          final filename = entity.path.split(Platform.pathSeparator).last;
+          if (filename.startsWith(_tempFilePrefix)) {
+            try {
+              final lastModified = await entity.lastModified();
+              if (currentTime.difference(lastModified) > _staleThreshold) {
+                await entity.delete().catchError((_) {});
+              }
+            } catch (_) {
+              // Ignore individual file access errors
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Best-effort cleanup: ignore directory listing errors
     }
+  }
+
+  Future<void> shareCsv(
+    String csvContent,
+    String filename, {
+    Directory? customTempDir,
+    Duration? cleanupDelay,
+  }) async {
+    // 1. Clean up stale export files before creating a new one (best-effort)
+    await cleanOldExports(customTempDir: customTempDir).catchError((_) {});
+
+    final tempDir = customTempDir ?? Directory.systemTemp;
+    final safeFilename = filename.startsWith(_tempFilePrefix)
+        ? filename
+        : '$_tempFilePrefix$filename';
+    final file = File('${tempDir.path}${Platform.pathSeparator}$safeFilename');
+
+    // 2. Write CSV to temporary file
+    try {
+      await file.writeAsString(csvContent);
+    } catch (e) {
+      // If write fails, delete file if created and rethrow original error
+      await file.delete().catchError((_) {});
+      rethrow;
+    }
+
+    // 3. Share temporary file
+    try {
+      await _shareXFiles([XFile(file.path)], text: 'Earnings Statement');
+    } catch (e) {
+      // If share invocation throws prior to/during presentation, clean up immediately and rethrow
+      await file.delete().catchError((_) {});
+      rethrow;
+    }
+
+    // 4. Successful share: do NOT delete immediately in a finally block.
+    // Schedule deferred cleanup so the receiving app has sufficient time to consume the file.
+    _scheduleFileCleanup(file, delay: cleanupDelay ?? _staleThreshold);
+  }
+
+  void _scheduleFileCleanup(File file, {required Duration delay}) {
+    Future.delayed(delay, () async {
+      try {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {}
+    });
   }
 
   Future<String> saveCsv(String csvContent, String filename) async {

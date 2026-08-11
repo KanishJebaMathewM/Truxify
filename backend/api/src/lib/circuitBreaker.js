@@ -53,6 +53,10 @@ export class CircuitBreaker {
     this.nextAttempt = Date.now();
   }
 
+  destroy() {
+    this.reset();
+  }
+
   async execute(fn, ...args) {
     const currentState = this.getState();
 
@@ -96,7 +100,8 @@ export class CircuitBreaker {
 
   onFailure(err, args) {
     this.failureCount += 1;
-    logger.error({ err: err.message, failures: this.failureCount }, `[CircuitBreaker:${this.name}] Execution failure`);
+    const errMessage = err instanceof Error ? err.message : String(err);
+    logger.error({ err: errMessage, failures: this.failureCount }, `[CircuitBreaker:${this.name}] Execution failure`);
 
     if (this.state === CircuitState.HALF_OPEN || this.failureCount >= this.failureThreshold) {
       this.state = CircuitState.OPEN;

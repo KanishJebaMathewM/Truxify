@@ -95,7 +95,7 @@ router.get('/vehicle-types', async (req, res) => {
     });
     res.json({ data });
   } catch (error) {
-    logger.error({ error }, 'Error fetching vehicle types');
+    logger.error({ requestId: req.requestId, error }, 'Error fetching vehicle types');
     res.status(500).json({ error: 'Failed to fetch vehicle types' });
   }
 });
@@ -109,7 +109,7 @@ router.get('/regions', async (req, res) => {
     });
     res.json({ data });
   } catch (error) {
-    logger.error({ error }, 'Error fetching regions');
+    logger.error({ requestId: req.requestId, error }, 'Error fetching regions');
     res.status(500).json({ error: 'Failed to fetch regions' });
   }
 });

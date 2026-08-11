@@ -7,10 +7,11 @@ import { supabaseAdmin } from '../../config/db.js';
 import {
   submitEscrowRefund,
   recordDepositTx,
-  submitEscrowRefund,
   submitEscrowCancelWithPenalty,
   confirmEscrowRefund,
   getEscrowBookingId,
+  resolveExpectedDepositAmount,
+  paisaToMaticWei,
 } from '../escrow.js';
 import { computeOrderPricing } from '../../lib/pricing.js';
 import { getRouteEstimate } from '../osrm.js';
@@ -66,14 +67,13 @@ export class OrderLifecycleService {
         waypoints = [],
       } = body;
 
-      let optimizedWaypoints = waypoints;
-      if (waypoints && waypoints.length > 0) {
-        optimizedWaypoints = await optimizeWaypoints(
-          { lat: Number(pickup_lat), lng: Number(pickup_lng), address: pickup_address },
-          { lat: Number(drop_lat), lng: Number(drop_lng), address: drop_address },
-          waypoints
-        );
-      }
+      const optimizedWaypoints = await optimizeWaypoints(
+        { lat: Number(pickup_lat), lng: Number(pickup_lng), address: pickup_address },
+        { lat: Number(drop_lat), lng: Number(drop_lng), address: drop_address },
+        waypoints,
+        pickup_date,
+        pickup_time
+      );
 
       let pricing;
       try {
@@ -301,8 +301,8 @@ export class OrderLifecycleService {
   async submitBid(loadOfferId, driverId, bidAmount) {
     return measureExecution('OrderLifecycleService.submitBid', async () => {
       const lockKey = `lock:submitBid:${driverId}:${loadOfferId}`;
-      const acquired = await acquireLock(lockKey, 5000);
-      if (!acquired) throw new DomainError(409, { error: 'Duplicate bid submission in progress.' });
+      const lockValue = await acquireLock(lockKey, 5000);
+      if (!lockValue) throw new DomainError(409, { error: 'Duplicate bid submission in progress.' });
 
       try {
         const { data: offer, error: offerErr } = await this.orderRepository.findLoadOfferById(loadOfferId, 'id, status, customer_id');
@@ -335,13 +335,13 @@ export class OrderLifecycleService {
           offer.customer_id,
           'New Bid Received',
           `A driver has submitted a bid of ₹${bidAmount} for your order.`,
-          'new_bid',
+          'order_update',
           { loadOfferId, bidId: bid.id }
         ).catch(err => logger.error(`[FCM] Failed to notify customer of new bid: ${err.message}`));
 
         return { message: 'Bid submitted successfully.', bid };
       } finally {
-        await releaseLock(lockKey);
+        await releaseLock(lockKey, lockValue);
       }
     });
   }
@@ -572,7 +572,13 @@ export class OrderLifecycleService {
           throw new DomainError(400, { error: 'Unable to compute new pricing for the requested drop.', details: pricingErr.message });
         }
 
-        const newAmountWei = BigInt(Math.round(pricing.totalAmount * 1e16));
+        // Rebalance the escrow booking alongside the re-priced total so the
+        // displayed price, the on-chain payout, and any refund all stay in
+        // sync. escrow_amount_wei is the authoritative payout figure (verified
+        // against at deposit time and on release), so it must track
+        // total_amount using the same canonical paisa→wei conversion the rest
+        // of the escrow pipeline uses.
+        const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
 
         const updates = {
           drop_address,
@@ -603,7 +609,7 @@ export class OrderLifecycleService {
           p_order_display_id: order.order_display_id,
           p_order_updates: updates,
           p_offer_updates: offerUpdates
-        }, userClient ?? supabaseAdmin);
+        }, supabaseAdmin);
 
         if (updateErr) {
           throw new DomainError(500, {
@@ -671,7 +677,7 @@ export class OrderLifecycleService {
           throw new DomainError(409, { error: 'Cannot cancel: the shipment has already been picked up and is in transit.' });
         }
 
-        const requiresRefund = ['funded', 'refund_pending', 'refund_failed'].includes(currentOrder.escrow_status);
+        const requiresRefund = ['funding', 'funded', 'refund_pending', 'refund_failed'].includes(currentOrder.escrow_status);
         const penaltyBps = currentOrder.status === 'truck_assigned'
           ? 1000
           : ['arrived_pickup', 'picked_up', 'in_transit', 'delivered'].includes(currentOrder.status)
@@ -801,6 +807,7 @@ export class OrderLifecycleService {
             const nextEscrowStatus = refundTxHash ? 'refund_pending' : 'refund_failed';
             await this.orderRepository.updateOrder(currentOrder.id, {
               status: 'cancelled',
+              cancellation_fee: cancellationFee,
               escrow_status: nextEscrowStatus,
               refund_tx_hash: refundTxHash,
               escrow_refund_error: String(refundErr.message || refundErr).slice(0, 1000),
@@ -883,20 +890,28 @@ export class OrderLifecycleService {
         const customerWallet = customerProfile?.polygon_wallet_address ?? null;
 
         const bookingId = order.escrow_booking_id || getEscrowBookingId(order.order_display_id);
+
+        // Resolve the authoritative expected deposit amount (cross-checked
+        // against the server-written bid context) and reject the deposit if it
+        // cannot be pinned down or if the stored figures disagree.
+        const resolvedAmount = resolveExpectedDepositAmount(order);
+        if (resolvedAmount.error) {
+          throw new DomainError(422, { error: resolvedAmount.error, code: resolvedAmount.code });
+        }
+        const expectedAmountWei = resolvedAmount.expectedAmountWei;
+
         const result = await recordDepositTx(
           bookingId,
           txHash,
           customerWallet,
           order.escrow_driver_wallet ?? null,
-          order.escrow_amount_wei ?? null
+          expectedAmountWei
         );
 
-        if (result.error) throw new DomainError(422, { error: result.error });
+        if (result.error) throw new DomainError(422, { error: result.error, code: result.code });
 
         const { error: updateErr } = await this.orderRepository.updateOrder(orderId, {
           escrow_status: 'funded',
-          deposit_tx_hash: result.txHash,
-          escrow_deposited_at: new Date().toISOString(),
         });
 
         if (updateErr) {
@@ -941,7 +956,7 @@ export class OrderLifecycleService {
             pending.driver_id,
             'Bid Accepted!',
             `Your bid for order ${pending.order_display_id} has been accepted. You are now assigned to this load.`,
-            'bid_accepted',
+            'order_update',
             { orderId, orderDisplayId: pending.order_display_id }
           ).catch((err) => logger.error(`[FCM] Failed to notify driver of bid acceptance: ${err.message}`));
         }
@@ -1006,5 +1021,38 @@ export class OrderLifecycleService {
         },
       };
     });
+  }
+}
+
+
+/**
+ * Creates an order, timeline entry, and load offer in a single durable database transaction.
+ */
+async function createOrderTransactional({ idempotencyKey, orderData, timelineData, loadOfferData }) {
+  if (!idempotencyKey) {
+    throw new Error('Idempotency key is required for transactional order creation.');
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin.rpc('create_order_tx', {
+      p_idempotency_key: idempotencyKey,
+      p_order_data: orderData,
+      p_timeline_data: timelineData || { status: 'created', details: { note: 'Order initialized' } },
+      p_load_offer_data: loadOfferData || null
+    });
+
+    if (error) {
+      if (error.code === 'P0001' || error.message.includes('ORDER_CREATION_IN_PROGRESS')) {
+        const inProgressErr = new Error('Order creation is currently in progress for this key.');
+        inProgressErr.status = 409;
+        throw inProgressErr;
+      }
+      throw error;
+    }
+
+    return data;
+  } catch (err) {
+    logger.error({ err: err.message, key: idempotencyKey }, 'TRANSACTIONAL_ORDER_ERROR');
+    throw err;
   }
 }

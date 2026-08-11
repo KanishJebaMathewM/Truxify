@@ -1,54 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-let scheduledHandler;
-const scheduleMock = vi.fn((expression, handler) => {
-  scheduledHandler = handler;
-  return { stop: vi.fn() };
-});
 const sendPushNotificationMock = vi.fn();
-const submitEscrowRefundMock = vi.fn();
-const confirmEscrowRefundMock = vi.fn();
-const ordersUpdateCalls = [];
-let scriptedResponses = [];
-
-function makeBuilder(table) {
-  const builder = {
-    _mode: 'select',
-    _payload: null,
-    _filters: [],
-    select() { return this; },
-    eq(column, value) {
-      this._filters.push({ op: 'eq', column, value });
-      return this;
-    },
-    lt() { return this; },
-    or(filter) {
-      this._filters.push({ op: 'or', filter });
-      return this;
-    },
-    in() { return this; },
-    maybeSingle() { return this; },
-    update(payload) {
-      this._mode = 'update';
-      this._payload = payload;
-      return this;
-    },
-    then(resolve) {
-      const scripted = scriptedResponses.shift();
-      const result = scripted ?? { data: null, error: null };
-      if (table === 'orders' && this._mode === 'update') {
-        ordersUpdateCalls.push({ payload: this._payload, filters: this._filters, result });
-      }
-      return resolve(result);
-    },
-  };
-
-  return builder;
-}
+const loggerWarnMock = vi.fn();
+const redisSetMock = vi.fn();
+const redisDelMock = vi.fn();
+const redisExpireMock = vi.fn();
 
 vi.mock('node-cron', () => ({
   default: {
-    schedule: scheduleMock,
+    schedule: vi.fn(),
   },
 }));
 
@@ -57,15 +17,15 @@ vi.mock('../../src/services/notificationService.js', () => ({
 }));
 
 vi.mock('../../src/services/escrow.js', () => ({
-  submitEscrowRefund: submitEscrowRefundMock,
-  confirmEscrowRefund: confirmEscrowRefundMock,
+  submitEscrowRefund: vi.fn(),
+  confirmEscrowRefund: vi.fn(),
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
   default: {
     error: vi.fn(),
     info: vi.fn(),
-    warn: vi.fn(),
+    warn: loggerWarnMock,
   },
 }));
 
@@ -86,130 +46,125 @@ vi.mock('../../src/core/telemetry/SpanFactory.js', () => ({
 }));
 
 vi.mock('../../src/config/db.js', () => ({
-  supabase: {
-    from: vi.fn(makeBuilder),
+  supabase: {},
+  supabaseAdmin: {},
+  redisClient: {
+    set: redisSetMock,
+    del: redisDelMock,
+    expire: redisExpireMock,
   },
 }));
 
 describe('staleOrderWorker TOCTOU guard (issue #5741)', () => {
-  beforeEach(async () => {
-    scheduledHandler = null;
-    scriptedResponses = [];
-    ordersUpdateCalls.length = 0;
-    scheduleMock.mockClear();
-    sendPushNotificationMock.mockReset();
-    submitEscrowRefundMock.mockReset();
-    confirmEscrowRefundMock.mockReset();
-    vi.resetModules();
-    const { startStaleOrderWorker } = await import('../../src/workers/staleOrderWorker.js');
-    startStaleOrderWorker();
+  let orderRepository;
+  let reconcileStaleOrders;
+
+  const cancelledRow = (overrides = {}) => ({
+    id: 'order-1',
+    customer_id: 'customer-1',
+    order_display_id: 'disp-1',
+    escrow_status: 'pending',
+    ...overrides,
   });
 
-  const staleOrder = { id: 'order-1', customer_id: 'customer-1', order_display_id: 'disp-1' };
-
-  function stillPending(overrides = {}) {
-    return {
-      id: 'order-1',
-      customer_id: 'customer-1',
-      order_display_id: 'disp-1',
-      escrow_status: 'pending',
-      escrow_amount_wei: null,
-      refund_tx_hash: null,
-      escrow_refund_attempts: 0,
-      ...overrides,
-    };
+  function staleCandidate() {
+    return { id: 'order-1' };
   }
 
-  it('skips an order that is no longer pending when re-fetched (TOCTOU window closed)', async () => {
-    scriptedResponses = [
-      { data: [staleOrder], error: null },
-      { data: null, error: null }, // re-fetch: not pending anymore
-    ];
+  beforeEach(async () => {
+    sendPushNotificationMock.mockReset();
+    loggerWarnMock.mockClear();
+    redisSetMock.mockReset().mockResolvedValue(true);
+    redisDelMock.mockReset().mockResolvedValue(true);
+    redisExpireMock.mockReset().mockResolvedValue(true);
+    vi.resetModules();
+    orderRepository = {
+      findStalePendingOrders: vi.fn(),
+      cancelStaleOrder: vi.fn(),
+      updateLoadOffer: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    ({ reconcileStaleOrders } = await import('../../src/workers/staleOrderWorker.js'));
+  });
 
-    await scheduledHandler();
+  it('skips ALL side effects when the CAS claim is lost (order accepted concurrently)', async () => {
+    orderRepository.findStalePendingOrders.mockResolvedValue({ data: [staleCandidate()], error: null });
+    orderRepository.cancelStaleOrder.mockResolvedValue({ data: [], error: null });
 
-    expect(ordersUpdateCalls).toHaveLength(0);
+    await reconcileStaleOrders(orderRepository);
+
+    expect(orderRepository.cancelStaleOrder).toHaveBeenCalledTimes(1);
+    expect(orderRepository.updateLoadOffer).not.toHaveBeenCalled();
     expect(sendPushNotificationMock).not.toHaveBeenCalled();
   });
 
-  it('never cancels an order whose escrow funding is in flight', async () => {
-    scriptedResponses = [
-      { data: [staleOrder], error: null },
-      { data: stillPending({ escrow_status: 'funding' }), error: null },
-    ];
+  it('treats a lost CAS race as expected and still processes other orders', async () => {
+    orderRepository.findStalePendingOrders.mockResolvedValue({
+      data: [{ id: 'order-1' }, { id: 'order-2' }],
+      error: null,
+    });
+    orderRepository.cancelStaleOrder
+      .mockResolvedValueOnce({ data: [], error: null })        // order-1: lost race
+      .mockResolvedValueOnce({ data: [cancelledRow({ id: 'order-2', customer_id: 'customer-2', order_display_id: 'disp-2' })], error: null });
 
-    await scheduledHandler();
+    await reconcileStaleOrders(orderRepository);
 
-    expect(ordersUpdateCalls).toHaveLength(0);
-    expect(submitEscrowRefundMock).not.toHaveBeenCalled();
-    expect(sendPushNotificationMock).not.toHaveBeenCalled();
-  });
-
-  it('guards the plain cancellation update on status=pending AND escrow_status pending/null', async () => {
-    scriptedResponses = [
-      { data: [staleOrder], error: null },
-      { data: stillPending(), error: null },
-      { data: [{ id: 'order-1' }], error: null }, // guarded cancel succeeds
-    ];
-
-    await scheduledHandler();
-
-    expect(ordersUpdateCalls).toHaveLength(1);
-    const { payload, filters } = ordersUpdateCalls[0];
-    expect(payload.status).toBe('cancelled');
-    expect(filters).toEqual(expect.arrayContaining([
-      { op: 'eq', column: 'id', value: 'order-1' },
-      { op: 'eq', column: 'status', value: 'pending' },
-      { op: 'or', filter: 'escrow_status.is.null,escrow_status.eq.pending' },
-    ]));
+    expect(orderRepository.updateLoadOffer).toHaveBeenCalledTimes(1);
     expect(sendPushNotificationMock).toHaveBeenCalledTimes(1);
+    expect(sendPushNotificationMock.mock.calls[0][0]).toBe('customer-2');
   });
 
-  it('routes funded escrow through submitEscrowRefund before finalising the cancellation', async () => {
-    submitEscrowRefundMock.mockResolvedValue({
-      txHash: '0xrefund',
-      bookingId: '0xbooking',
-      waitForConfirmation: async () => ({ hash: '0xrefund' }),
+  it('never cancels an order whose escrow funding is in flight (RPC no-ops)', async () => {
+    orderRepository.findStalePendingOrders.mockResolvedValue({ data: [staleCandidate()], error: null });
+    orderRepository.cancelStaleOrder.mockResolvedValue({ data: [], error: null });
+
+    await reconcileStaleOrders(orderRepository);
+
+    expect(orderRepository.cancelStaleOrder).toHaveBeenCalledTimes(1);
+    expect(orderRepository.updateLoadOffer).not.toHaveBeenCalled();
+    expect(sendPushNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it('cancels a plain pending order and sends exactly one notification', async () => {
+    orderRepository.findStalePendingOrders.mockResolvedValue({ data: [staleCandidate()], error: null });
+    orderRepository.cancelStaleOrder.mockResolvedValue({ data: [cancelledRow()], error: null });
+
+    await reconcileStaleOrders(orderRepository);
+
+    expect(orderRepository.cancelStaleOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.stringContaining('Stale order'),
+      expect.any(String),
+      {}
+    );
+    expect(orderRepository.updateLoadOffer).toHaveBeenCalledWith('disp-1', { status: 'cancelled' });
+    expect(sendPushNotificationMock).toHaveBeenCalledTimes(1);
+    expect(sendPushNotificationMock.mock.calls[0][0]).toBe('customer-1');
+    expect(sendPushNotificationMock.mock.calls[0][1]).toBe('Order Cancelled');
+  });
+
+  it('routes funded escrow into refund reconciliation WITHOUT submitting the refund itself', async () => {
+    orderRepository.findStalePendingOrders.mockResolvedValue({ data: [staleCandidate()], error: null });
+    orderRepository.cancelStaleOrder.mockResolvedValue({
+      data: [cancelledRow({ escrow_status: 'refund_pending' })],
+      error: null,
     });
 
-    scriptedResponses = [
-      { data: [staleOrder], error: null },
-      { data: stillPending({ escrow_status: 'funded' }), error: null },
-      { data: [{ id: 'order-1' }], error: null }, // → refund_pending
-      { data: [{ id: 'order-1' }], error: null }, // → refunded
-    ];
+    await reconcileStaleOrders(orderRepository);
 
-    await scheduledHandler();
-
-    expect(submitEscrowRefundMock).toHaveBeenCalledWith('disp-1');
-
-    const refundPending = ordersUpdateCalls.find(c => c.payload.escrow_status === 'refund_pending');
-    expect(refundPending).toBeDefined();
-    expect(refundPending.filters).toEqual(expect.arrayContaining([
-      { op: 'eq', column: 'status', value: 'pending' },
-      { op: 'eq', column: 'escrow_status', value: 'funded' },
-    ]));
-
-    const refunded = ordersUpdateCalls.find(c => c.payload.escrow_status === 'refunded');
-    expect(refunded).toBeDefined();
-    expect(refunded.payload.refund_tx_hash).toBe('0xrefund');
     expect(sendPushNotificationMock).toHaveBeenCalledTimes(1);
+    expect(sendPushNotificationMock.mock.calls[0][2]).toContain('escrowed funds are being refunded');
+    const { submitEscrowRefund, confirmEscrowRefund } = await import('../../src/services/escrow.js');
+    expect(submitEscrowRefund).not.toHaveBeenCalled();
+    expect(confirmEscrowRefund).not.toHaveBeenCalled();
   });
 
-  it('leaves the order for refund reconciliation when the refund submit fails', async () => {
-    submitEscrowRefundMock.mockRejectedValue(new Error('cancelBooking reverted'));
+  it('records an error and skips side effects when the claim RPC errors', async () => {
+    orderRepository.findStalePendingOrders.mockResolvedValue({ data: [staleCandidate()], error: null });
+    orderRepository.cancelStaleOrder.mockResolvedValue({ data: null, error: { message: 'rpc boom' } });
 
-    scriptedResponses = [
-      { data: [staleOrder], error: null },
-      { data: stillPending({ escrow_status: 'funded' }), error: null },
-      { data: [{ id: 'order-1' }], error: null }, // → refund_pending
-    ];
+    await reconcileStaleOrders(orderRepository);
 
-    await scheduledHandler();
-
-    const failed = ordersUpdateCalls.find(c => c.payload.escrow_status === 'refund_failed');
-    expect(failed).toBeDefined();
-    expect(failed.payload.escrow_refund_error).toContain('cancelBooking reverted');
-    expect(sendPushNotificationMock).toHaveBeenCalledTimes(1);
+    expect(orderRepository.updateLoadOffer).not.toHaveBeenCalled();
+    expect(sendPushNotificationMock).not.toHaveBeenCalled();
   });
 });

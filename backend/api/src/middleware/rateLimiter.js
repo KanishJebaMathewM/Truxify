@@ -2,6 +2,7 @@ import rateLimit, { MemoryStore } from "express-rate-limit";
 import { RedisStore } from "rate-limit-redis";
 import * as Sentry from "@sentry/node";
 import { redisClient } from "../config/db.js";
+import crypto from "crypto";
 import logger from "./logger.js";
 
 function isRedisReady() {
@@ -304,7 +305,14 @@ export const otpVerificationLimiter = rateLimit({
   max: OTP_VERIFICATION_MAX_REQUESTS,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: safeIpKeyGenerator,
+  keyGenerator: (req) => {
+    const phone = typeof req.body?.phone === "string" ? req.body.phone.trim() : "";
+    if (phone) {
+      const phoneHash = crypto.createHash("sha256").update(phone).digest("hex").slice(0, 16);
+      return `otp-verify:${phoneHash}:${safeIpKeyGenerator(req)}`;
+    }
+    return safeIpKeyGenerator(req);
+  },
   validate: { keyGeneratorIpFallback: false },
   store: createStore("rl:otp-verification:"),
   handler: sentryAlertHandler("otpVerificationLimiter"),
@@ -368,6 +376,108 @@ export const adminRateLimiter = rateLimit({
   message: {
     error: "Rate limit exceeded",
     retryAfter: Math.ceil(adminWindowMs / 1000),
+  },
+});
+
+const VERIFY_DELIVERY_WINDOW_MS =
+  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const VERIFY_DELIVERY_MAX_REQUESTS =
+  Number(process.env.VERIFY_DELIVERY_RATE_LIMIT_MAX_REQUESTS) || 10;
+
+// Delivery-OTP confirmation is a brute-force target, so it is throttled per
+// authenticated user with a strict cap.
+export const verifyDeliveryLimiter = rateLimit({
+  windowMs: VERIFY_DELIVERY_WINDOW_MS,
+  max: VERIFY_DELIVERY_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:verify-delivery:"),
+  handler: sentryAlertHandler("verifyDeliveryLimiter"),
+  message: {
+    error:
+      "Too many delivery OTP verification attempts. Please try again later.",
+  },
+});
+
+const RESEND_OTP_WINDOW_MS =
+  Number(process.env.RESEND_OTP_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const RESEND_OTP_MAX_REQUESTS =
+  Number(process.env.RESEND_OTP_RATE_LIMIT_MAX_REQUESTS) || 5;
+
+// OTP resend is an abuse vector (SMS flooding / OTP brute-forcing), so it gets
+// the strictest per-user cap alongside the existing otpVerificationLimiter.
+export const resendOtpLimiter = rateLimit({
+  windowMs: RESEND_OTP_WINDOW_MS,
+  max: RESEND_OTP_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:resend-otp:"),
+  handler: sentryAlertHandler("resendOtpLimiter"),
+  message: {
+    error: "Too many OTP resend requests. Please try again after 15 minutes.",
+  },
+});
+
+const CHANGE_DROP_WINDOW_MS =
+  Number(process.env.CHANGE_DROP_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const CHANGE_DROP_MAX_REQUESTS =
+  Number(process.env.CHANGE_DROP_RATE_LIMIT_MAX_REQUESTS) || 30;
+
+export const changeDropLimiter = rateLimit({
+  windowMs: CHANGE_DROP_WINDOW_MS,
+  max: CHANGE_DROP_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:change-drop:"),
+  handler: sentryAlertHandler("changeDropLimiter"),
+  message: { error: "Too many change-drop requests. Please try again later." },
+});
+
+const PREDICT_DEMAND_WINDOW_MS =
+  Number(process.env.PREDICT_DEMAND_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000;
+const PREDICT_DEMAND_MAX_REQUESTS =
+  Number(process.env.PREDICT_DEMAND_RATE_LIMIT_MAX_REQUESTS) || 60;
+
+// Demand prediction runs a ML model per request, so it is capped to a low
+// hourly budget per user to keep the inference service safe from abuse.
+export const predictDemandLimiter = rateLimit({
+  windowMs: PREDICT_DEMAND_WINDOW_MS,
+  max: PREDICT_DEMAND_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:predict-demand:"),
+  handler: sentryAlertHandler("predictDemandLimiter"),
+  message: {
+    error: "Too many demand prediction requests. Please try again later.",
+  },
+});
+
+const TELEMETRY_WINDOW_MS =
+  Number(process.env.TELEMETRY_RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000;
+const TELEMETRY_MAX_REQUESTS =
+  Number(process.env.TELEMETRY_RATE_LIMIT_MAX_REQUESTS) || 300;
+
+// Driver-location and route reads are polled frequently while tracking a
+// shipment, so the cap is generous but still bounded per authenticated user.
+export const telemetryLimiter = rateLimit({
+  windowMs: TELEMETRY_WINDOW_MS,
+  max: TELEMETRY_MAX_REQUESTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: userKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
+  store: createStore("rl:telemetry:"),
+  handler: sentryAlertHandler("telemetryLimiter"),
+  message: {
+    error: "Too many telemetry requests. Please try again later.",
   },
 });
 

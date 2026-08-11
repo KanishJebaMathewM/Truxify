@@ -59,6 +59,8 @@ class OrderService {
     bool requiresRefrigeration = false,
     double? targetTemperatureMin,
     double? targetTemperatureMax,
+    String? driverId,
+    String? truckId,
   }) async {
     try {
       final body = await _apiClient.post(
@@ -79,6 +81,8 @@ class OrderService {
           if (requiresRefrigeration) 'requires_refrigeration': true,
           if (targetTemperatureMin != null) 'target_temperature_min': targetTemperatureMin,
           if (targetTemperatureMax != null) 'target_temperature_max': targetTemperatureMax,
+          if (driverId != null && driverId.isNotEmpty) 'driver_id': driverId,
+          if (truckId != null && truckId.isNotEmpty) 'truck_id': truckId,
         },
       ) as Map<String, dynamic>?;
 
@@ -368,6 +372,23 @@ class OrderService {
       throw StateError(e.message);
     } catch (e) {
       throw StateError('Failed to submit rating: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> fetchMlEta({
+    required String tripId,
+    required double lat,
+    required double lng,
+  }) async {
+    try {
+      final body = await _apiClient.get(
+        '/api/ml/eta?tripId=${_encodePathSegment(tripId)}&lat=$lat&lng=$lng',
+      );
+      return body is Map<String, dynamic> ? body : <String, dynamic>{};
+    } on ApiException catch (e) {
+      throw StateError(e.message);
+    } catch (e) {
+      throw StateError('Failed to fetch ML ETA: $e');
     }
   }
 

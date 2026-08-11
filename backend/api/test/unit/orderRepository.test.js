@@ -11,6 +11,18 @@
 import { describe, it, expect, vi } from 'vitest';
 import { OrderRepository } from '../../src/repositories/orderRepository.js';
 
+vi.mock('../../src/core/telemetry/SpanFactory.js', () => ({
+  default: {
+    getActiveSpan: vi.fn(() => ({
+      setAttributes: vi.fn(),
+    })),
+    startWorkerSpan: vi.fn(() => ({
+      setAttributes: vi.fn(),
+    })),
+    end: vi.fn(),
+  },
+}));
+
 function buildStubSupabase(rowByQuery) {
   return {
     from: vi.fn((table) => {
@@ -79,5 +91,59 @@ describe('OrderRepository.findOrderByIdOrDisplayId', () => {
     await repo.findOrderByIdOrDisplayId(UUID, 'id');
 
     expect(spy).toHaveBeenCalledWith(UUID, 'id');
+  });
+});
+
+describe('OrderRepository.updateOrderWithFilter', () => {
+  function buildUpdateStub({ calls, result }) {
+    return {
+      from: vi.fn(() => {
+        const chain = {
+          eq(column, value) {
+            calls.push({ op: 'eq', column, value });
+            return chain;
+          },
+          neq(column, value) {
+            calls.push({ op: 'neq', column, value });
+            return chain;
+          },
+          not(column, operator, value) {
+            calls.push({ op: 'not', column, operator, value });
+            return chain;
+          },
+          in(column, value) {
+            calls.push({ op: 'in', column, value });
+            return chain;
+          },
+          select() { return chain; },
+          single() { return chain; },
+          then(resolve) { return Promise.resolve(resolve(result)); },
+        };
+        return {
+          update: vi.fn(() => chain),
+        };
+      }),
+    };
+  }
+
+  it('applies a neq filter to the update query', async () => {
+    const calls = [];
+    const supabase = buildUpdateStub({
+      calls,
+      result: { data: { id: UUID, escrow_status: 'funded' }, error: null },
+    });
+    const repo = new OrderRepository(supabase);
+
+    const result = await repo.updateOrderWithFilter(
+      UUID,
+      { escrow_status: 'funded' },
+      [{ op: 'neq', column: 'escrow_status', value: 'funded' }],
+    );
+
+    expect(result.error).toBeNull();
+    expect(calls).toEqual([
+      { op: 'eq', column: 'id', value: UUID },
+      { op: 'neq', column: 'escrow_status', value: 'funded' },
+    ]);
   });
 });

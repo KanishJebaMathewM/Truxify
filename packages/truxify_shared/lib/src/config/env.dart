@@ -44,7 +44,7 @@ class Env {
 
   // ── Backend API ────────────────────────────────────────────────────────────
   static const String apiBaseUrl = String.fromEnvironment(
-    'API_BASE_URL',
+    'TRUXIFY_API_BASE_URL',
     defaultValue: 'http://localhost:5000', // Local Express API
   );
 

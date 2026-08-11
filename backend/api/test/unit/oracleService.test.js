@@ -1,20 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockSupabaseFrom = vi.fn();
-vi.mock('../../../config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
   supabase: { from: () => mockSupabaseFrom() },
 }));
 
-vi.mock('../../middleware/logger.js', () => ({
+vi.mock('../../src/middleware/logger.js', () => ({
   default: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
 const mockVerifyDeliveryOtpHash = vi.fn();
-vi.mock('../../services/notificationService.js', () => ({
+vi.mock('../../src/services/notificationService.js', () => ({
   verifyDeliveryOtpHash: (...args) => mockVerifyDeliveryOtpHash(...args),
 }));
 
-const { OracleService } = await import('../../../oracle/OracleService.js');
+const { OracleService } = await import('../../src/oracle/OracleService.js');
 
 describe('OracleService', () => {
   let oracleService;

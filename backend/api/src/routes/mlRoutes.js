@@ -71,12 +71,28 @@ router.get('/eta', authenticate, userLimiter, async (req, res) => {
 
     const currentLat = parseCoord(lat, -90, 90);
     const currentLng = parseCoord(lng, -180, 180);
-    const hasLivePosition =
-      currentLat !== null && currentLng !== null;
 
-    const distanceKm = hasLivePosition
-      ? haversineKm(currentLat, currentLng, Number(order.drop_lat), Number(order.drop_lng))
-      : haversineKm(Number(order.pickup_lat), Number(order.pickup_lng), Number(order.drop_lat), Number(order.drop_lng));
+    const latProvided = lat !== undefined && lat !== null && lat !== '';
+    const lngProvided = lng !== undefined && lng !== null && lng !== '';
+
+    if (latProvided !== lngProvided) {
+      return res.status(400).json({ error: 'Both lat and lng must be provided together.' });
+    }
+
+    let positionSource = 'pickup';
+    let distanceKm;
+    if (latProvided) {
+      if (currentLat === null || currentLng === null) {
+        return res.status(400).json({ error: 'Invalid lat/lng: lat must be within [-90, 90] and lng within [-180, 180].' });
+      }
+      if (currentLat === 0 && currentLng === 0) {
+        return res.status(422).json({ error: 'lat/lng at (0,0) is not a valid live position.' });
+      }
+      positionSource = 'live';
+      distanceKm = haversineKm(currentLat, currentLng, Number(order.drop_lat), Number(order.drop_lng));
+    } else {
+      distanceKm = haversineKm(Number(order.pickup_lat), Number(order.pickup_lng), Number(order.drop_lat), Number(order.drop_lng));
+    }
 
     const now = new Date();
     const routeType = distanceKm > 20 ? 'highway' : 'city';
@@ -97,6 +113,7 @@ router.get('/eta', authenticate, userLimiter, async (req, res) => {
         distance_km: Math.round(distanceKm * 100) / 100,
         route_type: routeType,
         source: 'ml',
+        position_source: positionSource,
       });
     } catch (mlErr) {
       logger.warn('[MlEta] ML ETA prediction failed:', mlErr.message);

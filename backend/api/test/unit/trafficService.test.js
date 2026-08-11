@@ -10,12 +10,17 @@ vi.mock('../../src/middleware/logger.js', () => ({
   default: mockLogger,
 }));
 
+const mockFetch = vi.fn();
+vi.stubGlobal('fetch', mockFetch);
+
 import { getLiveTrafficMultiplier } from '../../src/services/trafficService.js';
 
 describe('trafficService - getLiveTrafficMultiplier', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    delete process.env.TOMTOM_API_KEY;
+    delete process.env.GOOGLE_MAPS_API_KEY;
   });
 
   it('returns 1.0 when pickupLat is missing', async () => {
@@ -99,5 +104,67 @@ describe('trafficService - getLiveTrafficMultiplier', () => {
     const result = await getLiveTrafficMultiplier(12.9, 77.5);
     // Should not throw
     expect(typeof result).toBe('number');
+  });
+
+  it('treats 0,0 coordinates as valid when a traffic API key is configured', async () => {
+    process.env.TOMTOM_API_KEY = 'test-key';
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        flowSegmentData: { speedDiffPercent: 0 },
+      }),
+    });
+
+    const result = await getLiveTrafficMultiplier(0, 0);
+    expect(result).toBe(1.0);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('raises the surge multiplier when TomTom reports slower traffic (negative speedDiff)', async () => {
+    process.env.TOMTOM_API_KEY = 'test-key';
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        flowSegmentData: { speedDiffPercent: -35 },
+      }),
+    });
+
+    const result = await getLiveTrafficMultiplier(12.9, 77.5);
+    expect(result).toBeCloseTo(1.35, 2);
+  });
+
+  it('clamps the TomTom surge multiplier at the maximum', async () => {
+    process.env.TOMTOM_API_KEY = 'test-key';
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        flowSegmentData: { speedDiffPercent: -400 },
+      }),
+    });
+
+    const result = await getLiveTrafficMultiplier(12.9, 77.5);
+    expect(result).toBe(2.5);
+  });
+
+  it('returns 1.0 when TomTom reports free-flow or faster traffic', async () => {
+    process.env.TOMTOM_API_KEY = 'test-key';
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        flowSegmentData: { speedDiffPercent: 20 },
+      }),
+    });
+
+    const result = await getLiveTrafficMultiplier(12.9, 77.5);
+    expect(result).toBe(1.0);
+  });
+
+  it('falls back to 1.0 when the TomTom API returns a non-ok response', async () => {
+    process.env.TOMTOM_API_KEY = 'test-key';
+    mockFetch.mockResolvedValue({ ok: false, status: 500 });
+
+    const result = await getLiveTrafficMultiplier(12.9, 77.5);
+    expect(result).toBe(1.0);
+    expect(mockLogger.error).toHaveBeenCalled();
   });
 });

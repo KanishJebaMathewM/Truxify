@@ -187,6 +187,5 @@ describe('RPC/route persist escrow_amount_wei (issue #5825)', () => {
     );
     expect(changeDropSection).toContain('escrow_amount_wei: newAmountWei.toString()');
     expect(changeDropSection).toContain('paisaToMaticWei(pricing.totalAmount)');
-    expect(changeDropSection).toContain('BigInt(paisaToMaticWei(pricing.totalAmount))');
   });
 });

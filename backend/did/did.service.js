@@ -2,7 +2,32 @@ import { ethers } from 'ethers';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
-import { supabase } from '../api/src/config/db.js';
+import { supabase, supabaseAdmin } from '../api/src/config/db.js';
+
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+function base58btc(input) {
+    const bytes = Buffer.isBuffer(input) ? input : Buffer.from(input);
+    let zeros = 0;
+    while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+    let digits = [0];
+    for (const byte of bytes) {
+        let carry = byte;
+        for (let i = 0; i < digits.length; i++) {
+            carry += digits[i] << 8;
+            digits[i] = carry % 58;
+            carry = (carry / 58) | 0;
+        }
+        while (carry > 0) {
+            digits.push(carry % 58);
+            carry = (carry / 58) | 0;
+        }
+    }
+    let output = '';
+    for (let i = 0; i < zeros; i++) output += '1';
+    for (let i = digits.length - 1; i >= 0; i--) output += BASE58_ALPHABET[digits[i]];
+    return output;
+}
 
 class DIDService {
     constructor() {
@@ -64,10 +89,10 @@ class DIDService {
             if (!publicKeyMultibase) {
                 const keyPair = crypto.generateKeyPairSync('rsa', {
                     modulusLength: 2048,
-                    publicKeyEncoding: { type: 'spki', format: 'pem' },
+                    publicKeyEncoding: { type: 'spki', format: 'der' },
                     privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
                 });
-                publicKeyMultibase = Buffer.from(keyPair.publicKey).toString('base64');
+                publicKeyMultibase = `z${base58btc(keyPair.publicKey)}`;
                 privateKey = Buffer.from(keyPair.privateKey).toString('base64');
             }
             await this.addVerificationMethod(did, 'key-1', 'RsaVerificationKey2018', did, publicKeyMultibase);
@@ -263,14 +288,14 @@ class DIDService {
     }
 
     async storeDID(data) {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
             .from('dids')
             .insert([{ did: data.did, owner: data.owner, public_key: data.publicKey, created_at: new Date().toISOString() }]);
         if (error) throw error;
     }
 
     async storeCredential(data) {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
             .from('credentials')
             .insert([{
                 credential_id: data.credentialId,
@@ -286,7 +311,7 @@ class DIDService {
     }
 
     async updateCredentialStatus(credentialId, revoked) {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
             .from('credentials')
             .update({ revoked, revoked_at: new Date().toISOString() })
             .eq('credential_id', credentialId);
@@ -294,8 +319,8 @@ class DIDService {
     }
 
     async getDIDStats() {
-        const { data: dids, error: didsErr } = await supabase.from('dids').select('*').order('created_at', { ascending: false }).limit(100);
-        const { data: credentials, error: credsErr } = await supabase.from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
+        const { data: dids, error: didsErr } = await (supabaseAdmin || supabase).from('dids').select('*').order('created_at', { ascending: false }).limit(100);
+        const { data: credentials, error: credsErr } = await (supabaseAdmin || supabase).from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
 
         if (didsErr || credsErr) {
             logger.error('Failed to fetch DID stats', { didsErr, credsErr });

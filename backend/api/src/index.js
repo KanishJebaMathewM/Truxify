@@ -75,6 +75,15 @@ import oracleRoutes from './routes/oracleRoutes.js'
 import blockchainMonitoringRoutes from './routes/blockchainMonitoringRoutes.js'
 
 // ============================================================================
+// 🆕 WEB3 SUBSYSTEM ROUTES
+// ============================================================================
+import zkidRoutes from '../../zkid/routes.js'
+import daoRoutes from '../../dao/routes.js'
+import mevRoutes from '../../mev/routes.js'
+import tokenizationRoutes from '../../tokenization/routes.js'
+import atomicSwapRoutes from '../../atomic-swap/routes.js'
+
+// ============================================================================
 // 🆕 GEOGRAPHIC SHARDING ROUTES
 // ============================================================================
 import trackingRoutes from './routes/trackingRoutes.js'
@@ -504,6 +513,17 @@ app.use('/api/v1/voice', voiceAssistantRoutes)
 app.use('/api/demand-heatmap', demandRoutes)
 app.use('/api/road-conditions', roadConditionRoutes)
 app.use('/api/escorts/wallet', escortWalletRoutes)
+
+// ============================================================================
+// 🆕 WEB3 SUBSYSTEM ROUTES
+// Each router already declares its own full path prefix (e.g. `/zkid/...`,
+// `/swap/...`), so they are mounted on the `/api` base only.
+// ============================================================================
+app.use('/api', zkidRoutes)
+app.use('/api', daoRoutes)
+app.use('/api', mevRoutes)
+app.use('/api', tokenizationRoutes)
+app.use('/api', atomicSwapRoutes)
 
 // ============================================================================
 // WEBHOOK ROUTES

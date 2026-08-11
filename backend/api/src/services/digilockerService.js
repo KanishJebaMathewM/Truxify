@@ -233,6 +233,7 @@ class DigilockerService {
     }
 
     const syncResults = [];
+    const syncErrors = [];
     for (const doc of documents) {
       const docHash = '0x' + crypto.createHash('sha256').update(doc.data).digest('hex');
 
@@ -255,25 +256,81 @@ class DigilockerService {
         }
       }
 
-      const { data: docRecord, error: dbErr } = await supabase
+      // Persist the document blob to storage so driver_documents.storage_path
+      // (NOT NULL) has a real value.
+      const docBytes = Buffer.from(typeof doc.data === 'string' ? doc.data : JSON.stringify(doc.data));
+      const storagePath = `${driverId}/${doc.type}-digilocker-${Date.now()}.json`;
+      const { error: uploadError } = await supabase.storage
+        .from('driver-documents')
+        .upload(storagePath, docBytes, {
+          contentType: 'application/json',
+          upsert: true
+        });
+
+      if (uploadError) {
+        logger.error(`Storage upload failed for ${doc.type}:`, uploadError.message);
+        syncErrors.push(`storage:${uploadError.message}`);
+        continue;
+      }
+
+      // driver_documents has no document_hash/is_verified/verification_source
+      // columns and no unique constraint on (driver_id, document_type), so
+      // upsert with onConflict is not possible. Use select-then-insert/update
+      // and map to the real schema (storage_path, mime_type, status,
+      // is_govt_verified, blockchain_tx_hash).
+      const docPayload = {
+        driver_id: driverId,
+        document_type: doc.type,
+        storage_path: storagePath,
+        mime_type: 'application/json',
+        status: isMock ? 'pending_review' : 'approved',
+        is_govt_verified: !isMock,
+        blockchain_tx_hash: txHash,
+        updated_at: new Date().toISOString()
+      };
+
+      const { data: existing, error: findError } = await supabase
         .from('driver_documents')
-        .upsert({
-          driver_id: driverId,
-          document_type: doc.type,
-          document_hash: docHash,
-          is_verified: true,
-          verification_source: isMock ? 'digilocker_mock' : 'digilocker',
-          blockchain_tx_hash: txHash,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'driver_id,document_type' })
-        .select()
-        .single();
+        .select('id')
+        .eq('driver_id', driverId)
+        .eq('document_type', doc.type)
+        .maybeSingle();
+
+      if (findError) {
+        logger.error(`Find driver_documents failed for ${doc.type}:`, findError.message);
+        syncErrors.push(`find:${findError.message}`);
+        continue;
+      }
+
+      const { data: docRecord, error: dbErr } = existing
+        ? await supabase
+            .from('driver_documents')
+            .update(docPayload)
+            .eq('id', existing.id)
+            .select()
+            .single()
+        : await supabase
+            .from('driver_documents')
+            .insert(docPayload)
+            .select()
+            .single();
 
       if (dbErr) {
         logger.error({ err: dbErr, docType: doc.type }, 'Database record failed');
+        syncErrors.push(`db:${dbErr.message}`);
       } else {
         syncResults.push(docRecord);
       }
+    }
+
+    if (syncErrors.length > 0) {
+      return {
+        success: false,
+        error: syncErrors.join('; '),
+        syncedDocumentsCount: syncResults.length,
+        documents: syncResults,
+        isMock
+      };
     }
 
     return {

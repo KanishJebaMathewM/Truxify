@@ -101,7 +101,7 @@ export async function verifyAuthToken(token) {
 
   return {
     id: userProfile.id,
-    uid: userProfile.firebase_uid,
+    uid: userProfile.firebase_uid || userProfile.id,
     role: userProfile.role,
     fullName: userProfile.full_name,
     phone: userProfile.phone,
@@ -411,7 +411,7 @@ export async function authenticate(req, res, next) {
     // Attach user data to request context
     req.user = {
       id: userProfile.id,
-      uid: userProfile.firebase_uid,
+      uid: userProfile.firebase_uid || userProfile.id,
       role: userProfile.role,
       fullName: userProfile.full_name,
       phone: userProfile.phone,

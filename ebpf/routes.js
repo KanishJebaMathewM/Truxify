@@ -1,6 +1,7 @@
 import express from 'express';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import path from 'node:path';
 import rateLimit from 'express-rate-limit';
 import logger from '../backend/api/src/middleware/logger.js';
 import { authenticate } from '../backend/api/src/middleware/auth.js';

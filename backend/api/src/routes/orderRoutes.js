@@ -186,7 +186,8 @@ import {
   recordDepositTx,
   confirmEscrowRefund,
 } from '../core/container.js';
-import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei } from '../services/escrow.js';
+import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei, submitEscrowRefund } from '../services/escrow.js';
+
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 
@@ -195,20 +196,23 @@ const router = express.Router();
 const getOrderResource = async (req) => {
   const { id } = req.params;
   if (!id) return null;
-  return await orderService.getOrderById(id);
+  return await orderRepository.findOrderById(id);
 };
 
 
-router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
+router.post('/api/deliveries/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
 
   const lat = parseFloat(driver_lat);
   const lng = parseFloat(driver_lng);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || isNaN(lat) || isNaN(lng)) {
     return res.status(400).json({ error: 'Invalid driver_lat or driver_lng' });
   }
 
+  if (!id || !id.trim()) {
+    return res.status(400).json({ error: 'Invalid order id' });
+  }
   let geofenceRadiusM;
   if (geofence_radius_m !== undefined) {
     geofenceRadiusM = parseFloat(geofence_radius_m);
@@ -254,6 +258,43 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
 );
 
 // ============================================================================
+// 1. CREATE ORDER (CUSTOMER) — POST /api/orders
+// ============================================================================
+/**
+ * @openapi
+ * /api/orders:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Create a new order
+ *     description: Creates an order with server-computed pricing, a default timeline, and a load-board offer.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateOrderRequest'
+ *     responses:
+ *       201:
+ *         description: Order created
+ *       400:
+ *         description: Validation failed
+ */
+router.post('/', authenticate, userLimiter, requirePolicy('order:create'), validateBody(createOrderSchema), async (req, res) => {
+  try {
+    const result = await orderLifecycleService.createOrder(req.user.id, req.user.fullName, req.body);
+    return res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Create order exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
 // 13c. DRIVER OTP CONFIRM ALIAS — POST /api/deliveries/:id/confirm-otp
 // ============================================================================
 /**
@@ -292,7 +333,7 @@ const handleDeliveryVerification = async (req, res) => {
       'total_amount, order_display_id'
     );
     const amountInr = orderForAmount?.total_amount
-      ? (orderForAmount.total_amount / 100).toFixed(0)
+      ? Math.round(orderForAmount.total_amount / 100)
       : null;
 
     if (escrowUpdateFailed) {
@@ -731,7 +772,6 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
 
     const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
       escrow_status: 'funded',
-      escrow_status: 'funded',
     }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
 
     if (updateErr) {
@@ -821,7 +861,7 @@ router.post('/predict-demand', authenticate, userLimiter, requirePolicy('order:p
  *               $ref: '#/components/schemas/DriverLocationResponse'
  */
 router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
@@ -893,7 +933,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
  *               $ref: '#/components/schemas/OrderRouteResponse'
  */
 router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-route', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
@@ -1123,4 +1163,72 @@ router.get('/history', authenticate, userLimiter, requirePolicy('order:view-hist
   }
 });
 
-module.exports = router;
+// GET /api/orders/my/active
+router.get('/my/active', authenticate, userLimiter, requirePolicy('order:view-active'), async (req, res) => {
+  try {
+    const orders = await orderLifecycleService.getActiveOrders(req.user.id);
+    return res.json(orders);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Active orders fetch error:', err);
+    return res.status(500).json({ error: 'Failed to fetch active orders.' });
+  }
+});
+
+// GET /api/orders/my/history
+router.get('/my/history', authenticate, userLimiter, requirePolicy('order:view-history'), async (req, res) => {
+  const { cursor } = req.query;
+
+  if (cursor !== undefined && (!Number.isInteger(Number(cursor)) || Number(cursor) < 1)) {
+    return res.status(400).json({ error: 'Invalid cursor parameter. Must be a valid positive integer.' });
+  }
+
+  const page = cursor ? parseInt(cursor, 10) : (parseInt(req.query.page, 10) || 1);
+  const limit = parseInt(req.query.limit, 10) || 20;
+
+  try {
+    const result = await orderLifecycleService.getOrderHistory(req.user.id, page, limit);
+    return res.json(result);
+  } catch (err) {
+    logger.error('Order history fetch error:', err);
+    return res.status(500).json({ error: 'Failed to fetch order history.' });
+  }
+});
+
+// GET /api/orders/:id/timeline
+router.get('/:id/timeline', authenticate, userLimiter, requirePolicy('order:view-timeline', async (req) => {
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  return { order };
+}), validateParams(paramIdSchema), async (req, res) => {
+  try {
+    const timeline = await orderLifecycleService.getOrderTimeline(req.params.id, req.user.id);
+    return res.json(timeline);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Order timeline fetch error:', err);
+    return res.status(500).json({ error: 'Failed to fetch order timeline.' });
+  }
+});
+
+// GET /api/orders/:id
+router.get('/:id', authenticate, userLimiter, requirePolicy('order:view', async (req) => {
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  return { order };
+}), validateParams(paramIdSchema), async (req, res) => {
+  try {
+    const detail = await orderLifecycleService.getOrderDetail(req.params.id, req.user.id);
+    return res.json(detail);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Order detail fetch error:', err);
+    return res.status(500).json({ error: 'Failed to fetch order.' });
+  }
+});
+
+export default router;

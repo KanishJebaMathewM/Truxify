@@ -85,7 +85,7 @@ class _BridgeStrikePreventionScreenState extends State<BridgeStrikePreventionScr
     return Container(
       height: 300,
       width: double.infinity,
-      color: Colors.grey[850],
+      color: Colors.grey[900],
       child: Stack(
         alignment: Alignment.center,
         children: [
@@ -198,7 +198,7 @@ class _BridgeStrikePreventionScreenState extends State<BridgeStrikePreventionScr
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.grey[850], borderRadius: BorderRadius.circular(16)),
+      decoration: BoxDecoration(color: Colors.grey[900], borderRadius: BorderRadius.circular(16)),
       child: Column(
         children: [
           Icon(Icons.check_circle_outline, color: safeColor, size: 48),

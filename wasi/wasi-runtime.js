@@ -1,12 +1,10 @@
 import { WASI } from '@wasmer/wasi';
-import { WasmFs } from '@wasmer/wasmfs';
 import fs from 'fs';
 import path from 'path';
 import logger from '../backend/api/src/middleware/logger.js';
 
 class WASIRuntime {
     constructor() {
-        this.wasmFs = new WasmFs();
         this.instances = new Map();
         this.isInitialized = false;
         this.capabilities = this.loadCapabilities();
@@ -36,14 +34,11 @@ class WASIRuntime {
     async initialize() {
         if (this.isInitialized) return;
         
-        // Mount host directories to WASI
-        for (const path of this.capabilities.allowedPaths) {
-            if (fs.existsSync(path)) {
-                this.wasmFs.mount(path, path);
-                logger.info(`✅ Mounted: ${path}`);
-            }
-        }
-        
+        // Host filesystem access is deliberately not exposed to the WASM
+        // sandbox: the WASI instance is created with no preopens (see
+        // loadWasiModule) and capability paths are enforced host-side via
+        // validatePath against capabilities.allowedPaths. No WasmFs mounts
+        // are attached to instances, so none are created here.
         this.isInitialized = true;
         logger.info('✅ WASI Runtime ready');
     }

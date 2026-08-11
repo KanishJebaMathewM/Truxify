@@ -58,11 +58,12 @@
  */
 
 import express from 'express';
-import { supabase, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
+import { supabase, supabaseAdmin, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 import { healthLimiter } from '../middleware/rateLimiter.js';
 import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
 import { createDefaultAggregator } from '../core/health/index.js';
+import { captureDebugException } from '../middleware/sentry.js';
 
 const router = express.Router();
 
@@ -82,10 +83,14 @@ function withTimeout(promise) {
 }
 
 async function checkSupabase() {
-  if (!supabase) return 'not_configured';
+  // Probe through the service-role client: anon privileges on profiles are
+  // revoked by revoke_anon_privileges.sql, so an anon-keyed probe would always
+  // report 42501 permission denied even when Supabase is reachable.
+  const client = supabaseAdmin || supabase;
+  if (!client) return 'not_configured';
   try {
     const { error } = await withTimeout(
-      supabase.from('profiles').select('id').limit(1)
+      client.from('profiles').select('id').limit(1)
     );
     return error ? 'failed' : 'connected';
   } catch (err) {
@@ -122,17 +127,12 @@ function checkFirebase() {
 
 async function checkEscrow() {
   try {
-  try {
-  const result = await checkEscrowHealth();
+    const result = await checkEscrowHealth();
+    return result.status;
   } catch (err) {
     logger.error('[Health] checkEscrow failed:', err?.message || err);
-    return { status: 'failed', detail: err?.message || 'Unknown error' };
+    return 'failed';
   }
-  } catch (err) {
-    logger.error('[Health] checkEscrow failed:', err?.message || err);
-    return { status: 'failed', detail: err?.message || 'Unknown error' };
-  }
-  return result.status;
 }
 
 function checkPolygon() {
@@ -293,7 +293,7 @@ const aggregator = createDefaultAggregator();
  *       503:
  *         description: One or more critical services degraded
  */
-router.get('/full', healthLimiter, async (_req, res) => {
+router.get('/full', healthLimiter, async (req, res) => {
   try {
     const result = await aggregator.aggregate();
     // 200 = system operational (healthy or degraded with non-critical failures)
@@ -301,7 +301,10 @@ router.get('/full', healthLimiter, async (_req, res) => {
     const httpStatus = result.status === 'unhealthy' ? 503 : 200;
     return res.status(httpStatus).json(result);
   } catch (err) {
-    logger.error('[health] Aggregated health check failed:', err.message);
+    logger.error(
+      { event: 'HEALTH_AGGREGATION_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+      '[health] Aggregated health check failed',
+    );
     return res.status(500).json({
       status: 'unhealthy',
       timestamp: new Date().toISOString(),
@@ -311,7 +314,19 @@ router.get('/full', healthLimiter, async (_req, res) => {
 });
 
 router.get('/sentry-debug', healthLimiter, (req, res) => {
-  throw new Error('Sentry Test Error from Node.js Backend');
+  // Debug-only route: fail-closed unless explicitly enabled outside production.
+  if (process.env.SENTRY_DEBUG_ENABLED !== 'true' || process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ error: 'Not found' });
+  }
+
+  const err = new Error('Sentry Test Error from Node.js Backend');
+  err.name = 'SentryDebugTestError';
+  const eventId = captureDebugException(err);
+
+  if (eventId) {
+    return res.status(200).json({ sent: true, eventId });
+  }
+  return res.status(503).json({ sent: false, error: 'Sentry is not configured (SENTRY_DSN unset).' });
 });
 
 export default router;

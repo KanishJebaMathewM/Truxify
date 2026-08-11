@@ -161,6 +161,9 @@ export function isValidCachedProfile(firebaseUid, cachedProfile) {
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedSupabaseProfile(userId, cachedProfile) {
+  if (typeof userId !== "string" || !userId.trim()) {
+    return false;
+  }
   if (
     !cachedProfile ||
     typeof cachedProfile !== "object" ||
@@ -312,6 +315,7 @@ export async function setCachedSupabaseProfile(
   const redisClient = getRedisClient();
   if (!redisClient || !userId || !profile) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       supabaseProfileKey(userId),
@@ -385,6 +389,7 @@ export async function setCachedCustomerStats(
   const redisClient = getRedisClient();
   if (!redisClient || !userId || !stats) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       customerStatsKey(userId),
@@ -434,6 +439,7 @@ export async function setCachedDriverDetails(
   const redisClient = getRedisClient();
   if (!redisClient || !userId || !details) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       driverDetailsKey(userId),

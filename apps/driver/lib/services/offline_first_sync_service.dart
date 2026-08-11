@@ -1,9 +1,13 @@
 import 'dart:async';
-import 'dart:math';
-import 'package:sqflite/sqflite.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:sqflite/sqflite.dart';
 import '../models/offline_sync_event_model.dart';
 
 class OfflineFirstSyncService {
@@ -16,6 +20,18 @@ class OfflineFirstSyncService {
 
   Stream<bool> get connectionStream => _connectionController.stream;
   Stream<List<OfflineSyncEvent>> get databaseStream => _dbController.stream;
+
+  /// Backend base URL, injected at build time via --dart-define.
+  /// Mirrors SyncEngine.apiBaseUrl so this service targets the same API host.
+  static String get _apiBaseUrl {
+    const envUrl = String.fromEnvironment('TRUXIFY_API_BASE_URL');
+    if (envUrl.isNotEmpty) return envUrl;
+    if (kReleaseMode) throw StateError('TRUXIFY_API_BASE_URL must be set in release mode');
+
+    if (kIsWeb) return 'http://localhost:8080';
+    if (Platform.isAndroid) return 'http://10.0.2.2:8080';
+    return 'http://localhost:8080';
+  }
 
   OfflineFirstSyncService() {
     _initDatabase();
@@ -116,8 +132,38 @@ class OfflineFirstSyncService {
 
   Future<bool> _syncSingleEvent(OfflineSyncEvent event) async {
     try {
-      await Future.delayed(const Duration(milliseconds: 200));
-      return true;
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return false;
+      final token = await user.getIdToken();
+
+      final tripId = event.payload['trip_id'];
+
+      final requestBody = {
+        'idempotencyKey': event.eventId,
+        'events': [
+          {
+            'id': event.eventId,
+            'type': event.eventType,
+            'trip_id': tripId,
+            'payload': event.payload,
+            'occurred_at': event.queuedAt.toUtc().toIso8601String(),
+          },
+        ],
+      };
+
+      // POST /api/v1/trips/events/batch — the same endpoint SyncEngine.attemptSync
+      // uses. Only a real 2xx response counts as success so the local queue is
+      // never marked synced (and never dropped) without reaching the backend.
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/api/v1/trips/events/batch'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(requestBody),
+      );
+
+      return response.statusCode == 200 || response.statusCode == 202;
     } catch (_) {
       return false;
     }

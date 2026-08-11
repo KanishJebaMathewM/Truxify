@@ -49,7 +49,6 @@ class TrafficPipeline:
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
         self.redis = redis.Redis.from_url(redis_url)
-        self._loop = asyncio.get_event_loop()
         self.model = self._load_or_create_model()
         self.gmaps_api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
         self.osrm_url = os.getenv('OSRM_URL', 'http://localhost:5000')
@@ -150,7 +149,7 @@ class TrafficPipeline:
                 session.close()
             
             # Cache in Redis
-            await self._loop.run_in_executor(
+            await asyncio.get_running_loop().run_in_executor(
                 None, partial(self.redis.setex,
                     f"traffic:{route_id}",
                     300,
@@ -217,7 +216,7 @@ class TrafficPipeline:
     
     async def get_real_time_traffic(self, route_id: str):
         """Get real-time traffic data for a route"""
-        cached = await self._loop.run_in_executor(None, partial(self.redis.get, f"traffic:{route_id}"))
+        cached = await asyncio.get_running_loop().run_in_executor(None, partial(self.redis.get, f"traffic:{route_id}"))
         if cached:
             return json.loads(cached)
         return None
@@ -327,7 +326,7 @@ class TrafficPipeline:
                     eta_string = str(timedelta(seconds=int(eta_seconds)))
                     
                     # Update Redis
-                    await self._loop.run_in_executor(
+                    await asyncio.get_running_loop().run_in_executor(
                         None, partial(self.redis.setex,
                             f"eta:order:{order_id}",
                             300,

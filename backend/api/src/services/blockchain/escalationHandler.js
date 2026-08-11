@@ -1,6 +1,6 @@
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const ESCALATION_THRESHOLDS = {
@@ -185,7 +185,7 @@ class EscalationHandler {
 
   async storeEscalation(record) {
     try {
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('blockchain_escalations')
         .upsert([{
           alert_id: record.alertId,

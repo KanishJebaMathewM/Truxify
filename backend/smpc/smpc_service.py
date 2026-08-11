@@ -263,12 +263,12 @@ class SMPCProtocol:
         return list(max_share.values())
 
     def _secure_compare(self, shares1: Dict[str, bytes], shares2: Dict[str, bytes]) -> Dict[str, bytes]:
-        """Secure comparison of two shared values"""
-        vals1 = [self._deserialize_result(self.cipher.decrypt(v)) for v in shares1.values()]
-        vals2 = [self._deserialize_result(self.cipher.decrypt(v)) for v in shares2.values()]
-        sum1 = sum(v[1] for v in vals1) % self.secret_sharing.prime
-        sum2 = sum(v[1] for v in vals2) % self.secret_sharing.prime
-        return shares1 if sum1 > sum2 else shares2
+        """Secure comparison of two shared values via Lagrange reconstruction"""
+        shares1_points = [self._deserialize_result(self.cipher.decrypt(v)) for v in shares1.values()]
+        shares2_points = [self._deserialize_result(self.cipher.decrypt(v)) for v in shares2.values()]
+        val1 = self.secret_sharing.reconstruct_secret(shares1_points)
+        val2 = self.secret_sharing.reconstruct_secret(shares2_points)
+        return shares1 if val1 > val2 else shares2
 
     def get_party_stats(self) -> Dict:
         return {

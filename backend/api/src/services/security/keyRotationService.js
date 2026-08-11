@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
-import { supabase } from '../../config/db.js';
+import { supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const ESCROW_ABI = [
@@ -76,7 +76,7 @@ class KeyRotationService {
     try {
       const rotationId = `rot_${crypto.randomUUID()}`;
 
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('key_rotations')
         .insert([{
           rotation_id: rotationId,
@@ -103,7 +103,7 @@ class KeyRotationService {
 
   async updateRotationRecord(rotationId, updates) {
     try {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('key_rotations')
         .update(updates)
         .eq('rotation_id', rotationId);
@@ -183,7 +183,7 @@ class KeyRotationService {
 
         // Persist only non-sensitive audit metadata — no key material of any kind.
         try {
-          const { error: insertError } = await supabase
+          const { error: insertError } = await supabaseAdmin
             .from('key_ownership_transfers')
             .insert([{
               old_wallet_address: oldWallet.address,   // public address only
@@ -218,7 +218,7 @@ class KeyRotationService {
 
   async getRotationHistory(userId, walletAddress, limit = 10) {
     try {
-      const { data: history, error } = await supabase
+      const { data: history, error } = await supabaseAdmin
         .from('key_rotations')
         .select('*')
         .eq('user_id', userId)
@@ -240,7 +240,7 @@ class KeyRotationService {
 
   async logKeyRotationEvent(userId, walletAddress, reason, status, errorMessage = null) {
     try {
-      await supabase
+      await supabaseAdmin
         .from('key_rotation_audit_log')
         .insert([{
           user_id: userId,
@@ -258,7 +258,7 @@ class KeyRotationService {
 
   async enforceKeyRotationPolicy(userId, daysSinceLastRotation = 90) {
     try {
-      const wallets = await supabase
+      const wallets = await supabaseAdmin
         .from('profiles')
         .select('polygon_wallet_address')
         .eq('id', userId);

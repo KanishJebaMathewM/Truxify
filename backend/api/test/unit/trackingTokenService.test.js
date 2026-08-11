@@ -248,6 +248,101 @@ describe('TrackingTokenService', () => {
     });
   });
 
+  describe('getDriverLocation', () => {
+    beforeEach(() => {
+      mockData.store.orders = [];
+      mockData.store.driver_locations = [];
+    });
+
+    it('returns the active driver location for the order driver', async () => {
+      mockData.store.orders.push({
+        order_display_id: '#FF20241205',
+        driver_id: 'driver-uuid-456',
+      });
+      mockData.store.driver_locations.push({
+        driver_id: 'driver-uuid-456',
+        latitude: 21.21,
+        longitude: 72.88,
+        last_updated_at: new Date().toISOString(),
+        is_active: true,
+      });
+
+      const location = await service.getDriverLocation('#FF20241205');
+
+      expect(location).not.toBeNull();
+      expect(location.latitude).toBe(21.21);
+      expect(location.longitude).toBe(72.88);
+    });
+
+    it('returns null when the driver has no active location row', async () => {
+      mockData.store.orders.push({
+        order_display_id: '#FF20241205',
+        driver_id: 'driver-uuid-456',
+      });
+
+      const location = await service.getDriverLocation('#FF20241205');
+
+      expect(location).toBeNull();
+    });
+
+    it('returns null when the order has no assigned driver', async () => {
+      mockData.store.orders.push({
+        order_display_id: '#FF20241205',
+        driver_id: null,
+      });
+
+      const location = await service.getDriverLocation('#FF20241205');
+
+      expect(location).toBeNull();
+    });
+
+    it('prefers the service-role client over the anon client', async () => {
+      mockData.store.orders.push({
+        order_display_id: '#FF20241205',
+        driver_id: 'driver-uuid-456',
+      });
+      const adminMock = createMockSupabase();
+      adminMock.store.driver_locations = [];
+      adminMock.store.driver_locations.push({
+        driver_id: 'driver-uuid-456',
+        latitude: 12.34,
+        longitude: 56.78,
+        last_updated_at: new Date().toISOString(),
+        is_active: true,
+      });
+
+      const adminService = new TrackingTokenService({
+        supabase: mockData.supabase,
+        supabaseAdmin: adminMock.supabase,
+        logger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
+      });
+
+      const location = await adminService.getDriverLocation('#FF20241205');
+
+      expect(location.latitude).toBe(12.34);
+      expect(location.longitude).toBe(56.78);
+    });
+
+    it('falls back to the anon client when no admin client is configured', async () => {
+      mockData.store.orders.push({
+        order_display_id: '#FF20241205',
+        driver_id: 'driver-uuid-456',
+      });
+      mockData.store.driver_locations.push({
+        driver_id: 'driver-uuid-456',
+        latitude: 21.21,
+        longitude: 72.88,
+        last_updated_at: new Date().toISOString(),
+        is_active: true,
+      });
+
+      const location = await service.getDriverLocation('#FF20241205');
+
+      expect(location.latitude).toBe(21.21);
+      expect(location.longitude).toBe(72.88);
+    });
+  });
+
   describe('security', () => {
     it('should not expose the raw token in the database', async () => {
       const result = await service.createToken({

@@ -103,6 +103,7 @@ router.post('/register', authenticate, deviceLimiter, validateBody(registerDevic
  *         description: Validation error
  */
 router.delete('/unregister', authenticate, deviceLimiter, validateBody(unregisterDeviceSchema), unregisterDeviceToken);
+router.post('/unregister', authenticate, deviceLimiter, validateBody(unregisterDeviceSchema), unregisterDeviceToken);
 
 // GET /api/devices/platforms
 router.get('/platforms', authenticate, getDevicePlatforms);

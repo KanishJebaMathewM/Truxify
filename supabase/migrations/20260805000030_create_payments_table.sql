@@ -37,12 +37,18 @@ alter table payments enable row level security;
 
 drop policy if exists payments_service_policy on payments;
 create policy payments_service_policy on payments
-  for all using (true) with check (true);
+  for all
+  to service_role
+  using (true) with check (true);
 
 drop policy if exists payments_owner_read_policy on payments;
 create policy payments_owner_read_policy on payments
-  for select using (user_id = get_profile_id());
+  for select
+  to authenticated
+  using (user_id = get_profile_id());
 
 drop policy if exists payments_owner_insert_policy on payments;
 create policy payments_owner_insert_policy on payments
-  for insert with check (user_id = get_profile_id());
+  for insert
+  to authenticated
+  with check (user_id = get_profile_id());

@@ -271,6 +271,31 @@ describe('accept_bid_tx — auth.uid() verification present in migration chain',
   });
 });
 
+describe('accept_bid_tx — two-phase acceptance guard preserved (issue #8971)', () => {
+  let ownershipFixContent;
+
+  beforeAll(async () => {
+    const p = path.resolve(__dirname, '../../../../supabase/migrations/20260805120000_fix_rpc_ownership_checks.sql');
+    ownershipFixContent = await fs.readFile(p, 'utf8');
+  });
+
+  it('the latest accept_bid_tx definition still verifies the pending_bid_acceptance snapshot', () => {
+    // 20260805120000 redefined accept_bid_tx for the get_profile_id()
+    // ownership fix (issue #6275). It must not drop the two-phase guard from
+    // 20260802120000 (issue #5777): the order must carry a
+    // pending_bid_acceptance snapshot whose bid_amount still matches the
+    // stored bid before the bid is finalized.
+    expect(/v_pending_acceptance jsonb/i.test(ownershipFixContent)).toBe(true);
+    expect(/pending_bid_acceptance/.test(ownershipFixContent)).toBe(true);
+    expect(
+      /v_pending_bid_amount\s*:=\s*\(v_pending_acceptance\s*->>['"]bid_amount['"]\)::int/i.test(ownershipFixContent)
+    ).toBe(true);
+    expect(
+      /Bid amount was modified after acceptance; refusing to finalize/i.test(ownershipFixContent)
+    ).toBe(true);
+  });
+});
+
 describe('complete_trip_tx — order-linked trip finalization (issue #5756)', () => {
   it('the 20260704000001 migration selects the trip by order_id and raises when none exists', async () => {
     const p = path.resolve(__dirname, '../../../../supabase/migrations/20260704000001_add_auth_verification_to_complete_trip_tx.sql');
@@ -361,6 +386,61 @@ describe('Service-level RPC calls carry an authenticated client (issue #5737)', 
     expect(driverRoutesContent).toMatch(/createUserClient\(req\.token\)/);
     expect(driverRoutesContent).toMatch(/userClient\.rpc\('withdraw_funds_tx'/);
     expect(driverRoutesContent).not.toMatch(/createUserClient\(req\.token\) \? [^;]* : supabase/);
+  });
+});
+
+describe('User-facing order data path uses the service-role client (issue #8885)', () => {
+  const base = path.resolve(__dirname, '../../src');
+  const readSource = (rel) => readFileSync(path.resolve(base, rel), 'utf8');
+
+  it('container.js wires orderRepository, orderValidationService, and trackingTokenService to the service-role client', () => {
+    const container = readSource('core/container.js');
+    expect(container).toMatch(/const repoClient = supabaseAdmin \?\? supabase;/);
+    expect(container).toMatch(/const orderRepository = new OrderRepository\(repoClient\);/);
+    expect(container).toMatch(/const orderValidationService = new OrderValidationService\(\{ supabase: repoClient, logger \}\)/);
+    expect(container).toMatch(/const trackingTokenService = new TrackingTokenService\(\{ supabase: repoClient, logger \}\)/);
+    expect(container).not.toMatch(/const orderRepository = new OrderRepository\(supabase\);/);
+  });
+});
+
+describe('update_order_and_load_offer invoked via the service-role client (issue #6335)', () => {
+  const base = path.resolve(__dirname, '../../src');
+  const readSource = (rel) => readFileSync(path.resolve(base, rel), 'utf8');
+
+  function rpcBlock(content, rpcName) {
+    const re = new RegExp(`executeRpc\\(\\s*'${rpcName}'`);
+    const match = re.exec(content);
+    if (!match) return null;
+    let depth = 1;
+    let i = match.index + match[0].length;
+    for (; i < content.length; i++) {
+      const ch = content[i];
+      if (ch === '(') depth += 1;
+      else if (ch === ')') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    return content.slice(match.index, i + 1);
+  }
+
+  it.each([
+    ['services/order/orderLifecycleService.js', 'orderLifecycleService.js change-drop path'],
+    ['routes/orderRoutes.js', 'orderRoutes.js change-drop route'],
+  ])('%s invokes update_order_and_load_offer with supabaseAdmin, never the user client', (rel, label) => {
+    const content = readSource(rel);
+    const block = rpcBlock(content, 'update_order_and_load_offer');
+
+    expect(block).toBeTruthy();
+    expect(block).toMatch(/,\s*supabaseAdmin\s*\)\s*;?$/);
+    expect(block).not.toMatch(/userClient/);
+    expect(block).not.toMatch(/createUserClient/);
+    expect(block).not.toMatch(/req\.token/);
+  });
+
+  it('orderRoutes.js imports supabaseAdmin from config/db.js', () => {
+    const content = readSource('routes/orderRoutes.js');
+    expect(content).toMatch(/import \{ [^}]*supabaseAdmin[^}]*\} from '\.\.\/config\/db\.js';/);
   });
 });
 

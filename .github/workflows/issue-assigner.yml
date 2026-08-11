@@ -1,6 +1,8 @@
 name: Issue Assignment
 
 on:
+  issues:
+    types: [opened]
   issue_comment:
     types: [created]
 
@@ -17,40 +19,59 @@ jobs:
       group: issue-assign-${{ github.event.issue.number }}
       cancel-in-progress: false
     
-    # Skip pull request comments (only process real issues)
+    # Skip pull request comments/events (only process real issues)
     if: github.event.issue.pull_request == null
 
     steps:
       - name: Handle assignment request
-      
         uses: actions/github-script@v7
         with:
-        
           script: |
-            const comment = context.payload.comment.body.toLowerCase().trim();
+            const isComment = !!context.payload.comment;
+            const targetUser = isComment ? context.payload.comment.user.login : context.payload.issue.user.login;
+            const userType = isComment ? context.payload.comment.user.type : context.payload.issue.user.type;
+
+            // Skip automated bot comments/issues
+            if (userType === 'Bot') return;
+
+            const commentText = (context.payload.comment?.body || '').toLowerCase().trim();
+            const issueBody = (context.payload.issue?.body || '').toLowerCase().trim();
+            const issueTitle = (context.payload.issue?.title || '').toLowerCase().trim();
+
             const KEYWORDS = [
+              "assign",
               "/assign",
+              "assigned",
+              "assignee",
+              "assigning",
+              "assignment",
               "assign me",
+              "please assign me",
+              "claim",
+              "take",
+              "work on",
               "i'd like to work on this",
               "i want to work on this",
               "can i work on this",
-              "please assign me"
+              "i will work on this",
+              "i'll work on this",
+              "i'll handle this",
+              "dibs"
             ];
 
-            // 1. Check if the comment matches any assignment keyword
-            
-            if (!KEYWORDS.some(kw => comment.includes(kw))) return;
-            
-            // Skip automated bot comments
-            
-            if (context.payload.comment.user.type === 'Bot') return;
+            const matchesAssignment = (text) => {
+              if (!text) return false;
+              return KEYWORDS.some(kw => text.includes(kw)) || /\bassign\w*/i.test(text);
+            };
+
+            // 1. Check if assignment request exists either in description or comment
+            const isAssignmentRequested = matchesAssignment(commentText) || matchesAssignment(issueBody) || matchesAssignment(issueTitle);
+            if (!isAssignmentRequested) return;
 
             const { owner, repo } = context.repo;
             const issueNumber = context.payload.issue.number;
-            const commenter = context.payload.comment.user.login;
 
             // 2. Fetch live issue data from the GitHub API
-            
             const { data: issue } = await github.rest.issues.get({
               owner, repo, issue_number: issueNumber,
             });
@@ -58,50 +79,44 @@ jobs:
             if (issue.state !== 'open') return;
 
             // 3. Check if the issue is already taken
-            
             if (issue.assignees && issue.assignees.length > 0) {
               const assignees = issue.assignees.map(a => a.login);
               
-              if (assignees.includes(commenter)) {
+              if (assignees.includes(targetUser)) {
                 await github.rest.issues.createComment({
                   owner, repo, issue_number: issueNumber,
-                  body: `@${commenter} You are already assigned to this issue! Please link your upcoming Pull Request to this ticket.`,
+                  body: `@${targetUser} You are already assigned to this issue! Please link your upcoming Pull Request to this ticket.`,
                 });
-                
               } else {
                 await github.rest.issues.createComment({
                   owner, repo, issue_number: issueNumber,
-                  body: `@${commenter} This issue is already claimed by @${assignees.join(', @')}. Keep an eye out for other open tasks!`,
+                  body: `@${targetUser} This issue is already claimed by @${assignees.join(', @')}. Keep an eye out for other open tasks!`,
                 });
-                
               }
               return;
             }
 
             // 4. Assign the contributor
-            
             await github.rest.issues.addAssignees({
               owner, repo, issue_number: issueNumber,
-              assignees: [commenter],
+              assignees: [targetUser],
             });
 
             // 5. Verify GitHub successfully added the assignee (handles non-collaborator silent drops)
-            
             const { data: updatedIssue } = await github.rest.issues.get({
               owner, repo, issue_number: issueNumber,
             });
 
             const currentAssignees = updatedIssue.assignees.map(a => a.login);
-            if (!currentAssignees.includes(commenter)) {
+            if (!currentAssignees.includes(targetUser)) {
               await github.rest.issues.createComment({
                 owner, repo, issue_number: issueNumber,
-                body: `@${commenter} Unable to assign you automatically. A repository administrator may need to assign you manually.`,
+                body: `@${targetUser} Unable to assign you automatically. A repository administrator may need to assign you manually.`,
               });
               return;
             }
 
             // 6. Add an "assigned" label to track status
-            
             const currentLabels = updatedIssue.labels.map(l => l.name);
             if (!currentLabels.includes('assigned')) {
               await github.rest.issues.addLabels({
@@ -111,11 +126,10 @@ jobs:
             }
 
             // 7. Post confirmation comment
-            
             await github.rest.issues.createComment({
               owner, repo, issue_number: issueNumber,
-              
-              body: `Assigned to @${commenter}! Please open a Pull Request linking to this issue once ready.`,
+              body: `Assigned to @${targetUser}! Please open a Pull Request linking to this issue once ready.`,
             });
+
 
             

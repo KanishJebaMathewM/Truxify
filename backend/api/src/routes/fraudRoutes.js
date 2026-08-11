@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { auditLog } from '../middleware/auditLog.js';
+import logger from '../middleware/logger.js';
 
 const router = express.Router();
 
@@ -17,9 +18,10 @@ router.get('/fraud/stats', authenticate, userLimiter, requirePolicy('fraud:view-
       data: stats
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[FraudRoutes] Error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -42,9 +44,10 @@ router.get('/fraud/risk/:userId', authenticate, userLimiter, requirePolicy('frau
       }
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[FraudRoutes] Error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -59,9 +62,10 @@ router.get('/fraud/review-queue', authenticate, userLimiter, requirePolicy('frau
       count: queue.length
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[FraudRoutes] Error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -78,9 +82,10 @@ router.post('/fraud/review/:reviewId/resolve', authenticate, userLimiter, requir
       data: result
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[FraudRoutes] Error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -108,9 +113,10 @@ router.post('/fraud/track', authenticate, userLimiter, requirePolicy('fraud:trac
       data: result
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[FraudRoutes] Error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });
@@ -126,9 +132,10 @@ router.post('/fraud/analyze-network/:userId', authenticate, userLimiter, require
       data: result
     });
   } catch (error) {
+    logger.error({ requestId: req.requestId }, '[FraudRoutes] Error:', error?.message || error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'Internal Server Error'
     });
   }
 });

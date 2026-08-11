@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:truxify_shared/truxify_shared.dart';
 import '../services/sync_service.dart';
+import '../services/image_compression_service.dart';
 import '../theme/app_theme.dart';
 
 class ProofOfDeliveryScreen extends StatefulWidget {
@@ -69,8 +70,10 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
     if (_cameraController == null || !_cameraController!.value.isInitialized) return;
     try {
       final photo = await _cameraController!.takePicture();
+      final File rawImage = File(photo.path);
+      final File compressedImage = await ImageCompressionService.compressImage(rawImage) ?? rawImage;
       setState(() {
-        _capturedPhoto = photo;
+        _capturedPhoto = XFile(compressedImage.path);
       });
     } catch (e) {
       debugPrint('Error taking photo: $e');
@@ -197,11 +200,19 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
                             )
                           : const Center(child: Text('Camera initializing...')),
                     )
-                  else
+                  else ...[
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: Image.file(File(_capturedPhoto!.path), height: 250, width: double.infinity, fit: BoxFit.cover),
                     ),
+                    const SizedBox(height: 4),
+                    Center(
+                      child: Text(
+                        'Uploading ${ImageCompressionService.getFileSize(File(_capturedPhoto!.path))}...',
+                        style: const TextStyle(color: Colors.grey, fontSize: 12),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   Center(
                     child: ElevatedButton.icon(

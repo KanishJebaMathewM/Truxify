@@ -35,7 +35,7 @@ class BackgroundSyncService {
   static void initialize() {
     Workmanager().initialize(
       callbackDispatcher,
-      isInDebugMode: true,
+      isInDebugMode: kDebugMode,
     );
   }
 

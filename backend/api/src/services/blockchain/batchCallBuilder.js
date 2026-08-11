@@ -1,28 +1,33 @@
 import { ethers } from 'ethers';
 import logger from '../../middleware/logger.js';
 
+// Real getters exposed by blockchain/contracts/TruxifyEscrow.sol.
 const ESCROW_ABI = [
-  'function getPaymentStatus(uint256 bookingId) view returns (uint8)',
-  'function getDriverBalance(address driver) view returns (uint256)',
-  'function getInsuranceCoverage(uint256 claimId) view returns (bool, uint256)',
-  'function getGeofenceStatus(uint256 shipmentId) view returns (bool)',
-  'function getReputationScore(address driver) view returns (uint256)',
+  'function getBooking(uint256 bookingId) view returns (address payable customer, address payable driver, uint256 amount, uint8 status, bool paid, bool started, uint256 createdAt, uint256 disputedAt)',
+  'function pendingWithdrawals(address account) view returns (uint256)',
+];
+
+// Real getter exposed by blockchain/contracts/Reputation.sol.
+const REPUTATION_ABI = [
+  'function getReputation(address driver) view returns (uint256)',
 ];
 
 class BatchCallBuilder {
   constructor(deps = {}) {
     this.escrowAddress = process.env.ESCROW_CONTRACT_ADDRESS;
+    this.reputationAddress = process.env.REPUTATION_CONTRACT_ADDRESS;
     this.provider = deps.provider;
-    this.iface = new ethers.Interface(ESCROW_ABI);
+    this.escrowIface = new ethers.Interface(ESCROW_ABI);
+    this.reputationIface = new ethers.Interface(REPUTATION_ABI);
   }
 
   buildPaymentStatusCall(bookingId) {
     return {
       target: this.escrowAddress,
-      callData: this.iface.encodeFunctionData('getPaymentStatus', [bookingId]),
+      callData: this.escrowIface.encodeFunctionData('getBooking', [bookingId]),
       decodeFn: (data) => {
-        const decoded = this.iface.decodeFunctionResult('getPaymentStatus', data);
-        return { status: decoded[0] };
+        const decoded = this.escrowIface.decodeFunctionResult('getBooking', data);
+        return { status: decoded.status };
       },
     };
   }
@@ -30,65 +35,31 @@ class BatchCallBuilder {
   buildDriverBalanceCall(driver) {
     return {
       target: this.escrowAddress,
-      callData: this.iface.encodeFunctionData('getDriverBalance', [driver]),
+      callData: this.escrowIface.encodeFunctionData('pendingWithdrawals', [driver]),
       decodeFn: (data) => {
-        const decoded = this.iface.decodeFunctionResult('getDriverBalance', data);
+        const decoded = this.escrowIface.decodeFunctionResult('pendingWithdrawals', data);
         return { balance: decoded[0].toString() };
-      },
-    };
-  }
-
-  buildInsuranceCall(claimId) {
-    return {
-      target: this.escrowAddress,
-      callData: this.iface.encodeFunctionData('getInsuranceCoverage', [claimId]),
-      decodeFn: (data) => {
-        const decoded = this.iface.decodeFunctionResult('getInsuranceCoverage', data);
-        return {
-          approved: decoded[0],
-          amount: decoded[1].toString(),
-        };
-      },
-    };
-  }
-
-  buildGeofenceCall(shipmentId) {
-    return {
-      target: this.escrowAddress,
-      callData: this.iface.encodeFunctionData('getGeofenceStatus', [shipmentId]),
-      decodeFn: (data) => {
-        const decoded = this.iface.decodeFunctionResult('getGeofenceStatus', data);
-        return { withinBounds: decoded[0] };
       },
     };
   }
 
   buildReputationCall(driver) {
     return {
-      target: this.escrowAddress,
-      callData: this.iface.encodeFunctionData('getReputationScore', [driver]),
+      target: this.reputationAddress || this.escrowAddress,
+      callData: this.reputationIface.encodeFunctionData('getReputation', [driver]),
       decodeFn: (data) => {
-        const decoded = this.iface.decodeFunctionResult('getReputationScore', data);
+        const decoded = this.reputationIface.decodeFunctionResult('getReputation', data);
         return { score: decoded[0].toString() };
       },
     };
   }
 
   buildShipmentCompletionBatch(shipment) {
-    const calls = [
+    return [
       this.buildPaymentStatusCall(shipment.bookingId),
       this.buildDriverBalanceCall(shipment.driverAddress),
-      this.buildInsuranceCall(shipment.insuranceClaimId),
       this.buildReputationCall(shipment.driverAddress),
     ];
-
-    if (shipment.geofenceIds && Array.isArray(shipment.geofenceIds)) {
-      shipment.geofenceIds.forEach(geofenceId => {
-        calls.push(this.buildGeofenceCall(geofenceId));
-      });
-    }
-
-    return calls;
   }
 
   buildMultiShipmentBatch(shipments) {
@@ -105,18 +76,27 @@ class BatchCallBuilder {
     return allCalls;
   }
 
+  _ifaceFor(target) {
+    if (this.reputationAddress && target === this.reputationAddress) {
+      return this.reputationIface;
+    }
+    return this.escrowIface;
+  }
+
   buildCustomBatch(callDefinitions) {
     return callDefinitions.map(def => {
       try {
         const functionName = def.functionName;
         const args = def.args || [];
+        const target = def.target || this.escrowAddress;
+        const iface = this._ifaceFor(target);
 
         return {
-          target: def.target || this.escrowAddress,
-          callData: this.iface.encodeFunctionData(functionName, args),
+          target,
+          callData: iface.encodeFunctionData(functionName, args),
           decodeFn: (data) => {
             try {
-              const result = this.iface.decodeFunctionResult(functionName, data);
+              const result = iface.decodeFunctionResult(functionName, data);
               return {
                 functionName,
                 result: result[0]?.toString?.() || result[0],
@@ -136,4 +116,5 @@ class BatchCallBuilder {
   }
 }
 
+export { ESCROW_ABI, REPUTATION_ABI };
 export default BatchCallBuilder;

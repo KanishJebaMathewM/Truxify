@@ -8,7 +8,7 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
     try {
       const parsed = new URL(origin);
       return parsed.protocol === "http:" || parsed.protocol === "https:";
-    } catch {
+    } catch (_) {
       return false;
     }
   });

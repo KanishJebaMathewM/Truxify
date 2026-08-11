@@ -213,7 +213,7 @@ describe('GET /api/health/full (Centralized Health Aggregation)', () => {
     const res = await request(app).get('/api/health/full');
 
     expect(res.body.services.workers.status).toBe('healthy');
-    expect(res.body.services.workers.metadata.workerCount).toBe(3);
+    expect(res.body.services.workers.metadata).toBeUndefined();
   });
 
   it('reports degraded when a worker is not running', async () => {

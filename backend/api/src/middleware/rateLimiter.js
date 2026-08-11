@@ -8,7 +8,7 @@ function isRedisReady() {
   return !!(redisClient && redisClient.status === 'ready');
 }
 
-function isSuspiciousForwardedHeader(header) {
+export function isSuspiciousForwardedHeader(header) {
   if (!header || typeof header !== 'string') return false;
 
   // Excessively long headers may indicate spoofing attempts.

@@ -1,5 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { mongoDb, redisClient, firebaseAdmin, supabase } from '../config/db.js';
+import { mongoDb, redisClient, firebaseAdmin, supabase, supabaseAdmin } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';
 import os from 'os';
@@ -1129,6 +1129,45 @@ export async function handleLocationPing(ws, data, req) {
     } catch (err) {
       logger.error('Redis cache telemetry error:', err.message);
     }
+  }
+
+  // Upsert the driver's live location into `driver_locations` (fire-and-forget
+  // so the WebSocket broadcast path is never blocked). This is the only writer
+  // for the table that feeds new-trip nearby-driver notifications and public
+  // shared tracking. The service-role client is required — RLS grants anon
+  // nothing on `driver_locations`, so an anon write would always be rejected.
+  // Deactivating any prior active row keeps exactly one live row per driver,
+  // matching the `drivers` view's `sync_drivers_update()` trigger (issue #8932).
+  if (supabaseAdmin) {
+    void (async () => {
+      try {
+        await supabaseAdmin
+          .from('driver_locations')
+          .update({ is_active: false })
+          .eq('driver_id', driver_id)
+          .eq('is_active', true);
+        const { error } = await supabaseAdmin
+          .from('driver_locations')
+          .insert({
+            driver_id,
+            latitude: lat,
+            longitude: lng,
+            is_active: true,
+            last_updated_at: new Date(serverNow).toISOString(),
+          });
+        if (error) {
+          logger.error(
+            { error, driver_id },
+            '[Tracker] Failed to write driver location',
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { err, driver_id },
+          '[Tracker] Failed to write driver location',
+        );
+      }
+    })();
   }
 
   // Persist GPS log to MongoDB Atlas (GPS Logs collection) using the typed

@@ -62,7 +62,6 @@ describe('parseLimit', () => {
     expect(parseLimit('25', 50)).toBe(25);
   });
 });
-import { describe, it, expect, vi } from 'vitest';
 import { validatePagination } from '../../src/middleware/pagination.js';
 import { buildPagination } from '../../src/utils/pagination.js';
 

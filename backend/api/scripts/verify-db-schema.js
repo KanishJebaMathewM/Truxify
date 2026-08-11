@@ -18,18 +18,23 @@ const REQUIRED_RPC_FUNCTIONS = [
 ];
 
 const REQUIRED_INDEXES = [
-  'profiles_role_idx',
-  'orders_customer_idx',
-  'orders_driver_idx',
-  'trucks_owner_idx',
+  // Real index names as created by docs/supabase_setup.sql and
+  // supabase/migrations/. The previous *_idx names matched no DDL anywhere,
+  // so the check always reported them missing. Each entry also carries the
+  // table the index lives on, because pg_indexes is queried per table
+  // instead of assuming every index sits on `trips`.
+  { name: 'idx_profiles_role', table: 'profiles' },
+  { name: 'idx_orders_customer', table: 'orders' },
+  { name: 'idx_orders_driver', table: 'orders' },
+  { name: 'idx_trucks_driver', table: 'trucks' },
   // Composite index: (driver_id, status, trip_date DESC) — replaces the
   // redundant single-column idx_trips_driver and serves all three hot
   // query shapes in driverRoutes.js (lines 1477, 1489, 1531).
-  'idx_trips_driver_status_date',
+  { name: 'idx_trips_driver_status_date', table: 'trips' },
   // Composite index: (driver_id, trip_display_id) — serves ownership-check
   // lookups at driverRoutes.js lines 629, 684, 726, 768.
-  'idx_trips_driver_display',
-  'load_offers_status_idx',
+  { name: 'idx_trips_driver_display', table: 'trips' },
+  { name: 'idx_load_offers_status', table: 'load_offers' },
 ];
 
 const TABLE_CATEGORIES = {
@@ -230,8 +235,10 @@ async function verifyRpcFunctions(supabaseUrl, supabaseKey) {
  */
 export async function verifyIndexes(supabaseUrl, supabaseKey) {
   try {
-    // Fetch the list of index names for the trips table from pg_catalog.
-    const endpoint = `${supabaseUrl.replace(/\/+$/, '')}/rest/v1/pg_indexes?select=indexname&tablename=eq.trips`;
+    // Fetch every index in the public schema from pg_catalog, keyed by
+    // (table, name), so each REQUIRED_INDEXES entry is checked against the
+    // table it actually belongs to rather than a trips-only filter.
+    const endpoint = `${supabaseUrl.replace(/\/+$/, '')}/rest/v1/pg_indexes?select=indexname,tablename,schemaname`;
     const response = await fetch(endpoint, {
       headers: {
         apikey: supabaseKey,
@@ -242,24 +249,31 @@ export async function verifyIndexes(supabaseUrl, supabaseKey) {
 
     if (!response.ok) {
       // Catalog not exposed — degrade gracefully.
-      return REQUIRED_INDEXES.map((name) => ({
+      return REQUIRED_INDEXES.map(({ name, table }) => ({
         name,
+        table,
         ok: false,
         message: `pg_indexes not accessible (HTTP ${response.status}) — run migration and verify manually`,
       }));
     }
 
     const rows = await response.json();
-    const present = new Set(rows.map((r) => r.indexname));
+    const present = new Set(
+      rows
+        .filter((r) => r.schemaname === 'public')
+        .map((r) => `${r.tablename}:${r.indexname}`)
+    );
 
-    return REQUIRED_INDEXES.map((name) => ({
+    return REQUIRED_INDEXES.map(({ name, table }) => ({
       name,
-      ok: present.has(name),
-      message: present.has(name) ? undefined : 'index not found in pg_indexes — migration may not have run',
+      table,
+      ok: present.has(`${table}:${name}`),
+      message: present.has(`${table}:${name}`) ? undefined : 'index not found in pg_indexes — migration may not have run',
     }));
   } catch (error) {
-    return REQUIRED_INDEXES.map((name) => ({
+    return REQUIRED_INDEXES.map(({ name, table }) => ({
       name,
+      table,
       ok: false,
       message: `could not verify indexes: ${error.message}`,
     }));

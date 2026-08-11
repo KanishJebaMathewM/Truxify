@@ -26,6 +26,7 @@ vi.mock("../../src/middleware/logger.js", () => ({
 
 vi.mock("@sentry/node", async (real) => ({
   ...(await real()),
+  Handlers: undefined,
   init: vi.fn(),
   flush: vi.fn(),
   expressErrorHandler: () => vi.fn(),

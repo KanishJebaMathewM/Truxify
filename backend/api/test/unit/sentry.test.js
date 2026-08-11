@@ -29,6 +29,10 @@ vi.mock("@sentry/node", async (real) => ({
   init: vi.fn(),
   flush: vi.fn(),
   expressErrorHandler: () => vi.fn(),
+  Handlers: {
+    requestHandler: () => vi.fn(),
+    errorHandler: () => vi.fn(),
+  },
   withScope: vi.fn((fn) => fn({ setTag: vi.fn() })),
   captureException: vi.fn(() => "mock-event-id"),
 }));

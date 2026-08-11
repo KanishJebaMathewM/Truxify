@@ -1,4 +1,3 @@
-/* global vi: writable */
 import { describe, it, expect } from 'vitest';
 import { AuthorizationError } from '../../../../src/core/auth/AuthorizationError.js';
 

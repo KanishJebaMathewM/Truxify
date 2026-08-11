@@ -1,4 +1,3 @@
-/* global vi: writable */
 import { describe, it, expect } from 'vitest';
 import { Role } from '../../../../src/core/auth/Role.js';
 import { Permission } from '../../../../src/core/auth/Permission.js';

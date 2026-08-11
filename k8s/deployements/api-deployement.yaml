@@ -55,7 +55,7 @@ spec:
           failureThreshold: 2
         startupProbe:
           httpGet:
-            path: /api/health/startup
+            path: /api/health/live
             port: 5000
           initialDelaySeconds: 5
           periodSeconds: 10

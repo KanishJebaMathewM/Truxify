@@ -1,7 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { oracleService } from '../core/container.js';
-import { supabase, redisClient } from '../config/db.js';
+import { supabase, createUserClient, redisClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireApiKey } from '../middleware/apiKey.js';
 import { safeIpKeyGenerator, createStore } from '../middleware/rateLimiter.js';
@@ -29,7 +29,8 @@ const GAS_PRICE_TTL_SECONDS = 7 * 24 * 60 * 60;
 const IDEMPOTENCY_TTL_SECONDS = 60 * 60;
 
 async function authorizeOrderAccess(req, orderId) {
-  const { data: order, error } = await supabase
+  const client = req.token ? createUserClient(req.token) : supabase;
+  const { data: order, error } = await client
     .from('orders')
     .select('id, customer_id, driver_id')
     .eq('id', orderId)

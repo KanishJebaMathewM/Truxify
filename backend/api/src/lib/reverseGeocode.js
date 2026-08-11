@@ -19,6 +19,9 @@ function getTimeoutMs() {
  */
 export async function reverseGeocode(lat, lon) {
   if (lat == null || lon == null || Number.isNaN(Number(lat)) || Number.isNaN(Number(lon))) return null;
+  const numLat = Number(lat);
+  const numLon = Number(lon);
+  if (numLat < -90 || numLat > 90 || numLon < -180 || numLon > 180) return null;
 
   // Round coordinates to ~100m precision (3 decimal places) to maximize cache hits
   const roundedLat = Number(lat).toFixed(3);

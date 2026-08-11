@@ -200,7 +200,7 @@ const getOrderResource = async (req) => {
 };
 
 
-router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
+router.post('/api/deliveries/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
 
   const lat = parseFloat(driver_lat);
@@ -256,6 +256,43 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
   }
 }
 );
+
+// ============================================================================
+// 1. CREATE ORDER (CUSTOMER) — POST /api/orders
+// ============================================================================
+/**
+ * @openapi
+ * /api/orders:
+ *   post:
+ *     tags: [Orders]
+ *     summary: Create a new order
+ *     description: Creates an order with server-computed pricing, a default timeline, and a load-board offer.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/CreateOrderRequest'
+ *     responses:
+ *       201:
+ *         description: Order created
+ *       400:
+ *         description: Validation failed
+ */
+router.post('/', authenticate, userLimiter, requirePolicy('order:create'), validateBody(createOrderSchema), async (req, res) => {
+  try {
+    const result = await orderLifecycleService.createOrder(req.user.id, req.user.fullName, req.body);
+    return res.status(201).json(result);
+  } catch (err) {
+    if (err instanceof DomainError) {
+      return res.status(err.status).json(err.payload);
+    }
+    logger.error('Create order exception:', err.message);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 // ============================================================================
 // 13c. DRIVER OTP CONFIRM ALIAS — POST /api/deliveries/:id/confirm-otp
@@ -735,7 +772,6 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
 
     const { data: updatedData, error: updateErr } = await orderRepository.updateOrderWithFilter(orderId, {
       escrow_status: 'funded',
-      escrow_status: 'funded',
     }, [{ op: 'eq', column: 'escrow_status', value: 'funding' }], 'id');
 
     if (updateErr) {
@@ -825,7 +861,7 @@ router.post('/predict-demand', authenticate, userLimiter, requirePolicy('order:p
  *               $ref: '#/components/schemas/DriverLocationResponse'
  */
 router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
@@ -897,7 +933,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
  *               $ref: '#/components/schemas/OrderRouteResponse'
  */
 router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-route', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
@@ -1163,7 +1199,7 @@ router.get('/my/history', authenticate, userLimiter, requirePolicy('order:view-h
 
 // GET /api/orders/:id/timeline
 router.get('/:id/timeline', authenticate, userLimiter, requirePolicy('order:view-timeline', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), validateParams(paramIdSchema), async (req, res) => {
   try {
@@ -1180,7 +1216,7 @@ router.get('/:id/timeline', authenticate, userLimiter, requirePolicy('order:view
 
 // GET /api/orders/:id
 router.get('/:id', authenticate, userLimiter, requirePolicy('order:view', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), validateParams(paramIdSchema), async (req, res) => {
   try {

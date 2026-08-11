@@ -76,6 +76,8 @@ afterEach(() => {
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
+  createUserClient: () => m.supabase,
   firebaseAdmin: null,
   get redisClient() {
     return mockRedis;

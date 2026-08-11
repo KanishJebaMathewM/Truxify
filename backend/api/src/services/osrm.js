@@ -229,7 +229,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
       try {
         await redisClient.set(cacheKey, JSON.stringify(feature), 'EX', ROUTE_CACHE_TTL_SECONDS);
       } catch (err) {
-        logger.error('[osrm] Redis set error (geometry):', err.message);
+        logger.error({ event: 'OSRM_REDIS_SET_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Redis set error (geometry)');
       }
     }
     return feature;

@@ -13,6 +13,22 @@ export default [
         fetch: 'readonly',
       }
     },
+  {
+    files: ['test/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.jest,
+        vi: 'writable',
+        describe: 'readonly',
+        it: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        test: 'readonly',
+      }
+    },
+  },
     rules: {
       'no-unused-vars': 'off',
       'no-undef': 'error',
@@ -20,6 +36,38 @@ export default [
       'no-useless-escape': 'off',
       'no-dupe-keys': 'off',
       'no-duplicate-imports': 'warn',
+    },
+  {
+    files: ['test/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.jest,
+        vi: 'writable',
+        describe: 'readonly',
+        it: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        test: 'readonly',
+      }
+    },
+  },
+  },
+  {
+    files: ['test/**/*.js'],
+    languageOptions: {
+      globals: {
+        ...globals.node,
+        ...globals.jest,
+        vi: 'writable',
+        describe: 'readonly',
+        it: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        test: 'readonly',
+      }
     },
   },
 ];

@@ -59,7 +59,8 @@ BEGIN
       drop_address = COALESCE(p_order_updates->>'drop_address', drop_address),
       drop_lat     = COALESCE((p_order_updates->>'drop_lat')::NUMERIC, drop_lat),
       drop_lng     = COALESCE((p_order_updates->>'drop_lng')::NUMERIC, drop_lng),
-      updated_at   = COALESCE((p_order_updates->>'updated_at')::TIMESTAMPTZ, updated_at)
+      -- updated_at is a server-managed audit field; never trust client input.
+      updated_at   = NOW()
     WHERE id = p_order_id
     RETURNING row_to_json(orders.*) INTO v_updated_order;
 
@@ -82,7 +83,8 @@ BEGIN
       platform_fee  = COALESCE((p_order_updates->>'platform_fee')::NUMERIC, platform_fee),
       total_amount  = COALESCE((p_order_updates->>'total_amount')::NUMERIC, total_amount),
       escrow_amount_wei = COALESCE(p_order_updates->>'escrow_amount_wei', escrow_amount_wei),
-      updated_at    = COALESCE((p_order_updates->>'updated_at')::TIMESTAMPTZ, updated_at)
+      -- updated_at is a server-managed audit field; never trust client input.
+      updated_at    = NOW()
     WHERE id = p_order_id
     RETURNING row_to_json(orders.*) INTO v_updated_order;
 

@@ -14,7 +14,7 @@
  */
 
 import express from 'express';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -22,6 +22,11 @@ import { auditLog } from '../middleware/auditLog.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+
+// Dashboard aggregates span every profile/order, so they must be read with a
+// client that bypasses per-row RLS. Fall back to the anon client only when no
+// service-role key is configured (e.g. tests), matching the repo convention.
+const dashboardDb = supabaseAdmin || supabase;
 
 /**
  * @openapi
@@ -46,24 +51,24 @@ const router = express.Router();
  */
 router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-dashboard'), auditLog({ action: 'admin:view-dashboard' }), async (req, res) => {
   try {
-    const { count: activeDrivers, error: driversErr } = await supabase
+    const { count: activeDrivers, error: driversErr } = await dashboardDb
       .from('profiles')
       .select('*', { count: 'exact', head: true })
       .eq('role', 'driver')
       .eq('is_active', true);
       
     if (driversErr) {
-      logger.error({ requestId: req.requestId }, 'Error fetching active drivers:', driversErr.message);
+      logger.error({ event: 'ADMIN_DASHBOARD_DRIVERS_ERROR', requestId: req.requestId || req.id, error: driversErr && driversErr.message }, 'Error fetching active drivers');
       return res.status(500).json({ error: 'Failed to fetch drivers count.' });
     }
 
-    const { count: pendingOrders, error: ordersErr } = await supabase
+    const { count: pendingOrders, error: ordersErr } = await dashboardDb
       .from('orders')
       .select('*', { count: 'exact', head: true })
       .eq('status', 'pending');
       
     if (ordersErr) {
-      logger.error({ requestId: req.requestId }, 'Error fetching pending orders:', ordersErr.message);
+      logger.error({ event: 'ADMIN_DASHBOARD_ORDERS_ERROR', requestId: req.requestId || req.id, error: ordersErr && ordersErr.message }, 'Error fetching pending orders');
       return res.status(500).json({ error: 'Failed to fetch pending orders.' });
     }
 
@@ -73,18 +78,19 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
     const istNow = new Date(now.getTime() + IST_OFFSET_MS);
     istNow.setUTCHours(0, 0, 0, 0);
     const today = new Date(istNow.getTime() - IST_OFFSET_MS);
-    const { data: todayOrders, error: revErr } = await supabase
+    const { data: todayOrders, error: revErr } = await dashboardDb
       .from('orders')
       .select('total_amount')
       .gte('created_at', today.toISOString())
       .in('status', ['delivered', 'payment_released']);
       
     if (revErr) {
-      logger.error({ requestId: req.requestId }, 'Error fetching revenue:', revErr.message);
+      logger.error({ event: 'ADMIN_DASHBOARD_REVENUE_ERROR', requestId: req.requestId || req.id, error: revErr && revErr.message }, 'Error fetching revenue');
       return res.status(500).json({ error: 'Failed to fetch revenue.' });
     }
     
-    const totalRevenue = (todayOrders || []).reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0);
+    // total_amount is stored in paisa — divide by 100 for INR display
+    const totalRevenue = todayOrders.reduce((sum, order) => sum + (order.total_amount || 0), 0) / 100;
 
     res.json({
       active_drivers: activeDrivers || 0,
@@ -92,7 +98,7 @@ router.get('/dashboard', authenticate, userLimiter, requirePolicy('admin:view-da
       total_revenue_today: totalRevenue
     });
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Admin dashboard error:', err);
+    logger.error({ event: 'ADMIN_DASHBOARD_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Admin dashboard error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

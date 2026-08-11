@@ -99,23 +99,41 @@ router.post('/telemetry/:id', telemetryHistoryLimiter, authenticate, validatePar
 
     if (isOutOfRange) {
       logger.warn(`Cold chain violation on load ${loadId}: temp ${temperature}°C out of range [${load.target_temperature_min}, ${load.target_temperature_max}]`);
-      
-      // In a full implementation, we might check if it's been out of range for 15 mins.
-      // For MVP, we'll insert a notification immediately if it's not already spammed.
-      // We can use the existing notifications table or system if one exists, but for now we'll just log.
-      
-      await supabaseAdmin.from('notifications').insert({
-        user_id: load.customer_id,
-        title: 'Temperature Alert',
-        body: `Your cargo (Load ${loadId}) is out of the safe temperature range. Current temp: ${temperature}°C.`,
-        notif_type: 'system',
-        metadata: {
-          load_id: loadId,
-          temperature,
-          target_temperature_min: load.target_temperature_min,
-          target_temperature_max: load.target_temperature_max
+
+      // Deduplicate alerts per excursion: only notify on the out-of-range
+      // transition, i.e. when the previous frame was in range or there is no
+      // prior frame. Continuing out-of-range frames are skipped, so a single
+      // excursion produces one notification instead of one per frame. The
+      // alert state resets automatically once a reading returns to range.
+      const { data: prevTelemetry, error: prevErr } = await supabaseAdmin
+        .from('temperature_telemetry')
+        .select('temperature')
+        .eq('load_id', loadId)
+        .order('recorded_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!prevErr) {
+        const prevTemp = prevTelemetry?.temperature;
+        const prevOutOfRange = prevTemp !== undefined && prevTemp !== null &&
+          ((load.target_temperature_min !== null && prevTemp < load.target_temperature_min) ||
+           (load.target_temperature_max !== null && prevTemp > load.target_temperature_max));
+
+        if (!prevOutOfRange) {
+          await supabaseAdmin.from('notifications').insert({
+            user_id: load.customer_id,
+            title: 'Temperature Alert',
+            body: `Your cargo (Load ${loadId}) is out of the safe temperature range. Current temp: ${temperature}°C.`,
+            notif_type: 'system',
+            metadata: {
+              load_id: loadId,
+              temperature,
+              target_temperature_min: load.target_temperature_min,
+              target_temperature_max: load.target_temperature_max
+            }
+          }).catch(err => logger.error({ event: 'IOT_NOTIFICATION_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Failed to send temperature alert notification'));
         }
-      }).catch(err => logger.error({ event: 'IOT_NOTIFICATION_ERROR', requestId: req.requestId || req.id, error: err && (err.message || String(err)) }, 'Failed to send temperature alert notification'));
+      }
     }
 
     return res.status(201).json({ success: true, message: 'Telemetry recorded' });

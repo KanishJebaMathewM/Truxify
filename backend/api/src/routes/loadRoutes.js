@@ -149,7 +149,7 @@ function sanitizeLoadFilters(query) {
  *       400:
  *         description: Validation error
  */
-router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), async (req, res) => {
+router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateQuery(loadFilterQuerySchema), async (req, res) => {
   try {
     const filters = req.query;
 
@@ -258,6 +258,9 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
       query = query.lte('freight_value', Math.round(filters.max_price * 100));
     }
     if (filters.distance !== undefined) {
+      // Include NULL extra_distance_km rows: most load offers are not
+      // en-route opportunities and leave this column NULL, so a plain
+      // .lte() would silently drop them (see issue #1943).
       query = query.or(`extra_distance_km.is.null,extra_distance_km.lte.${filters.distance}`);
     }
 
@@ -274,7 +277,15 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
 
     const ascending = filters.order === 'asc';
 
-    query = query.order(sortBy, { ascending }).range(from, to);
+    // Add an id tie-breaker (same direction) so pagination stays stable when
+    // multiple rows share the same sort key. The composite index
+    // (status, created_at DESC, id DESC) satisfies this ordering from the
+    // index alone, with no sort node.
+    query = query.order(sortBy, { ascending });
+    if (sortBy !== 'id') {
+      query = query.order('id', { ascending });
+    }
+    query = query.range(from, to);
 
     const { data: loads, error, count } = await query;
 

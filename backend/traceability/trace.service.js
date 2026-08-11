@@ -18,7 +18,8 @@ class TraceabilityService {
             'function getShipment(uint256 shipmentId) external view returns (tuple(uint256,uint256,address,address,uint256,uint256,string,string,bytes32,bool))',
             'function getProductEvents(uint256 productId) external view returns (tuple(uint256,uint256,uint256,string,string,string,address,uint256,bytes32)[])',
             'function getProductTrace(uint256 productId) external view returns (tuple(uint256,string,string,string,address,uint256,uint256,bool,string,bytes32), tuple(uint256,uint256,uint256,string,string,string,address,uint256,bytes32)[], tuple(uint256,uint256,address,uint256,bool,string,bytes32)[])',
-            'event ProductCreated(uint256 indexed productId, string name, address indexed manufacturer)'
+            'event ProductCreated(uint256 indexed productId, string name, address indexed manufacturer)',
+            'event ShipmentCreated(uint256 indexed shipmentId, uint256 productId, address indexed sender)'
         ];
 
         this.contract = new ethers.Contract(this.contractAddress, this.contractABI, this.wallet);
@@ -106,7 +107,7 @@ class TraceabilityService {
                 }
             }
             if (!shipmentId) {
-                shipmentId = await this.contract.getShipmentCount();
+                shipmentId = await this.contract.getTotalShipments();
             }
 
             await this.storeShipment({

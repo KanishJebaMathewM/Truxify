@@ -48,7 +48,7 @@
   ],
   "author": "Truxify Dev Team",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "@openzeppelin/contracts": "^5.6.1",
     "@openzeppelin/contracts-upgradeable": "^5.1.0",

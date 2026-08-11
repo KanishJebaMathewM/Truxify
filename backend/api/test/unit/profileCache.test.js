@@ -532,4 +532,15 @@ describe('profileCache utility', () => {
       expect(logger.error).toHaveBeenCalled();
     });
   });
+
+  describe('isValidCachedSupabaseProfile', () => {
+    it('returns false when userId is not a non-empty string', async () => {
+      const { isValidCachedSupabaseProfile } = await import('../../src/lib/profileCache.js');
+      const validProfile = { id: 'user-123', role: 'driver', isActive: true };
+      expect(isValidCachedSupabaseProfile(null, validProfile)).toBe(false);
+      expect(isValidCachedSupabaseProfile('', validProfile)).toBe(false);
+      expect(isValidCachedSupabaseProfile(123, validProfile)).toBe(false);
+      expect(isValidCachedSupabaseProfile('   ', validProfile)).toBe(false);
+    });
+  });
 });

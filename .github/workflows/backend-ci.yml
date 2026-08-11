@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   unit-tests:
-    name: Backend Unit Tests (shard ${{ matrix.shard }}/4)
+    name: Backend Tests (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -40,9 +40,14 @@ jobs:
         working-directory: backend/api
         run: npm install --workspaces=false --legacy-peer-deps --ignore-scripts
 
-      - name: Run unit tests (shard ${{ matrix.shard }}/4)
+      # Shard the whole test/ tree, not just test/unit. vitest.config.js
+      # collects test/**/*.test.js, so limiting this to test/unit left the 19
+      # suites at the top level of test/ and the 4 in test/contracts/ with no
+      # CI coverage at all. test/integration is excluded here because it runs
+      # in the job below, which provisions Postgres and Redis.
+      - name: Run tests (shard ${{ matrix.shard }}/4)
         working-directory: backend/api
-        run: npx vitest run test/unit --shard=${{ matrix.shard }}/4
+        run: npx vitest run --exclude "test/integration/**" --shard=${{ matrix.shard }}/4
 
   integration-tests:
     name: Backend Integration Tests

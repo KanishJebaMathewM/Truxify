@@ -237,6 +237,12 @@ One of Truxify's most powerful features — touching all 6 layers simultaneously
 | Driver navigation | Google Maps deep link (pre-planned by ML) | Free |
 | ML route calculation | OSRM + OpenStreetMap (self-hosted) | Free |
 
+## 🛠️ Troubleshooting
+
+Having problems with local setup or development?
+
+👉 [Read the Local Development Troubleshooting Guide](docs/troubleshooting.md)
+
 ## 🚀 Getting Started
 Note: Truxify is in active development (Phase 2). The core platform features are the current focus.
 
@@ -247,7 +253,7 @@ Note: Truxify is in active development (Phase 2). The core platform features are
 ### Run the Customer App
 ```bash
 git clone https://github.com/KanishJebaMathewM/Truxify.git
-cd Truxify/customer_app  # (or driver_app)
+cd Truxify/apps/customer  # or Truxify/apps/driver
 flutter pub get
 flutter run
 ```

@@ -82,6 +82,7 @@ router.post('/escrow', verifyWebhookSignature, async (req, res) => {
     return res.status(202).json({
       received: true,
       status: 'queued_for_retry',
+      error: `Webhook processing failed for order ${orderId}: ${error?.message || 'Unknown error'}`,
     });
   }
 });

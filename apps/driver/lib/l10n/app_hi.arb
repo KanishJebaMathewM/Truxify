@@ -841,5 +841,21 @@
   "withdrawalSuccessful": "निकासी सफल",
   "@withdrawalSuccessful": {
     "description": "Success message after a successful withdrawal"
+  },
+  "language": "भाषा",
+  "@language": {
+    "description": "Language selection setting"
+  },
+  "english": "अंग्रेज़ी",
+  "@english": {
+    "description": "English language name"
+  },
+  "hindi": "हिंदी",
+  "@hindi": {
+    "description": "Hindi language name"
+  },
+  "tamil": "तमिल",
+  "@tamil": {
+    "description": "Tamil language name"
   }
 }

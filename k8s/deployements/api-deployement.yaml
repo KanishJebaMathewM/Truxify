@@ -18,6 +18,7 @@ spec:
         app: truxify
         component: api
     spec:
+      serviceAccountName: api-service-account
       containers:
       - name: api
         image: truxify/api:latest
@@ -54,7 +55,7 @@ spec:
           failureThreshold: 2
         startupProbe:
           httpGet:
-            path: /api/health/startup
+            path: /api/health/live
             port: 5000
           initialDelaySeconds: 5
           periodSeconds: 10

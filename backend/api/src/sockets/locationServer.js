@@ -1,6 +1,6 @@
 import { Server } from "socket.io";
-import jwt from "jsonwebtoken";
 import logger from "../middleware/logger.js";
+import { verifyAuthToken } from "../middleware/auth.js";
 import { GpsLog } from "../models/GpsLog.js";
 import { supabase } from "../config/db.js";
 
@@ -108,7 +108,7 @@ export function getActiveDriverCount() {
  *  /customer namespace — Customer app subscribes to booking rooms here
  *
  * Auth:
- *  Both namespaces require a valid JWT in socket.handshake.auth.token
+ *  Both namespaces require a valid Firebase/Supabase token in socket.handshake.auth.token
  *
  * Dead-connection handling (issue #5728):
  *  In addition to Socket.IO's transport-level ping/pong (pingInterval /
@@ -187,13 +187,15 @@ export function initLocationServer(httpServer) {
      *
      * Expected payload:
      * {
-     *   bookingId: string,
      *   lat: number,        // -90 to 90
      *   lng: number,        // -180 to 180
      *   speed: number,      // km/h
      *   heading: number,    // 0–360 degrees
      *   timestamp: string   // ISO 8601
      * }
+     *
+     * Note: bookingId is taken from the authenticated socket session,
+     * NOT from the payload, to prevent unauthorized location updates.
      */
     socket.on("location_update", async (payload) => {
       // Treat any incoming data as proof-of-life (avoids evicting an active
@@ -217,6 +219,7 @@ export function initLocationServer(httpServer) {
         const gpsTimestamp = timestamp ? new Date(timestamp) : new Date();
 
         // 1. Persist GPS point to MongoDB time-series collection
+        // Use authenticated bookingId from socket, NOT from payload
         await GpsLog.create({
           bookingId,
           driverId,
@@ -228,6 +231,7 @@ export function initLocationServer(httpServer) {
         });
 
         // 2. Broadcast to customer's booking room
+        // Use authenticated bookingId from socket, NOT from payload
         io.of("/customer")
           .to(`booking:${bookingId}`)
           .emit("driver_location", {
@@ -361,9 +365,9 @@ async function verifyDriverToken(socket, next) {
       return next();
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const profile = await verifyAuthToken(token);
 
-    if (decoded.role !== "driver") {
+    if (profile.role !== "driver") {
       return next(new Error("Forbidden: driver role required"));
     }
 
@@ -372,12 +376,12 @@ async function verifyDriverToken(socket, next) {
       return next(new Error("bookingId required in handshake auth"));
     }
 
-    const isAssignedDriver = await verifyDriverAssignment(decoded.sub, bookingId);
+    const isAssignedDriver = await verifyDriverAssignment(profile.id, bookingId);
     if (!isAssignedDriver) {
       return next(new Error("Forbidden: driver is not assigned to this booking"));
     }
 
-    socket.data.driverId = decoded.sub;
+    socket.data.driverId = profile.id;
     socket.data.bookingId = bookingId;
 
     next();
@@ -402,13 +406,13 @@ async function verifyCustomerToken(socket, next) {
       return next();
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const profile = await verifyAuthToken(token);
 
-    if (decoded.role !== "customer") {
+    if (profile.role !== "customer") {
       return next(new Error("Forbidden: customer role required"));
     }
 
-    socket.data.customerId = decoded.sub;
+    socket.data.customerId = profile.id;
     next();
   } catch (error) {
     next(new Error(`Authentication failed: ${error.message}`));

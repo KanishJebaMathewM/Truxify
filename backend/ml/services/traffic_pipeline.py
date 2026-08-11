@@ -49,7 +49,6 @@ class TrafficPipeline:
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
         self.redis = redis.Redis.from_url(redis_url)
-        self._loop = asyncio.get_event_loop()
         self.model = self._load_or_create_model()
         self.gmaps_api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
         self.osrm_url = os.getenv('OSRM_URL', 'http://localhost:5000')
@@ -150,7 +149,7 @@ class TrafficPipeline:
                 session.close()
             
             # Cache in Redis
-            await self._loop.run_in_executor(
+            await asyncio.get_running_loop().run_in_executor(
                 None, partial(self.redis.setex,
                     f"traffic:{route_id}",
                     300,
@@ -217,7 +216,7 @@ class TrafficPipeline:
     
     async def get_real_time_traffic(self, route_id: str):
         """Get real-time traffic data for a route"""
-        cached = await self._loop.run_in_executor(None, partial(self.redis.get, f"traffic:{route_id}"))
+        cached = await asyncio.get_running_loop().run_in_executor(None, partial(self.redis.get, f"traffic:{route_id}"))
         if cached:
             return json.loads(cached)
         return None
@@ -316,7 +315,9 @@ class TrafficPipeline:
                     osrm_data = await self._fetch_osrm_data(current_location, destination)
                     route_distance_m = float(osrm_data.get('distance') or 0)
                     if route_distance_m > 0 and predicted_speed_kmh > 0:
-                        eta_seconds = (route_distance_m / 1000.0) / (predicted_speed_kmh / 3.6)
+                        # Convert speed from km/h to m/s, then divide distance_m by speed_mps to get seconds.
+                        # Incorrect: (route_distance_m / 1000.0) / (speed_kmh / 3.6) mixes km with m/s, off by 1000x.
+                        eta_seconds = route_distance_m / (predicted_speed_kmh / 3.6)
                     else:
                         # Fall back to the routing engine's duration estimate.
                         eta_seconds = float(osrm_data.get('duration') or 0)
@@ -325,7 +326,7 @@ class TrafficPipeline:
                     eta_string = str(timedelta(seconds=int(eta_seconds)))
                     
                     # Update Redis
-                    await self._loop.run_in_executor(
+                    await asyncio.get_running_loop().run_in_executor(
                         None, partial(self.redis.setex,
                             f"eta:order:{order_id}",
                             300,

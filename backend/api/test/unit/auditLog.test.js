@@ -43,10 +43,22 @@ describe('auditLog middleware', () => {
     };
   }
 
+  // The middleware subscribes with res.on('finish', ...), the way Express
+  // exposes the real response. This stands in for that: on() records the
+  // handlers and finish() fires them, so the tests can drive completion
+  // synchronously.
   function mockRes(overrides = {}) {
+    const handlers = { finish: [] };
     const res = {
       statusCode: 200,
-      finish: vi.fn(function () { return this; }),
+      on: vi.fn(function (event, handler) {
+        (handlers[event] ??= []).push(handler);
+        return this;
+      }),
+      finish: vi.fn(function () {
+        for (const handler of handlers.finish) handler();
+        return this;
+      }),
       ...overrides,
     };
     return res;

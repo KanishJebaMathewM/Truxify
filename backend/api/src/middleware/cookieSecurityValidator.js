@@ -3,10 +3,6 @@ import logger from './logger.js';
 const RECOMMENDED_ATTRIBUTES = ['HttpOnly', 'SameSite', 'Path'];
 
 export default function cookieSecurityValidator(req, res, next) {
-  if (process.env.NODE_ENV === 'production') {
-    return next();
-  }
-
   const originalSetHeader = res.setHeader.bind(res);
 
   res.setHeader = (name, value) => {

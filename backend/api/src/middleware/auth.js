@@ -133,9 +133,10 @@ export async function verifyAuthToken(token) {
       }
     }
 
-    if (!supabase) {
-      throw new Error("Supabase client is not configured on this server.");
-    }
+    // Calculate token remaining lifetime to clamp cache TTL
+    const nowSec = Math.floor(Date.now() / 1000);
+    const tokenExp = decodedToken.exp || (nowSec + TTL_SECONDS);
+    const tokenRemaining = tokenExp - nowSec;
 
     const userClient = createUserClient?.(token) || supabase;
     const { data: profile, error } = await userClient
@@ -144,8 +145,30 @@ export async function verifyAuthToken(token) {
       .eq("firebase_uid", firebaseUid)
       .maybeSingle();
 
-    if (error) {
-      throw new Error("Database query failed verification: " + error.message);
+      const userClient = createUserClient?.(token) || supabase;
+      const { data: profile, error } = await userClient
+        .from("profiles")
+        .select("id, firebase_uid, role, full_name, phone")
+        .eq("firebase_uid", firebaseUid)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (error) {
+        throw new Error("Database query failed verification: " + error.message);
+      }
+      userProfile = profile;
+
+      if (userProfile) {
+        const cacheTtl = Math.min(TTL_SECONDS, Math.max(1, tokenRemaining));
+        await setCachedProfile(firebaseUid, {
+          id: userProfile.id,
+          uid: userProfile.firebase_uid,
+          role: userProfile.role,
+          fullName: userProfile.full_name,
+          phone: userProfile.phone,
+          isActive: true,
+        }, cacheTtl);
+      }
     }
 
     if (!profile) {
@@ -238,9 +261,9 @@ export async function authenticate(req, res, next) {
       process.env.DEV_ACCESS_TOKEN &&
       devToken === process.env.DEV_ACCESS_TOKEN
     ) {
-      const testUserId = req.headers["x-user-id"];
-      const testUserRole = req.headers["x-user-role"] || "customer";
-      const testFullName = req.headers["x-user-name"] || "Test User";
+      const testUserId = devIdentity.id;
+      const testUserRole = devIdentity.role || "customer";
+      const testFullName = devIdentity.name || "Test User";
 
       if (testUserId) {
         req.user = {
@@ -506,6 +529,8 @@ export function requireRole(allowedRoles) {
     );
   }
 
+  const sanitizedAllowedRoles = allowedRoles.map(r => typeof r === "string" ? r.trim() : r);
+
   return (req, res, next) => {
     if (!req.user) {
       return res
@@ -515,18 +540,18 @@ export function requireRole(allowedRoles) {
 
     const userRole =
       typeof req.user.role === "string" ? req.user.role.trim() : "";
-    if (!allowedRoles.includes(userRole)) {
+    if (!sanitizedAllowedRoles.includes(userRole)) {
       const requestId = req.requestId || req.id;
       logger.warn(
         {
           event: "AUTH_DENIAL",
-          action: `requireRole(${allowedRoles.join(",")})`,
+          action: `requireRole(${sanitizedAllowedRoles.join(",")})`,
           userId: req.user.id,
           userRole: req.user.role,
-          allowedRoles,
+          allowedRoles: sanitizedAllowedRoles,
           requestId,
         },
-        `[Auth] Role denied: user=${req.user.id} role=${req.user.role} not in [${allowedRoles}]`,
+        `[Auth] Role denied: user=${req.user.id} role=${req.user.role} not in [${sanitizedAllowedRoles.join(",")}]`,
       );
 
       return res.status(403).json({

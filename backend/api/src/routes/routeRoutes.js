@@ -1,5 +1,5 @@
 import express from 'express';
-import { getRouteEstimate } from '../services/osrm.js';
+import { getRouteEstimate, validateCoordinates } from '../services/osrm.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
@@ -13,13 +13,19 @@ router.get('/estimate', authenticate, userLimiter, async (req, res) => {
   try {
     const { pickup_lat, pickup_lng, drop_lat, drop_lng } = req.query;
 
+    const isBlank = (str) => !str || String(str).trim() === '';
+    if (isBlank(pickup_lat) || isBlank(pickup_lng) || isBlank(drop_lat) || isBlank(drop_lng)) {
+      return res.status(400).json({ error: 'Invalid coordinates provided.' });
+    }
+
     const pickupLat = Number(pickup_lat);
     const pickupLng = Number(pickup_lng);
     const dropLat = Number(drop_lat);
     const dropLng = Number(drop_lng);
 
-    if (Number.isNaN(pickupLat) || Number.isNaN(pickupLng) || Number.isNaN(dropLat) || Number.isNaN(dropLng)) {
-      return res.status(400).json({ error: 'Invalid coordinates provided.' });
+    const validationError = validateCoordinates(pickupLat, pickupLng, dropLat, dropLng);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
     }
 
     const estimate = await getRouteEstimate({
@@ -38,7 +44,10 @@ router.get('/estimate', authenticate, userLimiter, async (req, res) => {
       duration_hours: estimate.durationSeconds ? Number((estimate.durationSeconds / 3600).toFixed(2)) : null
     });
   } catch (err) {
-    logger.error('Error calculating route estimate:', err.message);
+    logger.error(
+      { event: 'ROUTE_ESTIMATE_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+      'Error calculating route estimate',
+    );
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

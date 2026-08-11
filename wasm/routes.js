@@ -83,14 +83,30 @@ router.post('/wasm/optimize', async (req, res) => {
 router.post('/wasm/eta', async (req, res) => {
     try {
         const { distance, speed, trafficFactor } = req.body;
-        if (!distance || !speed) {
+        const numericDistance = Number(distance);
+        const numericSpeed = Number(speed);
+        const numericTrafficFactor = Number(trafficFactor || 0);
+
+        if (!Number.isFinite(numericDistance) || numericDistance <= 0) {
             return res.status(400).json({
                 success: false,
-                error: 'distance and speed required'
+                error: 'distance must be a positive number'
+            });
+        }
+        if (!Number.isFinite(numericSpeed) || numericSpeed <= 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'speed must be a positive number'
+            });
+        }
+        if (!Number.isFinite(numericTrafficFactor) || numericTrafficFactor >= 1) {
+            return res.status(400).json({
+                success: false,
+                error: 'trafficFactor must be a number less than 1'
             });
         }
         
-        const result = await edgeRuntime.calculateETA(distance, speed, trafficFactor || 0);
+        const result = await edgeRuntime.calculateETA(numericDistance, numericSpeed, numericTrafficFactor);
         res.json({
             success: true,
             data: result,

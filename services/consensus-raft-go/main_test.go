@@ -115,7 +115,6 @@ func TestLeaderReplicatesEntryToFollowersBeforeCommit(t *testing.T) {
 	node1.CurrentTerm = 1
 	node1.nextIndex = map[string]uint64{s2.URL: 1, s3.URL: 1}
 	node1.matchIndex = map[string]uint64{s2.URL: 0, s3.URL: 0}
-	node1.peerHeartbeats = map[string]bool{s2.URL: true, s3.URL: true}
 	node1.mu.Unlock()
 
 	body := strings.NewReader(`{"order_id":"ord-repl-1","command":"CREATED"}`)
@@ -183,15 +182,15 @@ func TestCommitDoesNotReturnSuccessWithoutQuorumReplication(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Fake acknowledged heartbeats so the liveness pre-check passes, while the
-	// peers themselves remain unreachable for AppendEntries replication.
+	// Seed matchIndex up to the current commit level (0) so the liveness
+	// pre-check passes, while the peers themselves remain unreachable for
+	// AppendEntries replication.
 	node.mu.Lock()
 	node.Role = Leader
 	node.LeaderID = "node1"
 	node.CurrentTerm = 1
 	node.nextIndex = map[string]uint64{unreachable[0]: 1, unreachable[1]: 1}
 	node.matchIndex = map[string]uint64{unreachable[0]: 0, unreachable[1]: 0}
-	node.peerHeartbeats = map[string]bool{unreachable[0]: true, unreachable[1]: true}
 	node.mu.Unlock()
 
 	body := strings.NewReader(`{"order_id":"ord-lost-1","command":"CREATED"}`)
@@ -250,7 +249,6 @@ func TestHeartbeatBackfillsLaggingFollower(t *testing.T) {
 	leader.CommitIndex = 2
 	leader.nextIndex = map[string]uint64{server.URL: 2}
 	leader.matchIndex = map[string]uint64{server.URL: 1}
-	leader.peerHeartbeats = map[string]bool{server.URL: true}
 	leader.mu.Unlock()
 
 	leader.sendHeartbeats()
@@ -309,3 +307,136 @@ func TestAdvanceCommitIndexRequiresQuorum(t *testing.T) {
 		t.Errorf("expected last_applied 2, got %d", leader.LastApplied)
 	}
 }
+
+// TestOutofOrderAppendResponseDoesNotRegressMatchIndex verifies that a delayed
+// or out-of-order AppendEntries success response with lower match index does
+// not regress matchIndex or nextIndex for a follower.
+func TestOutofOrderAppendResponseDoesNotRegressMatchIndex(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	follower := NewRaftNode("node2", []string{"node1"}, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/raft/append" {
+			follower.HandleAppend(w, r)
+		}
+	}))
+	defer server.Close()
+
+	now := time.Now()
+	leader := NewRaftNode("node1", []string{"node2"}, []string{server.URL})
+	leader.Log = []LogEntry{
+		{Index: 1, Term: 1, Command: "CREATED", OrderID: "ord-1", Timestamp: now},
+		{Index: 2, Term: 1, Command: "DISPATCHED", OrderID: "ord-1", Timestamp: now},
+	}
+	leader.Role = Leader
+	leader.CurrentTerm = 1
+	leader.nextIndex = map[string]uint64{server.URL: 3}
+	leader.matchIndex = map[string]uint64{server.URL: 2}
+
+	// Simulate stale heartbeat sent with PrevLogIndex 0 arriving later
+	leader.nextIndex[server.URL] = 1
+	leader.sendHeartbeats()
+
+	leader.mu.Lock()
+	match := leader.matchIndex[server.URL]
+	next := leader.nextIndex[server.URL]
+	leader.mu.Unlock()
+
+	if match != 2 {
+		t.Errorf("expected matchIndex to remain monotonically at 2, got %d", match)
+	}
+	if next != 3 {
+		t.Errorf("expected nextIndex to remain at 3, got %d", next)
+	}
+}
+
+// TestStaleFailureResponseDoesNotRegressNextIndex verifies that an out-of-order
+// failure response arriving after nextIndex has already advanced leaves nextIndex unchanged.
+func TestStaleFailureResponseDoesNotRegressNextIndex(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/raft/append" {
+			time.Sleep(50 * time.Millisecond)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(AppendEntriesResponse{Term: 1, Success: false})
+		}
+	}))
+	defer server.Close()
+
+	now := time.Now()
+	leader := NewRaftNode("node1", []string{"node2"}, []string{server.URL})
+	leader.Log = []LogEntry{
+		{Index: 1, Term: 1, Command: "CREATED", OrderID: "ord-1", Timestamp: now},
+		{Index: 2, Term: 1, Command: "DISPATCHED", OrderID: "ord-1", Timestamp: now},
+		{Index: 3, Term: 1, Command: "IN_TRANSIT", OrderID: "ord-1", Timestamp: now},
+	}
+	leader.Role = Leader
+	leader.CurrentTerm = 1
+	leader.nextIndex = map[string]uint64{server.URL: 2}
+	leader.matchIndex = map[string]uint64{server.URL: 1}
+
+	// Launch sendHeartbeats asynchronously probing index 2
+	done := make(chan bool)
+	go func() {
+		leader.sendHeartbeats()
+		done <- true
+	}()
+
+	// While RPC is in flight, simulate successful advancement of nextIndex to 4
+	time.Sleep(10 * time.Millisecond)
+	leader.mu.Lock()
+	leader.nextIndex[server.URL] = 4
+	leader.matchIndex[server.URL] = 3
+	leader.mu.Unlock()
+
+	<-done
+
+	leader.mu.Lock()
+	next := leader.nextIndex[server.URL]
+	match := leader.matchIndex[server.URL]
+	leader.mu.Unlock()
+
+	if next != 4 {
+		t.Errorf("expected nextIndex to remain unchanged at 4 when stale failure arrives, got %d", next)
+	}
+	if match != 3 {
+		t.Errorf("expected matchIndex to remain 3, got %d", match)
+	}
+}
+
+
+// TestHandleVoteResetsElectionTimer verifies that granting a vote updates lastLeaderSeen.
+func TestHandleVoteResetsElectionTimer(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", []string{"node2"}, nil)
+	oldTime := time.Now().Add(-10 * time.Second)
+	node.lastLeaderSeen = oldTime
+
+	reqPayload := `{"term": 1, "candidate_id": "node2", "last_log_index": 0, "last_log_term": 0}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/vote", strings.NewReader(reqPayload))
+	w := httptest.NewRecorder()
+
+	node.HandleVote(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	node.mu.Lock()
+	updatedSeen := node.lastLeaderSeen
+	votedFor := node.VotedFor
+	node.mu.Unlock()
+
+	if votedFor != "node2" {
+		t.Errorf("expected voted_for node2, got %s", votedFor)
+	}
+	if !updatedSeen.After(oldTime) {
+		t.Errorf("expected lastLeaderSeen to be reset upon granting vote, got %v", updatedSeen)
+	}
+}
+

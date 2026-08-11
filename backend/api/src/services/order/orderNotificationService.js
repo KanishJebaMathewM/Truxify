@@ -136,7 +136,6 @@ export class OrderNotificationService {
       logger.warn(`[OrderNotification] Delivery OTP notification failed for order ${orderDisplayId} — FCM error: ${notifResult.fcm?.error || 'unknown'}`);
       if (type === 'delivery_otp_in_transit') {
         await this.orderRepository.updateOrder(orderId, {
-          notification_failed: true,
           updated_at: new Date().toISOString(),
         });
       }

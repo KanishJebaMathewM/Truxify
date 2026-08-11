@@ -30,11 +30,11 @@ class _WalletSettlementScreenState extends State<WalletSettlementScreen> {
     }
   }
 
-  void _signBolAndSettle(SmartContractPayment contract) async {
-    showDialog(
+  Future<void> _signBolAndSettle(SmartContractPayment contract) async {
+    showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const AlertDialog(
+      builder: (dialogContext) => const AlertDialog(
         content: Row(
           children: [
             CircularProgressIndicator(),
@@ -42,26 +42,44 @@ class _WalletSettlementScreenState extends State<WalletSettlementScreen> {
             Expanded(child: Text('Executing Smart Contract on Blockchain...')),
           ],
         ),
-      )
+      ),
     );
 
-    final settledContract = await _paymentService.executeSmartContract(contract);
+    try {
+      final settledContract =
+          await _paymentService.executeSmartContract(contract);
 
-    if (mounted) {
-      Navigator.pop(context); // close dialog
+      if (!mounted) return;
       setState(() {
-        final index = _contracts.indexWhere((c) => c.contractId == contract.contractId);
+        final index =
+            _contracts.indexWhere((c) => c.contractId == contract.contractId);
         if (index != -1) {
           _contracts[index] = settledContract;
         }
       });
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Contract Settled! \$${settledContract.amountUsd} deposited to wallet.'),
+          content: Text(
+              'Contract Settled! \$${settledContract.amountUsd} deposited to wallet.'),
           backgroundColor: Colors.green,
-        )
+        ),
       );
+    } catch (e) {
+      debugPrint('Settlement failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Settlement failed: $e. Please tap the button to retry.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      // Always close the non-dismissible dialog, even when the call throws,
+      // so the driver is never stuck on a permanently spinning barrier.
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
     }
   }
 

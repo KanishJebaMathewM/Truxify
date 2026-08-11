@@ -7,6 +7,9 @@ import logger from '../middleware/logger.js';
 import { validateParams } from '../middleware/validate.js';
 import { createStore, safeIpKeyGenerator } from '../middleware/rateLimiter.js';
 import { publicTrackingTokenSchema } from '../validation/requestSchemas.js';
+import {
+  trackingTokenInvalidResponse,
+} from '../utils/trackingTokenStatus.js';
 
 const router = express.Router();
 
@@ -48,13 +51,7 @@ router.get(
       }
 
       if (!validation.valid) {
-        const statusMessages = {
-          not_found: { status: 404, message: 'Tracking link not found or invalid' },
-          revoked: { status: 410, message: 'This tracking link has been revoked' },
-          expired: { status: 410, message: 'This tracking link has expired' },
-        };
-
-        const { status, message } = statusMessages[validation.reason] || statusMessages.not_found;
+        const { status, message } = trackingTokenInvalidResponse(validation);
         return res.status(status).json({ error: message });
       }
 
@@ -138,7 +135,8 @@ router.get(
       }
 
       if (!validation.valid) {
-        return res.status(404).json({ error: 'Tracking link not found or invalid' });
+        const { status, message } = trackingTokenInvalidResponse(validation);
+        return res.status(status).json({ error: message });
       }
 
       const { orderDisplayId } = validation;

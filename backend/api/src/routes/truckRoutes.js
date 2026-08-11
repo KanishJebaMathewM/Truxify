@@ -96,7 +96,7 @@ import { FuelAdvisorService } from '../services/fuelAdvisorService.js';
 import { WeatherService } from '../services/weatherService.js';
 
 const weatherService = new WeatherService({ logger });
-const fuelAdvisorService = new FuelAdvisorService({ supabase, weatherService, logger });
+const fuelAdvisorService = new FuelAdvisorService({ supabase: supabaseAdmin, weatherService, logger });
 
 const DEFAULT_TRUCK_TYPES = ['Open Body', 'Closed Body', 'Container', 'Refrigerated'];
 

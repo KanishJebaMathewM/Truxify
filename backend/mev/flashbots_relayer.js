@@ -1,7 +1,12 @@
 import { ethers } from 'ethers';
+import axios from 'axios';
 
 /**
  * Flashbots / Fastlane Relayer Integration for MEV-Protected Escrow Bundles
+ *
+ * The module is importable without a relayer key; the relayer is created lazily
+ * by getMevRelayer() so services that only need a public-transaction fallback
+ * never crash on import when RELAYER_WALLET_PRIVATE_KEY is unset.
  */
 export class FlashbotsRelayerService {
   constructor(providerUrl, relayerPrivateKey) {
@@ -31,22 +36,55 @@ export class FlashbotsRelayerService {
   }
 
   async sendPrivateBundle(bundle) {
-    console.log(`[MEV Relayer] Submitting private transaction bundle to ${this.flashbotsRelayUrl} for block ${bundle.targetBlock}...`);
-    // Simulated private submission response
+    const params = {
+      txs: bundle.signedBundle,
+      blockNumber: `0x${BigInt(bundle.targetBlock).toString(16)}`,
+      version: process.env.FLASHBOTS_BUNDLE_VERSION || 'v3',
+    };
+
+    const response = await axios.post(
+      this.flashbotsRelayUrl,
+      {
+        jsonrpc: '2.0',
+        method: 'eth_sendBundle',
+        params: [params],
+        id: 1,
+      },
+      { timeout: 30000 }
+    );
+
+    if (response.data?.error) {
+      const message =
+        response.data.error.message ||
+        JSON.stringify(response.data.error);
+      throw new Error(`Flashbots bundle rejected: ${message}`);
+    }
+
     return {
       success: true,
-      bundleHash: ethers.keccak256(bundle.signedBundle[0]),
+      bundleHash: response.data?.result || null,
       targetBlock: bundle.targetBlock,
+      relayUrl: this.flashbotsRelayUrl,
     };
   }
 }
 
-const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
-if (!relayerPrivateKey) {
-  throw new Error('RELAYER_WALLET_PRIVATE_KEY environment variable is required');
+function resolveRelayerPrivateKey() {
+  return process.env.RELAYER_WALLET_PRIVATE_KEY || null;
 }
 
-export const mevRelayer = new FlashbotsRelayerService(
-  process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
-  relayerPrivateKey
-);
+let cachedMevRelayer = null;
+
+export function getMevRelayer() {
+  const relayerPrivateKey = resolveRelayerPrivateKey();
+  if (!relayerPrivateKey) {
+    throw new Error('RELAYER_WALLET_PRIVATE_KEY environment variable is required to use the Flashbots relayer');
+  }
+  if (!cachedMevRelayer) {
+    cachedMevRelayer = new FlashbotsRelayerService(
+      process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
+      relayerPrivateKey
+    );
+  }
+  return cachedMevRelayer;
+}

@@ -258,17 +258,29 @@ class DigilockerService {
 
       const { data: docRecord, error: dbErr } = await supabaseAdmin
         .from('driver_documents')
-        .upsert({
-          driver_id: driverId,
-          document_type: doc.type,
-          document_hash: docHash,
-          is_verified: true,
-          verification_source: isMock ? 'digilocker_mock' : 'digilocker',
-          blockchain_tx_hash: txHash,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'driver_id,document_type' })
-        .select()
-        .single();
+        .select('id')
+        .eq('driver_id', driverId)
+        .eq('document_type', doc.type)
+        .maybeSingle();
+
+      if (findError) {
+        logger.error(`Find driver_documents failed for ${doc.type}:`, findError.message);
+        syncErrors.push(`find:${findError.message}`);
+        continue;
+      }
+
+      const { data: docRecord, error: dbErr } = existing
+        ? await supabase
+            .from('driver_documents')
+            .update(docPayload)
+            .eq('id', existing.id)
+            .select()
+            .single()
+        : await supabase
+            .from('driver_documents')
+            .insert(docPayload)
+            .select()
+            .single();
 
       if (dbErr) {
         logger.error({ 
@@ -283,6 +295,16 @@ class DigilockerService {
       } else {
         syncResults.push(docRecord);
       }
+    }
+
+    if (syncErrors.length > 0) {
+      return {
+        success: false,
+        error: syncErrors.join('; '),
+        syncedDocumentsCount: syncResults.length,
+        documents: syncResults,
+        isMock
+      };
     }
 
     return {

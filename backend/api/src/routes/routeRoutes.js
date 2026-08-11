@@ -44,7 +44,10 @@ router.get('/estimate', authenticate, userLimiter, async (req, res) => {
       duration_hours: estimate.durationSeconds ? Number((estimate.durationSeconds / 3600).toFixed(2)) : null
     });
   } catch (err) {
-    logger.error({ requestId: req.requestId }, 'Error calculating route estimate:', err.message);
+    logger.error(
+      { event: 'ROUTE_ESTIMATE_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+      'Error calculating route estimate',
+    );
     res.status(500).json({ error: 'Internal server error.' });
   }
 });

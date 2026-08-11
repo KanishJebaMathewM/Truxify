@@ -65,6 +65,19 @@ export async function uploadDriverDocument(req, res) {
       });
     }
 
+    // Retrieve existing document of the same type for this driver
+    const { data: existingDoc, error: checkError } = await supabase
+      .from('driver_documents')
+      .select('id, storage_path')
+      .eq('driver_id', driverId)
+      .eq('document_type', documentType)
+      .maybeSingle();
+
+    if (checkError) {
+      logger.error('[DocumentController] Failed to query existing document:', checkError.message);
+      return res.status(500).json({ error: 'Failed to verify existing documents' });
+    }
+
     let verifiedMimeType;
     try {
       verifiedMimeType = validateDocumentBuffer(req.file.buffer, req.file.mimetype);

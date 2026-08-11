@@ -1,6 +1,6 @@
 import { Kafka } from 'kafkajs';
 import { context, propagation } from '@opentelemetry/api';
-import logger from '../api/src/middleware/logger.js';
+import logger from '../../api/src/middleware/logger.js';
 
 const kafka = new Kafka({
   clientId: 'truxify',
@@ -269,20 +269,29 @@ class KafkaConfig {
         logger.warn(`Topic ${topic} not found in consumer group offsets`);
         return;
       }
-      
+
+      const endOffsets = await admin.fetchTopicOffsets(topic);
+      const endByPartition = new Map(endOffsets.map(o => [o.partition, o.high]));
+
+      const partitions = [];
       for (const entry of topicData.partitions) {
         if (Number.isNaN(entry.partition) || entry.partition < 0) {
           logger.warn(`Skipping invalid partition: ${entry.partition}`);
           continue;
         }
-        await admin.setConsumerGroupOffset(
-          groupId,
-          { topic, partition: entry.partition },
-          'latest'
-        );
+        const offset = endByPartition.get(entry.partition);
+        if (offset === undefined) {
+          logger.warn(`No end offset found for partition ${entry.partition}, skipping`);
+          continue;
+        }
+        partitions.push({ partition: entry.partition, offset: String(offset) });
       }
-      
-      logger.info(`✅ Consumer offsets reset for ${groupId}`);
+
+      if (partitions.length > 0) {
+        await admin.setOffsets({ groupId, topic, partitions });
+      }
+
+      logger.info(`Consumer offsets reset for ${groupId}`);
     } finally {
       await admin.disconnect();
     }

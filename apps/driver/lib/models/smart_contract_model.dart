@@ -1,17 +1,25 @@
-class SmartContract {
-  final String contractAddress;
+class FreightSmartContract {
+  final String contractId;
   final String loadId;
-  final double escrowAmount;
+  final String brokerName;
+  final double payoutAmount;
+  final String status; // 'ESCROW_FUNDED', 'POD_UPLOADED', 'GEOFENCE_BREACHED', 'RELEASED', 'SETTLED'
+  final String walletAddress;
   final bool isGeofenceConfirmed;
   final bool isPodUploaded;
-  final String status; // e.g., 'ESCROW_FUNDED', 'RELEASED'
+  final DateTime createdAt;
+  final DateTime? settledAt;
 
-  SmartContract({
-    required this.contractAddress,
+  FreightSmartContract({
+    required this.contractId,
     required this.loadId,
-    required this.escrowAmount,
+    required this.brokerName,
+    required this.payoutAmount,
+    required this.status,
+    required this.walletAddress,
     this.isGeofenceConfirmed = false,
     this.isPodUploaded = false,
-    required this.status,
+    required this.createdAt,
+    this.settledAt,
   });
 }

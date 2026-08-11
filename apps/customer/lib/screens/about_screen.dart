@@ -127,19 +127,19 @@ class AboutScreen extends StatelessWidget {
 
             const SizedBox(height: 12),
 
-            _ContactRow(
+            const _ContactRow(
               icon: Icons.email_rounded,
               label: 'Email',
               value: 'support@truxify.com',
             ),
             const SizedBox(height: 12),
-            _ContactRow(
+            const _ContactRow(
               icon: Icons.phone_rounded,
               label: 'Phone',
               value: '+91 1800-TRUCK-1',
             ),
             const SizedBox(height: 12),
-            _ContactRow(
+            const _ContactRow(
               icon: Icons.public_rounded,
               label: 'Website',
               value: 'www.truxify.com',
@@ -177,6 +177,7 @@ class AboutScreen extends StatelessWidget {
 
 class _ContactRow extends StatelessWidget {
   const _ContactRow({
+    super.key,
     required this.icon,
     required this.label,
     required this.value,
@@ -228,7 +229,7 @@ class _ContactRow extends StatelessWidget {
 }
 
 class _SocialIcon extends StatelessWidget {
-  const _SocialIcon({required this.icon});
+  const _SocialIcon({super.key, required this.icon});
 
   final IconData icon;
 

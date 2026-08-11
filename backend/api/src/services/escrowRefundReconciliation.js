@@ -1,6 +1,6 @@
 import { redisClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
-import { confirmEscrowRefund, submitEscrowRefund } from './escrow.js';
+import { confirmEscrowRefund, submitEscrowRefund, submitEscrowCancelWithPenalty, paisaToMaticWei, getEscrowBooking, getEscrowBookingId } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import os from 'os';
 
@@ -48,8 +48,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
       try {
         globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
       } catch (err) {
-        logger.error('[escrow-reconciliation] Failed to acquire Redis global lock, skipping batch:', err.message);
-        return;
+        logger.warn({ err }, '[escrow-reconciliation] Failed to acquire reconciliation lock, proceeding without lock');
       }
       if (!globalLockAcquired) {
         logger.info('[escrow-reconciliation] Global lock held by another instance, skipping batch pull.');
@@ -66,7 +65,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
     }
 
     for (const order of pendingOrders ?? []) {
-      const retryCount = order.escrow_refund_retry_count ?? 0;
+      const retryCount = order.escrow_refund_attempts ?? 0;
 
       // Exponential backoff logic based on updated_at
       if (retryCount > 0 && order.updated_at) {
@@ -96,7 +95,7 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
       }
 
       try {
-        const retryCount = order.escrow_refund_retry_count ?? 0;
+        const retryCount = order.escrow_refund_attempts ?? 0;
         if (retryCount >= MAX_RETRIES) {
           logger.warn(`[escrow-reconciliation] Order ${order.order_display_id} exceeded max retries (${MAX_RETRIES}), escalating.`);
           continue;
@@ -121,16 +120,79 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
         let receipt;
 
         if (!refundTxHash) {
-          const submitted = await submitEscrowRefund(order.order_display_id);
-          if (submitted.waitForConfirmation) {
-            receipt = await submitted.waitForConfirmation();
-          } else {
-            logger.warn(`[escrow-reconciliation] waitForConfirmation unavailable for ${order.order_display_id} — escrow contract may not be initialized.`);
-            receipt = { hash: submitted.txHash };
+          // Issue #8891: verify the on-chain booking state before choosing the
+          // cancel path. TruxifyEscrow.cancelBooking now reverts for started
+          // bookings, and cancelWithPenalty also reverts on started bookings,
+          // so submitting either would waste gas and revert on every retry.
+          // Escalate for manual review instead of retrying forever.
+          const escrowBooking = await getEscrowBooking(getEscrowBookingId(order.order_display_id));
+          if (escrowBooking && escrowBooking.started) {
+            logger.error(
+              `[escrow-reconciliation] Order ${order.order_display_id} booking is started on-chain — full-refund/penalty cancel is not allowed; escalating to manual review.`
+            );
+            await orderRepository.updateOrder(order.id, {
+              escrow_refund_attempts: MAX_RETRIES,
+              escrow_refund_error: 'Booking started on-chain — cancel/refund reverted; requires manual review.',
+              reconciled_by: null,
+              updated_at: new Date().toISOString(),
+            });
+            continue;
           }
+
+          const cancellationFee = Number(order.cancellation_fee ?? 0);
+          let driverFeeWei = 0n;
+          if (cancellationFee > 0) {
+            // Prefer proportional wei from escrow_amount_wei when available so
+            // on-chain penalty matches the fee used at cancel time.
+            if (order.escrow_amount_wei != null && order.total_amount) {
+              const totalAmount = Number(order.total_amount);
+              if (Number.isFinite(totalAmount) && totalAmount > 0) {
+                driverFeeWei = (BigInt(order.escrow_amount_wei) * BigInt(cancellationFee)) / BigInt(Math.round(totalAmount));
+              }
+            }
+            if (driverFeeWei === 0n) {
+              driverFeeWei = paisaToMaticWei(cancellationFee);
+            }
+          }
+
+          // Defense-in-depth for issue #8891: a started trip must never take
+          // the full-refund cancelBooking path (the contract now reverts, but
+          // verify on-chain state first so we fail fast with a clear reason
+          // instead of submitting a transaction that will revert on-chain.
+          // When the trip is started, route through cancelWithPenalty even if
+          // cancellation_fee is 0 so the driver is compensated; if no fee can
+          // be derived, refuse to refund and leave the order for review.
+          if (driverFeeWei === 0n) {
+            const onChainBooking = await getEscrowBooking(getEscrowBookingId(order.order_display_id));
+            if (onChainBooking?.started) {
+              throw new Error(
+                `Escrow refund for ${order.order_display_id} aborted: on-chain booking is already started ` +
+                `(issue #8891) — full refund via cancelBooking is blocked; route through cancelWithPenalty.`
+              );
+            }
+          }
+
+          const submitted = driverFeeWei > 0n
+            ? await submitEscrowCancelWithPenalty(order.order_display_id, driverFeeWei)
+            : await submitEscrowRefund(order.order_display_id);
+          if (!submitted.waitForConfirmation || !submitted.txHash) {
+            // The on-chain refund was not actually submitted/confirmed
+            // (cancelBooking / cancelWithPenalty threw or the contract is not
+            // configured). Never finalize the order as refunded in that case —
+            // keep it in refund_pending/refund_failed so the retry loop can heal it.
+            throw new Error(
+              submitted.error ||
+              `Escrow refund for ${order.order_display_id} could not be submitted on-chain (no confirmation available).`
+            );
+          }
+          receipt = await submitted.waitForConfirmation();
           refundTxHash = receipt.hash ?? submitted.txHash;
         } else {
           receipt = await confirmEscrowRefund(refundTxHash);
+        }
+
+        if (!refundTxHash) {
+          throw new Error(`Escrow refund for ${order.order_display_id} has no confirmed on-chain refund transaction hash.`);
         }
 
         const refundedAt = new Date().toISOString();
@@ -151,9 +213,9 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
           );
         }
       } catch (err) {
-        const newRetryCount = (order.escrow_refund_retry_count ?? 0) + 1;
+        const newRetryCount = (order.escrow_refund_attempts ?? 0) + 1;
         await orderRepository.updateOrder(order.id, {
-          escrow_refund_retry_count: newRetryCount,
+          escrow_refund_attempts: newRetryCount,
           escrow_refund_error: err.message,
           reconciled_by: null,
           updated_at: new Date().toISOString(),

@@ -689,7 +689,7 @@ class StackedCapacityBar extends StatelessWidget {
               color: TruxifyColors.subtleBorder,
             ),
             LinearProgressIndicator(
-              value: thisLoad.clamp(0.0, 1.0),
+              value: thisLoad.clamp(0.0, 1.0).toDouble(),
               minHeight: 12,
               backgroundColor: Colors.transparent,
               color: TruxifyColors.accent,

@@ -4,6 +4,8 @@ import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
 
+import { acquireLock, releaseLock } from '../api/src/lib/redisLock.js';
+
 class ZKPService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
@@ -16,6 +18,7 @@ class ZKPService {
             'function verifySTARK(bytes calldata proof, bytes calldata publicInputs) external view returns (bool)',
             'function createPrivateTransaction(address recipient, uint256 amount, bytes memory encryptedData) external',
             'function getTransaction(bytes32 txId) external view returns (tuple(bytes32,bytes32,address,uint256,uint256,bool))',
+            'function getTransactionCount() external view returns (uint256)',
             'function getMerkleRoot() external view returns (bytes32)',
             'function isNullifierUsed(bytes32 nullifier) external view returns (bool)'
         ];
@@ -64,8 +67,31 @@ class ZKPService {
     }
 
     async processPrivateTransaction(data) {
+        let lockValue = null;
+        const lockKey = `zkp:nullifier:${data.nullifier}`;
+
         try {
             const { nullifier, commitment, recipient, amount, proof } = data;
+
+            // Attempt to acquire distributed lock
+            lockValue = await acquireLock(lockKey, 30000);
+            if (!lockValue) {
+                throw new Error('Concurrent transaction processing detected for this payload. Please try again later.');
+            }
+
+            // Check if nullifier is already processed in DB
+            const { data: existingTx, error: checkError } = await supabase
+                .from('zkp_transactions')
+                .select('tx_id')
+                .eq('nullifier', nullifier)
+                .maybeSingle();
+
+            if (existingTx) {
+                throw new Error('Transaction with this nullifier has already been processed.');
+            }
+            if (checkError) {
+                throw checkError;
+            }
 
             const tx = await this.zkp.processPrivateTransaction(
                 nullifier,
@@ -97,6 +123,10 @@ class ZKPService {
         } catch (error) {
             logger.error('Private transaction failed:', error);
             throw error;
+        } finally {
+            if (lockValue) {
+                await releaseLock(lockKey, lockValue);
+            }
         }
     }
 
@@ -146,9 +176,13 @@ class ZKPService {
             );
             const receipt = await tx.wait();
 
-            // Get transaction ID from logs
-            const txId = ethers.keccak256(
-                ethers.toUtf8Bytes(`${Date.now()}:${recipient}:${amount}`)
+            // Reconstruct the on-chain transaction id instead of fabricating one from Date.now()
+            // Contract: txId = keccak256(abi.encodePacked(block.timestamp, transactionCounter))
+            const block = await this.provider.getBlock(receipt.blockNumber);
+            const counter = await this.zkp.getTransactionCount();
+            const txId = ethers.solidityPackedKeccak256(
+                ["uint256", "uint256"],
+                [block.timestamp, counter]
             );
 
             await this.storeTransaction({
@@ -187,7 +221,7 @@ class ZKPService {
             return used;
         } catch (error) {
             logger.error('Nullifier check failed:', error);
-            throw new Error(`Nullifier verification failed: ${error.message}`);
+            throw new Error(`Nullifier verification failed: ${error.message}`, { cause: error });
         }
     }
 

@@ -1,9 +1,30 @@
 import express from 'express';
+import { authenticate } from '../middleware/auth.js';
 import zkpService from '../services/zkp/zkp.service.js';
 import { LockAcquisitionError } from '../lib/redisLock.js';
+import { redisRateLimiter } from '../middleware/redisRateLimiter.js';
 import logger from '../middleware/logger.js';
 
 const router = express.Router();
+
+/**
+ * Rate limiter for POST /zkp/verify.
+ *
+ * KYC verification triggers ZK proof generation + a Polygon blockchain
+ * transaction (gas cost, several seconds). We cap each authenticated user
+ * to 5 attempts per hour to prevent gas-draining abuse and DoS of the
+ * proof-generation pipeline.
+ *
+ * Window / limit are overridable via env vars:
+ *   ZKP_RATE_LIMIT_WINDOW_MS   (default 3 600 000 — 1 hour)
+ *   ZKP_RATE_LIMIT_MAX          (default 5)
+ */
+const zkpVerifyLimiter = redisRateLimiter({
+  routeKey: 'zkp_verify',
+  limit: Number(process.env.ZKP_RATE_LIMIT_MAX) || 5,
+  windowMs: Number(process.env.ZKP_RATE_LIMIT_WINDOW_MS) || 60 * 60 * 1000,
+  failClosed: true,
+});
 
 /**
  * POST /zkp/verify
@@ -19,11 +40,15 @@ const router = express.Router();
  *   - LockAcquisitionError → Redis unavailable              → 503
  *   - result.conflict === true → lock held (duplicate req)  → 409
  *   - result.alreadyVerified === true → already done        → 200
+ *
+ * Rate limiting (new):
+ *   zkpVerifyLimiter caps each user to 5 attempts/hour (sliding window).
+ *   Excess requests receive 429 before reaching the blockchain layer.
  */
-router.post('/verify', async (req, res) => {
+router.post('/verify', authenticate, zkpVerifyLimiter, async (req, res) => {
   try {
+    const userId = req.user.id;
     const {
-      userId,
       name,
       licenseNumber,
       rcNumber,
@@ -31,10 +56,6 @@ router.post('/verify', async (req, res) => {
       issueDate,
       expiryDate,
     } = req.body;
-
-    if (!userId) {
-      return res.status(400).json({ success: false, error: 'userId is required' });
-    }
 
     const result = await zkpService.verifyDriver({
       userId,
@@ -52,6 +73,14 @@ router.post('/verify', async (req, res) => {
         success: false,
         error: result.error,
       });
+    }
+
+    // Server-side verification gate (issue #8887)
+    if (result.code === 'KYC_NOT_SERVER_VERIFIED') {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+    if (result.code === 'MOCK_PROOF_NOT_RECORDED') {
+      return res.status(400).json({ success: false, error: result.error });
     }
 
     return res.status(200).json(result);
@@ -74,9 +103,12 @@ router.post('/verify', async (req, res) => {
  * GET /zkp/status/:userId
  * Returns the KYC verification status for a driver.
  */
-router.get('/status/:userId', async (req, res) => {
+router.get('/status/:userId', authenticate, async (req, res) => {
   try {
-    const { userId } = req.params;
+    const userId = req.params.userId;
+    if (userId !== req.user.id) {
+      return res.status(403).json({ success: false, error: 'Forbidden: you may only view your own verification status' });
+    }
     const verified = await zkpService.isVerified(userId);
     return res.status(200).json({ success: true, verified });
   } catch (error) {
@@ -89,7 +121,7 @@ router.get('/status/:userId', async (req, res) => {
  * GET /zkp/stats
  * Returns aggregate KYC verification counts.
  */
-router.get('/stats', async (req, res) => {
+router.get('/stats', authenticate, async (req, res) => {
   try {
     const stats = await zkpService.getVerificationStats();
     return res.status(200).json({ success: true, ...stats });

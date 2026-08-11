@@ -9,7 +9,8 @@
     "@apollo/federation": "^2.5.0",
     "@apollo/utils.keyvaluecache": "^2.1.0",
     "graphql": "^16.8.0",
-    "graphql-tag": "^2.12.0"
+    "graphql-tag": "^2.12.0",
+    "dataloader": "^2.2.2"
   },
   "scripts": {
     "start": "node index.js",

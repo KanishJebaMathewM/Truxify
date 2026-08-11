@@ -60,15 +60,37 @@ class KyberKEM:
             x >>= 1
         return y
     
-    def _sample_cbd(self, eta: int, size: int) -> np.ndarray:
-        """Sample from centered binomial distribution"""
-        # Simple implementation using numpy
-        samples = np.random.binomial(eta, 0.5, size) - np.random.binomial(eta, 0.5, size)
-        return samples % self.q
+    def _sample_cbd(self, eta: int, size: Any) -> np.ndarray:
+        """Sample from the centered binomial distribution (FIPS 203 Sec 4.1).
+
+        Each coefficient consumes ``2*eta`` uniform bits drawn from ``secrets``
+        (an ``os.urandom``-backed CSPRNG) and is computed as
+        sum(bits[:eta]) - sum(bits[eta:]).
+        """
+        total = size if isinstance(size, int) else int(np.prod(size))
+        samples = np.empty(total, dtype=np.int64)
+        for idx in range(total):
+            bits = secrets.randbits(2 * eta)
+            value = 0
+            for i in range(eta):
+                value += (bits >> i) & 1
+                value -= (bits >> (eta + i)) & 1
+            samples[idx] = value % self.q
+        return samples.reshape(size)
     
-    def _sample_uniform(self, size: int) -> np.ndarray:
-        """Sample uniformly from Z_q"""
-        return np.random.randint(0, self.q, size)
+    def _sample_uniform(self, size: Any) -> np.ndarray:
+        """Sample uniformly from Z_q via rejection sampling (FIPS 203 Sec 4.1).
+
+        16-bit values are drawn from ``secrets`` and rejected unless they fall
+        below the modulus ``q``.
+        """
+        total = size if isinstance(size, int) else int(np.prod(size))
+        samples = []
+        while len(samples) < total:
+            value = secrets.randbits(16)
+            if value < self.q:
+                samples.append(value)
+        return np.array(samples[:total], dtype=np.int64).reshape(size)
     
     def _ntt(self, f: np.ndarray) -> np.ndarray:
         """Number Theoretic Transform"""
@@ -176,8 +198,9 @@ class KyberKEM:
         u_compressed = self._compress(u, 10)
         v_compressed = self._compress(v, 4)
         
-        # Derive shared secret
-        shared_secret = self._derive_secret(u, v)
+        # Derive shared secret from the compressed ciphertext so it matches
+        # decapsulate, which hashes the compressed u/v transmitted in the ciphertext
+        shared_secret = self._derive_secret(u_compressed, v_compressed)
         
         ciphertext = {
             'u': u_compressed.tolist(),
@@ -193,26 +216,26 @@ class KyberKEM:
         return hashlib.sha256(data.tobytes()).digest()
     
     def decapsulate(self, ciphertext: bytes, secret_key: Dict) -> bytes:
-    """Decapsulate shared secret"""
-    ciphertext_dict = json.loads(ciphertext.decode())
-    u = np.array(ciphertext_dict['u'])
-    v = np.array(ciphertext_dict['v'])
-    s = np.array(secret_key['s'])
-    
-    # Decompress ciphertext
-    u_decompressed = self._decompress(u, self.params.du)
-    v_decompressed = self._decompress(v, self.params.dv)
-    
-    # Compute v - s^T * u
-    result = v_decompressed.copy()
-    for i in range(self.k):
-        result = (result - self._poly_multiply(s[i], u_decompressed[i])) % self.q
-    
-    # Derive shared secret from the same representation as encapsulate:
-    # use raw compressed u and v (not decompressed), matching encapsulate's _derive_secret(u, v)
-    shared_secret = self._derive_secret(u, v)
-    
-    return shared_secret
+        """Decapsulate shared secret"""
+        ciphertext_dict = json.loads(ciphertext.decode())
+        u = np.array(ciphertext_dict['u'])
+        v = np.array(ciphertext_dict['v'])
+        s = np.array(secret_key['s'])
+        
+        # Decompress ciphertext
+        u_decompressed = self._decompress(u, self.params.du)
+        v_decompressed = self._decompress(v, self.params.dv)
+        
+        # Compute v - s^T * u
+        result = v_decompressed.copy()
+        for i in range(self.k):
+            result = (result - self._poly_multiply(s[i], u_decompressed[i])) % self.q
+        
+        # Derive shared secret from the same representation as encapsulate:
+        # use raw compressed u and v (not decompressed), matching encapsulate's _derive_secret(u, v)
+        shared_secret = self._derive_secret(u, v)
+        
+        return shared_secret
 
 class QuantumSafeKeyExchange:
     """Quantum-safe key exchange using Kyber"""

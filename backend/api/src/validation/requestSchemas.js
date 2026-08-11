@@ -219,9 +219,7 @@ export const updateTicketSchema = z.object({
   subject: z.string().min(1, 'Subject cannot be empty').max(200, 'Subject must be 200 characters or fewer').optional(),
   category: z.string().min(1, 'Category cannot be empty').max(50, 'Category must be 50 characters or fewer').optional(),
   description: z.string().max(5000, 'Description must be 5000 characters or fewer').optional(),
-  status: z.enum(['open', 'in_progress', 'resolved', 'closed'], {
-    invalid_type_error: "Status must be one of: open, in_progress, resolved, closed",
-  }).optional(),
+  status: z.string().min(1, 'Status cannot be empty').max(50, 'Status must be 50 characters or fewer').optional(),
 }).strict();
 
 export const createTicketCommentSchema = z.object({
@@ -239,6 +237,29 @@ export const driverStatementSchema = z.object({
   }).optional(),
   format: z.enum(['json', 'csv']).optional(),
   sort_by: z.enum(['pickup_date', 'net_earnings', 'base_freight']).optional(),
+}).strict();
+
+/**
+ * Reporting window for the driver earnings summary.
+ *
+ * `.strict()` rejects unknown query keys so a typo surfaces as a 400 rather
+ * than silently falling back to the default period.
+ */
+export const earningsSummarySchema = z.object({
+  period: z.enum(['weekly', 'monthly']).optional(),
+}).strict();
+
+export const updateDocumentStatusSchema = z.object({
+  status: z.enum(['Approved', 'Rejected', 'Pending']),
+  rejection_reason: z.string().optional()
+});
+
+export const syncWeightSchema = z.object({
+  truck_id: z.string().min(1, "Truck ID is required"),
+  axles: z.array(z.object({
+    position: z.string().min(1, "Axle position is required"),
+    pressure_psi: coerceNumber(z.number().positive("Pressure must be positive"))
+  })).min(1, "At least one axle reading is required")
 }).strict();
 
 // Indian vehicle registration plate: 2 letters, 2 digits, up to 3 letters, up to 4 digits
@@ -272,10 +293,11 @@ export const updateProfileSchema = z.object({
   full_name: z.string().trim().min(1, 'Name cannot be empty').max(100, 'Name must be 100 characters or fewer').optional(),
   company_name: z.string().trim().min(1, 'Company name cannot be empty').max(200, 'Company name must be 200 characters or fewer').optional(),
   phone: z.string().trim().refine(isValidPhone, { message: 'Phone must be a valid number (digits, optional +, spaces/dashes/parens)' }).optional(),
+  email: z.string().trim().email('Invalid email address').optional(),
+  number_plate: z.string().trim().optional(),
   language: z.string().min(2, 'Invalid language code').max(10, 'Invalid language code').refine((v) => VALID_LANGUAGES.includes(v), { message: 'Unsupported language code' }).optional(),
   dark_mode: z.boolean().optional(),
   is_online: z.boolean().optional(),
-  verification_status: z.enum(['pending', 'verified', 'rejected']).optional(),
 }).strict();
 
 // ── Oracle & Verification schemas ───────────────────────────────────────
@@ -374,4 +396,32 @@ export const shareTrackingSchema = z.object({}).strict();
 
 export const publicTrackingTokenSchema = z.object({
   token: z.string().min(1, 'Tracking token is required').max(512),
+});
+
+export const reportGripDataSchema = z.object({
+  latitude: latitudeSchema,
+  longitude: longitudeSchema,
+  grip_index: coerceNumber(
+    z.number({ invalid_type_error: "grip_index must be a number" })
+      .min(0, { message: 'Grip index must be between 0 and 10' })
+      .max(10, { message: 'Grip index must be between 0 and 10' })
+  ),
+  slip_events_count: coerceNumber(
+    z.number({ invalid_type_error: "slip_events_count must be a number" })
+      .nonnegative({ message: 'slip_events_count must be >= 0' })
+  ).optional().default(0),
+}).strict();
+
+
+/**
+ * Schema for POST /api/driver/weigh-stations/sync-weight
+ */
+export const syncWeightSchema = z.object({
+  vehicleId: z.string().min(1, 'vehicleId is required'),
+  truckId: z.string().min(1, 'truckId is required'),
+  axles: z.array(z.object({
+    position: z.number().int().min(0),
+    pressure_psi: z.number().positive('pressure_psi must be a positive number'),
+  })).min(1, 'At least one axle is required'),
+  timestamp: z.string().datetime({ message: 'timestamp must be ISO 8601' }).optional(),
 });

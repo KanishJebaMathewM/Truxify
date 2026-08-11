@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package truxify.matcher;
+
+message BoxDimensions {
+  float length = 1;
+  float width = 2;
+  float height = 3;
+}
+
+message TruckSpaceRequest {
+  BoxDimensions truck_bed = 1;
+  repeated BoxDimensions cargo_boxes = 2;
+}
+
+message MatchResult {
+  bool fits = 1;
+  float space_utilization_percentage = 2;
+  uint32 packed_boxes_count = 3;
+}
+
+service VectorMatcherService {
+  rpc Evaluate3DPacking (TruckSpaceRequest) returns (MatchResult);
+}

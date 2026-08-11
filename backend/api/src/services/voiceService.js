@@ -1,17 +1,31 @@
 import axios from 'axios';
 import crypto from 'crypto';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
+const voiceDb = supabaseAdmin || supabase;
 import logger from '../middleware/logger.js';
 
 const MAX_CACHE_SIZE = 100;
 const CACHE_TTL_MS = 10 * 60 * 1000;
+const VOICE_API_TIMEOUT_MS = 10000;
+const WHISPER_TIMEOUT_MS = 15000;
 export const audioCache = new Map();
 
 function trimCache() {
   const now = Date.now();
+  // 1. Collect and purge expired entries first
+  const expiredKeys = [];
+  for (const [key, value] of audioCache.entries()) {
+    if (now - value.timestamp >= CACHE_TTL_MS) {
+      expiredKeys.push(key);
+    }
+  }
+  for (const key of expiredKeys) {
+    audioCache.delete(key);
+  }
+
+  // 2. If capacity still exceeds MAX_CACHE_SIZE, evict oldest remaining entries
   if (audioCache.size > MAX_CACHE_SIZE) {
     const oldest = [...audioCache.entries()]
-      .filter(([, v]) => now - v.timestamp < CACHE_TTL_MS)
       .sort(([, a], [, b]) => a.timestamp - b.timestamp);
     const toDelete = audioCache.size - MAX_CACHE_SIZE;
     for (let i = 0; i < toDelete && i < oldest.length; i++) {
@@ -20,24 +34,36 @@ function trimCache() {
   }
 }
 
-function cacheAudio(id, buffer) {
-  audioCache.set(id, { buffer, timestamp: Date.now() });
+function cacheAudio(id, buffer, userId) {
+  audioCache.set(id, { buffer, userId, timestamp: Date.now() });
   trimCache();
 }
 
-async function getBookingContext(bookingId) {
+async function getBookingContext(bookingId, userId) {
+  if (!userId) {
+    return null;
+  }
+
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const isUuid = uuidRegex.test(bookingId);
 
   // Orders table is the real order model (there is no bookings table).
   try {
-    let orderQuery = supabase.from('orders').select('*');
+    let orderQuery = voiceDb.from('orders').select('*');
     if (isUuid) {
       orderQuery = orderQuery.eq('id', bookingId);
     } else {
       orderQuery = orderQuery.eq('order_display_id', bookingId);
     }
-    const { data: order } = await orderQuery.maybeSingle();
+    
+    orderQuery = orderQuery.or(`customer_id.eq.${userId},driver_id.eq.${userId}`);
+
+    const { data: order, error } = await orderQuery.maybeSingle();
+    if (error) {
+      logger.warn('Orders table check failed in voiceService:', error.message);
+      return null;
+    }
+
     return order;
   } catch (err) {
     logger.warn('Orders table check failed in voiceService:', err.message);
@@ -46,7 +72,7 @@ async function getBookingContext(bookingId) {
 }
 
 export async function processVoiceQuery(userId, bookingId, audioBuffer, filename) {
-  const bookingData = await getBookingContext(bookingId);
+  const bookingData = await getBookingContext(bookingId, userId);
   
   if (!process.env.OPENAI_API_KEY || !process.env.ELEVENLABS_API_KEY) {
     logger.warn('Missing OpenAI or ElevenLabs API keys. Using mock Voice AI pipeline.');
@@ -78,7 +104,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
     // Generate a dummy silent mp3
     const mockAudio = Buffer.alloc(1000);
     const audioId = crypto.randomUUID();
-    cacheAudio(audioId, mockAudio);
+    cacheAudio(audioId, mockAudio, userId);
 
     return {
       transcript: selected.transcript,
@@ -90,7 +116,7 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
   // Production Whisper call
   let transcript;
   try {
-    const boundary = '----VoiceAIBoundary' + Math.random().toString(16).substring(2);
+    const boundary = '----VoiceAIBoundary' + crypto.randomBytes(16).toString('hex');
     const header = `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename || 'audio.wav'}"\r\nContent-Type: audio/wav\r\n\r\n`;
     const footer = `\r\n--${boundary}\r\nContent-Disposition: form-data; name="model"\r\n\r\nwhisper-1\r\n--${boundary}--`;
     const body = Buffer.concat([
@@ -103,7 +129,8 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
       headers: {
         'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
         'Content-Type': `multipart/form-data; boundary=${boundary}`
-      }
+      },
+      timeout: WHISPER_TIMEOUT_MS
     });
     transcript = whisperResponse.data.text;
   } catch (err) {
@@ -126,7 +153,8 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
       headers: {
         'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
         'Content-Type': 'application/json'
-      }
+      },
+      timeout: VOICE_API_TIMEOUT_MS
     });
     responseText = llmResponse.data.choices[0].message.content;
   } catch (err) {
@@ -150,11 +178,12 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
         'xi-api-key': process.env.ELEVENLABS_API_KEY,
         'accept': 'audio/mpeg'
       },
-      responseType: 'arraybuffer'
+      responseType: 'arraybuffer',
+      timeout: VOICE_API_TIMEOUT_MS
     });
 
     const audioId = crypto.randomUUID();
-    cacheAudio(audioId, Buffer.from(ttsResponse.data));
+    cacheAudio(audioId, Buffer.from(ttsResponse.data), userId);
     audioUrl = `/api/voice/audio/${audioId}`;
   } catch (err) {
     logger.error('ElevenLabs TTS failed:', err.message);
@@ -168,4 +197,4 @@ export async function processVoiceQuery(userId, bookingId, audioBuffer, filename
   };
 }
 
-export const __testing = { getBookingContext };
+export const __testing = { getBookingContext, trimCache, cacheAudio, MAX_CACHE_SIZE, CACHE_TTL_MS };

@@ -1,3 +1,3 @@
-module truxify/consensus-raft-go
+module truxify.com/consensus-raft-go
 
 go 1.21

@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:geolocator/geolocator.dart';
-import '../core/api_client.dart';
+import '../services/api_client.dart';
 import '../theme/app_theme.dart';
 
 /// DeliveryOtpScreen — shown to the driver when order status is 'arriving'.
@@ -16,6 +16,7 @@ import '../theme/app_theme.dart';
 ///     - Within 500m → shows "Auto-confirm available" badge
 ///     - Tapping badge → POST /api/orders/:id/geofence-confirm
 ///   • Animated "Payment Released ✓ ₹XXXX credited" success banner
+///   • "Payout Pending Reconciliation" banner when escrow update failed
 ///   • Haptic feedback on success
 class DeliveryOtpScreen extends StatefulWidget {
   const DeliveryOtpScreen({
@@ -51,12 +52,14 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
   bool _isVerifying = false;
   bool _isGeofenceConfirming = false;
   bool _paymentReleased = false;
+  bool _reconciliationRequired = false;
   String? _errorMessage;
   String? _releasedAmount;
 
   // Geofence
   double? _distanceM;
   bool _withinGeofence = false;
+  bool _geofenceVerified = false;
   Timer? _geofenceTimer;
   late final AnimationController _pulseController;
 
@@ -180,10 +183,16 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
       );
 
       final amount = body is Map ? (body['amount_inr'] as String?) : null;
-      await _showPaymentReleased(amount ?? widget.amountInr);
+      final reconciliationRequired =
+          body is Map && body['reconciliation_required'] == true;
+      if (reconciliationRequired) {
+        await _showReconciliationPending(amount ?? widget.amountInr);
+      } else {
+        await _showPaymentReleased(amount ?? widget.amountInr);
+      }
     } catch (e) {
       final msg = e.toString().replaceAll('Exception: ', '');
-      setState(() => _errorMessage = msg);
+      if (mounted) setState(() => _errorMessage = msg);
     } finally {
       if (mounted) setState(() => _isVerifying = false);
     }
@@ -201,6 +210,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
             const LocationSettings(accuracy: LocationAccuracy.high),
       );
 
+      // Client path stays under /api/orders; server route alignment is separate.
       final body = await _apiClient.post(
         '/api/orders/${widget.orderId}/geofence-confirm',
         body: {
@@ -209,8 +219,19 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
         },
       );
 
+      if (!mounted) return;
+
       if (body is Map && body['autoConfirmed'] == true) {
-        await _showPaymentReleased(widget.amountInr);
+        // Geofence only verifies presence — OTP is still required to release payment.
+        final serverMsg = body['message'] as String?;
+        setState(() {
+          _geofenceVerified = true;
+          _errorMessage = null;
+        });
+        final msg = (serverMsg != null && serverMsg.isNotEmpty)
+            ? serverMsg
+            : 'Location verified. Enter the customer OTP to release payment.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
       } else {
         final dist = body is Map ? body['distanceM'] as int? : null;
         setState(() => _errorMessage =
@@ -218,6 +239,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
             'Geofence radius is ${_geofenceRadius.toInt()}m.');
       }
     } catch (e) {
+      if (!mounted) return;
       setState(
           () => _errorMessage = e.toString().replaceAll('Exception: ', ''));
     } finally {
@@ -230,6 +252,18 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
     _geofenceTimer?.cancel();
     setState(() {
       _paymentReleased = true;
+      _releasedAmount = amount;
+    });
+    await _successController.forward();
+    await Future<void>.delayed(const Duration(seconds: 3));
+    if (mounted) Navigator.of(context).pop(true);
+  }
+
+  Future<void> _showReconciliationPending(String? amount) async {
+    HapticFeedback.heavyImpact();
+    _geofenceTimer?.cancel();
+    setState(() {
+      _reconciliationRequired = true;
       _releasedAmount = amount;
     });
     await _successController.forward();
@@ -260,7 +294,9 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
       ),
       body: _paymentReleased
           ? _buildSuccessBanner(isDark)
-          : _buildOtpForm(isDark),
+          : _reconciliationRequired
+              ? _buildReconciliationBanner(isDark)
+              : _buildOtpForm(isDark),
     );
   }
 
@@ -341,6 +377,107 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
                 const SizedBox(height: 16),
                 Text(
                   'The payment has been released from escrow\nand credited to your wallet.',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 14,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Order: ${widget.orderDisplayId}',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 12,
+                    color: isDark ? Colors.white38 : Colors.black38,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Reconciliation Pending Banner ─────────────────────────────────────────
+
+  Widget _buildReconciliationBanner(bool isDark) {
+    return Center(
+      child: FadeTransition(
+        opacity: _successOpacity,
+        child: ScaleTransition(
+          scale: _successScale,
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.orange.shade400,
+                        Colors.orange.shade700,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.orange.withValues(alpha: 0.4),
+                        blurRadius: 24,
+                        spreadRadius: 4,
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.hourglass_top_rounded,
+                    color: Colors.white,
+                    size: 52,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                Text(
+                  'Payout Pending Reconciliation',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? Colors.white : const Color(0xFF0F1117),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                if (_releasedAmount != null) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 10),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.orange.shade600,
+                          Colors.orange.shade800,
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    child: Text(
+                      '₹$_releasedAmount will be credited',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Text(
+                  'Delivery confirmed, but the escrow payout could not be '
+                  'credited automatically. Your payment is pending '
+                  'reconciliation and will be credited once it is resolved.',
                   style: GoogleFonts.dmSans(
                     fontSize: 14,
                     color: isDark ? Colors.white60 : Colors.black54,
@@ -454,6 +591,7 @@ class _DeliveryOtpScreenState extends State<DeliveryOtpScreen>
             _GeofenceBadge(
               distanceM: _distanceM,
               withinGeofence: _withinGeofence,
+              geofenceVerified: _geofenceVerified,
               isConfirming: _isGeofenceConfirming,
               pulseController: _pulseController,
               onAutoConfirm: _geofenceConfirm,
@@ -583,6 +721,7 @@ class _GeofenceBadge extends StatelessWidget {
   const _GeofenceBadge({
     required this.distanceM,
     required this.withinGeofence,
+    this.geofenceVerified = false,
     required this.isConfirming,
     required this.pulseController,
     required this.onAutoConfirm,
@@ -590,6 +729,7 @@ class _GeofenceBadge extends StatelessWidget {
 
   final double? distanceM;
   final bool withinGeofence;
+  final bool geofenceVerified;
   final bool isConfirming;
   final AnimationController pulseController;
   final VoidCallback onAutoConfirm;
@@ -600,13 +740,19 @@ class _GeofenceBadge extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final label = withinGeofence
-        ? 'You are ${distanceM!.toInt()}m away — Auto-confirm available'
-        : 'You are ${distanceM!.toInt()}m away (need <500m for auto-confirm)';
+    final label = geofenceVerified
+        ? 'Location verified — enter customer OTP to release payment'
+        : withinGeofence
+            ? 'You are ${distanceM!.toInt()}m away — Auto-confirm available'
+            : 'You are ${distanceM!.toInt()}m away (need <500m for auto-confirm)';
 
-    return GestureDetector(
-      onTap: withinGeofence && !isConfirming ? onAutoConfirm : null,
-      child: AnimatedBuilder(
+    return Semantics(
+      button: true,
+      enabled: withinGeofence && !isConfirming && !geofenceVerified,
+      label: label,
+      child: GestureDetector(
+        onTap: withinGeofence && !isConfirming && !geofenceVerified ? onAutoConfirm : null,
+        child: AnimatedBuilder(
         animation: pulseController,
         builder: (context, child) {
           final opacity =

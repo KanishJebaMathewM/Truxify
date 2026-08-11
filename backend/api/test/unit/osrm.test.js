@@ -311,3 +311,72 @@ describe('osrm - getRouteEstimate', () => {
     expect(mockRedis.set).not.toHaveBeenCalled();
   });
 });
+
+describe('osrm - getRouteEstimate edge cases', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns null for null input', async () => {
+    const result = await getRouteEstimate(null);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for undefined input', async () => {
+    const result = await getRouteEstimate(undefined);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when pickupLat is not finite', async () => {
+    const result = await getRouteEstimate({
+      pickupLat: NaN,
+      pickupLng: 77.5946,
+      dropLat: 13.0827,
+      dropLng: 80.2707,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('returns null when dropLat is Infinity', async () => {
+    const result = await getRouteEstimate({
+      pickupLat: 12.9716,
+      pickupLng: 77.5946,
+      dropLat: Infinity,
+      dropLng: 80.2707,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('uses cached result when Redis returns a hit', async () => {
+    const cachedResult = { distanceKm: 100, durationSeconds: 3600 };
+    mockRedis.get.mockResolvedValue(JSON.stringify(cachedResult));
+
+    const result = await getRouteEstimate({
+      pickupLat: 12.9716,
+      pickupLng: 77.5946,
+      dropLat: 13.0827,
+      dropLng: 80.2707,
+    });
+
+    expect(result).toEqual(cachedResult);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns null when Redis cache returns invalid JSON', async () => {
+    mockRedis.get.mockResolvedValue('not valid json');
+    fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ routes: [{ distance: 50000, duration: 1800 }] }),
+    });
+
+    const result = await getRouteEstimate({
+      pickupLat: 12.9716,
+      pickupLng: 77.5946,
+      dropLat: 13.0827,
+      dropLng: 80.2707,
+    });
+
+    // Redis get failed (invalid JSON), fetch was called as fallback
+    expect(fetch).toHaveBeenCalled();
+  });
+});

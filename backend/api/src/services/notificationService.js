@@ -1,7 +1,8 @@
-import { supabase, firebaseAdmin } from '../config/db.js';
+import { supabaseAdmin, firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
 import { measureExecution } from '../core/performanceMetrics.js';
+import { hashOtp, verifyOtpHash } from '../lib/otpHashing.js';
 
 const TRANSIENT_ERROR_CODES = new Set([
   'messaging/too-many-topics',
@@ -27,9 +28,9 @@ function calculateRetryBackoff(attempt) {
 }
 
 async function getUserFcmToken(userId) {
-  if (!supabase) return null;
+  if (!supabaseAdmin) return null;
   try {
-    const { data, error } = await supabase.from('profiles').select('fcm_token').eq('id', userId).maybeSingle();
+    const { data, error } = await supabaseAdmin.from('profiles').select('fcm_token').eq('id', userId).maybeSingle();
     if (error || !data?.fcm_token) return null;
     return data.fcm_token;
   } catch (err) {
@@ -39,9 +40,9 @@ async function getUserFcmToken(userId) {
 }
 
 async function clearInvalidToken(userId) {
-  if (!supabase) return;
+  if (!supabaseAdmin) return;
   try {
-    await supabase
+    await supabaseAdmin
       .from('profiles')
       .update({
         fcm_token: null,
@@ -121,55 +122,59 @@ export async function sendFcmNotification(userId, notification, data = {}) {
   };
 }
 
-/**
- * Hash a delivery OTP with scrypt and a per-OTP random salt. The salt is
- * stored alongside the digest, so the stored value cannot be brute-forced
- * offline the way an unsalted SHA-256 of a 6-digit code can be.
- *
- * @param {string|number} otp
- * @param {string} [saltHex] - existing salt (for verification), or undefined
- *   to generate a fresh 16-byte salt.
- * @returns {{hash: string, salt: string}} hex-encoded scrypt digest (64 bytes)
- *   and hex-encoded salt.
- */
-export function hashDeliveryOtp(otp, saltHex) {
-  const salt = saltHex || crypto.randomBytes(16).toString('hex');
-  const key = crypto.scryptSync(String(otp), salt, 64);
-  return { hash: key.toString('hex'), salt };
+export async function sendPushNotification(userId, title, body, notifType = 'order_update', data = {}) {
+  if (!userId || !title || !body) {
+    logger.warn('[NotificationService] sendPushNotification skipped — missing required fields.');
+    return { success: false, error: 'Missing required fields' };
+  }
+
+  let dbSuccess = false;
+  try {
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot persist notification.');
+    } else {
+      const { error } = await supabaseAdmin.from('notifications').insert({
+        user_id: userId,
+        title,
+        body,
+        notif_type: notifType,
+        metadata: data
+      });
+
+      if (error) {
+        logger.error({ err: error }, '[NotificationService] Database insert failed');
+      } else {
+        logger.info(`[NotificationService] Notification inserted for user ${userId}`);
+        dbSuccess = true;
+      }
+    }
+  } catch (dbErr) {
+    logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');
+  }
+
+  let fcmResult;
+  try {
+    fcmResult = await sendFcmNotification(userId, { title, body }, data);
+  } catch (err) {
+    logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
+  }
+
+  return { success: true, persisted: dbSuccess, fcm: fcmResult };
 }
 
-/**
- * Timing-safe comparison of a submitted OTP against a stored record.
- *
- * Records written after the salted-hash migration carry an `otp_salt`; those
- * are compared with scrypt. Pre-migration rows (no salt) are compared with
- * SHA-256 so in-flight OTPs keep working for their remaining TTL window.
- *
- * @param {string|number} otp
- * @param {{otp_hash?: string, otp_salt?: string}|null} otpRecord
- * @returns {boolean}
- */
-export function verifyDeliveryOtpHash(otp, otpRecord) {
-  if (!otpRecord) return false;
-  if (otpRecord.otp_salt) {
-    const { hash: submittedHash } = hashDeliveryOtp(otp, otpRecord.otp_salt);
-    const expected = String(otpRecord.otp_hash || '');
-    if (!/^[a-f0-9]{128}$/.test(expected)) return false;
-    return crypto.timingSafeEqual(Buffer.from(submittedHash, 'hex'), Buffer.from(expected, 'hex'));
-  }
-  if (otpRecord.otp_hash && /^[a-f0-9]{64}$/.test(otpRecord.otp_hash)) {
-    const submittedHash = crypto.createHash('sha256').update(String(otp)).digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(submittedHash, 'hex'), Buffer.from(otpRecord.otp_hash, 'hex'));
-  }
-  return false;
-}
+export const hashDeliveryOtp = hashOtp;
+export const verifyDeliveryOtpHash = verifyOtpHash;
 
 export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
   return measureExecution('NotificationService.storeDeliveryOtp', async () => {
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot store OTP.');
+      return null;
+    }
     const expiresAt = new Date(Date.now() + ttlMinutes * 60 * 1000).toISOString();
     const { hash: otpHash, salt: otpSalt } = hashDeliveryOtp(otp);
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('delivery_otps')
       .insert({
         order_id: orderId,
@@ -193,7 +198,11 @@ export async function storeDeliveryOtp(orderId, otp, ttlMinutes = 15) {
 
 export async function getActiveDeliveryOtp(orderId) {
   return measureExecution('NotificationService.getActiveDeliveryOtp', async () => {
-    const { data, error } = await supabase
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot read OTP.');
+      return null;
+    }
+    const { data, error } = await supabaseAdmin
       .from('delivery_otps')
       .select('id, otp_hash, otp_salt, expires_at')
       .eq('order_id', orderId)
@@ -218,7 +227,11 @@ export async function verifyDeliveryOtp(otpId) {
     // unverified OTPs for an order. This ensures only the matched OTP
     // (which was validated by the caller via timing-safe hash comparison)
     // is consumed, preventing any future caller from bypassing verification.
-    const { data, error } = await supabase
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot verify OTP.');
+      return false;
+    }
+    const { data, error } = await supabaseAdmin
       .from('delivery_otps')
       .update({
         verified: true,
@@ -230,8 +243,11 @@ export async function verifyDeliveryOtp(otpId) {
       .maybeSingle();
 
     if (error) {
-      logger.error('[NotificationService] Failed to verify OTP:', error.message);
-      return false;
+      logger.error(
+        { event: 'NOTIFICATION_INSERT_ERROR', error: error && error.message },
+        'Error inserting notification',
+      );
+      throw error;
     }
 
     if (!data) {
@@ -245,7 +261,11 @@ export async function verifyDeliveryOtp(otpId) {
 
 export async function expireDeliveryOtps(orderId) {
   return measureExecution('NotificationService.expireDeliveryOtps', async () => {
-    const { error } = await supabase
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot expire OTPs.');
+      return;
+    }
+    const { error } = await supabaseAdmin
       .from('delivery_otps')
       .update({ expires_at: new Date().toISOString() })
       .eq('order_id', orderId)
@@ -265,21 +285,25 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
 
   let dbSuccess = false;
   try {
-    const { error } = await supabase.from('notifications').insert({
-      user_id: customerId,
-      title,
-      body,
-      notif_type: 'order_update',
-      // No OTP or OTP-derived value is persisted here: an unsalted digest of
-      // a 6-digit code is offline-brute-forceable if the table leaks.
-      metadata: { order_display_id: orderDisplayId }
-    });
-
-    if (error) {
-      logger.error({ err: error }, '[NotificationService] Database insert failed');
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot persist notification.');
     } else {
-      logger.info('[NotificationService] Notification inserted successfully');
-      dbSuccess = true;
+      const { error } = await supabaseAdmin.from('notifications').insert({
+        user_id: customerId,
+        title,
+        body,
+        notif_type: 'order_update',
+        // No OTP or OTP-derived value is persisted here: an unsalted digest of
+        // a 6-digit code is offline-brute-forceable if the table leaks.
+        metadata: { order_display_id: orderDisplayId }
+      });
+
+      if (error) {
+        logger.error({ err: error }, '[NotificationService] Database insert failed');
+      } else {
+        logger.info('[NotificationService] Notification inserted successfully');
+        dbSuccess = true;
+      }
     }
   } catch (dbErr) {
     logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');
@@ -290,49 +314,23 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     fcmResult = await sendFcmNotification(
       customerId,
       { title, body },
-      { orderDisplayId, notifType: 'delivery_otp', deliveryOtp: String(otp) }
+      { orderDisplayId, notifType: 'delivery_otp',  }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
   }
 
-  if (process.env.TWILIO_AUTH_TOKEN) {
-    logger.info(`[NotificationService] [SMS] SMS stub: Sending OTP for order ${orderDisplayId} (masked)`);
-  } else {
-    logger.info(
-      `[NotificationService] [SMS] SMS stub: No SMS gateway configured. OTP sent out-of-band for order ${orderDisplayId} (masked)`
-    );
+    // Return the actual push-delivery result so callers can branch on it.
+    // The notification row is persisted independently of push delivery, so
+    // overall success is driven by the FCM outcome.
+    const fcmOk = Boolean(fcmResult?.success);
+    return {
+      success: fcmOk,
+      dbSuccess,
+      fcm: {
+        success: fcmOk,
+        messageId: fcmResult?.messageId ?? null,
+        error: fcmResult?.error ?? (fcmResult ? null : 'Unexpected sendFcmNotification error'),
+      },
+    };
   }
-
-  return { success: dbSuccess || fcmResult?.success, fcm: fcmResult };
-}
-
-export async function sendPushNotification(userId, title, body, notifType, metadata = {}) {
-  return measureExecution('NotificationService.sendPushNotification', async () => {
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('notifications').insert({
-          user_id: userId,
-          title,
-          body,
-          notif_type: notifType,
-          metadata
-        });
-
-        if (error) {
-          logger.error(`[NotificationService] Database insert failed: ${error.message}`);
-        }
-      } catch (dbErr) {
-        logger.error(`[NotificationService] Database error: ${dbErr.message}`);
-      }
-    }
-
-    let fcmResult;
-    try {
-      fcmResult = await sendFcmNotification(userId, { title, body }, { notifType, ...metadata });
-    } catch (err) {
-      logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
-    }
-    return { success: fcmResult?.success, fcm: fcmResult };
-  });
-}

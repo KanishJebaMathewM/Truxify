@@ -44,10 +44,7 @@ describe('Webhook Routes', () => {
       const res = await request(app)
         .post('/api/webhooks/escrow')
         .send({
-          eventType: 'EscrowRefunded',
-          orderId: 'test-123',
-          txHash: '0x123',
-          simulateFailure: true
+          eventType: 'PaymentReleased'
         });
 
       expect(res.status).toBe(500);
@@ -190,10 +187,7 @@ describe('Webhook Routes — HMAC Signature Verification', () => {
 
     it('returns 202 and enqueues to DLQ on processing failure with valid signature', async () => {
       const payload = {
-        eventType: 'EscrowReleased',
-        orderId: 'order-789',
-        txHash: '0xdef',
-        simulateFailure: true
+        eventType: 'PaymentReleased'
       };
       const signature = signPayload(payload);
 
@@ -208,10 +202,30 @@ describe('Webhook Routes — HMAC Signature Verification', () => {
 
       expect(mockEnqueueFailure).toHaveBeenCalledWith(
         'escrow',
-        'EscrowReleased',
+        'PaymentReleased',
         expect.any(Object),
         expect.any(Error)
       );
+    });
+
+    it('returns 500 instead of 202 when the DLQ enqueue fails', async () => {
+      mockEnqueueFailure.mockResolvedValueOnce(false);
+
+      const payload = {
+        eventType: 'PaymentReleased'
+      };
+      const signature = signPayload(payload);
+
+      const res = await request(app)
+        .post('/api/webhooks/escrow')
+        .set('X-Webhook-Signature', signature)
+        .send(payload);
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe(
+        'Webhook processing failed and the event could not be queued for retry'
+      );
+      expect(mockEnqueueFailure).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -53,8 +53,10 @@ AS $$
 DECLARE
   v_new_avg NUMERIC(3,2);
 BEGIN
-  -- Verify the caller IS the customer
-  IF auth.uid() <> p_customer_id THEN
+  -- Verify the caller IS the customer.
+  -- auth.uid() is the Firebase UID; get_profile_id() maps it to profiles.id
+  -- which is what p_customer_id stores, so compare via get_profile_id().
+  IF auth.uid() IS NOT NULL AND get_profile_id() <> p_customer_id THEN
     RAISE EXCEPTION 'Unauthorized: you can only submit ratings for yourself';
   END IF;
 

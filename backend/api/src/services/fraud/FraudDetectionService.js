@@ -1,5 +1,7 @@
 import logger from '../../middleware/logger.js';
-import { redisClient, supabase } from '../../config/db.js';
+import { redisClient, supabaseAdmin } from '../../config/db.js';
+
+const CONNECTION_PAGE_SIZE = 1000;
 
 class FraudDetectionService {
   constructor() {
@@ -37,7 +39,7 @@ class FraudDetectionService {
   // ============ Behavioral Fingerprinting ============
   async trackBehavior(userId, eventData) {
     try {
-      if (!supabase) return null;
+      if (!supabaseAdmin) return null;
       const profile = await this.getOrCreateProfile(userId);
       
       // Update behavioral metrics
@@ -98,7 +100,7 @@ class FraudDetectionService {
   }
 
   async getOrCreateProfile(userId) {
-    if (!supabase) return null;
+    if (!supabaseAdmin) return null;
     // Check Redis cache
     const cached = this.redis ? await this.redis.get(`behavior:${userId}`) : null;
     if (cached) {
@@ -110,7 +112,7 @@ class FraudDetectionService {
     if (inMemory) return inMemory;
 
     // Check database
-    const { data } = await supabase
+    const { data } = await supabaseAdmin
       .from('behavioral_profiles')
       .select('*')
       .eq('user_id', userId)
@@ -141,14 +143,14 @@ class FraudDetectionService {
   }
 
   async _flushPendingUpserts() {
-    if (this.pendingUpserts.size === 0 || !supabase) return;
+    if (this.pendingUpserts.size === 0 || !supabaseAdmin) return;
     
     // Extract records and clear the map for the next batch
     const records = Array.from(this.pendingUpserts.values());
     this.pendingUpserts.clear();
 
     try {
-      const { error: dbErr } = await supabase
+      const { error: dbErr } = await supabaseAdmin
         .from('behavioral_profiles')
         .upsert(records, { onConflict: 'user_id' });
 
@@ -325,32 +327,36 @@ class FraudDetectionService {
   }
 
   async getUserConnections(userId) {
-    if (!supabase) return [];
+    if (!supabaseAdmin) return [];
     const safeUserId = this.sanitizeUserId(userId);
     if (!safeUserId) return [];
     // Get all connections (orders, trips, shared routes)
-    const { data: orders, error } = await supabase
-      .from('orders')
-      .select('customer_id, driver_id')
-      .or(`customer_id.eq.${safeUserId},driver_id.eq.${safeUserId}`);
-
-    if (error) {
-      logger.error('Failed to load user fraud connections:', error);
-      return [];
-    }
-
-    if (!Array.isArray(orders)) {
-      return [];
-    }
-
     const connections = new Set();
-    orders.forEach(order => {
-      if (order.customer_id === userId && order.driver_id) {
-        connections.add(order.driver_id);
-      } else if (order.driver_id === userId && order.customer_id) {
-        connections.add(order.customer_id);
+    let offset = 0;
+    let page = [];
+    do {
+      const { data: orders, error } = await supabaseAdmin
+        .from('orders')
+        .select('customer_id, driver_id')
+        .or(`customer_id.eq.${safeUserId},driver_id.eq.${safeUserId}`)
+        .order('id', { ascending: true })
+        .range(offset, offset + CONNECTION_PAGE_SIZE - 1);
+
+      if (error) {
+        logger.error('Failed to load user fraud connections:', error);
+        return [];
       }
-    });
+
+      page = Array.isArray(orders) ? orders : [];
+      page.forEach(order => {
+        if (order.customer_id === userId && order.driver_id) {
+          connections.add(order.driver_id);
+        } else if (order.driver_id === userId && order.customer_id) {
+          connections.add(order.customer_id);
+        }
+      });
+      offset += page.length;
+    } while (page.length === CONNECTION_PAGE_SIZE);
 
     return Array.from(connections);
   }
@@ -361,17 +367,40 @@ class FraudDetectionService {
     const safeIds = userIds.map(id => this.sanitizeUserId(id)).filter(Boolean);
     if (safeIds.length === 0) return {};
 
-    const { data: orders, error } = await supabase
-      .from('orders')
-      .select('customer_id, driver_id')
-      .or(safeIds.map(id => `customer_id.eq.${id}`).join(',') + ',' + safeIds.map(id => `driver_id.eq.${id}`).join(','));
+    const BATCH_SIZE = 100;
+    const PAGE_SIZE = 1000;
+    const allOrders = [];
 
-    if (error) {
-      logger.error('Failed to load batch user fraud connections:', error);
-      return {};
+    // Query in batches to avoid unbounded OR filter URL-length limits
+    for (let i = 0; i < safeIds.length; i += BATCH_SIZE) {
+      const batch = safeIds.slice(i, i + BATCH_SIZE);
+      const batchFilter = batch.map(id => `customer_id.eq.${id}`).join(',') + ',' +
+        batch.map(id => `driver_id.eq.${id}`).join(',');
+
+      // Each batch's row set is paged too, since a single prolific user can
+      // still push one batch past PostgREST's 1000-row response cap.
+      let offset = 0;
+      let page = [];
+      do {
+        const { data: batchOrders, error } = await supabaseAdmin
+          .from('orders')
+          .select('customer_id, driver_id')
+          .or(batchFilter)
+          .order('id', { ascending: true })
+          .range(offset, offset + PAGE_SIZE - 1);
+
+        if (error) {
+          logger.error('Failed to load batch user fraud connections:', error.message);
+          return {};
+        }
+
+        page = Array.isArray(batchOrders) ? batchOrders : [];
+        allOrders.push(...page);
+        offset += page.length;
+      } while (page.length === PAGE_SIZE);
     }
 
-    if (!Array.isArray(orders)) {
+    if (!Array.isArray(allOrders)) {
       return {};
     }
 
@@ -380,7 +409,7 @@ class FraudDetectionService {
       connectionsMap[userId] = new Set();
     }
 
-    orders.forEach(order => {
+    allOrders.forEach(order => {
       if (userIds.includes(order.customer_id) && order.driver_id) {
         connectionsMap[order.customer_id].add(order.driver_id);
       }
@@ -600,8 +629,8 @@ class FraudDetectionService {
 
   async storeRiskScore(userId, score, components) {
     try {
-      if (!supabase) return;
-      await supabase
+      if (!supabaseAdmin) return;
+      await supabaseAdmin
         .from('fraud_risk_scores')
         .insert([{
           user_id: userId,
@@ -634,8 +663,8 @@ class FraudDetectionService {
   // ============ Auto-Review Queue ============
   async addToReviewQueue(userId, reason, riskScore) {
     try {
-      if (!supabase) return null;
-      const { data } = await supabase
+      if (!supabaseAdmin) return null;
+      const { data } = await supabaseAdmin
         .from('fraud_review_queue')
         .insert([{
           user_id: userId,
@@ -656,8 +685,8 @@ class FraudDetectionService {
   }
 
   async getReviewQueue(limit = 50) {
-    if (!supabase) return [];
-    const { data } = await supabase
+    if (!supabaseAdmin) return [];
+    const { data } = await supabaseAdmin
       .from('fraud_review_queue')
       .select('*')
       .eq('status', 'pending')
@@ -668,8 +697,8 @@ class FraudDetectionService {
   }
 
   async resolveReview(reviewId, action, notes) {
-    if (!supabase) return null;
-    const { data } = await supabase
+    if (!supabaseAdmin) return null;
+    const { data } = await supabaseAdmin
       .from('fraud_review_queue')
       .update({
         status: 'resolved',
@@ -698,14 +727,32 @@ class FraudDetectionService {
   }
 
   async getFraudStats() {
-    if (!supabase) return { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 };
-    const { data: scores } = await supabase
-      .from('fraud_risk_scores')
-      .select('risk_score, created_at')
-      .order('created_at', { ascending: false })
-      .limit(1000);
+    if (!supabaseAdmin) return { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 };
 
-    const safe = scores || [];
+    // PostgREST caps a single response at 1000 rows, so page through the whole
+    // table instead of letting the stats silently reflect only the latest slice.
+    const pageSize = 1000;
+    const scores = [];
+    while (true) {
+      const from = scores.length;
+      const { data: page, error } = await supabaseAdmin
+        .from('fraud_risk_scores')
+        .select('risk_score, created_at')
+        .order('created_at', { ascending: false })
+        .range(from, from + pageSize - 1);
+
+      if (error) {
+        logger.error('Failed to load fraud stats:', error);
+        return { total: 0, highRisk: 0, mediumRisk: 0, lowRisk: 0, avgScore: 0 };
+      }
+
+      scores.push(...(page || []));
+      if (!page || page.length < pageSize) {
+        break;
+      }
+    }
+
+    const safe = scores;
 
     const highRisk = safe.filter(s => s.risk_score > 0.7).length;
     const mediumRisk = safe.filter(s => s.risk_score > 0.4 && s.risk_score <= 0.7).length;

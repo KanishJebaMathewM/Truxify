@@ -145,7 +145,10 @@ class ConsulService {
         }
 
         // Round-robin load balancing
-        const service = services[Math.floor(Math.random() * services.length)];
+        if (this._rrIndex == null) {
+            this._rrIndex = 0;
+        }
+        const service = services[this._rrIndex++ % services.length];
         return `${service.address}:${service.port}`;
     }
 
@@ -175,7 +178,7 @@ class ConsulService {
                 const services = await this.discoverService(name, false);
                 for (const service of services) {
                     try {
-                        const health = await this.consul.health.checks(service.id);
+                        const health = await this.consul.health.checks(name);
                         const isHealthy = health.length > 0 && health.some(c => c.Status === 'passing');
 
                         results[service.id] = {
@@ -200,12 +203,35 @@ class ConsulService {
         return results;
     }
 
+    async _resolveServiceName(serviceId) {
+        if (this.services[serviceId]) {
+            return this.services[serviceId].name;
+        }
+        const agents = await this.consul.agent.services();
+        const entry = agents[serviceId];
+        if (entry && entry.Service) {
+            return entry.Service;
+        }
+        return null;
+    }
+
     async getServiceHealth(serviceId) {
         try {
-            const health = await this.consul.health.checks(serviceId);
+            const serviceName = await this._resolveServiceName(serviceId);
+            if (!serviceName) {
+                return {
+                    id: serviceId,
+                    healthy: false,
+                    error: `Unknown service id: ${serviceId}`,
+                    lastCheck: new Date().toISOString()
+                };
+            }
+
+            const health = await this.consul.health.checks(serviceName);
             const isHealthy = health.length > 0 && health.some(c => c.Status === 'passing');
             return {
                 id: serviceId,
+                serviceName,
                 healthy: isHealthy,
                 status: isHealthy ? 'passing' : 'critical',
                 lastCheck: new Date().toISOString()

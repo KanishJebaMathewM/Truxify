@@ -19,7 +19,7 @@ async function check() {
     }
     return { status: HealthStatus.DEGRADED, message: 'producer_not_connected' };
   } catch (err) {
-    logger.warn('[kafkaHealth] Health check error:', err?.message);
+    logger.warn('[kafkaHealth] Failed to import kafka config:', err?.message);
     return { status: HealthStatus.DEGRADED, message: 'module_not_available' };
   }
 } // <-- This closing brace was missing

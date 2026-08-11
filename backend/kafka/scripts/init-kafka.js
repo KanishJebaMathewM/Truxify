@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
-import kafka from '../config/kafka.config.js';
-import { TOPICS } from '../config/kafka.config.js';
-import logger from '../api/src/middleware/logger.js';
+import kafka, { TOPICS } from '../config/kafka.config.js';
+import logger from '../../api/src/middleware/logger.js';
 
 async function initKafka() {
   try {

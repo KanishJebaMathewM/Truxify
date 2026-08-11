@@ -7,6 +7,8 @@ const inMemoryStore = new Map();
 const inFlightRequests = new Map(); // In-memory lock for memory-only mode
 const IN_MEMORY_TTL_MS = 86400_000;
 const CLEANUP_INTERVAL_MS = 60_000;
+const MAX_IN_MEMORY_ENTRIES = 10000;
+const EVICTION_BATCH_SIZE = Math.floor(MAX_IN_MEMORY_ENTRIES * 0.1); // evict 10% at a time
 
 // The Redis lock must outlive the longest guarded handler or a slow request's
 // lock can expire mid-execution and let a duplicate re-acquire it. Escrow flows
@@ -14,7 +16,7 @@ const CLEANUP_INTERVAL_MS = 60_000;
 // default 120s gives a comfortable margin. Overridable per deployment.
 const LOCK_TTL_MS = Number(process.env.IDEMPOTENCY_LOCK_TTL_MS) || 120_000;
 
-const cleanupTimer = setInterval(() => {
+let cleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, entry] of inMemoryStore) {
     if (entry.expiresAt <= now) {
@@ -36,6 +38,16 @@ function getFromMemory(key) {
 }
 
 function setInMemory(key, data, ttlMs) {
+  if (inMemoryStore.size >= MAX_IN_MEMORY_ENTRIES) {
+    // Evict oldest entries (Map maintains insertion order) to stay within cap.
+    // Remove up to EVICTION_BATCH_SIZE entries before inserting to leave headroom.
+    let evicted = 0;
+    for (const k of inMemoryStore.keys()) {
+      if (evicted >= EVICTION_BATCH_SIZE) break;
+      inMemoryStore.delete(k);
+      evicted++;
+    }
+  }
   inMemoryStore.set(key, { data, expiresAt: Date.now() + ttlMs });
 }
 
@@ -45,28 +57,34 @@ function isCacheable(statusCode) {
 
 function cacheKey(req, idempotencyKey) {
   const identity = req.user?.id || 'anonymous';
-  return `idempotency:${identity}:${idempotencyKey}`;
+  // Scope by method + originalUrl so two endpoints (or verbs) sharing a user
+  // and key cannot collide (fixes #2915).
+  return `idempotency:${identity}:${req.method}:${req.originalUrl}:${idempotencyKey}`;
 }
 
 function readAndParse(str) {
   try {
     return JSON.parse(str);
-  } catch {
+  } catch (err) {
+    logger.warn({ err }, 'Malformed idempotency cached payload');
     return null;
   }
 }
 
 export function requireIdempotency(ttlSeconds = 3600) {
-  const ttlMs = ttlSeconds * 1000;
+  // Guard against invalid TTL: use default of 3600 if not a positive integer.
+  const safeTtlSeconds = Number.isInteger(ttlSeconds) && ttlSeconds > 0 ? ttlSeconds : 3600;
+  const ttlMs = safeTtlSeconds * 1000;
 
   return async function idempotencyMiddleware(req, res, next) {
     const idempotencyKey = req.headers['x-idempotency-key'];
 
-    if (!idempotencyKey) {
+    // Guard against non-string idempotency key: return 400 if not a string.
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey) {
       if (process.env.NODE_ENV === 'test') {
         return next();
       }
-      return res.status(400).json({ error: 'X-Idempotency-Key header is required for this action.' });
+      return res.status(400).json({ error: 'X-Idempotency-Key must be a non-empty string.' });
     }
 
     const key = cacheKey(req, idempotencyKey);
@@ -106,7 +124,12 @@ export function requireIdempotency(ttlSeconds = 3600) {
 
             const lockStillHeld = await redisClient.get(lockKey);
             if (!lockStillHeld) {
-              break; // Lock released but cache empty
+              const finalRaw = await redisClient.get(key);
+              const finalCached = finalRaw ? readAndParse(finalRaw) : null;
+              if (finalCached) {
+                return res.status(finalCached.statusCode).json(finalCached.body);
+              }
+              break; // Lock released but cache genuinely empty
             }
 
             retries--;
@@ -127,7 +150,12 @@ export function requireIdempotency(ttlSeconds = 3600) {
         const releaseLock = () => {
           if (lockReleased) return;
           lockReleased = true;
-          redisClient.del(lockKey).catch(() => { });
+          redisClient.del(lockKey).catch((err) => {
+            logger.error(
+              { err, lockKey },
+              '[Idempotency] Failed to release Redis lock.'
+            );
+          });
         };
 
         // Ensure lock is reliably released when response terminates
@@ -170,7 +198,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
 
           if (redisClient) {
             redisClient.set(key, cacheData, 'EX', ttlSeconds).catch(err => {
-              logger.error(`[Idempotency] Failed to cache response for key ${idempotencyKey}: ${err.message}`);
+              logger.error({ event: 'IDEMPOTENCY_CACHE_SET_ERROR', idempotencyKey, error: err && err.message }, '[Idempotency] Failed to cache response');
             });
           } else {
             setInMemory(key, cacheData, ttlMs);
@@ -182,7 +210,7 @@ export function requireIdempotency(ttlSeconds = 3600) {
 
       next();
     } catch (err) {
-      logger.error(`[Idempotency] Error processing idempotency key: ${err.message}`);
+      logger.error({ event: 'IDEMPOTENCY_PROCESS_ERROR', key: key && key.substring(0, 50), error: err && err.message }, '[Idempotency] Error processing idempotency key');
       next();
     }
   };

@@ -1,4 +1,4 @@
-import { supabase, redisClient } from '../config/db.js';
+import { supabaseAdmin, redisClient } from '../config/db.js';
 import { sendPushNotification } from './notificationService.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
@@ -10,6 +10,7 @@ const REMINDER_WINDOWS = [
 ];
 
 const DEFAULT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const DOCS_PAGE_SIZE = 1000;
 const LOCK_KEY = 'document:expiry:worker:lock';
 const LOCK_TTL_SECONDS = 600;
 const LEASE_EXTENSION_INTERVAL_MS = (LOCK_TTL_SECONDS * 1000) / 2;
@@ -59,14 +60,14 @@ function endOfDay(date) {
 }
 
 async function hasExistingNotification(userId, documentId, daysRemaining) {
-  if (!supabase) return false;
+  if (!supabaseAdmin) return false;
   try {
     const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('notifications')
       .select('id, metadata')
       .eq('user_id', userId)
-      .eq('notif_type', 'document_expiry')
+      .eq('notif_type', 'document')
       .gte('created_at', cutoff);
 
     if (error || !data || data.length === 0) return false;
@@ -75,7 +76,8 @@ async function hasExistingNotification(userId, documentId, daysRemaining) {
       (n) => n.metadata?.documentId === documentId &&
              String(n.metadata?.daysRemaining) === String(daysRemaining),
     );
-  } catch {
+  } catch (err) {
+    logger.error({ err, userId, documentId }, '[document-expiry] hasExistingNotification query failed');
     return false;
   }
 }
@@ -126,21 +128,29 @@ export async function processDocumentExpiryBatch() {
 
       let documents = [];
       try {
-        const { data, error } = await supabase
-          .from('documents')
-          .select('id, user_id, doc_type, valid_until')
-          .not('valid_until', 'is', null)
-          .gte('valid_until', windowStart.toISOString())
-          .lte('valid_until', windowEnd.toISOString());
+        let offset = 0;
+        let page = [];
+        do {
+          const { data, error } = await supabaseAdmin
+            .from('documents')
+            .select('id, user_id, doc_type, valid_until')
+            .not('valid_until', 'is', null)
+            .gte('valid_until', windowStart.toISOString())
+            .lte('valid_until', windowEnd.toISOString())
+            .order('valid_until', { ascending: true })
+            .order('id', { ascending: true })
+            .range(offset, offset + DOCS_PAGE_SIZE - 1);
 
-        if (error) {
-          logger.error(`[document-expiry] Failed to query documents for ${window.label} window:`, error.message);
-          continue;
-        }
+          if (error) {
+            throw new Error(error.message);
+          }
 
-        documents = data || [];
+          page = data || [];
+          documents.push(...page);
+          offset += page.length;
+        } while (page.length === DOCS_PAGE_SIZE);
       } catch (err) {
-        logger.error(`[document-expiry] Error querying documents for ${window.label} window:`, err.message);
+        logger.error(`[document-expiry] Failed to query documents for ${window.label} window:`, err.message);
         continue;
       }
 
@@ -182,7 +192,7 @@ export async function processDocumentExpiryBatch() {
         };
 
         try {
-          await sendPushNotification(doc.user_id, title, body, 'document_expiry', metadata);
+          await sendPushNotification(doc.user_id, title, body, 'document', metadata);
           totalNotificationsSent++;
           logger.info(`[document-expiry] Sent ${window.label} expiry alert for ${docLabel} (doc: ${doc.id}) to user ${doc.user_id}`);
         } catch (err) {

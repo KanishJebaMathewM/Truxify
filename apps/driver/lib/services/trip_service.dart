@@ -186,8 +186,8 @@ class TripService {
     String stopId,
     String tripDisplayId,
   ) async {
-    final connectivityResult = await Connectivity().checkConnectivity();
-    if (connectivityResult == ConnectivityResult.none) {
+    final connectivityResults = await Connectivity().checkConnectivity();
+    if (connectivityResults.contains(ConnectivityResult.none)) {
       await SyncEngine.queueEvent(
         tripId: tripDisplayId,
         eventType: 'markStopCompleted',

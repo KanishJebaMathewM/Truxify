@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import {
   sendDeliveryOtpNotification,
   storeDeliveryOtp,
@@ -17,7 +17,7 @@ import {
   OTP_LOCKOUT_MINUTES,
   DELIVERY_OTP_READY_STATUSES
 } from './orderNotificationService.js';
-import { escrowRelease, markEscrowBookingStarted } from '../escrow.js';
+import { escrowRelease, markEscrowBookingStarted, paisaToMaticWei } from '../escrow.js';
 import { DomainError } from './domainError.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 import { broadcastOrderMilestone } from '../../sockets/tracker.js';
@@ -138,7 +138,6 @@ export class OrderMilestoneService {
             `[OrderRoutes] Delivery OTP notification failed for order ${order.order_display_id} — FCM error: ${notifResult.fcm?.error || 'unknown'}`
           );
           await this.orderRepository.updateOrder(orderId, {
-            notification_failed: true,
             updated_at: new Date().toISOString()
           });
         }
@@ -161,7 +160,7 @@ export class OrderMilestoneService {
 
       const { data: order, error: orderErr } = await this.orderRepository.findOrderById(
         orderId,
-        'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status'
+        'id, order_display_id, driver_id, customer_id, escrow_status, escrow_release_attempts, status, total_amount'
       );
       if (orderErr || !order) throw new DomainError(404, { error: 'Order not found.' });
       if (order.driver_id !== driverId)
@@ -218,7 +217,10 @@ export class OrderMilestoneService {
 
       if (order.escrow_status === 'funded' || order.escrow_status === 'release_failed') {
         try {
-          const releaseResult = await escrowRelease(order.order_display_id);
+          const releaseResult = await escrowRelease(
+            order.order_display_id,
+            order.total_amount != null ? paisaToMaticWei(order.total_amount) : null,
+          );
           if (releaseResult.txHash) {
             releaseTxHash = releaseResult.txHash;
           } else if (releaseResult.alreadyReleased) {
@@ -244,7 +246,7 @@ export class OrderMilestoneService {
           p_otp_id: otpRecord.id,
           p_release_tx_hash: releaseTxHash
         },
-        userClient
+        supabaseAdmin
       );
       if (rpcErr) {
         logger.error('complete_trip_tx RPC failed:', rpcErr.message);

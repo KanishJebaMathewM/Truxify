@@ -18,12 +18,10 @@ export const HealthStatus = {
  */
 export function withTimeout(promise, ms = DEFAULT_TIMEOUT_MS) {
   let timer;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(`healthcheck timeout after ${ms}ms`)), ms);
-    }),
-  ]).finally(() => clearTimeout(timer));
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`healthcheck timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
 }
 
 /**

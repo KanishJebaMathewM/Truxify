@@ -120,7 +120,7 @@ const USER_HEADERS = {
 };
 
 const DRIVER_HEADERS = {
-  'x-user-id': 'driver-1',
+  'x-user-id': VALID_DRIVER_ID,
   'x-user-role': 'driver',
 };
 
@@ -463,6 +463,61 @@ describe('Verification Routes — Request Validation', () => {
       .set(DRIVER_HEADERS)
       .send({ driverId: VALID_DRIVER_ID, extra: 'nope' });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('Verification Routes — Document Check IDOR Guard', () => {
+  const OTHER_DRIVER_ID = '770e8400-e29b-41d4-a716-446655440002';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns 403 when a driver tries to check another driver\'s documents', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/documents/check')
+      .set(DRIVER_HEADERS)
+      .send({ driverId: OTHER_DRIVER_ID });
+
+    expect(res.status).toBe(403);
+    expect(mockVerificationService.checkDocumentIntegrity).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when a customer tries to check a driver\'s documents', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/documents/check')
+      .set(USER_HEADERS)
+      .send({ driverId: VALID_DRIVER_ID });
+
+    expect(res.status).toBe(403);
+    expect(mockVerificationService.checkDocumentIntegrity).not.toHaveBeenCalled();
+  });
+
+  it('returns 200 when a driver checks their own documents', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/documents/check')
+      .set(DRIVER_HEADERS)
+      .send({ driverId: VALID_DRIVER_ID });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(mockVerificationService.checkDocumentIntegrity).toHaveBeenCalledWith(VALID_DRIVER_ID);
+  });
+
+  it('returns 200 when an admin checks any driver\'s documents', async () => {
+    const app = buildVerifyApp();
+    const res = await request(app)
+      .post('/api/verify/documents/check')
+      .set('x-user-id', 'admin-uuid-999')
+      .set('x-user-role', 'admin')
+      .send({ driverId: OTHER_DRIVER_ID });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(mockVerificationService.checkDocumentIntegrity).toHaveBeenCalledWith(OTHER_DRIVER_ID);
   });
 });
 

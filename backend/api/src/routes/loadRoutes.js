@@ -50,13 +50,13 @@
  */
 
 import express from 'express';
-import { supabase } from '../config/db.js';
+import { supabaseAdmin } from '../config/db.js';
 import { authenticate, requireRole } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import logger from '../middleware/logger.js';
-import { loadFilterQuerySchema } from '../validation/loadSchemas.js';
-import { validateParams, validateQuery } from '../middleware/validate.js';
+import { loadFilterQuerySchema, createLoadSchema } from '../validation/loadSchemas.js';
+import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
 import { paramIdSchema, uuidParamSchema } from '../validation/requestSchemas.js';
 import { escapeLike } from '../lib/escapeLike.js';
 
@@ -149,7 +149,7 @@ function sanitizeLoadFilters(query) {
  *       400:
  *         description: Validation error
  */
-router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), async (req, res) => {
+router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateQuery(loadFilterQuerySchema), async (req, res) => {
   try {
     const filters = req.query;
 
@@ -193,7 +193,9 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
     const from = (page - 1) * limit;
     const to   = from + limit - 1;
 
-    let query = supabase
+    // load_offers is RLS-protected with all anon privileges revoked, so the
+    // marketplace board must read through the service-role client.
+    let query = supabaseAdmin
       .from('load_offers')
       .select('*', { count: 'exact' });
 
@@ -256,6 +258,9 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
       query = query.lte('freight_value', Math.round(filters.max_price * 100));
     }
     if (filters.distance !== undefined) {
+      // Include NULL extra_distance_km rows: most load offers are not
+      // en-route opportunities and leave this column NULL, so a plain
+      // .lte() would silently drop them (see issue #1943).
       query = query.or(`extra_distance_km.is.null,extra_distance_km.lte.${filters.distance}`);
     }
 
@@ -272,7 +277,15 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
 
     const ascending = filters.order === 'asc';
 
-    query = query.order(sortBy, { ascending }).range(from, to);
+    // Add an id tie-breaker (same direction) so pagination stays stable when
+    // multiple rows share the same sort key. The composite index
+    // (status, created_at DESC, id DESC) satisfies this ordering from the
+    // index alone, with no sort node.
+    query = query.order(sortBy, { ascending });
+    if (sortBy !== 'id') {
+      query = query.order('id', { ascending });
+    }
+    query = query.range(from, to);
 
     const { data: loads, error, count } = await query;
 
@@ -286,7 +299,7 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
       ...load,
       pickup: load.pickup_address,
       destination: load.drop_address,
-      estimated_price: load.freight_value / 100, // convert paisa to Rupees
+      estimated_price: load.freight_value / 100, // freight_value stored in paisa — divide by 100 for INR display
       vehicle_type: 'Truck'
     }));
 
@@ -308,29 +321,15 @@ router.get('/', authenticate, userLimiter, requirePolicy('load-offer:browse'), a
 // 1.5 CREATE NEW LOAD OFFER (CUSTOMER)
 // POST /api/loads
 // ============================================================================
-router.post('/', authenticate, userLimiter, requireRole(['customer']), async (req, res) => {
+router.post('/', authenticate, userLimiter, requireRole(['customer']), validateBody(createLoadSchema), async (req, res) => {
   try {
     const { origin, destination, weight_tons, expected_price, material_type } = req.body;
-
-    if (!origin || !origin.lat || !origin.lng) {
-      return res.status(400).json({ error: 'Origin with lat/lng is required' });
-    }
-    if (!destination || !destination.lat || !destination.lng) {
-      return res.status(400).json({ error: 'Destination with lat/lng is required' });
-    }
-
-    if (weight_tons === undefined || weight_tons === null || Number.isNaN(Number(weight_tons))) {
-      return res.status(400).json({ error: 'Valid weight_tons is required' });
-    }
-    if (expected_price === undefined || expected_price === null || Number.isNaN(Number(expected_price))) {
-      return res.status(400).json({ error: 'Valid expected_price is required' });
-    }
 
     const pickupAddress = origin.address || 'Unknown Origin';
     const dropAddress = destination.address || 'Unknown Destination';
     const routeLabel = `${pickupAddress.split(',')[0]} \u2192 ${dropAddress.split(',')[0]}`;
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from('load_offers')
       .insert({
         customer_id: req.user.id,
@@ -343,7 +342,7 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), async (re
         drop_lng: destination.lng,
         route_label: routeLabel,
         weight: `${weight_tons} tonnes`,
-        freight_value: Math.round(parseFloat(expected_price) * 100), // Assuming paisa representation
+        freight_value: Math.round(parseFloat(expected_price) * 100), // user input in INR — multiply by 100 to store as paisa
         goods_type: material_type || 'General',
         status: 'available'
       })
@@ -395,7 +394,7 @@ router.post('/', authenticate, userLimiter, requireRole(['customer']), async (re
  */
 router.get('/:id', authenticate, userLimiter, requirePolicy('load-offer:browse'), validateParams(paramIdSchema), async (req, res) => {
   try {
-    const { data: load, error } = await supabase
+    const { data: load, error } = await supabaseAdmin
       .from('load_offers')
       .select('*')
       .eq('id', req.params.id)
@@ -415,7 +414,7 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('load-offer:browse')
       ...load,
       pickup: load.pickup_address,
       destination: load.drop_address,
-      estimated_price: load.freight_value / 100, // convert paisa to Rupees
+      estimated_price: load.freight_value / 100, // freight_value stored in paisa — divide by 100 for INR display
       vehicle_type: 'Truck'
     };
 

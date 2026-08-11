@@ -43,7 +43,7 @@ class PaymentRepository {
       throw StateError('Payment method not found.');
     }
 
-    await _clearDefaults(userId);
+    await _clearDefaults(userId, exceptId: methodId);
     await SupabaseService.client
         .from(_table)
         .update({'is_default': true})

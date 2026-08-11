@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { acquireLock, releaseLock, LockAcquisitionError } from '../../lib/redisLock.js';
 
 /**
@@ -38,12 +38,17 @@ class ZKPService {
     try {
       const documentHash = this.hashDocument(driverData);
       const proofData = await this.callSnarkJS(driverData, documentHash);
-      await this.storeProof(driverData.userId, proofData);
+      // Never persist fabricated proofs into the audit/proof ledger — mock
+      // proofs exist only to exercise the pipeline outside production.
+      if (!proofData.isMock) {
+        await this.storeProof(driverData.userId, proofData);
+      }
       return {
         success: true,
         proof: proofData.proof,
         publicSignals: proofData.publicSignals,
         documentHash,
+        isMock: proofData.isMock === true,
         timestamp: new Date().toISOString()
       };
     } catch (error) {
@@ -65,16 +70,29 @@ class ZKPService {
   }
 
   async callSnarkJS(driverData, documentHash) {
-    // In production: execute snarkjs via child_process
-    // For now, return mock proof
-    return {
-      proof: {
-        a: ['0x123...', '0x456...'],
-        b: [['0x789...', '0xabc...'], ['0xdef...', '0xghi...']],
-        c: ['0xjkl...', '0xmno...']
-      },
-      publicSignals: [documentHash, '1']
-    };
+    const isMock = process.env.ZKP_MOCK === 'true' || process.env.NODE_ENV === 'test';
+
+    // The mock branch must be unreachable in production: a fabricated proof
+    // would otherwise be recorded as genuine and could grant KYC-verified
+    // state with no real document inspection.
+    if (process.env.NODE_ENV === 'production' && isMock) {
+      throw new Error('[ZKPService] Mock ZK proofs are disallowed in production.');
+    }
+
+    if (isMock) {
+      logger.warn('[ZKPService] Generating mock ZK proof (ZKP_MOCK or test mode active) — not persisted');
+      return {
+        isMock: true,
+        proof: {
+          a: ['0x123...', '0x456...'],
+          b: [['0x789...', '0xabc...'], ['0xdef...', '0xghi...']],
+          c: ['0xjkl...', '0xmno...']
+        },
+        publicSignals: [documentHash, '1']
+      };
+    }
+
+    throw new Error('[ZKPService] SNARK proof generation circuit worker is not configured.');
   }
 
   async verifyKYCOnChain(userId, proof) {
@@ -105,8 +123,8 @@ class ZKPService {
   }
 
   async getUserAddress(userId) {
-    const { data, error } = await supabase
-      .from('users')
+    const { data, error } = await (supabaseAdmin || supabase)
+      .from('profiles')
       .select('wallet_address')
       .eq('id', userId)
       .single();
@@ -115,7 +133,7 @@ class ZKPService {
   }
 
   async storeProof(userId, proofData) {
-    const { error } = await supabase
+    const { error } = await (supabaseAdmin || supabase)
       .from('zk_proofs')
       .insert([{
         user_id: userId,
@@ -127,8 +145,8 @@ class ZKPService {
   }
 
   async updateVerificationStatus(userId, verified, txHash) {
-    const { error } = await supabase
-      .from('users')
+    const { error } = await (supabaseAdmin || supabase)
+      .from('profiles')
       .update({
         kyc_verified: verified,
         kyc_verified_at: new Date().toISOString(),
@@ -155,13 +173,47 @@ class ZKPService {
    * an on-chain call and sufficient for the idempotency guard).
    */
   async isVerifiedInDb(userId) {
-    const { data, error } = await supabase
-      .from('users')
+    const { data, error } = await (supabaseAdmin || supabase)
+      .from('profiles')
       .select('kyc_verified')
       .eq('id', userId)
       .single();
     if (error || !data) return false;
     return data.kyc_verified === true;
+  }
+
+  /**
+   * Guards the ZKP path against self-attestation: the proof may only be
+   * generated over identity data the server already verified from the actual
+   * document (the OCR/DigiLocker KYC path sets driver_details.kyc_status and
+   * stores the extracted document number in kyc_doc_number). Client-supplied
+   * document numbers are cross-checked against that server-verified record.
+   *
+   * @returns {{ ok: true } | { ok: false, error: string }}
+   */
+  async assertServerVerified(userId, driverData) {
+    const client = supabaseAdmin ?? supabase;
+    const { data, error } = await client
+      .from('driver_details')
+      .select('kyc_status, kyc_doc_number')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error || !data) {
+      return { ok: false, error: 'No KYC verification record found. Complete document verification (OCR/DigiLocker) first.' };
+    }
+    if (data.kyc_status !== 'Verified') {
+      return { ok: false, error: `KYC is not server-verified (status: ${data.kyc_status || 'Unverified'}). Complete document verification (OCR/DigiLocker) before requesting a ZK proof.` };
+    }
+    if (data.kyc_doc_number) {
+      const normalize = (value) => String(value || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+      const serverDocNumber = normalize(data.kyc_doc_number);
+      const claimedLicenseNumber = normalize(driverData.licenseNumber);
+      if (!serverDocNumber || claimedLicenseNumber !== serverDocNumber) {
+        return { ok: false, error: 'License number does not match the server-verified document. Proofs are generated only over verified document data.' };
+      }
+    }
+    return { ok: true };
   }
 
   async getDocumentHash(userId) {
@@ -197,22 +249,22 @@ class ZKPService {
    */
   async verifyDriver(driverData) {
     const lockKey = `zkp:verify:${driverData.userId}`;
-    let lockValue = null;
-
-    // Throws LockAcquisitionError if Redis is down — propagate to route handler.
-    lockValue = await acquireLock(lockKey, ZKP_LOCK_TTL_MS);
-
-    if (lockValue === null) {
-      // Another request is currently processing this user's verification.
-      logger.warn(`[ZKP] Verification already in progress for user ${driverData.userId}`);
-      return {
-        success: false,
-        conflict: true,
-        error: 'Verification already in progress for this user. Please try again shortly.'
-      };
-    }
+    let lockValue;
 
     try {
+      // Throws LockAcquisitionError if Redis is down — propagate to route handler.
+      lockValue = await acquireLock(lockKey, ZKP_LOCK_TTL_MS);
+
+      if (lockValue === null) {
+        // Another request is currently processing this user's verification.
+        logger.warn(`[ZKP] Verification already in progress for user ${driverData.userId}`);
+        return {
+          success: false,
+          conflict: true,
+          error: 'Verification already in progress for this user. Please try again shortly.'
+        };
+      }
+
       // Idempotency guard: re-check inside the lock so a second request that
       // arrives after the first one has already committed sees the result and
       // exits without re-running the expensive blockchain transaction.
@@ -227,8 +279,35 @@ class ZKPService {
         };
       }
 
+      // Server-side verification gate (issue #8887): the ZKP path must never
+      // prove over client-supplied plaintext. Require the document to have
+      // been verified server-side (OCR/DigiLocker) and the claimed license
+      // number to match the server-verified record before any proof is
+      // generated, persisted, or submitted on-chain.
+      const serverCheck = await this.assertServerVerified(driverData.userId, driverData);
+      if (!serverCheck.ok) {
+        logger.warn(`[ZKP] Self-attestation blocked for user ${driverData.userId}: ${serverCheck.error}`);
+        return {
+          success: false,
+          code: 'KYC_NOT_SERVER_VERIFIED',
+          error: serverCheck.error
+        };
+      }
+
       // Step 1: Generate ZK proof
       const proofResult = await this.generateZKProof(driverData);
+
+      // Mock proofs (ZKP_MOCK/test mode) are never persisted and must never
+      // reach the on-chain verifier or flip kyc_verified — no fabricated
+      // credential can be recorded.
+      if (proofResult.isMock) {
+        logger.warn(`[ZKP] Mock proof generated for user ${driverData.userId} — not persisted or submitted on-chain`);
+        return {
+          success: false,
+          code: 'MOCK_PROOF_NOT_RECORDED',
+          error: 'Mock proofs are not persisted or submitted on-chain. Run in production without ZKP_MOCK.'
+        };
+      }
 
       // Step 2: Submit to blockchain
       const onChainResult = await this.verifyKYCOnChain(
@@ -253,16 +332,14 @@ class ZKPService {
       };
     } finally {
       // Always release the lock, even on error, so the user can retry.
-      if (lockValue) {
-        await releaseLock(lockKey, lockValue).catch(err =>
-          logger.error({ err }, '[ZKP] Failed to release verification lock')
-        );
-      }
+      await releaseLock(lockKey, lockValue).catch(err =>
+        logger.error({ err }, '[ZKP] Failed to release verification lock')
+      );
     }
   }
 
   async logVerification(userId, result) {
-    const { error } = await supabase
+    const { error } = await (supabaseAdmin || supabase)
       .from('kyc_audit_logs')
       .insert([{
         user_id: userId,
@@ -276,8 +353,8 @@ class ZKPService {
 
   async getVerificationStats() {
     const [verifiedResult, unverifiedResult] = await Promise.all([
-      supabase.from('users').select('id', { count: 'exact', head: true }).eq('kyc_verified', true),
-      supabase.from('users').select('id', { count: 'exact', head: true }).eq('kyc_verified', false),
+      (supabaseAdmin || supabase).from('profiles').select('id', { count: 'exact', head: true }).eq('kyc_verified', true),
+      (supabaseAdmin || supabase).from('profiles').select('id', { count: 'exact', head: true }).eq('kyc_verified', false),
     ]);
     if (verifiedResult.error) throw verifiedResult.error;
     if (unverifiedResult.error) throw unverifiedResult.error;

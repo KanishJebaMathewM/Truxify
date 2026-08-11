@@ -71,11 +71,17 @@ class LiquibaseService {
 
     async rollback(rollbackCount = 1) {
         try {
+            const parsedCount = parseInt(rollbackCount, 10);
+            if (!Number.isFinite(parsedCount) || parsedCount < 1) {
+                throw new Error('rollbackCount must be a positive integer');
+            }
+
             const args = [
                 `--changeLogFile=${this.liquibasePath}/changelog-master.xml`,
                 `--url=${this.dbUrl}`,
                 `--username=${this.username}`,
-                `--rollbackCount=${rollbackCount}`,
+                'rollback',
+                `--rollbackCount=${parsedCount}`,
             ];
 
             const { stdout, stderr } = await runLiquibase(args, this.password);
@@ -85,7 +91,7 @@ class LiquibaseService {
                 return { success: false, error: stderr };
             }
 
-            logger.info(`✅ Rollback ${rollbackCount} changes completed`);
+            logger.info(`✅ Rollback ${parsedCount} changes completed`);
             return { success: true, output: stdout };
         } catch (error) {
             logger.error('Rollback failed:', error);

@@ -80,7 +80,7 @@
  */
 
 import express from 'express';
-import { supabase, mongoDb, redisClient } from '../config/db.js';
+import { supabase, supabaseAdmin, mongoDb, redisClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
@@ -92,6 +92,13 @@ import { predictPrice } from '../services/ml.js';
 import { getLiveTrafficMultiplier } from '../services/trafficService.js';
 import { escapeLike } from '../lib/escapeLike.js';
 import logger from '../middleware/logger.js';
+import { FuelAdvisorService } from '../services/fuelAdvisorService.js';
+import { WeatherService } from '../services/weatherService.js';
+
+const weatherService = new WeatherService({ logger });
+const fuelAdvisorService = new FuelAdvisorService({ supabase, weatherService, logger });
+
+const DEFAULT_TRUCK_TYPES = ['Open Body', 'Closed Body', 'Container', 'Refrigerated'];
 
 function sanitizeNumberPlate(plate) {
   if (!plate || typeof plate !== 'string') return '';
@@ -133,7 +140,7 @@ const router = express.Router();
  */
 router.get('/types', authenticate, userLimiter, (req, res) => {
   return res.json({
-    types: ['Open Body', 'Closed Body', 'Container', 'Refrigerated']
+    types: DEFAULT_TRUCK_TYPES
   });
 });
 function parseCapacityFilter(value, field) {
@@ -336,6 +343,14 @@ function isLongitude(value) {
   return Number.isFinite(value) && value >= -180 && value <= 180;
 }
 
+const MATERIAL_TRUCK_COMPATIBILITY = Object.freeze({
+  Textile: ['Open Body', 'Closed Body', 'Container'],
+  Electronics: ['Closed Body', 'Container'],
+  Food: ['Closed Body', 'Container', 'Refrigerated'],
+  Machinery: ['Open Body', 'Container'],
+  Furniture: ['Closed Body', 'Container'],
+});
+
 async function canViewTruckNumber(user, truck) {
   if (user.role === 'admin' || truck.driver_id === user.id) {
     return { allowed: true };
@@ -439,7 +454,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
   }
 
   if (numWeightTonnes <= 0 || numWeightTonnes > 50) {
-    return res.status(400).json({ error: 'Weight must be between 0 and 50 tonnes' });
+    return res.status(400).json({ error: 'Weight must be greater than 0 and at most 50 tonnes' });
   }
   const fragileFilter = parseBoolean(is_fragile);
   if (fragileFilter.error) {
@@ -478,7 +493,20 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     return res.status(400).json({ error: 'min_capacity must be less than or equal to max_capacity' });
   }
 
-  const cacheKey = `truck_search:${numPickupLat},${numPickupLng}:${numDropLat},${numDropLng}:${numWeightTonnes}:${parseBoolean(is_fragile)}:${parseBoolean(is_stackable)}`;
+  const searchCacheFilters = {
+    pickupLat: numPickupLat,
+    pickupLng: numPickupLng,
+    dropLat: numDropLat,
+    dropLng: numDropLng,
+    weightTonnes: numWeightTonnes,
+    isFragile: fragileFilter.value,
+    isStackable: stackableFilter.value,
+    truckType: truck_type || '',
+    minCapacity: minCapFilter.value ?? '',
+    maxCapacity: maxCapFilter.value ?? '',
+    materialType: material_type || '',
+  };
+  const cacheKey = `truck_search:${JSON.stringify(searchCacheFilters)}`;
 
   if (redisClient) {
     try {
@@ -555,11 +583,11 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
               $maxDistance: maxDistanceMeters
             }
           }
-        }).toArray();
+        }).limit(200).toArray();
 
         nearbyDriverIds = [...new Set(nearbyTelemetry.map(t => t.driver_id))];
       } catch (mongoErr) {
-        logger.error('MongoDB telemetry search error:', mongoErr.message);
+        logger.error({ event: 'TRUCK_MONGO_TELEMETRY_ERROR', requestId: req.requestId || req.id, error: mongoErr && mongoErr.message }, 'MongoDB telemetry search error');
       }
     }
 
@@ -567,7 +595,10 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       return res.json([]);
     }
 
-    const { data: drivers, error: driversErr } = await supabase
+    // driver_details / trucks / profiles are RLS-protected with all anon
+    // privileges revoked, so the marketplace search must use the service-role
+    // client (scope is enforced by the search criteria, never the raw anon key).
+    const { data: drivers, error: driversErr } = await supabaseAdmin
       .from('driver_details')
       .select('user_id, rating, total_trips, completion_rate, truck_id')
       .eq('is_online', true)
@@ -575,7 +606,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
       .in('user_id', nearbyDriverIds);
 
     if (driversErr) {
-      logger.error('Driver search error:', driversErr.message);
+      logger.error({ event: 'TRUCK_DRIVER_SEARCH_ERROR', requestId: req.requestId || req.id, error: driversErr && driversErr.message }, 'Driver search error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -587,17 +618,17 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     const driverIds = drivers.map(d => d.user_id);
 
     const [trucksRes, profilesRes] = await Promise.all([
-      supabase.from('trucks').select('id, name, number_plate, max_capacity_tons').in('id', truckIds),
-      supabase.from('profiles').select('id, full_name, avatar_url, is_digilocker_verified').in('id', driverIds),
+      supabaseAdmin.from('trucks').select('id, name, truck_type, number_plate, max_capacity_tons').in('id', truckIds),
+      supabaseAdmin.from('profiles').select('id, full_name, avatar_url, is_digilocker_verified').in('id', driverIds),
     ]);
 
     if (trucksRes.error) {
-      logger.error('Truck enrichment lookup error:', trucksRes.error.message);
+      logger.error({ event: 'TRUCK_ENRICHMENT_ERROR', requestId: req.requestId || req.id, error: trucksRes.error && trucksRes.error.message }, 'Truck enrichment lookup error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
     if (profilesRes.error) {
-      logger.error('Driver profile enrichment lookup error:', profilesRes.error.message);
+      logger.error({ event: 'TRUCK_PROFILE_ENRICHMENT_ERROR', requestId: req.requestId || req.id, error: profilesRes.error && profilesRes.error.message }, 'Driver profile enrichment lookup error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -642,14 +673,28 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
           return false;
         }
       }
+      if (material_type && material_type !== '') {
+        const compatibleTypes = MATERIAL_TRUCK_COMPATIBILITY[material_type] || [];
+        if (!compatibleTypes.includes(truck.truckType)) {
+          return false;
+        }
+      }
       return true;
     });
 
     const responseResults = filteredResults.map(({ capacityTons, truckType, ...rest }) => rest);
 
+    if (redisClient) {
+      try {
+        await redisClient.set(cacheKey, JSON.stringify(responseResults), 'EX', 60);
+      } catch (err) {
+        logger.warn({ err: err.message }, 'Redis cache write error during search');
+      }
+    }
+
     res.json(responseResults);
   } catch (err) {
-    logger.error('Truck search error:', err.message);
+    logger.error({ event: 'TRUCK_SEARCH_ERROR', requestId: req.requestId || req.id, error: err && err.message }, 'Truck search error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -706,5 +751,75 @@ router.get('/:id/number', authenticate, userLimiter, validateParams(uuidParamSch
 });
 
 export default router;
+
+// ============================================================================
+// INTELLIGENT FUEL ADVISOR
+// ============================================================================
+/**
+ * @openapi
+ * /api/trucks/{id}/fuel-advisor:
+ *   get:
+ *     tags: [Trucks]
+ *     summary: Intelligent Fuel Advisor
+ *     description: Recommends the best biodiesel blend based on upcoming weather and recent engine load profile.
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Truck ID
+ *       - in: query
+ *         name: destination_lat
+ *         required: true
+ *         schema:
+ *           type: number
+ *         description: Latitude of destination
+ *       - in: query
+ *         name: destination_lng
+ *         required: true
+ *         schema:
+ *           type: number
+ *         description: Longitude of destination
+ *     responses:
+ *       200:
+ *         description: Recommendation object
+ *       400:
+ *         description: Missing or invalid destination coordinates
+ */
+router.get('/:id/fuel-advisor', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
+  const truckId = req.params.id;
+  const destinationLat = Number(req.query.destination_lat);
+  const destinationLng = Number(req.query.destination_lng);
+
+  if (!Number.isFinite(destinationLat) || !Number.isFinite(destinationLng)) {
+    return res.status(400).json({ error: 'Missing or invalid destination_lat or destination_lng' });
+  }
+
+  // Ensure truck belongs to the caller (if driver) or caller is admin
+  if (req.user.role === 'driver') {
+    const { data: truck, error: truckErr } = await supabase
+      .from('trucks')
+      .select('id')
+      .eq('id', truckId)
+      .eq('driver_id', req.user.id)
+      .single();
+
+    if (truckErr || !truck) {
+      return res.status(403).json({ error: 'Forbidden: Truck does not belong to you or does not exist' });
+    }
+  }
+
+  try {
+    const recommendation = await fuelAdvisorService.getFuelRecommendation(truckId, destinationLat, destinationLng);
+    return res.status(200).json(recommendation);
+  } catch (error) {
+    logger.error(`[fuel-advisor] Error computing recommendation for truck ${truckId}: ${error.message}`);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 // Resolves #2053: Prevent race conditions in truck allocation

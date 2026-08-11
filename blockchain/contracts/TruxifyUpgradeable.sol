@@ -144,6 +144,16 @@ contract TruxifyUpgradeable is
     /// @notice Emitted when an implementation's allowlist status changes.
     event ImplementationApprovalUpdated(address indexed implementation, bool approved);
 
+    // ============ Constructor ============
+
+    /// @notice The implementation contract is never used directly, only behind a
+    ///         UUPS proxy. Locking initialization here prevents an attacker from
+    ///         calling initialize() on the implementation itself and seizing the
+    ///         DEFAULT_ADMIN_ROLE (and thereby upgrade rights).
+    constructor() {
+        _disableInitializers();
+    }
+
     // ============ Initializer ============
     function initialize() public initializer {
         __AccessControl_init();
@@ -374,6 +384,7 @@ function disputeEscrow(uint256 escrowId) external onlyRole(DEFAULT_ADMIN_ROLE) n
         proposal.executed = true;
 
         if (passed) {
+            require(approvedImplementations[proposal.newImplementation], "Implementation not approved");
             // Set the DAO approval flag before calling upgradeToAndCall. The _authorizeUpgrade
             // hook will find this flag, consume it, and allow the upgrade to proceed.
             daoApprovedUpgrades[proposal.newImplementation] = true;

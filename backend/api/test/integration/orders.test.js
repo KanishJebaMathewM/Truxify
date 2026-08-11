@@ -76,6 +76,8 @@ afterEach(() => {
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: m.supabase,
+  createUserClient: () => m.supabase,
   firebaseAdmin: null,
   get redisClient() {
     return mockRedis;
@@ -2364,6 +2366,11 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
     expect(stored.drop_address).toBe('New Drop Place');
     expect(stored.drop_lat).toBe(22.22);
     expect(stored.drop_lng).toBe(88.88);
+
+    const dropChanged = m.store.order_timeline.filter(
+      t => t.order_display_id === 'OD-CHANGE-1' && t.milestone === 'Drop Changed'
+    );
+    expect(dropChanged).toHaveLength(1);
   });
 
   it('blocks change-drop with 409 when escrow is already funded', async () => {
@@ -2487,7 +2494,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
   });
 
   it('rejects cancellation once the shipment has been picked up', async () => {
-    for (const status of ['picked_up', 'in_transit', 'arriving', 'arrived_dropoff']) {
+    for (const status of ['picked_up', 'in_transit', 'arriving', 'delivered']) {
       m.store.orders = [
         {
           id: 'aaaa0006-0000-4000-8000-000000000006',

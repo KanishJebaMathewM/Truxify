@@ -1,6 +1,7 @@
 import gateway from './gateway/index.js';
 import startOrderService from './services/order.service.js';
 import startDriverService from './services/driver.service.js';
+import startTripService from './services/trip.service.js';
 import logger from '../api/src/middleware/logger.js';
 
 async function startGraphQL() {
@@ -11,6 +12,7 @@ async function startGraphQL() {
         await Promise.all([
             startOrderService(),
             startDriverService(),
+            startTripService(),
             // Add other services
         ]);
 
@@ -35,5 +37,4 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
-startGraphQL();
-.catch(err => console.error("Promise.all failed:", err));
+startGraphQL().catch(err => console.error("startGraphQL failed:", err));

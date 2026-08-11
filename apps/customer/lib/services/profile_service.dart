@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../core/api_client.dart';
 import 'fcm_service.dart';
 import 'supabase_service.dart';
@@ -12,12 +12,11 @@ class ProfileService {
   }) : _apiClient = apiClient ?? ApiClient();
 
   final ApiClient _apiClient;
+  static const _secureStorage = FlutterSecureStorage();
   static const String _profileCacheKey = 'truxify_profile_cache';
 
-  Future<Map<String, dynamic>?> _readCachedProfile(
-    SharedPreferences prefs,
-  ) async {
-    final cached = prefs.getString(_profileCacheKey);
+  Future<Map<String, dynamic>?> _readCachedProfile() async {
+    final cached = await _secureStorage.read(key: _profileCacheKey);
     if (cached == null) return null;
     try {
       final decoded = jsonDecode(cached);
@@ -25,21 +24,23 @@ class ProfileService {
     } catch (_) {
       // Invalid cache entries are cleared so future fallbacks do not crash.
     }
-    await prefs.remove(_profileCacheKey);
+    await _secureStorage.delete(key: _profileCacheKey);
     return null;
   }
 
   Future<Map<String, dynamic>> fetchProfile() async {
-    final prefs = await SharedPreferences.getInstance();
     try {
       final result = await _apiClient.get('/api/profile');
       if (result is Map<String, dynamic>) {
-        await prefs.setString(_profileCacheKey, jsonEncode(result));
+        await _secureStorage.write(
+          key: _profileCacheKey,
+          value: jsonEncode(result),
+        );
         return result;
       }
       throw StateError('Expected profile object but received ${result.runtimeType}');
     } on ApiException catch (e) {
-      final cached = await _readCachedProfile(prefs);
+      final cached = await _readCachedProfile();
       if (cached != null) {
         developer.log('API failed, returning cached profile.');
         return cached;
@@ -48,7 +49,7 @@ class ProfileService {
     } on FormatException {
       throw const FormatException('Invalid JSON response from server.');
     } catch (e) {
-      final cached = await _readCachedProfile(prefs);
+      final cached = await _readCachedProfile();
       if (cached != null) {
         developer.log('Network error, returning cached profile.');
         return cached;
@@ -56,7 +57,6 @@ class ProfileService {
       throw StateError('Failed to fetch profile via backend API: $e');
     }
   }
-
 
   Future<Map<String, dynamic>?> fetchCustomerStats() async {
     try {
@@ -94,18 +94,19 @@ class ProfileService {
 
     if (userId != null) {
       try {
-        await _apiClient.post(
-          '/api/auth/logout',
-        );
+        await _apiClient.post('/api/auth/logout');
       } catch (e) {
-        // ignore: avoid_print
         developer.log('Backend logout failed: $e');
       }
     }
 
-    // Unregister this device's FCM token first so a signed-out device stops
-    // receiving push notifications intended for the next user of a shared
-    // device, then sign out from local clients.
+    // Clear cached profile PII from secure storage on logout
+    try {
+      await _secureStorage.delete(key: _profileCacheKey);
+    } catch (e) {
+      developer.log('Failed to clear secure profile cache on logout: $e');
+    }
+
     try {
       await FcmService.unregisterToken();
     } catch (e) {
@@ -113,14 +114,8 @@ class ProfileService {
     }
 
     await Future.wait([
-      _safeSignOut(
-        () => FirebaseAuth.instance.signOut(),
-        'Firebase',
-      ),
-      _safeSignOut(
-        () => SupabaseService.client.auth.signOut(),
-        'Supabase',
-      ),
+      _safeSignOut(() => FirebaseAuth.instance.signOut(), 'Firebase'),
+      _safeSignOut(() => SupabaseService.client.auth.signOut(), 'Supabase'),
     ]);
   }
 

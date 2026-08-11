@@ -319,6 +319,12 @@ export const oracleVerifyCrosschainSchema = z.object({
     .regex(/^0x[a-fA-F0-9]+$/, { message: 'blockchainHash must be a 0x-prefixed hex string' }),
 }).strict();
 
+export const oracleGasPriceSyncSchema = z.object({
+  gasGwei: z.number().positive('gasGwei must be a positive number'),
+  idempotencyKey: z.string().min(1, 'idempotencyKey is required').max(128),
+  timestamp: z.number().optional(),
+}).strict();
+
 export const verifyOrderParamsSchema = z.object({
   orderId: uuidSchema,
 });

@@ -826,7 +826,7 @@ router.post('/predict-demand', authenticate, userLimiter, requirePolicy('order:p
  *               $ref: '#/components/schemas/DriverLocationResponse'
  */
 router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-driver-location', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
@@ -898,7 +898,7 @@ router.get('/:id/driver-location', authenticate, userLimiter, telemetryLimiter, 
  *               $ref: '#/components/schemas/OrderRouteResponse'
  */
 router.get('/:id/route', authenticate, userLimiter, telemetryLimiter, requirePolicy('order:view-route', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), validateParams(paramIdSchema), async (req, res) => {
   const orderId = req.params.id;
@@ -1164,7 +1164,7 @@ router.get('/my/history', authenticate, userLimiter, requirePolicy('order:view-h
 
 // GET /api/orders/:id/timeline
 router.get('/:id/timeline', authenticate, userLimiter, requirePolicy('order:view-timeline', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), validateParams(paramIdSchema), async (req, res) => {
   try {
@@ -1181,7 +1181,7 @@ router.get('/:id/timeline', authenticate, userLimiter, requirePolicy('order:view
 
 // GET /api/orders/:id
 router.get('/:id', authenticate, userLimiter, requirePolicy('order:view', async (req) => {
-  const { data: order } = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
+  const order = await orderValidationService.findOrderByIdOrDisplayId(req.params.id, 'id, customer_id, driver_id');
   return { order };
 }), validateParams(paramIdSchema), async (req, res) => {
   try {

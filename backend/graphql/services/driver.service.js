@@ -108,7 +108,9 @@ const resolvers = {
             let query = supabase.from('drivers').select('*');
             
             if (available !== undefined) {
-                query = query.eq('status', available ? 'AVAILABLE' : 'BUSY');
+                query = available
+                    ? query.eq('status', 'AVAILABLE')
+                    : query.neq('status', 'AVAILABLE');
             }
             
             if (location) {
@@ -144,6 +146,7 @@ const resolvers = {
                 .from('drivers')
                 .update({
                     status: input.status,
+                    availability: input.availability,
                     current_location: input.currentLocation,
                     truck_type: input.truckType || undefined,
                     truck_number: input.truckNumber || undefined,

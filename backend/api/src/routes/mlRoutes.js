@@ -54,7 +54,7 @@ router.get('/eta', authenticate, userLimiter, async (req, res) => {
     if (trip.order_id) {
       const { data: orderRes, error: orderErr } = await supabaseAdmin
         .from('orders')
-        .select('pickup_lat, pickup_lng, drop_lat, drop_lng')
+        .select('pickup_lat, pickup_lng, drop_lat, drop_lng, customer_id, driver_id')
         .eq('id', trip.order_id)
         .maybeSingle();
 
@@ -67,6 +67,14 @@ router.get('/eta', authenticate, userLimiter, async (req, res) => {
 
     if (!order || !order.drop_lat || !order.drop_lng) {
       return res.status(422).json({ error: 'Trip has no destination coordinates for ETA.' });
+    }
+
+    if (req.user.role !== 'admin') {
+      const isOwner =
+        order.customer_id === req.user.id || order.driver_id === req.user.id;
+      if (!isOwner) {
+        return res.status(404).json({ error: 'Trip not found.' });
+      }
     }
 
     const currentLat = parseCoord(lat, -90, 90);

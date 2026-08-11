@@ -190,8 +190,11 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
 }
 
 export function convertKmToMiles(km) {
-  if (typeof km !== 'number' || Number.isNaN(km)) {
-    throw new TypeError('km must be a number');
+  if (typeof km !== 'number' || Number.isNaN(km) || !Number.isFinite(km)) {
+    throw new TypeError('km must be a finite number');
+  }
+  if (km < 0) {
+    throw new RangeError('km must be non-negative');
   }
   return km * 0.621371;
 }

@@ -61,6 +61,8 @@ const POLICIES = {
   'delivery:verify':           { roles: [ROLES.DRIVER], ownership: (u, r) => r?.order && r.order.driver_id === u.id },
   'delivery:resend-otp':       { roles: [ROLES.DRIVER], ownership: (u, r) => r?.order && r.order.driver_id === u.id },
 
+  'escort:issue-credential':   { roles: [ROLES.DRIVER, ROLES.ADMIN], ownership: (u, r) => u.role === ROLES.ADMIN || (r?.callerWallet && r?.subject === r.callerWallet) },
+
   'load-offer:view-all':       {},
   'load-offer:browse':         { roles: [ROLES.DRIVER] },
 

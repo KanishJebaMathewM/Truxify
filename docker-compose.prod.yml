@@ -255,6 +255,7 @@ services:
       EXECUTIONS_DATA_PRUNE: "true"
       EXECUTIONS_DATA_MAX_AGE: 336
       N8N_METRICS: "true"
+      BACKEND_API_URL: ${BACKEND_API_URL:?BACKEND_API_URL is required}
     volumes:
       - n8n_data:/home/node/.n8n
     deploy:

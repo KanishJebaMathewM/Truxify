@@ -227,11 +227,17 @@ describe('Pricing Service Unit Tests', () => {
       expect(convertKmToMiles(100)).toBeCloseTo(62.1371, 4);
     });
 
-    it('throws TypeError for non-numeric or NaN', () => {
+    it('throws TypeError for non-numeric, NaN, or non-finite', () => {
       expect(() => convertKmToMiles('100')).toThrow(TypeError);
       expect(() => convertKmToMiles(null)).toThrow(TypeError);
       expect(() => convertKmToMiles(undefined)).toThrow(TypeError);
       expect(() => convertKmToMiles(NaN)).toThrow(TypeError);
+      expect(() => convertKmToMiles(Infinity)).toThrow(TypeError);
+    });
+
+    it('throws RangeError for negative km values', () => {
+      expect(() => convertKmToMiles(-5)).toThrow(RangeError);
+      expect(() => convertKmToMiles(-100)).toThrow(RangeError);
     });
   });
 });

@@ -51,7 +51,7 @@ import {
   invalidateCachedProfile,
   invalidateCachedSupabaseProfile,
 } from "../lib/profileCache.js";
-import { firebaseAdmin, supabase, redisClient } from "../config/db.js";
+import { firebaseAdmin, supabaseAdmin, redisClient } from "../config/db.js";
 import {
   OTP_MAX_FAILED_ATTEMPTS,
   OTP_LOCKOUT_MINUTES,
@@ -288,8 +288,12 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       });
     }
 
-    // Look up the latest unused, unexpired OTP for this phone number
-    const { data: otpRecord, error: fetchErr } = await supabase
+    // Look up the latest unused, unexpired OTP for this phone number. Access
+    // goes through the service-role client (supabaseAdmin): anon/authenticated
+    // have no SELECT privilege on phone_otps (see
+    // 20260811120000_secure_phone_otps_rls.sql), so otp_hash/otp_salt are never
+    // exposed to callers.
+    const { data: otpRecord, error: fetchErr } = await supabaseAdmin
       .from("phone_otps")
       .select("id, otp_hash, otp_salt, expires_at, verified")
       .eq("phone", phone)
@@ -336,7 +340,7 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
     }
 
     // Consume the OTP so it cannot be reused
-    const { error: updateErr } = await supabase
+    const { error: updateErr } = await supabaseAdmin
       .from("phone_otps")
       .update({ verified: true, verified_at: new Date().toISOString() })
       .eq("id", otpRecord.id);

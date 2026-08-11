@@ -416,7 +416,7 @@ export const reportGripDataSchema = z.object({
 /**
  * Schema for POST /api/driver/weigh-stations/sync-weight
  */
-export const syncWeightSchema = z.object({
+export const syncWeightSchemaV2 = z.object({
   vehicleId: z.string().min(1, 'vehicleId is required'),
   truckId: z.string().min(1, 'truckId is required'),
   axles: z.array(z.object({

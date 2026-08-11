@@ -8,7 +8,7 @@ class HighwayGraphDatasetLoader:
         # 5 highway junction nodes with [avg_speed, vehicle_density, toll_wait_time_mins]
         node_features = np.array([
             [60.0, 120.0, 2.0],
-            [25.0, 450.0, 15.0], // Congested Toll Plaza
+            [25.0, 450.0, 15.0],  # Congested Toll Plaza
             [55.0, 150.0, 3.0],
             [40.0, 280.0, 8.0],
             [70.0, 90.0, 1.0],

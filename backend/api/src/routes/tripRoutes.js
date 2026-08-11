@@ -141,6 +141,66 @@ function deepSanitize(obj, keys) {
   return clean;
 }
 
+/**
+ * Replays an offline 'markStopCompleted' event so a stop completed while the
+ * driver was offline is actually persisted once the batch syncs. Mirrors the
+ * online PUT /api/trips/:id/stops/:stopId/complete behaviour.
+ */
+async function replayMarkStopCompleted(tripId, payload) {
+  const stopId = payload?.stopId;
+  if (!stopId) {
+    logger.warn('[SyncEngine] markStopCompleted event missing stopId');
+    return;
+  }
+
+  const { data: stop, error: stopErr } = await supabaseAdmin
+    .from('trip_stops')
+    .select('id, is_completed')
+    .eq('id', stopId)
+    .eq('trip_display_id', tripId)
+    .maybeSingle();
+  if (stopErr) {
+    logger.error('[SyncEngine] Failed to fetch stop for markStopCompleted replay:', stopErr.message);
+    return;
+  }
+  if (!stop || stop.is_completed) return;
+
+  const { error: updateErr } = await supabaseAdmin
+    .from('trip_stops')
+    .update({
+      is_completed: true,
+      is_current: false,
+      status_label: 'Delivered',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', stop.id);
+  if (updateErr) {
+    logger.error('[SyncEngine] Failed to complete stop during replay:', updateErr.message);
+    return;
+  }
+
+  // Advance the current-stop marker to the next uncompleted stop.
+  const { data: nextStops, error: nextErr } = await supabaseAdmin
+    .from('trip_stops')
+    .select('id')
+    .eq('trip_display_id', tripId)
+    .eq('is_completed', false)
+    .order('sort_order', { ascending: true })
+    .limit(1);
+  if (nextErr) {
+    logger.error('[SyncEngine] Failed to resolve next stop during replay:', nextErr.message);
+  } else if (nextStops && nextStops.length > 0) {
+    await supabaseAdmin
+      .from('trip_stops')
+      .update({
+        is_current: true,
+        status_label: 'In Progress',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', nextStops[0].id);
+  }
+}
+
 // Schema for an individual Trip Event from the Flutter offline database
 const tripEventSchema = z.object({
   id: z.string().min(1, "Event ID is required"),
@@ -266,20 +326,28 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
       const tripIds = [...new Set(events.map(event => event.trip_id).filter(Boolean))];
 
       if (tripIds.length > 0) {
+        // Trip ids sent by the app are trip display ids ('TX-' + order display id),
+        // not the orders.id uuid. Map them back to the bare order display id before
+        // looking up the owning order, otherwise every batch is rejected with 403.
+        const orderDisplayIds = tripIds.map(tripId =>
+          typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId
+        );
+
         const { data: ownedOrders, error: ownershipError } = await supabase
           .from('orders')
-          .select('id, driver_id, customer_id')
-          .in('id', tripIds);
+          .select('order_display_id, driver_id, customer_id')
+          .in('order_display_id', orderDisplayIds);
 
         if (ownershipError) {
           logger.error('[SyncEngine] Failed to verify trip ownership:', ownershipError.message);
           return res.status(500).json({ error: 'Internal Server Error' });
         }
 
-        const orderById = new Map((ownedOrders || []).map(order => [order.id, order]));
+        const orderByDisplayId = new Map((ownedOrders || []).map(order => [order.order_display_id, order]));
 
         for (const tripId of tripIds) {
-          const order = orderById.get(tripId);
+          const orderDisplayId = typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId;
+          const order = orderByDisplayId.get(orderDisplayId);
           const isDriver = order?.driver_id === userId;
           const isCustomer = order?.customer_id === userId;
           if (!order || (!isDriver && !isCustomer)) {
@@ -332,6 +400,14 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
       logger.error('[SyncEngine] Bulk Insert Failed:', insertError.message);
       // Return 500 so the Flutter app knows to apply exponential backoff and retry later
       return res.status(500).json({ error: 'Database failed to process batch.' });
+    }
+
+    // 3.5 Replay actionable trip events (e.g. offline stop completions) so an
+    // event queued while offline has its effect applied once connectivity returns.
+    for (const event of events) {
+      if (event.type === 'markStopCompleted' && event.trip_id) {
+        await replayMarkStopCompleted(event.trip_id, event.payload || {});
+      }
     }
 
     // 4. Log the successful batch using the idempotency key

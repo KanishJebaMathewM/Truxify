@@ -58,7 +58,7 @@
  */
 
 import express from 'express';
-import { supabase, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
+import { supabase, supabaseAdmin, mongoDb, redisClient, firebaseAdmin } from '../config/db.js';
 import { healthLimiter } from '../middleware/rateLimiter.js';
 import { checkEscrowHealth } from '../services/escrow.js';
 import logger from '../middleware/logger.js';
@@ -82,10 +82,14 @@ function withTimeout(promise) {
 }
 
 async function checkSupabase() {
-  if (!supabase) return 'not_configured';
+  // Probe through the service-role client: anon privileges on profiles are
+  // revoked by revoke_anon_privileges.sql, so an anon-keyed probe would always
+  // report 42501 permission denied even when Supabase is reachable.
+  const client = supabaseAdmin || supabase;
+  if (!client) return 'not_configured';
   try {
     const { error } = await withTimeout(
-      supabase.from('profiles').select('id').limit(1)
+      client.from('profiles').select('id').limit(1)
     );
     return error ? 'failed' : 'connected';
   } catch (err) {
@@ -288,7 +292,7 @@ const aggregator = createDefaultAggregator();
  *       503:
  *         description: One or more critical services degraded
  */
-router.get('/full', healthLimiter, async (_req, res) => {
+router.get('/full', healthLimiter, async (req, res) => {
   try {
     const result = await aggregator.aggregate();
     // 200 = system operational (healthy or degraded with non-critical failures)
@@ -296,7 +300,10 @@ router.get('/full', healthLimiter, async (_req, res) => {
     const httpStatus = result.status === 'unhealthy' ? 503 : 200;
     return res.status(httpStatus).json(result);
   } catch (err) {
-    logger.error('[health] Aggregated health check failed:', err.message);
+    logger.error(
+      { event: 'HEALTH_AGGREGATION_ERROR', requestId: req.requestId || req.id, error: err && err.message },
+      '[health] Aggregated health check failed',
+    );
     return res.status(500).json({
       status: 'unhealthy',
       timestamp: new Date().toISOString(),

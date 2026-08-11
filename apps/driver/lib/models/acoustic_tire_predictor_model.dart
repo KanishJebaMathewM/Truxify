@@ -1,27 +1,27 @@
-class TireHarmonicData {
-  final String tirePosition; // e.g., "Drive Axle 1 - Outer Left"
-  final double currentFrequencyHz;
-  final double baselineFrequencyHz;
-  final double anomalyScore; // 0.0 to 1.0 (1.0 = imminent failure)
-  final String status; // "Normal", "Warning", "CRITICAL"
+class AcousticHarmonicSignature {
+  final double frequencyHz;
+  final double amplitudeDb;
+  final bool isAnomalous;
 
-  TireHarmonicData({
-    required this.tirePosition,
-    required this.currentFrequencyHz,
-    required this.baselineFrequencyHz,
-    required this.anomalyScore,
-    required this.status,
+  AcousticHarmonicSignature({
+    required this.frequencyHz,
+    required this.amplitudeDb,
+    required this.isAnomalous,
   });
 }
 
-class AcousticAnalysisStatus {
-  final bool isListening;
-  final List<TireHarmonicData> tireData;
-  final bool hasCriticalWarning;
+class TireAcousticAnalysis {
+  final String status; // "Monitoring", "Warning - Belt Separation Detected", "Critical - Imminent Blowout"
+  final String activeTireLocation; // e.g. "Driver Side - Drive Axle 1 - Outer"
+  final double confidencePct;
+  final int estimatedMinutesToFailure;
+  final List<AcousticHarmonicSignature> signatures;
 
-  AcousticAnalysisStatus({
-    required this.isListening,
-    required this.tireData,
-    required this.hasCriticalWarning,
+  TireAcousticAnalysis({
+    required this.status,
+    required this.activeTireLocation,
+    required this.confidencePct,
+    required this.estimatedMinutesToFailure,
+    required this.signatures,
   });
 }

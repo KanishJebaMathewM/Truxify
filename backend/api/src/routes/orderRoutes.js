@@ -186,7 +186,8 @@ import {
   recordDepositTx,
   confirmEscrowRefund,
 } from '../core/container.js';
-import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei } from '../services/escrow.js';
+import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei, submitEscrowRefund } from '../services/escrow.js';
+
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
 import { computeOrderPricing } from '../lib/pricing.js';
 
@@ -195,7 +196,7 @@ const router = express.Router();
 const getOrderResource = async (req) => {
   const { id } = req.params;
   if (!id) return null;
-  return await orderService.getOrderById(id);
+  return await orderRepository.findOrderById(id);
 };
 
 
@@ -205,10 +206,13 @@ router.post('/api/deliveries/:id/geofence-confirm', async (req, res) => {
   const lat = parseFloat(driver_lat);
   const lng = parseFloat(driver_lng);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || isNaN(lat) || isNaN(lng)) {
     return res.status(400).json({ error: 'Invalid driver_lat or driver_lng' });
   }
 
+  if (!id || !id.trim()) {
+    return res.status(400).json({ error: 'Invalid order id' });
+  }
   let geofenceRadiusM;
   if (geofence_radius_m !== undefined) {
     geofenceRadiusM = parseFloat(geofence_radius_m);
@@ -292,7 +296,7 @@ const handleDeliveryVerification = async (req, res) => {
       'total_amount, order_display_id'
     );
     const amountInr = orderForAmount?.total_amount
-      ? (orderForAmount.total_amount / 100).toFixed(0)
+      ? Math.round(orderForAmount.total_amount / 100)
       : null;
 
     if (escrowUpdateFailed) {
@@ -599,6 +603,7 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   }
 
   try {
+    const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, order_display_id, customer_id, escrow_booking_id, escrow_status, total_amount');
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
@@ -1191,4 +1196,4 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('order:view', async 
   }
 });
 
-module.exports = router;
+export default router;

@@ -1,7 +1,8 @@
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { errorResponse } from '../utils/apiResponse.js';
 import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
+import { errorResponse } from '../utils/apiResponse.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
 
@@ -66,7 +67,12 @@ export async function registerDeviceToken(req, res, next) {
       );
     }
 
-    const { data: existingDevice, error: lookupError } = await supabase
+    if (!supabaseAdmin) {
+      logger.error('[DeviceController] Service-role client unavailable for register_device_token');
+      return next(new AppError('Failed to register device', 503));
+    }
+
+    const { data: existingDevice, error: lookupError } = await supabaseAdmin
       .from('user_devices')
       .select('user_id')
       .eq('fcm_token', fcmToken)
@@ -81,9 +87,11 @@ export async function registerDeviceToken(req, res, next) {
 
     // All three operations (upsert user_devices, clear previous owner's profile,
     // sync current user's profile) run inside a single Postgres transaction via
-    // the register_device_token RPC so a partial failure rolls everything back
-    // and leaves no orphaned or desynchronized records.
-    const { error: rpcError } = await supabase.rpc('register_device_token', {
+    // the register_device_token RPC so a partial failure rolls everything back.
+    // The RPC is EXECUTE-granted to service_role only (the migration revokes it
+    // from PUBLIC/anon/authenticated), so it must be invoked through the admin
+    // client rather than the shared anon client.
+    const { error: rpcError } = await supabaseAdmin.rpc('register_device_token', {
       p_user_id:      userId,
       p_fcm_token:    fcmToken,
       p_platform:     platform || 'android',

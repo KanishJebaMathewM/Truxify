@@ -78,7 +78,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
         if (parsed !== null) return parsed;
       }
     } catch (err) {
-      logger.error('[osrm] Redis get error:', err.message);
+      logger.error({ event: 'OSRM_REDIS_GET_ERROR', error: err && err.message }, '[osrm] Redis get error');
     }
   }
 
@@ -122,7 +122,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
         try {
           await redisClient.set(cacheKey, JSON.stringify(result), 'EX', CACHE_TTL_SECONDS);
         } catch (err) {
-          logger.error('[osrm] Redis set error:', err.message);
+          logger.error({ event: 'OSRM_REDIS_SET_ERROR', error: err && err.message }, '[osrm] Redis set error');
         }
       }
 
@@ -188,7 +188,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
         if (parsed !== null) return parsed;
       }
     } catch (err) {
-      logger.error('[osrm] Redis get error (geometry):', err.message);
+      logger.error({ event: 'OSRM_REDIS_GET_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Redis get error (geometry)');
     }
   }
 

@@ -5,6 +5,7 @@ const supabaseMock = createSupabaseMock();
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: supabaseMock.supabase,
+  supabaseAdmin: supabaseMock.supabase,
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -44,7 +45,16 @@ describe('registerDeviceToken', () => {
 
     expect(res.status).not.toHaveBeenCalledWith(400);
     expect(next).not.toHaveBeenCalled();
-    expect(supabaseMock.calls.some((call) => call.table === 'user_devices' && call.mode === 'upsert')).toBe(true);
+    // Registration goes through the transactional register_device_token RPC,
+    // not a direct upsert, so the device row, the previous owner's profile and
+    // the current user's profile all commit or roll back together.
+    const rpcCall = supabaseMock.calls.find((call) => call.rpc === 'register_device_token');
+    expect(rpcCall).toBeDefined();
+    expect(rpcCall.args).toMatchObject({
+      p_user_id: 'user-1',
+      p_fcm_token: 'valid_token_12345',
+      p_platform: 'android',
+    });
     expect(res.json).toHaveBeenCalledWith({
       success: true,
       message: 'Device token registered',

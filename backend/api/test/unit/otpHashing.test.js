@@ -102,4 +102,23 @@ describe('otpHashing', () => {
       expect(verifyOtpHash(otp, otpRecord)).toBe(false);
     });
   });
+
+  describe('hashOtp edge cases', () => {
+    it('throws TypeError when OTP is null', () => {
+      expect(() => hashOtp(null)).toThrow(TypeError);
+    });
+
+    it('throws TypeError when OTP is undefined', () => {
+      expect(() => hashOtp(undefined)).toThrow(TypeError);
+    });
+
+    it('throws TypeError when OTP is an empty string', () => {
+      expect(() => hashOtp('')).toThrow(TypeError);
+    });
+
+    it('throws TypeError when OTP is only whitespace', () => {
+      expect(() => hashOtp('   ')).toThrow(TypeError);
+    });
+  });
+
 });

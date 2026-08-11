@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../controllers/app_controller.dart';
+import '../providers/text_scale_provider.dart';
 import '../core/app_routes.dart';
 import '../core/config.dart';
 import '../data/mock_data.dart';
@@ -1050,6 +1052,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   color: _borderColor(context),
                 ),
                 const _ThemeModeTile(),
+                Divider(
+                  height: 1,
+                  color: _borderColor(context),
+                ),
+                Consumer<TextScaleProvider>(
+                  builder: (context, scaleProvider, child) {
+                    return SwitchListTile.adaptive(
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                      title: Text(
+                        'Enable Large Text',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Optimized for dashboard mounting',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12,
+                          color: TruxifyColors.adaptiveSecondaryText(context),
+                        ),
+                      ),
+                      value: scaleProvider.isLargeText,
+                      onChanged: (val) => scaleProvider.toggleScale(val),
+                      activeColor: TruxifyColors.accent,
+                    );
+                  },
+                ),
                 Divider(
                   height: 1,
                   color: _borderColor(context),

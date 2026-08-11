@@ -88,7 +88,9 @@ async def predict_traffic(request: GraphRequest):
         data = builder.get_pytorch_data()
         
         # Generate synthetic node features for time steps
-        node_features = data.x.unsqueeze(0).unsqueeze(0)  # (1, 1, nodes, features)
+        # Model expects (batch_size, num_nodes, time_steps, features); build
+        # (1, num_nodes, 1, features) so batch_size == 1 and time_steps == 1.
+        node_features = data.x.unsqueeze(0).unsqueeze(2).contiguous()
         
         # Predict
         predictions = trainer.model.predict_traffic(node_features, data.edge_index)

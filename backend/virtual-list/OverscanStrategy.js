@@ -83,7 +83,7 @@ class OverscanStrategy extends EventEmitter {
         const speedCategory = this.getSpeedCategory(avgVelocity);
         
         // Calculate base overscan
-        let overscan = this.defaultOverscan;
+        let overscan;
         
         switch (speedCategory) {
             case 'veryFast':

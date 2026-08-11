@@ -397,3 +397,17 @@ export const shareTrackingSchema = z.object({}).strict();
 export const publicTrackingTokenSchema = z.object({
   token: z.string().min(1, 'Tracking token is required').max(512),
 });
+
+export const reportGripDataSchema = z.object({
+  latitude: latitudeSchema,
+  longitude: longitudeSchema,
+  grip_index: coerceNumber(
+    z.number({ invalid_type_error: "grip_index must be a number" })
+      .min(0, { message: 'Grip index must be between 0 and 10' })
+      .max(10, { message: 'Grip index must be between 0 and 10' })
+  ),
+  slip_events_count: coerceNumber(
+    z.number({ invalid_type_error: "slip_events_count must be a number" })
+      .nonnegative({ message: 'slip_events_count must be >= 0' })
+  ).optional().default(0),
+}).strict();

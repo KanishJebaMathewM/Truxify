@@ -207,7 +207,11 @@ async function finalizeOrRevert(order, orderRepository) {
       escrow_funding_error: err.message,
       escrow_funding_last_attempt_at: new Date().toISOString(),
     });
-    logger.warn(`[escrow-funding] Order ${order.order_display_id} funding reconciliation retry ${newAttempts}/${MAX_ATTEMPTS}: ${err.message}`);
+    if (newAttempts >= MAX_ATTEMPTS) {
+      logger.error(`[escrow-funding] Order ${order.order_display_id} reached max funding reconciliation retries (${MAX_ATTEMPTS}) and is escalated to manual review.`);
+    } else {
+      logger.warn(`[escrow-funding] Order ${order.order_display_id} funding reconciliation retry ${newAttempts}/${MAX_ATTEMPTS}: ${err.message}`);
+    }
   } finally {
     await releaseLock(lockKey, lockValue);
   }
@@ -244,6 +248,10 @@ export async function reconcileStaleFunding(orderRepository) {
     }
 
     for (const order of staleOrders ?? []) {
+      const attempts = order.escrow_funding_attempts ?? 0;
+      if (attempts >= MAX_ATTEMPTS) {
+        continue;
+      }
       if (!dueForRetry(order)) continue;
       if (globalLockAcquired && redisClient) {
         try {

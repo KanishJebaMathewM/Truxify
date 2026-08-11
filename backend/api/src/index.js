@@ -26,7 +26,7 @@ import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
 import { closeDbConnections, waitForMongoDb, validateConfig, redisClient, supabaseAdmin } from './config/db.js'
 import { orderRepository } from './core/container.js'
 import { OrderRepository } from './repositories/orderRepository.js'
-import { CacheManager } from './cache/CacheManager.js'
+import CacheManager from './cache/CacheManager.js'
 import { closeWebSocketServer, initWebSocketServer, __testing as wsTesting } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
@@ -61,8 +61,11 @@ import auditRoutes from './routes/auditRoutes.js'
 import paymentRoutes from './routes/paymentRoutes.js'
 import userRoutes from './routes/userRoutes.js'
 import voiceRoutes from './routes/voiceRoutes.js'
+import voiceAssistantRoutes from './routes/voice.routes.js'
 import demandRoutes from './routes/demandRoutes.js'
+import roadConditionRoutes from './routes/roadConditionRoutes.js'
 import escortWalletRoutes from './routes/escortWalletRoutes.js'
+import mlRoutes from './routes/mlRoutes.js'
 
 // ============================================================================
 // 🆕 MULTI-PROVIDER ORACLE & VERIFICATION ROUTES
@@ -93,6 +96,7 @@ import wasiRoutes from '../../../wasi/routes.js'
 import wasmRoutes from '../../../wasm/routes.js'
 import snykRoutes from '../../../snyk/routes.js'
 import liquibaseRoutes from '../../../database/liquibase/routes.js'
+import kedaRoutes from './routes/kedaRoutes.js'
 import earningsRouter from '../routes/earnings.js'
 import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 
@@ -101,7 +105,7 @@ import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 // ============================================================================
 import fraudRoutes from './routes/fraudRoutes.js'
 import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
-import { authenticate } from './middleware/auth.js'
+import { authenticate, requireRole } from './middleware/auth.js'
 import fraudDetection from './services/fraud/FraudDetectionService.js'
 import headerSizeMonitor from './middleware/headerSizeMonitor.js';
 
@@ -494,8 +498,11 @@ app.use('/api/public', publicTrackingRoutes)
 app.use('/api/auth', authLimiter, authRoutes)
 app.use('/api/v1/admin', adminRoutes)
 app.use('/api/v1/admin/audit-logs', auditRoutes)
+app.use('/api/v1/admin', authenticate, requireRole(['admin']), kedaRoutes)
 app.use('/api/voice', voiceRoutes)
+app.use('/api/v1/voice', voiceAssistantRoutes)
 app.use('/api/demand-heatmap', demandRoutes)
+app.use('/api/road-conditions', roadConditionRoutes)
 app.use('/api/escorts/wallet', escortWalletRoutes)
 
 // ============================================================================
@@ -508,12 +515,12 @@ app.use('/api/webhooks', webhookRoutes)
 // ============================================================================
 app.use('/api/verify', verificationRoutes)
 app.use('/api/oracle', oracleRoutes)
+app.use('/api/ml', mlRoutes)
 app.use('/api/blockchain', (req, _res, next) => {
   req.blockchainMetrics = blockchainMetrics;
   req.escalationHandler = escalationHandler;
   next();
 }, blockchainMonitoringRoutes)
-app.use('/api/webhooks', webhookRoutes)
 
 // ============================================================================
 // 🆕 BLOCKCHAIN MONITORING ROUTES
@@ -579,6 +586,7 @@ app.use('/api', wasiRoutes)
 app.use('/api', wasmRoutes)
 app.use('/api', snykRoutes)
 app.use('/api', liquibaseRoutes)
+app.use('/api/wim', wimBypassRouter)
 
 // 🆕 WebRTC Health Check Endpoint
 app.get('/api/webrtc/status', (req, res) => {
@@ -853,5 +861,3 @@ app.use((err, req, res, next) => {
 
   next(err);
 });
-
-app.use('/api/wim', wimBypassRouter);

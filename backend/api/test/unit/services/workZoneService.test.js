@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { predictWorkZoneDelays, generateBypassWaypoint } from '../../../../src/services/workZoneService.js';
-import logger from '../../../../src/middleware/logger.js';
+import { predictWorkZoneDelays, generateBypassWaypoint } from '../../../src/services/workZoneService.js';
+import logger from '../../../src/middleware/logger.js';
 
-vi.mock('../../../../src/middleware/logger.js', () => ({
+vi.mock('../../../src/middleware/logger.js', () => ({
   default: {
     info: vi.fn(),
     warn: vi.fn(),

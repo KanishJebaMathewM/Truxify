@@ -8,7 +8,8 @@ class TrajectoryDatasetBuilder:
         dataset = []
         for log in raw_gps_logs:
             state = np.array([log.get("speed", 50.0), log.get("slope", 0.0), log.get("congestion", 0.2)])
-            action = int(log.get("reroute_action", 0)) // 0: main highway, 1: bypass detour
+            # reroute_action: 0 = main highway, 1 = bypass detour
+            action = int(log.get("reroute_action", 0))
             dataset.append({"state": state, "action": action})
         return dataset
 

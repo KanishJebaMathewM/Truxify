@@ -377,31 +377,32 @@ export async function authenticate(req, res, next) {
         profileIsDeactivated = !!inactive;
       }
 
-      if (firebaseUid) {
-        try {
-          await setCachedProfile(
-            firebaseUid,
+      if (profileIsDeactivated) {
+        if (firebaseUid) {
+          try {
+            await setCachedProfile(
+              firebaseUid,
+              { isActive: false },
+              TOMBSTONE_TTL_SECONDS,
+            );
+          } catch (err) {
+            logger.error({ err }, "Cache set failed");
+          }
+        }
+        if (supabaseUserId) {
+          void setCachedSupabaseProfile(
+            supabaseUserId,
             { isActive: false },
             TOMBSTONE_TTL_SECONDS,
           );
-        } catch (err) {
-          logger.error({ err }, "Cache set failed");
         }
-      }
-      if (supabaseUserId) {
-        void setCachedSupabaseProfile(
-          supabaseUserId,
-          { isActive: false },
-          TOMBSTONE_TTL_SECONDS,
-        );
-      }
 
-      if (profileIsDeactivated) {
         return res.status(403).json({
           error: "User profile is inactive.",
           hint: "Contact support to reactivate your account.",
         });
       }
+
       return res.status(403).json({
         error: "User profile not found in database.",
         hint: "Register user in profiles table first.",

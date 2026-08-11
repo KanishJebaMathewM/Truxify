@@ -233,6 +233,7 @@ class DigilockerService {
     }
 
     const syncResults = [];
+    const syncErrors = [];
     for (const doc of documents) {
       const docHash = '0x' + crypto.createHash('sha256').update(doc.data).digest('hex');
 
@@ -278,15 +279,17 @@ class DigilockerService {
           message: dbErr.message,
           hint: dbErr.hint
         }, '[DigilockerService] Database upsert failed during sync');
+        syncErrors.push({ docType: doc.type, error: dbErr.message });
       } else {
         syncResults.push(docRecord);
       }
     }
 
     return {
-      success: true,
+      success: syncErrors.length === 0,
       syncedDocumentsCount: syncResults.length,
       documents: syncResults,
+      errors: syncErrors,
       isMock
     };
   }

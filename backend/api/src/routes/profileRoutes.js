@@ -105,6 +105,7 @@ import {
   getDriverDetails
 } from '../services/profileService.js';
 import { supabase } from '../config/db.js';
+import { ethers } from 'ethers';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
 import { auditLog } from '../middleware/auditLog.js';
@@ -283,6 +284,15 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
   const normalized = wallet_address.trim();
   if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
     return res.status(400).json({ error: 'Invalid wallet address' });
+  }
+  try {
+    // ethers.getAddress accepts all-lowercase / all-uppercase hex and throws
+    // for mixed-case addresses whose EIP-55 checksum is wrong, so a typo'd
+    // address can never be persisted and later fail escrow.isAddress() with
+    // a misleading "escrow not configured" error at bid acceptance time.
+    ethers.getAddress(normalized);
+  } catch {
+    return res.status(400).json({ error: 'Invalid wallet address: EIP-55 checksum is invalid.' });
   }
 
   try {

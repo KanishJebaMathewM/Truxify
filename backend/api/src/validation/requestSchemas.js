@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ethers } from 'ethers';
 import { VALID_LANGUAGES } from '../schemas/profile.js';
 
 // Generic field validation helpers
@@ -179,6 +180,16 @@ export const updateWalletSchema = z.object({
   wallet_address: z.string().regex(
     /^0x[a-fA-F0-9]{40}$/,
     'Must be a valid 0x-prefixed 42-character wallet address'
+  ).refine(
+    (address) => {
+      try {
+        ethers.getAddress(address);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Wallet address has an invalid EIP-55 checksum' }
   ),
 }).strict();
 

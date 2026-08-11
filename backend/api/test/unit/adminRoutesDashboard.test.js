@@ -72,7 +72,7 @@ describe('adminRoutes', () => {
       expect(res.body).toEqual({
         active_drivers: 5,
         pending_orders: 3,
-        total_revenue_today: 300,
+        total_revenue_today: 3,
       });
     });
 

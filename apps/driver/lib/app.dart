@@ -60,47 +60,23 @@ class _TruxifyAppState extends State<TruxifyApp> {
   Widget build(BuildContext context) {
     return TruxifyScope(
       controller: _controller,
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        builder: (context, child) {
-          final isLargeText = context.watch<TextScaleProvider>().isLargeText;
-          Widget existingChild = child!;
-          return MediaQuery(
-            data: MediaQuery.of(context).copyWith(
-              textScaler: isLargeText
-                  ? const TextScaler.linear(1.25)
-                  : const TextScaler.linear(1.0),
-            ),
-            child: existingChild,
-          );
-        },
-        onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
-        theme: TruxifyTheme.light(),
-        darkTheme: TruxifyTheme.dark(),
-        themeMode: _controller.themeMode,
-        locale: _controller.locale,
-        localizationsDelegates: const [
-          AppLocalizations.delegate,
-          GlobalMaterialLocalizations.delegate,
-          GlobalCupertinoLocalizations.delegate,
-          GlobalWidgetsLocalizations.delegate,
-        ],
-        supportedLocales: const [
-          Locale('en', ''),
-          Locale('hi', ''),
-          Locale('ta', ''),
-          Locale('kn', ''),
-          Locale('mr', ''),
-        ],
-    return LanguageProviderScope(
-      provider: _languageProvider,
-      child: TruxifyScope(
-        controller: _controller,
-        child: ListenableBuilder(
-          listenable: _languageProvider,
-          builder: (context, _) {
-            return MaterialApp(
+      child: ListenableBuilder(
+        listenable: _languageProvider,
+        builder: (context, _) {
+          return MaterialApp(
             debugShowCheckedModeBanner: false,
+            builder: (context, child) {
+              final isLargeText = context.watch<TextScaleProvider>().isLargeText;
+              Widget existingChild = child ?? const SizedBox.shrink();
+              return MediaQuery(
+                data: MediaQuery.of(context).copyWith(
+                  textScaler: isLargeText
+                      ? const TextScaler.linear(1.25)
+                      : const TextScaler.linear(1.0),
+                ),
+                child: existingChild,
+              );
+            },
             onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
             theme: TruxifyTheme.light(),
             darkTheme: TruxifyTheme.dark(),
@@ -113,85 +89,87 @@ class _TruxifyAppState extends State<TruxifyApp> {
               GlobalCupertinoLocalizations.delegate,
             ],
             supportedLocales: const [
-              Locale('en'),
-              Locale('hi'),
-              Locale('ta'),
+              Locale('en', ''),
+              Locale('hi', ''),
+              Locale('ta', ''),
+              Locale('kn', ''),
+              Locale('mr', ''),
             ],
-        initialRoute: AppRoutes.splash,
-        onGenerateRoute: (settings) {
-          switch (settings.name) {
-            case AppRoutes.splash:
-              return truxifyPageRoute(
-                (context) => const SplashScreen(),
-              );
+            initialRoute: AppRoutes.splash,
+            onGenerateRoute: (settings) {
+              switch (settings.name) {
+                case AppRoutes.splash:
+                  return truxifyPageRoute(
+                    (context) => const SplashScreen(),
+                  );
 
-            case AppRoutes.login:
-              return truxifyPageRoute(
-                (context) => const LoginScreen(),
-              );
+                case AppRoutes.login:
+                  return truxifyPageRoute(
+                    (context) => const LoginScreen(),
+                  );
 
-            case AppRoutes.otp:
-              final args = settings.arguments as Map<String, String>? ?? {};
-              return truxifyPageRoute(
-                (context) => OtpScreen(
-                  phone: args['phone'] ?? '',
-                  verificationId: args['verificationId'] ?? '',
-                  countryCode: args['countryCode'] ?? '+91',
-                ),
-              );
+                case AppRoutes.otp:
+                  final args = settings.arguments as Map<String, String>? ?? {};
+                  return truxifyPageRoute(
+                    (context) => OtpScreen(
+                      phone: args['phone'] ?? '',
+                      verificationId: args['verificationId'] ?? '',
+                      countryCode: args['countryCode'] ?? '+91',
+                    ),
+                  );
 
-            case AppRoutes.shell:
-              return truxifyPageRoute(
-                (context) => const ShellScreen(),
-              );
+                case AppRoutes.shell:
+                  return truxifyPageRoute(
+                    (context) => const ShellScreen(),
+                  );
 
-            case AppRoutes.documents:
-              return truxifyPageRoute(
-                (context) => const DocumentsScreen(),
-              );
+                case AppRoutes.documents:
+                  return truxifyPageRoute(
+                    (context) => const DocumentsScreen(),
+                  );
 
-            case AppRoutes.loadDetail:
-              final load = settings.arguments as LoadOffer?;
-              if (load == null) return null;
+                case AppRoutes.loadDetail:
+                  final load = settings.arguments as LoadOffer?;
+                  if (load == null) return null;
 
-              return truxifyPageRoute(
-                (context) => LoadDetailScreen(load: load),
-              );
+                  return truxifyPageRoute(
+                    (context) => LoadDetailScreen(load: load),
+                  );
 
-            case AppRoutes.loadPointDetail:
-              final point = settings.arguments as RouteMapPoint?;
-              if (point == null) return null;
+                case AppRoutes.loadPointDetail:
+                  final point = settings.arguments as RouteMapPoint?;
+                  if (point == null) return null;
 
-              return truxifyPageRoute(
-                (context) => LoadPointDetailScreen(point: point),
-              );
+                  return truxifyPageRoute(
+                    (context) => LoadPointDetailScreen(point: point),
+                  );
 
-            case AppRoutes.destinationPicker:
-              final args = settings.arguments as DestinationPickerArgs?;
+                case AppRoutes.destinationPicker:
+                  final args = settings.arguments as DestinationPickerArgs?;
 
-              return truxifyPageRoute(
-                (context) => DestinationPickerScreen(
-                  title: args?.title ?? 'Select Destination',
-                  initialQuery: args?.initialQuery,
-                  initialPoint: args?.initialPoint,
-                ),
-              );
+                  return truxifyPageRoute(
+                    (context) => DestinationPickerScreen(
+                      title: args?.title ?? 'Select Destination',
+                      initialQuery: args?.initialQuery,
+                      initialPoint: args?.initialPoint,
+                    ),
+                  );
 
-            case AppRoutes.pastTrips:
-              return truxifyPageRoute(
-                (context) => const PastTripsScreen(),
-              );
+                case AppRoutes.pastTrips:
+                  return truxifyPageRoute(
+                    (context) => const PastTripsScreen(),
+                  );
 
-            default:
-              return truxifyPageRoute(
-                (context) => const SplashScreen(),
-              );
-          }
+                default:
+                  return truxifyPageRoute(
+                    (context) => const SplashScreen(),
+                  );
+              }
+            },
+            navigatorObservers: const [],
+          );
         },
-        navigatorObservers: const [],
-      );
-    },
-    ),
+      ),
     );
   }
 }

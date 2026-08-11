@@ -11,9 +11,6 @@ import 'core/firebase_config.dart';
 import 'package:truxify_driver/config/env.dart';
 import 'providers/text_scale_provider.dart';
 import 'package:flutter_gen/gen_l10n/app_localizations.dart';
-import 'app.dart';
-import 'core/firebase_config.dart';
-import 'package:truxify_driver/config/env.dart';
 import 'providers/language_provider.dart';
 import 'services/background_sync_service.dart';
 
@@ -75,17 +72,16 @@ Future<void> main() async {
   ErrorWidget.builder = TruxifyErrorWidget.builder;
 
   // Wrap runApp in a guarded zone to capture uncaught async errors.
+  final languageProvider = LanguageProvider();
   runZonedGuarded(() {
     runApp(
       MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => TextScaleProvider()),
         ],
-        child: const TruxifyApp(),
+        child: TruxifyApp(languageProvider: languageProvider),
       ),
     );
-    final languageProvider = LanguageProvider();
-    runApp(TruxifyApp(languageProvider: languageProvider));
   }, (error, stackTrace) {
     CrashReportingService.captureException(
       error,

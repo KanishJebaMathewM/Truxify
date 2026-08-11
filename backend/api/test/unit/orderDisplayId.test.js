@@ -12,7 +12,7 @@ vi.mock('crypto', () => ({
   },
 }));
 
-const { generateOrderDisplayId, ORDER_DISPLAY_ID_MAX_RETRIES } = await import('../../src/lib/orderDisplayId.js');
+const { generateOrderDisplayId, isValidOrderDisplayId, ORDER_DISPLAY_ID_MAX_RETRIES } = await import('../../src/lib/orderDisplayId.js');
 
 describe('orderDisplayId', () => {
   describe('generateOrderDisplayId', () => {
@@ -56,6 +56,22 @@ describe('orderDisplayId', () => {
     it('ORDER_DISPLAY_ID_MAX_RETRIES is defined and positive', () => {
       expect(ORDER_DISPLAY_ID_MAX_RETRIES).toBeGreaterThan(0);
       expect(typeof ORDER_DISPLAY_ID_MAX_RETRIES).toBe('number');
+    });
+  });
+
+  describe('isValidOrderDisplayId', () => {
+    it('returns true for a valid generated display ID', () => {
+      const id = generateOrderDisplayId();
+      expect(isValidOrderDisplayId(id)).toBe(true);
+    });
+
+    it('returns false for invalid inputs (null, non-string, wrong prefix, incorrect length)', () => {
+      expect(isValidOrderDisplayId(null)).toBe(false);
+      expect(isValidOrderDisplayId(12345)).toBe(false);
+      expect(isValidOrderDisplayId('#XX20260802AAAAAAAAAAAA')).toBe(false);
+      expect(isValidOrderDisplayId('#FF20260802SHORT')).toBe(false);
+      expect(isValidOrderDisplayId('#FF20260802AAAAAAAAAAAAEXTRA')).toBe(false);
+      expect(isValidOrderDisplayId('#FF20260802AAAAAA!AAAAA')).toBe(false);
     });
   });
 });

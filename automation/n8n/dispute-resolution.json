@@ -38,6 +38,26 @@
       "position": [
         450,
         300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escrow Alert: Freeze Payment Contract Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+        "textBody": "=CRITICAL: The Freeze Payment Contract step failed after 3 retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Disputed funds were not frozen on-chain. Immediate manual intervention required.",
+        "options": {}
+      },
+      "id": "alert-freeze-failed",
+      "name": "Alert Admin — Escrow Freeze Failed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        450,
+        500
       ]
     },
     {
@@ -265,6 +285,26 @@
       "position": [
         500,
         600
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escrow Alert: Release Escrow Payment Failed for Booking {{$json.body.bookingId}}",
+        "textBody": "=CRITICAL: The Release Escrow Payment step failed after 3 retries for Booking {{$json.body.bookingId}}. Escrow payment was not released on-chain. Immediate manual intervention required.",
+        "options": {}
+      },
+      "id": "alert-release-failed",
+      "name": "Alert Admin — Escrow Release Failed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        500,
+        800
       ]
     }
   ],
@@ -290,6 +330,13 @@
           },
           {
             "node": "Query Supabase OTP Logs",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert Admin — Escrow Freeze Failed",
             "type": "main",
             "index": 0
           }
@@ -383,6 +430,18 @@
         [
           {
             "node": "Release Escrow Payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release Escrow Payment": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Alert Admin — Escrow Release Failed",
             "type": "main",
             "index": 0
           }

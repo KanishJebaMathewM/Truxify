@@ -52,6 +52,14 @@ export function captureException(err) {
   }
 }
 
+export function captureDebugException(err) {
+  if (!process.env.SENTRY_DSN) return null;
+  return Sentry.withScope((scope) => {
+    scope.setTag('debug', 'true');
+    return Sentry.captureException(err);
+  });
+}
+
 export function sentryErrorHandler() {
   if (typeof Sentry.Handlers?.errorHandler === 'function') {
     return Sentry.Handlers.errorHandler();

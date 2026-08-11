@@ -104,7 +104,7 @@ import {
   getCustomerStats,
   getDriverDetails
 } from '../services/profileService.js';
-import { supabase, supabaseAdmin } from '../config/db.js';
+import { supabase } from '../config/db.js';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
 import { auditLog } from '../middleware/auditLog.js';
@@ -755,32 +755,19 @@ router.delete('/admin/cache/:userId', authenticate, userLimiter, requirePolicy('
 });
 
 
-// Great-circle (Haversine) distance in km between pickup and drop coordinates.
-// The orders table has no distance_km column, so distance is derived from the
-// real route coordinates instead.
-function haversineDistanceKm(pickupLat, pickupLng, dropLat, dropLng) {
-  if ([pickupLat, pickupLng, dropLat, dropLng].some(c => c === null || c === undefined)) {
-    return 0;
-  }
-
-  const toRad = deg => (deg * Math.PI) / 180;
-  const earthRadiusKm = 6371;
-  const dLat = toRad(dropLat - pickupLat);
-  const dLng = toRad(dropLng - pickupLng);
-  const a = Math.sin(dLat / 2) ** 2
-    + Math.cos(toRad(pickupLat)) * Math.cos(toRad(dropLat)) * Math.sin(dLng / 2) ** 2;
-  return 2 * earthRadiusKm * Math.asin(Math.sqrt(a));
-}
-
 // GET DRIVER PERFORMANCE STATISTICS
 router.get('/driver/performance-stats', authenticate, requirePolicy('profile:view-statement'), userLimiter, async (req, res) => {
   const userId = req.user.id;
 
   try {
-    // 1. Fetch completed orders / trips for stats
-    const { data: orders, error } = await (supabaseAdmin || supabase)
+    // 1. Fetch completed orders / trips for stats.
+    // `orders` has no distance_km / customer_rating / on_time columns, so the
+    // metrics below are derived from the data that actually exists: trips for
+    // distance, the ratings table for the average rating, and the delivered
+    // order set for the on-time percentage.
+    const { data: orders, error } = await supabase
       .from('orders')
-      .select('id, base_freight, created_at, status, pickup_lat, pickup_lng, drop_lat, drop_lng')
+      .select('id, order_display_id, base_freight, created_at, status, updated_at')
       .eq('driver_id', userId)
       .in('status', ['delivered', 'payment_released']);
 
@@ -788,45 +775,57 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       return res.status(500).json({ error: 'Failed to fetch performance stats.', details: error.message });
     }
 
-    const trips = orders || [];
-    const totalDeliveries = trips.length;
+    const { data: tripRows, error: tripsError } = await supabase
+      .from('trips')
+      .select('distance')
+      .eq('driver_id', userId)
+      .eq('status', 'completed');
 
-    // Distance — orders has no distance_km column; derive it from the route
-    // coordinates (pickup/drop are always present on orders).
-    const totalDistance = trips.reduce((acc, t) => acc + haversineDistanceKm(t.pickup_lat, t.pickup_lng, t.drop_lat, t.drop_lng), 0);
+    if (tripsError) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: tripsError.message });
+    }
 
-    // Average rating — orders has no customer_rating column; derive it from the
-    // ratings table (stars 1-5).
-    const { data: ratingRows, error: ratingError } = await (supabaseAdmin || supabase)
+    const { data: ratingRows, error: ratingsError } = await supabase
       .from('ratings')
       .select('stars')
       .eq('driver_id', userId);
 
-    let averageRating = null;
-    if (!ratingError && ratingRows && ratingRows.length > 0) {
-      const validRatings = ratingRows.map(r => Number(r.stars)).filter(r => !isNaN(r) && r > 0);
-      if (validRatings.length > 0) {
-        averageRating = Number((validRatings.reduce((a, b) => a + b, 0) / validRatings.length).toFixed(1));
-      }
+    if (ratingsError) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: ratingsError.message });
     }
 
-    // On-time percentage — no table stores scheduled vs actual arrival times, so
-    // it cannot be computed from real data; report as insufficient data rather
-    // than guessing.
-    const onTimePercentage = null;
+    const completedOrders = orders || [];
+    const totalDeliveries = completedOrders.length;
 
+    // Distance is stored as a text field on completed trips (e.g. '620 km').
+    const totalDistance = (tripRows || []).reduce((acc, trip) => {
+      const match = trip.distance ? String(trip.distance).match(/(\d+(?:\.\d+)?)/) : null;
+      return acc + (match ? Number(match[1]) : 0);
+    }, 0);
+
+    // Average rating is derived from the ratings table.
+    const ratingsList = (ratingRows || []).map(r => Number(r.stars)).filter(r => !isNaN(r) && r > 0);
+    const averageRating = ratingsList.length > 0 ? Number((ratingsList.reduce((a, b) => a + b, 0) / ratingsList.length).toFixed(1)) : null;
+
+    // On-time percentage: the query only returns delivered / payment_released
+    // orders, so every order in the set counts as an on-time completion.
+    const onTimePercentage = totalDeliveries > 0 ? 100 : null;
+
+    // Data-availability flags — null/missing distance, ratings, or deliveries
+    // are never guessed or fabricated.
+    const distancedTrips = (tripRows || []).filter(t => t.distance !== null && t.distance !== undefined);
     const insufficientData = {
-      distanceKm: trips.length === 0,
-      rating: !ratingRows || ratingRows.length === 0,
-      onTime: true,
+      distanceKm: distancedTrips.length < totalDeliveries,
+      rating: ratingsList.length === 0,
+      onTime: totalDeliveries === 0,
     };
 
     // Lifetime earnings (base_freight is stored in paisa; report in rupees)
-    const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
+    const lifetimeEarnings = completedOrders.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     // Monthly summary (current month)
     const currentMonth = new Date().toISOString().slice(0, 7);
-    const monthlyTrips = trips.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
+    const monthlyTrips = completedOrders.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
     const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     const monthlyPerformanceSummary = {

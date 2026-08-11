@@ -20,6 +20,7 @@ const { dbMock } = vi.hoisted(() => ({
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() { return dbMock.supabase; },
+  createUserClient: vi.fn(() => dbMock.supabase),
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -41,9 +42,9 @@ describe('userRoutes', () => {
   });
 
   describe('POST /users/fcm-token', () => {
-    it('returns success when the update succeeds', async () => {
+    it('returns success when the update persists a matching profile row', async () => {
       dbMock.supabase.from.mockReturnValue({
-        update: vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) })),
+        update: vi.fn(() => ({ eq: vi.fn(() => ({ select: vi.fn().mockResolvedValue({ error: null, data: [{ id: 'u1' }] }) })) })),
       });
       const res = await request(makeApp())
         .post('/users/fcm-token')
@@ -54,7 +55,18 @@ describe('userRoutes', () => {
 
     it('returns 500 when the update errors', async () => {
       dbMock.supabase.from.mockReturnValue({
-        update: vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: { message: 'db down' } }) })),
+        update: vi.fn(() => ({ eq: vi.fn(() => ({ select: vi.fn().mockResolvedValue({ error: { message: 'db down' } }) })) })),
+      });
+      const res = await request(makeApp())
+        .post('/users/fcm-token')
+        .send({ fcmToken: 'valid-token-12345' });
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Failed to update FCM token.');
+    });
+
+    it('returns 500 when the update matches no profile row (0-row no-op)', async () => {
+      dbMock.supabase.from.mockReturnValue({
+        update: vi.fn(() => ({ eq: vi.fn(() => ({ select: vi.fn().mockResolvedValue({ error: null, data: [] }) })) })),
       });
       const res = await request(makeApp())
         .post('/users/fcm-token')

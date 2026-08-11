@@ -319,7 +319,7 @@ class MEVService {
 
         return {
             totalEscrows: escrows?.length || 0,
-            protectedEscrows: escrows?.filter(e => e.status === 'protected').length || 0,
+            protectedEscrows: escrows?.filter(e => e.status === 'pending').length || 0,
             releasedEscrows: escrows?.filter(e => e.status === 'released').length || 0,
             totalBundles: bundles?.length || 0,
             timestamp: new Date().toISOString()

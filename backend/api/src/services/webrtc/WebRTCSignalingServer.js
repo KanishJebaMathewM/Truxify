@@ -2,7 +2,7 @@ import { WebSocketServer } from 'ws';
 import crypto from 'crypto';
 import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
-import { supabase, redisClient } from '../../config/db.js';
+import { supabase, redisClient, createUserClient } from '../../config/db.js';
 
 class WebRTCSignalingServer {
   constructor(server) {
@@ -55,6 +55,7 @@ class WebRTCSignalingServer {
         ws,
         userId: decoded.id,
         role: decoded.role,
+        token,
         location: null,
         meshId,
         connectedAt: Date.now(),
@@ -225,6 +226,10 @@ class WebRTCSignalingServer {
       return;
     }
 
+    // Use an authenticated Supabase client for GPS data inserts (RLS requires authenticated role)
+    const userClient = peer.token ? createUserClient(peer.token) : null;
+    const gpsClient = userClient || supabase;
+
     const normalizedData = {
       ...data,
       location: this.normalizeLocation(data.location)
@@ -239,7 +244,7 @@ class WebRTCSignalingServer {
     };
 
     try {
-      const { error } = await supabase.from('gps_offline_data').insert([gpsEntry]);
+      const { error } = await gpsClient.from('gps_offline_data').insert([gpsEntry]);
       if (error) {
         logger.warn(`Failed to persist WebRTC GPS payload for peer ${peerId}: ${error.message}`);
       }

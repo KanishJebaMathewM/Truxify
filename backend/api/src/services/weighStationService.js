@@ -33,58 +33,18 @@ const BASE_AXLE_WEIGHT_LBS = 5000; // Unsprung weight
  * Syncs highly accurate internal air suspension weights with DOT enforcement software.
  * Bypasses random pull-in probability if weights are completely legal.
  */
+/**
+ * Syncs highly accurate internal air suspension weights with DOT enforcement software.
+ * Returns an UNSUPPORTED response until a real WIM provider (Drivewyze/PrePass) API is integrated.
+ */
 const syncAndTransmitInternalWeights = async (driverId, truckId, axles) => {
-  // Simulate network delay to DOT API
-  await new Promise(resolve => setTimeout(resolve, SIMULATED_NETWORK_DELAY_MS));
-
-  let totalGrossWeight = 0;
-  let isOverweight = false;
-  let violations = [];
-
-  const calculatedAxles = axles.map(axle => {
-    // Formula: Weight = Pressure * CalibrationFactor + BaseWeight
-    const calculatedWeight = Math.round((axle.pressure_psi * PSI_TO_LBS_FACTOR) + BASE_AXLE_WEIGHT_LBS);
-    totalGrossWeight += calculatedWeight;
-
-    // Check individual axle limits based on a simple heuristic (e.g. steering axle vs tandem)
-    // For this simulation, we'll enforce a strict 34,000 max for any axle group.
-    if (calculatedWeight > MAX_TANDEM_AXLE_LBS) {
-      isOverweight = true;
-      violations.push(`Axle ${axle.position} overweight: ${calculatedWeight} lbs`);
-    }
-
-    return {
-      position: axle.position,
-      pressure_psi: axle.pressure_psi,
-      calculated_weight_lbs: calculatedWeight
-    };
-  });
-
-  if (totalGrossWeight > MAX_GROSS_WEIGHT_LBS) {
-    isOverweight = true;
-    violations.push(`Gross weight overweight: ${totalGrossWeight} lbs`);
-  }
-
-  const stationId = 'WS-' + Math.floor(Math.random() * STATION_ID_RANGE);
-
-  if (isOverweight) {
-    return {
-      action: 'PULL_IN',
-      stationId,
-      reason: `Internal sensors indicate overweight: ${violations.join(', ')}`,
-      gross_weight_lbs: totalGrossWeight,
-      axles: calculatedAxles,
-      timestamp: new Date().toISOString()
-    };
-  }
-
+  logger.warn('[WeighStation] syncAndTransmitInternalWeights called but no WIM provider is configured -- returning unsupported');
   return {
-    action: 'BYPASS',
-    stationId,
-    reason: 'Internal air suspension sensors verified compliant weights.',
-    gross_weight_lbs: totalGrossWeight,
-    axles: calculatedAxles,
-    timestamp: new Date().toISOString()
+    action: 'UNSUPPORTED',
+    supported: false,
+    stationId: null,
+    reason: 'Weigh-in-motion sync is not available: no WIM provider (Drivewyze/PrePass) is configured. Configure WIM_PROVIDER_API_KEY to enable.',
+    timestamp: new Date().toISOString(),
   };
 };
 

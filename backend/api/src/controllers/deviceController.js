@@ -147,6 +147,14 @@ export async function unregisterDeviceToken(req, res, next) {
       return next(new AppError('Failed to unregister device', 500));
     }
 
+    // If no rows were deleted, the token was not registered for this user
+    if (!deletedRows || deletedRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Device token not found'
+      });
+    }
+
     // Query remaining device tokens for this user to fallback
     const { data: remainingDevice, error: remainingError } = await supabase
       .from('user_devices')

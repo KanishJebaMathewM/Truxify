@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { supabase, supabaseAdmin } from '../config/db.js';
+import { supabase, createUserClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import {
   validateDocumentBuffer,
@@ -31,13 +31,6 @@ function extensionForMime(mime) {
   return ext;
 }
 
-// truck_maintenance_tickets RLS and the maintenance-photos storage bucket
-// policies only allow authenticated/service-role access, so the anon-key
-// client can never read the ticket, upload files, or call the RPC. Use the
-// service-role client when available (falling back to the shared client for
-// local/test setups that run without a service key).
-const client = supabaseAdmin || supabase;
-
 export async function uploadMaintenancePhotos(req, res) {
   const uploadedPaths = [];
 
@@ -46,6 +39,14 @@ export async function uploadMaintenancePhotos(req, res) {
     if (!driverId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
+
+    // The append_maintenance_photos RPC is SECURITY DEFINER and calls
+    // auth.uid(), so it must be invoked with the caller's JWT attached rather
+    // than through the shared anon client (which would make auth.uid() NULL).
+    if (!req.token) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+    const userClient = createUserClient(req.token);
 
     const { ticketId } = req.params;
     if (!ticketId) {
@@ -63,7 +64,7 @@ export async function uploadMaintenancePhotos(req, res) {
     }
 
     // Verify ticket exists and belongs to this driver
-    const { data: ticket, error: ticketError } = await client
+    const { data: ticket, error: ticketError } = await supabase
       .from('truck_maintenance_tickets')
       .select('id, driver_id, photo_urls')
       .eq('id', ticketId)
@@ -140,7 +141,7 @@ export async function uploadMaintenancePhotos(req, res) {
       const ext = extensionForMime(verifiedMimeType);
       const storagePath = `${driverId}/${ticketId}/${Date.now()}-${randomUUID()}.${ext}`;
 
-      const { error: storageError } = await client.storage
+      const { error: storageError } = await supabase.storage
         .from('maintenance-photos')
         .upload(storagePath, file.buffer, {
           contentType: verifiedMimeType,
@@ -159,7 +160,7 @@ export async function uploadMaintenancePhotos(req, res) {
     // Generate signed URLs for the uploaded files
     const photoUrls = [];
     for (const path of uploadedPaths) {
-      const { data: urlData, error: urlError } = await client.storage
+      const { data: urlData, error: urlError } = await supabase.storage
         .from('maintenance-photos')
         .createSignedUrl(path, 60 * 60 * 24 * 7); // 7-day expiry
 
@@ -173,7 +174,7 @@ export async function uploadMaintenancePhotos(req, res) {
     }
 
     // Atomically append new paths via PostgreSQL RPC to enforce MAX_PHOTOS and prevent race conditions
-    const { error: updateError } = await client.rpc('append_maintenance_photos', {
+    const { error: updateError } = await userClient.rpc('append_maintenance_photos', {
       p_ticket_id: ticketId,
       p_new_paths: uploadedPaths,
       p_max_photos: MAX_PHOTOS,
@@ -207,7 +208,7 @@ export async function uploadMaintenancePhotos(req, res) {
 async function cleanupStorage(paths) {
   if (paths.length === 0) return;
   try {
-    await client.storage.from('maintenance-photos').remove(paths);
+    await supabase.storage.from('maintenance-photos').remove(paths);
   } catch (err) {
     logger.error('[MaintenancePhotoController] Storage cleanup failed:', err.message);
   }

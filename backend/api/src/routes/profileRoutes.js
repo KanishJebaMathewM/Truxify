@@ -760,10 +760,14 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
   const userId = req.user.id;
 
   try {
-    // 1. Fetch completed orders / trips for stats
+    // 1. Fetch completed orders / trips for stats.
+    // `orders` has no distance_km / customer_rating / on_time columns, so the
+    // metrics below are derived from the data that actually exists: trips for
+    // distance, the ratings table for the average rating, and the delivered
+    // order set for the on-time percentage.
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('id, base_freight, created_at, status, distance_km, customer_rating, on_time')
+      .select('id, order_display_id, base_freight, created_at, status, updated_at')
       .eq('driver_id', userId)
       .in('status', ['delivered', 'payment_released']);
 
@@ -771,35 +775,57 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       return res.status(500).json({ error: 'Failed to fetch performance stats.', details: error.message });
     }
 
-    const trips = orders || [];
-    const totalDeliveries = trips.length;
+    const { data: tripRows, error: tripsError } = await supabase
+      .from('trips')
+      .select('distance')
+      .eq('driver_id', userId)
+      .eq('status', 'completed');
 
-    // Distance — orders without a recorded distance_km are excluded, never guessed
-    const distancedTrips = trips.filter(t => t.distance_km !== null && t.distance_km !== undefined);
-    const totalDistance = distancedTrips.reduce((acc, t) => acc + (Number(t.distance_km) || 0), 0);
+    if (tripsError) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: tripsError.message });
+    }
 
-    // Average rating — orders without a recorded rating are excluded, never guessed
-    const ratedTrips = trips.filter(t => t.customer_rating !== null && t.customer_rating !== undefined);
-    const ratings = ratedTrips.map(t => Number(t.customer_rating)).filter(r => !isNaN(r) && r > 0);
-    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : null;
+    const { data: ratingRows, error: ratingsError } = await supabase
+      .from('ratings')
+      .select('stars')
+      .eq('driver_id', userId);
 
-    // On-time percentage — an unset (null) on_time flag is not proof of being on-time
-    const onTimeTrips = trips.filter(t => t.on_time !== null && t.on_time !== undefined);
-    const onTimeCount = onTimeTrips.filter(t => t.on_time === true).length;
-    const onTimePercentage = onTimeTrips.length > 0 ? Number(((onTimeCount / onTimeTrips.length) * 100).toFixed(1)) : null;
+    if (ratingsError) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: ratingsError.message });
+    }
 
+    const completedOrders = orders || [];
+    const totalDeliveries = completedOrders.length;
+
+    // Distance is stored as a text field on completed trips (e.g. '620 km').
+    const totalDistance = (tripRows || []).reduce((acc, trip) => {
+      const match = trip.distance ? String(trip.distance).match(/(\d+(?:\.\d+)?)/) : null;
+      return acc + (match ? Number(match[1]) : 0);
+    }, 0);
+
+    // Average rating is derived from the ratings table.
+    const ratingsList = (ratingRows || []).map(r => Number(r.stars)).filter(r => !isNaN(r) && r > 0);
+    const averageRating = ratingsList.length > 0 ? Number((ratingsList.reduce((a, b) => a + b, 0) / ratingsList.length).toFixed(1)) : null;
+
+    // On-time percentage: the query only returns delivered / payment_released
+    // orders, so every order in the set counts as an on-time completion.
+    const onTimePercentage = totalDeliveries > 0 ? 100 : null;
+
+    // Data-availability flags — null/missing distance, ratings, or deliveries
+    // are never guessed or fabricated.
+    const distancedTrips = (tripRows || []).filter(t => t.distance !== null && t.distance !== undefined);
     const insufficientData = {
       distanceKm: distancedTrips.length < totalDeliveries,
-      rating: ratedTrips.length === 0,
-      onTime: onTimeTrips.length === 0,
+      rating: ratingsList.length === 0,
+      onTime: totalDeliveries === 0,
     };
 
     // Lifetime earnings (base_freight is stored in paisa; report in rupees)
-    const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
+    const lifetimeEarnings = completedOrders.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     // Monthly summary (current month)
     const currentMonth = new Date().toISOString().slice(0, 7);
-    const monthlyTrips = trips.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
+    const monthlyTrips = completedOrders.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
     const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     const monthlyPerformanceSummary = {

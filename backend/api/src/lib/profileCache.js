@@ -161,6 +161,9 @@ export function isValidCachedProfile(firebaseUid, cachedProfile) {
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedSupabaseProfile(userId, cachedProfile) {
+  if (typeof userId !== "string" || !userId.trim()) {
+    return false;
+  }
   if (
     !cachedProfile ||
     typeof cachedProfile !== "object" ||

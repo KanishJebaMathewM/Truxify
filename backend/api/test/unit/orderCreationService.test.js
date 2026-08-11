@@ -20,7 +20,7 @@ describe('orderCreationService', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-    orderCreationService = (await import('../../src/services/order/orderCreationService.js')).default;
+    orderCreationService = (await import('../../src/services/order/orderCreationService.js')).OrderCreationService;
   });
 
   describe('createOrder', () => {

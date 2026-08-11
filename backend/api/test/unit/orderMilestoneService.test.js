@@ -16,7 +16,7 @@ describe('orderMilestoneService', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-    orderMilestoneService = (await import('../../src/services/order/orderMilestoneService.js')).default;
+    orderMilestoneService = (await import('../../src/services/order/orderMilestoneService.js')).OrderMilestoneService;
   });
 
   describe('addMilestone', () => {

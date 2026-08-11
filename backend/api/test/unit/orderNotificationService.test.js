@@ -12,7 +12,7 @@ describe('orderNotificationService', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-    orderNotificationService = (await import('../../src/services/order/orderNotificationService.js')).default;
+    orderNotificationService = (await import('../../src/services/order/orderNotificationService.js')).OrderNotificationService;
   });
 
   describe('sendOrderUpdate', () => {

@@ -20,7 +20,7 @@ describe('orderTimelineService', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-    orderTimelineService = (await import('../../src/services/order/orderTimelineService.js')).default;
+    orderTimelineService = (await import('../../src/services/order/orderTimelineService.js')).OrderTimelineService;
   });
 
   describe('addTimelineEvent', () => {

@@ -15,7 +15,7 @@ describe('orderLifecycleService', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.resetModules();
-    orderLifecycleService = (await import('../../src/services/order/orderLifecycleService.js')).default;
+    orderLifecycleService = (await import('../../src/services/order/orderLifecycleService.js')).OrderLifecycleService;
   });
 
   describe('startOrder', () => {

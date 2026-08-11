@@ -178,6 +178,43 @@ export async function unregisterDeviceToken(req, res, next) {
       return next(new AppError('Failed to unregister device', 500));
     }
 
+    // If no rows were deleted, the token was not registered for this user
+    if (!deletedRows || deletedRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Device token not found'
+      });
+    }
+
+    // Query remaining device tokens for this user to fallback
+    const { data: remainingDevice, error: remainingError } = await supabase
+      .from('user_devices')
+      .select('fcm_token')
+      .eq('user_id', userId)
+      .limit(1)
+      .maybeSingle();
+
+    if (remainingError) {
+      logger.error('[DeviceController] Failed to check remaining devices:', remainingError.message);
+    }
+
+    const nextToken = remainingDevice?.fcm_token || null;
+
+    const { error: profileSyncError } = await supabase
+      .from('profiles')
+      .update({
+        fcm_token: nextToken,
+        fcm_token_updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (profileSyncError) {
+      logger.error(
+        '[DeviceController] Device token removed but failed to sync profiles.fcm_token:',
+        profileSyncError.message
+      );
+    }
+
     return res.json({
       success: true,
       message: 'Device token unregistered'

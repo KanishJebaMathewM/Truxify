@@ -37,24 +37,35 @@ export const getNearbyGripData = async (req, res) => {
   try {
     const { lat, lng, radius_miles = 50 } = req.query;
 
-    if (!lat || !lng) {
+    if (lat === undefined || lat === null || lat === '' || lng === undefined || lng === null || lng === '') {
       return res.status(400).json({ error: 'Latitude (lat) and longitude (lng) are required' });
     }
 
-    const latitude = parseFloat(lat);
-    const longitude = parseFloat(lng);
+    const latitude = Number(lat);
+    const longitude = Number(lng);
+    const radiusMiles = Number(radius_miles);
 
-    if (isNaN(latitude) || isNaN(longitude)) {
-      return res.status(400).json({ error: 'Invalid latitude or longitude' });
+    if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+      return res.status(400).json({ error: 'Invalid latitude: must be a finite number in [-90, 90]' });
     }
-    
+
+    if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+      return res.status(400).json({ error: 'Invalid longitude: must be a finite number in [-180, 180]' });
+    }
+
+    if (!Number.isFinite(radiusMiles) || radiusMiles <= 0 || radiusMiles > 1000) {
+      return res.status(400).json({ error: 'Invalid radius_miles: must be a finite number in (0, 1000]' });
+    }
+
     // Approximate bounding box (1 degree is roughly 69 miles)
-    const radiusDeg = parseFloat(radius_miles) / 69.0;
+    const radiusDeg = radiusMiles / 69.0;
     const minLat = latitude - radiusDeg;
     const maxLat = latitude + radiusDeg;
-    // Longitude degree distance varies by latitude
+    // Longitude degree distance varies by latitude; clamp the cos term so that
+    // latitudes near ±90 cannot produce an infinite lng span.
     const latRad = latitude * (Math.PI / 180);
-    const lngDeg = radiusDeg / Math.cos(latRad);
+    const cosLat = Math.max(Math.abs(Math.cos(latRad)), 0.01);
+    const lngDeg = radiusDeg / cosLat;
     const minLng = longitude - lngDeg;
     const maxLng = longitude + lngDeg;
 

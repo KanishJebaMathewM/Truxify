@@ -1,5 +1,5 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
+import { expect } from "chai";
+import { ethers } from "hardhat";
 
 describe("DAO Quadratic Voting", function () {
   it("Should calculate quadratic cost = votes^2 correctly", async function () {

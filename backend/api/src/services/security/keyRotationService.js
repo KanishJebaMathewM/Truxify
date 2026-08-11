@@ -32,7 +32,7 @@ class KeyRotationService {
         logger.info('[KeyRotationService] Starting key rotation for:', walletAddress, 'Reason:', reason);
 
         if (!this.keyManagementService.validatePrivateKey(currentPrivateKey) ||
-            !this.keyManagementService.validatePrivateKey(newPrivateKey)) {
+          !this.keyManagementService.validatePrivateKey(newPrivateKey)) {
           throw new Error('Invalid private key format');
         }
 
@@ -166,27 +166,28 @@ class KeyRotationService {
           return { status: 'skipped', reason: 'contract_unavailable' };
         }
 
-        const signer = new ethers.Wallet(oldPrivateKey, this.provider);
+        // Derive public addresses — private keys must never leave this boundary.
+        const oldWallet = new ethers.Wallet(oldPrivateKey, this.provider);
+        const newWalletAddress = new ethers.Wallet(newPrivateKey).address;
 
-        const tx = await signer.sendTransaction({
+        // Verify contract interface expects (address, uint256) — never pass raw key.
+        const tx = await oldWallet.sendTransaction({
           to: this.escrowContract.target,
           data: this.escrowContract.interface.encodeFunctionData('transferKeyOwnership', [
-            walletAddress,
+            newWalletAddress,  // public address only — never the private key
             Date.now(),
           ]),
         });
 
         const receipt = await tx.wait();
 
-        // Receipt-row persistence is best-effort: the on-chain transfer has
-        // already committed, so a failed audit write must not surface as a
-        // transfer failure or trigger a duplicate re-transfer on retry.
+        // Persist only non-sensitive audit metadata — no key material of any kind.
         try {
           const { error: insertError } = await supabase
             .from('key_ownership_transfers')
             .insert([{
-              old_key: oldPrivateKey.slice(0, 10) + '...',
-              new_key: newPrivateKey.slice(0, 10) + '...',
+              old_wallet_address: oldWallet.address,   // public address only
+              new_wallet_address: newWalletAddress,     // public address only
               wallet_address: walletAddress,
               tx_hash: receipt.hash,
               block_number: receipt.blockNumber,

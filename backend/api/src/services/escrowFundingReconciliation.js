@@ -14,6 +14,11 @@ const MAX_ATTEMPTS = 10;
 const BASE_BACKOFF_MS = 60_000;
 const LOCK_KEY = 'escrow:funding:reconciliation:lock';
 const LOCK_TTL_SECONDS = 120;
+// PostgREST caps a single response at 1000 rows; page through the stale set
+// deterministically so a large stuck funding queue is drained rather than
+// only ever processing the leading slice (#9219).
+const STALE_FUNDING_PAGE_SIZE = 1000;
+const STALE_FUNDING_MAX_PAGES = 10;
 
 let fundingTimer = null;
 let fundingRunning = false;
@@ -241,26 +246,34 @@ export async function reconcileStaleFunding(orderRepository) {
     const fundingTtlMs = (Number.isFinite(ttlMinutes) && ttlMinutes > 0 ? ttlMinutes : DEFAULT_FUNDING_TTL_MINUTES) * 60 * 1000;
     const cutoff = new Date(Date.now() - fundingTtlMs).toISOString();
 
-    const { data: staleOrders, error } = await orderRepository.findStaleFundingOrders(cutoff);
-    if (error) {
-      logger.error('[escrow-funding] Failed to load stale funding orders:', error.message);
-      return;
-    }
+    for (let page = 0; page < STALE_FUNDING_MAX_PAGES; page += 1) {
+      const { data: staleOrders, error } = await orderRepository.findStaleFundingOrders(cutoff, {
+        offset: page * STALE_FUNDING_PAGE_SIZE,
+        limit: STALE_FUNDING_PAGE_SIZE,
+      });
+      if (error) {
+        logger.error('[escrow-funding] Failed to load stale funding orders:', error.message);
+        return;
+      }
+      if (!staleOrders || staleOrders.length === 0) break;
 
-    for (const order of staleOrders ?? []) {
-      const attempts = order.escrow_funding_attempts ?? 0;
-      if (attempts >= MAX_ATTEMPTS) {
-        continue;
-      }
-      if (!dueForRetry(order)) continue;
-      if (globalLockAcquired && redisClient) {
-        try {
-          await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-        } catch (err) {
-          logger.warn('[escrow-funding] Failed to refresh lock:', err.message);
+      for (const order of staleOrders) {
+        const attempts = order.escrow_funding_attempts ?? 0;
+        if (attempts >= MAX_ATTEMPTS) {
+          continue;
         }
+        if (!dueForRetry(order)) continue;
+        if (globalLockAcquired && redisClient) {
+          try {
+            await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
+          } catch (err) {
+            logger.warn('[escrow-funding] Failed to refresh lock:', err.message);
+          }
+        }
+        await finalizeOrRevert(order, orderRepository);
       }
-      await finalizeOrRevert(order, orderRepository);
+
+      if (staleOrders.length < STALE_FUNDING_PAGE_SIZE) break;
     }
   } finally {
     if (globalLockAcquired && redisClient) {

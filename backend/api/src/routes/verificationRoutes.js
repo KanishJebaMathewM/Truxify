@@ -103,7 +103,7 @@ router.get('/order/:orderId', orderVerificationLimiter, authenticate, validatePa
         error: error.message,
       });
     }
-
+    logger.error({ event: 'VERIFICATION_UPLOAD_ERROR', requestId: req.requestId || req.id, error: error && error.message }, 'Verification upload error');
     res.status(500).json({
       success: false,
       error: error.message
@@ -245,7 +245,7 @@ router.post('/kyc/upload', kycUploadLimiter, upload.single('image'), authenticat
     const mlApiKey = process.env.ML_API_KEY;
 
     if (!mlBaseUrl || !mlApiKey) {
-      logger.error('[OCR] ML service URL (ML_API_URL) or API key (ML_API_KEY) not configured');
+      logger.error({ event: 'OCR_SERVICE_NOT_CONFIGURED' }, '[OCR] ML service URL (ML_API_URL) or API key (ML_API_KEY) not configured');
       return res.status(503).json({ success: false, error: 'KYC OCR service is unconfigured' });
     }
 

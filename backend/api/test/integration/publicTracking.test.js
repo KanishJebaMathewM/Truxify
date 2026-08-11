@@ -70,6 +70,12 @@ vi.mock('../../src/config/db.js', () => ({
   supabase: {
     from(table) { return buildChainable(table); },
   },
+  supabaseAdmin: {
+    from(table) { return buildChainable(table); },
+  },
+  createUserClient: () => ({
+    from(table) { return buildChainable(table); },
+  }),
   redisClient: {},
   mongoDb: {},
   firebaseAdmin: { auth: () => ({ verifyIdToken: async () => ({ uid: 'test-user' }) }) },

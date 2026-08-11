@@ -62,8 +62,21 @@ class QuantumService:
             result = self.qubo_formatter.solve_qubo(qubo)
             
             # Extract route
-            route = self._extract_route(result)
-            
+            route = self._extract_route(result, [node['id'] for node in nodes])
+
+            if route is None:
+                return {
+                    'success': False,
+                    'not_implemented': True,
+                    'error': 'No connected route could be decoded from the QUBO solution',
+                    'data': {
+                        'route': None,
+                        'objective': result.get('objective'),
+                        'num_nodes': len(nodes),
+                        'num_edges': len(edges)
+                    }
+                }
+
             return {
                 'success': True,
                 'data': {
@@ -77,11 +90,57 @@ class QuantumService:
             logger.error(f"Route optimization failed: {e}")
             return {'success': False, 'error': str(e)}
     
-    def _extract_route(self, qubo_result: Dict) -> List:
-        """Extract route from QUBO solution"""
-        # In production: decode binary solution to route
-        # For now: return dummy route
-        return ['node1', 'node2', 'node3', 'node4']
+    def _extract_route(self, qubo_result: Dict, node_ids: List) -> List:
+        """Decode the QUBO edge-selection solution into an ordered route"""
+        solution = qubo_result.get('solution') or []
+        variables = qubo_result.get('variables') or []
+        if not solution or len(solution) != len(variables):
+            return None
+
+        selected = []
+        for var, bit in zip(variables, solution):
+            if bit and str(var).startswith('x_'):
+                parts = str(var)[2:].split('_')
+                if len(parts) == 2:
+                    selected.append((parts[0], parts[1]))
+
+        if not selected:
+            return None
+
+        adjacency = {}
+        for u, v in selected:
+            adjacency.setdefault(u, []).append(v)
+            adjacency.setdefault(v, []).append(u)
+
+        # Reject disconnected selections
+        visited = set()
+        stack = [selected[0][0]]
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            stack.extend(adjacency.get(current, []))
+        if len(visited) != len(adjacency):
+            return None
+
+        # Order the selected edges into a traversal
+        route = []
+        stack = [selected[0][0]]
+        remaining = list(selected)
+        while stack:
+            u = stack[-1]
+            edge = next((e for e in remaining if u in e), None)
+            if edge is None:
+                route.append(stack.pop())
+            else:
+                remaining.remove(edge)
+                v = edge[1] if edge[0] == u else edge[0]
+                stack.append(v)
+
+        # Map decoded node ids back to the original node id values
+        id_map = {str(nid): nid for nid in node_ids}
+        return [id_map.get(node, node) for node in route]
     
     def run_qaoa(self, cost_function: Any = None) -> Dict:
         """Run QAOA optimization"""

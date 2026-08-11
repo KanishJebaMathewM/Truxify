@@ -129,9 +129,9 @@ export async function verifyAuthToken(token) {
 
   return {
     id: userProfile.id,
-    uid: userProfile.firebase_uid,
+    uid: userProfile.uid ?? userProfile.firebase_uid,
     role: userProfile.role,
-    fullName: userProfile.full_name,
+    fullName: userProfile.fullName ?? userProfile.full_name,
     phone: userProfile.phone,
     isActive: true,
   };
@@ -272,7 +272,10 @@ export async function authenticate(req, res, next) {
     try {
       decoded = jwt.decode(token);
     } catch (err) {
-      // ignore decoding errors and let verification handle it
+      logger.warn(
+        { event: 'JWT_DECODE_ERROR', requestId: req.requestId || req.id },
+        'JWT decode failed',
+      );
     }
 
     const isSupabaseToken =

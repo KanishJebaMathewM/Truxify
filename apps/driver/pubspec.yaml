@@ -28,6 +28,7 @@ dependencies:
   google_fonts: ^8.1.0
   fl_chart: ^0.66.0
   flutter_riverpod: ^2.5.1
+  provider: ^6.1.2
   flutter_map: ^8.1.1
   latlong2: ^0.10.1
   http: ^1.6.0
@@ -47,6 +48,7 @@ dependencies:
   camera: ^0.11.0
   signature: ^6.3.0
   image_picker: ^1.1.2
+  flutter_image_compress: ^2.3.0
   battery_plus: ^6.2.1
   flutter_dotenv: ^5.2.0
   sentry_flutter: ^8.14.1

@@ -35,6 +35,23 @@ vi.mock('../../src/config/db.js', () => ({
 }));
 
 import AnomalyDetectionService, { ANOMALY_THRESHOLDS, ANOMALY_SEVERITY } from '../../src/services/security/anomalyDetectionService.js';
+import { supabase } from '../../src/config/db.js';
+
+/**
+ * Build a thenable supabase query-builder mock that records the chain and
+ * resolves to the given result. Mirrors awaiting the real PostgREST client.
+ */
+function mockQuery(result) {
+  const builder = {
+    select: vi.fn(() => builder),
+    eq: vi.fn(() => builder),
+    gte: vi.fn(() => builder),
+    order: vi.fn(() => builder),
+    limit: vi.fn(() => builder),
+  };
+  builder.then = (resolve, reject) => Promise.resolve(result).then(resolve, reject);
+  return builder;
+}
 
 describe('AnomalyDetectionService', () => {
   let service;
@@ -165,6 +182,76 @@ describe('AnomalyDetectionService', () => {
     it('never scores a credit/refund transaction as LARGE_WITHDRAWAL', async () => {
       const transaction = { type: 'credit', amount: 50000 };
       const result = await service.detectLargeWithdrawal('user-1', 'wallet-1', transaction);
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('getUserAverageWithdrawal', () => {
+    it('averages the recent bounded window and orders by recency', async () => {
+      const builder = mockQuery({
+        data: [{ amount: '1000' }, { amount: '2000' }],
+        error: null,
+      });
+      supabase.from.mockReturnValue(builder);
+
+      const avg = await service.getUserAverageWithdrawal('user-1', 'wallet-1');
+
+      expect(avg).toBe(1500);
+      expect(supabase.from).toHaveBeenCalledWith('transactions');
+      expect(builder.order).toHaveBeenCalledWith('created_at', { ascending: false });
+      expect(builder.limit).toHaveBeenCalledWith(1000);
+    });
+
+    it('falls back to half the threshold when the window is empty', async () => {
+      supabase.from.mockReturnValue(mockQuery({ data: [], error: null }));
+
+      const avg = await service.getUserAverageWithdrawal('user-1', 'wallet-1');
+
+      expect(avg).toBe(ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 2);
+    });
+  });
+
+  describe('getUserWithdrawalStdDev', () => {
+    it('computes the standard deviation from the bounded window', async () => {
+      const builder = mockQuery({
+        data: [{ amount: '100' }, { amount: '200' }, { amount: '300' }],
+        error: null,
+      });
+      supabase.from.mockReturnValue(builder);
+
+      const stdDev = await service.getUserWithdrawalStdDev('user-1', 'wallet-1');
+
+      const expected = Math.sqrt(((100 - 200) ** 2 + (200 - 200) ** 2 + (300 - 200) ** 2) / 3);
+      expect(stdDev).toBeCloseTo(expected, 6);
+      expect(builder.order).toHaveBeenCalledWith('created_at', { ascending: false });
+      expect(builder.limit).toHaveBeenCalledWith(1000);
+    });
+
+    it('falls back to a quarter of the threshold with fewer than two rows', async () => {
+      supabase.from.mockReturnValue(mockQuery({ data: [{ amount: '100' }], error: null }));
+
+      const stdDev = await service.getUserWithdrawalStdDev('user-1', 'wallet-1');
+
+      expect(stdDev).toBe(ANOMALY_THRESHOLDS.LARGE_WITHDRAWAL / 4);
+    });
+  });
+
+  describe('detectMultipleTransfers', () => {
+    it('uses an exact head count and flags transfers at or above the threshold', async () => {
+      const builder = mockQuery({ count: 7, error: null });
+      supabase.from.mockReturnValue(builder);
+
+      const result = await service.detectMultipleTransfers('user-1', 'wallet-1', { amount: '1' });
+
+      expect(builder.select).toHaveBeenCalledWith('id', { count: 'exact', head: true });
+      expect(result).toEqual(expect.objectContaining({ type: 'MULTIPLE_TRANSFERS', count: 7, severity: 'MEDIUM' }));
+    });
+
+    it('returns null when the exact count is below the threshold', async () => {
+      supabase.from.mockReturnValue(mockQuery({ count: 3, error: null }));
+
+      const result = await service.detectMultipleTransfers('user-1', 'wallet-1', { amount: '1' });
+
       expect(result).toBeNull();
     });
   });

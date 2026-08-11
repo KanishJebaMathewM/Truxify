@@ -1,4 +1,3 @@
-import logger from '../middleware/logger.js';
 import express from 'express';
 import { authenticate } from '../middleware/auth.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -256,6 +255,7 @@ router.get('/:id', authenticate, userLimiter, requirePolicy('admin:view-audit-lo
 
     res.json(data);
   } catch (err) {
+    logger.error({ requestId: req.requestId, err: err?.message || err }, '[AuditRoutes] Error fetching audit log entry');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

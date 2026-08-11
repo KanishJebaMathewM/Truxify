@@ -26,6 +26,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockEscrowRelease = vi.hoisted(() => vi.fn());
 const mockGetEscrowBooking = vi.hoisted(() => vi.fn());
+const mockResolveExpectedDepositAmount = vi.hoisted(() => vi.fn());
 
 const mockLogger = vi.hoisted(() => ({
   info: vi.fn(),
@@ -62,6 +63,7 @@ vi.mock('../../src/services/escrow.js', () => ({
   escrowRelease: mockEscrowRelease,
   getEscrowBooking: mockGetEscrowBooking,
   getEscrowBookingId: (displayId) => displayId,
+  resolveExpectedDepositAmount: mockResolveExpectedDepositAmount,
 }));
 
 import {
@@ -106,6 +108,7 @@ describe('escrowReleaseReconciliation', () => {
     mockReleaseLock.mockResolvedValue(true);
     mockRenewLock.mockResolvedValue(true);
     mockGetEscrowBooking.mockResolvedValue({ paid: true });
+    mockResolveExpectedDepositAmount.mockReturnValue({ expectedAmountWei: 1000000000000000000n });
   });
 
   it('skips the cycle when no OrderRepository is provided', async () => {
@@ -207,11 +210,43 @@ describe('escrowReleaseReconciliation', () => {
 
     await reconcilePendingEscrowReleases(repo);
 
-    expect(mockEscrowRelease).toHaveBeenCalledWith('ORD-001');
+    expect(mockResolveExpectedDepositAmount).toHaveBeenCalled();
+    expect(mockEscrowRelease).toHaveBeenCalledWith('ORD-001', 1000000000000000000n);
     expect(repo.executeRpc).toHaveBeenCalledWith(
       'complete_trip_tx',
       { p_order_id: 'order-1', p_otp_id: null, p_release_tx_hash: '0xretry' },
       mockSupabaseAdmin,
+    );
+  });
+
+
+  it('records attempt error when release_failed retry cannot resolve escrow amount', async () => {
+    const repo = makeOrderRepositoryMock();
+    repo.findPendingEscrowReleases.mockResolvedValue({
+      data: [releasedOrder({ escrow_status: 'release_failed', release_tx_hash: null })],
+      error: null,
+    });
+    repo.findOrderById.mockResolvedValue({
+      data: releasedOrder({
+        escrow_status: 'release_failed',
+        release_tx_hash: null,
+        escrow_amount_wei: null,
+        pending_bid_acceptance: null,
+      }),
+      error: null,
+    });
+    mockGetEscrowBooking.mockResolvedValue({ paid: false });
+    mockResolveExpectedDepositAmount.mockReturnValueOnce({
+      error: 'No escrow amount is recorded for this order. Deposit cannot be verified.',
+      code: 'ESCROW_AMOUNT_MISSING',
+    });
+
+    await reconcilePendingEscrowReleases(repo);
+
+    expect(mockEscrowRelease).not.toHaveBeenCalled();
+    expect(repo.updateOrder).toHaveBeenCalledWith(
+      'order-1',
+      expect.objectContaining({ escrow_release_attempts: 1 }),
     );
   });
 

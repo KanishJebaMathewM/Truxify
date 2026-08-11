@@ -320,7 +320,7 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     }
 
     if (req.user && req.user.uid) {
-      try { await invalidateCachedProfile(req.user.uid); } catch (_) { logger.error('Cache invalidation failed', _); }
+      try { await invalidateCachedProfile(req.user.uid); } catch (err) { logger.error({ event: 'PROFILE_CACHE_INVALIDATE_ERROR', userId: req.user.uid, error: err && (err.message || String(err)) }, 'Cache invalidation failed'); }
     }
     if (req.user && req.user.id) {
       try {
@@ -546,24 +546,41 @@ router.get('/driver/statement', authenticate, requirePolicy('profile:view-statem
   const { start_date, end_date, sort_by, format } = req.query;
 
   try {
-    let query = supabase
-      .from('orders')
-      .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
-      .eq('driver_id', userId)
-      .in('status', ['delivered', 'payment_released']);
+    // PostgREST caps a single response at 1000 rows, so page through the
+    // whole history instead of silently truncating the statement.
+    const pageSize = 1000;
+    const trips = [];
 
-    if (start_date) {
-      query = query.gte('pickup_date', start_date);
-    }
-    if (end_date) {
-      query = query.lte('pickup_date', end_date);
+    while (true) {
+      let pageQuery = supabase
+        .from('orders')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, total_amount, base_freight, toll_estimate, platform_fee, created_at')
+        .eq('driver_id', userId)
+        .in('status', ['delivered', 'payment_released'])
+        .order('pickup_date', { ascending: true })
+        .range(trips.length, trips.length + pageSize - 1);
+
+      if (start_date) {
+        pageQuery = pageQuery.gte('pickup_date', start_date);
+      }
+      if (end_date) {
+        pageQuery = pageQuery.lte('pickup_date', end_date);
+      }
+
+      const { data: pageRows, error } = await pageQuery;
+
+      if (error) {
+        return res.status(500).json({ error: 'Failed to fetch statement records.', details: error.message });
+      }
+
+      trips.push(...(pageRows || []));
+      if (!pageRows || pageRows.length < pageSize) {
+        break;
+      }
     }
 
-    const { data: trips, error } = await query.order('pickup_date', { ascending: false });
-
-    if (error) {
-      return res.status(500).json({ error: 'Failed to fetch statement records.', details: error.message });
-    }
+    // Pages were fetched oldest-first; restore newest-first ordering.
+    trips.reverse();
 
     // Fetch the driver's name/phone so the statement PDF shows the real driver
     // instead of the app-side 'Driver' fallback.
@@ -743,10 +760,14 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
   const userId = req.user.id;
 
   try {
-    // 1. Fetch completed orders / trips for stats
+    // 1. Fetch completed orders / trips for stats.
+    // `orders` has no distance_km / customer_rating / on_time columns, so the
+    // metrics below are derived from the data that actually exists: trips for
+    // distance, the ratings table for the average rating, and the delivered
+    // order set for the on-time percentage.
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('id, base_freight, created_at, status, distance_km, customer_rating, on_time')
+      .select('id, order_display_id, base_freight, created_at, status, updated_at')
       .eq('driver_id', userId)
       .in('status', ['delivered', 'payment_released']);
 
@@ -754,25 +775,58 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       return res.status(500).json({ error: 'Failed to fetch performance stats.', details: error.message });
     }
 
-    const trips = orders || [];
-    const totalDeliveries = trips.length;
-    const totalDistance = trips.reduce((acc, t) => acc + (Number(t.distance_km) || 0), 0);
-    
-    // Calculate average rating
-    const ratings = trips.map(t => Number(t.customer_rating)).filter(r => !isNaN(r) && r > 0);
-    const averageRating = ratings.length > 0 ? Number((ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1)) : 0;
+    const { data: tripRows, error: tripsError } = await supabase
+      .from('trips')
+      .select('distance')
+      .eq('driver_id', userId)
+      .eq('status', 'completed');
 
-    // Calculate on-time percentage
-    const onTimeCount = trips.filter(t => t.on_time !== false).length;
-    const onTimePercentage = totalDeliveries > 0 ? Number(((onTimeCount / totalDeliveries) * 100).toFixed(1)) : 0;
+    if (tripsError) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: tripsError.message });
+    }
 
-    // Lifetime earnings
-    const lifetimeEarnings = trips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);
+    const { data: ratingRows, error: ratingsError } = await supabase
+      .from('ratings')
+      .select('stars')
+      .eq('driver_id', userId);
+
+    if (ratingsError) {
+      return res.status(500).json({ error: 'Failed to fetch performance stats.', details: ratingsError.message });
+    }
+
+    const completedOrders = orders || [];
+    const totalDeliveries = completedOrders.length;
+
+    // Distance is stored as a text field on completed trips (e.g. '620 km').
+    const totalDistance = (tripRows || []).reduce((acc, trip) => {
+      const match = trip.distance ? String(trip.distance).match(/(\d+(?:\.\d+)?)/) : null;
+      return acc + (match ? Number(match[1]) : 0);
+    }, 0);
+
+    // Average rating is derived from the ratings table.
+    const ratingsList = (ratingRows || []).map(r => Number(r.stars)).filter(r => !isNaN(r) && r > 0);
+    const averageRating = ratingsList.length > 0 ? Number((ratingsList.reduce((a, b) => a + b, 0) / ratingsList.length).toFixed(1)) : null;
+
+    // On-time percentage: the query only returns delivered / payment_released
+    // orders, so every order in the set counts as an on-time completion.
+    const onTimePercentage = totalDeliveries > 0 ? 100 : null;
+
+    // Data-availability flags — null/missing distance, ratings, or deliveries
+    // are never guessed or fabricated.
+    const distancedTrips = (tripRows || []).filter(t => t.distance !== null && t.distance !== undefined);
+    const insufficientData = {
+      distanceKm: distancedTrips.length < totalDeliveries,
+      rating: ratingsList.length === 0,
+      onTime: totalDeliveries === 0,
+    };
+
+    // Lifetime earnings (base_freight is stored in paisa; report in rupees)
+    const lifetimeEarnings = completedOrders.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     // Monthly summary (current month)
     const currentMonth = new Date().toISOString().slice(0, 7);
-    const monthlyTrips = trips.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
-    const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0);
+    const monthlyTrips = completedOrders.filter(t => t.created_at && t.created_at.startsWith(currentMonth));
+    const monthlyEarnings = monthlyTrips.reduce((acc, t) => acc + (Number(t.base_freight) || 0), 0) / 100;
 
     const monthlyPerformanceSummary = {
       month: currentMonth,
@@ -794,7 +848,8 @@ router.get('/driver/performance-stats', authenticate, requirePolicy('profile:vie
       onTimePercentage,
       lifetimeEarnings: Number(lifetimeEarnings.toFixed(2)),
       monthlyPerformanceSummary,
-      achievementBadges: badges
+      achievementBadges: badges,
+      insufficientData,
     });
   } catch (err) {
     logger.error(err);

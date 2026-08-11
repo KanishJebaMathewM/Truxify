@@ -6,6 +6,7 @@ vi.mock('../../../src/middleware/logger.js', () => ({
 }));
 
 let mockSupabase = null;
+let mockSupabaseAdmin = null;
 let mockMongoDb = null;
 let mockRedisClient = null;
 let mockPgPool = null;
@@ -13,6 +14,7 @@ let mockFirebaseAdmin = null;
 
 vi.mock('../../../src/config/db.js', () => ({
   get supabase() { return mockSupabase; },
+  get supabaseAdmin() { return mockSupabaseAdmin; },
   get mongoDb() { return mockMongoDb; },
   get redisClient() { return mockRedisClient; },
   get pgPool() { return mockPgPool; },
@@ -27,6 +29,7 @@ describe('Individual health checks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSupabase = null;
+    mockSupabaseAdmin = null;
     mockMongoDb = null;
     mockRedisClient = null;
     mockPgPool = null;
@@ -68,6 +71,40 @@ describe('Individual health checks', () => {
       const { default: check } = await import('../../../src/core/health/checks/supabaseHealth.js');
       const result = await check();
       expect(result.status).toBe(HealthStatus.UNHEALTHY);
+    });
+
+    it('probes through supabaseAdmin (service role) so anon revocation does not false-flag', async () => {
+      const adminFrom = vi.fn().mockReturnThis();
+      const adminSelect = vi.fn().mockReturnThis();
+      const adminLimit = vi.fn().mockResolvedValue({ error: null });
+      mockSupabaseAdmin = {
+        from: adminFrom,
+        select: adminSelect,
+        limit: adminLimit,
+      };
+      // The anon client would fail (42501 permission denied) — it must not be used.
+      mockSupabase = {
+        from: vi.fn(() => {
+          throw new Error('anon client must not be used by the supabase health probe');
+        }),
+      };
+      const { default: check } = await import('../../../src/core/health/checks/supabaseHealth.js');
+      const result = await check();
+      expect(result.status).toBe(HealthStatus.HEALTHY);
+      expect(adminFrom).toHaveBeenCalledWith('profiles');
+      expect(adminLimit).toHaveBeenCalledWith(1);
+    });
+
+    it('falls back to the anon client when supabaseAdmin is not configured', async () => {
+      mockSupabaseAdmin = null;
+      mockSupabase = {
+        from: vi.fn().mockReturnThis(),
+        select: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockResolvedValue({ error: null }),
+      };
+      const { default: check } = await import('../../../src/core/health/checks/supabaseHealth.js');
+      const result = await check();
+      expect(result.status).toBe(HealthStatus.HEALTHY);
     });
   });
 

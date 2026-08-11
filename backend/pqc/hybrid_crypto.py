@@ -111,10 +111,16 @@ class HybridCrypto:
             )
             
             # Remove quantum secret from decrypted data
-            quantum_secret_len = len(quantum_secret)
-            if len(decrypted) < quantum_secret_len:
-                raise ValueError("Decrypted payload is too short to contain the quantum secret")
-            return decrypted[:-quantum_secret_len]
+            secret_len = len(quantum_secret)
+            if len(decrypted) < secret_len:
+                raise ValueError(
+                    f"Decrypted payload length ({len(decrypted)}) is shorter than quantum secret size ({secret_len})"
+                )
+            
+            if decrypted[-secret_len:] != quantum_secret:
+                raise ValueError("Quantum secret suffix verification failed on decrypted payload")
+
+            return decrypted[:-secret_len]
             
         except Exception as e:
             logger.error(f"Hybrid decryption failed: {e}")

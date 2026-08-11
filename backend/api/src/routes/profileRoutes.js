@@ -230,10 +230,33 @@ router.get('/customer-stats', authenticate, userLimiter, async (req, res) => {
  */
 router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
+    const targetId = req.params.id;
+
+    // Name lookup is only allowed when the caller can prove a business
+    // relationship with the target: the target is the caller's own profile,
+    // the driver assigned to one of the caller's orders, or the customer on
+    // one of the caller's (driver) orders. This prevents UUID enumeration.
+    if (targetId !== req.user.id) {
+      const { data: relatedOrder, error: relErr } = await supabase
+        .from('orders')
+        .select('id')
+        .or(`customer_id.eq.${req.user.id},driver_id.eq.${req.user.id}`)
+        .or(`customer_id.eq.${targetId},driver_id.eq.${targetId}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (relErr) {
+        return res.status(500).json({ error: 'Failed to fetch profile name.', details: relErr.message });
+      }
+      if (!relatedOrder) {
+        return res.status(404).json({ error: 'Profile not found.' });
+      }
+    }
+
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('full_name')
-      .eq('id', req.params.id)
+      .eq('id', targetId)
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: 'Failed to fetch profile name.', details: error.message });

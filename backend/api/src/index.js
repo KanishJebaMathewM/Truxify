@@ -165,7 +165,7 @@ import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
-import { startOutboxRelayWorker } from './workers/outboxRelayWorker.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -784,7 +784,6 @@ async function shutdown(signal) {
   stopDlqWorker()
   stopDocumentExpiryWorker()
   stopWithdrawalSettlementWorker()
-  import { stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   stopOutboxRelayWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()

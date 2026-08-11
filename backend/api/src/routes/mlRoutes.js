@@ -54,7 +54,7 @@ router.get('/eta', authenticate, userLimiter, async (req, res) => {
     if (trip.order_id) {
       const { data: orderRes, error: orderErr } = await supabaseAdmin
         .from('orders')
-        .select('pickup_lat, pickup_lng, drop_lat, drop_lng')
+        .select('pickup_lat, pickup_lng, drop_lat, drop_lng, customer_id, driver_id')
         .eq('id', trip.order_id)
         .maybeSingle();
 
@@ -69,14 +69,38 @@ router.get('/eta', authenticate, userLimiter, async (req, res) => {
       return res.status(422).json({ error: 'Trip has no destination coordinates for ETA.' });
     }
 
+    if (req.user.role !== 'admin') {
+      const isOwner =
+        order.customer_id === req.user.id || order.driver_id === req.user.id;
+      if (!isOwner) {
+        return res.status(404).json({ error: 'Trip not found.' });
+      }
+    }
+
     const currentLat = parseCoord(lat, -90, 90);
     const currentLng = parseCoord(lng, -180, 180);
-    const hasLivePosition =
-      currentLat !== null && currentLng !== null;
 
-    const distanceKm = hasLivePosition
-      ? haversineKm(currentLat, currentLng, Number(order.drop_lat), Number(order.drop_lng))
-      : haversineKm(Number(order.pickup_lat), Number(order.pickup_lng), Number(order.drop_lat), Number(order.drop_lng));
+    const latProvided = lat !== undefined && lat !== null && lat !== '';
+    const lngProvided = lng !== undefined && lng !== null && lng !== '';
+
+    if (latProvided !== lngProvided) {
+      return res.status(400).json({ error: 'Both lat and lng must be provided together.' });
+    }
+
+    let positionSource = 'pickup';
+    let distanceKm;
+    if (latProvided) {
+      if (currentLat === null || currentLng === null) {
+        return res.status(400).json({ error: 'Invalid lat/lng: lat must be within [-90, 90] and lng within [-180, 180].' });
+      }
+      if (currentLat === 0 && currentLng === 0) {
+        return res.status(422).json({ error: 'lat/lng at (0,0) is not a valid live position.' });
+      }
+      positionSource = 'live';
+      distanceKm = haversineKm(currentLat, currentLng, Number(order.drop_lat), Number(order.drop_lng));
+    } else {
+      distanceKm = haversineKm(Number(order.pickup_lat), Number(order.pickup_lng), Number(order.drop_lat), Number(order.drop_lng));
+    }
 
     const now = new Date();
     const routeType = distanceKm > 20 ? 'highway' : 'city';
@@ -97,6 +121,7 @@ router.get('/eta', authenticate, userLimiter, async (req, res) => {
         distance_km: Math.round(distanceKm * 100) / 100,
         route_type: routeType,
         source: 'ml',
+        position_source: positionSource,
       });
     } catch (mlErr) {
       logger.warn('[MlEta] ML ETA prediction failed:', mlErr.message);

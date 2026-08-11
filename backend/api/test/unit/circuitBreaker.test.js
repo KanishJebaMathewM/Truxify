@@ -84,4 +84,21 @@ describe('CircuitBreaker Unit Tests', () => {
     expect(res).toBe('recovered');
     expect(breaker.getState()).toBe(CircuitState.CLOSED);
   });
+
+  it('cleans up resources and resets state when destroy is called', () => {
+    const breaker = new CircuitBreaker('testDestroyBreaker', {
+      failureThreshold: 1,
+      resetTimeoutMs: 10000,
+      fallback: () => 'fallback',
+    });
+    breaker.onFailure(new Error('Fail'), []);
+    expect(breaker._halfOpenTimer).not.toBeNull();
+    expect(breaker.state).toBe(CircuitState.OPEN);
+
+    breaker.destroy();
+
+    expect(breaker._halfOpenTimer).toBeNull();
+    expect(breaker.state).toBe(CircuitState.CLOSED);
+    expect(breaker.failureCount).toBe(0);
+  });
 });

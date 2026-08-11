@@ -41,6 +41,7 @@ describe('OrderMilestoneService', () => {
     orderRepository = {
       findOrderById: vi.fn(),
       updateOrder: vi.fn(),
+      executeRpc: vi.fn(),
     };
     orderTimelineService = {
       getOrderTimeline: vi.fn(),
@@ -115,10 +116,17 @@ describe('OrderMilestoneService', () => {
         { milestone: 'In Transit', completed: false, sort_order: 50 },
       ]);
       orderTimelineService.completeMilestone.mockResolvedValue();
-      orderRepository.updateOrder.mockResolvedValue({ data: { id: 'o1', status: 'in_transit' }, error: null });
+      orderRepository.executeRpc.mockResolvedValue({ data: [{ id: 'o1', status: 'in_transit' }], error: null });
       const result = await service.updateMilestone({ orderId: 'o1', milestone: 'In Transit', driverId: 'd1' });
       expect(result.status).toBe('in_transit');
       expect(orderTimelineService.completeMilestone).toHaveBeenCalledWith('TX-1', 'In Transit');
+      expect(orderRepository.executeRpc).toHaveBeenCalledTimes(1);
+      const [, params] = orderRepository.executeRpc.mock.calls[0];
+      expect(params).toMatchObject({
+        p_order_id: 'o1',
+        p_status: 'in_transit',
+        p_event_type: 'ORDER_UPDATED',
+      });
     });
 
     it('rolls back the milestone when the order update fails', async () => {
@@ -128,7 +136,7 @@ describe('OrderMilestoneService', () => {
         { milestone: 'In Transit', completed: false, sort_order: 50 },
       ]);
       orderTimelineService.completeMilestone.mockResolvedValue();
-      orderRepository.updateOrder.mockResolvedValue({ data: null, error: { message: 'db down' } });
+      orderRepository.executeRpc.mockResolvedValue({ data: null, error: { message: 'db down' } });
       try {
         await service.updateMilestone({ orderId: 'o1', milestone: 'In Transit', driverId: 'd1' });
         expect.unreachable();

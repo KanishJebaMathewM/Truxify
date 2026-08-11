@@ -15,6 +15,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Check for duplicate migration version prefixes
+        run: |
+          versions=$(find supabase/migrations -maxdepth 1 -name '*.sql' -printf '%f\n' | grep -oE '^[0-9]{14}' | sort)
+          dups=$(echo "$versions" | uniq -d)
+          if [ -n "$dups" ]; then
+            echo "Duplicate migration version prefixes found:"
+            echo "$dups"
+            echo "Supabase tracks applied migrations by the YYYYMMDDHHMMSS prefix; give every migration a unique prefix."
+            exit 1
+          fi
+          echo "All migration version prefixes are unique."
+
       - name: Check for duplicate CREATE TABLE definitions across migrations
         run: |
           tables=$(grep -rhoE 'CREATE TABLE( IF NOT EXISTS)? [A-Za-z0-9_.]+' supabase/migrations/ | sed -E 's/^CREATE TABLE( IF NOT EXISTS)? //; s/^[A-Za-z0-9_]+\.//' | sort)

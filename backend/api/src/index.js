@@ -166,6 +166,7 @@ import {
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
 import './subscribers/reputationSubscriber.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 
 // Configuration load from root folder is handled in db.js
 
@@ -455,6 +456,9 @@ app.use(requestLogger)
 app.use(hppProtection)
 app.use(suspiciousRequests)
 
+// Sanitize all responses to prevent response-header injection before routes run.
+app.use(responseSanitizer)
+
 // Enforce a known request content-type on mutating requests (POST/PUT/PATCH).
 // `requireJsonContent` only rejects unrecognized media types; the three
 // allowed types match the parsers registered above.
@@ -682,8 +686,6 @@ setupSwagger(app)
 // Root route
 app.get('/', getRoot)
 
-app.use(responseSanitizer)
-
 // Handling 404 Route Not Found
 app.use(notFound)
 // Sentry error handler must come before the generic error handler;
@@ -741,7 +743,6 @@ server.listen(PORT, () => {
   startStaleOrderWorker(escrowReconciliationOrderRepository)
   startDocumentExpiryWorker()
   startWithdrawalSettlementWorker()
-  import { startOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   startOutboxRelayWorker()
 
   // Register worker states for health aggregation
@@ -784,7 +785,6 @@ async function shutdown(signal) {
   stopDlqWorker()
   stopDocumentExpiryWorker()
   stopWithdrawalSettlementWorker()
-  import { stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
   stopOutboxRelayWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()

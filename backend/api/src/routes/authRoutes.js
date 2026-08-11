@@ -106,6 +106,7 @@ router.post("/logout", authenticate, async (req, res) => {
 
   // ── 1. Invalidate Redis profile cache ──────────────────────────────
   // Bounded timeout prevents Redis hangs from blocking the logout response.
+  let cacheInvalidated = false;
   try {
     await withTimeout(
       Promise.all([
@@ -117,6 +118,7 @@ router.post("/logout", authenticate, async (req, res) => {
       2000,
       "Redis invalidation timeout",
     );
+    cacheInvalidated = true;
   } catch (err) {
     logger.warn(
       `[auth/logout] Cache invalidation skipped for uid=${uid}: ${err?.message}`,
@@ -142,7 +144,7 @@ router.post("/logout", authenticate, async (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Logged out successfully",
-    cacheInvalidated: true, // Redis errors are non-fatal — logout always succeeds
+    cacheInvalidated,
   });
 });
 

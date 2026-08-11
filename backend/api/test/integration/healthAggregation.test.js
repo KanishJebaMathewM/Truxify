@@ -10,6 +10,9 @@ let mockPgPool = null;
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() { return mockSupabase; },
+  // supabaseHealth probes through supabaseAdmin (falling back to supabase)
+  // since the anon client can't read `profiles` post revoke_anon_privileges.
+  get supabaseAdmin() { return mockSupabase; },
   get mongoDb() { return mockMongoDb; },
   get redisClient() { return mockRedisClient; },
   get firebaseAdmin() { return mockFirebaseAdmin; },

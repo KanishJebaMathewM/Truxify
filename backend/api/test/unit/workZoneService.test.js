@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
   supabase: { from: vi.fn() },
 }));
 
-vi.mock('../../middleware/logger.js', () => ({
+vi.mock('../../src/middleware/logger.js', () => ({
   default: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-const { WorkZoneService } = await import('../../services/workZoneService.js');
+const { WorkZoneService } = await import('../../src/services/workZoneService.js');
 
 describe('WorkZoneService', () => {
   let workZoneService;

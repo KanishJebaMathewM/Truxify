@@ -53,6 +53,10 @@ export class CircuitBreaker {
     this.nextAttempt = Date.now();
   }
 
+  destroy() {
+    this.reset();
+  }
+
   async execute(fn, ...args) {
     const currentState = this.getState();
 

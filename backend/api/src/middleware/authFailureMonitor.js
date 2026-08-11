@@ -10,6 +10,13 @@ export default function authFailureMonitor(req, res, next) {
     return next();
   }
 
+  if (
+    process.env.NODE_ENV === 'production' &&
+    process.env.AUTH_FAILURE_MONITOR_ENABLED === 'false'
+  ) {
+    return next();
+  }
+
   res.on('finish', () => {
     if (res.statusCode !== 401 && res.statusCode !== 403) {
       return;

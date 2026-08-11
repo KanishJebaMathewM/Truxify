@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const FINALITY_THRESHOLD = 100; // Blocks after which transaction is considered finalized
@@ -164,7 +164,7 @@ class StateDivergenceDetector {
 
   async logDivergence(divergenceId, divergenceResult) {
     try {
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('blockchain_divergence_log')
         .insert([{
           divergence_id: divergenceId,
@@ -205,7 +205,7 @@ class StateDivergenceDetector {
       try {
         logger.warn('[StateDivergenceDetector] Triggering state reconciliation from block:', canonicalState.blockNumber);
 
-        await supabase
+        await (supabaseAdmin || supabase)
           .from('blockchain_reconciliation_jobs')
           .insert([{
             status: 'pending',
@@ -285,7 +285,7 @@ class StateDivergenceDetector {
         status: 'in_progress',
       };
 
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('state_reconciliations')
         .insert([reconciliation]);
 
@@ -317,7 +317,7 @@ class StateDivergenceDetector {
     divergence.resolutionDetails = resolutionDetails;
 
     try {
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('blockchain_divergence_log')
         .update({
           resolved: true,

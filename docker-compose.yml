@@ -261,6 +261,7 @@ services:
       - INTERNAL_RELAYER_KEY=${INTERNAL_RELAYER_KEY:-local_relayer_secret}
       - ML_API_KEY=${ML_API_KEY:-local_ml_secret}
       - ML_ENGINE_URL=http://ml-engine:8000
+      - BACKEND_API_URL=${BACKEND_API_URL:-http://api:5000}
     volumes:
       - n8n_data:/home/node/.n8n
     healthcheck:

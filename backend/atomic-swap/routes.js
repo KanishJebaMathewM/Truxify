@@ -129,6 +129,17 @@ router.post('/swap/cross-chain/refund', async (req, res) => {
     }
 });
 
+// Get stats
+router.get('/swap/stats', async (req, res) => {
+    try {
+        const stats = await swapService.getSwapStats();
+        res.json({ success: true, data: stats });
+    } catch (error) {
+        logger.error('Stats error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Get swap
 router.get('/swap/:swapId', async (req, res) => {
     try {
@@ -149,17 +160,6 @@ router.get('/swap/cross-chain/:swapId', async (req, res) => {
         res.json({ success: true, data: swap });
     } catch (error) {
         logger.error('Cross-chain swap fetch error:', error);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-// Get stats
-router.get('/swap/stats', async (req, res) => {
-    try {
-        const stats = await swapService.getSwapStats();
-        res.json({ success: true, data: stats });
-    } catch (error) {
-        logger.error('Stats error:', error);
         res.status(500).json({ success: false, error: error.message });
     }
 });

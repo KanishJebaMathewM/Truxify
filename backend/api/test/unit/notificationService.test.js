@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import notificationService from '../../src/services/notificationService.js';
-import DomainError from '../../src/errors/DomainError.js';
+import { DomainError } from '../../src/services/order/domainError.js';
 
 describe('notificationService allowlist validation', () => {
   it('should throw DomainError for invalid notif_type in insertNotification', async () => {
@@ -20,4 +20,18 @@ describe('notificationService allowlist validation', () => {
       await expect(notificationService.sendPushNotification(payload)).resolves.toBeDefined();
     }
   });
+
+  describe('FCM edge cases', () => {
+    it('returns null when userId is null in getFcmTokenForUser', async () => {
+      const result = await notificationService.getFcmTokenForUser(null);
+      expect(result).toBeNull();
+    });
+
+    it('returns error result when fcmToken is empty in sendFcmNotification', async () => {
+      const result = await notificationService.sendFcmNotification(null, '', { title: 'Test', body: 'Test body' });
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('No FCM token');
+    });
+  });
+
 });

@@ -18,7 +18,9 @@ class SGXService:
         self.enclave_id = None
         self.attestation_quote = None
         self.secure_counter = 0
-        
+
+        self._aes_key = self._get_aes_key()
+
         logger.info("✅ SGX Service initialized")
     
     def init_enclave(self) -> Dict:
@@ -46,16 +48,16 @@ class SGXService:
     
     def _get_aes_key(self) -> bytes:
         key = os.environ.get('SGX_ENCRYPTION_KEY')
-        if key:
-            return base64.b64decode(key)
-        return hashlib.sha256(b'Truxify-SGX-default-key').digest()
+        if not key:
+            raise RuntimeError('SGX_ENCRYPTION_KEY environment variable is required')
+        return base64.b64decode(key)
 
     def encrypt_data(self, plaintext: str) -> Dict:
         try:
             if not self.enclave_initialized:
                 return {'success': False, 'error': 'Enclave not initialized'}
 
-            aesgcm = AESGCM(self._get_aes_key())
+            aesgcm = AESGCM(self._aes_key)
             nonce = os.urandom(12)
             plaintext_bytes = plaintext.encode()
             ciphertext = aesgcm.encrypt(nonce, plaintext_bytes, None)
@@ -77,7 +79,7 @@ class SGXService:
             if not self.enclave_initialized:
                 return {'success': False, 'error': 'Enclave not initialized'}
 
-            aesgcm = AESGCM(self._get_aes_key())
+            aesgcm = AESGCM(self._aes_key)
             payload = base64.b64decode(ciphertext_b64)
             nonce = payload[:12]
             ciphertext = payload[12:]

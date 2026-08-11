@@ -26,17 +26,27 @@ describe("ZK proof verification", function () {
 
   it("rejects an all-zero proof in Verifier.verifyProof", async function () {
     const { verifier } = await deployZkEVM();
-    await assertRejectsWith(
-      verifier.verifyProof([0, 0], [[0, 0], [0, 0]], [0, 0], [1, 1]),
-      "Invalid G1 point in proof (a)"
+    assert.equal(
+      await verifier.verifyProof([0, 0], [[0, 0], [0, 0]], [0, 0], [1, 1]),
+      false
     );
   });
 
   it("rejects an empty public input in Verifier.verifyProof", async function () {
     const { verifier } = await deployZkEVM();
-    await assertRejectsWith(
-      verifier.verifyProof([1, 2], [[1, 2], [1, 2]], [1, 2], [0, 0]),
-      "Empty public input"
+    assert.equal(
+      await verifier.verifyProof([1, 2], [[1, 2], [1, 2]], [1, 2], [0, 0]),
+      false
+    );
+  });
+
+  it("rejects a fabricated on-curve proof in Verifier.verifyProof", async function () {
+    const { verifier } = await deployZkEVM();
+    // (1,2) is a valid point on the BN254 curve, so the old placeholder
+    // accepted it; verifyProof must now fail closed for every proof.
+    assert.equal(
+      await verifier.verifyProof([1, 2], [[1, 2], [1, 2]], [1, 2], [1, 1]),
+      false
     );
   });
 
@@ -94,5 +104,17 @@ describe("ZK proof verification", function () {
       kycVerifier.connect(admin).verifyKYC([0, 0], [[0, 0], [0, 0]], [0, 0], [0, 0], user.address),
       "Zero proof rejected"
     );
+  });
+
+  it("does not mark a user verified with a fabricated proof in KYCVerifier", async function () {
+    const kycVerifier = await (await ethers.getContractFactory("KYCVerifier")).deploy();
+    await kycVerifier.waitForDeployment();
+    const [admin, user] = await ethers.getSigners();
+
+    const verified = await kycVerifier
+      .connect(admin)
+      .verifyKYC.staticCall([1, 2], [[1, 2], [1, 2]], [1, 2], [1, 1], user.address);
+    assert.equal(verified, false);
+    assert.equal(await kycVerifier.isVerified(user.address), false);
   });
 });

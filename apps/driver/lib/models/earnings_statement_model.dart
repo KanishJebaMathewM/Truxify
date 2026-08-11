@@ -22,6 +22,15 @@ class EarningsStatementModel {
   });
 
   factory EarningsStatementModel.fromJson(Map<String, dynamic> json) {
+    // Backend GET /api/profile/driver/statement returns a nested shape:
+    //   { driver_name, driver_phone, start_date, end_date,
+    //     summary: { total_trips, total_base_freight, total_platform_fees,
+    //                total_toll_estimate, total_net_earnings },
+    //     trips: [{ id, order_display_id, pickup_address, drop_address,
+    //               pickup_date, base_freight, platform_fee, toll_estimate,
+    //               net_earnings, status }] }
+    // Flat keys are still honoured as a fallback.
+    final summary = json['summary'] as Map<String, dynamic>? ?? {};
     final tripsList = (json['trips'] as List? ?? [])
         .map((t) => TripEarningRow.fromJson(t as Map<String, dynamic>))
         .toList();
@@ -31,10 +40,10 @@ class EarningsStatementModel {
       driverPhone: json['driver_phone'] as String?,
       startDate: DateTime.tryParse(json['start_date'] as String? ?? '') ?? DateTime.now(),
       endDate: DateTime.tryParse(json['end_date'] as String? ?? '') ?? DateTime.now(),
-      totalTrips: (json['total_trips'] as num?)?.toInt() ?? tripsList.length,
-      totalEarnings: _parsePaisa(json['total_earnings']),
-      platformFees: _parsePaisa(json['platform_fees']),
-      netEarnings: _parsePaisa(json['net_earnings']),
+      totalTrips: (summary['total_trips'] ?? json['total_trips'] as num?)?.toInt() ?? tripsList.length,
+      totalEarnings: _parsePaisa(summary['total_base_freight'] ?? json['total_earnings']),
+      platformFees: _parsePaisa(summary['total_platform_fees'] ?? json['platform_fees']),
+      netEarnings: _parsePaisa(summary['total_net_earnings'] ?? json['net_earnings']),
       trips: tripsList,
     );
   }
@@ -66,6 +75,8 @@ class TripEarningRow {
   final String? customerName;
   final double earnings;
   final double? platformFee;
+  final double? tollEstimate;
+  final String? status;
 
   TripEarningRow({
     this.tripId,
@@ -75,22 +86,38 @@ class TripEarningRow {
     this.customerName,
     required this.earnings,
     this.platformFee,
+    this.tollEstimate,
+    this.status,
   });
 
   factory TripEarningRow.fromJson(Map<String, dynamic> json) {
+    // Backend trip rows use id/order_display_id/pickup_date/pickup_address/
+    // drop_address/base_freight/platform_fee/toll_estimate/net_earnings/status;
+    // the previous flat keys (trip_id/display_id/trip_date/route/earnings) are
+    // kept as fallbacks.
+    final pickup = json['pickup_address'] as String?;
+    final drop = json['drop_address'] as String?;
+    final route = json['route'] as String? ??
+        (pickup != null && drop != null ? '$pickup → $drop' : json['route_label'] as String?);
+
     return TripEarningRow(
-      tripId: json['trip_id'] as String?,
-      displayId: json['display_id'] as String?,
-      tripDate: json['trip_date'] != null
-          ? DateTime.tryParse(json['trip_date'] as String)
+      tripId: json['trip_id'] as String? ?? json['id'] as String?,
+      displayId: json['display_id'] as String? ?? json['order_display_id'] as String?,
+      tripDate: (json['trip_date'] ?? json['pickup_date']) != null
+          ? DateTime.tryParse((json['trip_date'] ?? json['pickup_date']) as String)
           : null,
-      route: json['route'] as String? ?? json['route_label'] as String?,
+      route: route,
       customerName: json['customer_name'] as String? ??
           json['customer_display_name'] as String?,
-      earnings: EarningsStatementModel._parsePaisa(json['earnings']),
+      earnings: EarningsStatementModel._parsePaisa(
+          json['net_earnings'] ?? json['earnings'] ?? json['base_freight']),
       platformFee: json['platform_fee'] != null
           ? EarningsStatementModel._parsePaisa(json['platform_fee'])
           : null,
+      tollEstimate: json['toll_estimate'] != null
+          ? EarningsStatementModel._parsePaisa(json['toll_estimate'])
+          : null,
+      status: json['status'] as String?,
     );
   }
 
@@ -102,5 +129,7 @@ class TripEarningRow {
         'customer_name': customerName,
         'earnings': (earnings * 100).toInt(),
         'platform_fee': platformFee != null ? (platformFee! * 100).toInt() : null,
+        'toll_estimate': tollEstimate != null ? (tollEstimate! * 100).toInt() : null,
+        'status': status,
       };
 }

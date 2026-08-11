@@ -118,4 +118,40 @@ describe("zkEVMBridge", function () {
     const ownerAfter = await ethers.provider.getBalance(owner.address);
     assert.ok(ownerAfter > ownerBefore, "owner balance should increase");
   });
+
+  it("sweeps only the collected fees, not the contract balance", async function () {
+    const { bridge, user, owner } = await deployBridge();
+    const fee = await bridge.bridgeFee();
+    await bridge.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    assert.equal(await bridge.collectedFees(), fee);
+
+    await bridge.connect(owner).withdrawFees();
+    assert.equal(await bridge.collectedFees(), 0n);
+  });
+
+  it("does not drain pending user withdrawals when sweeping fees", async function () {
+    const { bridge, user, owner } = await deployBridge();
+    await bridge.connect(user).depositToL2({ value: ethers.parseEther("1") });
+    await bridge.connect(user).withdrawFromL2(ethers.parseEther("0.4"), ethers.randomBytes(65));
+
+    const pendingBefore = await bridge.pendingWithdrawals(user.address);
+    assert.equal(pendingBefore, ethers.parseEther("0.4"));
+
+    await bridge.connect(owner).withdrawFees();
+
+    assert.equal(await bridge.pendingWithdrawals(user.address), ethers.parseEther("0.4"));
+    await bridge.connect(user).claimWithdrawal();
+    assert.equal(await bridge.pendingWithdrawals(user.address), 0n);
+  });
+
+  it("rejects arbitrary ETH sent to the bridge via receive()", async function () {
+    const { bridge, user } = await deployBridge();
+    await assert.rejects(
+      user.sendTransaction({
+        to: await bridge.getAddress(),
+        value: ethers.parseEther("1"),
+      }),
+      "Only zkEVM can fund the bridge"
+    );
+  });
 });

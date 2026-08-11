@@ -409,11 +409,22 @@ func (rn *RaftNode) sendHeartbeats() {
 			return
 		}
 		if res.resp.Success {
-			// Follower accepted the prefix; record the highest matching index.
-			rn.matchIndex[res.url] = res.request.PrevLogIndex + uint64(len(res.request.Entries))
-			rn.nextIndex[res.url] = rn.matchIndex[res.url] + 1
-		} else if rn.nextIndex[res.url] > 1 {
-			// Log inconsistency: back off and retry from an earlier prefix.
+			// Follower accepted the prefix; monotonically record highest matching index.
+			newMatch := res.request.PrevLogIndex + uint64(len(res.request.Entries))
+			if newMatch > rn.matchIndex[res.url] {
+				rn.matchIndex[res.url] = newMatch
+			}
+			// nextIndex must never lag matchIndex+1. Repairing it separately
+			// matters when a stale failure response has already decremented
+			// nextIndex below what the follower is known to hold: newMatch
+			// would then not exceed matchIndex, and nesting this update inside
+			// that check would leave nextIndex stuck low forever, re-sending
+			// entries the follower already has on every heartbeat.
+			if next := rn.matchIndex[res.url] + 1; next > rn.nextIndex[res.url] {
+				rn.nextIndex[res.url] = next
+			}
+		} else if rn.nextIndex[res.url] > 1 && res.request.PrevLogIndex+1 == rn.nextIndex[res.url] {
+			// Log inconsistency: back off and retry from an earlier prefix if probe matches current nextIndex.
 			rn.nextIndex[res.url]--
 		}
 	}
@@ -566,6 +577,7 @@ func (rn *RaftNode) HandleVote(w http.ResponseWriter, r *http.Request) {
 		(rn.VotedFor == "" || rn.VotedFor == req.CandidateID) &&
 		rn.isLogUpToDate(req.LastLogIndex, req.LastLogTerm) {
 		rn.VotedFor = req.CandidateID
+		rn.lastLeaderSeen = time.Now()
 		resp.VoteGranted = true
 	}
 

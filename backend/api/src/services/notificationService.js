@@ -1,4 +1,4 @@
-import { supabase, supabaseAdmin, firebaseAdmin } from '../config/db.js';
+import { supabaseAdmin, firebaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
 import { measureExecution } from '../core/performanceMetrics.js';
@@ -28,9 +28,9 @@ function calculateRetryBackoff(attempt) {
 }
 
 async function getUserFcmToken(userId) {
-  if (!supabase) return null;
+  if (!supabaseAdmin) return null;
   try {
-    const { data, error } = await supabase.from('profiles').select('fcm_token').eq('id', userId).maybeSingle();
+    const { data, error } = await supabaseAdmin.from('profiles').select('fcm_token').eq('id', userId).maybeSingle();
     if (error || !data?.fcm_token) return null;
     return data.fcm_token;
   } catch (err) {
@@ -40,9 +40,9 @@ async function getUserFcmToken(userId) {
 }
 
 async function clearInvalidToken(userId) {
-  if (!supabase) return;
+  if (!supabaseAdmin) return;
   try {
-    await supabase
+    await supabaseAdmin
       .from('profiles')
       .update({
         fcm_token: null,
@@ -120,6 +120,46 @@ export async function sendFcmNotification(userId, notification, data = {}) {
     error: lastError?.message || 'Unknown error',
     errorCode: lastError?.code
   };
+}
+
+export async function sendPushNotification(userId, title, body, notifType = 'order_update', data = {}) {
+  if (!userId || !title || !body) {
+    logger.warn('[NotificationService] sendPushNotification skipped — missing required fields.');
+    return { success: false, error: 'Missing required fields' };
+  }
+
+  let dbSuccess = false;
+  try {
+    if (!supabaseAdmin) {
+      logger.error('[NotificationService] Service-role client not configured — cannot persist notification.');
+    } else {
+      const { error } = await supabaseAdmin.from('notifications').insert({
+        user_id: userId,
+        title,
+        body,
+        notif_type: notifType,
+        metadata: data
+      });
+
+      if (error) {
+        logger.error({ err: error }, '[NotificationService] Database insert failed');
+      } else {
+        logger.info(`[NotificationService] Notification inserted for user ${userId}`);
+        dbSuccess = true;
+      }
+    }
+  } catch (dbErr) {
+    logger.error({ err: dbErr }, '[NotificationService] Database connection error during notification insert');
+  }
+
+  let fcmResult;
+  try {
+    fcmResult = await sendFcmNotification(userId, { title, body }, data);
+  } catch (err) {
+    logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
+  }
+
+  return { success: true, persisted: dbSuccess, fcm: fcmResult };
 }
 
 export const hashDeliveryOtp = hashOtp;
@@ -203,8 +243,11 @@ export async function verifyDeliveryOtp(otpId) {
       .maybeSingle();
 
     if (error) {
-      logger.error('[NotificationService] Failed to verify OTP:', error.message);
-      return false;
+      logger.error(
+        { event: 'NOTIFICATION_INSERT_ERROR', error: error && error.message },
+        'Error inserting notification',
+      );
+      throw error;
     }
 
     if (!data) {
@@ -271,49 +314,23 @@ export async function sendDeliveryOtpNotification(customerId, orderDisplayId, ot
     fcmResult = await sendFcmNotification(
       customerId,
       { title, body },
-      { orderDisplayId, notifType: 'delivery_otp', deliveryOtp: String(otp) }
+      { orderDisplayId, notifType: 'delivery_otp',  }
     );
   } catch (err) {
     logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
   }
 
-  if (process.env.TWILIO_AUTH_TOKEN) {
-    logger.info(`[NotificationService] [SMS] SMS stub: Sending OTP for order ${orderDisplayId} (masked)`);
-  } else {
-    logger.info(
-      `[NotificationService] [SMS] SMS stub: No SMS gateway configured. OTP sent out-of-band for order ${orderDisplayId} (masked)`
-    );
+    // Return the actual push-delivery result so callers can branch on it.
+    // The notification row is persisted independently of push delivery, so
+    // overall success is driven by the FCM outcome.
+    const fcmOk = Boolean(fcmResult?.success);
+    return {
+      success: fcmOk,
+      dbSuccess,
+      fcm: {
+        success: fcmOk,
+        messageId: fcmResult?.messageId ?? null,
+        error: fcmResult?.error ?? (fcmResult ? null : 'Unexpected sendFcmNotification error'),
+      },
+    };
   }
-
-  return { success: dbSuccess || fcmResult?.success, fcm: fcmResult };
-}
-
-export async function sendPushNotification(userId, title, body, notifType, metadata = {}) {
-  return measureExecution('NotificationService.sendPushNotification', async () => {
-    if (supabaseAdmin) {
-      try {
-        const { error } = await supabaseAdmin.from('notifications').insert({
-          user_id: userId,
-          title,
-          body,
-          notif_type: notifType,
-          metadata
-        });
-
-        if (error) {
-          logger.error(`[NotificationService] Database insert failed: ${error.message}`);
-        }
-      } catch (dbErr) {
-        logger.error(`[NotificationService] Database error: ${dbErr.message}`);
-      }
-    }
-
-    let fcmResult;
-    try {
-      fcmResult = await sendFcmNotification(userId, { title, body }, { notifType, ...metadata });
-    } catch (err) {
-      logger.error({ err: err?.message ?? String(err) }, 'Unexpected sendFcmNotification error');
-    }
-    return { success: fcmResult?.success, fcm: fcmResult };
-  });
-}

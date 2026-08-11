@@ -40,13 +40,17 @@ let cacheMisses = 0;
 let cacheSets = 0;
 
 export function getCacheStats() {
-  const total = cacheHits + cacheMisses;
+  // Snapshot all counters in one read to avoid inconsistent intermediate sums
+  const hits = cacheHits;
+  const misses = cacheMisses;
+  const sets = cacheSets;
+  const total = hits + misses;
   return {
-    hits: cacheHits,
-    misses: cacheMisses,
-    sets: cacheSets,
+    hits,
+    misses,
+    sets,
     total,
-    hitRate: total > 0 ? ((cacheHits / total) * 100).toFixed(1) + "%" : "0%",
+    hitRate: total > 0 ? ((hits / total) * 100).toFixed(1) + '%' : '0%',
   };
 }
 
@@ -157,6 +161,9 @@ export function isValidCachedProfile(firebaseUid, cachedProfile) {
  * @returns {boolean} True if the cached profile shape is valid, false otherwise.
  */
 export function isValidCachedSupabaseProfile(userId, cachedProfile) {
+  if (typeof userId !== "string" || !userId.trim()) {
+    return false;
+  }
   if (
     !cachedProfile ||
     typeof cachedProfile !== "object" ||
@@ -308,6 +315,7 @@ export async function setCachedSupabaseProfile(
   const redisClient = getRedisClient();
   if (!redisClient || !userId || !profile) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       supabaseProfileKey(userId),
@@ -381,6 +389,7 @@ export async function setCachedCustomerStats(
   const redisClient = getRedisClient();
   if (!redisClient || !userId || !stats) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       customerStatsKey(userId),
@@ -430,6 +439,7 @@ export async function setCachedDriverDetails(
   const redisClient = getRedisClient();
   if (!redisClient || !userId || !details) return;
   if (ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       driverDetailsKey(userId),

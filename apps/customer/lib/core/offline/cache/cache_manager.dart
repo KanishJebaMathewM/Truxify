@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
@@ -12,6 +13,34 @@ class CacheManager {
     'last_location',
     'milestones',
   };
+
+  /// Order statuses considered "active" for offline active-orders views.
+  static const Set<String> _activeStatuses = {
+    'pending',
+    'active',
+    'truck_assigned',
+    'en_route_pickup',
+    'arrived_pickup',
+    'picked_up',
+    'in_transit',
+    'arriving',
+  };
+
+  /// Filters [results] (already in `updated_at DESC` order) down to active
+  /// orders and then truncates to [limit]. The truncation MUST happen after
+  /// the filter — applying a SQL `LIMIT` first would let a run of
+  /// recently-updated inactive orders push active orders out of the result
+  /// set (issue #7739).
+  @visibleForTesting
+  static List<Map<String, dynamic>> filterActiveOrders(
+    List<Map<String, dynamic>> results, {
+    required int limit,
+  }) {
+    return results
+        .where((item) => _activeStatuses.contains(item['status']))
+        .take(limit)
+        .toList();
+  }
 
   dynamic _safeDecode(String json) {
     try {
@@ -56,15 +85,19 @@ class CacheManager {
 
     _database = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE IF NOT EXISTS orders (
             id TEXT PRIMARY KEY,
             type TEXT NOT NULL,
+            status TEXT,
             payload TEXT NOT NULL,
             updated_at TEXT NOT NULL
           )
+        ''');
+        await db.execute('''
+          CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)
         ''');
         await db.execute('''
           CREATE TABLE IF NOT EXISTS profile (
@@ -106,6 +139,12 @@ class CacheManager {
           )
         ''');
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('''ALTER TABLE orders ADD COLUMN status TEXT''');
+          await db.execute('''CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status)''');
+        }
+      },
     );
 
     return _database!;
@@ -127,6 +166,7 @@ class CacheManager {
         {
           'id': id,
           'type': item['type'] ?? 'order',
+          'status': item['status']?.toString(),
           'payload': jsonEncode(item),
           'updated_at': updatedAt,
         },
@@ -136,14 +176,33 @@ class CacheManager {
 
     await batch.commit(noResult: true);
   }
+  set databaseForTesting(Database? db) => _database = db;
 
   Future<List<Map<String, dynamic>>> getOrders({bool activeOnly = false, int limit = 20}) async {
     final db = await open();
-    final rows = await db.query(
-      'orders',
-      orderBy: 'updated_at DESC',
-      limit: limit,
-    );
+    final List<Map<String, dynamic>> rows;
+    if (activeOnly) {
+      const activeStatuses = {
+        'pending',
+        'active',
+        'truck_assigned',
+        'en_route_pickup',
+        'arrived_pickup',
+        'picked_up',
+        'in_transit',
+        'arriving'
+      };
+      final statusIn = activeStatuses.map((s) => "'$s'").join(', ');
+      rows = await db.rawQuery(
+        "SELECT * FROM orders WHERE status IN ($statusIn) ORDER BY updated_at DESC LIMIT $limit",
+      );
+    } else {
+      rows = await db.query(
+        'orders',
+        orderBy: 'updated_at DESC',
+        limit: limit,
+      );
+    }
 
     final results = <Map<String, dynamic>>[];
 
@@ -161,20 +220,6 @@ class CacheManager {
         ...payload,
         '_cached_at': row['updated_at'],
       });
-    }
-
-    if (activeOnly) {
-      const activeStatuses = {
-        'pending',
-        'active',
-        'truck_assigned',
-        'en_route_pickup',
-        'arrived_pickup',
-        'picked_up',
-        'in_transit',
-        'arriving'
-      };
-      return results.where((item) => activeStatuses.contains(item['status'])).toList();
     }
 
     return results;

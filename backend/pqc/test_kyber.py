@@ -7,7 +7,7 @@ class TestKyber1024Relayer(unittest.TestCase):
 
     def test_keypair_generation(self):
         pk, sk = self.relayer.generate_keypair()
-        self.toEqual = self.assertEqual(len(pk), self.relayer.public_key_len)
+        self.assertEqual(len(pk), self.relayer.public_key_len)
         self.assertEqual(len(sk), self.relayer.secret_key_len)
 
     def test_encapsulate_decapsulate(self):
@@ -15,9 +15,10 @@ class TestKyber1024Relayer(unittest.TestCase):
         ct, ss1 = self.relayer.encapsulate(pk)
         self.assertEqual(len(ct), self.relayer.ciphertext_len)
         self.assertEqual(len(ss1), 32)
-        
+
         ss2 = self.relayer.decapsulate(ct, sk)
         self.assertEqual(len(ss2), 32)
+        self.assertEqual(ss1, ss2)
 
 if __name__ == '__main__':
     unittest.main()

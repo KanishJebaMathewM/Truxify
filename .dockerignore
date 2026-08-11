@@ -1,0 +1,18 @@
+# Docker resolves .dockerignore from the build-context root. Dockerfile.api and
+# Dockerfile.ml both build with the repository root as context, so
+# backend/ml/.dockerignore never applies to them and this file is what governs
+# those builds.
+**/__pycache__/
+**/*.py[cod]
+**/venv/
+**/node_modules/
+**/.env
+**/.env.*
+!**/.env.example
+**/*.db
+.git/
+.github/
+**/coverage/
+**/.pytest_cache/
+**/.dart_tool/
+**/build/

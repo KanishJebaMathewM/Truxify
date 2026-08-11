@@ -2,7 +2,7 @@ import { WebSocketServer } from 'ws';
 import crypto from 'crypto';
 import { verifyAuthToken } from '../../middleware/auth.js';
 import logger from '../../middleware/logger.js';
-import { supabase, redisClient } from '../../config/db.js';
+import { supabase, redisClient, createUserClient } from '../../config/db.js';
 
 class WebRTCSignalingServer {
   constructor(server) {
@@ -22,9 +22,15 @@ class WebRTCSignalingServer {
     this.wss.on('connection', async (ws, req) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
 
-      // Authenticate via token query parameter or Authorization header
-      const token = url.searchParams.get('token')
-        || req.headers.authorization?.replace('Bearer ', '');
+      // Reject tokens in the URL query string — they leak via logs, proxies,
+      // and browser history. Only the Authorization header is accepted.
+      if (url.searchParams.get('token')) {
+        logger.warn('WebRTC connection rejected: token provided in query string');
+        ws.close(4001, 'Token in URL is not allowed');
+        return;
+      }
+
+      const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
 
       if (!token) {
         logger.warn('WebRTC connection rejected: no token provided');
@@ -49,6 +55,7 @@ class WebRTCSignalingServer {
         ws,
         userId: decoded.id,
         role: decoded.role,
+        token,
         location: null,
         meshId,
         connectedAt: Date.now(),
@@ -219,6 +226,10 @@ class WebRTCSignalingServer {
       return;
     }
 
+    // Use an authenticated Supabase client for GPS data inserts (RLS requires authenticated role)
+    const userClient = peer.token ? createUserClient(peer.token) : null;
+    const gpsClient = userClient || supabase;
+
     const normalizedData = {
       ...data,
       location: this.normalizeLocation(data.location)
@@ -233,7 +244,7 @@ class WebRTCSignalingServer {
     };
 
     try {
-      const { error } = await supabase.from('gps_offline_data').insert([gpsEntry]);
+      const { error } = await gpsClient.from('gps_offline_data').insert([gpsEntry]);
       if (error) {
         logger.warn(`Failed to persist WebRTC GPS payload for peer ${peerId}: ${error.message}`);
       }
@@ -309,13 +320,13 @@ class WebRTCSignalingServer {
   }
 
   getOrCreateMesh() {
-    const meshId = `mesh_${crypto.randomBytes(8).toString('hex')}`;
+    const meshId = `mesh_${crypto.randomUUID()}`;
     this.meshes.set(meshId, new Set());
     return meshId;
   }
 
   generatePeerId() {
-    return `peer_${crypto.randomBytes(8).toString('hex')}`;
+    return `peer_${crypto.randomUUID()}`;
   }
 
   startDiscovery() {

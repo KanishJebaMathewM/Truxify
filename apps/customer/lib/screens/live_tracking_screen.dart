@@ -69,6 +69,40 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   // ── WebSocket connection state ────────────────────────────────────
   bool _wsConnected = false;
+  String? _mlEta;
+
+  String _formatEta(double etaMinutes) {
+    if (etaMinutes <= 0) return '0 mins';
+    final hrs = etaMinutes ~/ 60;
+    final mins = (etaMinutes % 60).round();
+    if (hrs > 0) {
+      if (mins > 0) {
+        return '$hrs hrs $mins mins';
+      } else {
+        return '$hrs hrs';
+      }
+    } else {
+      return '$mins mins';
+    }
+  }
+
+  Future<void> _fetchEtaFromMl(LatLng position) async {
+    try {
+      final res = await _orderService.fetchMlEta(
+        tripId: widget.orderId,
+        lat: position.latitude,
+        lng: position.longitude,
+      );
+      final etaMinutes = (res['eta_minutes'] as num?)?.toDouble();
+      if (etaMinutes != null && mounted) {
+        setState(() {
+          _mlEta = _formatEta(etaMinutes);
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch ML ETA: $e');
+    }
+  }
 
   @override
   void initState() {
@@ -102,6 +136,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   void dispose() {
     _routeRefreshTimer?.cancel();
     _movementController.dispose();
+    _mapController.dispose();
     if (SupabaseConfig.isConfigured || SupabaseService.mockClient != null) {
       if (_ordersChannel != null) {
         SupabaseService.client.removeChannel(_ordersChannel!);
@@ -203,6 +238,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   void _updateTruckPosition(LatLng newPosition) {
     if (!mounted) return;
+    _fetchEtaFromMl(newPosition);
 
     if (_currentPosition == null) {
       setState(() {
@@ -953,7 +989,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   Widget build(BuildContext context) {
     final driverName = _driverName;
     final truckNumber = _truckNumber;
-    final eta = _order?['eta']?.toString() ?? 'TBD';
+    final eta = _mlEta ?? 'Calculating…';
     final currentLocation = _order?['status']?.toString() ?? 'Pending';
     return Scaffold(
       body: Stack(

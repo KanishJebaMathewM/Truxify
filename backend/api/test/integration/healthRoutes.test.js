@@ -4,12 +4,14 @@ import express from 'express';
 
 // Define mocks that we can mutate per-test
 let mockSupabase = null;
+let mockSupabaseAdmin = null;
 let mockMongoDb = null;
 let mockRedisClient = null;
 let mockFirebaseAdmin = null;
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() { return mockSupabase; },
+  get supabaseAdmin() { return mockSupabaseAdmin; },
   get mongoDb() { return mockMongoDb; },
   get redisClient() { return mockRedisClient; },
   get firebaseAdmin() { return mockFirebaseAdmin; }
@@ -22,6 +24,11 @@ vi.mock('../../src/middleware/logger.js', () => ({
     info: vi.fn(),
     warn: vi.fn(),
   }
+}));
+
+const mockCaptureDebugException = vi.fn();
+vi.mock('../../src/middleware/sentry.js', () => ({
+  captureDebugException: (...args) => mockCaptureDebugException(...args),
 }));
 
 const { default: healthRouter } = await import('../../src/routes/healthRoutes.js');
@@ -46,6 +53,7 @@ describe('GET /api/health', () => {
       select: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue({ error: null })
     };
+    mockSupabaseAdmin = null;
 
     mockMongoDb = {
       admin: () => ({
@@ -89,6 +97,24 @@ describe('GET /api/health', () => {
       '[health] Supabase check failed:',
       'Supabase network error'
     );
+  });
+
+  it('probes through supabaseAdmin when anon privileges are revoked', async () => {
+    const adminLimit = vi.fn().mockResolvedValue({ error: null });
+    mockSupabaseAdmin = {
+      from: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnThis(),
+      limit: adminLimit,
+    };
+    // Anon client would return 42501 permission denied — it must not be used.
+    mockSupabase.limit.mockResolvedValue({ error: { message: '42501 permission denied' } });
+
+    const res = await request(app).get('/api/health');
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(res.body.services.supabase).toBe('connected');
+    expect(adminLimit).toHaveBeenCalledWith(1);
   });
 
   it('returns 503 and degraded status when MongoDB ping fails with an exception', async () => {
@@ -195,10 +221,30 @@ describe('GET /api/health/sentry-debug', () => {
 
   beforeEach(() => {
     app = buildApp();
+    mockCaptureDebugException.mockReset();
   });
 
-  it('triggers a Sentry debug error and returns 500', async () => {
+  it('returns 404 when the debug route is not enabled', async () => {
+    delete process.env.SENTRY_DEBUG_ENABLED;
     const res = await request(app).get('/api/health/sentry-debug');
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(404);
+    expect(mockCaptureDebugException).not.toHaveBeenCalled();
+  });
+
+  it('returns 503 when enabled but Sentry is not configured', async () => {
+    process.env.SENTRY_DEBUG_ENABLED = 'true';
+    mockCaptureDebugException.mockReturnValue(null);
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ sent: false, error: 'Sentry is not configured (SENTRY_DSN unset).' });
+    expect(mockCaptureDebugException).toHaveBeenCalled();
+  });
+
+  it('captures a sample event and returns its id when enabled', async () => {
+    process.env.SENTRY_DEBUG_ENABLED = 'true';
+    mockCaptureDebugException.mockReturnValue('test-event-id');
+    const res = await request(app).get('/api/health/sentry-debug');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sent: true, eventId: 'test-event-id' });
   });
 });

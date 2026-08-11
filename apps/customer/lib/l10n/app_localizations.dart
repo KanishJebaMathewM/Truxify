@@ -565,6 +565,15 @@ abstract class AppLocalizations {
 
   /// Error message when network connection fails
   String get networkError;
+
+  /// English language name
+  String get english;
+
+  /// Hindi language name
+  String get hindi;
+
+  /// Tamil language name
+  String get tamil;
 }
 
 class _AppLocalizationsDelegate

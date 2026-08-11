@@ -243,7 +243,10 @@ export async function verifyDeliveryOtp(otpId) {
       .maybeSingle();
 
     if (error) {
-      logger.error({ err: error }, '[NotificationService] Error inserting notification');
+      logger.error(
+        { event: 'NOTIFICATION_INSERT_ERROR', error: error && error.message },
+        'Error inserting notification',
+      );
       throw error;
     }
 

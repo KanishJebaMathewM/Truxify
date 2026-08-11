@@ -52,6 +52,8 @@ vi.mock('../../src/services/escrow.js', () => ({
   submitEscrowRefund: vi.fn(),
   submitEscrowCancelWithPenalty: vi.fn(),
   paisaToMaticWei: vi.fn((paisa) => BigInt(Math.round(Number(paisa))) * 10n**12n),
+  getEscrowBookingId: vi.fn((orderDisplayId) => `0x${orderDisplayId.padStart(64, '0')}`),
+  getEscrowBooking: vi.fn(async () => null),
 }));
 
 import { OrderRepository } from '../../src/repositories/orderRepository.js';
@@ -62,6 +64,7 @@ import {
   startEscrowRefundReconciliation,
   stopEscrowRefundReconciliation,
 } from '../../src/services/escrowRefundReconciliation.js';
+import { getEscrowBooking, submitEscrowRefund } from '../../src/services/escrow.js';
 
 let orderRepository;
 
@@ -339,5 +342,68 @@ describe('reconciliationRunning Recovery Behavior', () => {
     configureBuilder([]);
     await reconcilePendingEscrowRefunds(orderRepository);
     expect(mocks.redisSet).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('reconcilePendingEscrowRefunds — issue #8891 started-trip guard', () => {
+  beforeEach(() => {
+    vi.mocked(getEscrowBooking).mockReset();
+    vi.mocked(submitEscrowRefund).mockReset();
+  });
+
+  // Builder whose claim RPC returns the order as claimed so processing reaches
+  // the refund dispatch (rather than skipping as "already claimed").
+  function configureProcessingBuilder(order) {
+    mocks.supabaseFrom.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      in: vi.fn().mockReturnThis(),
+      not: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue({ data: [order], error: null }),
+      rpc: vi.fn().mockResolvedValue({ data: [order], error: null }),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+      update: vi.fn().mockResolvedValue({ data: null, error: null }),
+    });
+  }
+
+  it('aborts full refund and skips submitEscrowRefund when on-chain booking is started', async () => {
+    mocks.redisSet.mockReturnValueOnce('OK').mockReturnValueOnce('OK');
+    vi.mocked(getEscrowBooking).mockResolvedValue({ started: true });
+
+    configureProcessingBuilder({
+      id: 'o8891',
+      order_display_id: 'O8891',
+      cancellation_fee: 0,
+      escrow_refund_attempts: 0,
+      updated_at: new Date(Date.now() - 120_000).toISOString(),
+    });
+
+    await reconcilePendingEscrowRefunds(orderRepository);
+
+    expect(getEscrowBooking).toHaveBeenCalledTimes(1);
+    expect(submitEscrowRefund).not.toHaveBeenCalled();
+  });
+
+  it('proceeds with submitEscrowRefund when on-chain booking is not started', async () => {
+    mocks.redisSet.mockReturnValueOnce('OK').mockReturnValueOnce('OK');
+    vi.mocked(getEscrowBooking).mockResolvedValue({ started: false });
+    vi.mocked(submitEscrowRefund).mockResolvedValue({
+      txHash: '0xrefund',
+      bookingId: '0xbooking',
+      waitForConfirmation: async () => ({ hash: '0xrefund', status: 1 }),
+    });
+
+    configureProcessingBuilder({
+      id: 'o8891b',
+      order_display_id: 'O8891B',
+      cancellation_fee: 0,
+      escrow_refund_attempts: 0,
+      updated_at: new Date(Date.now() - 120_000).toISOString(),
+    });
+
+    await reconcilePendingEscrowRefunds(orderRepository);
+
+    expect(getEscrowBooking).toHaveBeenCalledTimes(1);
+    expect(submitEscrowRefund).toHaveBeenCalledTimes(1);
   });
 });

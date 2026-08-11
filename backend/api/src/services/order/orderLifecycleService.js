@@ -195,7 +195,7 @@ export class OrderLifecycleService {
       const { data: orders, error } = await this.orderRepository.findOrdersByCustomer(
         customerId,
         'id, order_display_id, status, pickup_address, drop_address, pickup_date, pickup_lat, pickup_lng, drop_lat, drop_lng, eta, driver_id, truck_id, truck_number, total_amount, goods_type, weight_tonnes, length_ft, width_ft, height_ft, is_stackable, is_fragile, special_requirements, created_at, updated_at',
-        activeStatuses, 'pickup_date', false
+        activeStatuses, 'pickup_date', false, { limit: 100 }
       );
 
       if (error) throw new DomainError(500, { error: 'Failed to fetch active orders.', details: error.message });

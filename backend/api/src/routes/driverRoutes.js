@@ -1868,6 +1868,7 @@ router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, r
         .from('trucks')
         .insert({
           driver_id: req.user.id,
+          name: type,
           truck_type: type,
           max_capacity_tons: capacityWeight || 0,
           number_plate: registrationNumber

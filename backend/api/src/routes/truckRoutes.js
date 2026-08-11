@@ -543,6 +543,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
     let finalTollEstimate = pricing.tollEstimate;
     let finalPlatformFee = pricing.platformFee;
     let finalTotalAmount = pricing.totalAmount;
+    let estimatedPrice = null;
     let isAiEstimate = false;
 
     try {
@@ -555,12 +556,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
         trafficMultiplier,
       });
       if (mlResult && mlResult.estimatedPricePaisa > 0) {
-        finalTotalAmount = mlResult.estimatedPricePaisa;
-        finalPlatformFee = Math.round(mlResult.estimatedPricePaisa * 0.05);
-        finalBaseFreight = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee - finalTollEstimate);
-        if (finalBaseFreight === 0) {
-          finalTollEstimate = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee);
-        }
+        estimatedPrice = mlResult.estimatedPricePaisa;
         isAiEstimate = true;
       } else {
         logger.warn({ mlResult }, 'Invalid price prediction response during search');
@@ -652,6 +648,7 @@ router.get('/search', authenticate, userLimiter, async (req, res) => {
         capacityTons: truck.max_capacity_tons || 0,
         truckType: truck.truck_type || '',
         price: finalTotalAmount,
+        estimatedPrice,
         baseFreight: finalBaseFreight,
         tollEstimate: finalTollEstimate,
         platformFee: finalPlatformFee,

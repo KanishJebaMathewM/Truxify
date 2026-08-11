@@ -40,6 +40,7 @@
     "ethers": "6.17.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
+    "express-validator": "^7.3.2",
     "firebase-admin": "^14.1.0",
     "helmet": "^8.2.0",
     "i18next": "^26.3.4",

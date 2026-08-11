@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock the db module before importing redisLock
-vi.mock('../../config/db.js', () => ({
+vi.mock('../../src/config/db.js', () => ({
   redisClient: null,
 }));
 
@@ -10,14 +10,13 @@ describe('redisLock', () => {
     vi.clearAllMocks();
   });
 
-  it('acquireLock returns null when redisClient is null', async () => {
-    const { acquireLock } = await import('../../lib/redisLock.js');
-    const result = await acquireLock('test-resource', 5000);
-    expect(result).toBeNull();
+  it('acquireLock throws (fails closed) when redisClient is null', async () => {
+    const { acquireLock, LockAcquisitionError } = await import('../../src/lib/redisLock.js');
+    await expect(acquireLock('test-resource', 5000)).rejects.toBeInstanceOf(LockAcquisitionError);
   });
 
   it('releaseLock does not throw when redisClient is null', async () => {
-    const { releaseLock } = await import('../../lib/redisLock.js');
+    const { releaseLock } = await import('../../src/lib/redisLock.js');
     await expect(releaseLock('non-existent-lock')).resolves.not.toThrow();
   });
 });

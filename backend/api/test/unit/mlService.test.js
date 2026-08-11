@@ -9,9 +9,17 @@ describe('mlService handleResponse error context', () => {
       json: async () => ({ error: 'Internal Server Error' }),
     };
 
-    await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/predict', 'POST'))
-      .rejects
-      .toThrow(/POST.*https:\/\/api\.ml\.com\/predict.*500/);
+    let error;
+    try {
+      await mlService.handleResponse(mockResponse, 'https://api.ml.com/predict', 'POST');
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain('POST');
+    expect(error.message).toContain('https://api.ml.com/predict');
+    expect(error.message).toContain('500');
   });
 
   it('should include method, url, and status 401 for unauthorized', async () => {
@@ -21,9 +29,17 @@ describe('mlService handleResponse error context', () => {
       json: async () => ({ error: 'Unauthorized' }),
     };
 
-    await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/embed', 'GET'))
-      .rejects
-      .toThrow(/GET.*https:\/\/api\.ml\.com\/embed.*401/);
+    let error;
+    try {
+      await mlService.handleResponse(mockResponse, 'https://api.ml.com/embed', 'GET');
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain('GET');
+    expect(error.message).toContain('https://api.ml.com/embed');
+    expect(error.message).toContain('401');
   });
 
   it('should include method, url, and status 403 for forbidden', async () => {
@@ -33,8 +49,16 @@ describe('mlService handleResponse error context', () => {
       json: async () => ({ error: 'Forbidden' }),
     };
 
-    await expect(mlService.handleResponse(mockResponse, 'https://api.ml.com/train', 'PUT'))
-      .rejects
-      .toThrow(/PUT.*https:\/\/api\.ml\.com\/train.*403/);
+    let error;
+    try {
+      await mlService.handleResponse(mockResponse, 'https://api.ml.com/train', 'PUT');
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain('PUT');
+    expect(error.message).toContain('https://api.ml.com/train');
+    expect(error.message).toContain('403');
   });
 });

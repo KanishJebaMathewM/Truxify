@@ -12,10 +12,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run Supabase Backup Script
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Dump Supabase database
         env:
           SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
-          echo "Connecting to Supabase Database..."
-          echo "Starting daily backup process..."
-          echo "Backup completed successfully!"
+          if [ -z "$SUPABASE_DB_URL" ]; then
+            echo "::error::SUPABASE_DB_URL secret is not set"
+            exit 1
+          fi
+          pg_dump --no-owner --no-acl --format=custom "$SUPABASE_DB_URL" > supabase_backup.dump
+          ls -lh supabase_backup.dump
+
+      - name: Verify backup is non-empty
+        run: |
+          SIZE=$(wc -c < supabase_backup.dump)
+          echo "Backup size: $SIZE bytes"
+          if [ "$SIZE" -eq 0 ]; then
+            echo "::error::Backup is empty"
+            exit 1
+          fi
+
+      - name: Upload backup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-backup-${{ github.run_id }}
+          path: supabase_backup.dump
+          retention-days: 30

@@ -43,7 +43,7 @@ class KeyRotationService {
         logger.info('[KeyRotationService] Starting key rotation for:', walletAddress, 'Reason:', reason);
 
         if (!this.keyManagementService.validatePrivateKey(currentPrivateKey) ||
-            !this.keyManagementService.validatePrivateKey(newPrivateKey)) {
+          !this.keyManagementService.validatePrivateKey(newPrivateKey)) {
           throw new Error('Invalid private key format');
         }
 
@@ -192,11 +192,16 @@ class KeyRotationService {
         }
 
         const signer = new ethers.Wallet(oldPrivateKey, this.provider);
+        // Derive public addresses — private keys must never leave this boundary.
+        const oldWallet = new ethers.Wallet(oldPrivateKey, this.provider);
+        const newWalletAddress = new ethers.Wallet(newPrivateKey).address;
 
-        const tx = await signer.sendTransaction({
+        // Verify contract interface expects (address, uint256) — never pass raw key.
+        const tx = await oldWallet.sendTransaction({
           to: this.escrowContract.target,
           data: this.escrowContract.interface.encodeFunctionData('transferKeyOwnership', [
             newAddress,
+            newWalletAddress,  // public address only — never the private key
             Date.now(),
           ]),
         });
@@ -208,12 +213,15 @@ class KeyRotationService {
         // transfer failure or trigger a duplicate re-transfer on retry.
         // Only non-sensitive metadata is persisted — public addresses and
         // transaction details. Private-key material is never stored.
+        // Persist only non-sensitive audit metadata — no key material of any kind.
         try {
           const { error: insertError } = await supabase
             .from('key_ownership_transfers')
             .insert([{
               old_wallet_address: walletAddress,
               new_wallet_address: newAddress,
+              old_wallet_address: oldWallet.address,   // public address only
+              new_wallet_address: newWalletAddress,     // public address only
               wallet_address: walletAddress,
               tx_hash: receipt.hash,
               block_number: receipt.blockNumber,

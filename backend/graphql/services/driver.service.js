@@ -166,10 +166,23 @@ const resolvers = {
                 throw new Error('Dispatcher role required');
             }
 
+            // orders.driver_id is a uuid FK to profiles(id), but the Driver.id
+            // exposed by the `drivers` view is the numeric driver_details.id.
+            // Resolve the driver's profile UUID before writing the assignment.
+            const { data: driver, error: driverError } = await supabase
+                .from('drivers')
+                .select('user_id')
+                .eq('id', driverId)
+                .single();
+
+            if (driverError || !driver?.user_id) {
+                throw new Error(`Driver ${driverId} not found`);
+            }
+
             const { data, error } = await supabase
                 .from('orders')
                 .update({
-                    driver_id: driverId,
+                    driver_id: driver.user_id,
                     status: 'truck_assigned',
                     updated_at: new Date().toISOString()
                 })
@@ -178,7 +191,7 @@ const resolvers = {
                 .single();
             
             if (error) throw error;
-            return data;
+            return { id: data.id, driver: { id: driverId } };
         },
         updateDriverLocation: async (_, { id, location }, { user }) => {
             const currentUser = requireUser(user);

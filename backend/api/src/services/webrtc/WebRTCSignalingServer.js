@@ -414,7 +414,11 @@ class WebRTCSignalingServer {
       logger.warn(`[WebRTC] Unauthorized offline GPS data access attempt for peer ${peerId}`);
       return [];
     }
-    const { data } = await supabase
+    const peer = this.peers.get(peerId);
+    // Use an authenticated Supabase client for GPS data reads (RLS requires authenticated role)
+    const userClient = peer?.token ? createUserClient(peer.token) : null;
+    const gpsClient = userClient || supabase;
+    const { data } = await gpsClient
       .from('gps_offline_data')
       .select('*')
       .eq('peerId', peerId)
@@ -430,7 +434,11 @@ class WebRTCSignalingServer {
       return;
     }
     // Mark data as synced for this peer
-    await supabase
+    const peer = this.peers.get(peerId);
+    // Use an authenticated Supabase client for GPS data updates (RLS requires authenticated role)
+    const userClient = peer?.token ? createUserClient(peer.token) : null;
+    const gpsClient = userClient || supabase;
+    await gpsClient
       .from('gps_offline_data')
       .update({ synced: true })
       .eq('peerId', peerId)

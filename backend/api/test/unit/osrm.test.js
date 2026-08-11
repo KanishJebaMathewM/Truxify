@@ -63,14 +63,15 @@ describe('osrm - buildRouteUrl', () => {
 });
 
 describe('osrm - buildCacheKey', ()=> {
-  it('rounds coordinates to 6 decimal places with v2 prefix', () => {
+  it('rounds coordinates to 8 decimal places with v2 prefix', () => {
     const key = buildCacheKey({
       pickupLat: 12.9715987,
       pickupLng: 77.5945627,
       dropLat: 13.0827,
       dropLng: 80.2707,
     });
-    expect(key).toBe('osrm:route:v2:12.971599:77.594563:13.0827:80.2707');
+    // buildCacheKey uses Number(n.toFixed(8)) for coordinate rounding
+    expect(key).toBe('osrm:route:v2:12.9715987:77.5945627:13.0827:80.2707');
   });
 
   it('produces same key for coordinates that round to same values', () => {
@@ -270,7 +271,10 @@ describe('osrm - getRouteEstimate', () => {
 
     expect(result).toEqual({ distanceKm: 20, durationSeconds: 900 });
     expect(fetch).toHaveBeenCalledOnce();
-    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Redis get error:', 'Redis connection refused');
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      { event: 'OSRM_REDIS_GET_ERROR', error: 'Redis connection refused' },
+      '[osrm] Redis get error'
+    );
   });
 
   it('returns result even when Redis set throws after successful OSRM response', async () => {
@@ -285,7 +289,10 @@ describe('osrm - getRouteEstimate', () => {
     });
 
     expect(result).toEqual({ distanceKm: 10, durationSeconds: 600 });
-    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Redis set error:', 'Redis write failed');
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      { event: 'OSRM_REDIS_SET_ERROR', error: 'Redis write failed' },
+      '[osrm] Redis set error'
+    );
   });
 
   it('does not cache null when OSRM returns a non-ok response', async () => {
@@ -315,6 +322,7 @@ describe('osrm - getRouteEstimate', () => {
 describe('osrm - getRouteEstimate edge cases', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal('fetch', vi.fn());
   });
 
   it('returns null for null input', async () => {

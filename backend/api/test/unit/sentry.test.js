@@ -17,6 +17,7 @@ import {
   flushSentry,
   sentryErrorHandler,
   shouldIgnoreError,
+  captureDebugException,
 } from "../../src/middleware/sentry.js";
 
 vi.mock("../../src/middleware/logger.js", () => ({
@@ -28,6 +29,8 @@ vi.mock("@sentry/node", async (real) => ({
   init: vi.fn(),
   flush: vi.fn(),
   expressErrorHandler: () => vi.fn(),
+  withScope: vi.fn((fn) => fn({ setTag: vi.fn() })),
+  captureException: vi.fn(() => "mock-event-id"),
 }));
 
 const Sentry = SentryModule;
@@ -70,6 +73,27 @@ describe("flushSentry", () => {
     vi.stubEnv("SENTRY_DSN", "https://abc@sentry.io/123");
     vi.mocked(Sentry.flush).mockRejectedValue(new Error("flush failed"));
     await expect(flushSentry(2000)).resolves.toBeUndefined();
+  });
+});
+
+describe("captureDebugException", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  it("returns null when SENTRY_DSN is not set", () => {
+    expect(captureDebugException(new Error("x"))).toBeNull();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("captures the error with a debug tag and returns the event id", () => {
+    vi.stubEnv("SENTRY_DSN", "https://abc@sentry.io/123");
+    const err = new Error("Sentry Test Error from Node.js Backend");
+    const id = captureDebugException(err);
+    expect(Sentry.withScope).toHaveBeenCalled();
+    expect(Sentry.captureException).toHaveBeenCalledWith(err);
+    expect(id).toBe("mock-event-id");
   });
 });
 

@@ -22,6 +22,8 @@ const { mockSupabase } = vi.hoisted(() => ({
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() { return mockSupabase; },
+  // No service-role key in tests — the route must fall back to the anon mock.
+  supabaseAdmin: undefined,
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({

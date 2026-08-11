@@ -1,5 +1,6 @@
 import { WebSocketServer } from 'ws';
 import { redisClient, firebaseAdmin, supabase } from '../config/db.js';
+import { mongoDb, redisClient, firebaseAdmin, supabase, supabaseAdmin } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';
 import crypto from 'crypto';
@@ -826,7 +827,17 @@ export async function handleLocationPing(ws, data, req) {
   const lat = data.lat !== undefined ? data.lat : data.latitude;
   const lng = data.lng !== undefined ? data.lng : data.longitude;
 
-  // Reject frames with null or undefined coordinates before validation
+  // Cross-field validation: require at least one complete coordinate pair.
+  const hasLatLng = data.lat !== undefined && data.lng !== undefined;
+  const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;
+  if (!hasLatLng && !hasLatLong) {
+    return ws.send(JSON.stringify({
+      error: 'Invalid telemetry payload',
+      details: ['At least one coordinate pair (lat+lng or latitude+longitude) is required.']
+    }));
+  }
+
+  // Reject frames with null or undefined resolved coordinates before schema validation
   if (lat === null || lat === undefined || lng === null || lng === undefined) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat and lng are required'] }));
   }
@@ -834,6 +845,9 @@ export async function handleLocationPing(ws, data, req) {
   // Canonicalise `latitude`/`longitude` into `lat`/`lng` so the schema
   // validation, sanitisation and the buffered telemetry record all operate on
   // one canonical coordinate pair regardless of which naming the client used.
+  // Normalize the alternate latitude/longitude names into the canonical
+  // lat/lng keys so schema validation, sanitization and persistence
+  // downstream all operate on the resolved coordinates.
   data.lat = lat;
   data.lng = lng;
 
@@ -850,16 +864,6 @@ export async function handleLocationPing(ws, data, req) {
   const normalizedValidationErrors = validateTelemetryPayload(normalizedForValidation);
   if (normalizedValidationErrors) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: normalizedValidationErrors }));
-  }
-
-  // Cross-field validation: require at least one complete coordinate pair.
-  const hasLatLng = data.lat !== undefined && data.lng !== undefined;
-  const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;
-  if (!hasLatLng && !hasLatLong) {
-    return ws.send(JSON.stringify({
-      error: 'Invalid telemetry payload',
-      details: ['At least one coordinate pair (lat+lng or latitude+longitude) is required.']
-    }));
   }
 
   const sanitized = sanitizeTelemetryData(data);
@@ -1001,6 +1005,68 @@ export async function handleLocationPing(ws, data, req) {
     } catch (err) {
       logger.error('Redis cache telemetry error:', err.message);
     }
+  }
+
+  // Upsert the driver's live location into `driver_locations` (fire-and-forget
+  // so the WebSocket broadcast path is never blocked). This is the only writer
+  // for the table that feeds new-trip nearby-driver notifications and public
+  // shared tracking. The service-role client is required — RLS grants anon
+  // nothing on `driver_locations`, so an anon write would always be rejected.
+  // Deactivating any prior active row keeps exactly one live row per driver,
+  // matching the `drivers` view's `sync_drivers_update()` trigger (issue #8932).
+  if (supabaseAdmin) {
+    void (async () => {
+      try {
+        await supabaseAdmin
+          .from('driver_locations')
+          .update({ is_active: false })
+          .eq('driver_id', driver_id)
+          .eq('is_active', true);
+        const { error } = await supabaseAdmin
+          .from('driver_locations')
+          .insert({
+            driver_id,
+            latitude: lat,
+            longitude: lng,
+            is_active: true,
+            last_updated_at: new Date(serverNow).toISOString(),
+          });
+        if (error) {
+          logger.error(
+            { error, driver_id },
+            '[Tracker] Failed to write driver location',
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { err, driver_id },
+          '[Tracker] Failed to write driver location',
+        );
+      }
+    })();
+  }
+
+  // Persist GPS log to MongoDB Atlas (GPS Logs collection) using the typed
+  // GpsLog mongoose schema. Fire-and-forget — the write must not block the
+  // WebSocket broadcast path. The bulk telemetry flush to the raw `telemetry`
+  // collection continues separately for batch analytics.
+  if (getMongoDb()) {
+    GpsLog.create({
+      bookingId: orderDisplayId || orderUUID || driver_id,
+      driverId: driver_id,
+      lat: sanitized.lat,
+      lng: sanitized.lng,
+      speed: sanitized.speed ?? 0,
+      heading: sanitized.bearing ?? 0,
+      timestamp: deviceTime || new Date(serverNow),
+      metadata: {
+        order_id: orderUUID || null,
+        order_display_id: orderDisplayId || null,
+        server_received_at: new Date(serverNow).toISOString(),
+      },
+    }).catch((err) => {
+      logger.error('[GpsLog] Failed to persist GPS coordinate to MongoDB:', err.message);
+    });
   }
 
   const timestampIso = new Date(serverNow).toISOString();

@@ -379,7 +379,9 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
       return {
         event_id: event.id,
         user_id: userId,
-        trip_id: event.trip_id || null,
+        trip_id: (typeof event.trip_id === 'string' && event.trip_id.startsWith('TX-'))
+          ? event.trip_id.slice(3)
+          : (event.trip_id || null),
         event_type: event.type,
         event_timestamp: event.occurred_at,
         latitude: event.payload?.lat !== undefined ? Number(event.payload.lat) : null,

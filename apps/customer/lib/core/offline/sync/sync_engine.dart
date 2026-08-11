@@ -100,7 +100,15 @@ class SyncEngine {
 
     await _markAsSyncing(resolved);
 
-    final uploadOutcome = await _uploadBatch(resolved);
+    final SyncUploadOutcome uploadOutcome;
+    try {
+      uploadOutcome = await _uploadBatch(resolved);
+    } catch (_) {
+      // An unexpected error during upload must never leave events stuck in the
+      // transient `syncing` state; fall through to failure handling below so
+      // they are re-queued on a later sync pass.
+      uploadOutcome = SyncUploadOutcome.retryableFailure;
+    }
     if (uploadOutcome == SyncUploadOutcome.success) {
       for (final event in resolved) {
         await db.markSynced(event.id);

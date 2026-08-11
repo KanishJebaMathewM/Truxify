@@ -399,15 +399,15 @@ describe('WebRTCSignalingServer', () => {
       expect(supabaseMock.from).not.toHaveBeenCalled();
     });
 
-    it('queries the owning user\'s data', async () => {
-      supabaseQuery.order.mockResolvedValue({ data: [{ peerId: 'peer-1' }] });
+    it('queries the owning user\'s data by their profile id', async () => {
+      supabaseQuery.order.mockResolvedValue({ data: [{ peerId: 'user-1' }] });
 
       const result = await server.getOfflineGPSData('peer-1', 100, { id: 'user-1' });
 
       expect(supabaseMock.from).toHaveBeenCalledWith('gps_offline_data');
-      expect(supabaseQuery.eq).toHaveBeenCalledWith('peerId', 'peer-1');
+      expect(supabaseQuery.eq).toHaveBeenCalledWith('peerId', 'user-1');
       expect(supabaseQuery.gt).toHaveBeenCalledWith('timestamp', 100);
-      expect(result).toEqual([{ peerId: 'peer-1' }]);
+      expect(result).toEqual([{ peerId: 'user-1' }]);
     });
 
     it('falls back to timestamp 0 when no cursor is given', async () => {
@@ -433,14 +433,36 @@ describe('WebRTCSignalingServer', () => {
       expect(supabaseMock.from).not.toHaveBeenCalled();
     });
 
-    it('marks only the unsynced rows of the owning peer', async () => {
+    it('marks only the unsynced rows of the owning peer by their profile id', async () => {
       supabaseQuery.eq.mockReturnValue(supabaseQuery);
 
       await server.syncOfflineData('peer-1', { id: 'user-1' });
 
       expect(supabaseQuery.update).toHaveBeenCalledWith({ synced: true });
-      expect(supabaseQuery.eq).toHaveBeenCalledWith('peerId', 'peer-1');
+      expect(supabaseQuery.eq).toHaveBeenCalledWith('peerId', 'user-1');
       expect(supabaseQuery.eq).toHaveBeenCalledWith('synced', false);
+    });
+  });
+
+  describe('handleGPSData() persistence', () => {
+    it('keys the offline GPS row by the owning profile id, not the session peerId', async () => {
+      addPeer(server, 'peer-1', { userId: 'user-1' });
+
+      await server.handleGPSData('peer-1', { location: { lat: 12.97, lng: 77.59 } });
+
+      expect(supabaseMock.from).toHaveBeenCalledWith('gps_offline_data');
+      const [entry] = supabaseQuery.insert.mock.calls[0][0];
+      expect(entry.peerId).toBe('user-1');
+      expect(entry.synced).toBe(false);
+      expect(entry.data.location).toEqual({ lat: 12.97, lng: 77.59 });
+    });
+
+    it('drops the frame when the peer has no authenticated user id', async () => {
+      addPeer(server, 'peer-anon', { userId: undefined });
+
+      await server.handleGPSData('peer-anon', { location: { lat: 12.97, lng: 77.59 } });
+
+      expect(supabaseMock.from).not.toHaveBeenCalled();
     });
   });
 

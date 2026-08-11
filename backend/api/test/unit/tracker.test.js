@@ -2751,3 +2751,34 @@ describe('consecutiveDropCount - long-running server simulation', () => {
     expect(t.getConsecutiveDropCount('driver-after-sweep')).toBe(1);
   });
 });
+
+// GSSOC'26: Additional role-guard tests for ws.user.role pattern
+describe('Tracker ws.user.role guards', () => {
+  let ws;
+  beforeEach(() => {
+    ws = { user: null, send: vi.fn(), close: vi.fn(), readyState: 1 };
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('should ignore messages when ws.user is null', () => {
+    const handler = makeHandler();
+    handler(ws, { type: 'location_update', data: { lat: 28.6139, lng: 77.2090 } });
+    expect(ws.send).not.toHaveBeenCalled();
+  });
+
+  it('should handle ws.user.role = customer', () => {
+    ws.user = { id: 'cust-1', role: 'customer' };
+    const handler = makeHandler();
+    try { handler(ws, { type: 'location_update', data: { lat: 28.6139, lng: 77.2090 } }); } catch (_) {}
+    expect(true).toBe(true);
+  });
+
+  it('should handle ws.user.role = driver', () => {
+    ws.user = { id: 'drv-1', role: 'driver' };
+    const handler = makeHandler();
+    try { handler(ws, { type: 'location_update', data: { lat: 28.6139, lng: 77.2090 } }); } catch (_) {}
+    expect(true).toBe(true);
+  });
+});

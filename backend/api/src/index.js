@@ -72,6 +72,7 @@ import mlRoutes from './routes/mlRoutes.js'
 // ============================================================================
 import verificationRoutes from './routes/verificationRoutes.js'
 import oracleRoutes from './routes/oracleRoutes.js'
+import internalRoutes from './routes/internalRoutes.js'
 import blockchainMonitoringRoutes from './routes/blockchainMonitoringRoutes.js'
 
 // ============================================================================
@@ -106,6 +107,7 @@ import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 import fraudRoutes from './routes/fraudRoutes.js'
 import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
 import { authenticate, requireRole } from './middleware/auth.js'
+import { requireApiKey } from './middleware/apiKey.js'
 import fraudDetection from './services/fraud/FraudDetectionService.js'
 import headerSizeMonitor from './middleware/headerSizeMonitor.js';
 
@@ -533,6 +535,14 @@ app.use('/api/blockchain', (req, _res, next) => {
   req.supabase = supabaseAdmin
   next()
 }, blockchainMonitoringRoutes)
+
+// ============================================================================
+// 🆕 INTERNAL B2B ROUTES (n8n circuit breaker workflow)
+// Auth-gated internal endpoints consumed by automation/n8n workflows:
+//   GET  /api/internal/escrow-velocity
+//   POST /api/internal/pause-escrow
+// ============================================================================
+app.use('/api/internal', requireApiKey, internalRoutes)
 
 // 🆕 Oracle Health Check Endpoint
 app.get('/api/oracle/health', (req, res) => {

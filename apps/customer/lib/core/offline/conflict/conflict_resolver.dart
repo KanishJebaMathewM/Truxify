@@ -1,6 +1,30 @@
 import '../models/trip_event.dart';
 
+class ConflictResolutionResult {
+  final List<TripEvent> resolved;
+  final List<String> supersededIds;
+
+  ConflictResolutionResult({
+    required this.resolved,
+    required this.supersededIds,
+  });
+}
+
 class ConflictResolver {
+  ConflictResolutionResult resolveWithDetails(List<TripEvent> events) {
+    final resolved = resolve(events);
+    final resolvedIds = resolved.map((e) => e.id).toSet();
+    final supersededIds = events
+        .map((e) => e.id)
+        .where((id) => !resolvedIds.contains(id))
+        .toList();
+
+    return ConflictResolutionResult(
+      resolved: resolved,
+      supersededIds: supersededIds,
+    );
+  }
+
   List<TripEvent> resolve(List<TripEvent> events) {
     final sorted = List<TripEvent>.of(events)
       ..sort((a, b) => _compareTimestamp(a.occurredAt, b.occurredAt));

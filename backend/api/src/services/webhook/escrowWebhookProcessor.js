@@ -21,7 +21,6 @@ async function findOrderByIdOrDisplayId(orderId) {
   if (!orderId) {
     throw new Error('Missing orderId in escrow webhook payload');
   }
-
   const columns = 'id, order_display_id, driver_id, escrow_status, release_tx_hash, refund_tx_hash';
 
   if (UUID_REGEX.test(orderId)) {
@@ -54,7 +53,7 @@ async function reconcileWalletLedger(order, txHash) {
   if (!order.driver_id) {
     return;
   }
-  const { error: walletError } = await requireDb()
+  const { data, error } = await requireDb()
     .from('wallet_transactions')
     .update({
       status: 'confirmed',
@@ -62,10 +61,18 @@ async function reconcileWalletLedger(order, txHash) {
     })
     .eq('driver_id', order.driver_id)
     .eq('order_display_id', order.order_display_id)
-    .eq('txn_type', 'credit');
+    .eq('txn_type', 'credit')
+    .select('id');
 
-  if (walletError) {
-    throw new Error(`Failed to reconcile wallet ledger for ${order.order_display_id}: ${walletError.message}`);
+  if (error) {
+    throw new Error(`Failed to reconcile wallet ledger for ${order.order_display_id}: ${error.message}`);
+  }
+
+  if (!data || data.length === 0) {
+    throw new Error(
+      `Wallet ledger reconciliation matched no credit transaction for order ${order.order_display_id} ` +
+        `(driver ${order.driver_id}) — driver payout may be unconfirmed`
+    );
   }
 }
 
@@ -124,7 +131,7 @@ async function handlePaymentReleased(payload) {
     return;
   }
 
-  const { error } = await requireDb()
+  const { data: updatedOrders, error } = await requireDb()
     .from('orders')
     .update({
       escrow_status: 'released',
@@ -134,10 +141,18 @@ async function handlePaymentReleased(payload) {
       updated_at: now,
     })
     .eq('id', order.id)
-    .in('escrow_status', RELEASE_RECONCILABLE_STATUSES);
+    .in('escrow_status', RELEASE_RECONCILABLE_STATUSES)
+    .select('id');
 
   if (error) {
     throw new Error(`Failed to mark order ${order.order_display_id} as released: ${error.message}`);
+  }
+
+  if (!updatedOrders || updatedOrders.length === 0) {
+    throw new Error(
+      `Order ${order.order_display_id} was not updated when marking as released — ` +
+        `escrow_status not in reconcilable set (${RELEASE_RECONCILABLE_STATUSES.join(', ')})`
+    );
   }
 
   await reconcileWalletLedger(order, payload.txHash);
@@ -149,11 +164,14 @@ async function handleBookingCancelled(payload) {
   const now = new Date().toISOString();
 
   if (order.escrow_status === 'refunded') {
+    if (payload.txHash && !order.refund_tx_hash) {
+      await requireDb().from('orders').update({ refund_tx_hash: payload.txHash }).eq('id', order.id);
+    }
     logger.info(`[Webhook] Order ${order.order_display_id} already refunded — duplicate delivery ignored.`);
     return;
   }
 
-  const { error } = await requireDb()
+  const { data: updatedOrders, error } = await requireDb()
     .from('orders')
     .update({
       escrow_status: 'refunded',
@@ -161,10 +179,18 @@ async function handleBookingCancelled(payload) {
       updated_at: now,
     })
     .eq('id', order.id)
-    .in('escrow_status', REFUND_RECONCILABLE_STATUSES);
+    .in('escrow_status', REFUND_RECONCILABLE_STATUSES)
+    .select('id');
 
   if (error) {
     throw new Error(`Failed to mark order ${order.order_display_id} as refunded: ${error.message}`);
+  }
+
+  if (!updatedOrders || updatedOrders.length === 0) {
+    throw new Error(
+      `Order ${order.order_display_id} was not updated when marking as refunded — ` +
+        `escrow_status not in reconcilable set (${REFUND_RECONCILABLE_STATUSES.join(', ')})`
+    );
   }
 
   logger.info(`[Webhook] Order ${order.order_display_id} marked escrow refunded (tx: ${payload.txHash})`);
@@ -184,6 +210,13 @@ async function handleWithdrawalSettled(payload) {
   // If the order already reflects the intended terminal state, short-circuit.
   const targetStatus = isRefund ? 'refunded' : 'released';
   if (order.escrow_status === targetStatus) {
+    if (txHash) {
+      if (isRefund && !order.refund_tx_hash) {
+        await requireDb().from('orders').update({ refund_tx_hash: txHash }).eq('id', order.id);
+      } else if (!isRefund && !order.release_tx_hash) {
+        await requireDb().from('orders').update({ release_tx_hash: txHash }).eq('id', order.id);
+      }
+    }
     if (!isRefund) {
       await reconcileWalletLedger(order, txHash);
     }
@@ -203,17 +236,29 @@ async function handleWithdrawalSettled(payload) {
         escrow_release_error: null,
       };
 
-  const { error } = await requireDb()
+  const { data: updatedOrders, error } = await requireDb()
     .from('orders')
     .update({
-      ...settlement,
+      escrow_status: isRefund ? 'refunded' : 'released',
+      release_tx_hash: isRefund ? undefined : (txHash || order.release_tx_hash || null),
+      refund_tx_hash: isRefund ? (txHash || order.refund_tx_hash || null) : undefined,
+      escrow_released_at: isRefund ? undefined : now,
+      escrow_release_error: isRefund ? undefined : null,
       updated_at: now,
     })
     .eq('id', order.id)
-    .in('escrow_status', [...REFUND_RECONCILABLE_STATUSES, ...RELEASE_RECONCILABLE_STATUSES]);
+    .in('escrow_status', [...REFUND_RECONCILABLE_STATUSES, ...RELEASE_RECONCILABLE_STATUSES])
+    .select('id');
 
   if (error) {
     throw new Error(`Failed to settle order ${order.order_display_id} from withdrawal webhook: ${error.message}`);
+  }
+
+  if (!updatedOrders || updatedOrders.length === 0) {
+    throw new Error(
+      `Order ${order.order_display_id} was not updated when settling from withdrawal webhook — ` +
+        `escrow_status not in reconcilable set (${[...REFUND_RECONCILABLE_STATUSES, ...RELEASE_RECONCILABLE_STATUSES].join(', ')})`
+    );
   }
 
   if (!isRefund) {
@@ -237,10 +282,6 @@ export async function processEscrowWebhookEvent(eventType, payload = {}) {
 
   const orderId = payload.orderId || 'unknown';
   logger.info(`[Webhook] Processing escrow event ${eventType} for order ${orderId}`);
-
-  if (payload.simulateFailure === true) {
-    throw new Error('Simulated database lock or processing failure');
-  }
 
   const handler = EVENT_HANDLERS[eventType];
   if (!handler) {

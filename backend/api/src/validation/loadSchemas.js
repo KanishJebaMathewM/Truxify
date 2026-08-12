@@ -13,6 +13,16 @@ const nonNegativeDecimalString = (field) => z
   });
 
 export const loadFilterQuerySchema = z.object({
+  // Repeated string params are allowed to reach the route, which rejects them
+  // (or handles them) with its own, more specific error messages, preserving
+  // the pre-validation behavior exactly.
+  page: z.union([z.string(), z.array(z.string())]).optional(),
+  limit: z.union([z.string(), z.array(z.string())]).optional(),
+  status: z.union([z.string(), z.array(z.string())]).optional(),
+  pickup_location: z.union([z.string(), z.array(z.string())]).optional(),
+  destination: z.union([z.string(), z.array(z.string())]).optional(),
+  goods_type: z.union([z.string(), z.array(z.string())]).optional(),
+  vehicle_type: z.union([z.string(), z.array(z.string())]).optional(),
   min_price: nonNegativeDecimalString('min_price').optional(),
   max_price: nonNegativeDecimalString('max_price').optional(),
   distance: nonNegativeDecimalString('distance').optional().refine(v => v === undefined || v > 0, {

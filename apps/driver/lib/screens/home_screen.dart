@@ -27,6 +27,7 @@ import '../core/app_routes.dart';
 import '../l10n/app_localizations.dart';
 import '../models/app_models.dart';
 import '../models/earnings_daily_model.dart';
+import 'delivery_otp_screen.dart';
 import '../services/driver_earnings_service.dart';
 import '../services/geocode_service.dart';
 import '../services/marketplace_repository.dart';
@@ -936,45 +937,59 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _completeRide() async {
-    if (_activeTripId != null) {
-      try {
-        final stops = await _tripService.fetchTripStops(_activeTripId!);
-        final currentStop =
-            stops.where((s) => s['is_current'] == true).firstOrNull;
-        if (currentStop != null) {
-          await _tripService.markStopCompleted(
-              currentStop['id'].toString(), _activeTripId!);
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-                content: Text(
-                    AppLocalizations.of(context)!.failedToCompleteTrip)),
-          );
-        }
-        return;
+    final orderId = _activeOrderId ?? _activeTripId;
+    final orderDisplayId = _activeTripId ?? _activeOrderId;
+    if (orderId == null || orderDisplayId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(AppLocalizations.of(context)!.failedToCompleteTrip),
+          ),
+        );
       }
+      return;
     }
+
+    final dropPoint = _destination?.point;
+    final amountInr = _activeTripPayout.isNotEmpty
+        ? _activeTripPayout.replaceAll('₹', '').trim()
+        : null;
+
+    final completed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => DeliveryOtpScreen(
+          orderId: orderId,
+          orderDisplayId: orderDisplayId,
+          dropLat: dropPoint?.latitude,
+          dropLng: dropPoint?.longitude,
+          amountInr: amountInr,
+        ),
+      ),
+    );
+
+    if (completed != true || !mounted) {
+      return;
+    }
+
     _clearDestination();
     WeighStationService.instance.resetAlertedStations();
-    if (mounted) {
-      setState(() {
-        _activeTripId = null;
-        _isTripStarted = false;
-        _activeTripEta = '';
-        _activeTripProgress = 0.0;
-        _activeTripStatus = '';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-              AppLocalizations.of(context)!.tripCompletedNetEarnings('')),
-          backgroundColor: TruxifyColors.success,
+    setState(() {
+      _activeTripId = null;
+      _activeOrderId = null;
+      _isTripStarted = false;
+      _activeTripEta = '';
+      _activeTripProgress = 0.0;
+      _activeTripStatus = '';
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          AppLocalizations.of(context)!.tripCompletedNetEarnings(''),
         ),
-      );
-      _loadDashboardMetrics();
-    }
+        backgroundColor: TruxifyColors.success,
+      ),
+    );
+    _loadDashboardMetrics();
   }
 
   Future<void> _checkPendingPods() async {
@@ -1116,13 +1131,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           ),
                         ),
-                      if (_isOffline) const OfflineBanner(),
-                      if (!_isCharging && _batteryLevel <= 20)
-                        LowBatteryBanner(
-                          batteryLevel: _batteryLevel,
-                          isCritical: _batteryLevel <= 10,
-                        ),
-                      ),
                     if (_isOffline) const OfflineBanner(),
                     if (!_isCharging && _batteryLevel <= 20)
                       LowBatteryBanner(
@@ -1446,7 +1454,16 @@ class _HomeScreenState extends State<HomeScreen> {
                                 : null,
                             onStartTrip: () async {
                               if (_activeTripId == null) {
-                                setState(() => _isTripStarted = true);
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        AppLocalizations.of(context)!
+                                            .failedToStartTrip,
+                                      ),
+                                    ),
+                                  );
+                                }
                                 return;
                               }
                               try {
@@ -1457,26 +1474,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                     _activeTripStatus = 'EN-ROUTE';
                                   });
                                 }
-                                try {
-                                  await _tripService
-                                      .startTrip(_activeTripId!);
-                                  if (mounted) {
-                                    setState(() {
-                                      _isTripStarted = true;
-                                      _activeTripStatus = 'EN-ROUTE';
-                                    });
-                                  }
-                                } catch (e) {
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context)
-                                        .showSnackBar(
-                                      SnackBar(
-                                          content: Text(
-                                              'Failed to start trip: $e')),
-                                    );
-                                  }
+                              } catch (e) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        AppLocalizations.of(context)!
+                                            .failedToStartTrip,
+                                      ),
+                                    ),
+                                  );
                                 }
-                              },
+                              }
+                            },
                               onCompleteTrip: _completeRide,
                               onCancel: _clearDestination,
                               onOpenMaps: _openGoogleMapsRoute,
@@ -2235,18 +2245,33 @@ class _HomeScreenState extends State<HomeScreen> {
               backgroundColor: TruxifyColors.accent,
               onConfirmed: () async {
                 if (_activeTripId == null) {
-                  setState(() => _isTripStarted = true);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          AppLocalizations.of(context)!.failedToStartTrip,
+                        ),
+                      ),
+                    );
+                  }
                   return;
                 }
                 try {
                   await _tripService.startTrip(_activeTripId!);
                   if (mounted) {
-                    setState(() => _isTripStarted = true);
+                    setState(() {
+                      _isTripStarted = true;
+                      _activeTripStatus = 'EN-ROUTE';
+                    });
                   }
                 } catch (e) {
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(AppLocalizations.of(context)!.failedToStartTrip)),
+                      SnackBar(
+                        content: Text(
+                          AppLocalizations.of(context)!.failedToStartTrip,
+                        ),
+                      ),
                     );
                   }
                 }

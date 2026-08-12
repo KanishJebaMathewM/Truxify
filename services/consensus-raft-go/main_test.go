@@ -440,3 +440,40 @@ func TestHandleVoteResetsElectionTimer(t *testing.T) {
 	}
 }
 
+// TestHandleCommitOrderRejectsOversizedBody verifies the service returns 413
+// for a body larger than the 1 MiB cap instead of buffering it into memory.
+func TestHandleCommitOrderRejectsOversizedBody(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", []string{"node2"}, nil)
+
+	big := strings.Repeat("a", maxRequestBodyBytes+1)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(big))
+	w := httptest.NewRecorder()
+
+	node.HandleCommitOrder(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for oversized body, got %d", w.Code)
+	}
+}
+
+// TestHandleCommitOrderAcceptsBodyWithinLimit verifies a body at the cap
+// boundary is still decoded (malformed payload → 400, not 413).
+func TestHandleCommitOrderAcceptsBodyWithinLimit(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", []string{"node2"}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader("{not-json"))
+	w := httptest.NewRecorder()
+
+	node.HandleCommitOrder(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed in-limit body, got %d", w.Code)
+	}
+}
+

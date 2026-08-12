@@ -12,6 +12,7 @@ import '../repositories/payment_repository.dart';
 import '../services/auth_service.dart';
 import '../services/profile_service.dart';
 import '../l10n/app_localizations.dart';
+import '../providers/language_provider.dart';
 import '../services/fcm_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_page_route.dart';
@@ -472,13 +473,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: MenuCard(
                 children: [
                   const _ThemeModeTile(),
-                  MenuItem(
-                    icon: Icons.language_rounded,
-                    label: AppLocalizations.of(context)!.language,
-                    trailing: 'English',
-                    onTap: () => Navigator.of(context).push(
-                        AppPageRoute(builder: (_) => const LanguageScreen())),
-                  ),
+                  const _LanguageTile(),
                   MenuItem(
                     icon: Icons.help_outline_rounded,
                     label: AppLocalizations.of(context)!.helpSupport,
@@ -725,6 +720,84 @@ class _ThemeModeTile extends StatelessWidget {
                 selected: {selectedTheme},
                 onSelectionChanged: (selection) {
                   controller.setThemeMode(selection.first);
+                },
+              ),
+            ],
+          ),
+        ),
+        Divider(
+          height: 1,
+          thickness: 1,
+          color: isDark ? TruxifyColors.darkBorder : TruxifyColors.border,
+        ),
+      ],
+    );
+  }
+}
+
+class _LanguageTile extends StatelessWidget {
+  const _LanguageTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final languageProvider = LanguageProvider.of(context);
+    final controller = TruxifyScope.of(context);
+    final currentCode = languageProvider.currentLocale.languageCode;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final iconBg =
+        isDark ? TruxifyColors.darkAccentLight : TruxifyColors.accentLight;
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: iconBg,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.language_rounded,
+                  size: 17,
+                  color: TruxifyColors.accent,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  AppLocalizations.of(context)!.language,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w500,
+                        fontSize: 14,
+                      ),
+                ),
+              ),
+              DropdownButton<String>(
+                value: ['en', 'hi', 'ta'].contains(currentCode) ? currentCode : 'en',
+                underline: const SizedBox(),
+                items: [
+                  DropdownMenuItem(
+                    value: 'en',
+                    child: Text(AppLocalizations.of(context)!.english),
+                  ),
+                  DropdownMenuItem(
+                    value: 'hi',
+                    child: Text(AppLocalizations.of(context)!.hindi),
+                  ),
+                  DropdownMenuItem(
+                    value: 'ta',
+                    child: Text(AppLocalizations.of(context)!.tamil),
+                  ),
+                ],
+                onChanged: (newCode) {
+                  if (newCode != null) {
+                    languageProvider.changeLocale(newCode);
+                    controller.setLocale(newCode);
+                  }
                 },
               ),
             ],

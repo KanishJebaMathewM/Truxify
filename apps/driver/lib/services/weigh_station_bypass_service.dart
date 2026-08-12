@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import '../models/weigh_in_motion_model.dart';
 
 class WeighStationBypassService {
@@ -18,12 +17,10 @@ class WeighStationBypassService {
     // Simulate transponder reading / PrePass network delay
     await Future.delayed(const Duration(seconds: 3));
 
-    final random = Random();
-    // 90% chance to bypass if compliant, 10% chance for random inspection
-    bool randomPullIn = random.nextDouble() > 0.90;
-    
+    // Verdict is driven only by the actual gross weight — never a random
+    // coin-flip, since this is rendered as a regulatory decision.
     String finalStatus;
-    if (grossWeight > 80000.0 || randomPullIn) {
+    if (grossWeight > 80000.0) {
       finalStatus = 'MUST_PULL_IN';
     } else {
       finalStatus = 'CLEARED_TO_BYPASS';

@@ -429,7 +429,7 @@ runs:
           R_HTTP=$(cat "$R_STATUS" 2>/dev/null || echo "000")
 
           # ── Gemini fallback to OpenRouter / backoff ─────────────────────────
-          local g_attempt=1
+          g_attempt=1
           while { is_quota_err "$G_RAW" || [ "$G_HTTP" != "200" ]; } && [ $g_attempt -le 3 ]; do
             if [ $g_attempt -eq 1 ] && [ -n "${OPENROUTER_API_KEY:-}" ]; then
               echo "  Gemini failed/quota exceeded (HTTP $G_HTTP) — trying OpenRouter fallback..." >&2
@@ -460,7 +460,7 @@ runs:
           done
 
           # ── Groq rate limit backoff + retry ────────────────────────────
-          local r_attempt=1
+          r_attempt=1
           while [ "$R_HTTP" = "429" ] && [ $r_attempt -le 3 ]; do
             echo "  Groq rate limit — waiting 30s then retrying (Attempt $r_attempt/3)..." >&2
             sleep 30

@@ -43,6 +43,7 @@ import { ethers } from 'ethers'
 import * as Sentry from '@sentry/node'
 import logger from '../middleware/logger.js'
 import { measureExecution } from '../core/performanceMetrics.js'
+import { isEscrowPaused, escrowPausedResult } from './escrowCircuitBreaker.js'
 
 const ESCROW_ABI = [
   'function createBooking(uint256 bookingId, address payable driver, bytes signature) external payable',
@@ -85,7 +86,7 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
     logger.info('✅ Polygon Escrow contract client initialised.');
     logger.info(`📊 Escrow rate: ${ESCROW_MATIC_PER_PAISA} MATIC/paisa → max deposit: ${MAX_ESCROW_MATIC} MATIC`);
   } catch (err) {
-    logger.error('❌ Failed to initialise Escrow contract client:', err.message)
+    logger.error({ event: 'ESCROW_INIT_ERROR', error: err && err.message }, 'Failed to initialise Escrow contract client')
     Sentry.captureException(err)
   }
 } else {
@@ -131,7 +132,7 @@ export async function validateEscrowSetup () {
     }
     logger.info(`[escrow] ✅ Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
   } catch (err) {
-    logger.error(`[escrow] ❌ Failed to query bytecode at ${address}: ${err.message}`)
+    logger.error({ event: 'ESCROW_BYTECODE_QUERY_ERROR', address, error: err && err.message }, `[escrow] Failed to query bytecode at ${address}`)
     return false
   }
 
@@ -372,6 +373,11 @@ export async function buildDepositTx (orderDisplayId, customerWalletAddress, dri
     return { txData: null, bookingId }
   }
 
+  if (await isEscrowPaused()) {
+    logger.warn(`[escrow] Circuit breaker paused — refusing to build deposit tx for booking ${orderDisplayId}.`)
+    return escrowPausedResult(bookingId, { txData: null })
+  }
+
   if (!ethers.isAddress(driverWalletAddress) || !ethers.isAddress(customerWalletAddress)) {
     return { txData: null, bookingId }
   }
@@ -544,6 +550,11 @@ export async function markEscrowBookingStarted (orderDisplayId) {
     return { txHash: null, bookingId }
   }
 
+  if (await isEscrowPaused()) {
+    logger.warn(`[escrow] Circuit breaker paused — refusing to mark booking started for ${orderDisplayId}.`)
+    return escrowPausedResult(bookingId)
+  }
+
   try {
     const tx = await escrowContract.markBookingStarted(bookingId)
     logger.info(`[escrow] markBookingStarted tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
@@ -587,6 +598,11 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
   if (!escrowContract) {
     logger.warn('[escrow] Contract not initialised — skipping releaseFunds.')
     return { txHash: null, bookingId }
+  }
+
+  if (await isEscrowPaused()) {
+    logger.warn(`[escrow] Circuit breaker paused — refusing to release funds for booking ${orderDisplayId}.`)
+    return escrowPausedResult(bookingId)
   }
 
   try {
@@ -634,7 +650,6 @@ export async function escrowRelease (orderDisplayId, expectedAmountWei = null) {
 }
 
 
-
 /**
  * Submit an escrow refund and return its hash before confirmation.
  */
@@ -645,6 +660,11 @@ export async function submitEscrowRefund (orderDisplayId) {
   if (!escrowContract) {
     logger.warn('[escrow] Contract not initialised — skipping refundFunds.')
     return { txHash: null, bookingId }
+  }
+
+  if (await isEscrowPaused()) {
+    logger.warn(`[escrow] Circuit breaker paused — refusing to refund booking ${orderDisplayId}.`)
+    return escrowPausedResult(bookingId)
   }
 
   let tx
@@ -708,6 +728,11 @@ export async function escrowLockPayment(orderDisplayId, customerWalletAddress, d
       return { txHash: null, bookingId };
     }
 
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing to lock payment for booking ${orderDisplayId}.`);
+      return escrowPausedResult(bookingId);
+    }
+
     try {
       const tx = await escrowContract.lockPayment(
         bookingId,
@@ -745,6 +770,11 @@ export async function submitEscrowCancelWithPenalty (orderDisplayId, driverFeeWe
       return { txHash: null, bookingId }
     }
 
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing to cancel booking ${orderDisplayId} with penalty.`)
+      return escrowPausedResult(bookingId)
+    }
+
     try {
       const tx = await escrowContract.cancelWithPenalty(bookingId, driverFeeWei)
       logger.info(`[escrow] cancelWithPenalty tx submitted: ${tx.hash} for booking ${orderDisplayId}`)
@@ -778,6 +808,11 @@ export async function submitEscrowRaiseDispute (orderDisplayId) {
     if (!escrowContract) {
       logger.warn('[escrow] Contract not initialised — skipping raiseDispute.')
       return { txHash: null, bookingId }
+    }
+
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing to raise dispute for booking ${orderDisplayId}.`)
+      return escrowPausedResult(bookingId)
     }
 
     let tx
@@ -820,6 +855,11 @@ export async function submitEscrowResolveDispute (orderDisplayId, driverAmountWe
       return { txHash: null, bookingId }
     }
 
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing to resolve dispute for booking ${orderDisplayId}.`)
+      return escrowPausedResult(bookingId)
+    }
+
     let tx
     try {
       tx = await escrowContract.resolveDispute(bookingId, driverAmountWei)
@@ -856,6 +896,11 @@ export async function submitEscrowResolveDisputeTimeout (orderDisplayId) {
       return { txHash: null, bookingId }
     }
 
+    if (await isEscrowPaused()) {
+      logger.warn(`[escrow] Circuit breaker paused — refusing to resolve dispute timeout for booking ${orderDisplayId}.`)
+      return escrowPausedResult(bookingId)
+    }
+
     let tx
     try {
       tx = await escrowContract.resolveDisputeTimeout(bookingId)
@@ -882,7 +927,7 @@ export const lockPayment = escrowLockPayment;
 
 
 
-async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
+export async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
   const bookingOnChain = await escrowContract.bookings(bookingId);
   const onChainAmountBN = BigInt(bookingOnChain.amount.toString());
   const expectedWeiBN = BigInt(expectedWei);
@@ -892,5 +937,3 @@ async function verifyOnChainEscrowBalance(bookingId, expectedWei) {
     expectedAmount: expectedWeiBN.toString()
   };
 }
-
-module.exports.verifyOnChainEscrowBalance = verifyOnChainEscrowBalance;

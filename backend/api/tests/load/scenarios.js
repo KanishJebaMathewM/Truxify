@@ -1,3 +1,4 @@
+/* eslint-disable */
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
@@ -27,14 +28,6 @@ export default function () {
   const resLoads = http.get(`${BASE_URL}/api/loads/available`, params);
   check(resLoads, {
     'available loads status is 200': (r) => r.status === 200,
-  const healthRes = http.get(`${BASE_URL}/health`, params);
-  check(healthRes, {
-    'status is 200': (r) => r.status === 200,
-  });
-
-  const availableLoadsRes = http.get(`${BASE_URL}/api/loads/available`, params);
-  check(availableLoadsRes, {
-    'status is 200': (r) => r.status === 200,
   });
 
   sleep(1);

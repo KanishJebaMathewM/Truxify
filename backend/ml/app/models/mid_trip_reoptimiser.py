@@ -1,6 +1,6 @@
 import logging
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
@@ -93,7 +93,7 @@ def find_mid_trip_loads(
     # Baseline distance: current -> next waypoint (without detour)
     baseline_dist = _haversine(cur_lat, cur_lng, next_lat, next_lng)
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     recommendations = []
 
     for load in nearby_loads:
@@ -129,14 +129,22 @@ def find_mid_trip_loads(
             # --- 3. Deadline feasibility ---
             try:
                 deadline_dt = datetime.fromisoformat(load.get("pickup_deadline", ""))
+
+                # Normalize every deadline to UTC so it can be compared with the
+                # UTC baseline. The API serializes deadlines as Z-suffixed ISO
+                # strings, but a naive deadline is treated as UTC as well.
+                if deadline_dt.tzinfo is None:
+                    deadline_dt = deadline_dt.replace(tzinfo=timezone.utc)
+                else:
+                    deadline_dt = deadline_dt.astimezone(timezone.utc)
+
+                travel_hours_to_pickup = dist_cur_pickup / _AVG_SPEED_KMH if _AVG_SPEED_KMH > 0 else float("inf")
+                estimated_pickup_time = now + timedelta(hours=travel_hours_to_pickup)
+
+                if estimated_pickup_time > deadline_dt:
+                    continue  # Cannot reach pickup in time
             except (ValueError, TypeError):
                 continue  # Skip loads with unparseable deadlines
-
-            travel_hours_to_pickup = dist_cur_pickup / _AVG_SPEED_KMH if _AVG_SPEED_KMH > 0 else float("inf")
-            estimated_pickup_time = now + timedelta(hours=travel_hours_to_pickup)
-
-            if estimated_pickup_time > deadline_dt:
-                continue  # Cannot reach pickup in time
 
             # --- 4. Scoring ---
             payment = load.get("payment_inr", 0.0)

@@ -93,4 +93,22 @@ describe('auth.js requireRole (issue #6664)', () => {
     expect(res.json).toHaveBeenCalledTimes(1);
     expect(next).not.toHaveBeenCalled();
   });
+
+  it('throws when allowedRoles contains only non-string or blank entries', async () => {
+    const { requireRole } = await loadAuth();
+    expect(() => requireRole([42, '   '])).toThrow(/at least one non-empty role/);
+  });
+
+  it('trims whitespace from allowedRoles entries', async () => {
+    const { requireRole } = await loadAuth();
+
+    const req = { user: { id: 'u2', role: 'driver' } };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+
+    await requireRole(['  driver  '])(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
+  });
 });

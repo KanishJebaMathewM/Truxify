@@ -235,7 +235,10 @@ class HistoryOrderData {
     this.targetTemperatureMin,
     this.targetTemperatureMax,
     this.escrowStatus,
-    this.ratingGiven,
+    this.pickupLat,
+    this.pickupLng,
+    this.dropLat,
+    this.dropLng,
   });
 
   final String orderId;
@@ -259,7 +262,10 @@ class HistoryOrderData {
   final bool? isFragile;
   final String? specialRequirements;
   final String? escrowStatus;
-  final int? ratingGiven;
+  final double? pickupLat;
+  final double? pickupLng;
+  final double? dropLat;
+  final double? dropLng;
 }
 
 class TimelineStepData {

@@ -41,6 +41,11 @@ module.exports = {
         runs: 200,
       },
       viaIR: true,
+      // solc 0.8.24 defaults to the shanghai EVM, which has no MCOPY.
+      // OpenZeppelin Contracts 5.x (Bytes.sol) emits mcopy in assembly, so the
+      // whole tree fails to compile without this. Polygon PoS has supported
+      // the cancun opcodes since the Napoli upgrade.
+      evmVersion: "cancun",
     },
   },
   networks: {

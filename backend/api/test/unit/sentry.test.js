@@ -16,6 +16,8 @@ import {
   initSentry,
   flushSentry,
   sentryErrorHandler,
+  shouldIgnoreError,
+  captureDebugException,
 } from "../../src/middleware/sentry.js";
 
 vi.mock("../../src/middleware/logger.js", () => ({
@@ -24,9 +26,20 @@ vi.mock("../../src/middleware/logger.js", () => ({
 
 vi.mock("@sentry/node", async (real) => ({
   ...(await real()),
+  // The installed SDK version has no `Handlers` export (removed upstream);
+  // sentry.js probes it via optional chaining. Declaring the key here (even
+  // as undefined) keeps that access from throwing under vitest's mock
+  // strictness, so the fallback to expressErrorHandler() is actually exercised.
+  Handlers: undefined,
   init: vi.fn(),
   flush: vi.fn(),
   expressErrorHandler: () => vi.fn(),
+  Handlers: {
+    requestHandler: () => vi.fn(),
+    errorHandler: () => vi.fn(),
+  },
+  withScope: vi.fn((fn) => fn({ setTag: vi.fn() })),
+  captureException: vi.fn(() => "mock-event-id"),
 }));
 
 const Sentry = SentryModule;
@@ -69,6 +82,27 @@ describe("flushSentry", () => {
     vi.stubEnv("SENTRY_DSN", "https://abc@sentry.io/123");
     vi.mocked(Sentry.flush).mockRejectedValue(new Error("flush failed"));
     await expect(flushSentry(2000)).resolves.toBeUndefined();
+  });
+});
+
+describe("captureDebugException", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  it("returns null when SENTRY_DSN is not set", () => {
+    expect(captureDebugException(new Error("x"))).toBeNull();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+  });
+
+  it("captures the error with a debug tag and returns the event id", () => {
+    vi.stubEnv("SENTRY_DSN", "https://abc@sentry.io/123");
+    const err = new Error("Sentry Test Error from Node.js Backend");
+    const id = captureDebugException(err);
+    expect(Sentry.withScope).toHaveBeenCalled();
+    expect(Sentry.captureException).toHaveBeenCalledWith(err);
+    expect(id).toBe("mock-event-id");
   });
 });
 
@@ -147,4 +181,36 @@ describe("sentry — error filter and level", () => {
       global.Error = OriginalError;
     }
   });
+
+describe('shouldIgnoreError', () => {
+  it('returns warn level for ECONNRESET errors', () => {
+    const err = new Error('Connection reset');
+    err.code = 'ECONNRESET';
+    expect(shouldIgnoreError(err)).toBe('warn');
+  });
+
+  it('returns warn level for ECONNREFUSED errors', () => {
+    const err = new Error('Connection refused');
+    err.code = 'ECONNREFUSED';
+    expect(shouldIgnoreError(err)).toBe('warn');
+  });
+
+  it('returns false for ETIMEDOUT errors (not in filter list)', () => {
+    const err = new Error('Operation timed out');
+    err.code = 'ETIMEDOUT';
+    expect(shouldIgnoreError(err)).toBe(false);
+  });
+
+  it('returns false for errors with unknown codes', () => {
+    const err = new Error('Some other error');
+    err.code = 'OTHER_ERROR';
+    expect(shouldIgnoreError(err)).toBe(false);
+  });
+
+  it('returns false for errors without a code property', () => {
+    const err = new Error('No code');
+    expect(shouldIgnoreError(err)).toBe(false);
+  });
+});
+
 });

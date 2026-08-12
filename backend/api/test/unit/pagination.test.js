@@ -139,6 +139,26 @@ describe('Pagination Middleware', () => {
     expect(req.query.limit).toBe(20);
     expect(req.query.offset).toBe(40); // (3-1) * 20
   });
+
+  it('injects X-Total-Count from the response body total', () => {
+    const setHeader = vi.fn();
+    const res = {
+      setHeader,
+      json: vi.fn(function (body) {
+        return body;
+      }),
+    };
+    const middleware = validatePagination();
+    const req = { query: {} };
+    const next = vi.fn();
+
+    middleware(req, res, next);
+    // The middleware wraps res.json; calling it with a total should set the header.
+    res.json({ data: [], totalCount: 42 });
+
+    expect(setHeader).toHaveBeenCalledWith('X-Total-Count', '42');
+    expect(setHeader).toHaveBeenCalledWith('Access-Control-Expose-Headers', 'X-Total-Count');
+  });
 });
 
 describe('pagination — NaN and edge case handling', () => {

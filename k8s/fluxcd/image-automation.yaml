@@ -5,9 +5,9 @@ metadata:
   namespace: flux-system
 spec:
   interval: 5m
-  image: truxify/api
+  image: ghcr.io/kanishjebamathewm/truxify-api
   secretRef:
-    name: docker-hub
+    name: ghcr
 ---
 apiVersion: image.toolkit.fluxcd.io/v1beta2
 kind: ImagePolicy

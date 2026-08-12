@@ -96,7 +96,7 @@ import { FuelAdvisorService } from '../services/fuelAdvisorService.js';
 import { WeatherService } from '../services/weatherService.js';
 
 const weatherService = new WeatherService({ logger });
-const fuelAdvisorService = new FuelAdvisorService({ supabase, weatherService, logger });
+const fuelAdvisorService = new FuelAdvisorService({ supabase: supabaseAdmin, weatherService, logger });
 
 const DEFAULT_TRUCK_TYPES = ['Open Body', 'Closed Body', 'Container', 'Refrigerated'];
 
@@ -557,6 +557,7 @@ router.get(
     let finalTollEstimate = pricing.tollEstimate;
     let finalPlatformFee = pricing.platformFee;
     let finalTotalAmount = pricing.totalAmount;
+    let estimatedPrice = null;
     let isAiEstimate = false;
 
     try {
@@ -569,12 +570,7 @@ router.get(
         trafficMultiplier,
       });
       if (mlResult && mlResult.estimatedPricePaisa > 0) {
-        finalTotalAmount = mlResult.estimatedPricePaisa;
-        finalPlatformFee = Math.round(mlResult.estimatedPricePaisa * 0.05);
-        finalBaseFreight = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee - finalTollEstimate);
-        if (finalBaseFreight === 0) {
-          finalTollEstimate = Math.max(0, mlResult.estimatedPricePaisa - finalPlatformFee);
-        }
+        estimatedPrice = mlResult.estimatedPricePaisa;
         isAiEstimate = true;
       } else {
         logger.warn({ mlResult }, 'Invalid price prediction response during search');
@@ -597,11 +593,11 @@ router.get(
               $maxDistance: maxDistanceMeters
             }
           }
-        }).toArray();
+        }).limit(200).toArray();
 
         nearbyDriverIds = [...new Set(nearbyTelemetry.map(t => t.driver_id))];
       } catch (mongoErr) {
-        logger.error('MongoDB telemetry search error:', mongoErr.message);
+        logger.error({ event: 'TRUCK_MONGO_TELEMETRY_ERROR', requestId: req.requestId || req.id, error: mongoErr && mongoErr.message }, 'MongoDB telemetry search error');
       }
     }
 
@@ -620,7 +616,7 @@ router.get(
       .in('user_id', nearbyDriverIds);
 
     if (driversErr) {
-      logger.error('Driver search error:', driversErr.message);
+      logger.error({ event: 'TRUCK_DRIVER_SEARCH_ERROR', requestId: req.requestId || req.id, error: driversErr && driversErr.message }, 'Driver search error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -637,12 +633,12 @@ router.get(
     ]);
 
     if (trucksRes.error) {
-      logger.error('Truck enrichment lookup error:', trucksRes.error.message);
+      logger.error({ event: 'TRUCK_ENRICHMENT_ERROR', requestId: req.requestId || req.id, error: trucksRes.error && trucksRes.error.message }, 'Truck enrichment lookup error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
     if (profilesRes.error) {
-      logger.error('Driver profile enrichment lookup error:', profilesRes.error.message);
+      logger.error({ event: 'TRUCK_PROFILE_ENRICHMENT_ERROR', requestId: req.requestId || req.id, error: profilesRes.error && profilesRes.error.message }, 'Driver profile enrichment lookup error');
       return res.status(500).json({ error: 'Failed to search trucks. Please try again later.' });
     }
 
@@ -666,6 +662,7 @@ router.get(
         capacityTons: truck.max_capacity_tons || 0,
         truckType: truck.truck_type || '',
         price: finalTotalAmount,
+        estimatedPrice,
         baseFreight: finalBaseFreight,
         tollEstimate: finalTollEstimate,
         platformFee: finalPlatformFee,
@@ -708,7 +705,7 @@ router.get(
 
     res.json(responseResults);
   } catch (err) {
-    logger.error('Truck search error:', err.message);
+    logger.error({ event: 'TRUCK_SEARCH_ERROR', requestId: req.requestId || req.id, error: err && err.message }, 'Truck search error');
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

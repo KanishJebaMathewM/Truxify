@@ -1,5 +1,5 @@
 import { WebSocketServer } from 'ws';
-import { mongoDb, redisClient, firebaseAdmin, supabase } from '../config/db.js';
+import { mongoDb, redisClient, firebaseAdmin, supabase, supabaseAdmin } from '../config/db.js';
 import jwt from 'jsonwebtoken';
 import logger from '../middleware/logger.js';
 import os from 'os';
@@ -11,8 +11,8 @@ import { ebpfLoader } from '../../../../ebpf/loader.js';
 import { createLocationEventBus } from './locationEventBus.js';
 
 const TELEMETRY_SCHEMA = {
-  lat: { type: 'number', required: true, min: -90, max: 90 },
-  lng: { type: 'number', required: true, min: -180, max: 180 },
+  lat: { type: 'number', required: false, min: -90, max: 90 },
+  lng: { type: 'number', required: false, min: -180, max: 180 },
   latitude: { type: 'number', required: false, min: -90, max: 90 },
   longitude: { type: 'number', required: false, min: -180, max: 180 },
   driver_id: { type: 'string', required: false, minLen: 1, maxLen: 64 },
@@ -26,6 +26,14 @@ const TELEMETRY_SCHEMA = {
 
 function validateTelemetryPayload(data) {
   const errors = [];
+
+  const hasLatLng = data.lat !== undefined && data.lat !== null && data.lng !== undefined && data.lng !== null;
+  const hasLatLong = data.latitude !== undefined && data.latitude !== null && data.longitude !== undefined && data.longitude !== null;
+  
+  if (!hasLatLng && !hasLatLong) {
+    errors.push('At least one coordinate pair (lat/lng or latitude/longitude) is required');
+  }
+
   for (const [field, rules] of Object.entries(TELEMETRY_SCHEMA)) {
     const value = data[field];
     if (rules.required && (value === undefined || value === null)) {
@@ -297,11 +305,19 @@ const WS_AUTH_TIMEOUT_MS = 10000;
 const DRIVER_ORDER_CACHE_TTL_SECONDS = 60;
 const DRIVER_ORDER_CACHE_KEY_PREFIX = 'driver:active-order:';
 
+// Orders in these statuses no longer keep a driver pinned to an active trip.
+// A cached `driver:active-order:` mapping for one of them is stale and must be
+// invalidated — otherwise mid-trip cache hits skip driver-assignment
+// re-verification and telemetry/geofence provenance keeps binding to the
+// previous trip (issue #10676).
+const TERMINAL_ORDER_STATUSES = new Set(['delivered', 'cancelled', 'payment_released']);
+
 /**
  * Retrieve the cached active order mapping for a driver.
  * Returns { orderId, orderDisplayId } or null on miss / error.
  */
 async function getCachedDriverOrder(driverId) {
+  if (!driverId) return null;
   if (!redisClient) return null;
   try {
     const cached = await redisClient.get(`${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`);
@@ -309,7 +325,7 @@ async function getCachedDriverOrder(driverId) {
       return JSON.parse(cached);
     }
   } catch (err) {
-    logger.error('Redis driver order cache get error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache get error');
   }
   return null;
 }
@@ -318,7 +334,9 @@ async function getCachedDriverOrder(driverId) {
  * Store the driver → active order mapping in Redis.
  */
 async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
+  if (!driverId) return;
   if (!redisClient || !orderId) return;
+  if (!orderDisplayId) return;
   try {
     await redisClient.set(
       `${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`,
@@ -327,7 +345,7 @@ async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
       DRIVER_ORDER_CACHE_TTL_SECONDS,
     );
   } catch (err) {
-    logger.error('Redis driver order cache set error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache set error');
   }
 }
 
@@ -335,13 +353,15 @@ async function setCachedDriverOrder(driverId, orderId, orderDisplayId) {
  * Invalidate cached active order for a driver.
  */
 async function invalidateDriverOrderCache(driverId) {
+  if (!driverId) return;
   if (!redisClient) return;
   try {
     await redisClient.del(`${DRIVER_ORDER_CACHE_KEY_PREFIX}${driverId}`);
   } catch (err) {
-    logger.error('Redis driver order cache invalidate error:', err.message);
+    logger.error({ err, driverId }, 'Redis driver order cache invalidate error');
   }
 }
+export { invalidateDriverOrderCache };
 
 function getClientIp(request) {
   // Trust only the TCP peer address. The X-Forwarded-For header is
@@ -535,7 +555,7 @@ async function authenticateWs(ws, token) {
     }
     ws.authenticated = true;
     await restoreSubscriptions(ws);
-    logger.info(`✅ WS Authenticated user: ${ws.user.id}`);
+    logger.info({ userId: ws.user.id }, 'WS Authenticated user');
   } catch (err) {
     logger.error({ err }, 'WS Auth failed');
     ws.send(JSON.stringify({ error: 'Unauthorized: Invalid token', code: 4001 }));
@@ -711,14 +731,14 @@ export function initWebSocketServer(server, orderRepository) {
     });
 
     ws.on('close', () => {
-      logger.info('🔌 WebSocket connection closed.');
+      logger.info('WebSocket connection closed');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
       })();
     });
 
     ws.on('error', (err) => {
-      logger.error('🔌 WebSocket client error:', err.message);
+      logger.error({ err }, 'WebSocket client error');
       void (async () => {
         await removeClientFromAllSubscriptions(ws);
       })();
@@ -751,7 +771,7 @@ export function initWebSocketServer(server, orderRepository) {
       };
       ws.authenticated = true;
       logger.warn({ event: 'WS_BYPASS_AUTH_USED', driverId: ws.driverId, role: ws.user.role }, 'WS Auth bypassed via DEV_ACCESS_TOKEN');
-      logger.info('🔌 New WebSocket connection established on /ws/tracking');
+      logger.info('New WebSocket connection established on /ws/tracking');
       return;
     }
 
@@ -767,13 +787,13 @@ export function initWebSocketServer(server, orderRepository) {
       }
     }, WS_AUTH_TIMEOUT_MS);
     ws.once('close', () => clearTimeout(authTimeout));
-    logger.info('🔌 New WebSocket connection established on /ws/tracking (awaiting first-frame auth)');
+    logger.info('New WebSocket connection established on /ws/tracking (awaiting first-frame auth)');
   });
 
   wsHeartbeatInterval = setInterval(() => {
     wss.clients.forEach((ws) => {
       if (ws.isAlive === false) {
-        logger.info('🔌 Terminating unresponsive WebSocket client.');
+        logger.info('Terminating unresponsive WebSocket client');
         return ws.terminate();
       }
       ws.isAlive = false;
@@ -863,7 +883,7 @@ export async function handleTrackingMessage(ws, message, req) {
             status: 'authenticated',
             user_id: ws.user?.id ?? ws.driverId,
           }));
-          logger.info('🔌 New WebSocket connection established on /ws/tracking (first-frame auth)');
+          logger.info('New WebSocket connection established on /ws/tracking (first-frame auth)');
         }
         return;
       }
@@ -932,10 +952,26 @@ export async function handleLocationPing(ws, data, req) {
   const lat = data.lat !== undefined ? data.lat : data.latitude;
   const lng = data.lng !== undefined ? data.lng : data.longitude;
 
-  // Reject frames with null or undefined coordinates before validation
+  // Cross-field validation: require at least one complete coordinate pair.
+  const hasLatLng = data.lat !== undefined && data.lng !== undefined;
+  const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;
+  if (!hasLatLng && !hasLatLong) {
+    return ws.send(JSON.stringify({
+      error: 'Invalid telemetry payload',
+      details: ['At least one coordinate pair (lat+lng or latitude+longitude) is required.']
+    }));
+  }
+
+  // Reject frames with null or undefined resolved coordinates before schema validation
   if (lat === null || lat === undefined || lng === null || lng === undefined) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat and lng are required'] }));
   }
+
+  // Normalize the alternate latitude/longitude names into the canonical
+  // lat/lng keys so schema validation, sanitization and persistence
+  // downstream all operate on the resolved coordinates.
+  data.lat = lat;
+  data.lng = lng;
 
   // Fix 3 + dead-code fix: run the payload through the schema validator/
   const normalizedForValidation = {
@@ -950,24 +986,6 @@ export async function handleLocationPing(ws, data, req) {
   const normalizedValidationErrors = validateTelemetryPayload(normalizedForValidation);
   if (normalizedValidationErrors) {
     return ws.send(JSON.stringify({ error: 'Invalid telemetry payload.', details: normalizedValidationErrors }));
-  }
-
-  // Schema-validate and sanitize the telemetry payload before further
-  // processing (issue #5758). Enforces field ranges and string lengths that
-  // the inline guards above do not cover.
-  const validationErrors = validateTelemetryPayload(data);
-  if (validationErrors) {
-    return ws.send(JSON.stringify({ error: 'Invalid telemetry payload', details: validationErrors }));
-  }
-
-  // Cross-field validation: require at least one complete coordinate pair.
-  const hasLatLng = data.lat !== undefined && data.lng !== undefined;
-  const hasLatLong = data.latitude !== undefined && data.longitude !== undefined;
-  if (!hasLatLng && !hasLatLong) {
-    return ws.send(JSON.stringify({
-      error: 'Invalid telemetry payload',
-      details: ['At least one coordinate pair (lat+lng or latitude+longitude) is required.']
-    }));
   }
 
   const sanitized = sanitizeTelemetryData(data);
@@ -1046,15 +1064,39 @@ export async function handleLocationPing(ws, data, req) {
       // database.  This avoids repeated Supabase queries for the same
       // driver during an active trip.
       const cached = await getCachedDriverOrder(driver_id);
+      let cacheVerified = false;
       if (cached) {
-        orderUUID = cached.orderId;
-        orderDisplayId = cached.orderDisplayId;
-      } else {
+        // A cached mapping can outlive the trip (it is only invalidated on
+        // disconnect or an order transition), so re-verify it still points at
+        // the driver's current, non-terminal order before trusting it — a bare
+        // cache hit previously skipped driver-assignment re-verification
+        // entirely (issue #10676).
+        const { data: activeOrder } = await _orderRepository.findOrderByAnyId(
+          cached.orderId,
+          'id, order_display_id, driver_id, status'
+        );
+        if (
+          activeOrder
+          && activeOrder.driver_id === driver_id
+          && !TERMINAL_ORDER_STATUSES.has(activeOrder.status)
+        ) {
+          orderUUID = cached.orderId;
+          orderDisplayId = cached.orderDisplayId || activeOrder.order_display_id;
+          cacheVerified = true;
+        } else {
+          // Stale entry (delivered/cancelled/reassigned) — drop it so the
+          // authoritative lookup below resolves the current assignment.
+          await invalidateDriverOrderCache(driver_id);
+        }
+      }
+
+      if (!cacheVerified) {
         const idToLookup = orderUUID || orderDisplayId;
-        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id');
+        const { data: order } = await _orderRepository.findOrderByAnyId(idToLookup, 'id, order_display_id, driver_id, status');
         if (order) {
           // Verify the authenticated driver is assigned to this order
           if (order.driver_id !== driver_id) {
+            await invalidateDriverOrderCache(driver_id);
             logger.warn({
               event: 'UNAUTHORIZED_ORDER_TRACKING',
               driverId: driver_id,
@@ -1069,7 +1111,18 @@ export async function handleLocationPing(ws, data, req) {
           }
           orderUUID = order.id;
           orderDisplayId = order.order_display_id;
-          await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
+          if (TERMINAL_ORDER_STATUSES.has(order.status)) {
+            // Order has ended — drop any cached mapping and do not re-bind
+            // telemetry/geofence provenance to the finished order.
+            orderUUID = null;
+            orderDisplayId = null;
+            await invalidateDriverOrderCache(driver_id);
+          } else if (orderDisplayId) {
+            await setCachedDriverOrder(driver_id, orderUUID, orderDisplayId);
+          }
+        } else if (cached) {
+          // Cached order no longer exists — drop the stale mapping.
+          await invalidateDriverOrderCache(driver_id);
         }
       }
     } catch (err) {
@@ -1120,6 +1173,45 @@ export async function handleLocationPing(ws, data, req) {
     } catch (err) {
       logger.error('Redis cache telemetry error:', err.message);
     }
+  }
+
+  // Upsert the driver's live location into `driver_locations` (fire-and-forget
+  // so the WebSocket broadcast path is never blocked). This is the only writer
+  // for the table that feeds new-trip nearby-driver notifications and public
+  // shared tracking. The service-role client is required — RLS grants anon
+  // nothing on `driver_locations`, so an anon write would always be rejected.
+  // Deactivating any prior active row keeps exactly one live row per driver,
+  // matching the `drivers` view's `sync_drivers_update()` trigger (issue #8932).
+  if (supabaseAdmin) {
+    void (async () => {
+      try {
+        await supabaseAdmin
+          .from('driver_locations')
+          .update({ is_active: false })
+          .eq('driver_id', driver_id)
+          .eq('is_active', true);
+        const { error } = await supabaseAdmin
+          .from('driver_locations')
+          .insert({
+            driver_id,
+            latitude: lat,
+            longitude: lng,
+            is_active: true,
+            last_updated_at: new Date(serverNow).toISOString(),
+          });
+        if (error) {
+          logger.error(
+            { error, driver_id },
+            '[Tracker] Failed to write driver location',
+          );
+        }
+      } catch (err) {
+        logger.error(
+          { err, driver_id },
+          '[Tracker] Failed to write driver location',
+        );
+      }
+    })();
   }
 
   // Persist GPS log to MongoDB Atlas (GPS Logs collection) using the typed
@@ -1366,7 +1458,7 @@ async function loadRecoveryFile() {
     }
   } catch (err) {
     logger.error('[TRUXIFY RECOVERY] Failed to load recovery file:', err.message);
-    try { fs.unlinkSync(RECOVERY_FILE_PATH); } catch (_) { /* ignore */ }
+    try { fs.unlinkSync(RECOVERY_FILE_PATH); } catch (unlinkErr) { logger.warn('[TRUXIFY RECOVERY] Failed to unlink recovery file:', unlinkErr.message); }
   }
 }
 
@@ -1531,7 +1623,7 @@ export async function handleSubscribe(ws, data) {
     }
   }
 
-  logger.info(`🔌 Client subscribed to telemetry updates for: "${targetId}"`);
+  logger.info({ targetId }, 'Client subscribed to telemetry updates');
   ws.send(JSON.stringify({ status: 'subscribed', target: targetId, reconnect_supported: true }));
 }
 
@@ -1606,7 +1698,7 @@ async function handleUnsubscribe(ws, data) {
       }
     }
 
-    logger.info(`🔌 Client unsubscribed from updates for: "${targetId}"`);
+    logger.info({ targetId }, 'Client unsubscribed from updates');
     ws.send(JSON.stringify({ status: 'unsubscribed', target: targetId }));
   }
 }
@@ -1615,7 +1707,7 @@ async function removeClientFromAllSubscriptions(ws) {
   trackingSubscriptions.forEach((clients, key) => {
     if (clients.has(ws)) {
       clients.delete(ws);
-      logger.info(`🔌 Removed socket subscription from "${key}" due to disconnect.`);
+      logger.info({ key }, 'Removed socket subscription due to disconnect');
     }
     if (clients.size === 0) {
       trackingSubscriptions.delete(key);
@@ -1630,7 +1722,7 @@ async function removeClientFromAllSubscriptions(ws) {
               supabase.removeChannel(channel);
             }
             locationChannels.delete(uuidKey);
-            logger.info(`🔌 Removed Supabase Realtime channel for order "${uuidKey}" on last subscriber disconnect.`);
+            logger.info({ uuidKey }, 'Removed Supabase Realtime channel on last subscriber disconnect');
           }
         }
         displayIdToLocationChannelKeys.delete(key);

@@ -181,6 +181,8 @@ async def set_threshold(data_type: str, threshold: float):
             }
         else:
             raise HTTPException(status_code=404, detail=f"Data type {data_type} not found")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Threshold setting failed: {e}")
         logger.error(f"Internal error: {e}")
@@ -203,6 +205,8 @@ async def get_threshold(data_type: str):
             }
         else:
             raise HTTPException(status_code=404, detail=f"Data type {data_type} not found")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Threshold fetch failed: {e}")
         logger.error(f"Internal error: {e}")

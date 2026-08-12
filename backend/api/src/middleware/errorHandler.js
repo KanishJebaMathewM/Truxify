@@ -26,20 +26,24 @@ export function errorHandler(err, req, res, next) {
 
   if (err && err.name === 'MulterError') {
     const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    // Multer error messages can embed the offending field name from the
+    // request; strip control characters so a hostile filename cannot inject
+    // into the JSON response body.
+    const message = String(err.message || 'Upload failed').replace(/[\x00-\x1f\x7f]/g, '');
     return res.status(status).json({
       success: false,
-      error: `File upload error: ${err.message}`,
-      code: err.code
+      error: `File upload error: ${message}`,
+      code: err.code || 'UPLOAD_ERROR'
     });
   }
 
   // Handle Zod validation errors
   if (err && err.name === 'ZodError') {
-    logger.warn({ requestId: req.requestId, errors: err.errors }, 'Zod validation failed');
+    logger.warn({ requestId: req.requestId, errors: err.issues }, 'Zod validation failed');
     return res.status(400).json({
       success: false,
       error: 'Validation failed',
-      details: err.errors.map(e => ({ field: e.path.join('.'), message: e.message })),
+      details: (err.issues || err.errors).map(e => ({ field: e.path.join('.'), message: e.message })),
     });
   }
 

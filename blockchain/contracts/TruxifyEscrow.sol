@@ -376,7 +376,13 @@ contract TruxifyEscrow is ReentrancyGuard, Ownable, Pausable {
             "TruxifyEscrow: Cannot cancel - booking not active"
         );
         require(!booking.paid, "TruxifyEscrow: Already paid");
+        require(!booking.started, "TruxifyEscrow: Trip already started");
         require(booking.amount > 0, "TruxifyEscrow: Nothing to refund");
+        // A started trip must be cancelled through cancelWithPenalty so the
+        // driver is compensated for work already performed. Allowing a full
+        // refund here would let the customer void a started booking while the
+        // driver receives nothing (issue #8891).
+        require(!booking.started, "TruxifyEscrow: Trip already started");
 
         // ── EFFECTS ───────────────────────────────────────────────────────
         uint256 refundAmount    = booking.amount;

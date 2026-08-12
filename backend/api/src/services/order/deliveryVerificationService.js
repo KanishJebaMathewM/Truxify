@@ -27,13 +27,15 @@ import {
 } from "../escrow.js";
 import logger from "../../middleware/logger.js";
 import { OrderTimelineService } from "./orderTimelineService.js";
+import { invalidateDriverOrderCache } from "../../sockets/tracker.js";
 
 const orderTimelineService = new OrderTimelineService({ supabase, logger });
 
 const DELIVERY_OTP_READY_STATUSES = new Set(["arriving"]);
 
+const _rawRadiusKm = Number(process.env.DELIVERY_GEOFENCE_RADIUS_KM);
 const DELIVERY_GEOFENCE_RADIUS_KM =
-  Number(process.env.DELIVERY_GEOFENCE_RADIUS_KM) || 0.5;
+  Number.isFinite(_rawRadiusKm) && _rawRadiusKm > 0 ? _rawRadiusKm : 0.5;
 const DELIVERY_GEOFENCE_MAX_AGE_MS =
   Number(process.env.DELIVERY_GEOFENCE_MAX_AGE_MS) || 5 * 60 * 1000;
 
@@ -90,7 +92,7 @@ export class DeliveryVerificationService {
         const { data: order, error: orderErr } =
           await this.orderRepository.findOrderById(
             orderId,
-            "id, order_display_id, driver_id, customer_id, escrow_status, escrow_amount_wei, escrow_release_attempts, status, release_tx_hash, drop_lat, drop_lng, toll_estimate, base_freight, platform_fee, total_amount",
+            "id, order_display_id, driver_id, customer_id, escrow_status, escrow_amount_wei, escrow_release_attempts, status, release_tx_hash, drop_lat, drop_lng, toll_estimate, base_freight, platform_fee, total_amount, pending_bid_acceptance",
           );
 
         if (orderErr || !order) {
@@ -347,13 +349,19 @@ export class DeliveryVerificationService {
         // The release gate must never be satisfied by self-reported coordinates.
         // assertDriverAtDropoff() proves physical presence using only telemetry
         // that was authenticated at ingestion and bound to this driver/order.
+        if (geofenceRadiusM !== undefined && geofenceRadiusM !== null) {
+          if (!Number.isFinite(geofenceRadiusM) || geofenceRadiusM <= 0) {
+            throw new DomainError(400, {
+              error: "Invalid geofenceRadiusM: must be a positive finite number.",
+            });
+          }
+        }
+
         // The radius is clamped to the server default so a client-supplied
-        // NaN/negative/oversized value can never bypass the distance check.
+        // oversized value can never bypass the distance check.
         const maxRadiusM = DELIVERY_GEOFENCE_RADIUS_KM * 1000;
         const radiusM =
-          geofenceRadiusM != null &&
-          Number.isFinite(geofenceRadiusM) &&
-          geofenceRadiusM > 0
+          geofenceRadiusM != null
             ? Math.min(geofenceRadiusM, maxRadiusM)
             : maxRadiusM;
         await this.assertDriverAtDropoff(order, radiusM);
@@ -486,16 +494,13 @@ export class DeliveryVerificationService {
           order.escrow_status === "funded" ||
           order.escrow_status === "release_failed"
         ) {
-          try {
-            const releaseResult = await this.escrowReleaseFn(
-              order.order_display_id,
           // Payout defense-in-depth: resolve the authoritative escrow amount
           // and verify it is consistent with the payout figure (total_amount)
           // BEFORE any on-chain release. The actual on-chain booking amount is
           // then enforced by escrowReleaseFn against the same expected figure,
           // so a booking funded with Y ≠ X can never be released while the app
           // pays the driver X from its own funds.
-          let expectedAmountWei = null;
+          let expectedAmountWei;
           const resolvedAmount = resolveExpectedDepositAmount(order);
           if (resolvedAmount.expectedAmountWei != null) {
             expectedAmountWei = resolvedAmount.expectedAmountWei;
@@ -509,7 +514,7 @@ export class DeliveryVerificationService {
                   ":",
                   details,
                 );
-                await this.orderRepository
+                await this._writeRepository
                   .updateOrder(orderId, {
                     escrow_status: "release_failed",
                     escrow_release_error: `ESCROW_AMOUNT_MISMATCH: ${details}`,
@@ -526,13 +531,42 @@ export class DeliveryVerificationService {
                     "Escrow amount mismatch detected. Payment cannot be released.",
                   code: "ESCROW_AMOUNT_MISMATCH",
                   details,
+                  retryable: false,
                 });
               }
             }
           } else {
-            logger.warn(
-              `[escrow] Order ${orderId} has no authoritative escrow amount on file — skipping on-chain amount verification on release (legacy row).`,
-            );
+            if (order.total_amount != null) {
+              expectedAmountWei = paisaToMaticWei(order.total_amount);
+            } else if (order.pending_bid_acceptance?.bid_amount != null) {
+              expectedAmountWei = paisaToMaticWei(order.pending_bid_acceptance.bid_amount);
+            } else {
+              const details = "Order is missing authoritative escrow amount (no escrow_amount_wei, total_amount, or pending_bid_acceptance.bid_amount)";
+              logger.error(
+                "[escrow] Missing authoritative escrow amount before release for order",
+                orderId,
+                ":",
+                details,
+              );
+              await this._writeRepository
+                .updateOrder(orderId, {
+                  escrow_status: "release_failed",
+                  escrow_release_error: `ESCROW_AMOUNT_MISSING: ${details}`,
+                  updated_at: new Date().toISOString(),
+                })
+                .catch((err) =>
+                  logger.warn(
+                    "[escrow] Failed to record missing amount:",
+                    err.message,
+                  ),
+                );
+              throw new DomainError(409, {
+                error: "Escrow amount missing. Payment cannot be released.",
+                code: "ESCROW_AMOUNT_MISSING",
+                details,
+                retryable: false,
+              });
+            }
           }
 
           try {
@@ -544,8 +578,9 @@ export class DeliveryVerificationService {
               releaseTxHash = releaseResult.txHash;
             } else if (releaseResult.alreadyReleased) {
               escrowAlreadyReleased = true;
+              releaseTxHash = order.release_tx_hash || null;
             } else if (releaseResult.code === "DEPOSIT_AMOUNT_MISMATCH") {
-              await this.orderRepository
+              await this._writeRepository
                 .updateOrder(orderId, {
                   escrow_status: "release_failed",
                   escrow_release_error: String(releaseResult.error).slice(0, 1000),
@@ -575,7 +610,7 @@ export class DeliveryVerificationService {
               ":",
               releaseErr.message,
             );
-            await this.orderRepository
+            await this._writeRepository
               .updateOrder(orderId, {
                 escrow_release_error: String(releaseErr.message).slice(0, 1000),
                 updated_at: new Date().toISOString(),
@@ -600,7 +635,6 @@ export class DeliveryVerificationService {
           if (releaseTxHash || escrowAlreadyReleased) {
             const { error: persistReleaseErr } =
               await this._writeRepository.updateOrder(orderId, {
-              await this.orderRepository.updateOrder(orderId, {
                 escrow_status: "released",
                 escrow_release_error: null,
                 escrow_released_at: new Date().toISOString(),
@@ -742,12 +776,29 @@ export class DeliveryVerificationService {
           });
         }
 
+        // The trip is complete (payment_released) — drop the cached
+        // driver→order mapping so telemetry/geofence provenance and the
+        // tracker's cache-first lookup no longer report the driver on the
+        // finished order (issue #10676).
+        const tripDriverId = tripData?.driver_id || order.driver_id;
+        if (tripDriverId) {
+          await invalidateDriverOrderCache(tripDriverId);
+        }
+
         // The trip is complete (payment_released) — kill any active public
         // tracking tokens so a shared link can no longer broadcast the driver's
-        // live location. Best-effort: revokeAllForOrder never throws.
-        await this.trackingTokenService?.revokeAllForOrder(
-          order.order_display_id,
-        );
+        // live location. Best-effort: token revocation failure must not break
+        // the delivery-complete flow, so swallow the throw here.
+        try {
+          await this.trackingTokenService?.revokeAllForOrder(
+            order.order_display_id,
+          );
+        } catch (error) {
+          logger.error(
+            `[verify-delivery] Failed to revoke tracking tokens for order ${order.order_display_id}:`,
+            error,
+          );
+        }
 
         // --- Fire FCM push to driver: "Payment Released ✓" ---
         const resolvedDriverIdForPush = tripData?.driver_id || order.driver_id;

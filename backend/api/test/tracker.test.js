@@ -4,11 +4,52 @@ import path from 'path';
 import fs from 'fs';
 
 const mockRedisClient = null;
+
+// In-memory `driver_locations` store + chainable builder for the service-role
+// client, used to verify the tracker's location writer (issue #8932).
+const mockAdminStore = { driver_locations: [] };
+
+function buildAdminBuilder(store) {
+  const builder = {
+    _filters: [],
+    _data: null,
+    _mode: null,
+    eq(col, val) { builder._filters.push({ col, val }); return builder; },
+    update(data) { builder._mode = 'update'; builder._data = data; return builder; },
+    insert(data) { builder._mode = 'insert'; builder._data = data; return builder; },
+    then(resolve) {
+      let rows = store.slice();
+      for (const f of builder._filters) {
+        rows = rows.filter(r => r[f.col] === f.val);
+      }
+      if (builder._mode === 'update') {
+        for (const row of rows) Object.assign(row, builder._data);
+        return resolve({ data: rows[0] || null, error: null });
+      }
+      if (builder._mode === 'insert') {
+        const row = { id: 'loc-' + store.length, ...builder._data };
+        store.push(row);
+        return resolve({ data: row, error: null });
+      }
+      return resolve({ data: rows, error: null });
+    },
+  };
+  return builder;
+}
+
+const mockSupabaseAdmin = {
+  from(table) {
+    if (!mockAdminStore[table]) mockAdminStore[table] = [];
+    return buildAdminBuilder(mockAdminStore[table]);
+  },
+};
+
 vi.mock('../src/config/db.js', () => ({
   get mongoDb() { return null; },
   get redisClient() { return mockRedisClient; },
   get firebaseAdmin() { return null; },
   get supabase() { return null; },
+  get supabaseAdmin() { return mockSupabaseAdmin; },
 }));
 vi.mock('../src/middleware/logger.js', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -125,7 +166,10 @@ describe('tracker', () => {
     it('rejects when driver_id is missing', async () => {
       const ws = makeWs({ driverId: null });
       await handleLocationPing(ws, { lat: 19.0, lng: 72.8 });
-      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Unauthorized: Missing authenticated WebSocket identity.' }));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({
+        error: 'Forbidden: Driver role required to publish location updates',
+        code: 4003,
+      }));
     });
 
     it('rejects spoofed location with mismatched driver_id', async () => {
@@ -138,23 +182,49 @@ describe('tracker', () => {
     it('rejects invalid coordinates', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 'abc', lng: 72.8 });
-      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Missing mandatory tracking parameters (lat, lng).' }));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat must be a valid number'] }));
     });
 
     it('rejects out-of-range coordinates', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 100, lng: 72.8 });
-      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Coordinates out of valid range' }));
+      expect(ws.send).toHaveBeenCalledWith(JSON.stringify({ error: 'Invalid telemetry payload.', details: ['lat must be <= 90'] }));
     });
 
     it('buffers valid location ping', async () => {
       const ws = makeWs();
       await handleLocationPing(ws, { lat: 19.076, lng: 72.877 });
-      const rawBuf = __testing.getTelemetryWriteBuffer();
-      const buffer = rawBuf.toArray ? rawBuf.toArray() : rawBuf;
+      // telemetryWriteBuffer is a TelemetryRingBuffer whose toArray() is async.
+      const buffer = await __testing.getTelemetryWriteBuffer().toArray();
       expect(buffer.length).toBe(1);
       expect(buffer[0].lat).toBe(19.076);
       expect(buffer[0].lng).toBe(72.877);
+    });
+
+    it('writes an active driver_locations row for a valid ping', async () => {
+      mockAdminStore.driver_locations = [];
+      const ws = makeWs();
+      await handleLocationPing(ws, { lat: 19.076, lng: 72.877 });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(mockAdminStore.driver_locations).toHaveLength(1);
+      expect(mockAdminStore.driver_locations[0]).toMatchObject({
+        driver_id: 'driver-1',
+        latitude: 19.076,
+        longitude: 72.877,
+        is_active: true,
+      });
+    });
+
+    it('keeps only one active driver_locations row across pings', async () => {
+      mockAdminStore.driver_locations = [];
+      const ws = makeWs();
+      await handleLocationPing(ws, { lat: 19.076, lng: 72.877 });
+      await handleLocationPing(ws, { lat: 19.1, lng: 72.9 });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      const active = mockAdminStore.driver_locations.filter(r => r.is_active);
+      expect(active).toHaveLength(1);
+      expect(active[0].latitude).toBe(19.1);
+      expect(mockAdminStore.driver_locations).toHaveLength(2);
     });
   });
 
@@ -198,10 +268,11 @@ describe('tracker', () => {
       expect(subs).toBeInstanceOf(Map);
     });
 
-    it('getTelemetryWriteBuffer returns an array', () => {
+    it('getTelemetryWriteBuffer exposes the ring buffer, whose toArray() resolves to an array', async () => {
       const rawBuf = __testing.getTelemetryWriteBuffer();
-      const buf = rawBuf.toArray ? rawBuf.toArray() : rawBuf;
-      expect(Array.isArray(buf)).toBe(true);
+      expect(typeof rawBuf.toArray).toBe('function');
+      expect(typeof rawBuf.push).toBe('function');
+      expect(Array.isArray(await rawBuf.toArray())).toBe(true);
     });
   });
 });

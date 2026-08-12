@@ -20,12 +20,35 @@ const DEFAULT_OSRM_BASE_URL = 'https://router.project-osrm.org';
 const DEFAULT_TIMEOUT_MS = 1500;
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 500;
+const MAX_RETRY_DELAY_MS = 10_000; // upper bound on a single backoff sleep
 const CACHE_TTL_SECONDS = 86400;
 const ROUTE_CACHE_TTL_SECONDS = 30;
+
+export const validateCoordinates = (pickupLat, pickupLng, dropLat, dropLng) => {
+  if (!Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) || 
+      !Number.isFinite(dropLat) || !Number.isFinite(dropLng)) {
+    return 'Invalid coordinates provided.';
+  }
+  if (pickupLat < -90 || pickupLat > 90) return 'pickup_lat must be between -90 and 90.';
+  if (pickupLng < -180 || pickupLng > 180) return 'pickup_lng must be between -180 and 180.';
+  if (dropLat < -90 || dropLat > 90) return 'drop_lat must be between -90 and 90.';
+  if (dropLng < -180 || dropLng > 180) return 'drop_lng must be between -180 and 180.';
+  
+  return null;
+};
 
 function parsePositiveNumber(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * Exponential backoff delay for a retry attempt, clamped to MAX_RETRY_DELAY_MS
+ * so a misconfigured (very large) retry count or base delay cannot produce a
+ * multi-hour sleep in the request path.
+ */
+function retryDelayMs(baseDelayMs, attempt) {
+  return Math.min(baseDelayMs * Math.pow(2, attempt), MAX_RETRY_DELAY_MS);
 }
 
 function buildRouteUrl({ pickupLat, pickupLng, dropLat, dropLng }) {
@@ -43,12 +66,17 @@ function buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng }) {
   return `osrm:route:v2:${r(pickupLat)}:${r(pickupLng)}:${r(dropLat)}:${r(dropLng)}`;
 }
 
-export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng } = {}) {
+export async function getRouteEstimate(input = {}) {
   return measureExecution('OSRMService.getRouteEstimate', async () => {
+  const { pickupLat, pickupLng, dropLat, dropLng } = input ?? {};
   if (
     !Number.isFinite(pickupLat) || !Number.isFinite(pickupLng) ||
     !Number.isFinite(dropLat) || !Number.isFinite(dropLng)
   ) {
+    return null;
+  }
+
+  if (pickupLat === dropLat && pickupLng === dropLng) {
     return null;
   }
 
@@ -65,7 +93,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
         if (parsed !== null) return parsed;
       }
     } catch (err) {
-      logger.error('[osrm] Redis get error:', err.message);
+      logger.error({ event: 'OSRM_REDIS_GET_ERROR', error: err && err.message }, '[osrm] Redis get error');
     }
   }
 
@@ -87,7 +115,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
         await response.text().catch(err => logger.warn('[OSRM] Failed to read error body:', err?.message));
         if (response.status >= 500 && attempt < maxRetries - 1) {
           logger.warn({ status: response.status, attempt: attempt + 1, maxRetries }, 'Server error. Retrying...');
-          await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
+          await new Promise(r => setTimeout(r, retryDelayMs(baseDelayMs, attempt)));
           continue;
         }
         return null;
@@ -95,7 +123,10 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
 
       const payload = await response.json();
       const route = Array.isArray(payload?.routes) ? payload.routes[0] : null;
-      if (!route || !Number.isFinite(route.distance) || route.distance < 0) {
+      // A zero distance means the API returned no real path (identical
+      // coordinates or an empty route); treat it as invalid so callers fall
+      // back to straight-line geometry instead of caching a useless estimate.
+      if (!route || !Number.isFinite(route.distance) || route.distance <= 0) {
         clearTimeout(timeout);
         return null;
       }
@@ -109,7 +140,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
         try {
           await redisClient.set(cacheKey, JSON.stringify(result), 'EX', CACHE_TTL_SECONDS);
         } catch (err) {
-          logger.error('[osrm] Redis set error:', err.message);
+          logger.error({ event: 'OSRM_REDIS_SET_ERROR', error: err && err.message }, '[osrm] Redis set error');
         }
       }
 
@@ -119,7 +150,7 @@ export async function getRouteEstimate({ pickupLat, pickupLng, dropLat, dropLng 
     } catch (err) {
       clearTimeout(timeout);
       if (attempt < maxRetries - 1) {
-        const delayMs = baseDelayMs * Math.pow(2, attempt);
+        const delayMs = retryDelayMs(baseDelayMs, attempt);
         if (err.code === 'EOPENBREAKER' || err.message?.includes('Breaker is open')) {
           logger.warn('[OSRM] Circuit is open. Falling back instantly.');
           return null; // Return null so caller knows to use straight-line fallback
@@ -153,7 +184,8 @@ function buildGeometryCacheKey({ originLat, originLng, destLat, destLng }) {
   return `osrm:geometry:v2:${r(originLat)}:${r(originLng)}:${r(destLat)}:${r(destLng)}`;
 }
 
-export async function getRouteGeometry({ originLat, originLng, destLat, destLng } = {}) {
+export async function getRouteGeometry(opts = {}) {
+  const { originLat, originLng, destLat, destLng } = opts || {};
   return measureExecution('OSRMService.getRouteGeometry', async () => {
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
@@ -175,7 +207,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
         if (parsed !== null) return parsed;
       }
     } catch (err) {
-      logger.error('[osrm] Redis get error (geometry):', err.message);
+      logger.error({ event: 'OSRM_REDIS_GET_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Redis get error (geometry)');
     }
   }
 
@@ -216,7 +248,7 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
       try {
         await redisClient.set(cacheKey, JSON.stringify(feature), 'EX', ROUTE_CACHE_TTL_SECONDS);
       } catch (err) {
-        logger.error('[osrm] Redis set error (geometry):', err.message);
+        logger.error({ event: 'OSRM_REDIS_SET_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Redis set error (geometry)');
       }
     }
     return feature;
@@ -234,7 +266,8 @@ export async function getRouteGeometry({ originLat, originLng, destLat, destLng 
   });
 }
 
-export function buildStraightLineGeometry({ originLat, originLng, destLat, destLng } = {}) {
+export function buildStraightLineGeometry(opts = {}) {
+  const { originLat, originLng, destLat, destLng } = opts || {};
   if (
     !Number.isFinite(originLat) || !Number.isFinite(originLng) ||
     !Number.isFinite(destLat) || !Number.isFinite(destLng)
@@ -260,6 +293,8 @@ export const __testing = {
   buildCacheKey,
   buildGeometryUrl,
   buildGeometryCacheKey,
+  retryDelayMs,
+  MAX_RETRY_DELAY_MS,
   DEFAULT_OSRM_BASE_URL,
   DEFAULT_TIMEOUT_MS,
 };

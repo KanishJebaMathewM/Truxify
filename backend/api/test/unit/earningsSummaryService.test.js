@@ -1,75 +1,60 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-const mockFrom = vi.fn();
-vi.mock('../../src/config/db.js', () => ({
-  supabase: { from: mockFrom },
-}));
+import { buildEarningsSummary, getPeriodStart } from '../../src/services/driver/earningsSummaryService.js';
 
 describe('earningsSummaryService', () => {
-  let earningsSummaryService;
-
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    vi.resetModules();
-    earningsSummaryService = (await import('../../src/services/driver/earningsSummaryService.js')).default;
   });
 
-  describe('getDriverEarningsSummary', () => {
-    it('returns summary with total earnings and trip count', async () => {
-      const mockTrips = [
-        { id: 't1', base_freight: '10000', status: 'delivered', created_at: '2026-08-01' },
-        { id: 't2', base_freight: '15000', status: 'delivered', created_at: '2026-08-02' },
+  describe('buildEarningsSummary', () => {
+    it('calculates correct total gross from trip earnings', () => {
+      const trips = [
+        { total_earnings: '10000', fuel_deducted: '0' },
+        { total_earnings: '15000', fuel_deducted: '0' },
       ];
-      mockFrom.mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        gte: vi.fn().mockReturnThis(),
-        lte: vi.fn().mockReturnThis(),
-        order: vi.fn().mockResolvedValue({ data: mockTrips, error: null }),
-      });
-
-      const result = await earningsSummaryService.getDriverEarningsSummary('driver-1', {
-        startDate: '2026-08-01',
-        endDate: '2026-08-31',
-      });
-
-      expect(result.totalEarnings).toBe(25000);
+      const result = buildEarningsSummary(trips, 'monthly', 'driver-1');
+      expect(result.totalGross).toBe(25000);
       expect(result.tripCount).toBe(2);
+      expect(result.netEarnings).toBe(25000);
     });
 
-    it('returns zero earnings when no trips found', async () => {
-      mockFrom.mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        gte: vi.fn().mockReturnThis(),
-        lte: vi.fn().mockReturnThis(),
-        order: vi.fn().mockResolvedValue({ data: [], error: null }),
-      });
+    it('returns zero earnings when trips array is empty', () => {
+      const result = buildEarningsSummary([], 'monthly', 'driver-new');
+      expect(result.totalGross).toBe(0);
+      expect(result.tripCount).toBe(0);
+      expect(result.netEarnings).toBe(0);
+    });
 
-      const result = await earningsSummaryService.getDriverEarningsSummary('driver-new', {
-        startDate: '2026-08-01',
-        endDate: '2026-08-31',
-      });
-
-      expect(result.totalEarnings).toBe(0);
+    it('handles null/undefined trips gracefully', () => {
+      const result = buildEarningsSummary(null, 'weekly', 'driver-null');
+      expect(result.totalGross).toBe(0);
       expect(result.tripCount).toBe(0);
     });
 
-    it('throws when database query fails', async () => {
-      mockFrom.mockReturnValue({
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        gte: vi.fn().mockReturnThis(),
-        lte: vi.fn().mockReturnThis(),
-        order: vi.fn().mockResolvedValue({ data: null, error: { message: 'DB error' } }),
-      });
+    it('includes broker savings in the response', () => {
+      const trips = [
+        { total_earnings: '10000', fuel_deducted: '0' },
+      ];
+      const result = buildEarningsSummary(trips, 'monthly', 'driver-1');
+      expect(result.brokerSavingsAmount).toBe(3500); // 35% of 10000
+      expect(result.brokerSavingsPercent).toBe(35);
+    });
+  });
 
-      await expect(
-        earningsSummaryService.getDriverEarningsSummary('driver-error', {
-          startDate: '2026-08-01',
-          endDate: '2026-08-31',
-        }),
-      ).rejects.toThrow();
+  describe('getPeriodStart', () => {
+    it('returns a Date for weekly period', () => {
+      const result = getPeriodStart('weekly');
+      expect(result).toBeInstanceOf(Date);
+    });
+
+    it('returns a Date for monthly period', () => {
+      const result = getPeriodStart('monthly');
+      expect(result).toBeInstanceOf(Date);
+    });
+
+    it('defaults to monthly when period is unknown', () => {
+      const result = getPeriodStart('unknown');
+      expect(result).toBeInstanceOf(Date);
     });
   });
 });

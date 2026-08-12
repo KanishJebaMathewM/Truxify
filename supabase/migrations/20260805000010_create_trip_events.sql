@@ -5,7 +5,7 @@
 CREATE TABLE IF NOT EXISTS trip_events (
   event_id        TEXT PRIMARY KEY,
   user_id         UUID NOT NULL,                     -- uploading user (driver or customer)
-  trip_id         UUID NULL,                         -- order/trip identifier
+  trip_id         UUID NULL,                         -- owning order's id (orders.id), resolved from the 'TX-' trip display id on batch sync
   event_type      TEXT NOT NULL,
   event_timestamp TIMESTAMPTZ NOT NULL,
   latitude        DOUBLE PRECISION NULL,

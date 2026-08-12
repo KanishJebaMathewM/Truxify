@@ -1,6 +1,6 @@
 import logger from './logger.js';
 
-const RECOMMENDED_ATTRIBUTES = ['HttpOnly', 'SameSite', 'Path'];
+const RECOMMENDED_ATTRIBUTES = ['HttpOnly', 'SameSite', 'Path', 'Secure'];
 
 export default function cookieSecurityValidator(req, res, next) {
   const originalSetHeader = res.setHeader.bind(res);

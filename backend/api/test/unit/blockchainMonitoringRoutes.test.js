@@ -8,10 +8,16 @@
  *
  * Run with:  npm test -- test/unit/blockchainMonitoringRoutes.test.js
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import blockchainMonitoringRoutes from '../../src/routes/blockchainMonitoringRoutes.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const INDEX_PATH = path.resolve(__dirname, '../../src/index.js');
 
 vi.mock('../../src/middleware/auth.js', () => ({
   authenticate: (req, _res, next) => next(),
@@ -100,12 +106,12 @@ describe('blockchainMonitoringRoutes', () => {
 
   it('GET /api/blockchain/events queries blockchain_monitoring_events through the attached supabase client', async () => {
     const res = await request(buildApp({ blockchainMetrics: metrics, escalationHandler, supabase }))
-      .get('/api/blockchain/events?type=PAYMENT_RECEIVED&severity=CRITICAL&limit=10');
+      .get('/api/blockchain/events?type=BOOKING_DISPUTED&severity=CRITICAL&limit=10');
 
     expect(res.status).toBe(200);
     expect(supabase.from).toHaveBeenCalledWith('blockchain_monitoring_events');
     expect(supabase.calls).toEqual([
-      { column: 'type', value: 'PAYMENT_RECEIVED' },
+      { column: 'type', value: 'BOOKING_DISPUTED' },
       { column: 'severity', value: 'CRITICAL' },
     ]);
     expect(res.body.count).toBe(0);
@@ -136,5 +142,15 @@ describe('blockchainMonitoringRoutes', () => {
     expect(res.status).toBe(200);
     expect(supabase.from).toHaveBeenCalledWith('blockchain_escalations');
     expect(res.body.escalation.alert_id).toBe('abc123');
+  });
+
+  it('regression: index.js mounts /api/blockchain exactly once with req.supabase = supabaseAdmin', () => {
+    const src = fs.readFileSync(INDEX_PATH, 'utf8');
+
+    const mountMatches = src.match(/app\.use\('\/api\/blockchain'/g) || [];
+    expect(mountMatches.length).toBe(1);
+
+    const mountSegment = src.slice(src.indexOf("app.use('/api/blockchain'"));
+    expect(mountSegment).toMatch(/req\.supabase\s*=\s*supabaseAdmin/);
   });
 });

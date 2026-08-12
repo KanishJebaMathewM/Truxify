@@ -15,6 +15,7 @@ services:
     build:
       context: ./backend/api
       target: development
+    image: ghcr.io/kanishjebamathewm/truxify-api
     container_name: truxify-api
     env_file:
       - .env
@@ -84,6 +85,7 @@ services:
   ml-engine:
     build:
       context: ./backend/ml
+    image: ghcr.io/kanishjebamathewm/truxify-ml
     container_name: truxify-ml-engine
     env_file:
       - .env
@@ -253,7 +255,7 @@ services:
     ports:
       - "5678:5678"
     environment:
-      - N8N_HOST=localhost
+      - N8N_HOST=${N8N_HOST:-localhost}
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
       - NODE_ENV=development
@@ -261,6 +263,7 @@ services:
       - INTERNAL_RELAYER_KEY=${INTERNAL_RELAYER_KEY:-local_relayer_secret}
       - ML_API_KEY=${ML_API_KEY:-local_ml_secret}
       - ML_ENGINE_URL=http://ml-engine:8000
+      - BACKEND_API_URL=${BACKEND_API_URL:-http://api:5000}
     volumes:
       - n8n_data:/home/node/.n8n
     healthcheck:

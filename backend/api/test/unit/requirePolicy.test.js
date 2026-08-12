@@ -21,6 +21,11 @@ describe('requirePolicy Middleware', () => {
     expect(mockRes.json).toHaveBeenCalledWith({ error: 'Not authenticated: req.user is missing.' });
   });
 
+  it('throws at construction time for an empty action', () => {
+    expect(() => requirePolicy('')).toThrow(/non-empty action/);
+    expect(() => requirePolicy('   ')).toThrow(/non-empty action/);
+  });
+
   it('calls next if policy authorization succeeds without resource', () => {
     vi.spyOn(policy, 'authorize').mockImplementation(() => {});
     const middleware = requirePolicy('ANY_ACTION');

@@ -27,6 +27,13 @@ import { policy, PolicyError } from '../security/policyEngine.js';
  *   skipped (backward-compatible with existing call sites).
  */
 export function requirePolicy(action, getResource) {
+  // A misconfigured route must fail loudly instead of silently authorizing
+  // with an empty/unknown action (which the policy engine would deny anyway).
+  if (typeof action !== 'string' || action.trim() === '') {
+    throw new Error('requirePolicy middleware requires a non-empty action string.');
+  }
+  const safeAction = action.trim();
+
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ error: 'Not authenticated: req.user is missing.' });
@@ -37,7 +44,7 @@ export function requirePolicy(action, getResource) {
     if (getResource) {
       Promise.resolve(getResource(req)).then((resource) => {
         try {
-          policy.authorize(req.user, action, resource, { requestId });
+          policy.authorize(req.user, safeAction, resource, { requestId });
           next();
         } catch (err) {
           if (err instanceof PolicyError) {
@@ -53,7 +60,7 @@ export function requirePolicy(action, getResource) {
       });
     } else {
       try {
-        policy.authorize(req.user, action, undefined, { requestId });
+        policy.authorize(req.user, safeAction, undefined, { requestId });
         next();
       } catch (err) {
         if (err instanceof PolicyError) {

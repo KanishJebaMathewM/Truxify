@@ -165,4 +165,22 @@ describe('headerSizeMonitor', () => {
       else delete process.env.HEADER_SIZE_LIMIT;
     }
   });
+
+  it('does not throw when a header value is a top-level undefined', () => {
+    const originalEnv = process.env.NODE_ENV;
+    const originalLimit = process.env.HEADER_SIZE_LIMIT;
+    process.env.NODE_ENV = 'development';
+    process.env.HEADER_SIZE_LIMIT = '5000';
+    try {
+      const req = makeReq({ 'x-undefined': undefined, 'x-ok': 'value' });
+      const res = makeRes();
+      const next = vi.fn();
+      expect(() => headerSizeMonitor(req, res, next)).not.toThrow();
+      expect(next).toHaveBeenCalledOnce();
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+      if (originalLimit !== undefined) process.env.HEADER_SIZE_LIMIT = originalLimit;
+      else delete process.env.HEADER_SIZE_LIMIT;
+    }
+  });
 });

@@ -145,6 +145,32 @@ describe('validatePricePrediction', () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toBe(RejectionReason.INVALID_MIN_PRICE);
   });
+
+  it('rejects max_price beyond the 3x band ratio', () => {
+    const result = validatePricePrediction({
+      estimated_price: 2000,
+      currency: 'INR',
+      max_price: 7000,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe(RejectionReason.INVALID_MAX_PRICE);
+  });
+
+  it('accepts max_price within the 3x band ratio', () => {
+    const result = validatePricePrediction({
+      estimated_price: 2000,
+      currency: 'INR',
+      max_price: 5000,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects confidence outside 0..1', () => {
+    const below = validatePricePrediction({ estimated_price: 1500, currency: 'INR', confidence: -0.1 });
+    const above = validatePricePrediction({ estimated_price: 1500, currency: 'INR', confidence: 1.1 });
+    expect(below.reason).toBe(RejectionReason.INVALID_CONFIDENCE);
+    expect(above.reason).toBe(RejectionReason.INVALID_CONFIDENCE);
+  });
 });
 
 describe('convertToPaisa', () => {

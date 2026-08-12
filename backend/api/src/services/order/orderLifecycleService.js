@@ -1,6 +1,7 @@
 import { DomainError } from './domainError.js';
 import { DeliveryVerificationService } from './deliveryVerificationService.js';
 import { expireDeliveryOtps, sendPushNotification } from '../notificationService.js';
+import { invalidateDriverOrderCache } from '../../sockets/tracker.js';
 import { acquireLock, releaseLock } from '../../lib/redisLock.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 import { supabaseAdmin } from '../../config/db.js';
@@ -195,7 +196,7 @@ export class OrderLifecycleService {
       const { data: orders, error } = await this.orderRepository.findOrdersByCustomer(
         customerId,
         'id, order_display_id, status, pickup_address, drop_address, pickup_date, pickup_lat, pickup_lng, drop_lat, drop_lng, eta, driver_id, truck_id, truck_number, total_amount, goods_type, weight_tonnes, length_ft, width_ft, height_ft, is_stackable, is_fragile, special_requirements, created_at, updated_at',
-        activeStatuses, 'pickup_date', false
+        activeStatuses, 'pickup_date', false, { limit: 100 }
       );
 
       if (error) throw new DomainError(500, { error: 'Failed to fetch active orders.', details: error.message });
@@ -691,6 +692,7 @@ export class OrderLifecycleService {
 
         if (currentOrder.status === 'cancelled' && (!requiresRefund || currentOrder.escrow_status === 'refunded')) {
           await this.revokeTrackingTokensForOrder(currentOrder.order_display_id);
+          await invalidateDriverOrderCache(currentOrder.driver_id);
           return {
             status: 200,
             body: {
@@ -792,6 +794,7 @@ export class OrderLifecycleService {
             await this.orderTimelineService.insertCancelEvent(currentOrder.order_display_id);
             await expireDeliveryOtps(currentOrder.id);
             await this.revokeTrackingTokensForOrder(currentOrder.order_display_id);
+            await invalidateDriverOrderCache(currentOrder.driver_id);
 
             return {
               status: 200,
@@ -814,6 +817,7 @@ export class OrderLifecycleService {
               escrow_refund_last_attempt_at: failedAt,
               updated_at: failedAt,
             });
+            await invalidateDriverOrderCache(currentOrder.driver_id);
 
             return {
               status: 202,
@@ -854,6 +858,7 @@ export class OrderLifecycleService {
         await this.orderTimelineService.insertCancelEvent(currentOrder.order_display_id);
         await expireDeliveryOtps(currentOrder.id);
         await this.revokeTrackingTokensForOrder(currentOrder.order_display_id);
+        await invalidateDriverOrderCache(currentOrder.driver_id);
 
         return {
           status: 200,

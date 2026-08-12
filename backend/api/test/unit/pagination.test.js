@@ -139,6 +139,30 @@ describe('Pagination Middleware', () => {
     expect(req.query.limit).toBe(20);
     expect(req.query.offset).toBe(40); // (3-1) * 20
   });
+
+  it('falls back to the default maxLimit when configured with a negative value', () => {
+    const middleware = validatePagination({ maxLimit: -5 });
+    const req = { query: { limit: '1000000' } };
+    const res = mockResponse();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(req.query.limit).toBe(100);
+  });
+
+  it('falls back to the default maxOffset when configured with NaN', () => {
+    const middleware = validatePagination({ maxOffset: NaN });
+    const req = { query: { offset: '50000' } };
+    const res = mockResponse();
+    const next = vi.fn();
+
+    middleware(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    expect(req.query.offset).toBe(10000);
+  });
 });
 
 describe('pagination — NaN and edge case handling', () => {
@@ -156,5 +180,12 @@ describe('pagination — NaN and edge case handling', () => {
   it('buildPagination handles Infinity page by defaulting to 1', () => {
     const result = buildPagination({ page: Infinity });
     expect(result.page).toBe(1);
+  });
+
+  it('buildPagination caps a huge page number to MAX_PAGE', () => {
+    const result = buildPagination({ page: 1e12, limit: 100 });
+    expect(result.page).toBe(1000000);
+    expect(result.offset).toBe(99999900);
+    expect(Number.isSafeInteger(result.offset)).toBe(true);
   });
 });

@@ -34,6 +34,16 @@ describe('Pricing Service Unit Tests', () => {
       expect(sanitizePrice(undefined)).toBe(0);
       expect(sanitizePrice('invalid')).toBe(0);
     });
+
+    it('rejects hex-like strings that Number() would coerce', () => {
+      expect(sanitizePrice('0x10')).toBe(0);
+      expect(sanitizePrice('0b101')).toBe(0);
+    });
+
+    it('rejects empty and whitespace-only strings', () => {
+      expect(sanitizePrice('')).toBe(0);
+      expect(sanitizePrice('   ')).toBe(0);
+    });
   });
 
   describe('haversineKm', () => {

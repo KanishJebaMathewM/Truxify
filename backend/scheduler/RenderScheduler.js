@@ -315,6 +315,7 @@ class RenderScheduler extends EventEmitter {
             
             // Process dependents
             this.processDependents(task);
+            this.pruneTaskMap();
             
         } catch (error) {
             // Handle error
@@ -336,6 +337,7 @@ class RenderScheduler extends EventEmitter {
                 this.stats.failedTasks++;
                 this.emit('taskFailed', { taskId: task.id, error: error.message });
                 logger.error(`Task ${task.id} failed: ${error.message}`);
+                this.pruneTaskMap();
             }
         }
     }
@@ -356,6 +358,26 @@ class RenderScheduler extends EventEmitter {
             const dep = this.taskMap.get(depId);
             if (dep && dep.status === 'pending') {
                 this.emit('dependentReady', { taskId: dep.id, dependencyId: task.id });
+            }
+        }
+    }
+
+    // Completed/failed tasks are kept in this.taskMap forever, so a long-lived
+    // scheduler accumulates one entry per scheduled task (unbounded memory).
+    // A terminal task can be pruned once none of its dependents is still
+    // pending or running — it is only read later by areDependenciesMet()
+    // for live dependents. Keep failed tasks only while they may still be
+    // depended on; getTask()/getTasks() for long-gone tasks are not used by
+    // the processing loop.
+    pruneTaskMap() {
+        for (const [taskId, task] of this.taskMap) {
+            if (task.status !== 'completed' && task.status !== 'failed') continue;
+            const hasLiveDependents = task.dependents.some(depId => {
+                const dep = this.taskMap.get(depId);
+                return dep && (dep.status === 'pending' || dep.status === 'running');
+            });
+            if (!hasLiveDependents) {
+                this.taskMap.delete(taskId);
             }
         }
     }

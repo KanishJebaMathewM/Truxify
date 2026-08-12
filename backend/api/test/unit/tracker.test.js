@@ -1979,6 +1979,48 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       expect(ws.send).not.toHaveBeenCalled();
     });
 
+    it('invalidates the cached mapping and drops the order binding when DB re-verification fails (issue #11190)', async () => {
+      const redisGet = vi.fn().mockResolvedValue(
+        JSON.stringify({ orderId: 'uuid-123', orderDisplayId: 'ORDER-789' })
+      );
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const redisDel = vi.fn().mockResolvedValue(1);
+      const mockChannel = { subscribe: vi.fn(), send: vi.fn().mockResolvedValue(undefined) };
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
+        firebaseAdmin: null,
+        supabaseAdmin: null,
+        supabase: { from: vi.fn(), channel: vi.fn().mockReturnValue(mockChannel) },
+      }));
+
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      const findOrderByAnyId = vi.fn().mockRejectedValue(new Error('ECONNRESET'));
+      t.setOrderRepository({ findOrderByAnyId });
+
+      const ws = { driverId: 'driver-cached', user: { id: 'driver-cached', role: 'driver' }, send: vi.fn() };
+
+      await hlp(ws, {
+        driver_id: 'driver-cached',
+        order_id: 'uuid-123',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      // The cached mapping was re-verified against the DB (issue #10676)
+      expect(findOrderByAnyId).toHaveBeenCalledWith('uuid-123', 'id, order_display_id, driver_id, status');
+      // A transient DB failure must not leave the stale mapping in the cache
+      expect(redisDel).toHaveBeenCalledWith('driver:active-order:driver-cached');
+      // Telemetry is buffered without the stale order binding
+      const buffer = await t.getTelemetryWriteBuffer().toArray();
+      const record = buffer[buffer.length - 1];
+      expect(record.order_id).toBeNull();
+      expect(record.order_display_id).toBeNull();
+      // No error surfaced to the driver socket
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
     it('queries DB on cache miss and populates cache', async () => {
       const redisGet = vi.fn().mockResolvedValue(null);
       const redisSet = vi.fn().mockResolvedValue('OK');

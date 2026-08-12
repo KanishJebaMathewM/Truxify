@@ -1127,6 +1127,15 @@ export async function handleLocationPing(ws, data, req) {
       }
     } catch (err) {
       logger.error('Failed to resolve order details in tracker:', err.message);
+      // A transient database failure during cache re-verification (or the
+      // authoritative lookup) must never let this ping bind telemetry to a
+      // stale or unverified order mapping. Invalidate the cached driver→order
+      // entry so the next ping performs a fresh authoritative lookup, and drop
+      // the order binding for this ping so geofence/telemetry provenance
+      // cannot point at the wrong order (issue #11190).
+      orderUUID = null;
+      orderDisplayId = null;
+      await invalidateDriverOrderCache(driver_id);
     }
   }
 

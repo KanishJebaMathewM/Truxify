@@ -55,6 +55,57 @@ describe('securityHeaders', () => {
     );
   });
 
+  it('uses SECURE_HSTS_MAX_AGE when configured', async () => {
+    const original = process.env.SECURE_HSTS_MAX_AGE;
+    process.env.SECURE_HSTS_MAX_AGE = '3600';
+    try {
+      const res = await request(createApp())
+        .get('/test')
+        .set('x-forwarded-proto', 'https');
+
+      expect(res.headers['strict-transport-security']).toBe(
+        'max-age=3600; includeSubDomains'
+      );
+    } finally {
+      if (original === undefined) delete process.env.SECURE_HSTS_MAX_AGE;
+      else process.env.SECURE_HSTS_MAX_AGE = original;
+    }
+  });
+
+  it('falls back to the default max-age for an invalid SECURE_HSTS_MAX_AGE', async () => {
+    const original = process.env.SECURE_HSTS_MAX_AGE;
+    process.env.SECURE_HSTS_MAX_AGE = 'not-a-number';
+    try {
+      const res = await request(createApp())
+        .get('/test')
+        .set('x-forwarded-proto', 'https');
+
+      expect(res.headers['strict-transport-security']).toBe(
+        'max-age=31536000; includeSubDomains'
+      );
+    } finally {
+      if (original === undefined) delete process.env.SECURE_HSTS_MAX_AGE;
+      else process.env.SECURE_HSTS_MAX_AGE = original;
+    }
+  });
+
+  it('falls back to the default max-age for weakening values like 0', async () => {
+    const original = process.env.SECURE_HSTS_MAX_AGE;
+    process.env.SECURE_HSTS_MAX_AGE = '0';
+    try {
+      const res = await request(createApp())
+        .get('/test')
+        .set('x-forwarded-proto', 'https');
+
+      expect(res.headers['strict-transport-security']).toBe(
+        'max-age=31536000; includeSubDomains'
+      );
+    } finally {
+      if (original === undefined) delete process.env.SECURE_HSTS_MAX_AGE;
+      else process.env.SECURE_HSTS_MAX_AGE = original;
+    }
+  });
+
   it('preserves headers an earlier layer already set', async () => {
     const res = await request(
       createApp({

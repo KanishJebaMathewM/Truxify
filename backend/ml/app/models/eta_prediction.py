@@ -3,8 +3,6 @@ import logging
 import os
 import pickle
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
 
 MODEL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "models_storage")
 MODEL_PATH = os.path.join(MODEL_DIR, "eta_predictor.pkl")
@@ -16,6 +14,7 @@ logger = logging.getLogger(__name__)
 class ETAPredictor:
     def __init__(self):
         self.model = None
+        self.trained_on = None
 
     def generate_synthetic_data(self, n=1000):
         np.random.seed(42)
@@ -54,24 +53,10 @@ class ETAPredictor:
         return X, eta
 
     def train(self):
-        X, y = self.generate_synthetic_data()
-
-        X_train, _, y_train, _ = train_test_split(
-            X, y, test_size=0.2, random_state=42
+        raise NotImplementedError(
+            "Synthetic training is for offline dev only and must never run at load time. "
+            "Ship a real trained ETA artifact."
         )
-
-        self.model = RandomForestRegressor(
-            n_estimators=100,
-            random_state=42
-        )
-
-        self.model.fit(X_train, y_train)
-
-        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
-
-        with open(MODEL_PATH, "wb") as f:
-            pickle.dump(self.model, f)
-        self._save_hash()
 
     def _save_hash(self):
         with open(MODEL_PATH, "rb") as f:
@@ -91,17 +76,25 @@ class ETAPredictor:
         return actual == expected
 
     def load(self):
-        if not os.path.exists(MODEL_PATH):
-            self.train()
+        if not (os.path.exists(MODEL_PATH) and os.path.exists(MODEL_HASH_PATH)):
+            raise RuntimeError(
+                f"ETA model artifacts missing: {MODEL_PATH} / {MODEL_HASH_PATH}. "
+                "Refusing to serve synthetic-data predictions. Train and ship real artifacts."
+            )
 
         if not self._verify_hash():
-            logger.warning("[eta] Model integrity check failed — retraining.")
-            os.remove(MODEL_PATH) if os.path.exists(MODEL_PATH) else None
-            self.train()
-            return
+            raise RuntimeError(
+                f"Corrupt ETA model artifacts: integrity check failed for {MODEL_PATH}. "
+                "Refusing to serve predictions. Ship a valid artifact."
+            )
 
-        with open(MODEL_PATH, "rb") as f:
-            self.model = pickle.load(f)
+        try:
+            with open(MODEL_PATH, "rb") as f:
+                self.model = pickle.load(f)
+        except Exception as exc:
+            raise RuntimeError(f"Corrupt ETA model artifacts: {exc}") from exc
+
+        self.trained_on = "real"
 
     def predict(self, distance, time_of_day, day_of_week, route_type, historical_speed):
         if self.model is None:

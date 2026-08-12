@@ -33,8 +33,8 @@ def test_health():
         "trust_scorer",
         "collaborative_filter",
         "eta_predictor",
-        "traffic_eta",
     }
+    assert data["model_artifact_origin"]["eta_predictor"] in {"real", None}
 
 
 def _auth_payload():

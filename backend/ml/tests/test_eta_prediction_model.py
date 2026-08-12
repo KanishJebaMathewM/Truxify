@@ -2,8 +2,19 @@
 
 Run with: python3 -m pytest tests/test_eta_prediction_model.py -v --no-header
 """
+import hashlib
+import pickle
+
 import numpy as np
+import pytest
+
+import app.models.eta_prediction as eta_mod
 from app.models.eta_prediction import ETAPredictor
+
+
+class _StubModel:
+    def predict(self, features):
+        return np.array([30.0])
 
 
 class TestGenerateSyntheticData:
@@ -84,3 +95,60 @@ class TestPredict:
 
         predictor.predict(100.0, 10, 1, "city", 60.0)
         assert captured["route_type"] == 0.0
+
+
+class TestFailLoudWhenArtifactsAbsent:
+    """Serving predictions from synthetic data must never happen silently."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_paths(self, tmp_path, monkeypatch):
+        """Point the module at a scratch directory for every test."""
+        monkeypatch.setattr(
+            eta_mod, "MODEL_PATH", str(tmp_path / "eta_predictor.pkl")
+        )
+        monkeypatch.setattr(
+            eta_mod, "MODEL_HASH_PATH", str(tmp_path / "eta_predictor.sha256")
+        )
+
+    def test_train_raises_not_implemented(self):
+        """Automatic synthetic training is forbidden."""
+        with pytest.raises(NotImplementedError):
+            ETAPredictor().train()
+
+    def test_load_raises_when_artifacts_missing(self):
+        """load() must fail loudly instead of silently generating data."""
+        predictor = ETAPredictor()
+        with pytest.raises(RuntimeError, match="artifacts missing"):
+            predictor.load()
+        assert predictor.model is None
+
+    def test_load_raises_on_hash_mismatch(self):
+        """A corrupt artifact must be rejected by the integrity check."""
+        model_path = eta_mod.MODEL_PATH
+        with open(model_path, "wb") as f:
+            f.write(b"tampered-model-bytes")
+        with open(eta_mod.MODEL_HASH_PATH, "w") as f:
+            f.write(hashlib.sha256(b"something-else").hexdigest())
+
+        with pytest.raises(RuntimeError, match="integrity check failed"):
+            ETAPredictor().load()
+
+    def test_predict_fails_loud_when_no_model(self):
+        """predict() must surface the load failure instead of guessing."""
+        predictor = ETAPredictor()
+        with pytest.raises(RuntimeError, match="artifacts missing"):
+            predictor.predict(100.0, 10, 1, 1, 60.0)
+
+    def test_load_succeeds_with_verified_artifact(self):
+        """A real artifact with a matching hash loads and is marked real."""
+        model_bytes = pickle.dumps(_StubModel())
+        with open(eta_mod.MODEL_PATH, "wb") as f:
+            f.write(model_bytes)
+        with open(eta_mod.MODEL_HASH_PATH, "w") as f:
+            f.write(hashlib.sha256(model_bytes).hexdigest())
+
+        predictor = ETAPredictor()
+        predictor.load()
+        assert predictor.trained_on == "real"
+        result = predictor.predict(100.0, 10, 1, 1, 60.0)
+        assert result["eta_minutes"] == 30.0

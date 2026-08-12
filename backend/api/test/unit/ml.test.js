@@ -147,6 +147,19 @@ describe('ml service — predictDemand', () => {
       .rejects
       .toThrow('Network unreachable');
   });
+
+  it('throws a descriptive error when the ML engine returns invalid JSON', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('not-json{{{'),
+    });
+
+    await expect(predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 }))
+      .rejects
+      .toThrow('[ML] Invalid JSON response from ML engine');
+    expect(mockLogger.error).toHaveBeenCalled();
+  });
 });
 
 describe('ml service — predictPrice', () => {

@@ -1,135 +1,97 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ethers } from 'ethers';
+/**
+ * Unit tests for backend/api/src/services/digilockerService.js
+ *
+ * Coverage:
+ *   - validateSetup: returns false when contracts not configured
+ *   - validateSetup: returns true when both contracts respond to probes
+ *   - validateSetup: returns false when a contract is missing bytecode
+ *   - validateSetup: returns false when a contract ABI probe fails
+ *
+ * Run with:  npm test -- test/unit/digilockerService.test.js
+ */
+import { describe, it, expect, vi, afterEach } from 'vitest'
 
-const mockLogger = vi.hoisted(() => ({
-  error: vi.fn(),
-  warn: vi.fn(),
-  info: vi.fn(),
-}));
+const ORIGINAL_ENV = { ...process.env }
 
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: mockLogger,
-}));
+function unsetContractEnv() {
+  delete process.env.POLYGON_RPC_URL
+  delete process.env.RELAYER_WALLET_PRIVATE_KEY
+  delete process.env.PRIVATE_KEY
+  delete process.env.DOCUMENT_REGISTRY_CONTRACT
+  delete process.env.KYC_VERIFIER_CONTRACT_ADDRESS
+}
 
-vi.mock('axios');
+function setContractEnv() {
+  process.env.POLYGON_RPC_URL = 'https://polygon-rpc.com'
+  process.env.RELAYER_WALLET_PRIVATE_KEY = '0x' + '11'.repeat(32)
+  process.env.DOCUMENT_REGISTRY_CONTRACT = '0x' + '22'.repeat(20)
+  process.env.KYC_VERIFIER_CONTRACT_ADDRESS = '0x' + '33'.repeat(20)
+}
 
-vi.mock('../../src/config/db.js', () => ({
-  supabase: {
-    from: vi.fn(),
-  },
-}));
+async function loadService() {
+  vi.resetModules()
+  const mod = await import('../../src/services/digilockerService.js')
+  return mod.default
+}
 
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: mockLogger,
-}));
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.resetModules()
+  process.env = { ...ORIGINAL_ENV }
+})
 
-describe('DigilockerService', () => {
-  let DigilockerService;
-  let service;
-  let mockSupabase;
+describe('digilockerService — validateSetup (contracts unconfigured)', () => {
+  it('returns false when env vars are missing', async () => {
+    unsetContractEnv()
+    const service = await loadService()
+    expect(await service.validateSetup()).toBe(false)
+  })
+})
 
-  beforeEach(async () => {
-    vi.clearAllMocks();
-    vi.resetModules();
+describe('digilockerService — validateSetup (contracts configured)', () => {
+  it('returns true when both contracts have bytecode and respond to probes', async () => {
+    setContractEnv()
+    const service = await loadService()
 
-    mockSupabase = {
-      from: vi.fn(),
-    };
+    expect(service.documentRegistry).toBeTruthy()
+    expect(service.kycVerifier).toBeTruthy()
 
-    vi.doMock('../../src/config/db.js', () => ({
-      supabase: mockSupabase,
-    }));
+    const provider = service.documentRegistry.runner.provider
+    vi.spyOn(provider, 'getCode').mockResolvedValue('0x12345678')
+    vi.spyOn(service.documentRegistry, 'getDocument').mockResolvedValue([
+      '0x' + '00'.repeat(32),
+      '',
+      0n,
+      false
+    ])
+    vi.spyOn(service.kycVerifier, 'isVerified').mockResolvedValue(false)
 
-    const mod = await import('../../src/services/digilockerService.js');
-    // Re-instantiate to get a fresh service with our mocks
-    // Since it's a singleton, we access the class directly
-    DigilockerService = mod.default.constructor;
-    service = new DigilockerService();
-    // Force mock mode by setting the env var before the test runs
-    process.env.DIGILOCKER_MOCK = 'true';
-    service = new DigilockerService();
-  });
+    expect(await service.validateSetup()).toBe(true)
+  })
 
-  afterEach(() => {
-    delete process.env.DIGILOCKER_MOCK;
-    delete process.env.DIGILOCKER_CLIENT_ID;
-    delete process.env.DIGILOCKER_CLIENT_SECRET;
-    vi.resetModules();
-  });
+  it('returns false when a contract has no bytecode at the configured address', async () => {
+    setContractEnv()
+    const service = await loadService()
 
-  describe('isMock', () => {
-    it('returns true when DIGILOCKER_MOCK is set', () => {
-      process.env.DIGILOCKER_MOCK = 'true';
-      const s = new DigilockerService();
-      expect(s.isMock).toBe(true);
-    });
+    const provider = service.documentRegistry.runner.provider
+    vi.spyOn(provider, 'getCode').mockResolvedValue('0x')
+    vi.spyOn(service.documentRegistry, 'getDocument').mockResolvedValue([])
+    vi.spyOn(service.kycVerifier, 'isVerified').mockResolvedValue(false)
 
-    it('returns false when DIGILOCKER_MOCK is not set', () => {
-      delete process.env.DIGILOCKER_MOCK;
-      const s = new DigilockerService();
-      expect(s.isMock).toBe(false);
-    });
+    expect(await service.validateSetup()).toBe(false)
+  })
 
-    it('returns false in production even when DIGILOCKER_MOCK is true', () => {
-      process.env.NODE_ENV = 'production';
-      process.env.DIGILOCKER_MOCK = 'true';
-      const s = new DigilockerService();
-      expect(s.isMock).toBe(false);
-      process.env.NODE_ENV = 'test';
-    });
-  });
+  it('returns false when the ABI probe fails (address points at the wrong contract)', async () => {
+    setContractEnv()
+    const service = await loadService()
 
-  describe('exchangeCode', () => {
-    it('returns mock token in mock mode', async () => {
-      process.env.DIGILOCKER_MOCK = 'true';
-      const s = new DigilockerService();
-      const result = await s.exchangeCode('test-code');
-      expect(result).toHaveProperty('access_token');
-      expect(result.access_token).toMatch(/^mock_digilocker_token_/);
-      expect(result).toHaveProperty('digilocker_id');
-      expect(result).toHaveProperty('name');
-    });
+    const provider = service.documentRegistry.runner.provider
+    vi.spyOn(provider, 'getCode').mockResolvedValue('0x12345678')
+    vi.spyOn(service.documentRegistry, 'getDocument').mockRejectedValue(
+      new Error('missing revert data in call exception')
+    )
+    vi.spyOn(service.kycVerifier, 'isVerified').mockResolvedValue(false)
 
-    it('returns error when credentials missing and not in mock mode', async () => {
-      delete process.env.DIGILOCKER_MOCK;
-      delete process.env.DIGILOCKER_CLIENT_ID;
-      const s = new DigilockerService();
-      const result = await s.exchangeCode('test-code');
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('not configured');
-    });
-  });
-
-  describe('verifyDocuments', () => {
-    it('verifies documents in mock mode and returns success', async () => {
-      process.env.DIGILOCKER_MOCK = 'true';
-      mockSupabase.from.mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockReturnValue({
-            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-          }),
-        }),
-        update: vi.fn().mockReturnValue({
-          eq: vi.fn().mockResolvedValue({ error: null }),
-        }),
-      });
-
-      const s = new DigilockerService();
-      const result = await s.verifyDocuments('user-123', 'mock-token');
-      expect(result.success).toBe(true);
-      expect(result.is_digilocker_verified).toBe(true);
-      expect(result).toHaveProperty('document_hash');
-      expect(result.verified_documents).toContain('driving_licence');
-      expect(result.verified_documents).toContain('rc_book');
-    });
-
-    it('returns error when not configured and not in mock mode', async () => {
-      delete process.env.DIGILOCKER_MOCK;
-      delete process.env.DIGILOCKER_CLIENT_ID;
-      const s = new DigilockerService();
-      const result = await s.verifyDocuments('user-123', 'token');
-      expect(result.success).toBe(false);
-      expect(result.is_digilocker_verified).toBe(false);
-    });
-  });
-});
+    expect(await service.validateSetup()).toBe(false)
+  })
+})

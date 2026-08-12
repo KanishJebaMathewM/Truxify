@@ -260,6 +260,18 @@ export async function authenticate(req, res, next) {
 
   const token = authHeader.split(" ")[1];
 
+  // Bound the token size before it reaches jwt.decode or any downstream
+  // client constructor: a 10MB Authorization header would otherwise be
+  // buffered in memory and passed to Firebase/Supabase SDKs verbatim.
+  // Firebase ID tokens and Supabase JWTs are far smaller than this.
+  const MAX_TOKEN_BYTES = 64 * 1024;
+  if (typeof token !== "string" || token.length > MAX_TOKEN_BYTES) {
+    return res.status(401).json({
+      error: "Access Denied. Invalid token.",
+      hint: "Provide a valid Bearer token in the Authorization header.",
+    });
+  }
+
   // Store the raw access token on the request so route handlers can create
   // per-request Supabase clients that carry the user's identity for RPC calls.
   req.token = token;

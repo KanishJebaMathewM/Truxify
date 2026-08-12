@@ -27,6 +27,34 @@ describe('authenticate middleware - non bypass flow', () => {
     expect(res.status).toHaveBeenCalledWith(401);
   });
 
+  it('returns 401 for an oversized bearer token without touching Firebase', async () => {
+    const dbMock = {
+      createUserClient: () => null,
+      firebaseAdmin: {
+        auth: vi.fn(() => ({
+          verifyIdToken: vi.fn().mockRejectedValue(new Error('should not be called')),
+        })),
+      },
+      supabase: null,
+    };
+    vi.doMock('../../src/config/db.js', () => dbMock);
+
+    const { authenticate } = await import('../../src/middleware/auth.js');
+
+    const req = { headers: { authorization: `Bearer ${'a'.repeat(70 * 1024)}` } };
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn(),
+    };
+    const next = vi.fn();
+
+    await authenticate(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(dbMock.firebaseAdmin.auth).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('returns 500 when supabase missing for supabase token', async () => {
     const token = jwt.sign({ iss: 'https://test.supabase.co/auth/v1' }, 'secret');
     vi.doMock('../../src/config/db.js', () => ({

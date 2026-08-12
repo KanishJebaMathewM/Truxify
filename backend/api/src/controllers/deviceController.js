@@ -2,7 +2,6 @@ import { supabase, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { errorResponse } from '../utils/apiResponse.js';
 import { AppError, UnauthorizedError, ValidationError } from '../utils/errors.js';
-import { errorResponse } from '../utils/apiResponse.js';
 
 const VALID_PLATFORMS = ['android', 'ios', 'web'];
 
@@ -145,6 +144,14 @@ export async function unregisterDeviceToken(req, res, next) {
     if (deleteError) {
       logger.error('[DeviceController] Failed to remove device token from database:', deleteError.message);
       return next(new AppError('Failed to unregister device', 500));
+    }
+
+    // If no rows were deleted, the token was not registered for this user
+    if (!deletedRows || deletedRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Device token not found'
+      });
     }
 
     // Query remaining device tokens for this user to fallback

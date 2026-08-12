@@ -30,7 +30,7 @@
  */
 
 import express from 'express';
-import { supabase } from '../config/db.js';
+import { createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { validateBody } from '../middleware/validate.js';
 import { deviceLimiter } from '../middleware/rateLimiter.js';
@@ -118,16 +118,27 @@ router.post(
     const { fcmToken } = req.body;
 
     try {
-      const { error } = await supabase
+      // Update through the caller's authenticated client. The anon client has
+      // no UPDATE on profiles, so a session-less UPDATE silently matches 0
+      // rows (null error) and the token is never persisted.
+      const { data, error } = await createUserClient(req.token)
         .from('profiles')
         .update({
           fcm_token: fcmToken,
           fcm_token_updated_at: new Date().toISOString(),
         })
-        .eq('id', userId);
+        .eq('id', userId)
+        .select('id');
 
       if (error) {
         logger.error('[UserRoutes] Failed to update FCM token in profiles:', error.message);
+        return res.status(500).json({ error: 'Failed to update FCM token.' });
+      }
+
+      // A 0-row match means the caller's identity did not resolve to a
+      // profile row — treat that as a failure rather than a silent no-op.
+      if (!data || data.length === 0) {
+        logger.error(`[UserRoutes] No profile row matched for user ${userId}; FCM token not persisted.`);
         return res.status(500).json({ error: 'Failed to update FCM token.' });
       }
 

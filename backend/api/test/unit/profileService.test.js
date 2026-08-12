@@ -10,9 +10,9 @@
  *   - getProfile populates cache after DB fetch
  *   - getProfile continues when cache write fails
  *   - getCustomerStats throws when supabase is null
- *   - getCustomerStats queries customer_stats table correctly
+ *   - getCustomerStats computes stats from the customer's orders
  *   - getCustomerStats returns cached data on cache hit
- *   - getCustomerStats falls back to DB when cache read fails
+ *   - getCustomerStats falls back to the orders query when cache read fails
  *   - getDriverDetails throws when supabase is null
  *   - getDriverDetails queries driver_details table correctly
  *   - getDriverDetails returns cached data on cache hit
@@ -28,7 +28,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
 }));
 
 const mockEqProfileMaybeSingle = vi.fn();
-const mockEqStatsMaybeSingle = vi.fn();
+const mockEqOrders = vi.fn();
 const mockEqDriverMaybeSingle = vi.fn();
 const supabaseRef = vi.hoisted(() => ({ current: null }));
 
@@ -43,12 +43,10 @@ const defaultMockSupabase = {
         })),
       };
     }
-    if (table === 'customer_stats') {
+    if (table === 'orders') {
       return {
         select: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            maybeSingle: mockEqStatsMaybeSingle,
-          })),
+          eq: mockEqOrders,
         })),
       };
     }
@@ -77,12 +75,15 @@ const profileCacheRef = vi.hoisted(() => ({
   setCachedCustomerStats: vi.fn().mockResolvedValue(undefined),
   getCachedDriverDetails: vi.fn().mockResolvedValue(null),
   setCachedDriverDetails: vi.fn().mockResolvedValue(undefined),
+  isValidCachedSupabaseProfile: vi.fn(() => true),
 }));
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() {
     return supabaseRef.current;
   },
+  // No service-role key in tests — the service falls back to the anon mock.
+  supabaseAdmin: undefined,
 }));
 
 vi.mock('../../src/lib/profileCache.js', () => profileCacheRef);
@@ -133,12 +134,13 @@ describe('getProfile', () => {
   });
 
   it('returns cached profile on cache hit (skips DB)', async () => {
-    const cachedProfile = { id: 'user-123', role: 'driver', full_name: 'Cached John' };
+    const cachedProfile = { id: 'user-123', isActive: true, role: 'driver', full_name: 'Cached John' };
     profileCacheRef.getCachedSupabaseProfile.mockResolvedValueOnce(cachedProfile);
 
     const result = await getProfile('user-123');
     expect(result).toEqual(cachedProfile);
     expect(profileCacheRef.getCachedSupabaseProfile).toHaveBeenCalledWith('user-123');
+    expect(profileCacheRef.isValidCachedSupabaseProfile).toHaveBeenCalledWith('user-123', cachedProfile);
     expect(profileCacheRef.setCachedSupabaseProfile).not.toHaveBeenCalled();
   });
 
@@ -202,29 +204,41 @@ describe('getCustomerStats', () => {
     await expect(getCustomerStats('user-123')).rejects.toThrow('Supabase client not configured');
   });
 
-  it('returns customer stats on successful query', async () => {
+  it('computes stats from the customer\'s orders', async () => {
     useMockSupabase();
-    const mockData = { total_orders: 42, total_saved: 8, co2_reduced_kg: 156.5 };
-    mockEqStatsMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
+    mockEqOrders.mockResolvedValueOnce({
+      data: [
+        { status: 'delivered', total_amount: 100 },
+        { status: 'in_transit', total_amount: 200 },
+        { status: 'cancelled', total_amount: 50 },
+      ],
+      error: null,
+    });
     const result = await getCustomerStats('user-456');
-    expect(result).toEqual(mockData);
+    expect(result).toEqual({
+      user_id: 'user-456',
+      total_orders: 3,
+      total_saved: 0,
+      co2_reduced_kg: 0,
+    });
   });
 
-  it('throws when supabase query returns an error', async () => {
+  it('throws when the orders query returns an error', async () => {
     useMockSupabase();
-    mockEqStatsMaybeSingle.mockResolvedValueOnce({ data: null, error: { message: 'Row not found' } });
-    await expect(getCustomerStats('user-456')).rejects.toThrow('Row not found');
+    mockEqOrders.mockResolvedValueOnce({ data: null, error: { message: 'Permission denied' } });
+    await expect(getCustomerStats('user-456')).rejects.toThrow('Permission denied');
   });
 
-  it('returns null when no customer stats are found', async () => {
-    supabaseRef.current = {
-      from: vi.fn().mockReturnThis(),
-      select: vi.fn().mockReturnThis(),
-      eq: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
-    };
-    const result = await getCustomerStats('new-user-without-stats');
-    expect(result).toBeNull();
+  it('returns zeroed stats when the customer has no orders', async () => {
+    useMockSupabase();
+    mockEqOrders.mockResolvedValueOnce({ data: [], error: null });
+    const result = await getCustomerStats('new-user-without-orders');
+    expect(result).toEqual({
+      user_id: 'new-user-without-orders',
+      total_orders: 0,
+      total_saved: 0,
+      co2_reduced_kg: 0,
+    });
   });
 
   it('returns cached stats on cache hit', async () => {
@@ -237,23 +251,31 @@ describe('getCustomerStats', () => {
     expect(profileCacheRef.setCachedCustomerStats).not.toHaveBeenCalled();
   });
 
-  it('falls back to DB when cache read fails', async () => {
+  it('falls back to the orders query when cache read fails', async () => {
     profileCacheRef.getCachedCustomerStats.mockRejectedValueOnce(new Error('Redis down'));
     useMockSupabase();
-    const mockData = { total_orders: 42 };
-    mockEqStatsMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
+    mockEqOrders.mockResolvedValueOnce({ data: [{ status: 'delivered' }], error: null });
 
     const result = await getCustomerStats('user-456');
-    expect(result).toEqual(mockData);
+    expect(result).toEqual({
+      user_id: 'user-456',
+      total_orders: 1,
+      total_saved: 0,
+      co2_reduced_kg: 0,
+    });
   });
 
-  it('populates cache after successful DB fetch', async () => {
+  it('populates cache after a successful orders query', async () => {
     useMockSupabase();
-    const mockData = { total_orders: 42 };
-    mockEqStatsMaybeSingle.mockResolvedValueOnce({ data: mockData, error: null });
+    mockEqOrders.mockResolvedValueOnce({ data: [{ status: 'delivered' }], error: null });
 
     await getCustomerStats('user-456');
-    expect(profileCacheRef.setCachedCustomerStats).toHaveBeenCalledWith('user-456', mockData);
+    expect(profileCacheRef.setCachedCustomerStats).toHaveBeenCalledWith('user-456', {
+      user_id: 'user-456',
+      total_orders: 1,
+      total_saved: 0,
+      co2_reduced_kg: 0,
+    });
   });
 });
 

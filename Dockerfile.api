@@ -20,7 +20,17 @@ COPY backend/api/package.json ./
 # --legacy-peer-deps matches backend/api/Dockerfile and the CI workflows.
 RUN npm install --omit=dev --legacy-peer-deps
 
-COPY --chown=appuser:appgroup backend/api/src ./src
+# The API source imports modules that live outside backend/api/src (the
+# earnings router, the did service, and the root subsystem routers), so the
+# repository layout is mirrored inside the image to keep those relative
+# imports valid.
+COPY --chown=appuser:appgroup backend/api ./backend/api
+COPY --chown=appuser:appgroup backend/did ./backend/did
+COPY --chown=appuser:appgroup ebpf ./ebpf
+COPY --chown=appuser:appgroup wasi ./wasi
+COPY --chown=appuser:appgroup wasm ./wasm
+COPY --chown=appuser:appgroup snyk ./snyk
+COPY --chown=appuser:appgroup database/liquibase ./database/liquibase
 
 # No .env is copied. Configuration is supplied at runtime through the
 # container environment (k8s Secret / ConfigMap, or `docker run --env-file`),
@@ -33,4 +43,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD ["node", "-e", "fetch('http://localhost:5000/api/health/live').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"]
 
-CMD ["node", "src/index.js"]
+CMD ["node", "backend/api/src/index.js"]

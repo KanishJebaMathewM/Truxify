@@ -108,11 +108,18 @@ class FHEModel:
         return x
     
     def _encrypted_linear(self, x: ts.ckks_vector, weights: ts.ckks_vector, bias: ts.ckks_vector) -> ts.ckks_vector:
-        """Encrypted linear layer"""
-        # In production: use FHE matrix multiplication
-        # For now, multiply by a scalar (simplified)
-        result = x * 0.5  # Simulated linear transformation
-        return result
+        """Encrypted linear layer.
+
+        Real encrypted matrix multiplication over CKKS is not implemented, and
+        the previous `x * 0.5` stub ignored the layer's weights and bias.
+        Fail closed: refuse to return fabricated predictions instead of
+        pretending the learned parameters participated in the computation.
+        """
+        raise NotImplementedError(
+            "Encrypted linear layer is not implemented; refusing to return "
+            "predictions that ignore the model weights. Train and serve a "
+            "model whose parameters are actually used."
+        )
     
     def _encrypted_relu(self, x: ts.ckks_vector) -> ts.ckks_vector:
         """Encrypted ReLU (approximated using degree-2 least-squares polynomial)

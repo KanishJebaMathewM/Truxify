@@ -106,12 +106,12 @@ describe('blockchainMonitoringRoutes', () => {
 
   it('GET /api/blockchain/events queries blockchain_monitoring_events through the attached supabase client', async () => {
     const res = await request(buildApp({ blockchainMetrics: metrics, escalationHandler, supabase }))
-      .get('/api/blockchain/events?type=PAYMENT_RECEIVED&severity=CRITICAL&limit=10');
+      .get('/api/blockchain/events?type=BOOKING_DISPUTED&severity=CRITICAL&limit=10');
 
     expect(res.status).toBe(200);
     expect(supabase.from).toHaveBeenCalledWith('blockchain_monitoring_events');
     expect(supabase.calls).toEqual([
-      { column: 'type', value: 'PAYMENT_RECEIVED' },
+      { column: 'type', value: 'BOOKING_DISPUTED' },
       { column: 'severity', value: 'CRITICAL' },
     ]);
     expect(res.body.count).toBe(0);

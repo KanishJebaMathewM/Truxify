@@ -111,6 +111,19 @@ export function validateQuery(schema) {
       });
       return next();
     } catch (err) {
+      // Zod throws on malformed/oversized input (e.g. transform failures).
+      // Treat those as client errors with the same envelope as a failed
+      // safeParse rather than surfacing an internal 500.
+      if (err && (err.name === 'ZodError' || err.issues)) {
+        logger.warn(
+          { event: 'VALIDATION_ERROR', type: 'query', requestId: req.requestId || req.id, details: formatValidationIssues(err) },
+          'Query validation failed',
+        );
+        return res.status(400).json({
+          error: "Validation failed",
+          details: formatValidationIssues(err),
+        });
+      }
       return res.status(500).json({
         error: "Internal query validation error",
         details: err.message,

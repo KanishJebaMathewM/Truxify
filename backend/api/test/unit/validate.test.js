@@ -187,6 +187,27 @@ describe('validateQuery middleware', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-
+  it('returns 400 instead of 500 when the schema throws a ZodError', () => {
+    // A schema whose transform throws (e.g. a value that cannot be coerced)
+    // must surface as a client error, not an internal server error.
+    const throwingSchema = {
+      safeParse: () => {
+        const err = new Error('Malformed value');
+        err.name = 'ZodError';
+        err.issues = [{ path: ['page'], message: 'Malformed value' }];
+        throw err;
+      },
+    };
+    const req = { query: { page: 'huge-value' } };
+    const res = makeRes();
+    const next = makeNext();
+    validateQuery(throwingSchema)(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'Validation failed',
+      details: [{ field: 'page', message: 'Malformed value' }],
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
 
 });

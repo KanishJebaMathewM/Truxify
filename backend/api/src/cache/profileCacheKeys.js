@@ -86,3 +86,24 @@ export const PROFILE_SUB_KEYS = Object.freeze({
 export function profileCacheKey(userId, subKey) {
   return CacheKeyBuilder.build('profile', `sb:${userId}`, subKey);
 }
+
+/**
+ * Generate the Redis key for a profile's version counter.
+ * Used for strong consistency validation across instances.
+ *
+ * @param {string} firebaseUid - The Firebase UID.
+ * @returns {string} Redis key, e.g. "user:profile:version:abc123"
+ */
+export function firebaseProfileVersionKey(firebaseUid) {
+  return `${PROFILE_KEY_PREFIX}${SEP}version${SEP}${firebaseUid}`;
+}
+
+/**
+ * Generate the Redis key for a Supabase profile's version counter.
+ *
+ * @param {string} userId - The Supabase profile UUID.
+ * @returns {string} Redis key, e.g. "user:profile:version:sb:550e8400-..."
+ */
+export function supabaseProfileVersionKey(userId) {
+  return `${PROFILE_KEY_PREFIX}${SEP}version${SEP}sb${SEP}${userId}`;
+}

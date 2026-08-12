@@ -6,8 +6,19 @@ import logging
 import json
 from dataclasses import dataclass, field
 import random
+from math import radians, cos, sin, atan2, sqrt
 
 logger = logging.getLogger(__name__)
+
+
+def haversine_km(a: Dict, b: Dict) -> float:
+    """Great-circle distance in kilometres between two lat/lng points."""
+    lat1, lng1 = radians(a['lat']), radians(a['lng'])
+    lat2, lng2 = radians(b['lat']), radians(b['lng'])
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    h = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2
+    return 6371.0 * 2 * atan2(sqrt(h), sqrt(1 - h))
 
 @dataclass
 class LogisticsAsset:
@@ -325,31 +336,68 @@ class DigitalTwinOptimizer:
         logger.info("✅ Digital Twin Optimizer initialized")
     
     def optimize_routes(self, asset_ids: List[str]) -> Dict:
-        """Optimize routes for assets"""
+        """Optimize routes for assets.
+
+        Derives the next stop, distance and ETA from the asset's real event
+        history (most recent event location as target, observed average speed).
+        Fails closed: missing assets are reported instead of silently skipped,
+        and assets without enough history are flagged as insufficient_data.
+        """
         routes = {}
+        missing_assets = []
+        insufficient_assets = []
         
         for asset_id in asset_ids:
             asset = self.twin.assets.get(asset_id)
             if not asset:
+                missing_assets.append(asset_id)
+                continue
+            
+            events = self.twin.get_events(asset_id, 100)
+            
+            if len(events) < 2:
+                insufficient_assets.append(asset_id)
                 continue
             
             current_location = asset.location
+            next_stop = events[0]['location']
+            distance = haversine_km(current_location, next_stop)
+            
+            # Average speed from consecutive event locations (newest first)
+            speeds = []
+            for prev, cur in zip(events, events[1:]):
+                prev_ts = datetime.fromisoformat(prev['timestamp'])
+                cur_ts = datetime.fromisoformat(cur['timestamp'])
+                elapsed_hours = (prev_ts - cur_ts).total_seconds() / 3600
+                travelled_km = haversine_km(prev['location'], cur['location'])
+                if elapsed_hours > 0:
+                    speeds.append(travelled_km / elapsed_hours)
+            
+            speeds = [s for s in speeds if s > 0]
+            if not speeds:
+                insufficient_assets.append(asset_id)
+                continue
+            
+            avg_speed = sum(speeds) / len(speeds)
+            estimated_time_minutes = (distance / avg_speed) * 60 if avg_speed > 0 else 0.0
             
             optimized_route = {
                 'asset_id': asset_id,
                 'current_location': current_location,
-                'next_stop': {
-                    'lat': current_location['lat'] + random.uniform(-0.5, 0.5),
-                    'lng': current_location['lng'] + random.uniform(-0.5, 0.5)
-                },
-                'estimated_time': random.uniform(30, 180),
-                'distance': random.uniform(10, 100)
+                'next_stop': next_stop,
+                'estimated_time': round(estimated_time_minutes, 2),
+                'distance': round(distance, 2),
+                'average_speed': round(avg_speed, 2),
+                'source': 'event_history'
             }
             
             routes[asset_id] = optimized_route
         
         return {
+            'success': not missing_assets and not insufficient_assets,
             'routes': routes,
+            'missing_assets': missing_assets,
+            'insufficient_data_assets': insufficient_assets,
             'optimization_time': datetime.now().isoformat()
         }
     

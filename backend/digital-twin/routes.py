@@ -212,11 +212,23 @@ async def optimize_routes(asset_ids: List[str]):
     try:
         result = optimizer.optimize_routes(asset_ids)
         
+        if not result.get('success'):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    'message': 'Route optimization incomplete',
+                    'missing_assets': result.get('missing_assets', []),
+                    'insufficient_data_assets': result.get('insufficient_data_assets', [])
+                }
+            )
+        
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Optimize routes failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

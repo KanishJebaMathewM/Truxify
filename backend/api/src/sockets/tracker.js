@@ -152,22 +152,27 @@ const MAX_CONSECUTIVE_DROPS = 10;
 const consecutiveDropCount = new Map();
 
 // =====================================================================
-// DRIVER STATE TTL & LAZY CLEANUP
+// DRIVER STATE TTL & PROACTIVE CLEANUP (#11186)
 // =====================================================================
 const TRACKER_DRIVER_STATE_TTL_MS = parseInt(process.env.TRACKER_DRIVER_STATE_TTL_MS, 10) || 900000; // default 15 min
-const DRIVER_STATE_SWEEP_THRESHOLD = 50;
-const DRIVER_STATE_SWEEP_INTERVAL_MS = 60000;
-let lastDriverStateSweep = 0;
+const DRIVER_STATE_SWEEP_INTERVAL_MS = 60000; // run cleanup every minute
+let driverStateSweepTimer = null;
 
 function sweepStaleDriverState(now) {
-  if (consecutiveDropCount.size < DRIVER_STATE_SWEEP_THRESHOLD) return;
-  if (now - lastDriverStateSweep < DRIVER_STATE_SWEEP_INTERVAL_MS) return;
-  lastDriverStateSweep = now;
   for (const [driverId, entry] of consecutiveDropCount) {
     if (now - entry.lastUpdated > TRACKER_DRIVER_STATE_TTL_MS) {
       consecutiveDropCount.delete(driverId);
     }
   }
+}
+
+// Start proactive cleanup interval to prevent unbounded Map growth
+function startDriverStateSweep() {
+  if (driverStateSweepTimer) return;
+  driverStateSweepTimer = setInterval(() => {
+    sweepStaleDriverState(Date.now());
+  }, DRIVER_STATE_SWEEP_INTERVAL_MS);
+  driverStateSweepTimer.unref?.();
 }
 
 // =====================================================================
@@ -1466,6 +1471,7 @@ async function initTelemetryScheduler() {
   await loadRecoveryFile();
   isSchedulerActive = true;
   scheduleNextFlush();
+  startDriverStateSweep();
   
   telemetryMonitorInterval = setInterval(() => {
     monitorBufferSize();
@@ -1487,6 +1493,11 @@ export async function closeWebSocketServer() {
   if (wsHeartbeatInterval) {
     clearInterval(wsHeartbeatInterval);
     wsHeartbeatInterval = null;
+  }
+
+  if (driverStateSweepTimer) {
+    clearInterval(driverStateSweepTimer);
+    driverStateSweepTimer = null;
   }
 
   // Wait for MongoDB to be available before final flush

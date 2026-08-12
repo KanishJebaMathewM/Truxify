@@ -4,6 +4,7 @@ import {
   getCachedSupabaseProfile, setCachedSupabaseProfile,
   getCachedCustomerStats, setCachedCustomerStats,
   getCachedDriverDetails, setCachedDriverDetails,
+  isValidCachedSupabaseProfile,
 } from '../lib/profileCache.js';
 import logger from '../middleware/logger.js';
 
@@ -20,7 +21,7 @@ export async function getProfile(userId) {
   if (isCacheEnabled()) {
     try {
       const cached = await getCachedSupabaseProfile(userId);
-      if (cached && isValidCachedProfile(userId, cached)) {
+      if (cached && isValidCachedSupabaseProfile(userId, cached)) {
         logger.debug({ userId }, 'Profile cache hit');
         return cached;
       }

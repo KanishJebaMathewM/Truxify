@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+import { getMevRelayer } from './flashbots_relayer.js';
 
 /**
  * Derives the exact 32-byte preimage that is revealed on-chain.
@@ -190,6 +191,30 @@ class MEVService {
             signedTxs.push(signedTx);
         }
         return signedTxs;
+    }
+
+    async releaseEscrowPrivate(escrowId, preimage) {
+        try {
+            const relayer = getMevRelayer();
+            const targetBlock = (await this.provider.getBlockNumber()) + 1;
+            const bundle = await relayer.assemblePrivateBundle(
+                this.escrowAddress,
+                this.escrowABI,
+                'releaseDepositPrivate',
+                [escrowId, preimage],
+                targetBlock
+            );
+            const result = await relayer.sendPrivateBundle(bundle);
+            return {
+                success: true,
+                txHash: result.bundleHash,
+                bundleHash: result.bundleHash,
+                targetBlock: result.targetBlock
+            };
+        } catch (error) {
+            logger.error('Private bundle release failed:', error);
+            throw error;
+        }
     }
 
     // ============ MEV Protection Level ============

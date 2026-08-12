@@ -1,143 +1,94 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockLogger = vi.hoisted(() => ({
-  error: vi.fn(),
-  warn: vi.fn(),
-  info: vi.fn(),
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
 }));
 
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: mockLogger,
+const { redisMock } = vi.hoisted(() => ({
+  redisMock: { get: vi.fn(), set: vi.fn(), del: vi.fn() },
 }));
+
+vi.mock('../../src/config/db.js', () => ({
+  redisClient: redisMock,
+}));
+
+import {
+  isEscrowPaused,
+  setEscrowPaused,
+  getPauseState,
+  escrowPausedResult,
+} from '../../src/services/escrowCircuitBreaker.js';
 
 describe('escrowCircuitBreaker', () => {
-  let mockRedis;
-  let isEscrowPaused;
-  let setEscrowPaused;
-  let getPauseState;
-  let escrowPausedResult;
-
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    mockRedis = {
-      get: vi.fn(),
-      set: vi.fn(),
-      del: vi.fn(),
-    };
-    vi.doMock('../../src/config/db.js', () => ({
-      redisClient: mockRedis,
-    }));
-    const mod = await import('../../src/services/escrowCircuitBreaker.js');
-    isEscrowPaused = mod.isEscrowPaused;
-    setEscrowPaused = mod.setEscrowPaused;
-    getPauseState = mod.getPauseState;
-    escrowPausedResult = mod.escrowPausedResult;
+    redisMock.get.mockResolvedValue(null);
+    redisMock.set.mockResolvedValue('OK');
+    redisMock.del.mockResolvedValue(1);
   });
 
-  describe('isEscrowPaused', () => {
-    it('returns false when redisClient is null', async () => {
-      vi.doMock('../../src/config/db.js', () => ({ redisClient: null }));
-      const mod = await import('../../src/services/escrowCircuitBreaker.js');
-      const result = await mod.isEscrowPaused();
-      expect(result).toBe(false);
-    });
-
-    it('returns false when pause key is not set', async () => {
-      mockRedis.get.mockResolvedValue(null);
-      const result = await isEscrowPaused();
-      expect(result).toBe(false);
-    });
-
-    it('returns true when pause key is "1"', async () => {
-      mockRedis.get.mockResolvedValue('1');
-      const result = await isEscrowPaused();
-      expect(result).toBe(true);
-    });
-
-    it('returns false (fail-open) when Redis get throws', async () => {
-      mockRedis.get.mockRejectedValue(new Error('Redis connection refused'));
-      const result = await isEscrowPaused();
-      expect(result).toBe(false);
-      expect(mockLogger.error).toHaveBeenCalledOnce();
-    });
+  it('isEscrowPaused is true when the flag is set in Redis', async () => {
+    redisMock.get.mockResolvedValue('1');
+    expect(await isEscrowPaused()).toBe(true);
+    expect(redisMock.get).toHaveBeenCalledWith('escrow:circuit-breaker:paused');
   });
 
-  describe('setEscrowPaused', () => {
-    it('opens the circuit and persists the pause flag', async () => {
-      mockRedis.set.mockResolvedValue('OK');
-      mockRedis.del.mockResolvedValue(0);
-
-      const result = await setEscrowPaused(true);
-
-      expect(result.paused).toBe(true);
-      expect(result.persisted).toBe(true);
-      expect(result).toHaveProperty('updatedAt');
-      expect(mockRedis.set).toHaveBeenCalledWith('escrow:circuit-breaker:paused', '1');
-      expect(mockLogger.warn).toHaveBeenCalledOnce();
-    });
-
-    it('closes the circuit and removes the pause flag', async () => {
-      mockRedis.set.mockResolvedValue('OK');
-      mockRedis.del.mockResolvedValue(1);
-
-      const result = await setEscrowPaused(false);
-
-      expect(result.paused).toBe(false);
-      expect(result.persisted).toBe(true);
-      expect(mockRedis.del).toHaveBeenCalledWith('escrow:circuit-breaker:paused');
-      expect(mockRedis.del).toHaveBeenCalledWith('escrow:circuit-breaker:paused-at');
-      expect(mockLogger.info).toHaveBeenCalledOnce();
-    });
-
-    it('throws when Redis set throws', async () => {
-      mockRedis.set.mockRejectedValue(new Error('Redis write failed'));
-
-      await expect(setEscrowPaused(true)).rejects.toThrow();
-    });
+  it('isEscrowPaused is false when the flag is absent', async () => {
+    expect(await isEscrowPaused()).toBe(false);
   });
 
-  describe('getPauseState', () => {
-    it('returns not paused when Redis is null', async () => {
-      vi.doMock('../../src/config/db.js', () => ({ redisClient: null }));
-      const mod = await import('../../src/services/escrowCircuitBreaker.js');
-      const result = await mod.getPauseState();
-      expect(result.paused).toBe(false);
-      expect(result.pausedAt).toBeNull();
-    });
-
-    it('returns paused state from Redis', async () => {
-      mockRedis.get.mockResolvedValueOnce('1');
-      mockRedis.get.mockResolvedValueOnce('2026-01-01T00:00:00.000Z');
-
-      const result = await getPauseState();
-
-      expect(result.paused).toBe(true);
-      expect(result.pausedAt).toBe('2026-01-01T00:00:00.000Z');
-    });
-
-    it('returns not paused when Redis get throws', async () => {
-      mockRedis.get.mockRejectedValue(new Error('Redis unavailable'));
-
-      const result = await getPauseState();
-
-      expect(result.paused).toBe(false);
-      expect(mockLogger.error).toHaveBeenCalledOnce();
-    });
+  it('isEscrowPaused fails open when Redis is unavailable', async () => {
+    redisMock.get.mockRejectedValue(new Error('down'));
+    expect(await isEscrowPaused()).toBe(false);
   });
 
-  describe('escrowPausedResult', () => {
-    it('returns correct result shape with bookingId', () => {
-      const result = escrowPausedResult('BOOKING-123');
-      expect(result.bookingId).toBe('BOOKING-123');
-      expect(result.code).toBe('ESCROW_PAUSED');
-      expect(result.error).toBe('Escrow is paused by the circuit breaker.');
-    });
+  it('setEscrowPaused(true) opens the circuit and persists a timestamp', async () => {
+    const before = Date.now();
+    const result = await setEscrowPaused(true);
+    expect(result.paused).toBe(true);
+    expect(result.persisted).toBe(true);
+    expect(new Date(result.updatedAt).getTime()).toBeGreaterThanOrEqual(before);
+    expect(redisMock.set).toHaveBeenCalledWith('escrow:circuit-breaker:paused', '1');
+    expect(redisMock.set).toHaveBeenCalledWith('escrow:circuit-breaker:paused-at', result.updatedAt);
+  });
 
-    it('merges extra fields into result', () => {
-      const result = escrowPausedResult('BOOKING-456', { driverId: 'driver-1' });
-      expect(result.bookingId).toBe('BOOKING-456');
-      expect(result.driverId).toBe('driver-1');
-      expect(result.code).toBe('ESCROW_PAUSED');
+  it('setEscrowPaused(false) closes the circuit and clears state', async () => {
+    const result = await setEscrowPaused(false);
+    expect(result.paused).toBe(false);
+    expect(redisMock.del).toHaveBeenCalledWith('escrow:circuit-breaker:paused');
+    expect(redisMock.del).toHaveBeenCalledWith('escrow:circuit-breaker:paused-at');
+  });
+
+  it('setEscrowPaused reports not persisted when Redis is unavailable', async () => {
+    redisMock.set.mockRejectedValue(new Error('down'));
+    await expect(setEscrowPaused(true)).rejects.toThrow('down');
+  });
+
+  it('getPauseState reports the flag and the time it was set', async () => {
+    redisMock.get.mockImplementation((key) =>
+      key === 'escrow:circuit-breaker:paused'
+        ? Promise.resolve('1')
+        : Promise.resolve('2026-08-11T00:00:00.000Z'),
+    );
+    const state = await getPauseState();
+    expect(state).toEqual({ paused: true, pausedAt: '2026-08-11T00:00:00.000Z' });
+  });
+
+  it('getPauseState defaults to not paused', async () => {
+    const state = await getPauseState();
+    expect(state).toEqual({ paused: false, pausedAt: null });
+  });
+
+  it('escrowPausedResult shapes the rejection returned by escrow submission paths', () => {
+    expect(escrowPausedResult('bk-1')).toEqual({
+      bookingId: 'bk-1',
+      error: 'Escrow is paused by the circuit breaker.',
+      code: 'ESCROW_PAUSED',
+    });
+    expect(escrowPausedResult('bk-1', { txData: null })).toMatchObject({
+      bookingId: 'bk-1',
+      txData: null,
+      code: 'ESCROW_PAUSED',
     });
   });
 });

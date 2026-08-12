@@ -559,7 +559,9 @@ class EventStore {
                 this.logger.warn(`Kafka unavailable — skipping publish of ${event.type}`);
                 return;
             }
-            await kafkaModule.default.publishEvent(topic, enriched, event.aggregateId);
+            // Use event.id (eventId) as the Kafka message key to prevent dedup collisions
+            // when multiple events share the same aggregateId (orderId)
+            await kafkaModule.default.publishEvent(topic, enriched, event.id);
             this.logger.info(`📤 Event published to Kafka: ${event.type}`);
         }
     }

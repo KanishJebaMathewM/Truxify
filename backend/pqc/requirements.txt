@@ -1,2 +1,3 @@
 cryptography>=42.0.0
+mlkem>=1.1.0
 pycryptodome>=3.20.0

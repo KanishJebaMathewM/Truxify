@@ -31,6 +31,7 @@ import { closeWebSocketServer, initWebSocketServer, __testing as wsTesting } fro
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
 import { validateEscrowSetup } from './services/escrow.js'
+import digilockerService from './services/digilockerService.js'
 
 
 import {
@@ -72,7 +73,17 @@ import mlRoutes from './routes/mlRoutes.js'
 // ============================================================================
 import verificationRoutes from './routes/verificationRoutes.js'
 import oracleRoutes from './routes/oracleRoutes.js'
+import internalRoutes from './routes/internalRoutes.js'
 import blockchainMonitoringRoutes from './routes/blockchainMonitoringRoutes.js'
+
+// ============================================================================
+// 🆕 WEB3 SUBSYSTEM ROUTES
+// ============================================================================
+import zkidRoutes from '../../zkid/routes.js'
+import daoRoutes from '../../dao/routes.js'
+import mevRoutes from '../../mev/routes.js'
+import tokenizationRoutes from '../../tokenization/routes.js'
+import atomicSwapRoutes from '../../atomic-swap/routes.js'
 
 // ============================================================================
 // 🆕 GEOGRAPHIC SHARDING ROUTES
@@ -106,6 +117,7 @@ import { initWebRTCSignaling, closeWebRTCSignaling } from './sockets/webrtc.js'
 import fraudRoutes from './routes/fraudRoutes.js'
 import { fraudDetectionMiddleware, networkAnalysisMiddleware } from './middleware/fraudMiddleware.js'
 import { authenticate, requireRole } from './middleware/auth.js'
+import { requireApiKey } from './middleware/apiKey.js'
 import fraudDetection from './services/fraud/FraudDetectionService.js'
 import headerSizeMonitor from './middleware/headerSizeMonitor.js';
 
@@ -154,6 +166,10 @@ import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
+import {
+  startOutboxRelayWorker,
+  stopOutboxRelayWorker,
+} from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
 
 // Configuration load from root folder is handled in db.js
@@ -245,13 +261,13 @@ if (!process.env.CHAINLINK_ENABLED && !process.env.BACKUP_ORACLE_ENABLED) {
 // ============================================================================
 // 🆕 SHARDING VALIDATION
 // ============================================================================
-if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST || 
-    !process.env.SHARD_EAST_HOST || !process.env.SHARD_WEST_HOST) {
+if (!process.env.SHARD_NORTH_HOST || !process.env.SHARD_SOUTH_HOST ||
+  !process.env.SHARD_EAST_HOST || !process.env.SHARD_WEST_HOST) {
   logger.warn('⚠️ Shard hosts not fully configured. Using localhost defaults.')
 }
 
-if (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH || 
-    !process.env.SHARD_PASSWORD_EAST || !process.env.SHARD_PASSWORD_WEST) {
+if (!process.env.SHARD_PASSWORD_NORTH || !process.env.SHARD_PASSWORD_SOUTH ||
+  !process.env.SHARD_PASSWORD_EAST || !process.env.SHARD_PASSWORD_WEST) {
   logger.warn('⚠️ Shard passwords not fully configured. Ensure all SHARD_PASSWORD_* env vars are set.')
 }
 
@@ -310,6 +326,15 @@ validateEscrowSetup().then((valid) => {
     logger.warn('⚠️ Escrow setup validation failed. On-chain escrow features may not work correctly.')
   }
 }).catch(err => logger.error({ err }, 'Escrow setup validation failed'))
+
+// Validate DocumentRegistry/KYCVerifier contract wiring — a mismatched
+// DOCUMENT_REGISTRY_CONTRACT / KYC_VERIFIER_CONTRACT_ADDRESS must fail loudly
+// instead of silently skipping the DigiLocker on-chain write.
+digilockerService.validateSetup().then((valid) => {
+  if (!valid) {
+    logger.warn('⚠️ DigiLocker contract setup validation failed. On-chain document verification may not work correctly.')
+  }
+}).catch(err => logger.error({ err }, 'DigiLocker contract setup validation failed'))
 
 const app = express()
 const server = http.createServer(app)
@@ -506,6 +531,17 @@ app.use('/api/road-conditions', roadConditionRoutes)
 app.use('/api/escorts/wallet', escortWalletRoutes)
 
 // ============================================================================
+// 🆕 WEB3 SUBSYSTEM ROUTES
+// Each router already declares its own full path prefix (e.g. `/zkid/...`,
+// `/swap/...`), so they are mounted on the `/api` base only.
+// ============================================================================
+app.use('/api', zkidRoutes)
+app.use('/api', daoRoutes)
+app.use('/api', mevRoutes)
+app.use('/api', tokenizationRoutes)
+app.use('/api', atomicSwapRoutes)
+
+// ============================================================================
 // WEBHOOK ROUTES
 // ============================================================================
 app.use('/api/webhooks', webhookRoutes)
@@ -516,16 +552,13 @@ app.use('/api/webhooks', webhookRoutes)
 app.use('/api/verify', verificationRoutes)
 app.use('/api/oracle', oracleRoutes)
 app.use('/api/ml', mlRoutes)
-app.use('/api/blockchain', (req, _res, next) => {
-  req.blockchainMetrics = blockchainMetrics;
-  req.escalationHandler = escalationHandler;
-  next();
-}, blockchainMonitoringRoutes)
 
 // ============================================================================
 // 🆕 BLOCKCHAIN MONITORING ROUTES
 // Attach the monitoring services and service-role client per request so the
 // handlers never fall back to the anon-key client (RLS would hide all rows).
+// NOTE: /api/blockchain must be mounted exactly once — a duplicate mount
+// registered earlier shadows this one and leaves req.supabase undefined.
 // ============================================================================
 app.use('/api/blockchain', (req, _res, next) => {
   req.blockchainMetrics = blockchainMetrics
@@ -533,6 +566,14 @@ app.use('/api/blockchain', (req, _res, next) => {
   req.supabase = supabaseAdmin
   next()
 }, blockchainMonitoringRoutes)
+
+// ============================================================================
+// 🆕 INTERNAL B2B ROUTES (n8n circuit breaker workflow)
+// Auth-gated internal endpoints consumed by automation/n8n workflows:
+//   GET  /api/internal/escrow-velocity
+//   POST /api/internal/pause-escrow
+// ============================================================================
+app.use('/api/internal', requireApiKey, internalRoutes)
 
 // 🆕 Oracle Health Check Endpoint
 app.get('/api/oracle/health', (req, res) => {
@@ -714,6 +755,7 @@ server.listen(PORT, () => {
   startStaleOrderWorker(escrowReconciliationOrderRepository)
   startDocumentExpiryWorker()
   startWithdrawalSettlementWorker()
+  startOutboxRelayWorker()
 
   // Register worker states for health aggregation
   globalThis.__truxify_workers = {
@@ -736,7 +778,7 @@ const SHUTDOWN_TIMEOUT_MS = 10_000
 /** @type {boolean} */
 let shuttingDown = false
 
-async function shutdown (signal) {
+async function shutdown(signal) {
   // Guard against recursive shutdown calls (e.g. an error inside shutdown
   // triggering uncaughtException while we're already shutting down).
   if (shuttingDown) {
@@ -755,6 +797,7 @@ async function shutdown (signal) {
   stopDlqWorker()
   stopDocumentExpiryWorker()
   stopWithdrawalSettlementWorker()
+  stopOutboxRelayWorker()
   fraudDetection.destroy()
   CacheManager.shutdown()
 

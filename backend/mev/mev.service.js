@@ -2,6 +2,25 @@ import { ethers } from 'ethers';
 import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+import { mevRelayer } from './flashbots_relayer.js';
+
+/**
+ * Derives the exact 32-byte preimage that is revealed on-chain.
+ *
+ * releaseDepositPrivate re-hashes the revealed bytes32 as
+ * `keccak256(abi.encodePacked(bytes32))`, so the secretHash committed via
+ * createProtectedDeposit must be `keccak256(preimage)` for exactly those 32
+ * bytes. Hashing the caller-supplied secret down to a fixed 32-byte value keeps
+ * creation and release consistent for secrets of any length/content (a plain
+ * string passed straight into the bytes32 slot would be zero-padded on-chain,
+ * producing a digest that can never match the commitment).
+ */
+export function toPreimageBytes32(secret) {
+    if (typeof secret === 'string' && secret.startsWith('0x') && secret.length === 66) {
+        return secret;
+    }
+    return ethers.keccak256(ethers.toUtf8Bytes(String(secret)));
+}
 
 class MEVService {
     constructor() {
@@ -36,11 +55,11 @@ class MEVService {
 
     async createCommitment(secret, userId) {
         try {
-            // Hash secret (the exact bytes revealed at release time, so the
-            // on-chain keccak(preimage) == secretHash check can pass)
-            const secretHash = ethers.keccak256(
-                ethers.toUtf8Bytes(secret)
-            );
+            // Hash the fixed 32-byte preimage revealed at release time, so the
+            // on-chain keccak256(abi.encodePacked(preimage)) == secretHash check
+            // can pass.
+            const preimage = toPreimageBytes32(secret);
+            const secretHash = ethers.keccak256(preimage);
             
             // Store commitment. The contract does not expose a commitment
             // function; the secretHash is embedded in the deposit via
@@ -70,10 +89,9 @@ class MEVService {
             // Create commitment first
             const commitment = await this.createCommitment(secret, userId);
             
-            // Hash secret for escrow (same bytes as release reveals: plain secret)
-            const secretHash = ethers.keccak256(
-                ethers.toUtf8Bytes(secret)
-            );
+            // Same preimage bytes the release reveals; must match the digest
+            // committed on-chain by createProtectedDeposit.
+            const secretHash = ethers.keccak256(toPreimageBytes32(secret));
             
             // Create MEV-protected deposit. The contract exposes
             // createProtectedDeposit(address payable driver, bytes32 secretHash);
@@ -133,19 +151,28 @@ class MEVService {
 
     async releaseEscrow(escrowId, secret) {
         try {
-            const tx = await this.escrow.releaseDepositPrivate(
-                escrowId,
-                secret,
-                { gasLimit: 150000 }
+            const blockNumber = await this.provider.getBlockNumber();
+            const targetBlock = blockNumber + 1;
+            
+            const bundle = await mevRelayer.assemblePrivateBundle(
+                this.escrowAddress,
+                this.escrowABI,
+                'releaseDepositPrivate',
+                [escrowId, secret],
+                targetBlock
             );
-            const receipt = await tx.wait();
             
-            await this.updateEscrowStatus(escrowId, 'released', receipt.hash);
+            const response = await mevRelayer.sendPrivateBundle(bundle);
             
-            logger.info(`✅ Escrow ${escrowId} released with MEV protection`);
+            const txHash = bundle.signedBundle[0] ? ethers.Transaction.from(bundle.signedBundle[0]).hash : '0x';
+            
+            await this.updateEscrowStatus(escrowId, 'released', txHash);
+            
+            logger.info(`✅ Escrow ${escrowId} released with MEV protection (Flashbots Bundle: ${response.bundleHash})`);
             return {
                 success: true,
-                txHash: receipt.hash
+                txHash,
+                bundleHash: response.bundleHash
             };
         } catch (error) {
             logger.error('Escrow release failed:', error);
@@ -153,58 +180,6 @@ class MEVService {
         }
     }
 
-    // ============ Flashbots Integration ============
-
-    async submitFlashbotsBundle(escrowId, transactions) {
-        try {
-            // Sign transactions
-            const signedTxs = await this.signTransactions(transactions);
-            
-            // Get current block number
-            const blockNumber = await this.provider.getBlockNumber();
-            const targetBlock = blockNumber + 1;
-            
-            // Submit to Flashbots
-            const response = await axios.post(
-                `${this.flashbotsEndpoint}/eth/v1/bundle`,
-                {
-                    jsonrpc: "2.0",
-                    method: "eth_sendBundle",
-                    params: [{
-                        txs: signedTxs,
-                        blockNumber: `0x${targetBlock.toString(16)}`
-                    }],
-                    id: 1
-                }
-            );
-            
-            // Store bundle
-            await this.storeBundle({
-                escrowId,
-                bundleId: response.data.result,
-                blockNumber: targetBlock
-            });
-            
-            logger.info(`✅ Flashbots bundle submitted for escrow ${escrowId}`);
-            return {
-                success: true,
-                bundleId: response.data.result,
-                blockNumber: targetBlock
-            };
-        } catch (error) {
-            logger.error('Flashbots bundle submission failed:', error);
-            throw error;
-        }
-    }
-
-    async signTransactions(transactions) {
-        const signedTxs = [];
-        for (const tx of transactions) {
-            const signedTx = await this.wallet.signTransaction(tx);
-            signedTxs.push(signedTx);
-        }
-        return signedTxs;
-    }
 
     // ============ MEV Protection Level ============
 
@@ -319,7 +294,7 @@ class MEVService {
 
         return {
             totalEscrows: escrows?.length || 0,
-            protectedEscrows: escrows?.filter(e => e.status === 'protected').length || 0,
+            protectedEscrows: escrows?.filter(e => e.status === 'pending').length || 0,
             releasedEscrows: escrows?.filter(e => e.status === 'released').length || 0,
             totalBundles: bundles?.length || 0,
             timestamp: new Date().toISOString()

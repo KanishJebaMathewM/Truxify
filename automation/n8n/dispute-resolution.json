@@ -18,26 +18,37 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{$env.BACKEND_API_URL}}/api/payments/freeze",
-        "sendBody": true,
-        "bodyParametersUi": {
-          "parameter": [
-            {
-              "name": "bookingId",
-              "value": "={{$json.body.bookingId}}"
-            }
-          ]
-        },
+        "method": "GET",
+        "url": "={{$env.BACKEND_API_URL}}/api/payments/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}/status",
         "options": {}
       },
       "id": "4e78b8a5-d8ca-43bc-9cb7-78fe7ea9b10c",
-      "name": "Freeze Payment Contract",
+      "name": "Check Escrow Status",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
         450,
         300
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escrow Alert: Freeze Payment Contract Failed for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+        "textBody": "=CRITICAL: The Freeze Payment Contract step failed after 3 retries for Booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Disputed funds were not frozen on-chain. Immediate manual intervention required.",
+        "options": {}
+      },
+      "id": "alert-freeze-failed",
+      "name": "Alert Admin — Escrow Freeze Failed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        450,
+        500
       ]
     },
     {
@@ -79,29 +90,12 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{$env.BACKEND_API_URL}}/api/support/generate-dispute-pdf",
-        "sendBody": true,
-        "bodyParametersUi": {
-          "parameter": [
-            {
-              "name": "bookingId",
-              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
-            },
-            {
-              "name": "gpsTrail",
-              "value": "={{$node[\"Query MongoDB GPS Trail\"].json}}"
-            },
-            {
-              "name": "otpLogs",
-              "value": "={{$node[\"Query Supabase OTP Logs\"].json}}"
-            }
-          ]
-        },
+        "method": "GET",
+        "url": "={{$env.BACKEND_API_URL}}/api/orders/{{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}/timeline",
         "options": {}
       },
       "id": "f512c1b1-21c2-4632-bd88-12cd2a8aefaa",
-      "name": "Package Dispute PDF",
+      "name": "Fetch Order Timeline",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
@@ -112,28 +106,28 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$env.BACKEND_API_URL}}/api/support/notify-dispute",
+        "url": "={{$env.BACKEND_API_URL}}/api/support/tickets",
         "sendBody": true,
         "bodyParametersUi": {
           "parameter": [
             {
-              "name": "bookingId",
-              "value": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}"
-            },
-            {
-              "name": "title",
+              "name": "subject",
               "value": "Dispute Flagged: Delivery Unconfirmed"
             },
             {
-              "name": "body",
-              "value": "A dispute has been initiated for booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}."
+              "name": "category",
+              "value": "payment"
+            },
+            {
+              "name": "description",
+              "value": "A dispute has been initiated for booking {{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}. Evidence gathered from the GPS trail and OTP logs."
             }
           ]
         },
         "options": {}
       },
       "id": "76bcca3e-51c3-4d44-be12-2cde2a5bdeee",
-      "name": "Notify Both Parties",
+      "name": "Open Support Ticket",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
@@ -174,7 +168,7 @@
         "conditions": {
           "string": [
             {
-              "value1": "={{$json.status}}",
+              "value1": "={{$json.order.status}}",
               "value2": "disputed"
             }
           ]
@@ -192,15 +186,16 @@
     {
       "parameters": {
         "operation": "insert",
-        "table": "arbitration_records",
+        "table": "order_timeline",
         "data": {
-          "booking_id": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
-          "status": "pending",
-          "details": "Escalated after 24h of inactivity"
+          "order_display_id": "={{$node[\"Dispute Webhook Trigger\"].json.body.bookingId}}",
+          "milestone": "Escalated to Arbitration",
+          "completed": false,
+          "sort_order": 100
         }
       },
       "id": "dc12cbb5-a87f-47bc-9b2f-9811abecdd33",
-      "name": "Create Arbitration Record",
+      "name": "Record Escalation Event",
       "type": "n8n-nodes-base.supabase",
       "typeVersion": 1,
       "position": [
@@ -241,30 +236,37 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{$env.BACKEND_API_URL}}/api/payments/release",
-        "sendBody": true,
-        "bodyParametersUi": {
-          "parameter": [
-            {
-              "name": "bookingId",
-              "value": "={{$json.body.bookingId}}"
-            },
-            {
-              "name": "recipient",
-              "value": "={{$json.body.recipient}}"
-            }
-          ]
-        },
+        "method": "GET",
+        "url": "={{$env.BACKEND_API_URL}}/api/payments/{{$json.body.bookingId}}/status",
         "options": {}
       },
       "id": "cc897db2-6d2c-47bc-ad78-87efcdbc5a8f",
-      "name": "Release Escrow Payment",
+      "name": "Verify Escrow Release",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
       "position": [
         500,
         600
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "toEmail": "admin@truxify.com",
+        "subject": "=Escrow Alert: Release Escrow Payment Failed for Booking {{$json.body.bookingId}}",
+        "textBody": "=CRITICAL: The Release Escrow Payment step failed after 3 retries for Booking {{$json.body.bookingId}}. Escrow payment was not released on-chain. Immediate manual intervention required.",
+        "options": {}
+      },
+      "id": "alert-release-failed",
+      "name": "Alert Admin — Escrow Release Failed",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 1,
+      "position": [
+        500,
+        800
       ]
     }
   ],
@@ -273,14 +275,14 @@
       "main": [
         [
           {
-            "node": "Freeze Payment Contract",
+            "node": "Check Escrow Status",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Freeze Payment Contract": {
+    "Check Escrow Status": {
       "main": [
         [
           {
@@ -293,6 +295,13 @@
             "type": "main",
             "index": 0
           }
+        ],
+        [
+          {
+            "node": "Alert Admin — Escrow Freeze Failed",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
@@ -300,7 +309,7 @@
       "main": [
         [
           {
-            "node": "Package Dispute PDF",
+            "node": "Fetch Order Timeline",
             "type": "main",
             "index": 0
           }
@@ -311,25 +320,25 @@
       "main": [
         [
           {
-            "node": "Package Dispute PDF",
+            "node": "Fetch Order Timeline",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Package Dispute PDF": {
+    "Fetch Order Timeline": {
       "main": [
         [
           {
-            "node": "Notify Both Parties",
+            "node": "Open Support Ticket",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Notify Both Parties": {
+    "Open Support Ticket": {
       "main": [
         [
           {
@@ -366,7 +375,7 @@
       "main": [
         [
           {
-            "node": "Create Arbitration Record",
+            "node": "Record Escalation Event",
             "type": "main",
             "index": 0
           },
@@ -382,7 +391,19 @@
       "main": [
         [
           {
-            "node": "Release Escrow Payment",
+            "node": "Verify Escrow Release",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release Escrow Payment": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Alert Admin — Escrow Release Failed",
             "type": "main",
             "index": 0
           }

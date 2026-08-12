@@ -16,7 +16,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
   },
 }));
 
-const { registerDeviceToken } = await import('../../src/controllers/deviceController.js');
+const { registerDeviceToken, unregisterDeviceToken } = await import('../../src/controllers/deviceController.js');
 
 function makeResponse() {
   return {
@@ -100,5 +100,51 @@ describe('registerDeviceToken', () => {
       }),
     );
     expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('unregisterDeviceToken', () => {
+  beforeEach(() => {
+    supabaseMock.reset();
+  });
+
+  it('returns 404 when the device token is not registered for the user', async () => {
+    const req = {
+      user: { id: 'user-1' },
+      body: { fcmToken: 'valid_token_12345' },
+    };
+    const res = makeResponse();
+    const next = vi.fn();
+
+    await unregisterDeviceToken(req, res, next);
+
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith({
+      success: false,
+      error: 'Device token not found',
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('deletes the token and returns success when a matching row exists', async () => {
+    supabaseMock.store.user_devices = [
+      { id: 'row-1', user_id: 'user-1', fcm_token: 'valid_token_12345' },
+    ];
+
+    const req = {
+      user: { id: 'user-1' },
+      body: { fcmToken: 'valid_token_12345' },
+    };
+    const res = makeResponse();
+    const next = vi.fn();
+
+    await unregisterDeviceToken(req, res, next);
+
+    expect(res.status).not.toHaveBeenCalledWith(404);
+    expect(res.json).toHaveBeenCalledWith({
+      success: true,
+      message: 'Device token unregistered',
+    });
+    expect(supabaseMock.calls.some((call) => call.table === 'user_devices' && call.mode === 'delete')).toBe(true);
   });
 });

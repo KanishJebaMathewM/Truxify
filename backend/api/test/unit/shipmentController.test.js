@@ -6,6 +6,7 @@ const { dbMock } = vi.hoisted(() => ({
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() { return dbMock.supabase; },
+  createUserClient: () => null,
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({

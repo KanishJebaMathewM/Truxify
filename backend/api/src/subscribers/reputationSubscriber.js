@@ -1,7 +1,7 @@
 import { eventBus } from '../core/events/index.js';
 import { awardReputationPoints } from '../services/reputation.js';
 import { OrderRepository } from '../repositories/orderRepository.js';
-import { supabase } from '../config/db.js';
+import { supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { ContextPropagator } from '../core/telemetry/ContextPropagator.js';
 import spanFactory from '../core/telemetry/SpanFactory.js';
@@ -38,7 +38,7 @@ eventBus.subscribe('rating:submitted', async (payload) => {
         
         // Attempt to log failure in DB for retry worker
         try {
-          const orderRepository = new OrderRepository(supabase);
+          const orderRepository = new OrderRepository(supabaseAdmin);
           await orderRepository.insertReputationFailure({
             driver_wallet: driverWallet,
             stars,

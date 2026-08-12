@@ -114,8 +114,13 @@ std::vector<float> parse_query_vector(const std::string& body) {
     if (pos == std::string::npos) return vec;
     pos++;
     while (pos < body.size()) {
+        // Stop the skip-scan at ']' — without this check it treats the
+        // closing bracket as just another non-digit character and keeps
+        // scanning past it, picking up any later numeric field in the body
+        // (e.g. "k": 5) as an extra vector element.
         while (pos < body.size() &&
-               !(std::isdigit(static_cast<unsigned char>(body[pos])) || body[pos] == '-')) {
+               !(std::isdigit(static_cast<unsigned char>(body[pos])) || body[pos] == '-') &&
+               body[pos] != ']') {
             pos++;
         }
         if (pos >= body.size() || body[pos] == ']') break;

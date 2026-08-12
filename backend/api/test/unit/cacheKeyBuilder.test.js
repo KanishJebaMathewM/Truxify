@@ -78,6 +78,12 @@ describe('CacheKeyBuilder', () => {
       expect(key).toBe('order:v2:order-42:items');
     });
 
+    it('combines custom prefix, version, and subKey', async () => {
+      CacheNamespace.register('custom', { prefix: 'c:v2' });
+      const key = await CacheKeyBuilder.buildVersioned('custom', 'entity-1', 'sub', 5);
+      expect(key).toBe('c:v2:v5:entity-1:sub');
+    });
+
     it('defaults to v1 for unknown namespace', async () => {
       const key = await CacheKeyBuilder.buildVersioned('unknown', 'id-1');
       expect(key).toBe('unknown:v1:id-1');

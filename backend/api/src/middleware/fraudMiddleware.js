@@ -46,10 +46,11 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
       });
 
       if (risk && risk.riskScore > RISK_REVIEW_THRESHOLD) {
-        // Flag for review
+        // Flag for review. The reason carries the request id so review
+        // entries can be traced back to a specific request in the logs.
         await fraudDetection.addToReviewQueue(
           userId,
-          `Suspicious activity on ${req.path}`,
+          `Suspicious activity on ${req.path} (requestId: ${req.requestId || req.id || 'unknown'})`,
           risk.riskScore
         );
 
@@ -70,7 +71,7 @@ export const fraudDetectionMiddleware = async (req, res, next) => {
 
     next();
   } catch (error) {
-    logger.error('Fraud middleware error — failing closed:', error);
+    logger.error({ requestId: req.requestId, err: error }, 'Fraud middleware error — failing closed');
     return res.status(503).json({
       error: 'Fraud detection service is temporarily unavailable. Please retry.',
     });

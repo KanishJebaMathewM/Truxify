@@ -440,3 +440,41 @@ func TestHandleVoteResetsElectionTimer(t *testing.T) {
 	}
 }
 
+func TestLeaderWithoutQuorumRejectsCommit(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	// Node 1 is leader but Node 2 is unreachable (port 9999 is blocked/dead)
+	node := NewRaftNode("node1", []string{"node2"}, []string{"http://localhost:9999"})
+	
+	// Transition manually to leader (simulating startElection election win)
+	node.mu.Lock()
+	node.Role = Leader
+	node.CurrentTerm = 1
+	node.nextIndex = map[string]uint64{"http://localhost:9999": 1}
+	node.matchIndex = map[string]uint64{"http://localhost:9999": 0}
+	node.peerLive = map[string]bool{"http://localhost:9999": false}
+	node.mu.Unlock()
+
+	// Try to commit order command
+	reqPayload := `{"order_id": "ord-1", "command": "CREATED"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload))
+	w := httptest.NewRecorder()
+
+	node.HandleCommitOrder(w, req)
+
+	// Since there is no quorum validation, it should return 503 Service Unavailable (no quorum)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503 (no quorum), got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	// Verify no entry was appended to the log
+	node.mu.Lock()
+	logLen := len(node.Log)
+	node.mu.Unlock()
+	if logLen != 0 {
+		t.Errorf("expected log to remain empty, but got length %d", logLen)
+	}
+}
+
+

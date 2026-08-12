@@ -131,6 +131,7 @@ type RaftNode struct {
 	heartbeatInterval  time.Duration
 	nextIndex          map[string]uint64
 	matchIndex         map[string]uint64
+	peerLive           map[string]bool
 	httpClient         *http.Client
 }
 
@@ -160,6 +161,7 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		electionTimeout:    time.Duration(electionMinMs) * time.Millisecond,
 		nextIndex:          make(map[string]uint64),
 		matchIndex:         make(map[string]uint64),
+		peerLive:           make(map[string]bool),
 		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
 	}
 }
@@ -248,14 +250,13 @@ func (rn *RaftNode) startElection() {
 		// follower's log matches its own and works backward from the end.
 		rn.nextIndex = make(map[string]uint64, len(rn.PeerURLs))
 		rn.matchIndex = make(map[string]uint64, len(rn.PeerURLs))
+		rn.peerLive = make(map[string]bool, len(rn.PeerURLs))
 		for _, url := range rn.PeerURLs {
 			rn.nextIndex[url] = rn.lastLogIndex() + 1
-			// Optimistically assume each follower has replicated the leader's
-			// full log (consistent with nextIndex). This keeps the admission
-			// gate passable immediately after election when all followers are
-			// up, instead of until the first heartbeat succeeds; actual
-			// replication is still required to commit new entries.
-			rn.matchIndex[url] = rn.lastLogIndex()
+			// Seed matchIndex to 0 on election per Raft spec; let sendHeartbeats'
+			// existing monotonic update learn the true match index.
+			rn.matchIndex[url] = 0
+			rn.peerLive[url] = false
 		}
 		log.Printf("🌐 node [%s] elected leader for term %d", rn.NodeID, rn.CurrentTerm)
 	}
@@ -409,6 +410,7 @@ func (rn *RaftNode) sendHeartbeats() {
 			return
 		}
 		if res.resp.Success {
+			rn.peerLive[res.url] = true
 			// Follower accepted the prefix; monotonically record highest matching index.
 			newMatch := res.request.PrevLogIndex + uint64(len(res.request.Entries))
 			if newMatch > rn.matchIndex[res.url] {
@@ -467,8 +469,8 @@ func (rn *RaftNode) advanceCommitIndexLocked() {
 // heartbeat completes.
 func (rn *RaftNode) leaderHasQuorumLocked() bool {
 	acked := 1 // self
-	for _, m := range rn.matchIndex {
-		if m >= rn.CommitIndex {
+	for url, m := range rn.matchIndex {
+		if rn.peerLive[url] && m >= rn.CommitIndex {
 			acked++
 		}
 	}

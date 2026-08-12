@@ -169,10 +169,11 @@ import {
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
 import { expireDeliveryOtps, sendPushNotification } from '../services/notificationService.js';
+import { invalidateDriverOrderCache } from '../sockets/tracker.js';
 import { DomainError } from '../services/order/domainError.js';
 import { predictDemand, predictPrice, matchEnRouteLoads } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
-import { acquireLock, releaseLock } from '../lib/redisLock.js';
+import { acquireLock, releaseLock, LockAcquisitionError } from '../lib/redisLock.js';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
 import {
@@ -635,12 +636,18 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
   const { txHash } = req.body;
 
   const lockKey = `escrow_lock:${orderId}`;
-  const lockValue = await acquireLock(lockKey, 120000);
-  if (!lockValue) {
-    return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
-  }
+  // lockValue holds the owner UUID returned by acquireLock. It is passed to
+  // releaseLock in `finally` so only the holder can delete the lock.
+  let lockValue = null;
 
   try {
+    // acquireLock throws LockAcquisitionError when Redis is unavailable and
+    // returns null when the lock is already held by another request.
+    lockValue = await acquireLock(lockKey, 120000);
+    if (!lockValue) {
+      return res.status(409).json({ error: 'Another deposit confirmation is in progress for this order. Please try again.' });
+    }
+
     const order = await orderValidationService.findOrderByIdOrDisplayId(orderId, 'id, status, order_display_id, customer_id, escrow_booking_id, escrow_status, escrow_amount_wei, escrow_driver_wallet, pending_bid_acceptance, total_amount');
     orderValidationService.assertOrderFound(order);
     orderValidationService.assertCustomerOwnership(order, req.user.id);
@@ -728,6 +735,10 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
           details: acceptErr.message,
         });
       }
+      // Driver assignment confirmed — drop any stale cached mapping so the
+      // tracker resolves the newly assigned driver on the next ping
+      // (issue #10676).
+      await invalidateDriverOrderCache(pending.driver_id);
       sendPushNotification(
         pending.driver_id,
         'Bid Accepted!',
@@ -788,13 +799,20 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
     await finalizeAcceptance();
     res.json({ message: 'Escrow deposit confirmed', txHash: result.txHash });
   } catch (err) {
+    if (err instanceof LockAcquisitionError) {
+      // Redis is down — do NOT proceed with the deposit mutation.
+      logger.error('[confirm-deposit] Redis unavailable — refusing deposit confirmation:', err.message);
+      return res.status(503).json({ error: 'Payment service temporarily unavailable. Please retry in a moment.' });
+    }
     if (err instanceof DomainError) {
       return res.status(err.status).json(err.payload);
     }
     logger.error('[confirm-deposit] Exception:', err.message);
     res.status(500).json({ error: 'Internal Server Error' });
   } finally {
-    await releaseLock(lockKey, lockValue);
+    if (lockValue) {
+      await releaseLock(lockKey, lockValue);
+    }
   }
 });
 

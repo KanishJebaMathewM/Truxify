@@ -13,7 +13,9 @@
  *   - calculateRiskLevel: mixed severity = max severity
  *   - shouldBlockTransaction: LOW risk = false
  *   - shouldBlockTransaction: MEDIUM risk = false
- *   - shouldBlockTransaction: HIGH risk = true
+ *   - shouldBlockTransaction: HIGH risk = false (alert only, not blocked)
+ *   - shouldBlockTransaction: LARGE_WITHDRAWAL type = true
+ *   - shouldBlockTransaction: CRITICAL severity = true
  *
  * Run with:  npm run test:unit -- test/unit/anomalyDetectionService.test.js
  */
@@ -148,6 +150,16 @@ describe('AnomalyDetectionService', () => {
       const riskLevel = service.calculateRiskLevel(anomalies);
       expect(riskLevel).toBe(ANOMALY_SEVERITY.CRITICAL);
     });
+
+    it('returns the maximum severity when anomalies have mixed severities', () => {
+      const anomalies = [
+        { type: 'UNUSUAL_TIME', severity: 'LOW' },
+        { type: 'LARGE_WITHDRAWAL', severity: 'HIGH' },
+        { type: 'CRITICAL_ALERT', severity: 'CRITICAL' },
+      ];
+      const riskLevel = service.calculateRiskLevel(anomalies);
+      expect(riskLevel).toBe(ANOMALY_SEVERITY.CRITICAL);
+    });
   });
 
   describe('shouldBlockTransaction', () => {
@@ -156,16 +168,25 @@ describe('AnomalyDetectionService', () => {
       expect(result).toBe(false);
     });
 
-    it('returns false for MEDIUM severity anomalies', () => {
-      const anomalies = [{ type: 'UNUSUAL_TIME', severity: 'MEDIUM' }];
-      const result = service.shouldBlockTransaction(anomalies);
-      expect(result).toBe(false);
+    it('returns false for LOW and MEDIUM severity anomalies', () => {
+      const lowResult = service.shouldBlockTransaction([{ type: 'UNUSUAL_TIME', severity: 'LOW' }]);
+      expect(lowResult).toBe(false);
+
+      const mediumResult = service.shouldBlockTransaction([{ type: 'UNUSUAL_TIME', severity: 'MEDIUM' }]);
+      expect(mediumResult).toBe(false);
     });
 
     it('returns true when there is a LARGE_WITHDRAWAL anomaly type', () => {
       const anomalies = [{ type: 'LARGE_WITHDRAWAL', severity: 'LOW' }];
       const result = service.shouldBlockTransaction(anomalies);
       expect(result).toBe(true);
+    });
+
+    it('returns false for HIGH severity anomalies (security alert triggered but transaction not blocked)', () => {
+      // shouldBlockTransaction only blocks CRITICAL severity or LARGE_WITHDRAWAL type.
+      // HIGH severity triggers an alert but does not block the transaction.
+      const result = service.shouldBlockTransaction([{ type: 'SUSPICIOUS_PATTERN', severity: 'HIGH' }]);
+      expect(result).toBe(false);
     });
 
     it('returns true when there is a CRITICAL severity anomaly', () => {
@@ -201,6 +222,9 @@ describe('AnomalyDetectionService', () => {
 
       expect(avg).toBe(1500);
       expect(supabase.from).toHaveBeenCalledWith('wallet_transactions');
+      expect(builder.select).toHaveBeenCalledWith('amount');
+      expect(builder.eq).toHaveBeenCalledWith('driver_id', 'user-1');
+      expect(builder.eq).toHaveBeenCalledWith('txn_type', 'withdrawal');
       expect(builder.order).toHaveBeenCalledWith('created_at', { ascending: false });
       expect(builder.limit).toHaveBeenCalledWith(1000);
     });

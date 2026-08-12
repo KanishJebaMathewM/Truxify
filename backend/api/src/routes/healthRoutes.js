@@ -128,10 +128,10 @@ function checkFirebase() {
 async function checkEscrow() {
   try {
     const result = await checkEscrowHealth();
-    return result.status;
+    return result?.status ?? 'unavailable';
   } catch (err) {
-    logger.error('[Health] checkEscrow failed:', err?.message || err);
-    return 'failed';
+    logger.error('[health] Escrow health check failed:', err.message);
+    return 'unavailable';
   }
 }
 

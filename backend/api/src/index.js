@@ -7,6 +7,7 @@ import http from 'http'
 import dotenv from 'dotenv'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -24,12 +25,14 @@ import cookieSecurityValidator from './middleware/cookieSecurityValidator.js';
 import maintenancePhotoRoutes from './routes/maintenancePhotoRoutes.js'
 
 import { closeDbConnections, waitForMongoDb, validateConfig, redisClient, supabaseAdmin } from './config/db.js'
+import { validateWimConfig } from './config/wim.js'
 import { orderRepository } from './core/container.js'
 import { OrderRepository } from './repositories/orderRepository.js'
 import CacheManager from './cache/CacheManager.js'
 import { closeWebSocketServer, initWebSocketServer, __testing as wsTesting } from './sockets/tracker.js'
 import { initLocationServer, closeLocationServer } from './sockets/locationServer.js'
 import { startEscrowReleaseReconciliation, stopEscrowReleaseReconciliation } from './services/escrowReleaseReconciliation.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import { validateEscrowSetup } from './services/escrow.js'
 import digilockerService from './services/digilockerService.js'
 
@@ -160,14 +163,19 @@ import {
   stopDlqWorker,
 } from './workers/dlqWorker.js'
 import { startStaleOrderWorker } from './workers/staleOrderWorker.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 import BlockchainMetrics from './services/blockchain/blockchainMetrics.js'
 import EscalationHandler from './services/blockchain/escalationHandler.js'
 import {
   startWithdrawalSettlementWorker,
   stopWithdrawalSettlementWorker
 } from './workers/withdrawalSettlementWorker.js'
-import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
+import {
+  startOutboxRelayWorker,
+  stopOutboxRelayWorker,
+} from './workers/outboxRelayWorker.js'
 import './subscribers/reputationSubscriber.js'
+import { startOutboxRelayWorker, stopOutboxRelayWorker } from './workers/outboxRelayWorker.js'
 
 // Configuration load from root folder is handled in db.js
 
@@ -236,6 +244,20 @@ if (!process.env.WEBHOOK_SECRET) {
   } else {
     logger.warn('⚠️ WEBHOOK_SECRET is not set. Webhook requests will be rejected (fail-closed) until it is configured.')
   }
+}
+
+// ============================================================================
+// 🆕 WIM BYPASS VALIDATION
+// ============================================================================
+// WIM bypass credentials are HMAC-signed with a server secret. Without a
+// properly configured secret the process must fail fast rather than ever
+// issue an unsigned or weakly-signed bypass credential.
+try {
+  validateWimConfig();
+  logger.info('✅ WIM bypass signing configuration is valid.')
+} catch (err) {
+  logger.fatal(err.message)
+  process.exit(1)
 }
 
 // ============================================================================
@@ -466,6 +488,9 @@ app.use(requestLogger)
 app.use(hppProtection)
 app.use(suspiciousRequests)
 
+// Sanitize all responses to prevent response-header injection before routes run.
+app.use(responseSanitizer)
+
 // Enforce a known request content-type on mutating requests (POST/PUT/PATCH).
 // `requireJsonContent` only rejects unrecognized media types; the three
 // allowed types match the parsers registered above.
@@ -692,8 +717,6 @@ setupSwagger(app)
 
 // Root route
 app.get('/', getRoot)
-
-app.use(responseSanitizer)
 
 // Handling 404 Route Not Found
 app.use(notFound)

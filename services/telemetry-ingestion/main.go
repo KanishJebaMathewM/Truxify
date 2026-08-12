@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -92,6 +93,27 @@ var operatorRoles = map[string]bool{
 	"admin":      true,
 	"operator":   true,
 	"dispatcher": true,
+}
+
+// maxRequestBodyBytes caps request bodies decoded by this service (1 MiB) so
+// an oversized or streamed body cannot be buffered into memory.
+const maxRequestBodyBytes = 1 << 20
+
+// decodeJSONBody decodes r.Body into v with a 1 MiB cap. It writes a 413 and
+// returns false when the body exceeds the cap; the net/http server drains and
+// closes the connection afterwards so it is not left in an unsafe state.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return false
+		}
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return false
+	}
+	return true
 }
 
 // Calculate Haversine distance in meters between two lat/lng points
@@ -490,8 +512,7 @@ func handlePing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var ping TelemetryPing
-	if err := json.NewDecoder(r.Body).Decode(&ping); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid telemetry payload: %v", err), http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &ping) {
 		return
 	}
 
@@ -546,8 +567,7 @@ func handleGeofence(w http.ResponseWriter, r *http.Request) {
 		RadiusM   float64 `json:"radius_meters"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 

@@ -27,6 +27,21 @@ from functools import partial
 logger = logging.getLogger(__name__)
 Base = declarative_base()
 
+
+def eta_seconds_from_speed(route_distance_m: float, predicted_speed_mps: float) -> Optional[float]:
+    """Convert a predicted traffic speed (m/s) into a travel time (seconds).
+
+    The LSTM is trained on traffic_speed (m/s) (see train_model), so its raw
+    output is a speed, not a duration. eta_seconds = distance_m / speed_mps.
+    Returns None when either input is missing or non-positive so callers can
+    fall back to the routing engine's own duration estimate.
+    """
+    if not route_distance_m or route_distance_m <= 0:
+        return None
+    if not predicted_speed_mps or predicted_speed_mps <= 0:
+        return None
+    return route_distance_m / predicted_speed_mps
+
 class TrafficData(Base):
     __tablename__ = 'traffic_data'
     
@@ -305,19 +320,21 @@ class TrafficPipeline:
                     datetime.now().weekday()
                 ]])
                 
-                # Predict traffic speed (km/h) with the LSTM.
-                predicted_speed_kmh = self.predict_eta(features)
+                # The LSTM predicts traffic speed in m/s (it is trained on
+                # traffic_speed, see _fetch_osrm_data and train_model), so its
+                # output is a speed, not a duration. Convert the predicted
+                # speed into an ETA in seconds using the route distance so the
+                # value is meaningful as a travel time.
+                predicted_speed_mps = self.predict_eta(features)
 
-                if predicted_speed_kmh is not None:
-                    # The model predicts speed, not duration. Convert the
-                    # predicted speed into an ETA in seconds using the route
-                    # distance so the value is meaningful as a travel time.
+                if predicted_speed_mps is not None:
                     osrm_data = await self._fetch_osrm_data(current_location, destination)
                     route_distance_m = float(osrm_data.get('distance') or 0)
-                    if route_distance_m > 0 and predicted_speed_kmh > 0:
-                        # Convert speed from km/h to m/s, then divide distance_m by speed_mps to get seconds.
-                        # Incorrect: (route_distance_m / 1000.0) / (speed_kmh / 3.6) mixes km with m/s, off by 1000x.
-                        eta_seconds = route_distance_m / (predicted_speed_kmh / 3.6)
+                    if route_distance_m > 0 and predicted_speed_mps > 0:
+                        # Distance (m) / speed (m/s) yields seconds. The speed
+                        # is already m/s — do NOT divide by 3.6 as if it were
+                        # km/h, that inflated the ETA by 3.6x.
+                        eta_seconds = route_distance_m / predicted_speed_mps
                     else:
                         # Fall back to the routing engine's duration estimate.
                         eta_seconds = float(osrm_data.get('duration') or 0)

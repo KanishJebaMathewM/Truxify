@@ -1,4 +1,5 @@
 import logging
+import os
 import numpy as np
 from typing import List, Optional
 from sklearn.ensemble import GradientBoostingRegressor
@@ -6,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from .base import save_model, load_model, model_exists
+from .base import save_model, load_model, model_exists, get_model_meta, restore_previous_model
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,41 @@ FEATURE_NAMES = [
 ]
 
 
+# A newly trained model is only promoted to production if its MAE beats the
+# current production MAE by at least this fraction. A small positive
+# tolerance (rather than requiring strict improvement) avoids flapping
+# between near-identical models on noisy synthetic data.
+#
+# Configurable via the PROMOTION_MAE_IMPROVEMENT_THRESHOLD env var so the
+# gate can be tuned per-environment without a code change; falls back to
+# the 0.01 default if unset, unparsable, or negative.
+DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD = 0.01
+
+
+def _load_promotion_mae_improvement_threshold() -> float:
+    raw = os.environ.get("PROMOTION_MAE_IMPROVEMENT_THRESHOLD", str(DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD))
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid PROMOTION_MAE_IMPROVEMENT_THRESHOLD=%r; falling back to default %.4f.",
+            raw, DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD,
+        )
+        return DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD
+
+    if value < 0:
+        logger.warning(
+            "PROMOTION_MAE_IMPROVEMENT_THRESHOLD=%s is negative; falling back to default %.4f.",
+            value, DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD,
+        )
+        return DEFAULT_PROMOTION_MAE_IMPROVEMENT_THRESHOLD
+
+    return value
+
+
+PROMOTION_MAE_IMPROVEMENT_THRESHOLD = _load_promotion_mae_improvement_threshold()
+
+
 def train_demand_forecast_model() -> dict:
     global _model_cache
     X, y = generate_synthetic_demand_data()
@@ -95,12 +131,62 @@ def train_demand_forecast_model() -> dict:
         "feature_names": FEATURE_NAMES,
     }
 
-    save_model((model, scaler), MODEL_NAME, metrics)
-    # Invalidate the in-memory cache so the next predict_demand call
-    # loads the newly trained model instead of the stale cached copy
-    reset_model_cache()
-    logger.info("Demand forecast model trained. R2: %.3f, MAE: %.3f", r2, mae)
+    # Gate deployment: only overwrite the production model if the new one is
+    # actually better than what's currently deployed. Without this, every
+    # retraining run silently replaced production regardless of quality,
+    # and the README's "auto-rollback" claim had nothing to roll back to
+    # even if it were wired up correctly.
+    current_meta = get_model_meta(MODEL_NAME)
+    current_mae = (current_meta or {}).get("metrics", {}).get("mae")
+
+    promoted = True
+    reason = "No existing production model; first training run promoted."
+    if current_mae is not None:
+        improvement = (current_mae - mae) / current_mae if current_mae else 0.0
+        if improvement >= PROMOTION_MAE_IMPROVEMENT_THRESHOLD:
+            reason = f"New model MAE {mae:.4f} improved on production MAE {current_mae:.4f} by {improvement:.2%}."
+        else:
+            promoted = False
+            reason = (
+                f"New model MAE {mae:.4f} did not improve on production MAE {current_mae:.4f} "
+                f"by the required {PROMOTION_MAE_IMPROVEMENT_THRESHOLD:.0%} threshold "
+                f"(delta {improvement:.2%}); keeping existing production model."
+            )
+
+    metrics["promoted"] = promoted
+    metrics["promotion_reason"] = reason
+
+    if promoted:
+        save_model((model, scaler), MODEL_NAME, metrics)
+        # Invalidate the in-memory cache so the next predict_demand call
+        # loads the newly trained model instead of the stale cached copy
+        reset_model_cache()
+        logger.info("Demand forecast model trained and PROMOTED. R2: %.3f, MAE: %.3f", r2, mae)
+    else:
+        logger.info("Demand forecast model trained but NOT promoted. %s", reason)
+
     return metrics
+
+
+def rollback_demand_forecast_model() -> dict:
+    """Roll back the demand-forecast model to its previously-promoted version.
+
+    Returns a dict describing whether a rollback actually happened, so the
+    caller (the /train/demand/rollback endpoint, and ultimately the n8n
+    retraining workflow) gets a real, truthful result instead of the old
+    trigger_rollback()-style no-op that only logged and returned a
+    hardcoded-looking payload.
+    """
+    global _model_cache
+    restored = restore_previous_model(MODEL_NAME)
+    if restored:
+        reset_model_cache()
+        meta = get_model_meta(MODEL_NAME) or {}
+        logger.warning("Demand forecast model rolled back to previous version.")
+        return {"rolled_back": True, "metrics": meta.get("metrics", {})}
+
+    logger.warning("Demand forecast rollback requested but no previous version exists.")
+    return {"rolled_back": False, "reason": "No previous version available to roll back to."}
 
 
 def predict_demand(features: List[float]) -> Optional[float]:

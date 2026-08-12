@@ -24,6 +24,7 @@ When importing workflows into your n8n instance, ensure the following environmen
 | `INTERNAL_RELAYER_KEY` | HMAC secret for relayer API calls to backend Express service | `local_relayer_secret` |
 | `ML_API_KEY` | API Key for authenticating against the FastAPI ML Engine | `local_ml_secret` |
 | `ML_ENGINE_URL` | Base URL of the ML service container | `http://ml-engine:8000` |
+| `BACKEND_API_URL` | Base URL of the backend Express API, reachable from the n8n container on the internal Docker network | `http://api:5000` |
 | `N8N_ENCRYPTION_KEY` | Master encryption key for n8n credentials | Configured in `docker-compose.prod.yml` |
 
 ---

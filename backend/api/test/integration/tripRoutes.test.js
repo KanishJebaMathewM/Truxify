@@ -4,10 +4,12 @@ import express from 'express';
 
 const { createSupabaseMock } = await vi.importActual('../helpers/supabaseMock.js');
 const m = createSupabaseMock();
+const createUserClientSpy = vi.fn((token) => m.supabase);
 
 vi.mock('../../src/config/db.js', () => ({
     supabase: m.supabase,
     supabaseAdmin: m.supabase,
+    createUserClient: createUserClientSpy,
     firebaseAdmin: null,
     redisClient: null,
     mongoDb: null,
@@ -185,7 +187,7 @@ describe('Trip Routes', () => {
             expect.objectContaining({
                 event_id: 'event-1',
                 user_id: 'driver-1',
-                trip_id: 'TX-ORDER1',
+                trip_id: 'trip-1',
                 event_type: 'location_update',
                 latitude: 19.076,
                 longitude: 72.8777,
@@ -204,6 +206,19 @@ describe('Trip Routes', () => {
                 event_count: 1,
             })
         );
+    });
+
+    it('POST /events/batch routes all queries through the per-request user client', async () => {
+        createUserClientSpy.mockClear();
+
+        const res = await request(buildApp())
+            .post('/api/v1/trips/events/batch')
+            .set(DRIVER_HEADERS)
+            .send(validPayload);
+
+        expect(res.status).toBe(202);
+        expect(createUserClientSpy).toHaveBeenCalledTimes(1);
+        expect(createUserClientSpy).toHaveBeenCalledWith('test-auth-token');
     });
 
     it('POST /events/batch returns 500 when trip event upsert fails', async () => {
@@ -579,6 +594,20 @@ describe('GET /api/trips/:id/events', () => {
     expect(res.status).toBe(200);
     expect(res.body.trip_id).toBe('11111111-1111-4111-a111-111111111111');
     expect(res.body.events).toHaveLength(2);
+  });
+
+  it('queries trip_events through the per-request user client', async () => {
+    createUserClientSpy.mockClear();
+    m.store.trip_events.push(
+      { event_id: 'ev-1', user_id: 'driver-1', trip_id: '11111111-1111-4111-a111-111111111111', event_type: 'gpsUpdate', event_timestamp: '2026-06-01T10:00:00Z', latitude: 19.0, longitude: 72.8, metadata: {}, created_at: '2026-06-01T10:00:00Z' },
+    );
+
+    const res = await request(buildEventsApp())
+      .get('/api/trips/11111111-1111-4111-a111-111111111111/events')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(200);
+    expect(createUserClientSpy).toHaveBeenCalledWith('test-auth-token');
   });
 
   it('allows the order customer to access trip events', async () => {

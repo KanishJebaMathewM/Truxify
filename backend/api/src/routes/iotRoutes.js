@@ -19,6 +19,7 @@ const telemetryHistoryLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
   store: createStore('rl:iot-telemetry-history:'),
   message: { error: 'Rate limit exceeded', retryAfter: 900 },
 });

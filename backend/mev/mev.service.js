@@ -4,10 +4,15 @@ import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
 
 /**
- * Derives the exact 32-byte preimage revealed on-chain. releaseDepositPrivate
- * re-hashes the revealed bytes32 as `keccak256(abi.encodePacked(bytes32))`, so
- * the secretHash committed via createProtectedDeposit must be
- * `keccak256(preimage)` for exactly those 32 bytes.
+ * Derives the exact 32-byte preimage that is revealed on-chain.
+ *
+ * releaseDepositPrivate re-hashes the revealed bytes32 as
+ * `keccak256(abi.encodePacked(bytes32))`, so the secretHash committed via
+ * createProtectedDeposit must be `keccak256(preimage)` for exactly those 32
+ * bytes. Hashing the caller-supplied secret down to a fixed 32-byte value keeps
+ * creation and release consistent for secrets of any length/content (a plain
+ * string passed straight into the bytes32 slot would be zero-padded on-chain,
+ * producing a digest that can never match the commitment).
  */
 export function toPreimageBytes32(secret) {
     if (typeof secret === 'string' && secret.startsWith('0x') && secret.length === 66) {

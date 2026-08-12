@@ -59,21 +59,41 @@ async function finalizeOrRevert(order, orderRepository) {
 
     if (bookingFunded && !mismatchReason && order.status === 'cancelled') {
       logger.info(`[escrow-funding] Order ${order.order_display_id} is cancelled but deposit landed on-chain. Triggering refund.`);
+      let refundResult;
       try {
-        await submitEscrowRefund(order.order_display_id);
+        refundResult = await submitEscrowRefund(order.order_display_id);
+      } catch (err) {
+        refundResult = { txHash: null, error: err.message };
+        logger.error(`[escrow-funding] Failed to refund cancelled order ${order.order_display_id}: ${err.message}`);
+      }
+
+      if (refundResult?.error || !refundResult?.txHash) {
+        const refundError = refundResult?.error || 'escrow refund was not submitted';
         await orderRepository.updateOrder(order.id, {
-          escrow_status: 'refunded',
-          escrow_refund_error: null,
+          escrow_status: 'refund_failed',
+          escrow_refund_error: refundError,
           updated_at: new Date().toISOString(),
         });
+        return;
+      }
+
+      try {
+        await refundResult.waitForConfirmation();
       } catch (err) {
-        logger.error(`[escrow-funding] Failed to refund cancelled order ${order.order_display_id}: ${err.message}`);
+        logger.error(`[escrow-funding] Refund confirmation failed for cancelled order ${order.order_display_id}: ${err.message}`);
         await orderRepository.updateOrder(order.id, {
           escrow_status: 'refund_failed',
           escrow_refund_error: err.message,
           updated_at: new Date().toISOString(),
         });
+        return;
       }
+
+      await orderRepository.updateOrder(order.id, {
+        escrow_status: 'refunded',
+        escrow_refund_error: null,
+        updated_at: new Date().toISOString(),
+      });
       return;
     }
 

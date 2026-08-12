@@ -71,7 +71,7 @@ export default function suspiciousRequests(req, res, next) {
     }, "Suspicious request detected");
 
     const blocking = findings.filter(f =>
-      ['SQL Injection', 'Path Traversal'].includes(f)
+      ['Path Traversal'].includes(f)
     );
     if (blocking.length) {
       return res.status(403).json({ error: 'Request blocked: suspicious content detected' });

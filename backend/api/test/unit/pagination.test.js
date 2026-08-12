@@ -157,4 +157,11 @@ describe('pagination — NaN and edge case handling', () => {
     const result = buildPagination({ page: Infinity });
     expect(result.page).toBe(1);
   });
+
+  it('buildPagination caps a huge page number to MAX_PAGE', () => {
+    const result = buildPagination({ page: 1e12, limit: 100 });
+    expect(result.page).toBe(1000000);
+    expect(result.offset).toBe(99999900);
+    expect(Number.isSafeInteger(result.offset)).toBe(true);
+  });
 });

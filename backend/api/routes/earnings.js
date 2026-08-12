@@ -9,6 +9,7 @@ import logger from '../src/middleware/logger.js';
 import {
   MAX_TRIPS_PER_SUMMARY,
   buildEarningsSummary,
+  formatLocalDate,
   getPeriodStart,
 } from '../src/services/driver/earningsSummaryService.js';
 
@@ -67,7 +68,7 @@ router.get(
         .select('trip_display_id, trip_date, distance, total_earnings, fuel_deducted')
         .eq('driver_id', driverId)
         .eq('status', 'completed')
-        .gte('trip_date', periodStart.toISOString().split('T')[0])
+        .gte('trip_date', formatLocalDate(periodStart))
         .order('trip_date', { ascending: false })
         .limit(MAX_TRIPS_PER_SUMMARY);
 

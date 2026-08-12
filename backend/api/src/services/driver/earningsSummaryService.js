@@ -39,6 +39,25 @@ export function getPeriodStart(period) {
 }
 
 /**
+ * Format a Date as a YYYY-MM-DD calendar date in the server's local timezone.
+ *
+ * `trip_date` is a local calendar date, so the reporting-window lower bound
+ * must be expressed in local time too. `toISOString()` renders UTC, which in
+ * timezones east of UTC (e.g. IST, UTC+5:30) shifts local midnight of the 1st
+ * back to the last day of the previous month and silently drags that day's
+ * trips into the summary.
+ *
+ * @param {Date} date
+ * @returns {string} Local calendar date as YYYY-MM-DD.
+ */
+export function formatLocalDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+/**
  * Coerce a possibly-null numeric column to a finite number.
  *
  * `total_earnings` and `fuel_deducted` are both nullable, and a null

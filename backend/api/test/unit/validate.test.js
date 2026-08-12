@@ -69,6 +69,15 @@ describe('validateBody middleware', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it('does not throw when req.body is undefined', () => {
+    const req = {};
+    const res = makeRes();
+    const next = makeNext();
+    expect(() => validateBody(schema)(req, res, next)).not.toThrow();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('does not call next when validation fails', () => {
     const req = { body: { name: 1, age: 2 } };
     const res = makeRes();

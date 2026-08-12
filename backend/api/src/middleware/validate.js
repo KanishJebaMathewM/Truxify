@@ -47,7 +47,12 @@ export function validateArray(schema) {
 
 export function validateBody(schema) {
   return (req, res, next) => {
-    const result = schema.safeParse(req.body);
+    // A request without a body (no content-type / no payload) leaves
+    // req.body undefined; zod's safeParse throws on undefined in some
+    // versions. Normalize to {} so a missing body is validated the same
+    // way an empty JSON object would be.
+    const body = req.body === undefined || req.body === null ? {} : req.body;
+    const result = schema.safeParse(body);
 
     if (!result.success) {
       logger.warn(

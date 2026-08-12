@@ -57,6 +57,24 @@ describe('requestIdMiddleware', () => {
     requestIdMiddleware(req2, makeRes(), vi.fn());
     expect(req1.requestId).not.toBe(req2.requestId);
   });
+
+  it('ignores an inbound id with unsafe characters', () => {
+    const req = makeReq({ headers: { 'x-request-id': 'bad id with spaces!' } });
+    const res = makeRes();
+    requestIdMiddleware(req, res, vi.fn());
+    expect(req.requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+  });
+
+  it('ignores an inbound id that exceeds the length limit', () => {
+    const req = makeReq({ headers: { 'x-request-id': 'a'.repeat(65) } });
+    const res = makeRes();
+    requestIdMiddleware(req, res, vi.fn());
+    expect(req.requestId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+    );
+  });
 });
 
 describe('requestLogger', () => {

@@ -73,7 +73,7 @@
 
 import express from 'express';
 import { z } from 'zod';
-import { supabase, supabaseAdmin } from '../config/db.js';
+import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { validateParams } from '../middleware/validate.js';
@@ -83,6 +83,21 @@ import logger from '../middleware/logger.js';
 const router = express.Router();
 const DEFAULT_EVENTS_LIMIT = 100;
 const MAX_EVENTS_LIMIT = 500;
+
+/**
+ * Builds the Supabase client for a request. End-user queries must run as the
+ * authenticated user (per-request client carrying the JWT) so Row Level
+ * Security authorizes them — the anon client fails RLS and trips every
+ * endpoint (ownership 403, inserts 500, empty reads, broken idempotency).
+ * Admins and token-less (dev/test bypass) requests fall back to the admin
+ * client.
+ */
+function getUserSupabaseClient(req) {
+  if (!req.token || req.user?.role === 'admin') {
+    return supabaseAdmin || supabase;
+  }
+  return createUserClient(req.token);
+}
 
 function parsePositiveIntegerQuery(value, fallback, max) {
   if (value === undefined) return { value: fallback };
@@ -279,6 +294,7 @@ const validateBatchPayload = (schema) => (req, res, next) => {
 router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(batchSyncSchema), async (req, res) => {
   const { events, idempotencyKey } = req.body;
   const userId = req.user.id;
+  const userClient = getUserSupabaseClient(req);
 
   if (events.length === 0) {
     // Flutter expects 200 or 202 for success.
@@ -336,7 +352,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
         typeof tripId === 'string' && tripId.startsWith('TX-') ? tripId.slice(3) : tripId
       );
 
-      const { data: ownedOrders, error: ownershipError } = await supabase
+      const { data: ownedOrders, error: ownershipError } = await userClient
         .from('orders')
         .select('id, order_display_id, driver_id, customer_id')
         .in('order_display_id', orderDisplayIds);
@@ -364,7 +380,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
 
     // 3. Check Idempotency (Prevent double processing)
     // We check if this exact batch has already been processed recently.
-    const { data: existingBatch } = await supabase
+    const { data: existingBatch } = await userClient
       .from('processed_batches')
       .select('id')
       .eq('idempotency_key', idempotencyKey)
@@ -411,7 +427,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     // 3. Bulk Insert / Upsert into the trip_events table
     // Upsert ensures that if a specific event ID already exists, it just updates it
     // rather than failing the whole batch.
-    const { error: insertError } = await supabase
+    const { error: insertError } = await userClient
       .from('trip_events')
       .upsert(recordsToInsert, { onConflict: 'event_id' });
 
@@ -432,7 +448,7 @@ router.post('/events/batch', authenticate, userLimiter, validateBatchPayload(bat
     // 4. Log the successful batch using the idempotency key
     // This prevents the same batch from being uploaded again if the client crashes
     // before it can mark them as synced in its local SQLite db.
-    const { error: idempotencyError } = await supabase
+    const { error: idempotencyError } = await userClient
       .from('processed_batches')
       .insert({
         idempotency_key: idempotencyKey,
@@ -572,7 +588,7 @@ router.get('/:id/events', authenticate, userLimiter, validateParams(uuidParamSch
       }
     }
 
-    let eventsQuery = supabase
+    let eventsQuery = getUserSupabaseClient(req)
       .from('trip_events')
       .select('event_id, user_id, trip_id, event_type, event_timestamp, latitude, longitude, metadata, created_at', { count: 'exact' })
       .eq('trip_id', tripId);

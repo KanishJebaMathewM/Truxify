@@ -94,7 +94,7 @@
  */
 
 import express from 'express';
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin, createUserClient } from '../config/db.js';
 import { authenticate } from '../middleware/auth.js';
 import { userLimiter } from '../middleware/rateLimiter.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
@@ -105,6 +105,14 @@ import { createTicketSchema, updateTicketSchema, createTicketCommentSchema, para
 
 const router = express.Router();
 router.use(userLimiter);
+
+// support_tickets / support_ticket_comments are authenticated/service-role
+// only (RLS policies + revoke_anon_privileges.sql revoke anon access), so the
+// anon-key client resolves every read to empty and every write to a denial.
+// User-scoped handlers query through the caller's authenticated client;
+// admin handlers use the service-role client so they can see all tickets.
+const adminDb = supabaseAdmin || supabase;
+const userDb = (req) => createUserClient(req.token);
 
 
 const FAQ_COLUMNS = 'id, question, answer, app_type, sort_order';
@@ -342,7 +350,7 @@ router.post('/tickets', authenticate, userLimiter, validateBody(createTicketSche
   }
 
   try {
-    const { data: ticket, error } = await supabase
+    const { data: ticket, error } = await userDb(req)
       .from('support_tickets')
       .insert({
         user_id: req.user.id,
@@ -437,7 +445,7 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
   }
 
   try {
-    let query = supabase
+    let query = userDb(req)
       .from('support_tickets')
       .select(TICKET_COLUMNS, { count: 'exact' })
       .eq('user_id', req.user.id);
@@ -508,7 +516,7 @@ router.get('/tickets', authenticate, userLimiter, async (req, res) => {
  *         description: Ticket not found
  */
 router.get('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:view', async (req) => {
-  const { data: ticket } = await supabase
+  const { data: ticket } = await userDb(req)
     .from('support_tickets')
     .select('id, user_id')
     .eq('id', req.params.id)
@@ -518,7 +526,7 @@ router.get('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:view
   const ticketId = req.params.id;
 
   try {
-    const { data: ticket, error } = await supabase
+    const { data: ticket, error } = await userDb(req)
       .from('support_tickets')
       .select(TICKET_DETAIL_COLUMNS)
       .eq('id', ticketId)
@@ -582,7 +590,7 @@ router.get('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:view
  *         description: Ticket not found
  */
 router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:update', async (req) => {
-  const { data: ticket } = await supabase
+  const { data: ticket } = await userDb(req)
     .from('support_tickets')
     .select('id, user_id, status')
     .eq('id', req.params.id)
@@ -593,7 +601,7 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
   const { subject, description, category, status } = req.body;
 
   try {
-    const { data: ticket, error: fetchError } = await supabase
+    const { data: ticket, error: fetchError } = await userDb(req)
       .from('support_tickets')
       .select('id, user_id, status')
       .eq('id', ticketId)
@@ -661,7 +669,7 @@ router.patch('/tickets/:id', authenticate, userLimiter, requirePolicy('ticket:up
       updates.status = normalizedStatus;
     }
 
-    const { data: updatedTicket, error: updateError } = await supabase
+    const { data: updatedTicket, error: updateError } = await userDb(req)
       .from('support_tickets')
       .update(updates)
       .eq('id', ticketId)
@@ -763,7 +771,7 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
   }
 
   try {
-    let query = supabase
+    let query = adminDb
       .from('support_tickets')
       .select(TICKET_DETAIL_COLUMNS, { count: 'exact' });
 
@@ -855,7 +863,7 @@ router.get('/admin/tickets', authenticate, userLimiter, requirePolicy('ticket:ad
  * @returns {object} 500 - Internal server error
  */
 router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ticket:add-comment', async (req) => {
-  const { data: ticket } = await supabase
+  const { data: ticket } = await userDb(req)
     .from('support_tickets')
     .select('id, user_id, status')
     .eq('id', req.params.id)
@@ -866,7 +874,7 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('t
   const { message } = req.body;
 
   try {
-    const { data: ticket, error: fetchError } = await supabase
+    const { data: ticket, error: fetchError } = await userDb(req)
       .from('support_tickets')
       .select('id, user_id, status')
       .eq('id', ticketId)
@@ -887,7 +895,7 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('t
       return res.status(409).json({ error: 'Cannot comment on a closed ticket.' });
     }
 
-    const { data: comment, error: insertError } = await supabase
+    const { data: comment, error: insertError } = await userDb(req)
       .from('support_ticket_comments')
       .insert({
         ticket_id: ticketId,
@@ -960,7 +968,7 @@ router.post('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('t
  *         description: Ticket not found
  */
 router.get('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ticket:view-comments', async (req) => {
-  const { data: ticket } = await supabase
+  const { data: ticket } = await userDb(req)
     .from('support_tickets')
     .select('id, user_id')
     .eq('id', req.params.id)
@@ -975,7 +983,7 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ti
   const isAscending = sort !== 'desc';
 
   try {
-    const { data: ticket, error: fetchError } = await supabase
+    const { data: ticket, error: fetchError } = await userDb(req)
       .from('support_tickets')
       .select('id, user_id')
       .eq('id', ticketId)
@@ -1004,7 +1012,7 @@ router.get('/tickets/:id/comments', authenticate, userLimiter, requirePolicy('ti
     }
     const offset = parsedOffset.value;
 
-    const { data: comments, error: commentsError } = await supabase
+    const { data: comments, error: commentsError } = await userDb(req)
       .from('support_ticket_comments')
       .select('id, ticket_id, user_id, user_name, message, created_at')
       .eq('ticket_id', ticketId)

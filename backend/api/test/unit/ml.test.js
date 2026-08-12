@@ -147,6 +147,19 @@ describe('ml service — predictDemand', () => {
       .rejects
       .toThrow('Network unreachable');
   });
+
+  it('throws a descriptive error when the ML engine returns invalid JSON', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: () => Promise.resolve('not-json{{{'),
+    });
+
+    await expect(predictDemand({ hour: 12, day_of_week: 1, temperature: 25, precipitation: 0, historical_volume: 100, nearby_drivers: 10 }))
+      .rejects
+      .toThrow('[ML] Invalid JSON response from ML engine');
+    expect(mockLogger.error).toHaveBeenCalled();
+  });
 });
 
 describe('ml service — predictPrice', () => {
@@ -359,6 +372,41 @@ describe('ml service — predictPrice', () => {
     expect(result.estimatedPriceInr).toBe(3000);
     expect(result.estimated_price).toBe(3000);
     expect(result.currency).toBe('INR');
+  });
+
+  it('rejects response where estimated_price is a string', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 'five thousand', currency: 'INR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction');
+  });
+
+  it('rejects response with invalid currency code', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 3000, currency: 'EUR' })),
+    });
+
+    await expect(predictPrice({ distanceKm: 100, cargoWeightKg: 500 }))
+      .rejects
+      .toThrow('[ML] Invalid prediction');
+  });
+
+  it('uses default truck type medium_truck when undefined is passed explicitly', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      text: () => Promise.resolve(JSON.stringify({ estimated_price: 3000, currency: 'INR' })),
+    });
+
+    await predictPrice({ distanceKm: 50, cargoWeightKg: 200, truckType: undefined });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    const body = JSON.parse(opts.body);
+    expect(body.truck_type).toBe('medium_truck');
   });
 });
 

@@ -1,6 +1,18 @@
 import { supabase } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
 
+/**
+ * DEPRECATED — superseded by the unified outbox pipeline (Issue #1).
+ *
+ * This adapter reads/writes the legacy `events` table, which is no longer the
+ * durable event log. The authoritative event log is `event_outbox`
+ * (transactional outbox written by the `trg_orders_event_outbox` trigger),
+ * relayed to Kafka by relay/outbox.relay.js and applied to
+ * `orders_read_model` by cqrs/order.read.model.js.
+ *
+ * Kept in place for reference/back-compat; the active pipeline never writes
+ * the `events` table.
+ */
 class EventRepository {
   async saveEvent(event) {
     try {
@@ -94,9 +106,15 @@ class EventRepository {
 
   async reemitEvent(event) {
     // Re-emit event to Kafka
-    const kafka = (await import('../config/kafka.config.js')).default;
+    const kafkaModule = await import('../config/kafka.config.js');
+    const kafka = kafkaModule.default;
+    const topic = kafkaModule.TOPICS[event.event_type];
+    if (!topic) {
+      logger.warn(`No Kafka topic mapped for event type ${event.event_type}; skipping replay`);
+      return;
+    }
     await kafka.publishEvent(
-      event.event_type,
+      topic,
       {
         eventId: event.event_id,
         eventType: event.event_type,

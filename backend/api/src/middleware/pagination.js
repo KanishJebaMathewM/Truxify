@@ -3,10 +3,21 @@
  * Parses and caps limit and offset parameters.
  */
 export function validatePagination(options = {}) {
-  const maxLimit = options.maxLimit || 100;
-  const maxOffset = options.maxOffset || 10000;
-  const defaultLimit = options.defaultLimit || 10;
-  const defaultOffset = options.defaultOffset || 0;
+  // Sanitize configuration: a non-positive or non-finite maxLimit/maxOffset
+  // would otherwise produce broken Math.min() results (e.g. a negative limit
+  // or a NaN cap). Fall back to the documented defaults.
+  const maxLimit = Number.isFinite(Number(options.maxLimit)) && Number(options.maxLimit) > 0
+    ? Number(options.maxLimit)
+    : 100;
+  const maxOffset = Number.isFinite(Number(options.maxOffset)) && Number(options.maxOffset) > 0
+    ? Number(options.maxOffset)
+    : 10000;
+  const defaultLimit = Number.isFinite(Number(options.defaultLimit)) && Number(options.defaultLimit) > 0
+    ? Number(options.defaultLimit)
+    : 10;
+  const defaultOffset = Number.isFinite(Number(options.defaultOffset)) && Number(options.defaultOffset) >= 0
+    ? Number(options.defaultOffset)
+    : 0;
   const parseInteger = (value) => {
     if (!/^\d+$/.test(String(value))) {
       return null;
@@ -38,7 +49,9 @@ export function validatePagination(options = {}) {
     } else if (req.query.page) {
        const parsedPage = parseInteger(req.query.page);
        if (Number.isFinite(parsedPage) && parsedPage > 0) {
-          offset = Math.min((parsedPage - 1) * limit, maxOffset);
+          const computedOffset = (parsedPage - 1) * limit;
+          // Guard against NaN (e.g., if limit is 0) and cap at maxOffset
+          offset = Number.isNaN(computedOffset) ? defaultOffset : Math.min(computedOffset, maxOffset);
        } else {
           return res.status(400).json({ error: 'Invalid page parameter' });
        }

@@ -10,12 +10,7 @@ const router = express.Router();
  */
 router.get('/metrics', authenticate, requireRole(['admin', 'support']), async (req, res) => {
   try {
-    const { data: metrics, error } = await req.blockchainMetrics.getMetrics();
-
-    if (error) {
-      logger.error('Failed to fetch blockchain metrics:', error);
-      return res.status(500).json({ error: 'Failed to fetch metrics' });
-    }
+    const metrics = req.blockchainMetrics.getMetrics();
 
     res.json({
       timestamp: new Date().toISOString(),
@@ -77,7 +72,7 @@ router.post('/alerts/:alertId/resolve', authenticate, requireRole(['admin', 'sup
 
 /**
  * Get monitoring events with filtering
- * GET /api/blockchain/events?type=PAYMENT_RECEIVED&severity=CRITICAL&limit=50
+ * GET /api/blockchain/events?type=BOOKING_DISPUTED&severity=CRITICAL&limit=50
  */
 router.get('/events', authenticate, requireRole(['admin', 'support']), async (req, res) => {
   try {
@@ -91,12 +86,17 @@ router.get('/events', authenticate, requireRole(['admin', 'support']), async (re
 
     // Validate event type if provided
     const validTypes = [
-      'PAYMENT_RECEIVED',
-      'INSURANCE_CLAIM_APPROVED',
-      'INSURANCE_CLAIM_REJECTED',
-      'GEOFENCE_BREACH',
-      'BALANCE_UPDATE_FAILED',
-      'SMART_CONTRACT_REVERT',
+      'BOOKING_CREATED',
+      'PAYMENT_RELEASED',
+      'BOOKING_CANCELLED',
+      'BOOKING_STARTED',
+      'CANCELLATION_PENALTY_APPLIED',
+      'BOOKING_DISPUTED',
+      'DISPUTE_RESOLVED',
+      'WITHDRAWAL_READY',
+      'WITHDRAWN',
+      'EMERGENCY_RECOVERED',
+      'RELAYER_UPDATED',
     ];
     if (type && !validTypes.includes(type)) {
       return res.status(400).json({ error: 'Invalid event type' });

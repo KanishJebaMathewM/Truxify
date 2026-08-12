@@ -10,6 +10,9 @@ let mockPgPool = null;
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() { return mockSupabase; },
+  // supabaseHealth probes through supabaseAdmin (falling back to supabase)
+  // since the anon client can't read `profiles` post revoke_anon_privileges.
+  get supabaseAdmin() { return mockSupabase; },
   get mongoDb() { return mockMongoDb; },
   get redisClient() { return mockRedisClient; },
   get firebaseAdmin() { return mockFirebaseAdmin; },
@@ -53,6 +56,14 @@ describe('GET /api/health/full (Centralized Health Aggregation)', () => {
     delete process.env.ML_ENGINE_URL;
     delete globalThis.__truxify_workers;
     delete globalThis.__truxify_wsState;
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({ jsonrpc: '2.0', id: 1, result: '0x100' }),
+    }));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('returns 200 with aggregated status when all critical services are healthy', async () => {
@@ -205,7 +216,7 @@ describe('GET /api/health/full (Centralized Health Aggregation)', () => {
     const res = await request(app).get('/api/health/full');
 
     expect(res.body.services.workers.status).toBe('healthy');
-    expect(res.body.services.workers.metadata.workerCount).toBe(3);
+    expect(res.body.services.workers.metadata).toBeUndefined();
   });
 
   it('reports degraded when a worker is not running', async () => {

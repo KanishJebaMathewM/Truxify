@@ -50,6 +50,7 @@ contract DIDRegistry is Ownable, Pausable {
     mapping(string => ServiceEndpoint[]) public didServiceEndpoints;
     mapping(string => VerificationMethod[]) public didVerificationMethods;
     mapping(bytes32 => Credential) public credentials;
+    mapping(address => uint256) public issuerNonces;
     mapping(address => string[]) public addressToDIDs;
     mapping(bytes32 => bool) public credentialRevoked;
 
@@ -200,14 +201,18 @@ contract DIDRegistry is Ownable, Pausable {
             "Issuer not authorized for credential type"
         );
 
+        uint256 nonce = issuerNonces[msg.sender]++;
         bytes32 credentialId = keccak256(
             abi.encodePacked(
                 block.timestamp,
                 msg.sender,
                 subject,
-                credentialType
+                credentialType,
+                nonce
             )
         );
+
+        require(credentials[credentialId].issuer == address(0), "Credential already exists");
 
         credentials[credentialId] = Credential({
             id: credentialId,

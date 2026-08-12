@@ -1,9 +1,10 @@
-import { supabase } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
 import { measureExecution } from '../core/performanceMetrics.js';
 import {
   getCachedSupabaseProfile, setCachedSupabaseProfile,
   getCachedCustomerStats, setCachedCustomerStats,
   getCachedDriverDetails, setCachedDriverDetails,
+  isValidCachedSupabaseProfile,
 } from '../lib/profileCache.js';
 import logger from '../middleware/logger.js';
 
@@ -20,7 +21,7 @@ export async function getProfile(userId) {
   if (isCacheEnabled()) {
     try {
       const cached = await getCachedSupabaseProfile(userId);
-      if (cached) {
+      if (cached && isValidCachedSupabaseProfile(userId, cached)) {
         logger.debug({ userId }, 'Profile cache hit');
         return cached;
       }
@@ -51,7 +52,8 @@ export async function getProfile(userId) {
 
 export async function getCustomerStats(userId) {
   return measureExecution('ProfileService.getCustomerStats', async () => {
-  if (!supabase) {
+  const client = supabaseAdmin || supabase;
+  if (!client) {
     throw new Error('Supabase client not configured — check SUPABASE_URL and SUPABASE_ANON_KEY');
   }
 
@@ -67,23 +69,33 @@ export async function getCustomerStats(userId) {
     }
   }
 
-  const { data, error } = await supabase
-    .from('customer_stats')
-    .select('*')
-    .eq('user_id', userId)
-    .maybeSingle();
+  // customer_stats was never populated by any write path, so stats are
+  // computed from the customer's orders at request time. Reads go through
+  // the service-role client when available (RLS would hide other orders).
+  const { data: orders, error } = await client
+    .from('orders')
+    .select('status, total_amount')
+    .eq('customer_id', userId);
 
   if (error) throw error;
 
-  if (isCacheEnabled() && data) {
+  const stats = {
+    user_id: userId,
+    total_orders: (orders || []).length,
+    // No broker-baseline data exists on orders to compute savings / CO2.
+    total_saved: 0,
+    co2_reduced_kg: 0,
+  };
+
+  if (isCacheEnabled()) {
     try {
-      await setCachedCustomerStats(userId, data);
+      await setCachedCustomerStats(userId, stats);
     } catch (err) {
       logger.warn({ err, userId }, 'Customer stats cache write failed');
     }
   }
 
-  return data;
+  return stats;
   });
 }
 
@@ -129,7 +141,7 @@ export async function createProfile(profileData) {
   return measureExecution('ProfileService.createProfile', async () => {
   if (!supabase) throw new Error('Supabase client not configured');
   const { data, error } = await supabase.from('profiles').insert(profileData).select().single();
-  if (error) throw error;
+  if (error) { logger.error("[ProfileService] createProfile error:", error?.message || error); throw error; }
   return data;
   });
 }
@@ -138,7 +150,7 @@ export async function updateProfile(userId, updateData) {
   return measureExecution('ProfileService.updateProfile', async () => {
   if (!supabase) throw new Error('Supabase client not configured');
   const { data, error } = await supabase.from('profiles').update(updateData).eq('id', userId).select().single();
-  if (error) throw error;
+  if (error) { logger.error("[ProfileService] createProfile error:", error?.message || error); throw error; }
   return data;
   });
 }

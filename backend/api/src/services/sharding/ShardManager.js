@@ -15,8 +15,8 @@ class ShardManager {
     const missingPasswords = [];
 
     // North Zone - Delhi, UP, Punjab, Haryana, Rajasthan
-    const northPassword = process.env.SHARD_NORTH_PASSWORD;
-    if (!northPassword) missingPasswords.push('SHARD_NORTH_PASSWORD');
+    const northPassword = process.env.SHARD_PASSWORD_NORTH || process.env.SHARD_PASSWORD;
+    if (!northPassword) missingPasswords.push('SHARD_PASSWORD_NORTH');
     this.shards.set('north', {
       name: 'north',
       states: ['delhi', 'up', 'punjab', 'haryana', 'rajasthan', 'j&k', 'himachal', 'uttarakhand'],
@@ -29,8 +29,8 @@ class ShardManager {
     });
 
     // South Zone - Tamil Nadu, Karnataka, Kerala, AP, Telangana
-    const southPassword = process.env.SHARD_SOUTH_PASSWORD;
-    if (!southPassword) missingPasswords.push('SHARD_SOUTH_PASSWORD');
+    const southPassword = process.env.SHARD_PASSWORD_SOUTH || process.env.SHARD_PASSWORD;
+    if (!southPassword) missingPasswords.push('SHARD_PASSWORD_SOUTH');
     this.shards.set('south', {
       name: 'south',
       states: ['tamilnadu', 'karnataka', 'kerala', 'andhra', 'telangana', 'pondicherry'],
@@ -43,8 +43,8 @@ class ShardManager {
     });
 
     // East Zone - WB, Bihar, Odisha, Jharkhand, NE States
-    const eastPassword = process.env.SHARD_EAST_PASSWORD;
-    if (!eastPassword) missingPasswords.push('SHARD_EAST_PASSWORD');
+    const eastPassword = process.env.SHARD_PASSWORD_EAST || process.env.SHARD_PASSWORD;
+    if (!eastPassword) missingPasswords.push('SHARD_PASSWORD_EAST');
     this.shards.set('east', {
       name: 'east',
       states: ['westbengal', 'bihar', 'odisha', 'jharkhand', 'assam', 'sikkim', 'nagaland', 'manipur', 'meghalaya', 'mizoram', 'arunachal', 'tripura'],
@@ -57,8 +57,8 @@ class ShardManager {
     });
 
     // West Zone - Maharashtra, Gujarat, MP, Goa
-    const westPassword = process.env.SHARD_WEST_PASSWORD;
-    if (!westPassword) missingPasswords.push('SHARD_WEST_PASSWORD');
+    const westPassword = process.env.SHARD_PASSWORD_WEST || process.env.SHARD_PASSWORD;
+    if (!westPassword) missingPasswords.push('SHARD_PASSWORD_WEST');
     this.shards.set('west', {
       name: 'west',
       states: ['maharashtra', 'gujarat', 'madhyapradesh', 'goa', 'chhattisgarh'],
@@ -71,7 +71,13 @@ class ShardManager {
     });
 
     if (missingPasswords.length > 0) {
-      throw new Error(`Missing required shard password env vars: ${missingPasswords.join(', ')}`);
+      if (process.env.SHARDING_ENABLED === 'true') {
+        throw new Error(`Missing required shard password env vars: ${missingPasswords.join(', ')}`);
+      }
+      logger.warn(
+        `Sharding not enabled — missing shard password env vars: ${missingPasswords.join(', ')}. ` +
+        'Set SHARDING_ENABLED=true (with the SHARD_PASSWORD_* vars) to require shard credentials.'
+      );
     }
 
     // Initialize connection pools

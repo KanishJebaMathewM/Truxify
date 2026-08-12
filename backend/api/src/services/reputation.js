@@ -25,15 +25,7 @@ import { measureExecution } from "../core/performanceMetrics.js";
 
 // Safe math utilities for reputation calculations.
 // Boundary clamping (0–MAX_REPUTATION) is handled by clampReputation.
-function safeAdd(a, b) {
-  const result = Number(a) + Number(b);
-  return Number.isFinite(result) ? result : 0;
-}
 
-function safeSubtract(a, b) {
-  const result = Number(a) - Number(b);
-  return Number.isFinite(result) ? result : 0;
-}
 
 /** @type {number} Must match Reputation.sol MAX_REPUTATION constant */
 const MAX_REPUTATION = 10000;
@@ -71,10 +63,14 @@ export function initReputationContract() {
       );
       logger.info("✅ Polygon Reputation contract client initialised.");
     } catch (err) {
+      logger.error(
+        { event: 'REPUTATION_CONTRACT_INIT_ERROR', error: err && (err.message || String(err)) },
+        '[Reputation] Blockchain call failed during contract init',
+      );
       reputationContract = null;
       logger.error(
-        "❌ Failed to initialise Reputation contract client:",
-        err.message,
+        { event: 'REPUTATION_INIT_ERROR', error: err && err.message },
+        'Failed to initialise Reputation contract client',
       );
     }
   } else {
@@ -113,6 +109,7 @@ async function retryWithBackoff(fn, maxRetries, baseDelayMs) {
     try {
       return await fn();
     } catch (err) {
+      logger.error({ event: 'REPUTATION_BLOCKCHAIN_ERROR', attempt, maxRetries, error: err && (err.message || String(err)) }, '[Reputation] Blockchain call failed');
       if (attempt === maxRetries) throw err;
       // Add ±25% jitter to spread out concurrent retries and prevent thundering herd.
       const jitter = 0.75 + Math.random() * 0.5; // [0.75, 1.25]
@@ -182,7 +179,8 @@ export async function awardReputationPoints(driverWalletAddress, stars) {
         );
       } catch (err) {
         logger.error(
-          `[reputation] increaseReputation failed for driver ${driverWalletAddress} after ${REPUTATION_RETRY_MAX} retries: ${err.message}`,
+          { event: 'REPUTATION_INCREASE_ERROR', driverWalletAddress, error: err && (err.message || String(err)) },
+          `[Reputation] increaseReputation failed for driver ${driverWalletAddress} after ${REPUTATION_RETRY_MAX} retries`,
         );
         throw err;
       }
@@ -224,10 +222,11 @@ export async function getDriverReputation(walletAddress) {
       clearTimeout(timeoutId);
       return Number(score);
     } catch (err) {
-      clearTimeout(timeoutId);
       logger.error(
-        `[reputation] Failed to fetch on-chain reputation for ${walletAddress}: ${err.message}`,
+        { event: 'REPUTATION_FETCH_ERROR', walletAddress, error: err && (err.message || String(err)) },
+        `[Reputation] Failed to fetch on-chain reputation for ${walletAddress}`,
       );
+      clearTimeout(timeoutId);
       return null;
     }
   });

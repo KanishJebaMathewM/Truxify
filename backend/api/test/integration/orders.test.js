@@ -76,6 +76,9 @@ afterEach(() => {
 
 vi.mock('../../src/config/db.js', () => ({
   supabase: m.supabase,
+  supabaseAdmin: null,
+  supabaseAdmin: m.supabase,
+  createUserClient: () => m.supabase,
   firebaseAdmin: null,
   get redisClient() {
     return mockRedis;
@@ -2492,7 +2495,7 @@ describe('Customer actions: change-drop and cancel endpoints', () => {
   });
 
   it('rejects cancellation once the shipment has been picked up', async () => {
-    for (const status of ['picked_up', 'in_transit', 'arriving', 'arrived_dropoff']) {
+    for (const status of ['picked_up', 'in_transit', 'arriving', 'delivered']) {
       m.store.orders = [
         {
           id: 'aaaa0006-0000-4000-8000-000000000006',

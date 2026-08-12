@@ -307,3 +307,271 @@ func TestAdvanceCommitIndexRequiresQuorum(t *testing.T) {
 		t.Errorf("expected last_applied 2, got %d", leader.LastApplied)
 	}
 }
+
+// TestOutofOrderAppendResponseDoesNotRegressMatchIndex verifies that a delayed
+// or out-of-order AppendEntries success response with lower match index does
+// not regress matchIndex or nextIndex for a follower.
+func TestOutofOrderAppendResponseDoesNotRegressMatchIndex(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	follower := NewRaftNode("node2", []string{"node1"}, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/raft/append" {
+			follower.HandleAppend(w, r)
+		}
+	}))
+	defer server.Close()
+
+	now := time.Now()
+	leader := NewRaftNode("node1", []string{"node2"}, []string{server.URL})
+	leader.Log = []LogEntry{
+		{Index: 1, Term: 1, Command: "CREATED", OrderID: "ord-1", Timestamp: now},
+		{Index: 2, Term: 1, Command: "DISPATCHED", OrderID: "ord-1", Timestamp: now},
+	}
+	leader.Role = Leader
+	leader.CurrentTerm = 1
+	leader.nextIndex = map[string]uint64{server.URL: 3}
+	leader.matchIndex = map[string]uint64{server.URL: 2}
+
+	// Simulate stale heartbeat sent with PrevLogIndex 0 arriving later
+	leader.nextIndex[server.URL] = 1
+	leader.sendHeartbeats()
+
+	leader.mu.Lock()
+	match := leader.matchIndex[server.URL]
+	next := leader.nextIndex[server.URL]
+	leader.mu.Unlock()
+
+	if match != 2 {
+		t.Errorf("expected matchIndex to remain monotonically at 2, got %d", match)
+	}
+	if next != 3 {
+		t.Errorf("expected nextIndex to remain at 3, got %d", next)
+	}
+}
+
+// TestStaleFailureResponseDoesNotRegressNextIndex verifies that an out-of-order
+// failure response arriving after nextIndex has already advanced leaves nextIndex unchanged.
+func TestStaleFailureResponseDoesNotRegressNextIndex(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/raft/append" {
+			time.Sleep(50 * time.Millisecond)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(AppendEntriesResponse{Term: 1, Success: false})
+		}
+	}))
+	defer server.Close()
+
+	now := time.Now()
+	leader := NewRaftNode("node1", []string{"node2"}, []string{server.URL})
+	leader.Log = []LogEntry{
+		{Index: 1, Term: 1, Command: "CREATED", OrderID: "ord-1", Timestamp: now},
+		{Index: 2, Term: 1, Command: "DISPATCHED", OrderID: "ord-1", Timestamp: now},
+		{Index: 3, Term: 1, Command: "IN_TRANSIT", OrderID: "ord-1", Timestamp: now},
+	}
+	leader.Role = Leader
+	leader.CurrentTerm = 1
+	leader.nextIndex = map[string]uint64{server.URL: 2}
+	leader.matchIndex = map[string]uint64{server.URL: 1}
+
+	// Launch sendHeartbeats asynchronously probing index 2
+	done := make(chan bool)
+	go func() {
+		leader.sendHeartbeats()
+		done <- true
+	}()
+
+	// While RPC is in flight, simulate successful advancement of nextIndex to 4
+	time.Sleep(10 * time.Millisecond)
+	leader.mu.Lock()
+	leader.nextIndex[server.URL] = 4
+	leader.matchIndex[server.URL] = 3
+	leader.mu.Unlock()
+
+	<-done
+
+	leader.mu.Lock()
+	next := leader.nextIndex[server.URL]
+	match := leader.matchIndex[server.URL]
+	leader.mu.Unlock()
+
+	if next != 4 {
+		t.Errorf("expected nextIndex to remain unchanged at 4 when stale failure arrives, got %d", next)
+	}
+	if match != 3 {
+		t.Errorf("expected matchIndex to remain 3, got %d", match)
+	}
+}
+
+
+// TestHandleVoteResetsElectionTimer verifies that granting a vote updates lastLeaderSeen.
+func TestHandleVoteResetsElectionTimer(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", []string{"node2"}, nil)
+	oldTime := time.Now().Add(-10 * time.Second)
+	node.lastLeaderSeen = oldTime
+
+	reqPayload := `{"term": 1, "candidate_id": "node2", "last_log_index": 0, "last_log_term": 0}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/vote", strings.NewReader(reqPayload))
+	w := httptest.NewRecorder()
+
+	node.HandleVote(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	node.mu.Lock()
+	updatedSeen := node.lastLeaderSeen
+	votedFor := node.VotedFor
+	node.mu.Unlock()
+
+	if votedFor != "node2" {
+		t.Errorf("expected voted_for node2, got %s", votedFor)
+	}
+	if !updatedSeen.After(oldTime) {
+		t.Errorf("expected lastLeaderSeen to be reset upon granting vote, got %v", updatedSeen)
+	}
+}func TestHandleCommitOrderDuplicateDeduplication(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", nil, nil)
+	node.Role = Leader
+	node.CurrentTerm = 1
+	node.CommitIndex = 1
+
+	// Setup log with an existing entry
+	node.Log = []LogEntry{
+		{Index: 1, Term: 1, Command: "CREATED", OrderID: "ord-1", Timestamp: time.Now()},
+	}
+
+	// Try to commit the exact same (order_id, command)
+	reqPayload := `{"order_id": "ord-1", "command": "CREATED"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload))
+	w := httptest.NewRecorder()
+
+	node.HandleCommitOrder(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	// Verify no new entry was appended
+	if len(node.Log) != 1 {
+		t.Errorf("expected log length 1 (no duplicate appended), got %d", len(node.Log))
+	}
+}
+
+func TestHandleCommitOrderInvalidTransition(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", nil, nil)
+	node.Role = Leader
+	node.CurrentTerm = 1
+
+	// Case 1: Start with non-CREATED command (should fail)
+	reqPayload1 := `{"order_id": "ord-1", "command": "DISPATCHED"}`
+	req1 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload1))
+	w1 := httptest.NewRecorder()
+	node.HandleCommitOrder(w1, req1)
+	if w1.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 when starting with DISPATCHED, got %d", w1.Code)
+	}
+
+	// Case 2: Valid CREATED
+	reqPayload2 := `{"order_id": "ord-1", "command": "CREATED"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload2))
+	w2 := httptest.NewRecorder()
+	node.HandleCommitOrder(w2, req2)
+
+	// Case 3: Out of order transition CREATED -> DELIVERED (should fail)
+	reqPayload3 := `{"order_id": "ord-1", "command": "DELIVERED"}`
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload3))
+	w3 := httptest.NewRecorder()
+	node.HandleCommitOrder(w3, req3)
+	if w3.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 for out-of-order transition CREATED -> DELIVERED, got %d", w3.Code)
+	}
+}
+
+func TestLeaderWithoutQuorumRejectsCommit(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	// Node 1 is leader but Node 2 is unreachable (port 9999 is blocked/dead)
+	node := NewRaftNode("node1", []string{"node2"}, []string{"http://localhost:9999"})
+	
+	// Transition manually to leader (simulating startElection election win)
+	node.mu.Lock()
+	node.Role = Leader
+	node.CurrentTerm = 1
+	node.nextIndex = map[string]uint64{"http://localhost:9999": 1}
+	node.matchIndex = map[string]uint64{"http://localhost:9999": 0}
+	node.peerLive = map[string]bool{"http://localhost:9999": false}
+	node.mu.Unlock()
+
+	// Try to commit order command
+	reqPayload := `{"order_id": "ord-1", "command": "CREATED"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(reqPayload))
+	w := httptest.NewRecorder()
+
+	node.HandleCommitOrder(w, req)
+
+	// Since there is no quorum validation, it should return 503 Service Unavailable (no quorum)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503 (no quorum), got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	// Verify no entry was appended to the log
+	node.mu.Lock()
+	logLen := len(node.Log)
+	node.mu.Unlock()
+	if logLen != 0 {
+		t.Errorf("expected log to remain empty, but got length %d", logLen)
+	}
+}
+
+// TestHandleCommitOrderRejectsOversizedBody verifies the service returns 413
+// for a body larger than the 1 MiB cap instead of buffering it into memory.
+func TestHandleCommitOrderRejectsOversizedBody(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", []string{"node2"}, nil)
+
+	big := strings.Repeat("a", maxRequestBodyBytes+1)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader(big))
+	w := httptest.NewRecorder()
+
+	node.HandleCommitOrder(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for oversized body, got %d", w.Code)
+	}
+}
+
+// TestHandleCommitOrderAcceptsBodyWithinLimit verifies a body at the cap
+// boundary is still decoded (malformed payload → 400, not 413).
+func TestHandleCommitOrderAcceptsBodyWithinLimit(t *testing.T) {
+	bypassAuth = true
+	defer func() { bypassAuth = false }()
+
+	node := NewRaftNode("node1", []string{"node2"}, nil)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/raft/commit", strings.NewReader("{not-json"))
+	w := httptest.NewRecorder()
+
+	node.HandleCommitOrder(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for malformed in-limit body, got %d", w.Code)
+	}
+}

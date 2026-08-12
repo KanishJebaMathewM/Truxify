@@ -1,6 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-// ── Mock the audit service ──────────────────────────────────────
 const mockLog = vi.fn().mockResolvedValue({ id: 'mock-log-id' });
 
 vi.mock('../../src/services/auditLogService.js', () => ({
@@ -43,10 +41,22 @@ describe('auditLog middleware', () => {
     };
   }
 
+  // The middleware subscribes with res.on('finish', ...), the way Express
+  // exposes the real response. This stands in for that: on() records the
+  // handlers and finish() fires them, so the tests can drive completion
+  // synchronously.
   function mockRes(overrides = {}) {
+    const handlers = { finish: [] };
     const res = {
       statusCode: 200,
-      finish: vi.fn(function () { return this; }),
+      on: vi.fn(function (event, handler) {
+        (handlers[event] ??= []).push(handler);
+        return this;
+      }),
+      finish: vi.fn(function () {
+        for (const handler of handlers.finish) handler();
+        return this;
+      }),
       ...overrides,
     };
     return res;
@@ -393,5 +403,67 @@ describe('auditWithState convenience', () => {
   it('should return a middleware function', () => {
     const middleware = auditWithState('order:cancel', 'orders');
     expect(typeof middleware).toBe('function');
+  });
+});
+
+describe('scrubPii', () => {
+  let scrubPii;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import('../../src/middleware/auditLog.js');
+    scrubPii = mod.scrubPii;
+  });
+
+  it('redacts sensitive keys at the top level', () => {
+    const input = { password: 'hunter2', name: 'Alice', token: 'abc' };
+    expect(scrubPii(input)).toEqual({
+      password: '[REDACTED]',
+      name: 'Alice',
+      token: '[REDACTED]',
+    });
+  });
+
+  it('redacts sensitive keys nested in objects and arrays', () => {
+    const input = {
+      user: { otp: '123456', phone: '+911234567890' },
+      headers: [{ authorization: 'Bearer xyz' }],
+    };
+    const result = scrubPii(input);
+    expect(result.user.otp).toBe('[REDACTED]');
+    expect(result.user.phone).toBe('+911234567890');
+    expect(result.headers[0].authorization).toBe('[REDACTED]');
+  });
+
+  it('redacts card numbers embedded in strings', () => {
+    const input = { card: 'my card is 4111 1111 1111 1111 and expires soon' };
+    expect(scrubPii(input).card).toBe('my card is [REDACTED] and expires soon');
+  });
+
+  it('redacts full 10-digit phone numbers embedded in strings', () => {
+    const input = { note: 'contact 9876543210 for delivery updates' };
+    expect(scrubPii(input).note).toBe('contact [REDACTED] for delivery updates');
+  });
+
+  it('leaves partial phone numbers untouched', () => {
+    const input = { note: 'last four digits are 3210' };
+    expect(scrubPii(input).note).toBe('last four digits are 3210');
+  });
+
+  it('matches case-insensitively', () => {
+    const input = { Password: 'x', API_KEY: 'y', 'Otp': 'z' };
+    expect(scrubPii(input)).toEqual({
+      Password: '[REDACTED]',
+      API_KEY: '[REDACTED]',
+      Otp: '[REDACTED]',
+    });
+  });
+
+  it('leaves null, primitives and non-sensitive data untouched', () => {
+    expect(scrubPii(null)).toBeNull();
+    expect(scrubPii(undefined)).toBeUndefined();
+    expect(scrubPii(42)).toBe(42);
+    expect(scrubPii('plain text')).toBe('plain text');
+    expect(scrubPii({ name: 'Bob', age: 30 })).toEqual({ name: 'Bob', age: 30 });
   });
 });

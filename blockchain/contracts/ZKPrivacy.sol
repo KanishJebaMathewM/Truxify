@@ -38,28 +38,81 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         uint[] input;
     }
 
+    struct RatingStats {
+        uint256 totalStars;
+        uint256 totalRatings;
+    }
+
     // ============ State Variables ============
 
     mapping(bytes32 => bool) public nullifiers;
     mapping(bytes32 => bool) public commitments;
+    mapping(bytes32 => uint256) public commitmentAmounts;
+    mapping(bytes32 => bool) public spentCommitments;
     mapping(bytes32 => PrivateTransaction) public transactions;
+    mapping(address => RatingStats) public driverRatings;
+    mapping(bytes32 => bool) public usedNullifiers;
 
     MerkleTree public merkleTree;
     address public verifier;
 
     uint256 public constant MERKLE_DEPTH = 20;
+    bytes32[MERKLE_DEPTH] private fillSubtrees;
     uint256 public transactionCounter;
 
     // Events
     event CommitmentAdded(bytes32 indexed commitment, uint256 index);
     event TransactionProcessed(bytes32 indexed nullifier, address indexed recipient, uint256 amount);
+    event Deposit(bytes32 indexed commitment, uint256 amount, uint256 index);
     event ProofVerified(bytes32 indexed transactionId, bool isValid);
+    event RatingSubmitted(address indexed driver, uint8 stars, bytes32 indexed nullifierHash);
 
     // ============ Constructor ============
 
     constructor(address _verifier) Ownable(msg.sender) {
         verifier = _verifier;
         _initializeMerkleTree();
+    }
+
+    // ============ Anonymous Rating ============
+
+    function submitAnonymousRating(
+        address _driver,
+        uint8 _stars,
+        bytes32 _tripId,
+        Proof calldata proof
+    ) external nonReentrant whenNotPaused {
+        require(_driver != address(0), "Invalid driver");
+        require(_stars >= 1 && _stars <= 5, "Invalid rating stars (1-5)");
+        require(_tripId != bytes32(0), "Invalid trip id");
+        require(verifier != address(0), "Verifier not set");
+
+        // Derive the nullifier from the trip and the rater so it cannot be
+        // freely chosen and each rater can rate a given trip at most once.
+        bytes32 nullifierHash = keccak256(abi.encodePacked(_tripId, msg.sender));
+        require(!usedNullifiers[nullifierHash], "Nullifier already used for trip rating");
+
+        // Bind the proof's public inputs to this exact rating: nullifier,
+        // driver and stars must all be committed inside the proof.
+        require(proof.input.length >= 3, "Invalid proof public inputs length");
+        require(proof.input[0] == uint256(nullifierHash), "Nullifier mismatch in proof input");
+        require(proof.input[1] == uint256(uint160(_driver)), "Driver mismatch in proof input");
+        require(proof.input[2] == uint256(_stars), "Stars mismatch in proof input");
+
+        bool isValid = IVerifier(verifier).verifyProof(proof.a, proof.b, proof.c, proof.input);
+        require(isValid, "Invalid ZK proof");
+
+        usedNullifiers[nullifierHash] = true;
+        driverRatings[_driver].totalStars += _stars;
+        driverRatings[_driver].totalRatings += 1;
+
+        emit RatingSubmitted(_driver, _stars, nullifierHash);
+    }
+
+    function getDriverAverageRating(address _driver) external view returns (uint256 averageScaled) {
+        RatingStats memory stats = driverRatings[_driver];
+        if (stats.totalRatings == 0) return 0;
+        return (stats.totalStars * 100) / stats.totalRatings; // Scaled by 100 (e.g. 480 = 4.80 stars)
     }
 
     // ============ Merkle Tree ============
@@ -80,20 +133,18 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         require(index < 2 ** MERKLE_DEPTH, "Tree full");
 
         bytes32 leaf = commitment;
-        bytes32[] memory updatedLevels = merkleTree.levels;
-
         uint256 currentIndex = index;
         for (uint256 i = 0; i < MERKLE_DEPTH; i++) {
             if (currentIndex % 2 == 0) {
-                updatedLevels[i + 1] = keccak256(abi.encodePacked(leaf, updatedLevels[i]));
+                leaf = keccak256(abi.encodePacked(leaf, merkleTree.levels[i]));
+                fillSubtrees[i] = leaf;
             } else {
-                updatedLevels[i + 1] = keccak256(abi.encodePacked(updatedLevels[i], leaf));
+                leaf = keccak256(abi.encodePacked(fillSubtrees[i], leaf));
             }
             currentIndex /= 2;
-            leaf = updatedLevels[i + 1];
         }
 
-        merkleTree.levels = updatedLevels;
+        merkleTree.levels[MERKLE_DEPTH] = leaf;
         merkleTree.nextIndex = index + 1;
 
         emit CommitmentAdded(commitment, index);
@@ -124,6 +175,20 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         return isValid;
     }
 
+    // ============ Deposit ============
+
+    function deposit(bytes32 commitment) external payable whenNotPaused nonReentrant {
+        require(msg.value > 0, "Deposit amount must be > 0");
+        require(commitment != bytes32(0), "Invalid commitment");
+        require(!commitments[commitment], "Commitment already exists");
+
+        commitments[commitment] = true;
+        commitmentAmounts[commitment] = msg.value;
+
+        uint256 index = _insertCommitment(commitment);
+        emit Deposit(commitment, msg.value, index);
+    }
+
     function processPrivateTransaction(
         bytes32 nullifier,
         bytes32 commitment,
@@ -132,7 +197,9 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         Proof memory proof
     ) external nonReentrant whenNotPaused {
         require(!nullifiers[nullifier], "Nullifier already used");
-        require(!commitments[commitment], "Commitment already used");
+        require(commitments[commitment], "Commitment does not exist");
+        require(!spentCommitments[commitment], "Commitment already spent");
+        require(commitmentAmounts[commitment] >= amount, "Insufficient deposit amount");
         require(recipient != address(0), "Invalid recipient");
         require(amount > 0, "Amount must be > 0");
 
@@ -165,20 +232,20 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         });
 
         nullifiers[nullifier] = true;
-        commitments[commitment] = true;
-
-        // Insert into Merkle tree
-        _insertCommitment(commitment);
+        spentCommitments[commitment] = true;
 
         emit TransactionProcessed(nullifier, recipient, amount);
     }
 
     // ============ zk-STARKs Transparent ============
 
+    // `public` rather than `external`: processSTARKTransaction calls this
+    // internally, and Solidity cannot resolve an external function by plain
+    // name. The external ABI entry is unchanged.
     function verifySTARK(
         bytes calldata proof,
         bytes calldata publicInputs
-    ) external view returns (bool) {
+    ) public view returns (bool) {
         require(proof.length > 0, "ZKPrivacy: Empty proof");
         require(publicInputs.length > 0, "ZKPrivacy: Empty publicInputs");
         require(verifier != address(0), "ZKPrivacy: Verifier not set");

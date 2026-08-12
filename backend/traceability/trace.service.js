@@ -18,7 +18,8 @@ class TraceabilityService {
             'function getShipment(uint256 shipmentId) external view returns (tuple(uint256,uint256,address,address,uint256,uint256,string,string,bytes32,bool))',
             'function getProductEvents(uint256 productId) external view returns (tuple(uint256,uint256,uint256,string,string,string,address,uint256,bytes32)[])',
             'function getProductTrace(uint256 productId) external view returns (tuple(uint256,string,string,string,address,uint256,uint256,bool,string,bytes32), tuple(uint256,uint256,uint256,string,string,string,address,uint256,bytes32)[], tuple(uint256,uint256,address,uint256,bool,string,bytes32)[])',
-            'event ProductCreated(uint256 indexed productId, string name, address indexed manufacturer)'
+            'event ProductCreated(uint256 indexed productId, string name, address indexed manufacturer)',
+            'event ShipmentCreated(uint256 indexed shipmentId, uint256 productId, address indexed sender)'
         ];
 
         this.contract = new ethers.Contract(this.contractAddress, this.contractABI, this.wallet);
@@ -106,7 +107,7 @@ class TraceabilityService {
                 }
             }
             if (!shipmentId) {
-                shipmentId = await this.contract.getShipmentCount();
+                shipmentId = await this.contract.getTotalShipments();
             }
 
             await this.storeShipment({
@@ -364,6 +365,50 @@ class TraceabilityService {
                 created_at: new Date().toISOString()
             }]);
         if (error) throw error;
+    }
+
+    /**
+     * Verify if a user owns or has access to a shipment
+     * CWE-639: Insecure Direct Object Reference prevention
+     */
+    async verifyShipmentOwnership(shipmentId, userId) {
+        try {
+            // First try to get from blockchain
+            const shipment = await this.contract.getShipment(shipmentId);
+            
+            // User is owner if they are the sender or receiver
+            const sender = shipment[2].toLowerCase();
+            const receiver = shipment[3].toLowerCase();
+            const userIdLower = userId.toLowerCase();
+            
+            if (sender === userIdLower || receiver === userIdLower) {
+                return true;
+            }
+            
+            // Also check in database for additional access controls
+            const { data: dbShipment } = await supabase
+                .from('trace_shipments')
+                .select('user_id, allowed_users')
+                .eq('shipment_id', shipmentId)
+                .single();
+            
+            if (dbShipment) {
+                // Owner has access
+                if (dbShipment.user_id === userId) {
+                    return true;
+                }
+                // Check allowed users list
+                const allowedUsers = dbShipment.allowed_users || [];
+                if (allowedUsers.includes(userId)) {
+                    return true;
+                }
+            }
+            
+            return false;
+        } catch (error) {
+            logger.error(`[SECURITY] Ownership verification failed for shipment ${shipmentId}:`, error);
+            return false;
+        }
     }
 
     // ============ Statistics ============

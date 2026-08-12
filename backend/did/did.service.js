@@ -2,10 +2,38 @@ import { ethers } from 'ethers';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
-import { supabase } from '../api/src/config/db.js';
+import { supabase, supabaseAdmin } from '../api/src/config/db.js';
+
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+function base58btc(input) {
+    const bytes = Buffer.isBuffer(input) ? input : Buffer.from(input);
+    let zeros = 0;
+    while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+    let digits = [0];
+    for (const byte of bytes) {
+        let carry = byte;
+        for (let i = 0; i < digits.length; i++) {
+            carry += digits[i] << 8;
+            digits[i] = carry % 58;
+            carry = (carry / 58) | 0;
+        }
+        while (carry > 0) {
+            digits.push(carry % 58);
+            carry = (carry / 58) | 0;
+        }
+    }
+    let output = '';
+    for (let i = 0; i < zeros; i++) output += '1';
+    for (let i = digits.length - 1; i >= 0; i--) output += BASE58_ALPHABET[digits[i]];
+    return output;
+}
 
 class DIDService {
     constructor() {
+        if (!process.env.DID_PROOF_SECRET) {
+            throw new Error('DID_PROOF_SECRET environment variable is required and must not be empty');
+        }
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
         this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
         this.didRegistryAddress = process.env.DID_REGISTRY_ADDRESS;
@@ -49,7 +77,7 @@ class DIDService {
         logger.info('✅ DID Service initialized');
     }
 
-    async createDID(userAddress) {
+    async createDID(userAddress, publicKey) {
         try {
             const did = `did:truxify:${uuidv4()}`;
 
@@ -59,12 +87,17 @@ class DIDService {
             await this.addServiceEndpoint(did, 'identity', 'IdentityService', `${process.env.API_URL}/api/did/identity`, 'Main identity service');
             await this.addServiceEndpoint(did, 'credentials', 'CredentialService', `${process.env.API_URL}/api/did/credentials`, 'Credential management service');
 
-            const keyPair = crypto.generateKeyPairSync('rsa', {
-                modulusLength: 2048,
-                publicKeyEncoding: { type: 'spki', format: 'pem' },
-                privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-            });
-            const publicKeyMultibase = Buffer.from(keyPair.publicKey).toString('base64');
+            let publicKeyMultibase = publicKey;
+            let privateKey = null;
+            if (!publicKeyMultibase) {
+                const keyPair = crypto.generateKeyPairSync('rsa', {
+                    modulusLength: 2048,
+                    publicKeyEncoding: { type: 'spki', format: 'der' },
+                    privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
+                });
+                publicKeyMultibase = `z${base58btc(keyPair.publicKey)}`;
+                privateKey = Buffer.from(keyPair.privateKey).toString('base64');
+            }
             await this.addVerificationMethod(did, 'key-1', 'RsaVerificationKey2018', did, publicKeyMultibase);
 
             await this.identityWallet.createWallet(did);
@@ -72,7 +105,7 @@ class DIDService {
             await this.storeDID({ did, owner: userAddress, publicKey: publicKeyMultibase });
 
             logger.info(`✅ DID created: ${did}`);
-            return { success: true, did, publicKey: publicKeyMultibase, txHash: receipt.hash };
+            return { success: true, did, publicKey: publicKeyMultibase, privateKey, txHash: receipt.hash };
         } catch (error) {
             logger.error('DID creation failed:', error);
             throw error;
@@ -103,8 +136,9 @@ class DIDService {
 
     async issueCredential(subject, credentialType, schema, validUntil) {
         try {
+            const issuedAtMs = Date.now();
             const schemaHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(schema)));
-            const proof = this.generateProof(subject, credentialType, schema);
+            const proof = this.generateProof(subject, credentialType, schema, issuedAtMs);
             const proofHash = ethers.keccak256(ethers.toUtf8Bytes(proof));
 
             const validUntilTimestamp = validUntil || Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
@@ -152,7 +186,7 @@ class DIDService {
                 subject,
                 credentialType,
                 schema,
-                issuedAt: new Date().toISOString(),
+                issuedAt: new Date(issuedAtMs).toISOString(),
                 validUntil: new Date(validUntilTimestamp * 1000).toISOString(),
                 txHash: receipt.hash,
                 proof
@@ -205,11 +239,13 @@ class DIDService {
         }
     }
 
-    generateProof(subject, credentialType, schema) {
-        const secret = process.env.DID_PROOF_SECRET || 'default-proof-secret';
-        const payload = JSON.stringify({ subject, credentialType, schema, timestamp: Date.now() });
-        const proof = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-        return proof;
+    generateProof(subject, credentialType, schema, issuedAtMs) {
+        const secret = process.env.DID_PROOF_SECRET;
+        if (!secret) {
+            throw new Error('DID_PROOF_SECRET is not configured; refusing to generate proof');
+        }
+        const payload = JSON.stringify({ subject, credentialType, schema, timestamp: issuedAtMs });
+        return crypto.createHmac('sha256', secret).update(payload).digest('hex');
     }
 
     async getDID(did) {
@@ -258,14 +294,14 @@ class DIDService {
     }
 
     async storeDID(data) {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
             .from('dids')
             .insert([{ did: data.did, owner: data.owner, public_key: data.publicKey, created_at: new Date().toISOString() }]);
         if (error) throw error;
     }
 
     async storeCredential(data) {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
             .from('credentials')
             .insert([{
                 credential_id: data.credentialId,
@@ -281,7 +317,7 @@ class DIDService {
     }
 
     async updateCredentialStatus(credentialId, revoked) {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
             .from('credentials')
             .update({ revoked, revoked_at: new Date().toISOString() })
             .eq('credential_id', credentialId);
@@ -289,8 +325,8 @@ class DIDService {
     }
 
     async getDIDStats() {
-        const { data: dids, error: didsErr } = await supabase.from('dids').select('*').order('created_at', { ascending: false }).limit(100);
-        const { data: credentials, error: credsErr } = await supabase.from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
+        const { data: dids, error: didsErr } = await (supabaseAdmin || supabase).from('dids').select('*').order('created_at', { ascending: false }).limit(100);
+        const { data: credentials, error: credsErr } = await (supabaseAdmin || supabase).from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
 
         if (didsErr || credsErr) {
             logger.error('Failed to fetch DID stats', { didsErr, credsErr });

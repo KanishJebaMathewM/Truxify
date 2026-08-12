@@ -3,10 +3,6 @@ import logger from './logger.js';
 const DEFAULT_LIMIT = 8192; // 8 KB
 
 export default function headerSizeMonitor(req, res, next) {
-  if (process.env.NODE_ENV === 'production') {
-    return next();
-  }
-
   const rawLimit = process.env.HEADER_SIZE_LIMIT;
   const parsedLimit = Number(rawLimit);
   const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : DEFAULT_LIMIT;
@@ -14,14 +10,17 @@ export default function headerSizeMonitor(req, res, next) {
   let totalSize = 0;
 
   for (const [name, value] of Object.entries(req.headers)) {
-    totalSize += Buffer.byteLength(name);
+    totalSize += Buffer.byteLength(String(name));
 
     if (Array.isArray(value)) {
       for (const item of value) {
-        totalSize += Buffer.byteLength(String(item));
+        if (item === undefined || item === null) continue;
+        // Stringify objects defensively; Buffer.byteLength on a non-string
+        // throws, and header values can be nested in exotic proxies.
+        totalSize += Buffer.byteLength(typeof item === 'string' ? item : JSON.stringify(item));
       }
-    } else if (value !== undefined) {
-      totalSize += Buffer.byteLength(String(value));
+    } else if (value !== undefined && value !== null) {
+      totalSize += Buffer.byteLength(typeof value === 'string' ? value : String(value));
     }
   }
 
@@ -35,6 +34,10 @@ export default function headerSizeMonitor(req, res, next) {
       },
       'Request headers exceed configured size threshold'
     );
+    return res.status(431).json({
+      success: false,
+      error: 'Request header fields too large',
+    });
   }
 
   next();

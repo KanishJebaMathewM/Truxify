@@ -191,6 +191,93 @@ class MarketplaceRepository {
     }
   }
 
+  /// Converts a raw `load_offers` row into the numeric fields the ML deadhead
+  /// engine expects, normalising the database's storage format:
+  ///   * `pickup_lat`/`pickup_lng`/`drop_lat`/`drop_lng` → `origin_*`/`dest_*`
+  ///   * free-text `weight` ("3 tonnes") → `weightKg`
+  ///   * free-text `dimensions` ("12 × 6 × 6 ft") → `lengthM`/`widthM`/`heightM`
+  ///   * paisa `freight_value` → `paymentInr` (rupees)
+  /// Legacy `origin_*`/`weight_kg`/`length_m`/`payment_inr` keys are still
+  /// honoured when present (older API / mock responses). Exposed for tests.
+  @visibleForTesting
+  static ({
+    double? originLat,
+    double? originLng,
+    double? destLat,
+    double? destLng,
+    double? weightKg,
+    double? lengthM,
+    double? widthM,
+    double? heightM,
+    double? paymentInr,
+  }) rawDeadheadFields(Map<String, dynamic> row) {
+    double? asDouble(String key) {
+      final v = row[key];
+      if (v is num) return v.toDouble();
+      if (v is String) return double.tryParse(v);
+      return null;
+    }
+
+    final dims = _parseDimensionsM((row['dimensions'] ?? '').toString());
+    final freightValuePaisa = _numOr(row, 'freight_value', 0);
+    return (
+      originLat: asDouble('pickup_lat') ?? asDouble('origin_lat'),
+      originLng: asDouble('pickup_lng') ?? asDouble('origin_lng'),
+      destLat: asDouble('drop_lat') ?? asDouble('dest_lat'),
+      destLng: asDouble('drop_lng') ?? asDouble('dest_lng'),
+      weightKg: _parseWeightKg((row['weight'] ?? '').toString()) ??
+          asDouble('weight_kg'),
+      lengthM: dims != null ? dims[0] : asDouble('length_m'),
+      widthM: dims != null ? dims[1] : asDouble('width_m'),
+      heightM: dims != null ? dims[2] : asDouble('height_m'),
+      paymentInr: freightValuePaisa > 0
+          ? freightValuePaisa / 100
+          : asDouble('payment_inr'),
+    );
+  }
+
+  static num _numOr(Map<String, dynamic> row, String key, num fallback) {
+    final v = row[key];
+    if (v is num) return v;
+    if (v is String) return num.tryParse(v) ?? fallback;
+    return fallback;
+  }
+
+  /// Parses free-text weight like "3 tonnes" / "500 kg" into kilograms.
+  /// Returns null when the unit cannot be interpreted.
+  static double? _parseWeightKg(String weightText) {
+    final text = weightText.trim().toLowerCase();
+    if (text.isEmpty) return null;
+    final match = RegExp(r'(\d+(?:\.\d+)?)\s*([a-z]*)').firstMatch(text);
+    if (match == null) return null;
+    final number = double.tryParse(match.group(1)!);
+    if (number == null) return null;
+    final unit = match.group(2) ?? '';
+    if (unit.isEmpty || unit.startsWith('kg')) return number;
+    if (unit.startsWith('ton')) return number * 1000;
+    if (unit.startsWith('g')) return number / 1000;
+    if (unit.startsWith('q')) return number * 100;
+    return null;
+  }
+
+  /// Parses free-text dimensions like "12 × 6 × 6 ft" (or "4 × 2 × 2" in
+  /// metres) into [lengthM, widthM, heightM]. Returns null unless three
+  /// numeric values are present.
+  static List<double>? _parseDimensionsM(String dimensionsText) {
+    final numbers = RegExp(r'\d+(?:\.\d+)?')
+        .allMatches(dimensionsText)
+        .map((m) => double.tryParse(m.group(0)!))
+        .whereType<double>()
+        .take(3)
+        .toList(growable: false);
+    if (numbers.length != 3) return null;
+    final text = dimensionsText.toLowerCase();
+    final isFeet =
+        text.contains('ft') || text.contains('feet') || text.contains("'");
+    final factor = isFeet ? 0.3048 : 1.0;
+    return numbers.map((n) => n * factor).toList(growable: false);
+  }
+
   LoadOffer _mapLoadOffer(Map<String, dynamic> row) {
     String s(String key, [String fallback = '']) => (row[key] ?? fallback).toString();
     num n(String key, [num fallback = 0]) {
@@ -222,12 +309,6 @@ class MarketplaceRepository {
       if (v is num) return v != 0;
       return fallback;
     }
-    double? nullableDouble(String key) {
-      final v = row[key];
-      if (v is num) return v.toDouble();
-      if (v is String) return double.tryParse(v);
-      return null;
-    }
 
     final freightValue = row.containsKey('freight_value')
         ? _formatCurrency(n('freight_value'))
@@ -243,15 +324,20 @@ class MarketplaceRepository {
     final isBestProfit = b('is_best_profit', b('best_profit', false));
 
     // Raw numeric data for ML payloads (nullable for backward compatibility).
-    final originLat = nullableDouble('origin_lat');
-    final originLng = nullableDouble('origin_lng');
-    final destLat = nullableDouble('dest_lat');
-    final destLng = nullableDouble('dest_lng');
-    final weightKg = nullableDouble('weight_kg');
-    final lengthM = nullableDouble('length_m');
-    final widthM = nullableDouble('width_m');
-    final heightM = nullableDouble('height_m');
-    final paymentInr = nullableDouble('payment_inr');
+    // Real `load_offers` rows store coordinates under `pickup_*`/`drop_*`,
+    // cargo weight/dimensions as free text and freight in paisa — those are
+    // normalised here (see [rawDeadheadFields]). Legacy `origin_*` keys are
+    // still honoured for older API responses.
+    final raw = rawDeadheadFields(row);
+    final originLat = raw.originLat;
+    final originLng = raw.originLng;
+    final destLat = raw.destLat;
+    final destLng = raw.destLng;
+    final weightKg = raw.weightKg;
+    final lengthM = raw.lengthM;
+    final widthM = raw.widthM;
+    final heightM = raw.heightM;
+    final paymentInr = raw.paymentInr;
 
     return LoadOffer(
       id: s('id'),
@@ -329,9 +415,9 @@ class MarketplaceRepository {
         'dest_lat': load.destinationLat,
         'dest_lng': load.destinationLng,
         'weight_kg': load.weightKg,
-        'length_m': load.lengthM ?? 0.0,
-        'width_m': load.widthM ?? 0.0,
-        'height_m': load.heightM ?? 0.0,
+        'length_m': load.lengthM ?? 1.0,
+        'width_m': load.widthM ?? 1.0,
+        'height_m': load.heightM ?? 1.0,
         'pickup_deadline': arrivalTime,
         'payment_inr': load.paymentInr,
       });

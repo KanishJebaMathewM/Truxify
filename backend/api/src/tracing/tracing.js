@@ -1,5 +1,7 @@
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
-import { Resource } from '@opentelemetry/resources';
+import resourcesModule from '@opentelemetry/resources';
+
+const { Resource } = resourcesModule;
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-grpc';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
@@ -88,7 +90,7 @@ class Tracing {
         if (!this.isInitialized) {
             this.initialize();
         }
-        return this.provider.getTracer(name);
+        return this.provider ? this.provider.getTracer(name) : trace.getTracer(name);
     }
 
     createSpan(name, options = {}) {

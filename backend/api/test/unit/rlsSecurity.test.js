@@ -53,6 +53,16 @@ const MAIN_RLS_TABLES = ALL_TABLES.filter(
   (t) => !['user_devices', 'driver_documents', 'webhook_failures', 'tracking_tokens', 'behavioral_profiles', 'fraud_risk_scores', 'fraud_review_queue'].includes(t)
 );
 
+// Tables that revoke_anon_privileges.sql intentionally exempts: their RLS
+// policies grant SELECT to anon so GET /api/v1/vehicle-types and
+// GET /api/v1/regions work for unauthenticated clients. They must still be
+// covered by the "enables RLS" checks (hence staying in ALL_TABLES) but must
+// not be required to appear in the revoke migration.
+const ANON_REVOKE_EXEMPT_TABLES = ['vehicle_types', 'regions'];
+const ANON_REVOKE_TABLES = ALL_TABLES.filter(
+  (t) => !ANON_REVOKE_EXEMPT_TABLES.includes(t)
+);
+
 describe('RLS Migration (20240101000000_rls.sql)', () => {
   let rlsContent;
 
@@ -180,8 +190,13 @@ describe('Revoke anon privileges (revoke_anon_privileges.sql)', () => {
     revokeContent = await fs.readFile(revokePath, 'utf8');
   });
 
-  it.each(ALL_TABLES)('revokes anon privileges on table: %s', (table) => {
+  it.each(ANON_REVOKE_TABLES)('revokes anon privileges on table: %s', (table) => {
     expect(revokeContent).toContain(`REVOKE ALL ON TABLE public.${table} FROM anon`);
+  });
+
+  it.each(ANON_REVOKE_EXEMPT_TABLES)('pins the documented anon exemption for public reference table: %s', (table) => {
+    expect(revokeContent).not.toContain(`REVOKE ALL ON TABLE public.${table} FROM anon`);
+    expect(revokeContent).toMatch(/intentionally public reference tables/);
   });
 });
 
@@ -268,6 +283,31 @@ describe('accept_bid_tx — auth.uid() verification present in migration chain',
   it('withdraw_funds_tx has auth.uid() check verifying caller owns the wallet', () => {
     const hasAuthCheck = /IF auth\.uid\(\) <> p_driver_id THEN/i.test(secureRpcContent);
     expect(hasAuthCheck).toBe(true);
+  });
+});
+
+describe('accept_bid_tx — two-phase acceptance guard preserved (issue #8971)', () => {
+  let ownershipFixContent;
+
+  beforeAll(async () => {
+    const p = path.resolve(__dirname, '../../../../supabase/migrations/20260805120000_fix_rpc_ownership_checks.sql');
+    ownershipFixContent = await fs.readFile(p, 'utf8');
+  });
+
+  it('the latest accept_bid_tx definition still verifies the pending_bid_acceptance snapshot', () => {
+    // 20260805120000 redefined accept_bid_tx for the get_profile_id()
+    // ownership fix (issue #6275). It must not drop the two-phase guard from
+    // 20260802120000 (issue #5777): the order must carry a
+    // pending_bid_acceptance snapshot whose bid_amount still matches the
+    // stored bid before the bid is finalized.
+    expect(/v_pending_acceptance jsonb/i.test(ownershipFixContent)).toBe(true);
+    expect(/pending_bid_acceptance/.test(ownershipFixContent)).toBe(true);
+    expect(
+      /v_pending_bid_amount\s*:=\s*\(v_pending_acceptance\s*->>['"]bid_amount['"]\)::int/i.test(ownershipFixContent)
+    ).toBe(true);
+    expect(
+      /Bid amount was modified after acceptance; refusing to finalize/i.test(ownershipFixContent)
+    ).toBe(true);
   });
 });
 
@@ -361,6 +401,20 @@ describe('Service-level RPC calls carry an authenticated client (issue #5737)', 
     expect(driverRoutesContent).toMatch(/createUserClient\(req\.token\)/);
     expect(driverRoutesContent).toMatch(/userClient\.rpc\('withdraw_funds_tx'/);
     expect(driverRoutesContent).not.toMatch(/createUserClient\(req\.token\) \? [^;]* : supabase/);
+  });
+});
+
+describe('User-facing order data path uses the service-role client (issue #8885)', () => {
+  const base = path.resolve(__dirname, '../../src');
+  const readSource = (rel) => readFileSync(path.resolve(base, rel), 'utf8');
+
+  it('container.js wires orderRepository, orderValidationService, and trackingTokenService to the service-role client', () => {
+    const container = readSource('core/container.js');
+    expect(container).toMatch(/const repoClient = supabaseAdmin \?\? supabase;/);
+    expect(container).toMatch(/const orderRepository = new OrderRepository\(repoClient\);/);
+    expect(container).toMatch(/const orderValidationService = new OrderValidationService\(\{ supabase: repoClient, logger \}\)/);
+    expect(container).toMatch(/const trackingTokenService = new TrackingTokenService\(\{ supabase: repoClient, logger \}\)/);
+    expect(container).not.toMatch(/const orderRepository = new OrderRepository\(supabase\);/);
   });
 });
 

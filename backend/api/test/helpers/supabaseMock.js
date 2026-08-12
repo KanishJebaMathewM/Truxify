@@ -38,7 +38,8 @@ class SupabaseQueryBuilder {
     this._payload = null;       // for insert / rpc
     this._select = '*';
     this._filters = [];         // [{col, op, val}]
-    this._order = null;         // {col, ascending}
+    this._order = null;         // {col, ascending} — last .order() call
+    this._orders = [];          // [{col, ascending}] — every .order() call
     this._limit = null;
     this._single = false;
     this._maybeSingle = false;
@@ -85,7 +86,9 @@ class SupabaseQueryBuilder {
   not(col, op, val) { this._filters.push({ col, op: `not:${op}`, val }); return this; }
   or(spec) { this._filters.push({ col: null, op: 'or', val: spec }); return this; }
   order(col, opts = {}) {
-    this._order = { col, ascending: opts.ascending !== false };
+    const entry = { col, ascending: opts.ascending !== false };
+    this._orders.push(entry);
+    this._order = entry;
     return this;
   }
   limit(n) { this._limit = n; return this; }
@@ -218,6 +221,7 @@ class SupabaseQueryBuilder {
       select: this._select,
       filters: this._filters,
       order: this._order,
+      orders: this._orders,
       limit: this._limit,
       single: this._single,
       maybeSingle: this._maybeSingle,
@@ -303,6 +307,9 @@ class SupabaseQueryBuilder {
       if (this._single) {
         return { data: updatedRows[0] ?? null, error: updatedRows[0] ? null : { code: 'PGRST116', message: 'no rows' } };
       }
+      if (this._maybeSingle) {
+        return { data: updatedRows[0] ?? null, error: null };
+      }
       return { data: updatedRows, error: null };
     }
 
@@ -327,9 +334,15 @@ class SupabaseQueryBuilder {
       for (const f of this._filters) {
         rows = rows.filter(r => this._matches(r, f));
       }
-      if (this._order) {
-        const { col, ascending } = this._order;
-        rows.sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (ascending ? 1 : -1));
+      if (this._orders.length) {
+        rows.sort((a, b) => {
+          for (const { col, ascending } of this._orders) {
+            if (a[col] === b[col]) continue;
+            const cmp = a[col] > b[col] ? 1 : -1;
+            return ascending ? cmp : -cmp;
+          }
+          return 0;
+        });
       }
       const totalCount = rows.length;
       if (this._range) {
@@ -397,6 +410,20 @@ export function createSupabaseMock(initialStore = {}) {
           store.orders[idx] = { ...store.orders[idx], driver_id: args.p_driver_id, status: 'active' };
         }
       }
+      // Simulate the append_maintenance_photos PL/pgSQL RPC (see
+      // migrations/20260811000000_create_append_maintenance_photos.sql)
+      if (fnName === 'append_maintenance_photos' && args?.p_ticket_id) {
+        const idx = store.truck_maintenance_tickets?.findIndex(t => t.id === args.p_ticket_id);
+        if (idx !== -1) {
+          store.truck_maintenance_tickets[idx] = {
+            ...store.truck_maintenance_tickets[idx],
+            photo_urls: [
+              ...(store.truck_maintenance_tickets[idx].photo_urls || []),
+              ...(args.p_new_paths || []),
+            ],
+          };
+        }
+      }
       return Promise.resolve({ data: null, error: null });
     },
     storage: {
@@ -435,6 +462,18 @@ export function createSupabaseMock(initialStore = {}) {
     supabase,
     store,
     calls,
+    /**
+     * Return the mock to its initial state. Needed by suites that build the
+     * mock once at module scope — the usual shape when it has to be visible
+     * to a hoisted vi.mock factory — and clear it between tests instead of
+     * constructing a fresh one.
+     */
+    reset() {
+      for (const table of Object.keys(store)) delete store[table];
+      Object.assign(store, initialStore);
+      calls.length = 0;
+      for (const key of Object.keys(programmed)) delete programmed[key];
+    },
     programError(msg = 'mock error')    { programmed.nextError    = { message: msg }; },
     programErrorFor(table, mode, msg = 'mock error') {
       programmed.matchingErrors ??= [];

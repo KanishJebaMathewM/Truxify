@@ -32,23 +32,21 @@ describe('Weigh Station Service', () => {
   });
 
   describe('syncAndTransmitInternalWeights', () => {
-    it('returns BYPASS for completely legal weights', async () => {
-      // 50 PSI * 250 + 5000 = 17,500 lbs (Well under 34k tandem max and 80k gross)
+    it('returns UNSUPPORTED when no WIM provider is configured', async () => {
       const axles = [
-        { position: 'steer', pressure_psi: 30 }, // 30 * 250 + 5000 = 12500
-        { position: 'drive', pressure_psi: 50 }, // 50 * 250 + 5000 = 17500
-        { position: 'trailer', pressure_psi: 50 } // 50 * 250 + 5000 = 17500
-      ]; // Gross: 47,500 lbs
+        { position: 'steer', pressure_psi: 30 },
+        { position: 'drive', pressure_psi: 50 },
+        { position: 'trailer', pressure_psi: 50 }
+      ];
 
       const result = await syncAndTransmitInternalWeights('driver-1', 'truck-1', axles);
 
-      expect(result.action).toBe('BYPASS');
-      expect(result.gross_weight_lbs).toBe(47500);
-      expect(result.axles.length).toBe(3);
+      expect(result.action).toBe('UNSUPPORTED');
+      expect(result.supported).toBe(false);
+      expect(result.stationId).toBeNull();
     });
 
-    it('returns PULL_IN if a single axle is overweight', async () => {
-      // 120 PSI * 250 + 5000 = 35,000 lbs (Over 34k tandem limit)
+    it('returns UNSUPPORTED for single axle overweight check', async () => {
       const axles = [
         { position: 'steer', pressure_psi: 30 },
         { position: 'drive', pressure_psi: 120 },
@@ -57,12 +55,11 @@ describe('Weigh Station Service', () => {
 
       const result = await syncAndTransmitInternalWeights('driver-1', 'truck-1', axles);
 
-      expect(result.action).toBe('PULL_IN');
-      expect(result.reason).toContain('Axle drive overweight');
+      expect(result.action).toBe('UNSUPPORTED');
+      expect(result.reason).toContain('no WIM provider');
     });
 
-    it('returns PULL_IN if gross weight is overweight', async () => {
-      // 110 PSI * 250 + 5000 = 32,500 lbs each * 3 = 97,500 lbs (Over 80k gross limit)
+    it('returns UNSUPPORTED for gross weight check', async () => {
       const axles = [
         { position: 'steer', pressure_psi: 110 },
         { position: 'drive', pressure_psi: 110 },
@@ -71,9 +68,8 @@ describe('Weigh Station Service', () => {
 
       const result = await syncAndTransmitInternalWeights('driver-1', 'truck-1', axles);
 
-      expect(result.action).toBe('PULL_IN');
-      expect(result.reason).toContain('Gross weight overweight');
-      expect(result.gross_weight_lbs).toBe(97500);
+      expect(result.action).toBe('UNSUPPORTED');
+      expect(result.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     });
   });
 });

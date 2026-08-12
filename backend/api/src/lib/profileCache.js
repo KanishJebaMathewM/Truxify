@@ -250,6 +250,11 @@ export async function setCachedProfile(
 ) {
   const redisClient = getRedisClient();
   if (!redisClient || !firebaseUid || !profile) return;
+  // Clamp the TTL the same way the Supabase setters do: a non-positive TTL
+  // would immediately expire the key, and an unbounded TTL could pin a
+  // stale (e.g. deactivated) profile in cache for a very long time.
+  if (!Number.isFinite(Number(ttlSeconds)) || ttlSeconds < 1) ttlSeconds = 1;
+  if (ttlSeconds > 86400) ttlSeconds = 86400;
   try {
     await redisClient.set(
       firebaseProfileKey(firebaseUid),

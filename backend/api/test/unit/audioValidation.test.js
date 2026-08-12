@@ -76,6 +76,12 @@ describe('detectAudioMimeType', () => {
     expect(detectAudioMimeType(AAC_ADTS)).toBe('audio/aac');
   });
 
+  it('detects the alternate ADTS AAC sync pattern (0xFFF9)', () => {
+    // The second AAC signature covers the 0xFFF9 header variant.
+    const altAac = withHeader([0xff, 0xf9, 0x50, 0x80]);
+    expect(detectAudioMimeType(altAac)).toBe('audio/aac');
+  });
+
   it('rejects a RIFF container that is not WAVE', () => {
     const avi = Buffer.alloc(64);
     avi.write('RIFF', 0, 'ascii');

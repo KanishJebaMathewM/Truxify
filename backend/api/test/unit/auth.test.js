@@ -1182,4 +1182,68 @@ describe('authenticate middleware - Redis caching', () => {
     expect(ttl).toBeGreaterThan(0);
     expect(ttl).toBeLessThanOrEqual(120);
   });
+
+  it('caches a firebase profile bounded by the token remaining lifetime', async () => {
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const expSeconds = nowSeconds + 90; // token expires in 90 seconds
+    const token = jwt.sign({ exp: expSeconds }, 'secret');
+
+    const dbProfile = {
+      id: 'firebase-user-1',
+      firebase_uid: 'firebase-user',
+      role: 'driver',
+      full_name: 'Fresh Fire',
+      phone: '+913333333333',
+    };
+
+    const redisClientMock = {
+      get: vi.fn().mockResolvedValue(null),
+      set: vi.fn().mockResolvedValue('OK'),
+    };
+
+    const firebaseAdminMock = {
+      auth: () => ({
+        verifyIdToken: vi.fn().mockResolvedValue({
+          uid: 'firebase-user',
+          exp: expSeconds,
+        }),
+      }),
+    };
+
+    const supabaseMock = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve({ data: dbProfile, error: null }),
+            }),
+          }),
+        }),
+      }),
+    };
+
+    vi.doMock('../../src/config/db.js', () => ({
+      createUserClient: () => null,
+      firebaseAdmin: firebaseAdminMock,
+      supabase: supabaseMock,
+      redisClient: redisClientMock,
+    }));
+
+    const { authenticate } = await import('../../src/middleware/auth.js');
+
+    const req = { headers: { authorization: `Bearer ${token}` } };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+
+    await authenticate(req, res, next);
+
+    expect(next).toHaveBeenCalled();
+    const setCall = redisClientMock.set.mock.calls.find(
+      ([key]) => key === 'user:profile:firebase-user'
+    );
+    expect(setCall).toBeDefined();
+    const ttl = setCall[3];
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(90);
+  });
 });

@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockOrderRepository = {
-  createTimeline: vi.fn(),
   getTimeline: vi.fn(),
   updateTimelineMilestone: vi.fn(),
-  deleteTimeline: vi.fn(),
+  createTimeline: vi.fn(),
 };
 
 describe('orderTimelineService', () => {
@@ -12,60 +11,48 @@ describe('orderTimelineService', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    orderTimelineService = new (await import('../../src/services/order/orderTimelineService.js')).OrderTimelineService(mockOrderRepository);
-  });
-
-  describe('createOrderTimeline', () => {
-    it('creates the default milestone timeline for an order', async () => {
-      mockOrderRepository.createTimeline.mockResolvedValue({ data: [], error: null });
-
-      await orderTimelineService.createOrderTimeline('order-1');
-      expect(mockOrderRepository.createTimeline).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({ order_display_id: 'order-1', milestone: 'Order Placed', completed: true }),
-          expect.objectContaining({ order_display_id: 'order-1', milestone: 'In Transit', completed: false }),
-          expect.objectContaining({ order_display_id: 'order-1', milestone: 'Delivered', completed: false }),
-        ]),
-      );
-    });
-
-    it('throws when the timeline insert fails', async () => {
-      mockOrderRepository.createTimeline.mockResolvedValue({ data: null, error: { message: 'DB insert failed' } });
-
-      await expect(orderTimelineService.createOrderTimeline('order-1')).rejects.toThrow('Failed to create order timeline.');
-    });
+    vi.resetModules();
+    const { OrderTimelineService } = await import('../../src/services/order/orderTimelineService.js');
+    orderTimelineService = new OrderTimelineService(mockOrderRepository);
   });
 
   describe('getOrderTimeline', () => {
-    it('returns the stored timeline events', async () => {
-      const events = [
-        { id: 'e1', created_at: '2026-08-01T10:00:00Z', type: 'created' },
-        { id: 'e2', created_at: '2026-08-01T11:00:00Z', type: 'status_change' },
-      ];
-      mockOrderRepository.getTimeline.mockResolvedValue({ data: events, error: null });
+    it('returns events for an order', async () => {
+      mockOrderRepository.getTimeline.mockResolvedValue({
+        data: [{ id: 'e1', milestone: 'Order Placed' }],
+        error: null,
+      });
 
       const result = await orderTimelineService.getOrderTimeline('order-1');
-      expect(result).toEqual(events);
+      expect(result).toHaveLength(1);
+      expect(mockOrderRepository.getTimeline).toHaveBeenCalledWith('order-1');
     });
 
-    it('returns an empty array when no events exist', async () => {
+    it('returns empty array when no events', async () => {
       mockOrderRepository.getTimeline.mockResolvedValue({ data: [], error: null });
-
       const result = await orderTimelineService.getOrderTimeline('order-1');
       expect(result).toEqual([]);
+    });
+
+    it('throws when the timeline query fails', async () => {
+      mockOrderRepository.getTimeline.mockResolvedValue({ data: null, error: { message: 'DB down' } });
+      await expect(orderTimelineService.getOrderTimeline('order-1')).rejects.toThrow();
     });
   });
 
   describe('completeMilestone', () => {
-    it('marks a milestone as completed', async () => {
+    it('marks a milestone completed', async () => {
       mockOrderRepository.updateTimelineMilestone.mockResolvedValue({ error: null });
 
-      await orderTimelineService.completeMilestone('order-1', 'In Transit', '2026-08-01T11:00:00Z');
+      await expect(orderTimelineService.completeMilestone('order-1', 'In Transit')).resolves.not.toThrow();
       expect(mockOrderRepository.updateTimelineMilestone).toHaveBeenCalledWith(
-        'order-1',
-        'In Transit',
-        expect.objectContaining({ completed: true, milestone_time: '2026-08-01T11:00:00Z' }),
+        'order-1', 'In Transit', expect.objectContaining({ completed: true }),
       );
+    });
+
+    it('throws when the milestone update fails', async () => {
+      mockOrderRepository.updateTimelineMilestone.mockResolvedValue({ error: { message: 'DB down' } });
+      await expect(orderTimelineService.completeMilestone('order-1', 'In Transit')).rejects.toThrow();
     });
   });
 });

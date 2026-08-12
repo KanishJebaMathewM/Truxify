@@ -392,7 +392,6 @@ describe('Profile Routes', () => {
 
       const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
       expect(profileUpdateCall.payload).toEqual({
-        wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
         polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
       });
     });
@@ -450,6 +449,46 @@ describe('Profile Routes', () => {
       expect(res.body.error).toBe('This wallet address is already registered to another account.');
 
       m.supabase.from = originalFrom;
+    });
+
+    it('rejects a mixed-case address with an invalid EIP-55 checksum', async () => {
+      const res = await request(buildApp())
+        .put('/api/profile/wallet')
+        .set(CUSTOMER_HEADERS)
+        .send({
+          wallet_address: '0x52908400098527886E0F7030069857D2e4169EE7',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation failed');
+      expect(res.body.details[0].field).toBe('wallet_address');
+      expect(res.body.details[0].message).toContain('EIP-55 checksum');
+    });
+
+    it('accepts a valid checksummed mixed-case address', async () => {
+      m.store.profiles.push({
+        id: 'customer-uuid-123',
+        firebase_uid: 'firebase-cust-uid',
+        role: 'customer',
+      });
+
+      const res = await request(buildApp())
+        .put('/api/profile/wallet')
+        .set(CUSTOMER_HEADERS)
+        .send({
+          wallet_address: '0x52908400098527886E0F7030069857D2E4169EE7',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        success: true,
+        walletAddress: '0x52908400098527886E0F7030069857D2E4169EE7',
+      });
+
+      const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
+      expect(profileUpdateCall.payload).toEqual({
+        polygon_wallet_address: '0x52908400098527886E0F7030069857D2E4169EE7',
+      });
     });
   });
 

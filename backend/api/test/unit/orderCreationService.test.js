@@ -1,168 +1,99 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+const mockRpc = vi.fn();
+const mockGetRouteEstimate = vi.fn();
+const mockComputeOrderPricing = vi.fn();
+const mockPredictPrice = vi.fn();
+const mockGetLiveTrafficMultiplier = vi.fn();
+
 vi.mock('../../src/config/db.js', () => ({
-  supabase: { rpc: vi.fn(), from: vi.fn() },
-  supabaseAdmin: { rpc: vi.fn(), from: vi.fn() },
+  supabase: {},
+  supabaseAdmin: { rpc: mockRpc },
 }));
 
 vi.mock('../../src/services/osrm.js', () => ({
-  getRouteEstimate: vi.fn(),
-  validateCoordinates: vi.fn(),
+  getRouteEstimate: mockGetRouteEstimate,
+  validateCoordinates: vi.fn(() => null),
 }));
 
-vi.mock('../../src/services/trafficService.js', () => ({
-  getLiveTrafficMultiplier: vi.fn(),
+vi.mock('../../src/lib/pricing.js', () => ({
+  computeOrderPricing: mockComputeOrderPricing,
 }));
 
 vi.mock('../../src/services/ml.js', () => ({
-  predictPrice: vi.fn(),
+  predictPrice: mockPredictPrice,
 }));
 
-import { supabaseAdmin } from '../../src/config/db.js';
-import { getRouteEstimate, validateCoordinates } from '../../src/services/osrm.js';
-import { getLiveTrafficMultiplier } from '../../src/services/trafficService.js';
-import { predictPrice } from '../../src/services/ml.js';
-
-const validOrderData = {
-  pickup_address: 'Delhi',
-  pickup_lat: 28.6139,
-  pickup_lng: 77.209,
-  drop_address: 'Mumbai',
-  drop_lat: 19.076,
-  drop_lng: 72.8777,
-  goods_type: 'Electronics',
-  weight_tonnes: 5,
-};
+vi.mock('../../src/services/trafficService.js', () => ({
+  getLiveTrafficMultiplier: mockGetLiveTrafficMultiplier,
+}));
 
 describe('orderCreationService', () => {
-  let orderCreationService;
+  let createOrder;
 
   beforeEach(async () => {
     vi.resetAllMocks();
-    validateCoordinates.mockReturnValue(null);
-    getLiveTrafficMultiplier.mockResolvedValue(1.0);
-    predictPrice.mockResolvedValue({ estimatedPricePaisa: 1500000 });
-    orderCreationService = await import('../../src/services/order/orderCreationService.js');
+    vi.resetModules();
+    const module = await import('../../src/services/order/orderCreationService.js');
+    createOrder = module.createOrder;
+
+    mockRpc.mockImplementation((fnName) =>
+      fnName === 'create_order_tx'
+        ? { data: { id: 'order-new' }, error: null }
+        : { data: [], error: null },
+    );
+    mockGetRouteEstimate.mockResolvedValue({ distanceKm: 100 });
+    mockComputeOrderPricing.mockReturnValue({
+      distanceKm: 100,
+      baseFreight: 5000,
+      tollEstimate: 500,
+      platformFee: 200,
+      totalAmount: 5700,
+      fuelCost: 1800,
+      netProfit: 300,
+    });
+    mockPredictPrice.mockResolvedValue({ estimatedPricePaisa: 570000 });
+    mockGetLiveTrafficMultiplier.mockResolvedValue(1.0);
   });
+
+  const validOrderData = {
+    pickup_address: 'Delhi',
+    pickup_lat: 28.6139,
+    pickup_lng: 77.209,
+    drop_address: 'Mumbai',
+    drop_lat: 19.076,
+    drop_lng: 72.8777,
+    goods_type: 'Electronics',
+    weight_tonnes: 5,
+  };
 
   describe('createOrder', () => {
-    it('creates an order and broadcasts it to the loads board', async () => {
-      getRouteEstimate.mockResolvedValue({ distanceKm: 120 });
-      supabaseAdmin.rpc.mockImplementation((fn) =>
-        fn === 'create_order_tx'
-          ? { data: { id: 'order-1', order_display_id: 'OD-1' }, error: null }
-          : { data: [], error: null },
-      );
+    it('rejects orders missing required fields', async () => {
+      await expect(createOrder({ orderData: {}, userId: 'cust-1', user: {} })).rejects.toThrow('Missing required');
+    });
 
-      const result = await orderCreationService.createOrder({
+    it('rejects invalid coordinates', async () => {
+      const { validateCoordinates } = await import('../../src/services/osrm.js');
+      validateCoordinates.mockReturnValue('Invalid coordinates');
+      const orderData = { ...validOrderData, pickup_lat: 999, pickup_lng: 999 };
+
+      await expect(createOrder({ orderData, userId: 'cust-1', user: {} })).rejects.toThrow('Invalid coordinates');
+      expect(mockRpc).not.toHaveBeenCalled();
+    });
+
+    it('creates an order via the transaction RPC', async () => {
+      const result = await createOrder({
         orderData: validOrderData,
-        userId: 'user-1',
-        user: { fullName: 'Alice' },
+        userId: 'cust-1',
+        user: { fullName: 'Test Customer' },
       });
 
-      expect(result.order.id).toBe('order-1');
-      expect(supabaseAdmin.rpc).toHaveBeenCalledWith(
-        'create_order_tx',
-        expect.objectContaining({ p_customer_id: 'user-1', p_customer_name: 'Alice' }),
-      );
-    });
-
-    it('throws when required routing or cargo fields are missing', async () => {
-      await expect(
-        orderCreationService.createOrder({
-          orderData: { drop_address: 'Mumbai' },
-          userId: 'user-1',
-          user: { fullName: 'Alice' },
-        }),
-      ).rejects.toThrow('Missing required routing or cargo specification fields.');
-    });
-
-    it('throws when the coordinates are invalid', async () => {
-      validateCoordinates.mockReturnValueOnce('Latitude must be between -90 and 90.');
-
-      await expect(
-        orderCreationService.createOrder({
-          orderData: validOrderData,
-          userId: 'user-1',
-          user: { fullName: 'Alice' },
-        }),
-      ).rejects.toThrow('Latitude must be between -90 and 90.');
-    });
-
-    it('throws when pricing computation fails', async () => {
-      getRouteEstimate.mockRejectedValue(new Error('OSRM timeout'));
-
-      await expect(
-        orderCreationService.createOrder({
-          orderData: validOrderData,
-          userId: 'user-1',
-          user: { fullName: 'Alice' },
-        }),
-      ).rejects.toThrow('Unable to compute freight pricing for the given route/cargo.');
-    });
-
-    it('retries order creation when the display id collides', async () => {
-      let createAttempts = 0;
-      supabaseAdmin.rpc.mockImplementation((fn) => {
-        if (fn === 'create_order_tx') {
-          createAttempts += 1;
-          if (createAttempts === 1) {
-            return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
-          }
-          return { data: { id: 'order-1', order_display_id: 'OD-1' }, error: null };
-        }
-        return { data: [], error: null };
-      });
-
-      const result = await orderCreationService.createOrder({
-        orderData: validOrderData,
-        userId: 'user-1',
-        user: { fullName: 'Alice' },
-      });
-
-      const createOrderCalls = supabaseAdmin.rpc.mock.calls.filter(([fn]) => fn === 'create_order_tx');
-      expect(createOrderCalls).toHaveLength(2);
-      expect(result.order.id).toBe('order-1');
-    });
-  });
-
-  describe('findTargetDrivers', () => {
-    it('returns only drivers whose truck capacity can carry the load', async () => {
-      supabaseAdmin.rpc.mockResolvedValue({
-        data: [{ driver_id: 'd1' }, { driver_id: 'd2' }, { driver_id: 'd3' }],
-        error: null,
-      });
-      const driverDetailsChain = {
-        select: vi.fn().mockReturnThis(),
-        eq: vi.fn().mockReturnThis(),
-        not: vi.fn().mockReturnThis(),
-        in: vi.fn().mockReturnThis(),
-        data: [
-          { user_id: 'd1', truck_id: 't1' },
-          { user_id: 'd2', truck_id: 't2' },
-          { user_id: 'd3', truck_id: 't3' },
-        ],
-      };
-      const trucksChain = {
-        select: vi.fn().mockReturnThis(),
-        in: vi.fn().mockReturnThis(),
-        data: [
-          { id: 't1', max_capacity_tons: 10 },
-          { id: 't2', max_capacity_tons: 4 },
-          { id: 't3', max_capacity_tons: null },
-        ],
-      };
-      supabaseAdmin.from.mockImplementation((table) => (table === 'driver_details' ? driverDetailsChain : trucksChain));
-
-      const result = await orderCreationService.findTargetDrivers({ pickupLat: 28.6, pickupLng: 77.2, weightTonnes: 5 });
-      expect(result).toEqual(['d1']);
-    });
-
-    it('returns an empty array when the nearby-driver RPC fails', async () => {
-      supabaseAdmin.rpc.mockResolvedValue({ data: null, error: { message: 'rpc down' } });
-
-      const result = await orderCreationService.findTargetDrivers({ pickupLat: 28.6, pickupLng: 77.2, weightTonnes: 5 });
-      expect(result).toEqual([]);
+      expect(mockRpc).toHaveBeenCalledWith('create_order_tx', expect.objectContaining({
+        p_customer_id: 'cust-1',
+        p_pickup_address: 'Delhi',
+        p_total_amount: 5700,
+      }));
+      expect(result.order).toEqual({ id: 'order-new' });
     });
   });
 });

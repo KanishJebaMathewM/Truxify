@@ -6,8 +6,19 @@ import logging
 import json
 from dataclasses import dataclass, field
 import random
+from math import radians, cos, sin, atan2, sqrt
 
 logger = logging.getLogger(__name__)
+
+
+def haversine_km(a: Dict, b: Dict) -> float:
+    """Great-circle distance in kilometres between two lat/lng points."""
+    lat1, lng1 = radians(a['lat']), radians(a['lng'])
+    lat2, lng2 = radians(b['lat']), radians(b['lng'])
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    h = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2
+    return 6371.0 * 2 * atan2(sqrt(h), sqrt(1 - h))
 
 @dataclass
 class LogisticsAsset:
@@ -275,31 +286,66 @@ class PredictiveAnalytics:
         }
     
     def predict_arrival_time(self, asset_id: str) -> Dict:
-        """Predict arrival time for asset"""
+        """Predict arrival time for asset from real event history.
+
+        Derives the ETA from the asset's recent LogisticsEvent history:
+        average speed between consecutive event locations, and the great-circle
+        distance to the most recent event location. Fails closed with an
+        explicit no-data result when there is not enough history instead of
+        returning a randomly generated value.
+        """
         asset = self.twin.assets.get(asset_id)
         if not asset:
             return {'error': 'Asset not found'}
         
-        location = asset.location
         status = asset.status
         
-        if status == 'in_transit':
-            avg_speed = 50
-            distance = random.uniform(50, 500)
-            eta_minutes = (distance / avg_speed) * 60
-            
-            return {
-                'estimated_arrival': (datetime.now() + timedelta(minutes=eta_minutes)).isoformat(),
-                'confidence': 0.85,
-                'distance_remaining': distance,
-                'average_speed': avg_speed,
-                'eta_minutes': eta_minutes
-            }
-        else:
+        if status != 'in_transit':
             return {
                 'status': status,
                 'message': 'Asset not in transit'
             }
+        
+        events = self.twin.get_events(asset_id, 100)
+        
+        if len(events) < 2:
+            return {
+                'prediction': 'insufficient_data',
+                'confidence': 0.0,
+                'message': 'Not enough event history to estimate arrival time'
+            }
+        
+        # Average speed from consecutive event locations (events are newest first)
+        speeds = []
+        for prev, cur in zip(events, events[1:]):
+            prev_ts = datetime.fromisoformat(prev['timestamp'])
+            cur_ts = datetime.fromisoformat(cur['timestamp'])
+            elapsed_hours = (prev_ts - cur_ts).total_seconds() / 3600
+            travelled_km = haversine_km(prev['location'], cur['location'])
+            if elapsed_hours > 0:
+                speeds.append(travelled_km / elapsed_hours)
+        
+        speeds = [s for s in speeds if s > 0]
+        if not speeds:
+            return {
+                'prediction': 'insufficient_data',
+                'confidence': 0.0,
+                'message': 'No observable movement in event history'
+            }
+        
+        avg_speed = sum(speeds) / len(speeds)
+        distance = haversine_km(asset.location, events[0]['location'])
+        eta_minutes = (distance / avg_speed) * 60
+        confidence = min(1.0, len(events) / 50)
+        
+        return {
+            'estimated_arrival': (datetime.now() + timedelta(minutes=eta_minutes)).isoformat(),
+            'confidence': confidence,
+            'distance_remaining': distance,
+            'average_speed': avg_speed,
+            'eta_minutes': eta_minutes,
+            'source': 'event_history'
+        }
     
     def predict_demand(self, location: Dict, hours: int = 24) -> Dict:
         """Predict demand at location"""

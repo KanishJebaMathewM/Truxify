@@ -317,7 +317,8 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
     // address can never be persisted and later fail escrow.isAddress() with
     // a misleading "escrow not configured" error at bid acceptance time.
     ethers.getAddress(normalized);
-  } catch {
+  } catch (err) {
+    logger.error({ err }, 'Wallet address checksum validation failed');
     return res.status(400).json({ error: 'Invalid wallet address: EIP-55 checksum is invalid.' });
   }
 

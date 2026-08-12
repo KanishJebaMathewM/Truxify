@@ -333,7 +333,7 @@ class FraudDetectionService {
     // Get all connections (orders, trips, shared routes)
     const connections = new Set();
     let offset = 0;
-    let page = [];
+    let page;
     do {
       const { data: orders, error } = await supabaseAdmin
         .from('orders')
@@ -380,7 +380,7 @@ class FraudDetectionService {
       // Each batch's row set is paged too, since a single prolific user can
       // still push one batch past PostgREST's 1000-row response cap.
       let offset = 0;
-      let page = [];
+      let page;
       do {
         const { data: batchOrders, error } = await supabaseAdmin
           .from('orders')

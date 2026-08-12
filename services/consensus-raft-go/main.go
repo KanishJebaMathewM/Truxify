@@ -145,7 +145,7 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		electionMaxMs = electionMinMs
 	}
 
-	return &RaftNode{
+	rn := &RaftNode{
 		NodeID:             id,
 		CurrentTerm:        0,
 		Role:               Follower,
@@ -162,6 +162,79 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		matchIndex:         make(map[string]uint64),
 		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
 	}
+	rn.loadState()
+	return rn
+}
+
+type RaftState struct {
+	CurrentTerm uint64     `json:"current_term"`
+	VotedFor    string     `json:"voted_for"`
+	Log         []LogEntry `json:"log"`
+}
+
+func (rn *RaftNode) stateFilePath() string {
+	path := os.Getenv("RAFT_STATE_FILE")
+	if path == "none" {
+		return ""
+	}
+	if path == "" {
+		path = "raft_state_" + rn.NodeID + ".json"
+	}
+	return path
+}
+
+func (rn *RaftNode) persistState() {
+	path := rn.stateFilePath()
+	if path == "" {
+		return
+	}
+	state := RaftState{
+		CurrentTerm: rn.CurrentTerm,
+		VotedFor:    rn.VotedFor,
+		Log:         rn.Log,
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		log.Printf("[%s] Error marshaling raft state: %v", rn.NodeID, err)
+		return
+	}
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		log.Printf("[%s] Error writing temporary raft state file: %v", rn.NodeID, err)
+		return
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		log.Printf("[%s] Error renaming temporary raft state file to %s: %v", rn.NodeID, path, err)
+		return
+	}
+}
+
+func (rn *RaftNode) loadState() {
+	path := rn.stateFilePath()
+	if path == "" {
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		log.Printf("[%s] Error reading raft state file: %v", rn.NodeID, err)
+		return
+	}
+	var state RaftState
+	if err := json.Unmarshal(data, &state); err != nil {
+		log.Printf("[%s] Error unmarshaling raft state: %v", rn.NodeID, err)
+		return
+	}
+	rn.CurrentTerm = state.CurrentTerm
+	rn.VotedFor = state.VotedFor
+	if state.Log != nil {
+		rn.Log = state.Log
+	} else {
+		rn.Log = make([]LogEntry, 0)
+	}
+	log.Printf("[%s] Restored state from %s: Term=%d VotedFor=%q LogEntries=%d", rn.NodeID, path, rn.CurrentTerm, rn.VotedFor, len(rn.Log))
 }
 
 func (rn *RaftNode) lastLogIndex() uint64 {
@@ -197,6 +270,7 @@ func (rn *RaftNode) stepDownLocked(term uint64) {
 		rn.Role = Follower
 	}
 	rn.lastLeaderSeen = time.Now()
+	rn.persistState()
 }
 
 // startElection campaigns for leadership: bump term, vote for self, and
@@ -210,6 +284,7 @@ func (rn *RaftNode) startElection() {
 	rn.LeaderID = ""
 	rn.electionStarted = time.Now()
 	rn.electionTimeout = rn.randomElectionTimeout()
+	rn.persistState()
 
 	req := RequestVoteRequest{
 		Term:         rn.CurrentTerm,
@@ -579,6 +654,7 @@ func (rn *RaftNode) HandleVote(w http.ResponseWriter, r *http.Request) {
 		rn.VotedFor = req.CandidateID
 		rn.lastLeaderSeen = time.Now()
 		resp.VoteGranted = true
+		rn.persistState()
 	}
 
 	resp.Term = rn.CurrentTerm
@@ -625,12 +701,20 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 		// once per term. Record the acknowledged leader as this term's vote
 		// when none has been cast yet, so a later candidate in the same term
 		// cannot obtain a second vote.
+		votedForChanged := false
 		if rn.VotedFor == "" || rn.VotedFor == req.LeaderID {
-			rn.VotedFor = req.LeaderID
+			if rn.VotedFor != req.LeaderID {
+				rn.VotedFor = req.LeaderID
+				votedForChanged = true
+			}
 		}
 		rn.lastLeaderSeen = time.Now()
 
-		if rn.appendLogFromLeaderLocked(req) {
+		success, logChanged := rn.appendLogFromLeaderLocked(req)
+		if success {
+			if votedForChanged || logChanged {
+				rn.persistState()
+			}
 			if req.LeaderCommit > rn.CommitIndex {
 				last := uint64(len(rn.Log))
 				if req.LeaderCommit < last {
@@ -658,30 +742,33 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 
 // appendLogFromLeaderLocked appends replicated entries after checking log
 // consistency with the previous entry.
-func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
+func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) (bool, bool) {
 	if req.PrevLogIndex > uint64(len(rn.Log)) {
-		return false
+		return false, false
 	}
 	if req.PrevLogIndex > 0 {
 		prev := rn.Log[req.PrevLogIndex-1]
 		if prev.Term != req.PrevLogTerm {
-			return false
+			return false, false
 		}
 	}
+	logChanged := false
 	for i, e := range req.Entries {
 		idx := int(req.PrevLogIndex) + 1 + i
 		if idx <= len(rn.Log) {
 			if rn.Log[idx-1].Term != e.Term {
 				rn.Log = rn.Log[:idx-1]
 				rn.Log = append(rn.Log, req.Entries[i:]...)
-				return true
+				logChanged = true
+				return true, logChanged
 			}
 		} else {
 			rn.Log = append(rn.Log, req.Entries[i:]...)
-			return true
+			logChanged = true
+			return true, logChanged
 		}
 	}
-	return true
+	return true, logChanged
 }
 
 // HandleCommitOrder accepts a committed order entry on the leader.
@@ -751,6 +838,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	// Append to the local log first. CommitIndex is NOT advanced here: the entry
 	// must first be replicated to a quorum of followers (Raft §5.3).
 	rn.Log = append(rn.Log, entry)
+	rn.persistState()
 	rn.mu.Unlock()
 
 	// Replicate to followers and wait for a quorum acknowledgement before

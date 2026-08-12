@@ -25,14 +25,28 @@ DECLARE
     v_customer_id UUID;
     v_result JSONB;
     v_timeline JSONB;
+    v_created BIGINT;
 BEGIN
-    -- 1. Check existing durable idempotency record
+    -- 1. Create the durable idempotency lock row for first-time callers. The
+    --    unique key serializes concurrent callers: a second transaction blocks
+    --    here until the first commits (or rolls back), so it can never observe
+    --    the record mid-flight and then flip a completed/failed status back.
+    INSERT INTO order_idempotency_records (idempotency_key, status, updated_at)
+    VALUES (p_idempotency_key, 'in_progress', NOW())
+    ON CONFLICT (idempotency_key) DO NOTHING;
+    GET DIAGNOSTICS v_created = ROW_COUNT;
+
+    -- 2. Lock the idempotency record for the rest of the transaction.
     SELECT * INTO v_existing_record
     FROM order_idempotency_records
     WHERE idempotency_key = p_idempotency_key
     FOR UPDATE;
 
-    IF FOUND THEN
+    -- 3. A record we just created belongs to this attempt. Any other record is
+    --    inspected under the lock: a completed order is replayed from its
+    --    cached response, and a fresh in_progress record means another caller
+    --    is actively creating the order. Completed records are never flipped.
+    IF v_created = 0 THEN
         IF v_existing_record.status = 'completed' THEN
             RETURN v_existing_record.response_body;
         ELSIF v_existing_record.status = 'in_progress' AND v_existing_record.created_at > (NOW() - INTERVAL '5 minutes') THEN
@@ -40,11 +54,11 @@ BEGIN
         END IF;
     END IF;
 
-    -- 2. Upsert in_progress status lock in DB
-    INSERT INTO order_idempotency_records (idempotency_key, status, updated_at)
-    VALUES (p_idempotency_key, 'in_progress', NOW())
-    ON CONFLICT (idempotency_key)
-    DO UPDATE SET status = 'in_progress', updated_at = NOW();
+    -- 4. Mark the record in_progress for this attempt (covers a retry after a
+    --    stale or failed attempt). Completed records are unaffected.
+    UPDATE order_idempotency_records
+    SET status = 'in_progress', updated_at = NOW()
+    WHERE idempotency_key = p_idempotency_key;
 
     -- Resolve the customer identity: only the service-role backend may supply a
     -- customer_id. Any other caller is bound to their own JWT-derived profile id.
@@ -60,7 +74,7 @@ BEGIN
         END IF;
     END IF;
 
-    -- 3. Perform atomic Order Creation
+    -- 5. Perform atomic Order Creation
     INSERT INTO orders (
         order_display_id, customer_id, status,
         pickup_address, pickup_lat, pickup_lng,
@@ -102,7 +116,7 @@ BEGIN
     )
     RETURNING id, status INTO v_order_id, v_status;
 
-    -- 4. Insert Order Timeline milestones
+    -- 6. Insert Order Timeline milestones
     IF p_timeline_data IS NULL OR jsonb_typeof(p_timeline_data) <> 'array' OR jsonb_array_length(p_timeline_data) = 0 THEN
         INSERT INTO order_timeline (order_display_id, milestone, milestone_time, completed, sort_order)
         VALUES
@@ -128,7 +142,7 @@ BEGIN
         END LOOP;
     END IF;
 
-    -- 5. Insert Load Offer record if present
+    -- 7. Insert Load Offer record if present
     IF p_load_offer_data IS NOT NULL AND p_load_offer_data != 'null'::jsonb THEN
         INSERT INTO load_offers (
             order_display_id, customer_id, customer_name,
@@ -161,7 +175,7 @@ BEGIN
         );
     END IF;
 
-    -- 6. Store completed result
+    -- 8. Store completed result
     v_result := jsonb_build_object(
         'success', true,
         'order_id', v_order_id,

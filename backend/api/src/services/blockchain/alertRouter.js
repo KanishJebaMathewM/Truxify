@@ -174,12 +174,17 @@ class AlertRouter {
 
   getTypeEmoji(type) {
     const emojis = {
-      PAYMENT_RECEIVED: '💰',
-      INSURANCE_CLAIM_APPROVED: '✅',
-      INSURANCE_CLAIM_REJECTED: '❌',
-      GEOFENCE_BREACH: '⚠️',
-      BALANCE_UPDATE_FAILED: '🚨',
-      SMART_CONTRACT_REVERT: '💥',
+      BOOKING_CREATED: '📋',
+      PAYMENT_RELEASED: '💰',
+      BOOKING_CANCELLED: '↩️',
+      BOOKING_STARTED: '🚚',
+      CANCELLATION_PENALTY_APPLIED: '⚖️',
+      BOOKING_DISPUTED: '⚠️',
+      DISPUTE_RESOLVED: '✅',
+      WITHDRAWAL_READY: '🏦',
+      WITHDRAWN: '💵',
+      EMERGENCY_RECOVERED: '🚨',
+      RELAYER_UPDATED: '🔄',
     };
     return emojis[type] || '📢';
   }

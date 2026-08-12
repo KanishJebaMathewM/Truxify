@@ -1,5 +1,22 @@
 import logger from './logger.js';
 
+/**
+ * Format a Zod validation error into a flat array of field+message objects
+ * suitable for returning as an HTTP 400 body.
+ *
+ * @param {object} error - A Zod error object with an `issues` array.
+ *   Each issue has at least { path: string[], message: string }.
+ * @returns {Array<{field: string, message: string}>} Formatted issues with
+ *   `field` set to the dot-joined path or "body" if empty, and
+ *   `message` set to the issue message.
+ *
+ * @example
+ * // Given a Zod error for missing "email" in the request body:
+ * const formatted = formatValidationIssues(error);
+ * // => [{ field: "body.email", message: "Required" }]
+ *
+ * @since 1.0.0
+ */
 export function formatValidationIssues(error) {
   return error.issues.map((issue) => ({
     field: issue.path.length > 0 ? issue.path.join(".") : "body",

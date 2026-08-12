@@ -18,26 +18,8 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{$json.body.record.order_api_url}}/api/contracts/freeze",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-API-Key",
-              "value": "={{$env.INTERNAL_RELAYER_KEY}}"
-            }
-          ]
-        },
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "tripId",
-              "value": "={{$json.body.record.id}}"
-            }
-          ]
-        },
+        "method": "GET",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/payments/{{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/status",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -47,13 +29,11 @@
         0
       ],
       "id": "freeze-escrow",
-      "name": "Freeze Smart Contract Escrow"
+      "name": "Check Escrow Status"
     },
     {
       "parameters": {
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/={{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/dispute-evidence",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/{{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/timeline",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -63,30 +43,26 @@
         0
       ],
       "id": "fetch-evidence",
-      "name": "Fetch GPS Trail & OTP Logs"
+      "name": "Fetch Order Timeline"
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/notifications/dispute",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/support/tickets",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
             {
-              "name": "tripId",
-              "value": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}"
+              "name": "subject",
+              "value": "Dispute Opened: Delivery Unconfirmed"
             },
             {
-              "name": "driverPhone",
-              "value": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.driver_phone}}"
+              "name": "category",
+              "value": "payment"
             },
             {
-              "name": "customerPhone",
-              "value": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.customer_phone}}"
-            },
-            {
-              "name": "message",
-              "value": "Dispute opened for trip. Smart contract payment frozen."
+              "name": "description",
+              "value": "Dispute opened for trip {{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}. Evidence gathered from the order timeline."
             }
           ]
         },
@@ -99,7 +75,7 @@
         0
       ],
       "id": "notify-parties",
-      "name": "Notify Driver & Customer"
+      "name": "Open Support Ticket"
     },
     {
       "parameters": {
@@ -117,7 +93,7 @@
     },
     {
       "parameters": {
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/={{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}/status",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/orders/{{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -134,7 +110,7 @@
         "conditions": {
           "string": [
             {
-              "value1": "={{$json.status}}",
+              "value1": "={{$json.order.status}}",
               "value2": "disputed"
             }
           ]
@@ -152,17 +128,21 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/admin/escalate",
+        "url": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.order_api_url}}/api/support/tickets",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
             {
-              "name": "tripId",
-              "value": "={{$node[\"Supabase Dispute Webhook\"].json.body.record.id}}"
+              "name": "subject",
+              "value": "Escalation: Arbitration Required for Trip"
             },
             {
-              "name": "evidence",
-              "value": "={{$node[\"Fetch GPS Trail & OTP Logs\"].json}}"
+              "name": "category",
+              "value": "payment"
+            },
+            {
+              "name": "description",
+              "value": "Trip {{$node[\"Supabase Dispute Webhook\"].json.body.record.id}} remained disputed after 24 hours. Review the order timeline for evidence."
             }
           ]
         },
@@ -175,7 +155,7 @@
         0
       ],
       "id": "escalate-admin",
-      "name": "Escalate to Admin Arbitration Queue"
+      "name": "Escalate as Support Ticket"
     },
     {
       "parameters": {
@@ -194,30 +174,8 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "={{$json.body.record.order_api_url}}/api/contracts/resolve",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-API-Key",
-              "value": "={{$env.INTERNAL_RELAYER_KEY}}"
-            }
-          ]
-        },
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "tripId",
-              "value": "={{$json.body.record.id}}"
-            },
-            {
-              "name": "action",
-              "value": "={{$json.body.action}}"
-            }
-          ]
-        },
+        "method": "GET",
+        "url": "={{$json.body.record.order_api_url}}/api/payments/{{$json.body.record.id}}/status",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -227,7 +185,7 @@
         200
       ],
       "id": "release-or-refund",
-      "name": "Release or Refund Smart Contract Escrow"
+      "name": "Verify Escrow Release"
     }
   ],
   "connections": {

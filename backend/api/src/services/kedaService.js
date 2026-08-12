@@ -48,7 +48,7 @@ class KEDAService {
                 timestamp: new Date().toISOString()
             };
         } catch (error) {
-            logger.error('Metrics fetch failed:', error);
+            logger.error({ event: 'KEDA_METRICS_FETCH_ERROR', error: error?.message }, 'Metrics fetch failed');
             return {
                 success: false,
                 error: error.message,
@@ -105,7 +105,7 @@ class KEDAService {
             const query = `sum(rate(container_cpu_usage_seconds_total{namespace="${ns}",pod=~"${dep}-.*"}[5m]))`;
             return await this.getMetrics('cpu_usage', query);
         } catch (error) {
-            logger.error('CPU usage fetch failed:', error);
+            logger.error({ event: 'KEDA_CPU_FETCH_ERROR', error: error?.message }, 'CPU usage fetch failed');
             return {
                 success: false,
                 error: error.message,
@@ -121,7 +121,7 @@ class KEDAService {
             const query = `sum(container_memory_usage_bytes{namespace="${ns}",pod=~"${dep}-.*"})`;
             return await this.getMetrics('memory_usage', query);
         } catch (error) {
-            logger.error('Memory usage fetch failed:', error);
+            logger.error({ event: 'KEDA_MEMORY_FETCH_ERROR', error: error?.message }, 'Memory usage fetch failed');
             return {
                 success: false,
                 error: error.message,
@@ -137,7 +137,7 @@ class KEDAService {
             const query = `kube_deployment_status_replicas{namespace="${ns}",deployment="${dep}"}`;
             return await this.getMetrics('replica_count', query);
         } catch (error) {
-            logger.error('Replica count fetch failed:', error);
+            logger.error({ event: 'KEDA_REPLICA_FETCH_ERROR', error: error?.message }, 'Replica count fetch failed');
             return {
                 success: false,
                 error: error.message,

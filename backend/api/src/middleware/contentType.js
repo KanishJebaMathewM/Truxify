@@ -1,7 +1,7 @@
 export function requireJsonContent(req, res, next) {
   // Only enforce on mutating requests
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
-    const contentType = req.headers['content-type'];
+    let contentType = req.headers['content-type'];
 
     if (!contentType) {
       return res.status(415).json({
@@ -13,6 +13,24 @@ export function requireJsonContent(req, res, next) {
           'multipart/form-data',
         ],
       });
+    }
+
+    // A repeated `content-type` header arrives as an array. Only a single
+    // media type is meaningful; reject the ambiguous multi-value form rather
+    // than calling .split on an array (which would throw).
+    if (Array.isArray(contentType)) {
+      contentType = contentType[0];
+      if (!contentType) {
+        return res.status(415).json({
+          error: 'Unsupported Media Type.',
+          received: undefined,
+          allowed: [
+            'application/json',
+            'application/x-www-form-urlencoded',
+            'multipart/form-data',
+          ],
+        });
+      }
     }
 
     // Compare the base media type exactly (ignoring parameters such as

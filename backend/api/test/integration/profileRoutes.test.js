@@ -57,6 +57,8 @@ describe('Profile Routes', () => {
     m.store.customer_stats = [];
     m.store.driver_details = [];
     m.store.orders = [];
+    m.store.trips = [];
+    m.store.ratings = [];
     m.calls.length = 0;
     vi.clearAllMocks();
   });
@@ -390,7 +392,6 @@ describe('Profile Routes', () => {
 
       const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
       expect(profileUpdateCall.payload).toEqual({
-        wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
         polygon_wallet_address: '0x1234567890abcdef1234567890abcdef12345678',
       });
     });
@@ -448,6 +449,46 @@ describe('Profile Routes', () => {
       expect(res.body.error).toBe('This wallet address is already registered to another account.');
 
       m.supabase.from = originalFrom;
+    });
+
+    it('rejects a mixed-case address with an invalid EIP-55 checksum', async () => {
+      const res = await request(buildApp())
+        .put('/api/profile/wallet')
+        .set(CUSTOMER_HEADERS)
+        .send({
+          wallet_address: '0x52908400098527886E0F7030069857D2e4169EE7',
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation failed');
+      expect(res.body.details[0].field).toBe('wallet_address');
+      expect(res.body.details[0].message).toContain('EIP-55 checksum');
+    });
+
+    it('accepts a valid checksummed mixed-case address', async () => {
+      m.store.profiles.push({
+        id: 'customer-uuid-123',
+        firebase_uid: 'firebase-cust-uid',
+        role: 'customer',
+      });
+
+      const res = await request(buildApp())
+        .put('/api/profile/wallet')
+        .set(CUSTOMER_HEADERS)
+        .send({
+          wallet_address: '0x52908400098527886E0F7030069857D2E4169EE7',
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        success: true,
+        walletAddress: '0x52908400098527886E0F7030069857D2E4169EE7',
+      });
+
+      const profileUpdateCall = m.calls.find(c => c.table === 'profiles' && c.mode === 'update');
+      expect(profileUpdateCall.payload).toEqual({
+        polygon_wallet_address: '0x52908400098527886E0F7030069857D2E4169EE7',
+      });
     });
   });
 
@@ -600,9 +641,6 @@ describe('Profile Routes', () => {
           id: 'order-1',
           driver_id: 'driver-uuid-456',
           status: 'delivered',
-          distance_km: 100,
-          customer_rating: 5,
-          on_time: true,
           base_freight: 1000,
           created_at: `${currentMonth}-05T00:00:00Z`,
         },
@@ -610,9 +648,6 @@ describe('Profile Routes', () => {
           id: 'order-2',
           driver_id: 'driver-uuid-456',
           status: 'payment_released',
-          distance_km: 200,
-          customer_rating: 4,
-          on_time: false,
           base_freight: 2000,
           created_at: `${currentMonth}-10T00:00:00Z`,
         },
@@ -620,11 +655,40 @@ describe('Profile Routes', () => {
           id: 'order-other-driver',
           driver_id: 'other-driver',
           status: 'delivered',
-          distance_km: 999,
-          customer_rating: 1,
-          on_time: true,
           base_freight: 9999,
           created_at: `${currentMonth}-01T00:00:00Z`,
+        }
+      );
+      m.store.trips.push(
+        {
+          id: 'trip-1',
+          driver_id: 'driver-uuid-456',
+          status: 'completed',
+          distance: '100 km',
+        },
+        {
+          id: 'trip-2',
+          driver_id: 'driver-uuid-456',
+          status: 'completed',
+          distance: '200 km',
+        },
+        {
+          id: 'trip-other-driver',
+          driver_id: 'other-driver',
+          status: 'completed',
+          distance: '999 km',
+        }
+      );
+      m.store.ratings.push(
+        {
+          id: 'rating-1',
+          driver_id: 'driver-uuid-456',
+          stars: 5,
+        },
+        {
+          id: 'rating-2',
+          driver_id: 'driver-uuid-456',
+          stars: 4,
         }
       );
 
@@ -636,7 +700,7 @@ describe('Profile Routes', () => {
       expect(res.body.totalDeliveries).toBe(2);
       expect(res.body.totalDistanceKm).toBe(300);
       expect(res.body.averageRating).toBe(4.5);
-      expect(res.body.onTimePercentage).toBe(50);
+      expect(res.body.onTimePercentage).toBe(100);
       expect(res.body.lifetimeEarnings).toBe(30);
       expect(res.body.monthlyPerformanceSummary).toEqual({
         month: currentMonth,
@@ -660,16 +724,13 @@ describe('Profile Routes', () => {
       expect(res.body.insufficientData).toEqual({ distanceKm: false, rating: true, onTime: true });
     });
 
-    it('does not count null distance/rating/on_time as real data', async () => {
+    it('does not count null distance/rating as real data', async () => {
       const currentMonth = new Date().toISOString().slice(0, 7);
       m.store.orders.push(
         {
           id: 'order-incomplete',
           driver_id: 'driver-uuid-456',
           status: 'delivered',
-          distance_km: null,
-          customer_rating: null,
-          on_time: null,
           base_freight: 1000,
           created_at: `${currentMonth}-05T00:00:00Z`,
         },
@@ -677,11 +738,29 @@ describe('Profile Routes', () => {
           id: 'order-complete',
           driver_id: 'driver-uuid-456',
           status: 'payment_released',
-          distance_km: 10,
-          customer_rating: 5,
-          on_time: true,
           base_freight: 2000,
           created_at: `${currentMonth}-10T00:00:00Z`,
+        }
+      );
+      m.store.trips.push(
+        {
+          id: 'trip-with-distance',
+          driver_id: 'driver-uuid-456',
+          status: 'completed',
+          distance: '10 km',
+        },
+        {
+          id: 'trip-null-distance',
+          driver_id: 'driver-uuid-456',
+          status: 'completed',
+          distance: null,
+        }
+      );
+      m.store.ratings.push(
+        {
+          id: 'rating-1',
+          driver_id: 'driver-uuid-456',
+          stars: 5,
         }
       );
 

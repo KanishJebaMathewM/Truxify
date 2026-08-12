@@ -31,6 +31,7 @@ from app.models.eta_prediction import eta_predictor
 from app.models.demand_forecast import (
     predict_demand,
     train_demand_forecast_model,
+    rollback_demand_forecast_model,
     FEATURE_NAMES,
 )
 from app.models.price_prediction import (
@@ -705,6 +706,24 @@ async def train_demand_endpoint(_auth=Depends(verify_api_key)):
     except Exception as e:
         logger.error("Demand model training failed: %s", e)
         raise HTTPException(status_code=500, detail="Training failed")
+
+
+@app.post("/train/demand/rollback")
+async def rollback_demand_endpoint(_auth=Depends(verify_api_key)):
+    """Roll back the demand-forecast model to its previously-promoted version.
+
+    This is the real rollback path for the model actually retrained by
+    /train/demand and the n8n weekly retraining workflow. It is
+    intentionally separate from /ab-testing/rollback/{test_id}, which
+    belongs to the unrelated ETA shadow-traffic A/B testing system and has
+    no knowledge of the demand-forecast model or its versions.
+    """
+    try:
+        result = await asyncio.to_thread(rollback_demand_forecast_model)
+        return result
+    except Exception as e:
+        logger.error("Demand model rollback failed: %s", e)
+        raise HTTPException(status_code=500, detail="Rollback failed")
 
 
 @app.post("/train/price", response_model=TrainResponse)

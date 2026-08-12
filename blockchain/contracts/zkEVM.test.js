@@ -1,5 +1,5 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
+import { expect } from "chai";
+import { ethers } from "hardhat";
 
 const ZERO_DATA = "0x";
 const GAS_PRICE = 10n;

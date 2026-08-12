@@ -766,6 +766,32 @@ export class DeliveryVerificationService {
           logger.info(
             `[verify-delivery] Retry for stuck escrow for order ${orderId} by driver ${driverId} — release confirmed (tx_hash=${releaseTxHash || "alreadyReleased"}).`,
           );
+          // For stuck escrow retries: the on-chain release has been confirmed.
+          // Still call complete_trip_tx (with p_otp_id=null since OTP is already
+          // verified) to credit the driver's wallet and finalize the trip.
+          // This prevents the driver from not being paid when escrow release
+          // succeeded but RPC failed initially (issue #11183).
+          const rpcResult = await this.orderRepository.executeRpc(
+            "complete_trip_tx",
+            {
+              p_order_id: orderId,
+              p_otp_id: null,
+              p_release_tx_hash: releaseTxHash,
+            },
+            supabaseAdmin
+          );
+
+          if (rpcResult.error) {
+            logger.error(
+              `[verify-delivery] complete_trip_tx failed on stuck escrow retry for order ${orderId}:`,
+              rpcResult.error.message
+            );
+            throw new DomainError(500, {
+              error: "Failed to complete trip on stuck escrow retry.",
+              details: rpcResult.error.message,
+            });
+          }
+
           // The verified OTP is consumed on the retry path too so it cannot be
           // replayed by a later attempt. It is only consumed after the release
           // is confirmed, so a failed release leaves the OTP intact for the

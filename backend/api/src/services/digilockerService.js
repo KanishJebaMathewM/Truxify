@@ -324,7 +324,7 @@ class DigilockerService {
         }
       }
 
-      const { data: docRecord, error: dbErr } = await supabaseAdmin
+      const { data: existing, error: findError } = await supabaseAdmin
         .from('driver_documents')
         .select('id')
         .eq('driver_id', driverId)
@@ -337,14 +337,23 @@ class DigilockerService {
         continue;
       }
 
+      const docPayload = {
+        driver_id: driverId,
+        document_type: doc.type,
+        document_hash: docHash,
+        is_digilocker_verified: true,
+        verified_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
       const { data: docRecord, error: dbErr } = existing
-        ? await supabase
+        ? await supabaseAdmin
             .from('driver_documents')
             .update(docPayload)
             .eq('id', existing.id)
             .select()
             .single()
-        : await supabase
+        : await supabaseAdmin
             .from('driver_documents')
             .insert(docPayload)
             .select()

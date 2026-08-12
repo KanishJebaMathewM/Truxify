@@ -499,7 +499,7 @@ export class DeliveryVerificationService {
           // then enforced by escrowReleaseFn against the same expected figure,
           // so a booking funded with Y ≠ X can never be released while the app
           // pays the driver X from its own funds.
-          let expectedAmountWei = null;
+          let expectedAmountWei;
           const resolvedAmount = resolveExpectedDepositAmount(order);
           if (resolvedAmount.expectedAmountWei != null) {
             expectedAmountWei = resolvedAmount.expectedAmountWei;
@@ -777,10 +777,18 @@ export class DeliveryVerificationService {
 
         // The trip is complete (payment_released) — kill any active public
         // tracking tokens so a shared link can no longer broadcast the driver's
-        // live location. Best-effort: revokeAllForOrder never throws.
-        await this.trackingTokenService?.revokeAllForOrder(
-          order.order_display_id,
-        );
+        // live location. Best-effort: token revocation failure must not break
+        // the delivery-complete flow, so swallow the throw here.
+        try {
+          await this.trackingTokenService?.revokeAllForOrder(
+            order.order_display_id,
+          );
+        } catch (error) {
+          logger.error(
+            `[verify-delivery] Failed to revoke tracking tokens for order ${order.order_display_id}:`,
+            error,
+          );
+        }
 
         // --- Fire FCM push to driver: "Payment Released ✓" ---
         const resolvedDriverIdForPush = tripData?.driver_id || order.driver_id;

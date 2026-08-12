@@ -154,6 +154,19 @@ describe('osrm - getRouteEstimate', () => {
     expect(result).toBeNull();
   });
 
+  it('returns null when route distance is zero', async () => {
+    fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ routes: [{ distance: 0, duration: 0 }] }),
+    });
+
+    const result = await getRouteEstimate({
+      pickupLat: 12.9, pickupLng: 77.5, dropLat: 13.0, dropLng: 80.2,
+    });
+
+    expect(result).toBeNull();
+  });
+
   it('returns distanceKm and durationSeconds on valid response', async () => {
     fetch.mockResolvedValue({
       ok: true,

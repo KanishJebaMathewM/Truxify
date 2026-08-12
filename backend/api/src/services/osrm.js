@@ -109,7 +109,10 @@ export async function getRouteEstimate(input = {}) {
 
       const payload = await response.json();
       const route = Array.isArray(payload?.routes) ? payload.routes[0] : null;
-      if (!route || !Number.isFinite(route.distance) || route.distance < 0) {
+      // A zero distance means the API returned no real path (identical
+      // coordinates or an empty route); treat it as invalid so callers fall
+      // back to straight-line geometry instead of caching a useless estimate.
+      if (!route || !Number.isFinite(route.distance) || route.distance <= 0) {
         clearTimeout(timeout);
         return null;
       }

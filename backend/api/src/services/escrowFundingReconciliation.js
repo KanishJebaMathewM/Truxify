@@ -3,6 +3,7 @@ import logger from '../middleware/logger.js';
 import { submitEscrowRefund, getEscrowBooking } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
 import { sendPushNotification } from './notificationService.js';
+import { invalidateDriverOrderCache } from '../sockets/tracker.js';
 
 // Two-phase acceptance sweeper (#5724): orders that reached escrow_status
 // 'funding' but whose escrow deposit never lands within the funding TTL are
@@ -149,6 +150,11 @@ async function finalizeOrRevert(order, orderRepository) {
           return;
         }
 
+        // Driver assignment confirmed — drop any stale cached mapping so the
+        // tracker resolves the newly assigned driver on the next ping
+        // (issue #10676).
+        await invalidateDriverOrderCache(pending.driver_id);
+
         sendPushNotification(
           pending.driver_id,
           'Bid Accepted!',
@@ -238,6 +244,12 @@ async function finalizeOrRevert(order, orderRepository) {
     if (revertErr) {
       logger.error(`[escrow-funding] Failed to revert order ${order.order_display_id}: ${revertErr.message}`);
     } else {
+      // Driver released back to pool — drop any stale cached mapping so the
+      // tracker resolves the driver's next assignment (issue #10676).
+      const releasedDriverId = order.pending_bid_acceptance?.driver_id;
+      if (releasedDriverId) {
+        await invalidateDriverOrderCache(releasedDriverId);
+      }
       sendPushNotification(
         order.customer_id,
         'Bid Acceptance Expired',

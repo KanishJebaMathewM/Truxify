@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { sendPushNotification, sendFcmNotification } from '../../src/services/notificationService.js';
+import crypto from 'crypto';
+import { sendPushNotification, sendFcmNotification, hashDeliveryOtp, verifyDeliveryOtpHash } from '../../src/services/notificationService.js';
 
 // notificationService reads supabaseAdmin and firebaseAdmin (not supabase),
 // and getUserFcmToken chains .select().eq().maybeSingle() — a mock lacking
@@ -102,6 +103,21 @@ describe('notificationService', () => {
       await expect(
         sendPushNotification('user-1', 'Title', 'Body', 'invalid_type')
       ).resolves.toBeDefined();
+    });
+  });
+
+  describe('delivery OTP hashing', () => {
+    it('round-trips a salted hash and rejects a wrong OTP', () => {
+      const { hash, salt } = hashDeliveryOtp('123456');
+      expect(hash).toMatch(/^[a-f0-9]{128}$/);
+      expect(verifyDeliveryOtpHash('123456', { otp_hash: hash, otp_salt: salt })).toBe(true);
+      expect(verifyDeliveryOtpHash('654321', { otp_hash: hash, otp_salt: salt })).toBe(false);
+    });
+
+    it('still verifies legacy unsalted SHA-256 hashes', () => {
+      const legacyHash = crypto.createHash('sha256').update('123456').digest('hex');
+      expect(verifyDeliveryOtpHash('123456', { otp_hash: legacyHash })).toBe(true);
+      expect(verifyDeliveryOtpHash('999999', { otp_hash: legacyHash })).toBe(false);
     });
   });
 });

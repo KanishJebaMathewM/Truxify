@@ -2,10 +2,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { requirePolicy } from '../../src/middleware/requirePolicy.js';
 import { policy } from '../../src/security/policyEngine.js';
 
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
 describe('requirePolicy Middleware', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
+
+  it('requirePolicy is a function', async () => {
+    const mod = await import('../../src/middleware/requirePolicy.js');
+    expect(typeof mod.requirePolicy).toBe('function');
+  });
+
   it('returns 401 if req.user is missing', () => {
     const middleware = requirePolicy('READ');
     const mockReq = {};

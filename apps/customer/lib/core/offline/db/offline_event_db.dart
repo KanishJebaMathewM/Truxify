@@ -94,6 +94,19 @@ class OfflineEventDb {
     );
   }
 
+  /// Resets events left in the transient `syncing` state (e.g. because the app
+  /// was killed mid-upload) back to `pending` so they are re-queued on the next
+  /// sync pass instead of being orphaned forever.
+  Future<int> reconcileStuckSyncing() async {
+    final db = await open();
+    return db.update(
+      _tableName,
+      {'sync_status': 'pending'},
+      where: 'sync_status = ?',
+      whereArgs: ['syncing'],
+    );
+  }
+
   Future<void> markSynced(String id) async {
     final db = await open();
     await db.update(

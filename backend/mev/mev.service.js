@@ -2,7 +2,6 @@ import { ethers } from 'ethers';
 import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
-import { mevRelayer } from './flashbots_relayer.js';
 
 /**
  * Derives the exact 32-byte preimage that is revealed on-chain.
@@ -151,28 +150,32 @@ class MEVService {
 
     async releaseEscrow(escrowId, secret) {
         try {
-            const blockNumber = await this.provider.getBlockNumber();
-            const targetBlock = blockNumber + 1;
-            
-            const bundle = await mevRelayer.assemblePrivateBundle(
-                this.escrowAddress,
-                this.escrowABI,
-                'releaseDepositPrivate',
-                [escrowId, secret],
-                targetBlock
+            // Reveal the same 32-byte preimage the commitment was created from.
+            const preimage = toPreimageBytes32(secret);
+
+            // When MEV_PRIVATE_RELAY is enabled, submit the release as a private
+            // Flashbots bundle so it cannot be front-run; otherwise fall back to
+            // a normal public transaction.
+            if (process.env.MEV_PRIVATE_RELAY === 'true') {
+                const result = await this.releaseEscrowPrivate(escrowId, preimage);
+                await this.updateEscrowStatus(escrowId, 'released', result.txHash);
+                logger.info(`✅ Escrow ${escrowId} released via private bundle`);
+                return result;
+            }
+
+            const tx = await this.escrow.releaseDepositPrivate(
+                escrowId,
+                preimage,
+                { gasLimit: 150000 }
             );
-            
-            const response = await mevRelayer.sendPrivateBundle(bundle);
-            
-            const txHash = bundle.signedBundle[0] ? ethers.Transaction.from(bundle.signedBundle[0]).hash : '0x';
-            
-            await this.updateEscrowStatus(escrowId, 'released', txHash);
-            
-            logger.info(`✅ Escrow ${escrowId} released with MEV protection (Flashbots Bundle: ${response.bundleHash})`);
+            const receipt = await tx.wait();
+
+            await this.updateEscrowStatus(escrowId, 'released', receipt.hash);
+
+            logger.info(`✅ Escrow ${escrowId} released with MEV protection`);
             return {
                 success: true,
-                txHash,
-                bundleHash: response.bundleHash
+                txHash: receipt.hash
             };
         } catch (error) {
             logger.error('Escrow release failed:', error);
@@ -180,6 +183,14 @@ class MEVService {
         }
     }
 
+    async signTransactions(transactions) {
+        const signedTxs = [];
+        for (const tx of transactions) {
+            const signedTx = await this.wallet.signTransaction(tx);
+            signedTxs.push(signedTx);
+        }
+        return signedTxs;
+    }
 
     // ============ MEV Protection Level ============
 

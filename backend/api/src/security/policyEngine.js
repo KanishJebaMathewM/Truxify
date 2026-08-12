@@ -92,6 +92,9 @@ const POLICIES = {
   'truck:register':            { roles: [ROLES.DRIVER] },
   'truck:list-own':            { roles: [ROLES.DRIVER] },
 
+  'wim:request-bypass':        { roles: [ROLES.DRIVER] },
+  'wim:verify-bypass':         { roles: [ROLES.DRIVER, ROLES.ADMIN] },
+
   'maintenance:upload-photos':  { roles: [ROLES.DRIVER] },
 
   'ticket:create':             {},

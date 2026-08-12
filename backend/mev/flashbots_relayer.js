@@ -3,6 +3,10 @@ import axios from 'axios';
 
 /**
  * Flashbots / Fastlane Relayer Integration for MEV-Protected Escrow Bundles
+ *
+ * The module is importable without a relayer key; the relayer is created lazily
+ * by getMevRelayer() so services that only need a public-transaction fallback
+ * never crash on import when RELAYER_WALLET_PRIVATE_KEY is unset.
  */
 export class FlashbotsRelayerService {
   constructor(providerUrl, relayerPrivateKey) {
@@ -42,7 +46,7 @@ export class FlashbotsRelayerService {
     }
 
     console.log(`[MEV Relayer] Submitting private transaction bundle to ${this.flashbotsRelayUrl} for block ${bundle.targetBlock}...`);
-    
+
     const payload = {
       jsonrpc: '2.0',
       id: 1,
@@ -51,6 +55,7 @@ export class FlashbotsRelayerService {
         {
           txs: bundle.signedBundle,
           blockNumber: `0x${bundle.targetBlock.toString(16)}`,
+          version: process.env.FLASHBOTS_BUNDLE_VERSION || 'v3',
         }
       ]
     };
@@ -87,12 +92,22 @@ export class FlashbotsRelayerService {
   }
 }
 
-const relayerPrivateKey = process.env.RELAYER_WALLET_PRIVATE_KEY;
-if (!relayerPrivateKey && process.env.FLASHBOTS_DRY_RUN !== 'true') {
-  throw new Error('RELAYER_WALLET_PRIVATE_KEY environment variable is required when not in dry run');
+function resolveRelayerPrivateKey() {
+  return process.env.RELAYER_WALLET_PRIVATE_KEY || null;
 }
 
-export const mevRelayer = new FlashbotsRelayerService(
-  process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
-  relayerPrivateKey || '0x0000000000000000000000000000000000000000000000000000000000000001'
-);
+let cachedMevRelayer = null;
+
+export function getMevRelayer() {
+  const relayerPrivateKey = resolveRelayerPrivateKey();
+  if (!relayerPrivateKey) {
+    throw new Error('RELAYER_WALLET_PRIVATE_KEY environment variable is required to use the Flashbots relayer');
+  }
+  if (!cachedMevRelayer) {
+    cachedMevRelayer = new FlashbotsRelayerService(
+      process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com',
+      relayerPrivateKey
+    );
+  }
+  return cachedMevRelayer;
+}

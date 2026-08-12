@@ -5,6 +5,11 @@ const failures = new Map();
 const DEFAULT_THRESHOLD = 5;
 const DEFAULT_WINDOW_MS = 60_000;
 
+// Upper bound on distinct tracked IPs so a distributed brute-force sweep
+// across many source addresses cannot grow this map without limit. When the
+// cap is reached the oldest tracked IP is evicted first (Map insertion order).
+const MAX_TRACKED_IPS = 10_000;
+
 export default function authFailureMonitor(req, res, next) {
   if (process.env.NODE_ENV === 'test') {
     return next();
@@ -32,6 +37,12 @@ export default function authFailureMonitor(req, res, next) {
 
     const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     const now = Date.now();
+
+    // Bound the tracked set before inserting a new IP.
+    if (!failures.has(ip) && failures.size >= MAX_TRACKED_IPS) {
+      const oldest = failures.keys().next().value;
+      if (oldest !== undefined) failures.delete(oldest);
+    }
 
     const existing = failures.get(ip);
 

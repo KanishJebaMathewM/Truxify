@@ -35,7 +35,7 @@ vi.mock('../../src/config/db.js', () => ({
 }));
 
 vi.mock('../../src/services/escrow.js', () => ({
-  escrowRefund: vi.fn(),
+  submitEscrowRefund: vi.fn(),
   getEscrowBooking: vi.fn(),
 }));
 
@@ -121,6 +121,78 @@ describe('escrowFundingReconciliation', () => {
       expect(mockLogger.error).toHaveBeenCalledWith(
         '[escrow-funding] Failed to load stale funding orders:',
         'DB error'
+      );
+    });
+it('refunds cancelled funded orders only after submit and confirmation', async () => {
+      mockRedisClient.set.mockResolvedValue('locked');
+
+      const mockOrders = [
+        {
+          id: 'order-cancelled',
+          order_display_id: 'DIS-CANCEL',
+          status: 'cancelled',
+          escrow_status: 'funding',
+          escrow_booking_id: 'booking-1',
+          escrow_amount_wei: '1000000000000000000',
+          escrow_funding_attempts: 0,
+          escrow_funding_last_attempt_at: null,
+          pending_bid_acceptance: null,
+          customer_id: 'cust-1',
+        },
+      ];
+      mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: mockOrders, error: null });
+
+      const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValueOnce('lock-value');
+      releaseLock.mockResolvedValueOnce(undefined);
+
+      const { getEscrowBooking, submitEscrowRefund } = await import('../../src/services/escrow.js');
+      getEscrowBooking.mockResolvedValueOnce({ paid: false, amount: 1000000000000000000n });
+      const waitForConfirmation = vi.fn().mockResolvedValue(undefined);
+      submitEscrowRefund.mockResolvedValueOnce({ txHash: '0xrefund', waitForConfirmation });
+
+      await reconcileStaleFunding(mockOrderRepository);
+
+      expect(submitEscrowRefund).toHaveBeenCalledWith('DIS-CANCEL');
+      expect(waitForConfirmation).toHaveBeenCalled();
+      expect(mockOrderRepository.updateOrder).toHaveBeenCalledWith(
+        'order-cancelled',
+        expect.objectContaining({ escrow_status: 'refunded', escrow_refund_error: null }),
+      );
+    });
+
+    it('marks refund_failed when cancelled order refund is not submitted', async () => {
+      mockRedisClient.set.mockResolvedValue('locked');
+
+      const mockOrders = [
+        {
+          id: 'order-cancelled',
+          order_display_id: 'DIS-CANCEL',
+          status: 'cancelled',
+          escrow_status: 'funding',
+          escrow_booking_id: 'booking-1',
+          escrow_amount_wei: '1000000000000000000',
+          escrow_funding_attempts: 0,
+          escrow_funding_last_attempt_at: null,
+          pending_bid_acceptance: null,
+          customer_id: 'cust-1',
+        },
+      ];
+      mockOrderRepository.findStaleFundingOrders.mockResolvedValueOnce({ data: mockOrders, error: null });
+
+      const { acquireLock, releaseLock } = await import('../../src/lib/redisLock.js');
+      acquireLock.mockResolvedValueOnce('lock-value');
+      releaseLock.mockResolvedValueOnce(undefined);
+
+      const { getEscrowBooking, submitEscrowRefund } = await import('../../src/services/escrow.js');
+      getEscrowBooking.mockResolvedValueOnce({ paid: false, amount: 1000000000000000000n });
+      submitEscrowRefund.mockResolvedValueOnce({ txHash: null, error: 'chain rejected' });
+
+      await reconcileStaleFunding(mockOrderRepository);
+
+      expect(mockOrderRepository.updateOrder).toHaveBeenCalledWith(
+        'order-cancelled',
+        expect.objectContaining({ escrow_status: 'refund_failed', escrow_refund_error: 'chain rejected' }),
       );
     });
 

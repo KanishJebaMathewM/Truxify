@@ -23,6 +23,21 @@ class ABTestMetrics(Base):
     timestamp = Column(DateTime, default=datetime.utcnow)
     request_id = Column(String(100))
 
+class ABTestVersion(Base):
+    """Registry of model versions and their serving status.
+
+    Exactly one row carries status='production' at any time; shadow
+    versions and superseded (rolled-back) versions are kept for history.
+    """
+    __tablename__ = 'ab_test_versions'
+
+    id = Column(Integer, primary_key=True)
+    version = Column(String(200))
+    file_path = Column(String(500), nullable=True)
+    status = Column(String(50), default='shadow')  # production | shadow | superseded
+    test_id = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class ABTestModel:
     """A/B Testing with shadow deployment and auto-rollback"""
     
@@ -32,6 +47,7 @@ class ABTestModel:
         self.Session = sessionmaker(bind=self.engine)
         self.threshold = threshold  # If new model < threshold% of old, rollback
         self.traffic_split = 0.10  # 10% to new model
+        self.rollback_degradation_threshold = 0.15  # degrade > 15% ⇒ rollback
         
     def get_model_for_request(self, request_id: str) -> Dict[str, Any]:
         """Route request to production or shadow model based on A/B split"""
@@ -117,12 +133,24 @@ class ABTestModel:
             
             # Determine if shadow model is better
             is_better = self.is_shadow_better(results)
-            
+
+            improvements = [
+                v['improvement'] for v in results.values()
+                if isinstance(v.get('improvement'), (int, float))
+            ]
+            mean_improvement = sum(improvements) / len(improvements) if improvements else 0.0
+            degradation = max(0.0, -mean_improvement / 100.0)
+
             return {
                 'test_id': test_id,
                 'results': results,
+                'metrics': {
+                    'degradation': round(degradation, 4),
+                    'mean_improvement': round(mean_improvement, 4),
+                    'metric_count': len(improvements),
+                },
                 'shadow_better': is_better,
-                'should_rollback': not is_better,
+                'should_rollback': (not is_better) or degradation > self.rollback_degradation_threshold,
                 'timestamp': datetime.utcnow().isoformat()
             }
         finally:
@@ -184,7 +212,7 @@ class ABTestModel:
             if recent:
                 return {
                     'test_id': recent.test_id,
-                    'production_version': 'production',
+                    'production_version': self.get_production_version(),
                     'shadow_version': recent.model_version,
                     'started_at': recent.timestamp.isoformat(),
                     'status': 'active'
@@ -195,30 +223,98 @@ class ABTestModel:
         finally:
             session.close()
 
+    def _current_production_row(self, session) -> Optional[ABTestVersion]:
+        """Return the single registry row currently serving production."""
+        return session.query(ABTestVersion).filter(
+            ABTestVersion.status == 'production'
+        ).order_by(ABTestVersion.id.desc()).first()
+
+    def _shadow_versions(self, session, test_id: str) -> list:
+        """Return the distinct shadow model versions logged for a test."""
+        rows = session.query(ABTestMetrics.model_version).filter(
+            ABTestMetrics.test_id == test_id,
+            ABTestMetrics.model_version != 'production'
+        ).distinct().all()
+        return [row[0] for row in rows]
+
     def get_production_version(self) -> str:
-        return 'production'
-    
+        """Return the currently serving model version from the registry.
+
+        Falls back to 'production' when no version has ever been registered.
+        """
+        session = self.Session()
+        try:
+            row = self._current_production_row(session)
+            return row.version if row else 'production'
+        finally:
+            session.close()
+
     def trigger_rollback(self, test_id: str) -> Dict[str, Any]:
         """Auto-rollback to previous version if shadow model underperforms"""
         evaluation = self.evaluate_test(test_id)
-        
+
         if evaluation.get('should_rollback', False):
-            # Trigger rollback via n8n webhook
-            logger.warning(f"⚠️ Rollback triggered for test {test_id}")
-            
-            # Return rollback instructions
+            session = self.Session()
+            try:
+                current = self._current_production_row(session)
+                restored_version = current.version if current else 'production'
+
+                if current:
+                    current.status = 'superseded'
+
+                session.add(ABTestVersion(
+                    version=restored_version,
+                    status='production',
+                    test_id=test_id,
+                    created_at=datetime.utcnow()
+                ))
+                session.commit()
+
+                shadow_versions = self._shadow_versions(session, test_id)
+                degraded_version = shadow_versions[-1] if shadow_versions else 'shadow'
+            finally:
+                session.close()
+
+            logger.warning(
+                f"Rollback triggered for test {test_id}: "
+                f"restored production to '{restored_version}'"
+            )
+
             return {
                 'action': 'rollback',
                 'test_id': test_id,
                 'reason': 'Shadow model underperformed',
-                'production_version': 'production',
-                'previous_version': 'production',
+                'production_version': restored_version,
+                'previous_version': degraded_version,
                 'timestamp': datetime.utcnow().isoformat()
             }
-        
+
+        session = self.Session()
+        try:
+            current = self._current_production_row(session)
+            previous_version = current.version if current else 'production'
+
+            shadow_versions = self._shadow_versions(session, test_id)
+            promoted_version = shadow_versions[-1] if shadow_versions else previous_version
+
+            if current:
+                current.status = 'superseded'
+
+            session.add(ABTestVersion(
+                version=promoted_version,
+                status='production',
+                test_id=test_id,
+                created_at=datetime.utcnow()
+            ))
+            session.commit()
+        finally:
+            session.close()
+
         return {
             'action': 'promote',
             'test_id': test_id,
             'reason': 'Shadow model performed well',
+            'production_version': promoted_version,
+            'previous_version': previous_version,
             'timestamp': datetime.utcnow().isoformat()
         }

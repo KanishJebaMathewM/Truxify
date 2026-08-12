@@ -46,26 +46,52 @@ class eBPFLoader:
             raise
     
     def load_program(self, object_file: str) -> bool:
-        """Load eBPF program into kernel"""
+        """Load eBPF program into kernel and pin it to the BPF filesystem"""
+        program_name = os.path.basename(object_file).replace('.o', '')
+        pin_path = f"/sys/fs/bpf/truxify_{program_name}"
+
         try:
-            # Use bpftool to load program
-            cmd = ["sudo", "bpftool", "prog", "load", object_file, "/sys/fs/bpf/truxify"]
+            # Load the object to a unique per-program path. Sharing a single
+            # /sys/fs/bpf/truxify path makes the second load fail with
+            # "File exists" before pinning even starts.
+            load_path = f"{pin_path}.load"
+            cmd = ["sudo", "bpftool", "prog", "load", object_file, load_path]
             subprocess.run(cmd, check=True, capture_output=True)
-            
-            # Pin program to BPF filesystem
-            program_name = os.path.basename(object_file).replace('.o', '')
-            pin_path = f"/sys/fs/bpf/truxify_{program_name}"
-            
-            cmd = ["sudo", "bpftool", "prog", "pin", "id", program_name, pin_path]
+
+            # bpftool prog pin id takes the numeric kernel program id, not the
+            # program name. Resolve it from `bpftool prog list` for this object.
+            prog_id = self._resolve_prog_id(load_path)
+            if prog_id is None:
+                raise RuntimeError(f"could not resolve kernel id for {program_name}")
+
+            cmd = ["sudo", "bpftool", "prog", "pin", "id", str(prog_id), pin_path]
             subprocess.run(cmd, check=True, capture_output=True)
-            
-            self.loaded_programs.append(program_name)
-            logger.info(f"✅ Loaded: {program_name}")
+            subprocess.run(["sudo", "rm", "-f", load_path], check=True, capture_output=True)
+
+            self.loaded_programs.append(pin_path)
+            logger.info(f"✅ Loaded: {program_name} (id {prog_id}, {pin_path})")
             return True
-            
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Loading failed: {e.stderr}")
-            return False
+
+        except Exception as e:
+            logger.error(f"Loading failed for {program_name}: {e}")
+            raise
+
+    def _resolve_prog_id(self, pinned_path: str) -> Any:
+        """Resolve the numeric kernel id of the program pinned at pinned_path."""
+        try:
+            result = subprocess.run(
+                ["sudo", "bpftool", "prog", "list", "--json"],
+                check=True, capture_output=True, text=True
+            )
+            for prog in json.loads(result.stdout):
+                pinned = prog.get("pinned") or []
+                if isinstance(pinned, str):
+                    pinned = [pinned]
+                if pinned_path in pinned:
+                    return prog.get("id")
+        except Exception as e:
+            logger.error(f"Resolving program id failed for {pinned_path}: {e}")
+        return None
     
     def attach_program(self, program_name: str, event: str) -> bool:
         """Attach eBPF program to event"""
@@ -121,29 +147,30 @@ class eBPFLoader:
                 logger.warning(f"Program not found: {program_path}")
                 continue
             
-            try:
-                # Compile
-                object_file = self.compile_program(program_path)
-                
-                # Load
-                success = self.load_program(object_file)
-                results[program] = success
-                
-            except Exception as e:
-                logger.error(f"Failed to process {program}: {e}")
-                results[program] = False
+            # Compile
+            object_file = self.compile_program(program_path)
+            
+            # Load
+            success = self.load_program(object_file)
+            results[program] = success
         
         return results
     
     def cleanup(self):
-        """Remove loaded eBPF programs"""
-        for program in self.loaded_programs:
+        """Remove pinned eBPF programs and any legacy shared pin path."""
+        for pin_path in self.loaded_programs:
             try:
-                pin_path = f"/sys/fs/bpf/truxify_{program}"
                 subprocess.run(["sudo", "rm", "-f", pin_path], check=True)
-                logger.info(f"✅ Cleaned up: {program}")
+                logger.info(f"✅ Cleaned up: {pin_path}")
             except Exception as e:
-                logger.error(f"Cleanup failed for {program}: {e}")
+                logger.error(f"Cleanup failed for {pin_path}: {e}")
+        
+        # Remove the legacy shared pin path used by the old loader so a
+        # redeploy does not collide with it.
+        try:
+            subprocess.run(["sudo", "rm", "-f", "/sys/fs/bpf/truxify"], check=True)
+        except Exception as e:
+            logger.error(f"Legacy pin cleanup failed: {e}")
         
         self.loaded_programs = []
 
@@ -160,7 +187,11 @@ class eBPFMonitor:
     def start_monitoring(self):
         """Start system monitoring"""
         self.running = True
-        self.loader.load_all_programs()
+        results = self.loader.load_all_programs()
+        failed = [p for p, ok in results.items() if not ok]
+        if failed:
+            self.running = False
+            raise RuntimeError(f"eBPF monitoring failed to load: {', '.join(failed)}")
         
         logger.info("✅ eBPF monitoring started")
     

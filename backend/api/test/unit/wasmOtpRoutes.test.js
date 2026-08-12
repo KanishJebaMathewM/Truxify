@@ -25,3 +25,51 @@ describe('POST /api/wasm/otp (issue #6331)', () => {
     expect(res.body).not.toHaveProperty('success');
   });
 });
+
+describe('wasm edge engine (issue #10629)', () => {
+  it('never answers 200 {success:true, data:null} for /wasm/eta', async () => {
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/wasm/eta')
+      .send({ distance: 10, speed: 40, trafficFactor: 0.1 });
+
+    // Either the engine produced a genuine numeric ETA, or it reported a
+    // failure — but never a 200 success with null data.
+    expect([200, 500]).toContain(res.status);
+    if (res.status === 200) {
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toBeTypeOf('number');
+    } else {
+      expect(res.body.success).toBe(false);
+    }
+  });
+
+  it('never answers 200 {success:true, data:null} for /wasm/route', async () => {
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/wasm/route')
+      .send({ origin: 'A', destination: 'B', weight: 500, distance: 25 });
+
+    expect([200, 500]).toContain(res.status);
+    if (res.status === 200) {
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).not.toBeNull();
+    } else {
+      expect(res.body.success).toBe(false);
+    }
+  });
+
+  it('validates /wasm/eta inputs before invoking the engine', async () => {
+    const app = buildApp();
+
+    const res = await request(app)
+      .post('/api/wasm/eta')
+      .send({ distance: 0, speed: 40 });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+});
+

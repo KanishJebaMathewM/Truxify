@@ -12,7 +12,7 @@ const enDict = (() => {
   try {
     return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/en.json')));
   } catch (err) {
-    logger.warn({ err }, '[i18n] Failed to load en.json locale, falling back to empty object');
+    logger.warn({ event: 'I18N_LOCALE_LOAD_ERROR', locale: 'en', error: err && err.message }, '[i18n] Failed to load en.json locale, falling back to empty object');
     return {};
   }
 })();
@@ -21,7 +21,7 @@ const esDict = (() => {
   try {
     return JSON.parse(fs.readFileSync(path.join(__dirname, '../locales/es.json')));
   } catch (err) {
-    logger.warn({ err }, '[i18n] Failed to load es.json locale, falling back to empty object');
+    logger.warn({ event: 'I18N_LOCALE_LOAD_ERROR', locale: 'es', error: err && err.message }, '[i18n] Failed to load es.json locale, falling back to empty object');
     return {};
   }
 })();

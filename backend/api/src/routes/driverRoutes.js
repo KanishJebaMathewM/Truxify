@@ -127,10 +127,11 @@
  */
 
 import express from 'express';
-import { supabase, redisClient, createUserClient } from '../config/db.js';
+import { supabase, supabaseAdmin, redisClient, createUserClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { predictDriverProfit } from '../services/ml.js';
 import { authenticate } from '../middleware/auth.js';
+import { requireApiKey } from '../middleware/apiKey.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
 import {
   DEADHEAD_COLUMNS,
@@ -160,6 +161,111 @@ const router = express.Router();
 router.use(userLimiter);
 const hosStatusSchema = z.object({
   status: z.enum(['off_duty', 'on_duty', 'driving', 'resting'])
+});
+
+// ============================================================================
+// ACTIVE DRIVERS (B2B, consumed by the n8n document-integrity workflow)
+// ============================================================================
+/**
+ * @openapi
+ * /api/driver/active:
+ *   get:
+ *     tags: [Driver]
+ *     summary: List active drivers with their documents
+ *     description: Returns drivers currently online (driver_details.is_online = true) with their KYC documents. Auth-gated for backend-to-backend callers (x-api-key / VALID_API_KEYS); the n8n document-integrity workflow polls this daily.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Array of active drivers with documents
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                     format: uuid
+ *                   driver_id:
+ *                     type: string
+ *                     format: uuid
+ *                   name:
+ *                     type: string
+ *                     nullable: true
+ *                   documents:
+ *                     type: array
+ *                     items:
+ *                       type: object
+ *                       properties:
+ *                         type:
+ *                           type: string
+ *                         status:
+ *                           type: string
+ *                         expiry_date:
+ *                           type: string
+ *                           format: date
+ *                           nullable: true
+ *       401:
+ *         description: Missing or invalid API key
+ *       502:
+ *         description: Supabase query failed
+ */
+router.get('/active', requireApiKey, userLimiter, async (req, res) => {
+  try {
+    const client = supabaseAdmin || supabase;
+    if (!client) {
+      return res.status(503).json({ error: 'Supabase is not configured.' });
+    }
+
+    const { data: activeDrivers, error: driversError } = await client
+      .from('driver_details')
+      .select('user_id')
+      .eq('is_online', true);
+
+    if (driversError) {
+      return res.status(502).json({ error: 'Failed to fetch active drivers.', details: driversError.message });
+    }
+
+    const driverIds = (activeDrivers || []).map((d) => d.user_id);
+    if (driverIds.length === 0) {
+      return res.json([]);
+    }
+
+    const [profilesRes, docsRes] = await Promise.all([
+      client.from('profiles').select('id, full_name').in('id', driverIds),
+      client.from('driver_documents').select('driver_id, document_type, status').in('driver_id', driverIds),
+    ]);
+
+    if (profilesRes.error || docsRes.error) {
+      return res.status(502).json({ error: 'Failed to fetch active driver details.' });
+    }
+
+    const nameById = Object.fromEntries((profilesRes.data || []).map((p) => [p.id, p.full_name]));
+    const docsByDriver = {};
+    for (const doc of docsRes.data || []) {
+      (docsByDriver[doc.driver_id] = docsByDriver[doc.driver_id] || []).push({
+        type: doc.document_type,
+        status: doc.status,
+        // driver_documents has no expiry column; documents expire via the
+        // `documents` table consumed by documentExpiryService.
+        expiry_date: null,
+      });
+    }
+
+    const drivers = (activeDrivers || []).map((d) => ({
+      id: d.user_id,
+      driver_id: d.user_id,
+      name: nameById[d.user_id] || null,
+      documents: docsByDriver[d.user_id] || [],
+    }));
+
+    return res.json(drivers);
+  } catch (err) {
+    logger.error({ requestId: req.requestId }, 'Active drivers fetch error:', err);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 // Driver role authorization guard middleware
@@ -1088,6 +1194,7 @@ const predictProfitLimiter = rateLimit({
   message: { error: 'Too many prediction requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:predict-profit:'),
 });
 
 router.post(
@@ -1512,7 +1619,7 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
  *       400:
  *         description: Invalid payload
  */
-router.post('/weigh-stations/sync-weight', authenticate, requirePolicy('driver:view-stats'), userLimiter, validateBody(syncWeightSchema), async (req, res) => {
+router.post('/weigh-stations/sync-weight', validateBody(syncWeightSchema), authenticate, requirePolicy('driver:view-stats'), userLimiter, validateBody(syncWeightSchema), async (req, res) => {
   try {
     const driverId = req.user.id;
     const { truck_id, axles } = req.body;
@@ -1727,8 +1834,13 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
   try {
     const userId = req.user.id;
 
+    // Read through the caller's authenticated client so RLS lets the driver
+    // see their own profile, driver_details (including kyc_status), truck
+    // and documents. The shared anon client is denied on all of these.
+    const db = createUserClient(req.token);
+
     // 1. Fetch base profile
-    const { data: profile, error: profileErr } = await supabase
+    const { data: profile, error: profileErr } = await db
       .from('profiles')
       .select('id, full_name, phone, email')
       .eq('id', userId)
@@ -1739,7 +1851,7 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
     }
 
     // 2. Fetch driver details
-    const { data: details, error: detailsErr } = await supabase
+    const { data: details, error: detailsErr } = await db
       .from('driver_details')
       .select('rating, total_trips, completion_rate, is_online, kyc_status, truck_id')
       .eq('user_id', userId)
@@ -1748,7 +1860,7 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
     // 3. Fetch truck details if assigned
     let truck = null;
     if (details && details.truck_id) {
-      const { data: truckData } = await supabase
+      const { data: truckData } = await db
         .from('trucks')
         .select('*')
         .eq('id', details.truck_id)
@@ -1757,7 +1869,7 @@ router.get('/profile', authenticate, userLimiter, async (req, res) => {
     }
 
     // 4. Fetch documents and map their status
-    const { data: docs } = await supabase
+    const { data: docs } = await db
       .from('driver_documents')
       .select('document_type, status, is_govt_verified')
       .eq('driver_id', userId);
@@ -1868,6 +1980,7 @@ router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, r
         .from('trucks')
         .insert({
           driver_id: req.user.id,
+          name: type,
           truck_type: type,
           max_capacity_tons: capacityWeight || 0,
           number_plate: registrationNumber

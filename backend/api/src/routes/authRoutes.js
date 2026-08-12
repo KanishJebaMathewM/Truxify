@@ -41,7 +41,6 @@
  */
 
 import express from "express";
-import rateLimit from "express-rate-limit";
 import { authenticate } from "../middleware/auth.js";
 import {
   userLimiter,
@@ -51,7 +50,7 @@ import {
   invalidateCachedProfile,
   invalidateCachedSupabaseProfile,
 } from "../lib/profileCache.js";
-import { firebaseAdmin, supabase, redisClient } from "../config/db.js";
+import { firebaseAdmin, supabaseAdmin, redisClient } from "../config/db.js";
 import {
   OTP_MAX_FAILED_ATTEMPTS,
   OTP_LOCKOUT_MINUTES,
@@ -59,19 +58,6 @@ import {
 import logger from "../middleware/logger.js";
 
 const router = express.Router();
-
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
-  message: {
-    success: false,
-    message: "Too many requests from this IP, please try again later.",
-  },
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-router.use(authLimiter);
 
 export function withTimeout(operation, timeoutMs, message) {
   let timer;
@@ -106,6 +92,7 @@ router.post("/logout", authenticate, async (req, res) => {
 
   // ── 1. Invalidate Redis profile cache ──────────────────────────────
   // Bounded timeout prevents Redis hangs from blocking the logout response.
+  let cacheInvalidated = false;
   try {
     await withTimeout(
       Promise.all([
@@ -117,6 +104,7 @@ router.post("/logout", authenticate, async (req, res) => {
       2000,
       "Redis invalidation timeout",
     );
+    cacheInvalidated = true;
   } catch (err) {
     logger.warn(
       `[auth/logout] Cache invalidation skipped for uid=${uid}: ${err?.message}`,
@@ -142,7 +130,7 @@ router.post("/logout", authenticate, async (req, res) => {
   return res.status(200).json({
     success: true,
     message: "Logged out successfully",
-    cacheInvalidated: true, // Redis errors are non-fatal — logout always succeeds
+    cacheInvalidated,
   });
 });
 
@@ -241,15 +229,9 @@ async function clearAuthOtpFailures(phone) {
   if (redisClient) {
     try {
       await redisClient.del(`auth_otp_failed_count:${phoneKey}`);
-      return;
     } catch (err) {
       logger.error("[auth/verify-otp] Redis error in clearAuthOtpFailures, falling back to memory:", err.message);
     }
-  }
-  const record = authOtpFailedAttempts.get(phoneKey);
-  if (record) {
-    record.count = 0;
-    if (record.lockedUntil) return;
   }
   authOtpFailedAttempts.delete(phoneKey);
 }
@@ -294,8 +276,12 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
       });
     }
 
-    // Look up the latest unused, unexpired OTP for this phone number
-    const { data: otpRecord, error: fetchErr } = await supabase
+    // Look up the latest unused, unexpired OTP for this phone number. Access
+    // goes through the service-role client (supabaseAdmin): anon/authenticated
+    // have no SELECT privilege on phone_otps (see
+    // 20260811120000_secure_phone_otps_rls.sql), so otp_hash/otp_salt are never
+    // exposed to callers.
+    const { data: otpRecord, error: fetchErr } = await supabaseAdmin
       .from("phone_otps")
       .select("id, otp_hash, otp_salt, expires_at, verified")
       .eq("phone", phone)
@@ -342,7 +328,7 @@ router.post("/verify-otp", otpVerificationLimiter, async (req, res) => {
     }
 
     // Consume the OTP so it cannot be reused
-    const { error: updateErr } = await supabase
+    const { error: updateErr } = await supabaseAdmin
       .from("phone_otps")
       .update({ verified: true, verified_at: new Date().toISOString() })
       .eq("id", otpRecord.id);

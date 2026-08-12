@@ -12,7 +12,7 @@ describe('OrderRepository stale-order cancellation', () => {
     orderRepository = new OrderRepository(supabaseMock.supabase);
   });
 
-  it('findStalePendingOrders selects only pending, older-than-cutoff, non-funding orders in a bounded batch', async () => {
+  it('findStalePendingOrders selects pending, older-than-cutoff orders with null or non-funding escrow in a bounded batch', async () => {
     supabaseMock.programData([]);
 
     const cutoff = '2024-01-01T00:00:00.000Z';
@@ -24,7 +24,7 @@ describe('OrderRepository stale-order cancellation', () => {
     expect(call.filters).toEqual(expect.arrayContaining([
       { col: 'status', op: 'eq', val: 'pending' },
       { col: 'created_at', op: 'lt', val: cutoff },
-      { col: 'escrow_status', op: 'neq', val: 'funding' },
+      { col: null, op: 'or', val: 'escrow_status.is.null,escrow_status.neq.funding' },
     ]));
     expect(call.limit).toBe(100);
   });

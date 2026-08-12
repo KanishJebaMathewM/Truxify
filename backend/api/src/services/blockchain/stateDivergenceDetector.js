@@ -2,7 +2,7 @@ import { ethers } from 'ethers';
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const FINALITY_THRESHOLD = 100; // Blocks after which transaction is considered finalized
@@ -35,7 +35,7 @@ class StateDivergenceDetector {
       try {
         await this.checkForDivergence();
       } catch (err) {
-        logger.error('[StateDivergenceDetector] Monitoring error:', err.message);
+        logger.error({ err }, '[StateDivergenceDetector] Monitoring error');
       }
     }, interval);
   }
@@ -97,7 +97,7 @@ class StateDivergenceDetector {
           queryTime: Date.now(),
         };
       } catch (err) {
-        logger.warn(`[StateDivergenceDetector] Node ${nodeIndex} query failed:`, err.message);
+        logger.warn({ err, nodeIndex }, '[StateDivergenceDetector] Node query failed');
         throw err;
       }
     });
@@ -164,7 +164,7 @@ class StateDivergenceDetector {
 
   async logDivergence(divergenceId, divergenceResult) {
     try {
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('blockchain_divergence_log')
         .insert([{
           divergence_id: divergenceId,
@@ -177,7 +177,7 @@ class StateDivergenceDetector {
 
       logger.info('[StateDivergenceDetector] Divergence logged:', divergenceId);
     } catch (err) {
-      logger.error('[StateDivergenceDetector] Failed to log divergence:', err.message);
+      logger.error({ err }, '[StateDivergenceDetector] Failed to log divergence');
     }
   }
 
@@ -196,7 +196,7 @@ class StateDivergenceDetector {
 
       logger.warn('[StateDivergenceDetector] Divergence alert:', alert);
     } catch (err) {
-      logger.error('[StateDivergenceDetector] Failed to alert divergence:', err.message);
+      logger.error({ err }, '[StateDivergenceDetector] Failed to alert divergence');
     }
   }
 
@@ -205,7 +205,7 @@ class StateDivergenceDetector {
       try {
         logger.warn('[StateDivergenceDetector] Triggering state reconciliation from block:', canonicalState.blockNumber);
 
-        await supabase
+        await (supabaseAdmin || supabase)
           .from('blockchain_reconciliation_jobs')
           .insert([{
             status: 'pending',
@@ -216,7 +216,7 @@ class StateDivergenceDetector {
 
         logger.info('[StateDivergenceDetector] Reconciliation job queued');
       } catch (err) {
-        logger.error('[StateDivergenceDetector] Failed to queue reconciliation:', err.message);
+        logger.error({ err }, '[StateDivergenceDetector] Failed to queue reconciliation');
         Sentry.captureException(err);
       }
     });
@@ -252,7 +252,7 @@ class StateDivergenceDetector {
           txHash,
         };
       } catch (err) {
-        logger.error('[StateDivergenceDetector] Finality check failed:', err.message);
+        logger.error({ err }, '[StateDivergenceDetector] Finality check failed');
         return { finalized: false, error: err.message, txHash };
       }
     });
@@ -285,7 +285,7 @@ class StateDivergenceDetector {
         status: 'in_progress',
       };
 
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('state_reconciliations')
         .insert([reconciliation]);
 
@@ -317,7 +317,7 @@ class StateDivergenceDetector {
     divergence.resolutionDetails = resolutionDetails;
 
     try {
-      await supabase
+      await (supabaseAdmin || supabase)
         .from('blockchain_divergence_log')
         .update({
           resolved: true,

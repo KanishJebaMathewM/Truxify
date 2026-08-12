@@ -36,6 +36,10 @@ describe('LoadOfferCacheService', () => {
       expect(LoadOfferCacheService.getRegion(null, 72.0)).toBe('global');
     });
 
+    it('returns global for null lng', () => {
+      expect(LoadOfferCacheService.getRegion(19.0, null)).toBe('global');
+    });
+
     it('returns global for undefined lng', () => {
       expect(LoadOfferCacheService.getRegion(19.0, undefined)).toBe('global');
     });
@@ -46,6 +50,14 @@ describe('LoadOfferCacheService', () => {
 
     it('returns global for NaN lat', () => {
       expect(LoadOfferCacheService.getRegion(NaN, 72.0)).toBe('global');
+    });
+
+    it('returns global for non-finite lat', () => {
+      expect(LoadOfferCacheService.getRegion(Infinity, 77.2090)).toBe('global');
+    });
+
+    it('returns global for non-finite lng', () => {
+      expect(LoadOfferCacheService.getRegion(28.6139, NaN)).toBe('global');
     });
 
     it('returns global for non-numeric lng', () => {
@@ -97,6 +109,12 @@ describe('LoadOfferCacheService', () => {
       expect(mockLogger.warn).toHaveBeenCalled();
     });
 
+    it('returns null when Redis returns null', async () => {
+      mockRedis.get.mockResolvedValue(null);
+      const version = await LoadOfferCacheService.getVersion('region1');
+      expect(version).toBeNull();
+    });
+
     it('calls Redis with correct key', async () => {
       mockRedis.get.mockResolvedValue('1');
       await LoadOfferCacheService.getVersion('region42');
@@ -137,6 +155,12 @@ describe('LoadOfferCacheService', () => {
       mockRedis.incr.mockRejectedValue(new Error('Redis write error'));
       await LoadOfferCacheService.invalidateRegion(19.076, 72.877);
       expect(mockLogger.warn).toHaveBeenCalled();
+    });
+
+    it('handles Redis errors gracefully', async () => {
+      mockRedis.incr.mockRejectedValue(new Error('Redis error'));
+      // Should not throw
+      await expect(LoadOfferCacheService.invalidateRegion(28.6139, 77.2090)).resolves.toBeUndefined();
     });
   });
 });

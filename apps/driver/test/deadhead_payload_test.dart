@@ -306,10 +306,11 @@ void main() {
       expect(load['dest_lng'], 77.5946);
       expect(load['weight_kg'], 1000);
       expect(load['payment_inr'], 1500);
-      // length_m, width_m, height_m default to 0.0 when null
-      expect(load['length_m'], 0.0);
-      expect(load['width_m'], 0.0);
-      expect(load['height_m'], 0.0);
+      // length_m, width_m, height_m default to 1.0 when null so the payload
+      // stays positive for the backend's positive-dimension schema.
+      expect(load['length_m'], 1.0);
+      expect(load['width_m'], 1.0);
+      expect(load['height_m'], 1.0);
     });
 
     test('does NOT include 0.0 placeholder values for missing data', () {
@@ -350,6 +351,94 @@ void main() {
       final availableLoads =
           payload['available_loads'] as List<Map<String, dynamic>>;
       expect(availableLoads, isEmpty);
+    });
+  });
+
+  group('MarketplaceRepository.rawDeadheadFields', () {
+    test('maps a real load_offers row into ML deadhead fields', () {
+      final fields = MarketplaceRepository.rawDeadheadFields(<String, dynamic>{
+        'id': 'load-010',
+        'pickup_lat': 21.1702,
+        'pickup_lng': 72.8311,
+        'drop_lat': 26.9124,
+        'drop_lng': 75.7873,
+        'weight': '3 tonnes',
+        'dimensions': '12 × 6 × 6 ft',
+        'freight_value': 822000,
+        'fuel_cost': 50000,
+        'toll_cost': 20000,
+        'net_profit': 610000,
+      });
+
+      expect(fields.originLat, closeTo(21.1702, 0.000001));
+      expect(fields.originLng, closeTo(72.8311, 0.000001));
+      expect(fields.destLat, closeTo(26.9124, 0.000001));
+      expect(fields.destLng, closeTo(75.7873, 0.000001));
+      expect(fields.weightKg, 3000);
+      expect(fields.lengthM, closeTo(12 * 0.3048, 0.000001));
+      expect(fields.widthM, closeTo(6 * 0.3048, 0.000001));
+      expect(fields.heightM, closeTo(6 * 0.3048, 0.000001));
+      expect(fields.paymentInr, 8220);
+    });
+
+    test('falls back to legacy origin_*/weight_kg/payment_inr keys', () {
+      final fields = MarketplaceRepository.rawDeadheadFields(<String, dynamic>{
+        'id': 'load-011',
+        'origin_lat': 13.0827,
+        'origin_lng': 80.2707,
+        'dest_lat': 12.9716,
+        'dest_lng': 77.5946,
+        'weight_kg': 5000,
+        'length_m': 4.0,
+        'width_m': 1.8,
+        'height_m': 1.8,
+        'payment_inr': 5000,
+      });
+
+      expect(fields.originLat, 13.0827);
+      expect(fields.originLng, 80.2707);
+      expect(fields.destLat, 12.9716);
+      expect(fields.destLng, 77.5946);
+      expect(fields.weightKg, 5000);
+      expect(fields.lengthM, 4.0);
+      expect(fields.widthM, 1.8);
+      expect(fields.heightM, 1.8);
+      expect(fields.paymentInr, 5000);
+    });
+
+    test('parses metric dimensions and kilogram weight', () {
+      final fields = MarketplaceRepository.rawDeadheadFields(<String, dynamic>{
+        'pickup_lat': 23.0225,
+        'pickup_lng': 72.5714,
+        'drop_lat': 26.9124,
+        'drop_lng': 75.7873,
+        'weight': '500 kg',
+        'dimensions': '4.5 × 2 × 2',
+        'freight_value': 250000,
+      });
+
+      expect(fields.weightKg, 500);
+      expect(fields.lengthM, closeTo(4.5, 0.000001));
+      expect(fields.widthM, 2.0);
+      expect(fields.heightM, 2.0);
+      expect(fields.paymentInr, 2500);
+    });
+
+    test('returns nulls for a row with no deadhead-relevant data', () {
+      final fields = MarketplaceRepository.rawDeadheadFields(<String, dynamic>{
+        'id': 'load-012',
+        'pickup_address': 'Surat',
+        'drop_address': 'Jaipur',
+        'weight': 'unknown',
+      });
+
+      expect(fields.originLat, isNull);
+      expect(fields.destLat, isNull);
+      expect(fields.weightKg, isNull);
+      expect(fields.lengthM, isNull);
+      expect(fields.widthM, isNull);
+      expect(fields.heightM, isNull);
+      expect(fields.paymentInr, isNull);
     });
   });
 }

@@ -41,7 +41,7 @@ vi.mock('../../api/src/middleware/logger.js', () => ({
   },
 }));
 
-import processedEventRepository from '../../repositories/processedEvent.repository.js';
+import processedEventRepository from '../repositories/processedEvent.repository.js';
 import { supabaseAdmin } from '../../api/src/config/db.js';
 
 describe('ProcessedEventRepository.claimProcessed', () => {

@@ -63,7 +63,10 @@ contract StateChannel is ReentrancyGuard {
         Channel storage channel = channels[channelId];
         require(!channel.isClosed, "Channel closed");
         require(msg.sender == channel.userA || msg.sender == channel.userB, "Not participant");
-        require(sequence >= channel.sequence, "Stale sequence");
+        // Only a strictly newer signed state may (re)open or extend a dispute.
+        // Re-submitting the same state would otherwise reset challengeExpiry and
+        // lock the channel funds forever (issue #10792).
+        require(sequence > channel.sequence, "Stale sequence");
         require(balanceA + balanceB == channel.balanceA + channel.balanceB, "Invalid balance sum");
 
         bytes32 stateHash = keccak256(abi.encodePacked(channelId, sequence, balanceA, balanceB)).toEthSignedMessageHash();
@@ -77,8 +80,15 @@ contract StateChannel is ReentrancyGuard {
         channel.sequence = sequence;
         channel.balanceA = balanceA;
         channel.balanceB = balanceB;
-        channel.isDisputed = true;
-        channel.challengeExpiry = block.timestamp + CHALLENGE_PERIOD;
+
+        // Start the challenge only once. A later newer state may update the
+        // balances but must NOT reset the already-running expiry, so
+        // finalizeExit is always reachable within one CHALLENGE_PERIOD of the
+        // first valid challenge.
+        if (!channel.isDisputed) {
+            channel.isDisputed = true;
+            channel.challengeExpiry = block.timestamp + CHALLENGE_PERIOD;
+        }
 
         emit DisputeInitiated(channelId, sequence, channel.challengeExpiry);
     }

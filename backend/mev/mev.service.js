@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+import { getMevRelayer } from './flashbots_relayer.js';
 
 /**
  * Derives the exact 32-byte preimage that is revealed on-chain.
@@ -190,6 +191,26 @@ class MEVService {
             signedTxs.push(signedTx);
         }
         return signedTxs;
+    }
+
+    async submitFlashbotsBundle(escrowId, transactions) {
+        try {
+            const relayer = getMevRelayer();
+            const targetBlock = (await this.provider.getBlockNumber()) + 1;
+            const result = await relayer.sendPrivateBundle({
+                signedBundle: transactions,
+                targetBlock
+            });
+            await this.storeBundle({
+                escrowId,
+                bundleId: result.bundleHash,
+                blockNumber: result.targetBlock
+            });
+            return result;
+        } catch (error) {
+            logger.error('Flashbots bundle submission failed:', error);
+            throw error;
+        }
     }
 
     // ============ MEV Protection Level ============

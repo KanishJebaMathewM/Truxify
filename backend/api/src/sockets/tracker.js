@@ -289,6 +289,12 @@ let telemetryTotalDropped = 0;
 let telemetryRaceDropped = 0;
 let telemetryOverflowDropped = 0;
 
+// Backpressure & circuit-breaker config (#11180)
+const BUFFER_BACKPRESSURE_THRESHOLD = 0.9;      // 90% - start applying backpressure
+const BUFFER_CIRCUIT_BREAKER_THRESHOLD = 0.95;  // 95% - reject new telemetry if MongoDB down
+const MONGODB_DOWN_CIRCUIT_BREAKER_MS = 300000; // 5 minutes before circuit breaks
+let mongoDbUnavailableSince = null;             // timestamp when MongoDB became unavailable
+
 const WS_UPGRADE_RATE_LIMIT = 5;
 const WS_UPGRADE_RATE_WINDOW_SECONDS = 60;
 const MAX_MSG_PER_SECOND = 10;
@@ -924,6 +930,42 @@ export async function handleLocationPing(ws, data, req) {
     }));
   }
 
+  // Backpressure: if buffer is critically full and MongoDB has been
+  // unavailable for an extended period, reject new telemetry to prevent
+  // unbounded memory growth (issue #11180).
+  const bufferUsagePct = telemetryWriteBuffer.length / MAX_BUFFER_SIZE;
+  const mongoAvailable = !!getMongoDb();
+  const now = Date.now();
+  if (!mongoAvailable) {
+    if (mongoDbUnavailableSince === null) {
+      mongoDbUnavailableSince = now;
+    }
+    if (bufferUsagePct >= BUFFER_CIRCUIT_BREAKER_THRESHOLD &&
+        now - mongoDbUnavailableSince >= MONGODB_DOWN_CIRCUIT_BREAKER_MS) {
+      return ws.send(JSON.stringify({
+        error: 'Service temporarily unavailable: telemetry buffer full and MongoDB unreachable',
+        code: 503,
+        retryAfter: 300,
+      }));
+    }
+  } else {
+    mongoDbUnavailableSince = null;
+  }
+  if (bufferUsagePct >= BUFFER_BACKPRESSURE_THRESHOLD) {
+    logger.warn(
+      `[TRUXIFY BACKPRESSURE] Buffer at ${(bufferUsagePct * 100).toFixed(0)}% ` +
+      `(${telemetryWriteBuffer.length}/${MAX_BUFFER_SIZE}) — ` +
+      `applying backpressure, dropping ping`
+    );
+    telemetryTotalDropped++;
+    telemetryOverflowDropped++;
+    return ws.send(JSON.stringify({
+      error: 'Backpressure applied: telemetry buffer near capacity',
+      code: 429,
+      retryAfter: 10,
+    }));
+  }
+
   const { driver_id: payloadDriverId, speed, bearing, device_timestamp } = data;
 
   if (payloadDriverId && payloadDriverId !== driver_id) {
@@ -1340,6 +1382,8 @@ async function flushTelemetryBuffer() {
     logger.error('[TRUXIFY STORAGE WARN] MongoDB is not initialized or disconnected. Retaining telemetry logs in memory buffer.');
     return;
   }
+  // MongoDB is available — reset unavailability tracker
+  mongoDbUnavailableSince = null;
 
   if (flushMutex) return;
   flushMutex = true;

@@ -214,11 +214,30 @@ class SimulationEngine:
             metrics['event_types'][event.type] = metrics['event_types'].get(event.type, 0) + 1
         
         if events:
-            total_time = (events[-1].timestamp - events[0].timestamp).total_seconds()
-            if total_time > 0:
-                metrics['utilization'] = len(events) / (total_time / 60)
-        
-        metrics['efficiency'] = min(1.0, len(events) / 100)
+            total_window = (events[-1].timestamp - events[0].timestamp).total_seconds()
+            if total_window > 0 and metrics['unique_assets'] > 0:
+                # Active asset-time: each asset counts as active from its first
+                # to its last event in the window. Utilization is the fraction
+                # of available asset-time (window * unique assets) actually used.
+                spans: Dict[str, List] = {}
+                for event in events:
+                    spans.setdefault(event.asset_id, []).append(event.timestamp)
+
+                active_seconds = sum(
+                    (max(ts) - min(ts)).total_seconds() for ts in spans.values()
+                )
+                available_seconds = total_window * metrics['unique_assets']
+                metrics['utilization'] = (
+                    min(1.0, active_seconds / available_seconds)
+                    if available_seconds > 0
+                    else 0.0
+                )
+
+            # Efficiency: the fraction of events that completed on time
+            # (i.e., without a delay), rather than raw event volume.
+            delay_events = metrics['event_types'].get('delay', 0)
+            on_time_events = len(events) - delay_events
+            metrics['efficiency'] = on_time_events / len(events)
         
         return metrics
     

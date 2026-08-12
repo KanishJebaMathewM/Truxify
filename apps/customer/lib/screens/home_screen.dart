@@ -81,8 +81,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _orderService.fetchHistoryOrders(),
       ]);
       if (!mounted) return;
-      final profile = results[0] is Map<String, dynamic>
+      final profileResponse = results[0] is Map<String, dynamic>
           ? results[0] as Map<String, dynamic>
+          : <String, dynamic>{};
+      final profile = profileResponse['profile'] is Map<String, dynamic>
+          ? profileResponse['profile'] as Map<String, dynamic>
           : <String, dynamic>{};
       final orders = results[1] is List
           ? List<Map<String, dynamic>>.from(results[1] as List)
@@ -94,9 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
           : <Map<String, dynamic>>[];
 
       setState(() {
-        _customerName =
-            (profile['full_name']?.toString() ?? profile['name']?.toString() ?? '')
-                .trim();
+        _customerName = (profile['fullName']?.toString() ?? '').trim();
         _activeOrders = orders;
         _customerStats = stats;
         _usualRoutes = _computeUsualRoutes(history);
@@ -116,6 +117,11 @@ class _HomeScreenState extends State<HomeScreen> {
     if (hour < 12) return 'Good morning';
     if (hour < 17) return 'Good afternoon';
     return 'Good evening';
+  }
+
+  String _formatSavingsValue() {
+    final totalSaved = (_customerStats?['totalSaved'] as num?)?.toDouble() ?? 0;
+    return '₹${(totalSaved / 100).toStringAsFixed(totalSaved % 100 == 0 ? 0 : 2)}';
   }
 
   void _showComingSoon(BuildContext context, String title) {
@@ -443,8 +449,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       StatCard(
                                         title: AppLocalizations.of(context)!
                                             .savings,
-                                        value:
-                                            '${_customerStats?['totalSaved'] ?? 0}',
+                                        value: _formatSavingsValue(),
                                         icon: Icons.savings_rounded,
                                       ),
                                     ],
@@ -477,8 +482,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                           title:
                                               AppLocalizations.of(context)!
                                                   .savings,
-                                          value:
-                                              '${_customerStats?['totalSaved'] ?? 0}',
+                                          value: _formatSavingsValue(),
                                           icon: Icons.savings_rounded,
                                         ),
                                       ),

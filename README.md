@@ -253,7 +253,7 @@ Note: Truxify is in active development (Phase 2). The core platform features are
 ### Run the Customer App
 ```bash
 git clone https://github.com/KanishJebaMathewM/Truxify.git
-cd Truxify/customer_app  # (or driver_app)
+cd Truxify/apps/customer  # or Truxify/apps/driver
 flutter pub get
 flutter run
 ```
@@ -400,4 +400,29 @@ Thanks to all contributors ❤️
 [Report Bug](https://github.com/KanishJebaMathewM/Truxify/issues) · [Request Feature](https://github.com/KanishJebaMathewM/Truxify/issues)
 
 </div>
+
+## Troubleshooting
+
+### Installation fails
+- Ensure you are using the supported Node.js version.
+- Run `npm install` or `npm ci`.
+- Delete `node_modules` and reinstall dependencies if necessary.
+
+### Environment variables not loading
+- Verify that a `.env` file exists.
+- Ensure all required variables are defined.
+- Restart the development server after making changes.
+
+## FAQ
+
+### How do I start the project?
+Run:
+
+```bash
+npm install
+npm run dev
+```
+
+### How do I report a bug?
+Please open a GitHub issue with reproduction steps and relevant logs.
 

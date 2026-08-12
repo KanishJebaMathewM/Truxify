@@ -21,45 +21,37 @@ const NEW_TRIP_NOTIFY_BATCH_SIZE = Number(process.env.NEW_TRIP_NOTIFY_BATCH_SIZE
   : 25;
 const DRIVER_LOCATION_FRESHNESS_MS = 15 * 60 * 1000;
 
-function haversineDistanceKm(lat1, lng1, lat2, lng2) {
-  const toRad = deg => (deg * Math.PI) / 180;
-  const R = 6371;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
-
 /**
  * Find drivers that should be notified about a new trip: those online and
  * located within the configured radius of the pickup, whose truck can carry
- * the load (by weight capacity). Falls back to in-memory filtering when the
- * drivers are not filterable in a single SQL query.
+ * the load (by weight capacity).
+ *
+ * The radius+freshness search is pushed into Postgres via the
+ * get_nearby_active_drivers RPC, which runs ST_DWithin against the indexed
+ * driver_locations.location geography column (idx_driver_locations_location)
+ * instead of pulling every active driver nationwide and filtering by
+ * haversine distance in JS.
  *
  * @param {{pickupLat: number, pickupLng: number, weightTonnes: number}} args
  * @returns {Promise<string[]>} driver ids, bounded by NEW_TRIP_NOTIFY_MAX_DRIVERS
  */
-async function findTargetDrivers({ pickupLat, pickupLng, weightTonnes }) {
-  const { data: locations } = await supabase
-    .from('driver_locations')
-    .select('driver_id, latitude, longitude')
-    .eq('is_active', true)
-    .gte('last_updated_at', new Date(Date.now() - DRIVER_LOCATION_FRESHNESS_MS).toISOString())
-    .not('latitude', 'is', null);
+export async function findTargetDrivers({ pickupLat, pickupLng, weightTonnes }) {
+  const { data: nearbyDrivers, error: nearbyError } = await supabaseAdmin.rpc('get_nearby_active_drivers', {
+    origin_lat: pickupLat,
+    origin_lng: pickupLng,
+    radius_meters: NEW_TRIP_NOTIFY_RADIUS_KM * 1000,
+    freshness_seconds: DRIVER_LOCATION_FRESHNESS_MS / 1000,
+  });
 
-  if (!locations || locations.length === 0) return [];
+  if (nearbyError) {
+    logger.error(`[orders] get_nearby_active_drivers RPC failed: ${nearbyError.message}`);
+    return [];
+  }
 
-  const nearbyDriverIds = locations
-    .filter(loc => {
-      if (!Number.isFinite(Number(loc.latitude)) || !Number.isFinite(Number(loc.longitude))) return false;
-      return haversineDistanceKm(pickupLat, pickupLng, Number(loc.latitude), Number(loc.longitude)) <= NEW_TRIP_NOTIFY_RADIUS_KM;
-    })
-    .map(loc => loc.driver_id);
-
+  const nearbyDriverIds = (nearbyDrivers ?? []).map(row => row.driver_id);
   if (nearbyDriverIds.length === 0) return [];
 
-  const { data: driverDetails } = await supabase
+  const { data: driverDetails } = await supabaseAdmin
     .from('driver_details')
     .select('user_id, truck_id')
     .eq('is_online', true)
@@ -71,7 +63,7 @@ async function findTargetDrivers({ pickupLat, pickupLng, weightTonnes }) {
   const truckIds = driverDetails.map(d => d.truck_id).filter(Boolean);
   if (truckIds.length === 0) return [];
 
-  const { data: trucks } = await supabase
+  const { data: trucks } = await supabaseAdmin
     .from('trucks')
     .select('id, max_capacity_tons')
     .in('id', truckIds);

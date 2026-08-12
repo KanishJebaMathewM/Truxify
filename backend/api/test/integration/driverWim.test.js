@@ -82,4 +82,24 @@ describe('Driver WIM Sync Routes', () => {
     expect(res.body.action).toBe('BYPASS');
     expect(res.body.gross_weight_lbs).toBe(30000);
   });
+
+  it('GET /api/driver/weigh-stations/bypass-status returns 503 UNSUPPORTED (no real WIM provider)', async () => {
+    const res = await request(buildApp())
+      .get('/api/driver/weigh-stations/bypass-status?lat=19.076&lng=72.8777')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(503);
+    expect(res.body.action).toBe('UNSUPPORTED');
+    expect(res.body.supported).toBe(false);
+    expect(res.body.simulated).toBe(true);
+    expect(res.body.stationId).toBeNull();
+  });
+
+  it('GET /api/driver/weigh-stations/bypass-status returns 400 for invalid coordinates', async () => {
+    const res = await request(buildApp())
+      .get('/api/driver/weigh-stations/bypass-status?lat=abc&lng=72.8777')
+      .set(DRIVER_HEADERS);
+
+    expect(res.status).toBe(400);
+  });
 });

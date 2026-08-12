@@ -111,4 +111,50 @@ describe('apiResponse helpers', () => {
       });
     });
   });
+
+
+describe('paginated edge cases', () => {
+  it('handles a zero limit without producing Infinity', () => {
+    const result = paginated([], 1, 0, 10);
+    expect(result.pagination.limit).toBe(1);
+    expect(result.pagination.totalPages).toBe(10);
+    expect(Number.isFinite(result.pagination.totalPages)).toBe(true);
+  });
+
+  it('handles a negative limit without producing Infinity', () => {
+    const result = paginated([], 1, -5, 10);
+    expect(result.pagination.limit).toBe(1);
+    expect(result.pagination.totalPages).toBe(10);
+  });
+
+  it('handles a non-finite limit gracefully', () => {
+    const result = paginated([], 1, NaN, 10);
+    expect(result.pagination.limit).toBe(1);
+    expect(result.pagination.totalPages).toBe(10);
+  });
+
+  it('handles page 0 gracefully', () => {
+    const result = paginated([{ id: 1 }], 0, 10, 1);
+    expect(result.pagination.page).toBe(0);
+    expect(result.pagination.totalPages).toBe(1);
+    expect(result.pagination.hasPrevPage).toBe(false);
+    expect(result.pagination.hasNextPage).toBe(false);
+  });
+
+  it('handles page greater than totalPages', () => {
+    const result = paginated([], 100, 10, 50);
+    expect(result.pagination.page).toBe(100);
+    expect(result.pagination.totalPages).toBe(5);
+    expect(result.pagination.hasNextPage).toBe(false);
+    expect(result.pagination.hasPrevPage).toBe(true);
+  });
+
+  it('handles total=0 gracefully', () => {
+    const result = paginated([], 1, 10, 0);
+    expect(result.pagination.totalPages).toBe(0);
+    expect(result.pagination.hasNextPage).toBe(false);
+    expect(result.pagination.hasPrevPage).toBe(false);
+  });
+});
+
 });

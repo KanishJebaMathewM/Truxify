@@ -149,6 +149,10 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
     throw new RangeError(`weightTonnes must be a positive number, got ${weightTonnes}`);
   }
 
+  if (pickupLat == null || pickupLng == null || dropLat == null || dropLng == null) {
+    throw new TypeError('computeOrderPricing: pickupLat, pickupLng, dropLat, and dropLng are required and cannot be null');
+  }
+
   const fallbackDistanceKm = haversineKm(pickupLat, pickupLng, dropLat, dropLng);
   const distanceKm = Number.isFinite(roadDistanceKm) && roadDistanceKm >= 0
     ? roadDistanceKm
@@ -186,8 +190,11 @@ export function computeOrderPricing(input, rateCard = readRateCard()) {
 }
 
 export function convertKmToMiles(km) {
-  if (typeof km !== 'number' || Number.isNaN(km)) {
-    throw new TypeError('km must be a number');
+  if (typeof km !== 'number' || Number.isNaN(km) || !Number.isFinite(km)) {
+    throw new TypeError('km must be a finite number');
+  }
+  if (km < 0) {
+    throw new RangeError('km must be non-negative');
   }
   return km * 0.621371;
 }

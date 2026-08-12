@@ -61,6 +61,15 @@ async function recordDispatchOutcome(withdrawalId, settlementRef) {
  * settle_withdrawal_tx is idempotent and only matches rows still in 'pending'.
  */
 async function settleWithRetry(withdrawalId, settlementRef) {
+  // settle_withdrawal_tx happily marks a withdrawal 'completed' and releases
+  // the reserved wallet_pending balance even when p_settlement_ref is NULL.
+  // Never settle without an actual payout reference: the row may have been
+  // claimed but the payout never confirmed dispatched (crash window).
+  if (!settlementRef) {
+    throw new Error(
+      `Refusing to settle withdrawal ${withdrawalId}: no payout settlement reference recorded.`,
+    );
+  }
   let lastError = null;
   for (let attempt = 1; attempt <= SETTLE_RETRY_ATTEMPTS; attempt += 1) {
     const { error } = await supabaseAdmin.rpc("settle_withdrawal_tx", {
@@ -180,9 +189,20 @@ export async function settlePendingWithdrawals() {
       }
     }
 
-    // The payout has already been dispatched. Never call fail_withdrawal_tx
-    // here — restoring wallet_confirmed would double-pay the driver. Keep the
-    // row 'pending' and let the next sweep retry the idempotent settle call.
+    // The payout has already been dispatched (payout_attempted_at is set), so
+    // never call fail_withdrawal_tx here — restoring wallet_confirmed would
+    // double-pay the driver. Keep the row 'pending' and let the next sweep
+    // retry the idempotent settle call. If the settlement reference is still
+    // missing, the row may have been claimed but the dispatch never produced a
+    // payout reference (crash window) — refuse to settle so the withdrawal is
+    // not falsely marked completed with no payout having left the platform.
+    if (!settlementRef) {
+      logger.warn(
+        `[WithdrawalSettlementWorker] Withdrawal ${withdrawal.id} was claimed but no payout settlement reference was recorded - refusing to settle, keeping funds reserved.`,
+      );
+      continue;
+    }
+
     try {
       await settleWithRetry(withdrawal.id, settlementRef);
       logger.info(

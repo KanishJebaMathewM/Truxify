@@ -22,6 +22,8 @@ const { mockSupabase } = vi.hoisted(() => ({
 
 vi.mock('../../src/config/db.js', () => ({
   get supabase() { return mockSupabase; },
+  // No service-role key in tests — the route must fall back to the anon mock.
+  supabaseAdmin: undefined,
 }));
 
 vi.mock('../../src/middleware/logger.js', () => ({
@@ -70,7 +72,9 @@ describe('adminRoutes', () => {
       expect(res.body).toEqual({
         active_drivers: 5,
         pending_orders: 3,
-        total_revenue_today: 300,
+        // total_amount is stored in paisa; route divides by 100 for INR display
+        // 100 + 200 paisa = 300 paisa = 3 INR
+        total_revenue_today: 3,
       });
     });
 

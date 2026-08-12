@@ -85,14 +85,25 @@ describe("ZK proof verification", function () {
     );
   });
 
-  it("rejects zero/empty proofs in zkSTARKVerifier", async function () {
-    const zkSTARKVerifier = await (await ethers.getContractFactory("zkSTARKVerifier")).deploy();
+  it("rejects arbitrary proof bytes in zkSTARKVerifier (issue #10797)", async function () {
+    const mock = await (await ethers.getContractFactory("MockSTARKVerifier")).deploy();
+    await mock.waitForDeployment();
+    const zkSTARKVerifier = await (await ethers.getContractFactory("zkSTARKVerifier")).deploy(await mock.getAddress());
     await zkSTARKVerifier.waitForDeployment();
 
-    assert.equal(await zkSTARKVerifier.verifyProof("0x", "0x1234"), false);
-    assert.equal(await zkSTARKVerifier.verifyProof("0x1234", "0x"), false);
-    assert.equal(await zkSTARKVerifier.verifyProof("0x0000", "0x0000"), false);
-    assert.equal(await zkSTARKVerifier.verifyProof("0x1234", "0x5678"), true);
+    const publicInputs = ethers.AbiCoder.defaultAbiCoder().encode(
+      ["uint256", "uint256[]"],
+      [123n, [1n, 2n]]
+    );
+
+    // Arbitrary proof bytes must NOT verify.
+    assert.equal(await zkSTARKVerifier.verifyProof("0x1234", publicInputs), false);
+
+    // Empty proofs are rejected outright.
+    await assertRejectsWith(
+      zkSTARKVerifier.verifyProof("0x", publicInputs),
+      "Proof is empty"
+    );
   });
 
   it("rejects zero proofs in KYCVerifier.verifyKYC", async function () {
@@ -111,9 +122,12 @@ describe("ZK proof verification", function () {
     await kycVerifier.waitForDeployment();
     const [admin, user] = await ethers.getSigners();
 
+    // Bind the proof to the user (as KYCVerifier requires), but use a
+    // fabricated on-curve proof that must still fail verification.
+    const boundInput = [BigInt(user.address), 1n];
     const verified = await kycVerifier
       .connect(admin)
-      .verifyKYC.staticCall([1, 2], [[1, 2], [1, 2]], [1, 2], [1, 1], user.address);
+      .verifyKYC.staticCall([1, 2], [[1, 2], [1, 2]], [1, 2], boundInput, user.address);
     assert.equal(verified, false);
     assert.equal(await kycVerifier.isVerified(user.address), false);
   });

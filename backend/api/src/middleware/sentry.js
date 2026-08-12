@@ -24,7 +24,7 @@ export function initSentry() {
         return null;
       }
       if (event.exception?.values?.[0]?.value) {
-        const err = new Error(event.exception.values[0].value);
+        const err = new Error(event.exception.values[0].value, { cause: null });
         err.code = event.exception.values[0].type || undefined;
         if (shouldIgnoreError(err)) return null;
       }

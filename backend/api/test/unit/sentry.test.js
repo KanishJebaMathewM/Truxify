@@ -30,7 +30,6 @@ vi.mock("@sentry/node", async (real) => ({
   // sentry.js probes it via optional chaining. Declaring the key here (even
   // as undefined) keeps that access from throwing under vitest's mock
   // strictness, so the fallback to expressErrorHandler() is actually exercised.
-  Handlers: undefined,
   init: vi.fn(),
   flush: vi.fn(),
   expressErrorHandler: () => vi.fn(),

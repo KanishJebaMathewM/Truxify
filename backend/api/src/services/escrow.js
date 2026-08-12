@@ -103,10 +103,12 @@ if (rpcUrl && contractAddress && relayerPrivateKey) {
  *   a) Bytecode exists at ESCROW_CONTRACT_ADDRESS (not an empty address)
  *   b) The contract at that address responds to the expected ABI
  *
- * If either check fails, this function returns false and logs details.
- * The escrow service will continue in degraded mode (all operations
- * return { txData: null }) — the server does NOT crash so that
- * non-escrow functionality stays available.
+ * If either check fails, this function returns false, logs details, AND
+ * deactivates the contract client (escrowContract = null). Every escrow
+ * operation guards on `!escrowContract`, so once deactivated they all return
+ * { txData: null } / null immediately — isEscrowEnabled() becomes false and
+ * checkEscrowHealth() reports 'not_configured'. The server does NOT crash so
+ * that non-escrow functionality stays available.
  *
  * @returns {Promise<boolean>} — true if validation passed
  */
@@ -126,13 +128,16 @@ export async function validateEscrowSetup () {
     if (code === '0x') {
       logger.error(
         `[escrow] ❌ No contract deployed at ${address}. ` +
-        'Check ESCROW_CONTRACT_ADDRESS in your .env.'
+        'Check ESCROW_CONTRACT_ADDRESS in your .env. ' +
+        'Deactivating escrow — all escrow operations will be disabled.'
       )
+      escrowContract = null
       return false
     }
     logger.info(`[escrow] ✅ Bytecode confirmed at ${address} (${(code.length - 2) / 2} bytes).`)
   } catch (err) {
     logger.error({ event: 'ESCROW_BYTECODE_QUERY_ERROR', address, error: err && err.message }, `[escrow] Failed to query bytecode at ${address}`)
+    escrowContract = null
     return false
   }
 
@@ -148,8 +153,9 @@ export async function validateEscrowSetup () {
       `[escrow] ❌ Contract at ${address} does not respond to 'bookings(uint256)'. ` +
       'This likely means it is NOT TruxifyEscrow.sol. ' +
       'Check that ESCROW_CONTRACT_ADDRESS points to the active TruxifyEscrow contract, ' +
-      'not the deprecated Escrow.sol.'
+      'not the deprecated Escrow.sol. Deactivating escrow — all escrow operations will be disabled.'
     )
+    escrowContract = null
     return false
   }
 
@@ -278,7 +284,11 @@ export function resolveExpectedDepositAmount(order) {
 }
 
 /**
- * Check whether the escrow contract client has been successfully initialised.
+ * Check whether the escrow contract client is initialised AND has passed
+ * deployment validation. validateEscrowSetup() deactivates the client
+ * (sets escrowContract = null) when the configured address has no bytecode
+ * or does not respond to the expected ABI, so a misconfigured deployment
+ * reports disabled instead of failing at runtime.
  * @returns {boolean}
  */
 export function isEscrowEnabled() {

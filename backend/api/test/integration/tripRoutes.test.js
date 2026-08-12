@@ -185,7 +185,7 @@ describe('Trip Routes', () => {
             expect.objectContaining({
                 event_id: 'event-1',
                 user_id: 'driver-1',
-                trip_id: 'TX-ORDER1',
+                trip_id: 'trip-1',
                 event_type: 'location_update',
                 latitude: 19.076,
                 longitude: 72.8777,

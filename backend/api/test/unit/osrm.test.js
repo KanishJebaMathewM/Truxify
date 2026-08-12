@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const mockRedis = vi.hoisted(() => ({
   get: vi.fn(),
   set: vi.fn(),
+  del: vi.fn(),
 }));
 
 const mockLogger = vi.hoisted(() => ({
@@ -19,7 +20,7 @@ vi.mock('../../src/middleware/logger.js', () => ({
   default: mockLogger,
 }));
 
-import { getRouteEstimate, __testing } from '../../src/services/osrm.js';
+import { getRouteEstimate, getRouteGeometry, __testing } from '../../src/services/osrm.js';
 
 const { buildRouteUrl, buildCacheKey, DEFAULT_OSRM_BASE_URL, DEFAULT_TIMEOUT_MS } = __testing;
 
@@ -396,5 +397,53 @@ describe('osrm - getRouteEstimate edge cases', () => {
 
     // Redis get failed (invalid JSON), fetch was called as fallback
     expect(fetch).toHaveBeenCalled();
+  });
+});
+
+describe('osrm - getRouteGeometry cache handling', () => {
+  it('evicts a malformed cached geometry payload and refetches', async () => {
+    mockRedis.get.mockResolvedValue('{not valid json');
+    fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        routes: [{
+          distance: 1000,
+          duration: 60,
+          geometry: { coordinates: [[77.5, 12.9], [80.2, 13.0]] },
+        }],
+      }),
+    });
+
+    const result = await getRouteGeometry({
+      originLat: 12.9,
+      originLng: 77.5,
+      destLat: 13.0,
+      destLng: 80.2,
+    });
+
+    expect(mockRedis.del).toHaveBeenCalled();
+    expect(result).not.toBeNull();
+    expect(result.type).toBe('Feature');
+    expect(result.geometry.coordinates.length).toBe(2);
+  });
+
+  it('serves a valid cached geometry without refetching', async () => {
+    const cachedFeature = {
+      type: 'Feature',
+      properties: { distanceKm: 1, durationSeconds: 60 },
+      geometry: { type: 'LineString', coordinates: [[77.5, 12.9], [80.2, 13.0]] },
+    };
+    mockRedis.get.mockResolvedValue(JSON.stringify(cachedFeature));
+    fetch.mockClear();
+
+    const result = await getRouteGeometry({
+      originLat: 12.9,
+      originLng: 77.5,
+      destLat: 13.0,
+      destLng: 80.2,
+    });
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(result).toEqual(cachedFeature);
   });
 });

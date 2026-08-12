@@ -186,7 +186,16 @@ export async function getRouteGeometry(opts = {}) {
       // Stale null results (from transient failures) must not be served
       // from cache — the next call should retry the OSRM API.
       if (cached) {
-        const parsed = JSON.parse(cached);
+        let parsed;
+        try {
+          parsed = JSON.parse(cached);
+        } catch (err) {
+          // Malformed cached payload — drop the poison key so every request
+          // does not keep hitting the same broken entry.
+          logger.error({ event: 'OSRM_REDIS_PARSE_GEOMETRY_ERROR', error: err && err.message }, '[osrm] Invalid cached geometry — evicting');
+          await redisClient.del(cacheKey).catch(() => {});
+          throw err;
+        }
         if (parsed !== null) return parsed;
       }
     } catch (err) {

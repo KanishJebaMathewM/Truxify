@@ -155,6 +155,23 @@ export async function reconcilePendingEscrowRefunds(orderRepository) {
             }
           }
 
+          // Defense-in-depth for issue #8891: a started trip must never take
+          // the full-refund cancelBooking path (the contract now reverts, but
+          // verify on-chain state first so we fail fast with a clear reason
+          // instead of submitting a transaction that will revert on-chain.
+          // When the trip is started, route through cancelWithPenalty even if
+          // cancellation_fee is 0 so the driver is compensated; if no fee can
+          // be derived, refuse to refund and leave the order for review.
+          if (driverFeeWei === 0n) {
+            const onChainBooking = await getEscrowBooking(getEscrowBookingId(order.order_display_id));
+            if (onChainBooking?.started) {
+              throw new Error(
+                `Escrow refund for ${order.order_display_id} aborted: on-chain booking is already started ` +
+                `(issue #8891) — full refund via cancelBooking is blocked; route through cancelWithPenalty.`
+              );
+            }
+          }
+
           const submitted = driverFeeWei > 0n
             ? await submitEscrowCancelWithPenalty(order.order_display_id, driverFeeWei)
             : await submitEscrowRefund(order.order_display_id);

@@ -141,6 +141,51 @@ export function auditLog(options = {}) {
 }
 
 /**
+ * Keys whose values must never reach the audit log. Matching is
+ * case-insensitive on the final path segment so nested payloads are covered
+ * too (e.g. `body.password`, `headers.authorization`).
+ */
+const SENSITIVE_KEY_PATTERN = /(password|passwd|secret|token|otp|authorization|api[_-]?key|access[_-]?key|cookie|cvv|pin)\b/i;
+
+/**
+ * Recursively redacts sensitive fields before an audit entry is persisted.
+ *
+ * beforeState / afterState / metadata are developer-supplied snapshots that
+ * can echo request bodies verbatim. Scrub here — not at the call sites — so a
+ * future getAfterState callback cannot accidentally leak credentials into the
+ * audit trail.
+ *
+ * @param {unknown} value
+ * @param {string} [path] - current object path, used for key matching
+ * @returns {unknown} the value with sensitive fields replaced by "[REDACTED]"
+ */
+export function scrubPii(value, path = '') {
+  if (value === null || value === undefined) return value;
+
+  if (Array.isArray(value)) {
+    return value.map((item, index) => scrubPii(item, `${path}[${index}]`));
+  }
+
+  if (typeof value === 'object') {
+    const scrubbed = {};
+    for (const [key, item] of Object.entries(value)) {
+      const keyPath = path ? `${path}.${key}` : key;
+      const isSensitive = SENSITIVE_KEY_PATTERN.test(key);
+      scrubbed[key] = isSensitive ? '[REDACTED]' : scrubPii(item, keyPath);
+    }
+    return scrubbed;
+  }
+
+  if (typeof value === 'string') {
+    // Redact 16-digit card numbers that may be embedded in strings.
+    const CARD_NUMBER_PATTERN = /\b\d{4}[ -]?\d{4}[ -]?\d{4}[ -]?\d{4}\b/g;
+    return value.replace(CARD_NUMBER_PATTERN, '[REDACTED]');
+  }
+
+  return value;
+}
+
+/**
  * Writes the audit entry to the database.
  */
 async function writeAuditEntry(req, res, {
@@ -193,9 +238,9 @@ async function writeAuditEntry(req, res, {
     correlationId: req.correlationId,
     requestId: req.requestId,
     statusCode: res.statusCode,
-    beforeState,
-    afterState,
-    metadata,
+    beforeState: scrubPii(beforeState),
+    afterState: scrubPii(afterState),
+    metadata: scrubPii(metadata),
   });
 }
 

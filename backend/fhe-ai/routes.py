@@ -46,11 +46,15 @@ async def train_model(request: TrainRequest):
         y = np.array(request.labels)
         
         result = fhe_service.train(X, y, request.epochs)
+        if not result.get('success'):
+            raise HTTPException(status_code=500, detail=result.get('error', 'Training failed'))
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Training failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

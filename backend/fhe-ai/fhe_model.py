@@ -181,30 +181,18 @@ class FHETrainer:
         return self.model
     
     def train_encrypted(self, X: np.ndarray, y: np.ndarray, epochs: int = 10) -> Dict:
-        """Train model on encrypted data"""
-        if self.model is None:
-            raise ValueError("Model not created")
-        
-        # Encrypt input
-        X_enc = self.model.encrypt_input(X)
-        
-        # Simple training (simulated)
-        losses = []
-        for epoch in range(epochs):
-            # Forward pass (encrypted)
-            y_pred = self.model.forward(X_enc)
-            
-            # Loss (simulated)
-            loss = 0.5
-            losses.append(loss)
-            
-            if (epoch + 1) % 5 == 0:
-                logger.info(f"Epoch {epoch+1}/{epochs}: Loss = {loss:.4f}")
-        
-        return {
-            'losses': losses,
-            'final_loss': losses[-1] if losses else None
-        }
+        """Train model on encrypted data.
+
+        Real encrypted gradient descent is not implemented, and the previous
+        stub returned a constant 0.5 loss every epoch without updating any
+        weights. Fail closed: refuse to report fabricated training progress
+        instead of pretending learning occurred.
+        """
+        raise NotImplementedError(
+            "Encrypted training is not implemented; refusing to return "
+            "a fabricated loss curve. Train a model on plaintext data "
+            "and encrypt the resulting weights."
+        )
     
     def predict_encrypted(self, X: np.ndarray) -> np.ndarray:
         """Make predictions on encrypted data"""

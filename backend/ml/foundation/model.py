@@ -249,12 +249,13 @@ class FoundationModelTrainer:
             'lr': self.optimizer.param_groups[0]['lr']
         }
     
-    def train(self, train_data: List[Dict], val_data: Optional[List[Dict]] = None) -> Dict:
+    def train(self, train_data: List[Dict], val_data: Optional[List[Dict]] = None, epochs: Optional[int] = None) -> Dict:
         """Full training loop"""
         losses = []
         val_losses = []
+        num_epochs = epochs if epochs is not None else self.config.epochs
         
-        for epoch in range(self.config.epochs):
+        for epoch in range(num_epochs):
             epoch_loss = 0
             num_batches = 0
             

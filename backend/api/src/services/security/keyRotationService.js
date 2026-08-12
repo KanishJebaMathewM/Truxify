@@ -200,7 +200,6 @@ class KeyRotationService {
         const tx = await oldWallet.sendTransaction({
           to: this.escrowContract.target,
           data: this.escrowContract.interface.encodeFunctionData('transferKeyOwnership', [
-            newAddress,
             newWalletAddress,  // public address only — never the private key
             Date.now(),
           ]),
@@ -218,8 +217,6 @@ class KeyRotationService {
           const { error: insertError } = await supabaseAdmin
             .from('key_ownership_transfers')
             .insert([{
-              old_wallet_address: walletAddress,
-              new_wallet_address: newAddress,
               old_wallet_address: oldWallet.address,   // public address only
               new_wallet_address: newWalletAddress,     // public address only
               wallet_address: walletAddress,

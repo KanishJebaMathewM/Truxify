@@ -36,8 +36,9 @@ vi.mock('../../../src/config/db.js', () => {
     }))
   }));
   return {
-    default: { supabase: { from } },
+    default: { supabase: { from }, supabaseAdmin: { from } },
     supabase: { from },
+    supabaseAdmin: { from },
   };
 });
 

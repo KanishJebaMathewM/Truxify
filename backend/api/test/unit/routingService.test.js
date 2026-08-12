@@ -64,7 +64,9 @@ describe('routingService - optimizeWaypoints', () => {
       { lat: 1, lng: 1, address: 'End' },
       wp
     );
-    expect(result).toBe(wp);
+    // The function returns a defensive copy, so use toEqual for deep equality
+    expect(result).toEqual(wp);
+    expect(result).not.toBe(wp);
   });
 
   it('falls back to original order when OSRM returns non-Ok code', async () => {

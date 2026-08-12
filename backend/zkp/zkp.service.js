@@ -140,8 +140,8 @@ class ZKPService {
 
             return {
                 success: true,
-                proof: `0x${ethers.hexlify(proof)}`,
-                publicInputs: `0x${ethers.hexlify(publicInputs)}`,
+                proof: ethers.hexlify(proof),
+                publicInputs: ethers.hexlify(publicInputs),
                 timestamp: new Date().toISOString()
             };
         } catch (error) {

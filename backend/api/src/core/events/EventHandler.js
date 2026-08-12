@@ -36,7 +36,7 @@ export class EventHandler {
           this._handler(event),
           this._timeout > 0
             ? new Promise((_, reject) =>
-                setTimeout(() => reject(new Error(`Handler "${this._name}" timed out after ${this._timeout}ms`)), this._timeout)
+                setTimeout(() => reject(new Error(`Handler "${this._name}" timed out after ${this._timeout}ms`, { cause: null })), this._timeout)
               )
             : Promise.resolve(),
         ]);

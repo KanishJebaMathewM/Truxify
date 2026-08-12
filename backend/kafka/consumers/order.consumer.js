@@ -3,6 +3,8 @@ import processedEventRepository from '../repositories/processedEvent.repository.
 import deadLetterRepository from '../repositories/deadLetter.repository.js';
 import logger from '../../api/src/middleware/logger.js';
 
+const MAX_REPLAY_ATTEMPTS = 3;
+
 class OrderConsumer {
   constructor({ eventBus: externalEventBus } = {}) {
     this.handlers = new Map();
@@ -188,7 +190,12 @@ class OrderConsumer {
         parsedMessage = JSON.parse(serialized);
       } catch (error) {
         logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}): message is not valid JSON:`, error);
-        await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
+          await deadLetterRepository.markStatus(entry.id, 'failed');
+          logger.error(`Dead letter ${entry.id} (${entry.topic}) marked failed after ${entry.retry_count ?? 0} retries`);
+        } else {
+          await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        }
         results.failed += 1;
         continue;
       }
@@ -201,7 +208,16 @@ class OrderConsumer {
         results.succeeded += 1;
       } catch (error) {
         logger.error(`Replay failed for dead letter ${entry.id} (${entry.topic}):`, error);
-        await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        // Cap replay attempts so a poison message is not retried forever.
+        // After the cap the dead letter is marked failed and no longer
+        // picked up by listPending(), otherwise each replay cycles the same
+        // failing entry back into the pending queue indefinitely.
+        if ((entry.retry_count ?? 0) >= MAX_REPLAY_ATTEMPTS) {
+          await deadLetterRepository.markStatus(entry.id, 'failed');
+          logger.error(`Dead letter ${entry.id} (${entry.topic}) marked failed after ${entry.retry_count ?? 0} retries`);
+        } else {
+          await deadLetterRepository.markStatus(entry.id, 'pending', { incrementRetry: true });
+        }
         results.failed += 1;
       }
     }

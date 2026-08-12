@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import logger from '../middleware/logger.js';
-import { supabase, supabaseAdmin, redisClient } from '../config/db.js';
+import { supabase, supabaseAdmin } from '../config/db.js';
+import { acquireLock, renewLock, releaseLock, LockAcquisitionError } from '../lib/redisLock.js';
 import { sendPushNotification } from '../services/notificationService.js';
 import { WorkerTracer } from '../core/telemetry/WorkerTracer.js';
 import spanFactory from '../core/telemetry/SpanFactory.js';
@@ -12,9 +13,12 @@ let staleOrderRunning = false;
 const STALE_ORDER_CANCELLATION_REASON = 'Stale order: no accepted bid within 24 hours.';
 
 // Distributed batch lock: only ONE replica may run the hourly stale sweep at a
-// time. Same pattern as escrowFundingReconciliation / escrowRefundReconciliation.
+// time. The lock is owner-aware (see ../lib/redisLock.js): every acquisition
+// returns a UUID owner token, and renewals/releases verify ownership via an
+// atomic Lua script, so a slow replica can never renew or delete a lock that a
+// newer owner holds. Same pattern as escrowReleaseReconciliation.
 const LOCK_KEY = 'stale:order:cancellation:lock';
-const LOCK_TTL_SECONDS = 120;
+const LOCK_TTL_MS = 120_000;
 
 const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_STALE_ORDER_AGE_MS = 24 * 60 * 60 * 1000;
@@ -47,33 +51,48 @@ export const startStaleOrderWorker = (orderRepository) => {
 /**
  * Run one stale-order sweep.
  *
- * Replica safety: a Redis NX lock (plus an in-memory re-entrancy guard) ensures
- * only one replica executes the batch. Per-order safety is enforced by the
- * atomic `cancel_stale_order_tx` RPC: it locks the order row FOR UPDATE and
- * only cancels an order that is still 'pending' and older than the cutoff, so
- * a concurrent bid acceptance (which also locks the row) produces exactly one
- * valid winner. Side effects (load-offer cancellation, customer notification)
- * run ONLY when the RPC returns the cancelled row; a lost race returns zero
- * rows and is treated as expected, never as an error.
+ * Replica safety: an owner-aware Redis lock (plus an in-memory re-entrancy
+ * guard) ensures only one replica executes the batch.
+ *
+ * Lock lifecycle:
+ *   1. acquireLock() returns a per-acquisition UUID owner token.
+ *   2. The owner token is renewed (via the owner-checked renewLock()) before
+ *      every order cancellation. If renewal fails — the TTL lapsed and another
+ *      replica may now own the lock — the worker stops sweeping immediately
+ *      instead of continuing as a phantom owner.
+ *   3. releaseLock() is called in `finally` and only deletes the key if the
+ *      current process still owns it (atomic Lua GET+DEL), so a late-arriving
+ *      old owner can never delete a newer owner's lock.
+ *
+ * Per-order safety is enforced by the atomic `cancel_stale_order_tx` RPC: it
+ * locks the order row FOR UPDATE and only cancels an order that is still
+ * 'pending' and older than the cutoff, so a concurrent bid acceptance (which
+ * also locks the row) produces exactly one valid winner. Side effects
+ * (load-offer cancellation, customer notification) run ONLY when the RPC
+ * returns the cancelled row; a lost race returns zero rows and is treated as
+ * expected, never as an error.
  */
 export async function reconcileStaleOrders(repository) {
   if (!repository) throw new Error('reconcileStaleOrders requires an OrderRepository instance');
   if (staleOrderRunning) return;
   staleOrderRunning = true;
-  let globalLockAcquired = false;
+  let lockOwnerToken = null;
 
   try {
-    if (redisClient) {
-      try {
-        globalLockAcquired = await redisClient.set(LOCK_KEY, process.pid.toString(), 'NX', 'EX', LOCK_TTL_SECONDS);
-      } catch (err) {
-        logger.error('[StaleOrderWorker] Failed to acquire Redis global lock, skipping batch:', err.message);
-        return;
+    try {
+      lockOwnerToken = await acquireLock(LOCK_KEY, LOCK_TTL_MS);
+    } catch (err) {
+      if (err instanceof LockAcquisitionError) {
+        logger.error(`[StaleOrderWorker] Redis unavailable while acquiring global lock, skipping batch: ${err.message}`);
+      } else {
+        logger.error(`[StaleOrderWorker] Failed to acquire Redis global lock, skipping batch: ${err.message}`);
       }
-      if (!globalLockAcquired) {
-        logger.info('[StaleOrderWorker] Global lock held by another replica, skipping batch.');
-        return;
-      }
+      return;
+    }
+
+    if (lockOwnerToken === null) {
+      logger.info('[StaleOrderWorker] Global lock held by another replica, skipping batch.');
+      return;
     }
 
     const staleSince = new Date(Date.now() - DEFAULT_STALE_ORDER_AGE_MS).toISOString();
@@ -99,20 +118,27 @@ export async function reconcileStaleOrders(repository) {
     const metrics = { found: staleOrders.length, cancelled: 0, skipped: 0, errors: 0 };
 
     let index = 0;
+    let ownershipLost = false;
+
     async function workerPool() {
-      while (index < staleOrders.length) {
+      while (!ownershipLost) {
         const currentIndex = index++;
+        if (currentIndex >= staleOrders.length) return;
         const order = staleOrders[currentIndex];
-        if (order) {
-          if (globalLockAcquired && redisClient) {
-            try {
-              await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-            } catch (err) {
-              logger.warn('[StaleOrderWorker] Failed to refresh lock:', err.message);
-            }
-          }
-          await cancelStaleOrder(order, staleSince, repository, metrics);
+        if (!order) continue;
+
+        // Owner-checked renewal (atomic Lua GET + PEXPIRE). A false result
+        // means our lock TTL lapsed and a new owner may hold the lock — stop
+        // treating ourselves as the owner and abort the sweep, then let the
+        // `finally` block run the owner-checked release (a safe no-op).
+        const renewed = await renewLock(LOCK_KEY, lockOwnerToken, LOCK_TTL_MS);
+        if (!renewed) {
+          ownershipLost = true;
+          logger.warn('[StaleOrderWorker] Lost ownership of the global lock, stopping sweep early.');
+          return;
         }
+
+        await cancelStaleOrder(order, staleSince, repository, metrics);
       }
     }
 
@@ -132,11 +158,12 @@ export async function reconcileStaleOrders(repository) {
   } catch (err) {
     logger.error(`[StaleOrderWorker] Unexpected error during cleanup: ${err.message}`);
   } finally {
-    if (globalLockAcquired && redisClient) {
-      try {
-        await redisClient.del(LOCK_KEY);
-      } catch (err) {
-        logger.warn('[StaleOrderWorker] Failed to release global lock:', err.message);
+    if (lockOwnerToken) {
+      // Owner-checked release: a no-op if the lock expired and a new replica
+      // took over. Never deletes a lock we no longer own.
+      const released = await releaseLock(LOCK_KEY, lockOwnerToken);
+      if (!released) {
+        logger.warn('[StaleOrderWorker] Failed to release global lock (ownership lost or Redis unavailable).');
       }
     }
     staleOrderRunning = false;

@@ -69,6 +69,7 @@ describe('orderRoutes.js driver-location route syntax (issue #6662)', () => {
       "requirePolicy('order:view-driver-location', async (req) =>",
       'orderValidationService.findOrderByIdOrDisplayId(req.params.id,',
       'return { order };',
+      "requirePolicy('order:view-driver-location', async (req) => {",
       'validateParams(paramIdSchema)',
       "async (req, res) =>",
     ]) {

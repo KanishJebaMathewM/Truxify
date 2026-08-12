@@ -2,13 +2,24 @@ import { ethers } from 'ethers';
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
-import { supabase } from '../../config/db.js';
+import { supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const ESCROW_ABI = [
   'function transferKeyOwnership(address newKeyAddress, uint256 nonce) external',
   'function verifyKeyOwnership(address keyAddress) view returns (bool)',
 ];
+
+function sanitizeErrorMessage(message, secrets = []) {
+  let safe = typeof message === 'string' ? message : String(message);
+  for (const secret of secrets) {
+    if (!secret) {
+      continue;
+    }
+    safe = safe.split(String(secret)).join('[REDACTED]');
+  }
+  return safe;
+}
 
 class KeyRotationService {
   constructor(deps = {}) {
@@ -76,7 +87,7 @@ class KeyRotationService {
     try {
       const rotationId = `rot_${crypto.randomUUID()}`;
 
-      const { data, error } = await supabase
+      const { data, error } = await supabaseAdmin
         .from('key_rotations')
         .insert([{
           rotation_id: rotationId,
@@ -103,7 +114,7 @@ class KeyRotationService {
 
   async updateRotationRecord(rotationId, updates) {
     try {
-      const { error } = await supabase
+      const { error } = await supabaseAdmin
         .from('key_rotations')
         .update(updates)
         .eq('rotation_id', rotationId);
@@ -166,6 +177,21 @@ class KeyRotationService {
           return { status: 'skipped', reason: 'contract_unavailable' };
         }
 
+        if (!this.isValidPrivateKey(oldPrivateKey) || !this.isValidPrivateKey(newPrivateKey)) {
+          throw new Error('Invalid private key format');
+        }
+
+        // Derive the new wallet's public address from the private key. The
+        // raw private key must never be encoded into calldata or persisted —
+        // only the public address leaves the key-management boundary.
+        let newAddress;
+        try {
+          newAddress = new ethers.Wallet(newPrivateKey).address;
+        } catch (walletErr) {
+          throw new Error('Invalid new private key: could not derive wallet address', { cause: walletErr });
+        }
+
+        const signer = new ethers.Wallet(oldPrivateKey, this.provider);
         // Derive public addresses — private keys must never leave this boundary.
         const oldWallet = new ethers.Wallet(oldPrivateKey, this.provider);
         const newWalletAddress = new ethers.Wallet(newPrivateKey).address;
@@ -174,6 +200,7 @@ class KeyRotationService {
         const tx = await oldWallet.sendTransaction({
           to: this.escrowContract.target,
           data: this.escrowContract.interface.encodeFunctionData('transferKeyOwnership', [
+            newAddress,
             newWalletAddress,  // public address only — never the private key
             Date.now(),
           ]),
@@ -181,11 +208,18 @@ class KeyRotationService {
 
         const receipt = await tx.wait();
 
+        // Receipt-row persistence is best-effort: the on-chain transfer has
+        // already committed, so a failed audit write must not surface as a
+        // transfer failure or trigger a duplicate re-transfer on retry.
+        // Only non-sensitive metadata is persisted — public addresses and
+        // transaction details. Private-key material is never stored.
         // Persist only non-sensitive audit metadata — no key material of any kind.
         try {
-          const { error: insertError } = await supabase
+          const { error: insertError } = await supabaseAdmin
             .from('key_ownership_transfers')
             .insert([{
+              old_wallet_address: walletAddress,
+              new_wallet_address: newAddress,
               old_wallet_address: oldWallet.address,   // public address only
               new_wallet_address: newWalletAddress,     // public address only
               wallet_address: walletAddress,
@@ -209,16 +243,27 @@ class KeyRotationService {
           blockNumber: receipt.blockNumber,
         };
       } catch (err) {
-        logger.error('[KeyRotationService] On-chain transfer failed:', err.message);
-        Sentry.captureException(err);
-        throw err;
+        const safeMessage = sanitizeErrorMessage(err && err.message, [oldPrivateKey, newPrivateKey]);
+        logger.error('[KeyRotationService] On-chain transfer failed:', safeMessage);
+        Sentry.captureException(new Error('On-chain transfer failed: ' + safeMessage, { cause: err }));
+        throw new Error('On-chain key ownership transfer failed: ' + safeMessage, { cause: err });
       }
     });
   }
 
+  isValidPrivateKey(privateKey) {
+    if (this.keyManagementService && typeof this.keyManagementService.validatePrivateKey === 'function') {
+      return this.keyManagementService.validatePrivateKey(privateKey);
+    }
+    if (!privateKey || typeof privateKey !== 'string') {
+      return false;
+    }
+    return /^0x[a-fA-F0-9]{64}$/.test(privateKey) || /^[a-fA-F0-9]{64}$/.test(privateKey);
+  }
+
   async getRotationHistory(userId, walletAddress, limit = 10) {
     try {
-      const { data: history, error } = await supabase
+      const { data: history, error } = await supabaseAdmin
         .from('key_rotations')
         .select('*')
         .eq('user_id', userId)
@@ -240,7 +285,7 @@ class KeyRotationService {
 
   async logKeyRotationEvent(userId, walletAddress, reason, status, errorMessage = null) {
     try {
-      await supabase
+      await supabaseAdmin
         .from('key_rotation_audit_log')
         .insert([{
           user_id: userId,
@@ -258,7 +303,7 @@ class KeyRotationService {
 
   async enforceKeyRotationPolicy(userId, daysSinceLastRotation = 90) {
     try {
-      const wallets = await supabase
+      const wallets = await supabaseAdmin
         .from('profiles')
         .select('polygon_wallet_address')
         .eq('id', userId);

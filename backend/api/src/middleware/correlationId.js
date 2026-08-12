@@ -9,10 +9,12 @@ const SAFE_CORRELATION_ID = /^[A-Za-z0-9_-]{1,64}$/;
 export function correlationIdMiddleware(req, res, next) {
   const headers = req?.headers || {};
   const header = headers['x-correlation-id'] || headers['X-Correlation-ID'];
-  const rawHeader = Array.isArray(header) ? header[0] : header;
+  // A repeated x-correlation-id header arrives as an array. The multi-value form
+  // is ambiguous and must not be trusted, so treat it as invalid and generate a
+  // fresh UUID rather than regex-testing any single entry.
   const correlationId =
-    typeof rawHeader === 'string' && SAFE_CORRELATION_ID.test(rawHeader.trim())
-      ? rawHeader.trim()
+    !Array.isArray(header) && typeof header === 'string' && SAFE_CORRELATION_ID.test(header.trim())
+      ? header.trim()
       : randomUUID();
 
   if (req) {

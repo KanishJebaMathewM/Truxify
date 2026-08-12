@@ -81,13 +81,25 @@ describe('correlationIdMiddleware', () => {
     expect(res.setHeader).toHaveBeenCalledWith('X-Correlation-ID', validUuid);
   });
 
-  it('handles array correlation ID headers safely by taking first entry', () => {
+  it('rejects array correlation ID headers and generates a fresh UUID', () => {
     const req = makeReq({ 'x-correlation-id': ['array-id-789', 'array-id-000'] });
     const res = makeRes();
     const next = vi.fn();
     correlationIdMiddleware(req, res, next);
-    expect(req.correlationId).toBe('array-id-789');
-    expect(res.setHeader).toHaveBeenCalledWith('X-Correlation-ID', 'array-id-789');
+    expect(req.correlationId).not.toBe('array-id-789');
+    expect(req.correlationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(res.setHeader).toHaveBeenCalledWith('X-Correlation-ID', req.correlationId);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('rejects uppercase array correlation ID headers and generates a fresh UUID', () => {
+    const req = makeReq({ 'X-Correlation-ID': ['array-id-200', 'array-id-300'] });
+    const res = makeRes();
+    const next = vi.fn();
+    correlationIdMiddleware(req, res, next);
+    expect(req.correlationId).not.toBe('array-id-200');
+    expect(req.correlationId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(next).toHaveBeenCalledOnce();
   });
 
   it('handles uppercase X-Correlation-ID header name', () => {

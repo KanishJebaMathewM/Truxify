@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"log"
 	"math/rand"
 	"net/http"
@@ -72,6 +73,27 @@ func requireAuth(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 
+	return true
+}
+
+// maxRequestBodyBytes caps request bodies decoded by this service (1 MiB) so
+// an oversized or streamed body cannot be buffered into memory.
+const maxRequestBodyBytes = 1 << 20
+
+// decodeJSONBody decodes r.Body into v with a 1 MiB cap. It writes a 413 and
+// returns false when the body exceeds the cap; the net/http server drains and
+// closes the connection afterwards so it is not left in an unsafe state.
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v interface{}) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return false
+		}
+		http.Error(w, "Invalid payload", http.StatusBadRequest)
+		return false
+	}
 	return true
 }
 
@@ -559,8 +581,7 @@ func (rn *RaftNode) HandleVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req RequestVoteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -604,8 +625,7 @@ func (rn *RaftNode) HandleAppend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req AppendEntriesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 
@@ -700,8 +720,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		Command string `json:"command"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid payload", http.StatusBadRequest)
+	if !decodeJSONBody(w, r, &req) {
 		return
 	}
 

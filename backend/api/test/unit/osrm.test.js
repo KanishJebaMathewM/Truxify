@@ -320,6 +320,13 @@ describe('osrm - getRouteEstimate', () => {
 
 describe('osrm - getRouteEstimate edge cases', () => {
   beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+    mockRedis.get.mockResolvedValue(null);
+    mockRedis.set.mockResolvedValue('OK');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
     vi.clearAllMocks();
     vi.stubGlobal('fetch', vi.fn());
   });

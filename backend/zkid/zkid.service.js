@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+import { zkDidVerifier } from './did_verifier.js';
 
 class ZKIDService {
     constructor() {
@@ -10,17 +11,15 @@ class ZKIDService {
         this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
         this.zkidAddress = process.env.ZKID_CONTRACT_ADDRESS;
 
+        // ABI mirrors the deployed ZKIdentity.sol surface only. The contract
+        // exposes registerDID / revokeCredential / verifyZkProof plus the
+        // public state getters; any selector not in this list reverts on-chain.
         this.zkidABI = [
-            'function createIdentity(bytes32 identityHash) external',
-            'function issueCredential(bytes32 identityHash, string memory credentialType, bytes32 schemaHash, bytes32 credentialHash) external',
+            'function registerDID(string didURI, bytes32 merkleRoot) external',
             'function revokeCredential(bytes32 credentialHash) external',
-            'function requestVerification(bytes32 identityHash, bytes32 credentialHash, bytes calldata proofData) external',
-            'function createSelectiveDisclosure(bytes32 identityHash, bytes32[] memory disclosedAttributes, address recipient) external',
-            'function revokeSelectiveDisclosure(bytes32 disclosureId) external',
-            'function getIdentity(bytes32 identityHash) external view returns (tuple(bytes32,address,uint256,uint256,bool,bytes32[]))',
-            'function getCredential(bytes32 credentialHash) external view returns (tuple(bytes32,bytes32,string,bytes32,uint256,uint256,bool,address))',
-            'function isIdentityActive(bytes32 identityHash) external view returns (bool)',
-            'function isCredentialValid(bytes32 credentialHash) external view returns (bool)'
+            'function verifyZkProof(address identity, bytes32 proofHash, bytes32 nullifierHash) external view returns (bool)',
+            'function didRegistry(address identity) external view returns (string didURI, bytes32 credentialMerkleRoot, bool isRevoked, uint256 registeredAt)',
+            'function revokedCredentials(bytes32 credentialHash) external view returns (bool)'
         ];
 
         this.zkid = new ethers.Contract(this.zkidAddress, this.zkidABI, this.wallet);
@@ -40,7 +39,11 @@ class ZKIDService {
                 ethers.toUtf8Bytes(`${userAddress}:${Date.now()}:${uuidv4()}`)
             );
 
-            const tx = await this.zkid.createIdentity(identityHash, {
+            // The contract keys DID documents by the caller address and stores
+            // the identity hash as the credential merkle root.
+            const didURI = zkDidVerifier.createDidUri(userAddress);
+
+            const tx = await this.zkid.registerDID(didURI, identityHash, {
                 gasLimit: 200000
             });
             const receipt = await tx.wait();
@@ -72,27 +75,22 @@ class ZKIDService {
                 ethers.toUtf8Bytes(`${identityHash}:${credentialType}:${Date.now()}`)
             );
 
-            const tx = await this.zkid.issueCredential(
-                identityHash,
-                credentialType,
-                schemaHash || ethers.ZeroHash,
-                credentialHash,
-                { gasLimit: 150000 }
-            );
-            const receipt = await tx.wait();
-
+            // The ZKIdentity contract exposes no credential issuance API — it
+            // only registers DIDs, revokes credentials and verifies zk proofs.
+            // Issuance is an off-chain (DB-anchored) operation; verification
+            // and revocation are what the contract guarantees.
             await this.storeCredential({
                 identityHash,
                 credentialHash,
                 credentialType,
-                txHash: receipt.hash
+                txHash: null
             });
 
             logger.info(`✅ Credential issued: ${credentialHash}`);
             return {
                 success: true,
                 credentialHash,
-                txHash: receipt.hash
+                txHash: null
             };
         } catch (error) {
             logger.error('Credential issuance failed:', error);
@@ -123,22 +121,31 @@ class ZKIDService {
 
     async verifyCredential(credentialHash) {
         try {
-            const isValid = await this.zkid.isCredentialValid(credentialHash);
-            const credential = await this.zkid.getCredential(credentialHash);
+            // On-chain revocation check against the real contract getter, plus
+            // the issued credential record persisted by issueCredential.
+            const isRevoked = await this.zkid.revokedCredentials(credentialHash);
+
+            const { data: credentialRow } = await supabase
+                .from('zkid_credentials')
+                .select('*')
+                .eq('credential_hash', credentialHash)
+                .maybeSingle();
 
             return {
                 success: true,
-                isValid,
-                credential: {
-                    credentialHash: credential[0],
-                    identityHash: credential[1],
-                    credentialType: credential[2],
-                    schemaHash: credential[3],
-                    issuedAt: credential[4].toString(),
-                    expiresAt: credential[5].toString(),
-                    revoked: credential[6],
-                    issuer: credential[7]
-                },
+                isValid: !isRevoked && Boolean(credentialRow),
+                credential: credentialRow
+                    ? {
+                        credentialHash: credentialRow.credential_hash,
+                        identityHash: credentialRow.identity_hash,
+                        credentialType: credentialRow.credential_type,
+                        schemaHash: ethers.ZeroHash,
+                        issuedAt: credentialRow.issued_at,
+                        expiresAt: null,
+                        revoked: Boolean(credentialRow.revoked),
+                        issuer: this.wallet.address
+                    }
+                    : null,
                 timestamp: new Date().toISOString()
             };
         } catch (error) {
@@ -151,41 +158,48 @@ class ZKIDService {
 
     async requestVerification(identityHash, credentialHash, proofData) {
         try {
-            const tx = await this.zkid.requestVerification(
-                identityHash,
-                credentialHash,
-                proofData || ethers.ZeroHash,
-                { gasLimit: 200000 }
-            );
-            const receipt = await tx.wait();
+            // Resolve the identity's owning address so the on-chain proof check
+            // runs against the address-keyed DID registry (didRegistry).
+            const { data: identity } = await supabase
+                .from('zkid_identities')
+                .select('user_address')
+                .eq('identity_hash', identityHash)
+                .maybeSingle();
 
-            // Derive the request id from the on-chain event if present,
-            // otherwise anchor it to the actual transaction hash instead of
-            // fabricating a keccak of a client-side timestamp
-            let requestId = null;
-            for (const log of receipt.logs) {
-                const parsed = this.zkid.interface.parseLog(log);
-                if (parsed && /request/i.test(parsed.name)) {
-                    requestId = parsed.args[0]?.toString?.() ?? null;
-                    break;
-                }
+            const proofPayload = typeof proofData === 'string'
+                ? proofData
+                : JSON.stringify(proofData || '');
+            const proofHash = proofData?.proofHash
+                || ethers.keccak256(ethers.toUtf8Bytes(proofPayload));
+            const nullifierHash = proofData?.nullifierHash
+                || ethers.keccak256(ethers.toUtf8Bytes(credentialHash));
+
+            let verified = false;
+            if (identity?.user_address) {
+                verified = await this.zkid.verifyZkProof(
+                    identity.user_address,
+                    proofHash,
+                    nullifierHash
+                );
             }
-            if (!requestId) {
-                requestId = receipt.hash;
-            }
+
+            const requestId = ethers.keccak256(
+                ethers.toUtf8Bytes(`${identityHash}:${credentialHash}:${Date.now()}:${uuidv4()}`)
+            );
 
             await this.storeVerificationRequest({
                 requestId,
                 identityHash,
                 credentialHash,
-                txHash: receipt.hash
+                txHash: null,
+                verified
             });
 
             logger.info(`✅ Verification requested: ${requestId}`);
             return {
                 success: true,
                 requestId,
-                txHash: receipt.hash
+                txHash: null
             };
         } catch (error) {
             logger.error('Verification request failed:', error);
@@ -197,31 +211,25 @@ class ZKIDService {
 
     async createSelectiveDisclosure(identityHash, disclosedAttributes, recipient) {
         try {
-            const tx = await this.zkid.createSelectiveDisclosure(
-                identityHash,
-                disclosedAttributes,
-                recipient,
-                { gasLimit: 150000 }
-            );
-            const receipt = await tx.wait();
-
             const disclosureId = ethers.keccak256(
                 ethers.toUtf8Bytes(`${identityHash}:${Date.now()}:${recipient}`)
             );
 
+            // The contract has no disclosure API; disclosures are off-chain
+            // records bound to the identity stored in the DID registry.
             await this.storeSelectiveDisclosure({
                 disclosureId,
                 identityHash,
                 disclosedAttributes,
                 recipient,
-                txHash: receipt.hash
+                txHash: null
             });
 
             logger.info(`✅ Selective disclosure created: ${disclosureId}`);
             return {
                 success: true,
                 disclosureId,
-                txHash: receipt.hash
+                txHash: null
             };
         } catch (error) {
             logger.error('Selective disclosure creation failed:', error);
@@ -231,16 +239,17 @@ class ZKIDService {
 
     async revokeSelectiveDisclosure(disclosureId) {
         try {
-            const tx = await this.zkid.revokeSelectiveDisclosure(disclosureId, {
-                gasLimit: 100000
-            });
-            const receipt = await tx.wait();
+            const { error } = await supabase
+                .from('zkid_disclosures')
+                .update({ revoked: true, revoked_at: new Date().toISOString() })
+                .eq('disclosure_id', disclosureId);
+            if (error) throw error;
 
             logger.info(`✅ Selective disclosure revoked: ${disclosureId}`);
             return {
                 success: true,
                 disclosureId,
-                txHash: receipt.hash
+                txHash: null
             };
         } catch (error) {
             logger.error('Selective disclosure revocation failed:', error);
@@ -252,14 +261,31 @@ class ZKIDService {
 
     async getIdentity(identityHash) {
         try {
-            const identity = await this.zkid.getIdentity(identityHash);
+            const { data: identityRow } = await supabase
+                .from('zkid_identities')
+                .select('*')
+                .eq('identity_hash', identityHash)
+                .maybeSingle();
+
+            // Fetch the on-chain DID document via the real public getter when
+            // the owning address is known.
+            let didDocument = null;
+            if (identityRow?.user_address) {
+                const doc = await this.zkid.didRegistry(identityRow.user_address);
+                didDocument = {
+                    didURI: doc[0],
+                    credentialMerkleRoot: doc[1],
+                    isRevoked: doc[2],
+                    registeredAt: doc[3].toString()
+                };
+            }
+
             return {
-                identityHash: identity[0],
-                owner: identity[1],
-                createdAt: identity[2].toString(),
-                updatedAt: identity[3].toString(),
-                isActive: identity[4],
-                credentialHashes: identity[5]
+                identityHash,
+                userAddress: identityRow?.user_address || null,
+                isActive: identityRow?.is_active !== false,
+                didDocument,
+                createdAt: identityRow?.created_at || null
             };
         } catch (error) {
             logger.error('Identity fetch failed:', error);
@@ -269,16 +295,23 @@ class ZKIDService {
 
     async getCredential(credentialHash) {
         try {
-            const credential = await this.zkid.getCredential(credentialHash);
+            const { data: credentialRow } = await supabase
+                .from('zkid_credentials')
+                .select('*')
+                .eq('credential_hash', credentialHash)
+                .maybeSingle();
+
+            if (!credentialRow) return null;
+
             return {
-                credentialHash: credential[0],
-                identityHash: credential[1],
-                credentialType: credential[2],
-                schemaHash: credential[3],
-                issuedAt: credential[4].toString(),
-                expiresAt: credential[5].toString(),
-                revoked: credential[6],
-                issuer: credential[7]
+                credentialHash: credentialRow.credential_hash,
+                identityHash: credentialRow.identity_hash,
+                credentialType: credentialRow.credential_type,
+                schemaHash: ethers.ZeroHash,
+                issuedAt: credentialRow.issued_at,
+                expiresAt: null,
+                revoked: Boolean(credentialRow.revoked),
+                issuer: this.wallet.address
             };
         } catch (error) {
             logger.error('Credential fetch failed:', error);
@@ -329,7 +362,7 @@ class ZKIDService {
                 identity_hash: data.identityHash,
                 credential_hash: data.credentialHash,
                 tx_hash: data.txHash,
-                verified: true,
+                verified: data.verified ?? true,
                 created_at: new Date().toISOString()
             }]);
         if (error) throw error;

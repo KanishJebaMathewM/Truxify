@@ -316,6 +316,11 @@ contract zkEVM is Ownable, ReentrancyGuard, Pausable {
     }
 
     function _verifyProof(bytes calldata proof) internal view returns (bool) {
+        // A real Groth16/STARK verifier must be configured before withdrawals
+        // or batch execution can ever succeed. Reverting here (instead of
+        // silently failing on the placeholder) makes misconfigurations loud so
+        // user funds are never stranded by an unconfigured proof check.
+        require(verifier != address(0), "zkEVM: verifier not configured");
         require(proof.length > 0, "Empty proof");
         (uint[2] memory a, uint[2][2] memory b, uint[2] memory c, uint[2] memory input) =
             abi.decode(proof, (uint[2], uint[2][2], uint[2], uint[2]));

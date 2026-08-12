@@ -34,6 +34,49 @@ const REQUIRED_INDEXES = [
   { name: 'idx_load_offers_status', table: 'load_offers' },
 ];
 
+/**
+ * Composite indexes that back the hottest multi-column access paths.
+ *
+ * Single-column indexes on each of driver_id, status and trip_date cannot
+ * satisfy a query filtering on the first two and ordering by the third —
+ * Postgres falls back to a bitmap AND plus an explicit sort. These are
+ * verified separately so a missing migration surfaces at deploy time rather
+ * than as unexplained latency.
+ */
+const REQUIRED_COMPOSITE_INDEXES = [
+  {
+    table: 'trips',
+    name: 'idx_trips_driver_status_date',
+    columns: ['driver_id', 'status', 'trip_date'],
+    servedBy: 'driver earnings and trip-history queries',
+  },
+  {
+    table: 'trips',
+    name: 'idx_trips_driver_display',
+    columns: ['driver_id', 'trip_display_id'],
+    servedBy: 'per-trip ownership checks',
+  },
+];
+
+/**
+ * Check the declared composite indexes against a list of index names.
+ *
+ * @param {string[]} existingIndexNames Index names present in the database.
+ * @returns {Array<{name: string, table: string, present: boolean, servedBy: string}>}
+ */
+export function checkCompositeIndexes(existingIndexNames) {
+  const present = new Set(existingIndexNames || []);
+  return REQUIRED_COMPOSITE_INDEXES.map((index) => ({
+    name: index.name,
+    table: index.table,
+    columns: index.columns,
+    servedBy: index.servedBy,
+    present: present.has(index.name),
+  }));
+}
+
+export { REQUIRED_COMPOSITE_INDEXES };
+
 const TABLE_CATEGORIES = {
   core: ['profiles', 'orders', 'trips', 'trucks'],
   marketplace: ['load_offers', 'bids', 'routes'],

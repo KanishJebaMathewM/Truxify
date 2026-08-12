@@ -314,7 +314,9 @@ export async function authenticate(req, res, next) {
       const cachedProfile = await getCachedSupabaseProfile(supabaseUserId);
       if (cachedProfile) {
         if (!isValidCachedSupabaseProfile(supabaseUserId, cachedProfile)) {
-          void invalidateCachedSupabaseProfile(supabaseUserId);
+          invalidateCachedSupabaseProfile(supabaseUserId).catch((err) => {
+            logger.error({ err }, "Cache invalidation failed");
+          });
         } else if (cachedProfile.isActive === false) {
           return res.status(403).json({
             error: "User profile is inactive.",
@@ -440,11 +442,13 @@ export async function authenticate(req, res, next) {
           }
         }
         if (supabaseUserId) {
-          void setCachedSupabaseProfile(
+          setCachedSupabaseProfile(
             supabaseUserId,
             { isActive: false },
             TOMBSTONE_TTL_SECONDS,
-          );
+          ).catch((err) => {
+            logger.error({ err }, "Cache set failed");
+          });
         }
 
         return res.status(403).json({
@@ -492,7 +496,11 @@ export async function authenticate(req, res, next) {
         isSupabaseToken && Number.isFinite(decoded?.exp)
           ? Math.min(TTL_SECONDS, decoded.exp - nowSeconds)
           : TTL_SECONDS;
-      void setCachedSupabaseProfile(supabaseUserId, req.user, ttlSeconds);
+      setCachedSupabaseProfile(supabaseUserId, req.user, ttlSeconds).catch(
+        (err) => {
+          logger.error({ err }, "Cache set failed");
+        },
+      );
     }
 
     next();

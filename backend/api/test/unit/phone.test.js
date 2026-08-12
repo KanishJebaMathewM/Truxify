@@ -13,8 +13,8 @@ describe('normalizePhone', () => {
     expect(normalizePhone('919876543210')).toBe('+919876543210');
   });
 
-  it('returns null for a 0-prefixed 11-digit number (not handled)', () => {
-    expect(normalizePhone('09876543210')).toBeNull();
+  it('strips a leading trunk-prefix 0 from an 11-digit number', () => {
+    expect(normalizePhone('09876543210')).toBe('+919876543210');
   });
 
   it('strips spaces and punctuation', () => {

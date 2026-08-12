@@ -296,8 +296,37 @@ class DIDService {
     async storeDID(data) {
         const { error } = await (supabaseAdmin || supabase)
             .from('dids')
-            .insert([{ did: data.did, owner: data.owner, public_key: data.publicKey, created_at: new Date().toISOString() }]);
+            .insert([{
+                did: data.did,
+                owner: data.owner,
+                public_key: data.publicKey,
+                is_active: true,
+                created_at: new Date().toISOString()
+            }]);
         if (error) throw error;
+    }
+
+    async updateDIDStatus(did, isActive) {
+        const { error } = await (supabaseAdmin || supabase)
+            .from('dids')
+            .update({ is_active: isActive, updated_at: new Date().toISOString() })
+            .eq('did', did);
+        if (error) throw error;
+    }
+
+    async deactivateDID(did) {
+        try {
+            const tx = await this.didRegistry.deactivateDID(did);
+            await tx.wait();
+
+            await this.updateDIDStatus(did, false);
+
+            logger.info(`✅ DID deactivated: ${did}`);
+            return { success: true, did };
+        } catch (error) {
+            logger.error('DID deactivation failed:', error);
+            throw error;
+        }
     }
 
     async storeCredential(data) {
@@ -325,21 +354,27 @@ class DIDService {
     }
 
     async getDIDStats() {
-        const { data: dids, error: didsErr } = await (supabaseAdmin || supabase).from('dids').select('*').order('created_at', { ascending: false }).limit(100);
-        const { data: credentials, error: credsErr } = await (supabaseAdmin || supabase).from('credentials').select('*').order('issued_at', { ascending: false }).limit(100);
+        const client = supabaseAdmin || supabase;
 
-        if (didsErr || credsErr) {
-            logger.error('Failed to fetch DID stats', { didsErr, credsErr });
+        const [totalDids, activeDids, totalCreds, revokedCreds] = await Promise.all([
+            client.from('dids').select('id', { count: 'exact', head: true }),
+            client.from('dids').select('id', { count: 'exact', head: true }).eq('is_active', true),
+            client.from('credentials').select('id', { count: 'exact', head: true }),
+            client.from('credentials').select('id', { count: 'exact', head: true }).eq('revoked', true)
+        ]);
+
+        const errors = [totalDids, activeDids, totalCreds, revokedCreds]
+            .filter((result) => result.error)
+            .map((result) => result.error);
+        if (errors.length > 0) {
+            logger.error('Failed to fetch DID stats', errors);
         }
 
-        const safeDids = dids || [];
-        const safeCreds = credentials || [];
-
         return {
-            totalDIDs: safeDids.length,
-            activeDIDs: safeDids.filter(d => d.is_active !== false).length,
-            totalCredentials: safeCreds.length,
-            revokedCredentials: safeCreds.filter(c => c.revoked === true).length
+            totalDIDs: totalDids.error ? 0 : (totalDids.count ?? 0),
+            activeDIDs: activeDids.error ? 0 : (activeDids.count ?? 0),
+            totalCredentials: totalCreds.error ? 0 : (totalCreds.count ?? 0),
+            revokedCredentials: revokedCreds.error ? 0 : (revokedCreds.count ?? 0)
         };
     }
 }

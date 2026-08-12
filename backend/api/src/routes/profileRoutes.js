@@ -105,6 +105,7 @@ import {
   getDriverDetails
 } from '../services/profileService.js';
 import { supabase } from '../config/db.js';
+import { ethers } from 'ethers';
 import { ProfileModel } from '../models/ProfileModel.js';
 import { invalidateCachedProfile, invalidateCachedSupabaseProfile, invalidateCachedSupabaseProfileAll } from '../lib/profileCache.js';
 import { auditLog } from '../middleware/auditLog.js';
@@ -230,10 +231,33 @@ router.get('/customer-stats', authenticate, userLimiter, async (req, res) => {
  */
 router.get('/:id/name', authenticate, userLimiter, validateParams(uuidParamSchema), async (req, res) => {
   try {
+    const targetId = req.params.id;
+
+    // Name lookup is only allowed when the caller can prove a business
+    // relationship with the target: the target is the caller's own profile,
+    // the driver assigned to one of the caller's orders, or the customer on
+    // one of the caller's (driver) orders. This prevents UUID enumeration.
+    if (targetId !== req.user.id) {
+      const { data: relatedOrder, error: relErr } = await supabase
+        .from('orders')
+        .select('id')
+        .or(`customer_id.eq.${req.user.id},driver_id.eq.${req.user.id}`)
+        .or(`customer_id.eq.${targetId},driver_id.eq.${targetId}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (relErr) {
+        return res.status(500).json({ error: 'Failed to fetch profile name.', details: relErr.message });
+      }
+      if (!relatedOrder) {
+        return res.status(404).json({ error: 'Profile not found.' });
+      }
+    }
+
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('full_name')
-      .eq('id', req.params.id)
+      .eq('id', targetId)
       .maybeSingle();
 
     if (error) return res.status(500).json({ error: 'Failed to fetch profile name.', details: error.message });
@@ -283,6 +307,15 @@ router.put('/wallet', authenticate, userLimiter, validateBody(updateWalletSchema
   const normalized = wallet_address.trim();
   if (!/^0x[a-fA-F0-9]{40}$/.test(normalized)) {
     return res.status(400).json({ error: 'Invalid wallet address' });
+  }
+  try {
+    // ethers.getAddress accepts all-lowercase / all-uppercase hex and throws
+    // for mixed-case addresses whose EIP-55 checksum is wrong, so a typo'd
+    // address can never be persisted and later fail escrow.isAddress() with
+    // a misleading "escrow not configured" error at bid acceptance time.
+    ethers.getAddress(normalized);
+  } catch {
+    return res.status(400).json({ error: 'Invalid wallet address: EIP-55 checksum is invalid.' });
   }
 
   try {

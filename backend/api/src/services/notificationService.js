@@ -55,6 +55,10 @@ function calculateRetryBackoff(attempt) {
   return delay + Math.floor(Math.random() * 200);
 }
 
+// Exposed for unit tests; the bounds are verified so a misconfigured retry
+// count cannot produce an unbounded sleep.
+export const __testing = { calculateRetryBackoff, RETRY_MAX_DELAY };
+
 async function getUserFcmToken(userId) {
   if (!supabaseAdmin) return null;
   try {

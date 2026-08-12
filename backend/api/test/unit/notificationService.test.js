@@ -104,4 +104,22 @@ describe('notificationService', () => {
       ).resolves.toBeDefined();
     });
   });
+
+  describe('calculateRetryBackoff', () => {
+    it('grows the base delay exponentially per attempt', async () => {
+      const { __testing } = await import('../../src/services/notificationService.js');
+      const attempt0 = __testing.calculateRetryBackoff(0);
+      const attempt1 = __testing.calculateRetryBackoff(1);
+      const attempt2 = __testing.calculateRetryBackoff(2);
+      expect(attempt1).toBeGreaterThan(attempt0);
+      expect(attempt2).toBeGreaterThan(attempt1);
+    });
+
+    it('caps the delay at RETRY_MAX_DELAY plus jitter', async () => {
+      const { __testing } = await import('../../src/services/notificationService.js');
+      const delay = __testing.calculateRetryBackoff(10);
+      expect(delay).toBeLessThanOrEqual(__testing.RETRY_MAX_DELAY + 200);
+      expect(delay).toBeGreaterThanOrEqual(__testing.RETRY_MAX_DELAY);
+    });
+  });
 });

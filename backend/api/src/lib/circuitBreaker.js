@@ -32,6 +32,7 @@ export class CircuitBreaker {
       }
       this._halfOpenTimer = null;
     }, this.resetTimeoutMs);
+    this._halfOpenTimer.unref?.();
   }
 
   getState() {
@@ -51,6 +52,10 @@ export class CircuitBreaker {
     this.failureCount = 0;
     this.successCount = 0;
     this.nextAttempt = Date.now();
+  }
+
+  destroy() {
+    this.reset();
   }
 
   async execute(fn, ...args) {

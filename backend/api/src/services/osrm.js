@@ -66,6 +66,10 @@ export async function getRouteEstimate(input = {}) {
     return null;
   }
 
+  if (pickupLat === dropLat && pickupLng === dropLng) {
+    return null;
+  }
+
   const cacheKey = buildCacheKey({ pickupLat, pickupLng, dropLat, dropLng });
 
   if (redisClient) {

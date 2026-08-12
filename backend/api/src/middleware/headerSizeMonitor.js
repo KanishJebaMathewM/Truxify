@@ -10,15 +10,21 @@ export default function headerSizeMonitor(req, res, next) {
   let totalSize = 0;
 
   for (const [name, value] of Object.entries(req.headers)) {
-    totalSize += Buffer.byteLength(name);
+    if (name === undefined || name === null) continue;
+    totalSize += Buffer.byteLength(String(name));
 
     if (Array.isArray(value)) {
       for (const item of value) {
+        if (item === undefined || item === null) continue;
         totalSize += Buffer.byteLength(String(item));
+        // Early exit: no need to keep measuring once the limit is crossed.
+        if (totalSize > limit) break;
       }
-    } else if (value !== undefined) {
+    } else if (value !== undefined && value !== null) {
       totalSize += Buffer.byteLength(String(value));
     }
+
+    if (totalSize > limit) break;
   }
 
   if (totalSize > limit) {

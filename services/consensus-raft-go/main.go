@@ -710,6 +710,18 @@ func (rn *RaftNode) appendLogFromLeaderLocked(req AppendEntriesRequest) bool {
 	return true
 }
 
+// writeCommitSuccess writes the success payload for a committed order entry.
+func (rn *RaftNode) writeCommitSuccess(w http.ResponseWriter, entry LogEntry) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":      true,
+		"raft_index":   entry.Index,
+		"term":         entry.Term,
+		"order_id":     entry.OrderID,
+		"committed_at": entry.Timestamp.Format(time.RFC3339),
+	})
+}
+
 // HandleCommitOrder accepts a committed order entry on the leader.
 func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -765,17 +777,43 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entry := LogEntry{
-		Index:     uint64(len(rn.Log) + 1),
-		Term:      rn.CurrentTerm,
-		Command:   req.Command,
-		OrderID:   req.OrderID,
-		Timestamp: time.Now(),
+	// Idempotency: an identical (order_id, command) already present in the log
+	// is never appended again. When it is already committed the retry is
+	// answered with the existing entry's index; when it is still pending
+	// replication the flow below simply waits for it to commit.
+	entryIndex := rn.findEntryLocked(req.OrderID, req.Command, uint64(len(rn.Log)))
+	if entryIndex == 0 {
+		// State-transition validation: the command must follow the order's
+		// recorded lifecycle history.
+		last := rn.orderStatesLocked(uint64(len(rn.Log)))[req.OrderID]
+		if !canTransition(last, req.Command) {
+			rn.mu.Unlock()
+			http.Error(w, "invalid state transition for order", http.StatusBadRequest)
+			return
+		}
+
+		entry := LogEntry{
+			Index:     uint64(len(rn.Log) + 1),
+			Term:      rn.CurrentTerm,
+			Command:   req.Command,
+			OrderID:   req.OrderID,
+			Timestamp: time.Now(),
+		}
+
+		// Append to the local log first. CommitIndex is NOT advanced here: the
+		// entry must first be replicated to a quorum of followers (Raft §5.3).
+		rn.Log = append(rn.Log, entry)
+		entryIndex = entry.Index
 	}
 
-	// Append to the local log first. CommitIndex is NOT advanced here: the entry
-	// must first be replicated to a quorum of followers (Raft §5.3).
-	rn.Log = append(rn.Log, entry)
+	if entryIndex <= rn.CommitIndex {
+		// Already committed in a previous round — answer the retry idempotently.
+		e := rn.Log[entryIndex-1]
+		rn.mu.Unlock()
+		rn.writeCommitSuccess(w, e)
+		return
+	}
+
 	rn.mu.Unlock()
 
 	// Replicate to followers and wait for a quorum acknowledgement before
@@ -794,7 +832,8 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	committed := rn.CommitIndex >= entry.Index
+	committed := rn.CommitIndex >= entryIndex
+	entry := rn.Log[entryIndex-1]
 	rn.mu.Unlock()
 
 	if !committed {
@@ -815,7 +854,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success":    false,
 			"error":      "entry not yet committed to a quorum of followers",
-			"raft_index": entry.Index,
+			"raft_index": entryIndex,
 		})
 		return
 	}
@@ -824,17 +863,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 	// before the client observes success.
 	rn.sendHeartbeats()
 
-	rn.mu.Lock()
-	defer rn.mu.Unlock()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":      true,
-		"raft_index":   entry.Index,
-		"term":         entry.Term,
-		"order_id":     entry.OrderID,
-		"committed_at": entry.Timestamp.Format(time.RFC3339),
-	})
+	rn.writeCommitSuccess(w, entry)
 }
 
 func envInt(key string, def int) int {

@@ -69,6 +69,40 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   // ── WebSocket connection state ────────────────────────────────────
   bool _wsConnected = false;
+  String? _mlEta;
+
+  String _formatEta(double etaMinutes) {
+    if (etaMinutes <= 0) return '0 mins';
+    final hrs = etaMinutes ~/ 60;
+    final mins = (etaMinutes % 60).round();
+    if (hrs > 0) {
+      if (mins > 0) {
+        return '$hrs hrs $mins mins';
+      } else {
+        return '$hrs hrs';
+      }
+    } else {
+      return '$mins mins';
+    }
+  }
+
+  Future<void> _fetchEtaFromMl(LatLng position) async {
+    try {
+      final res = await _orderService.fetchMlEta(
+        tripId: widget.orderId,
+        lat: position.latitude,
+        lng: position.longitude,
+      );
+      final etaMinutes = (res['eta_minutes'] as num?)?.toDouble();
+      if (etaMinutes != null && mounted) {
+        setState(() {
+          _mlEta = _formatEta(etaMinutes);
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch ML ETA: $e');
+    }
+  }
 
   @override
   void initState() {
@@ -102,6 +136,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   void dispose() {
     _routeRefreshTimer?.cancel();
     _movementController.dispose();
+    _mapController.dispose();
     if (SupabaseConfig.isConfigured || SupabaseService.mockClient != null) {
       if (_ordersChannel != null) {
         SupabaseService.client.removeChannel(_ordersChannel!);
@@ -157,7 +192,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     );
 
     _trackingSubscription = _trackingWebSocket!.stream.listen((message) {
-      debugPrint('Tracking WebSocket message received: $message');
+      debugPrint('Tracking WebSocket message received');
       if (message is! String) return;
       try {
         if (message == 'pong') return;
@@ -183,7 +218,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
           }
         } else if (payload['event'] == 'milestone_update') {
           // Refresh timeline whenever the driver hits a new milestone.
-          debugPrint('[LiveTracking] Milestone update received: ${payload['data']}');
+          debugPrint('[LiveTracking] Milestone update received');
           _loadTimeline();
         } else if (payload['event'] == null && payload['error'] != null) {
           debugPrint('[LiveTracking] WS server error: ${payload['error']}');
@@ -203,6 +238,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
 
   void _updateTruckPosition(LatLng newPosition) {
     if (!mounted) return;
+    _fetchEtaFromMl(newPosition);
 
     if (_currentPosition == null) {
       setState(() {
@@ -249,8 +285,6 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   Future<void> _loadOrder() async {
     try {
       final order = await _orderService.fetchOrderById(widget.orderId);
-
-      debugPrint('ORDER DATA = $order');
 
       if (!mounted) return;
 
@@ -339,7 +373,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
     _supabaseRealtimeChannel!.onBroadcast(
       event: 'location',
       callback: (payload) {
-        debugPrint('Received Supabase Realtime location update: $payload');
+        debugPrint('Received Supabase Realtime location update');
         final lat = (payload['lat'] as num?)?.toDouble();
         final lng = (payload['lng'] as num?)?.toDouble();
         if (lat != null && lng != null && mounted) {
@@ -806,7 +840,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
             value: widget.orderId,
           ),
           callback: (payload) {
-            debugPrint('Realtime order update: ${payload.newRecord}');
+            debugPrint('Realtime order update received');
             _loadOrder();
             _loadTimeline();
           },
@@ -953,7 +987,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen>
   Widget build(BuildContext context) {
     final driverName = _driverName;
     final truckNumber = _truckNumber;
-    final eta = _order?['eta']?.toString() ?? 'TBD';
+    final eta = _mlEta ?? 'Calculating…';
     final currentLocation = _order?['status']?.toString() ?? 'Pending';
     return Scaffold(
       body: Stack(

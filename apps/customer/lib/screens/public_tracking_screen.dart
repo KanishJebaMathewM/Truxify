@@ -53,6 +53,7 @@ class _PublicTrackingScreenState extends State<PublicTrackingScreen> {
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _mapController.dispose();
     super.dispose();
   }
 

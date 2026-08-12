@@ -27,6 +27,7 @@ const stats = {
 export function init(client) {
   if (initialized) return;
   redisClient = client;
+  CacheKeyBuilder._setRedisClient(client);
   if (!client) {
     logger.warn('[CacheManager] No Redis client provided - caching disabled.');
     return;
@@ -159,6 +160,7 @@ export function isInitialized() {
 
 export function shutdown() {
   redisClient = null;
+  CacheKeyBuilder._setRedisClient(null);
   initialized = false;
   logger.info('[CacheManager] Shut down.');
 }

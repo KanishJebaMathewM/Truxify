@@ -58,7 +58,7 @@ class _OrdersScreenState extends State<OrdersScreen>
   DateTime? _startDate;
   DateTime? _endDate;
   String _selectedSort = 'Newest';
-  final List<String> _sortOptions = ['Newest', 'Oldest', 'Delivery Date'];
+  final List<String> _sortOptions = ['Newest', 'Oldest'];
 
   void _resetFilters() {
     setState(() {
@@ -198,6 +198,10 @@ class _OrdersScreenState extends State<OrdersScreen>
               isStackable: order['is_stackable'] as bool?,
               isFragile: order['is_fragile'] as bool?,
               specialRequirements: order['special_requirements']?.toString(),
+              pickupLat: (order['pickup_lat'] as num?)?.toDouble(),
+              pickupLng: (order['pickup_lng'] as num?)?.toDouble(),
+              dropLat: (order['drop_lat'] as num?)?.toDouble(),
+              dropLng: (order['drop_lng'] as num?)?.toDouble(),
             );
           }).toList();
         });
@@ -432,12 +436,9 @@ class _OrdersScreenState extends State<OrdersScreen>
       final dateB = DateTime.tryParse(b.date) ?? DateTime(1970);
       if (_selectedSort == 'Oldest') {
         return dateA.compareTo(dateB);
-      } else if (_selectedSort == 'Delivery Date') {
-        return dateB.compareTo(dateA); // Or delivery date equivalent fallback
-      } else {
-        // Default 'Newest'
-        return dateB.compareTo(dateA);
       }
+      // Default 'Newest'
+      return dateB.compareTo(dateA);
     });
 
     return filtered;

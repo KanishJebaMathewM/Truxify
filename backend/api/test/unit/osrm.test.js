@@ -70,7 +70,7 @@ describe('osrm - buildCacheKey', ()=> {
       dropLat: 13.0827,
       dropLng: 80.2707,
     });
-    expect(key).toBe('osrm:route:v2:12.971599:77.594563:13.0827:80.2707');
+    expect(key).toBe('osrm:route:v2:12.9715987:77.5945627:13.0827:80.2707');
   });
 
   it('produces same key for coordinates that round to same values', () => {
@@ -234,7 +234,7 @@ describe('osrm - getRouteEstimate', () => {
       pickupLat: 12.9715987, pickupLng: 77.5945627, dropLat: 13.0827, dropLng: 80.2707,
     });
 
-    expect(mockRedis.get).toHaveBeenCalledWith('osrm:route:v2:12.971599:77.594563:13.0827:80.2707');
+    expect(mockRedis.get).toHaveBeenCalledWith('osrm:route:v2:12.9715987:77.5945627:13.0827:80.2707');
   });
 
   it('calls OSRM and stores result in Redis on cache miss', async () => {
@@ -270,7 +270,10 @@ describe('osrm - getRouteEstimate', () => {
 
     expect(result).toEqual({ distanceKm: 20, durationSeconds: 900 });
     expect(fetch).toHaveBeenCalledOnce();
-    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Redis get error:', 'Redis connection refused');
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      { event: 'OSRM_REDIS_GET_ERROR', error: 'Redis connection refused' },
+      '[osrm] Redis get error'
+    );
   });
 
   it('returns result even when Redis set throws after successful OSRM response', async () => {
@@ -285,7 +288,10 @@ describe('osrm - getRouteEstimate', () => {
     });
 
     expect(result).toEqual({ distanceKm: 10, durationSeconds: 600 });
-    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Redis set error:', 'Redis write failed');
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      { event: 'OSRM_REDIS_SET_ERROR', error: 'Redis write failed' },
+      '[osrm] Redis set error'
+    );
   });
 
   it('does not cache null when OSRM returns a non-ok response', async () => {
@@ -309,5 +315,81 @@ describe('osrm - getRouteEstimate', () => {
     });
 
     expect(mockRedis.set).not.toHaveBeenCalled();
+  });
+});
+
+describe('osrm - getRouteEstimate edge cases', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+    mockRedis.get.mockResolvedValue(null);
+    mockRedis.set.mockResolvedValue('OK');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it('returns null for null input', async () => {
+    const result = await getRouteEstimate(null);
+    expect(result).toBeNull();
+  });
+
+  it('returns null for undefined input', async () => {
+    const result = await getRouteEstimate(undefined);
+    expect(result).toBeNull();
+  });
+
+  it('returns null when pickupLat is not finite', async () => {
+    const result = await getRouteEstimate({
+      pickupLat: NaN,
+      pickupLng: 77.5946,
+      dropLat: 13.0827,
+      dropLng: 80.2707,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('returns null when dropLat is Infinity', async () => {
+    const result = await getRouteEstimate({
+      pickupLat: 12.9716,
+      pickupLng: 77.5946,
+      dropLat: Infinity,
+      dropLng: 80.2707,
+    });
+    expect(result).toBeNull();
+  });
+
+  it('uses cached result when Redis returns a hit', async () => {
+    const cachedResult = { distanceKm: 100, durationSeconds: 3600 };
+    mockRedis.get.mockResolvedValue(JSON.stringify(cachedResult));
+
+    const result = await getRouteEstimate({
+      pickupLat: 12.9716,
+      pickupLng: 77.5946,
+      dropLat: 13.0827,
+      dropLng: 80.2707,
+    });
+
+    expect(result).toEqual(cachedResult);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns null when Redis cache returns invalid JSON', async () => {
+    mockRedis.get.mockResolvedValue('not valid json');
+    fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ routes: [{ distance: 50000, duration: 1800 }] }),
+    });
+
+    const result = await getRouteEstimate({
+      pickupLat: 12.9716,
+      pickupLng: 77.5946,
+      dropLat: 13.0827,
+      dropLng: 80.2707,
+    });
+
+    // Redis get failed (invalid JSON), fetch was called as fallback
+    expect(fetch).toHaveBeenCalled();
   });
 });

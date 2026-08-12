@@ -29,7 +29,10 @@ const REQUIRED_BEFORE_ROUTES = [
   { name: 'HPP protection', marker: 'app.use(hppProtection)' },
   { name: 'suspicious requests', marker: 'app.use(suspiciousRequests)' },
   { name: 'content-type enforcement', marker: 'app.use(requireJsonContent)' },
-  { name: 'fraud detection', marker: 'app.use(fraudDetectionMiddleware)' },
+  // Fraud detection is deliberately registered per-route (after authenticate)
+  // for the high-value orders/payments/trips routers — see #6321 — so the
+  // marker locks in that mount rather than a global registration.
+  { name: 'fraud detection', marker: "app.use('/api/orders', fraudDetectionMiddleware" },
   { name: 'global rate limiter', marker: "app.use('/api/', globalLimiter)" },
 ];
 

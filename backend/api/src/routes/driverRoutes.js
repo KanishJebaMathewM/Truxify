@@ -127,25 +127,145 @@
  */
 
 import express from 'express';
-import { supabase, redisClient, createUserClient } from '../config/db.js';
+import { supabase, supabaseAdmin, redisClient, createUserClient } from '../config/db.js';
 import { getDriverReputation } from '../services/reputation.js';
 import { predictDriverProfit } from '../services/ml.js';
 import { authenticate } from '../middleware/auth.js';
+import { requireApiKey } from '../middleware/apiKey.js';
 import { requirePolicy } from '../middleware/requirePolicy.js';
+import {
+  DEADHEAD_COLUMNS,
+  DEADHEAD_MAX_ROWS,
+  EARNINGS_MAX_ROWS,
+  EARNINGS_TRIP_COLUMNS,
+  buildWeeklyChart,
+  countDeadheadTripsSaved,
+  getDeadheadCutoff,
+  getEarningsCutoff,
+  sumDistanceKm,
+  sumEarnings,
+  toDateKey,
+} from '../services/driver/earningsReportService.js';
 import { userLimiter, createStore } from '../middleware/rateLimiter.js';
-import { checkBypassEligibility } from '../services/weighStationService.js';
+import { checkBypassEligibility, syncAndTransmitInternalWeights } from '../services/weighStationService.js';
 import { isPayoutProviderConfigured } from '../services/wallet/payoutProvider.js';
 
 import { validateBody, validateParams, validateQuery } from '../middleware/validate.js';
-import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema, driverIdParamSchema, driverStatementSchema } from '../validation/requestSchemas.js';
+import { driverOnlineSchema, withdrawSchema, uuidParamSchema, paramIdSchema, predictDriverProfitSchema, uuidSchema, driverIdParamSchema, driverStatementSchema, syncWeightSchema } from '../validation/requestSchemas.js';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import logger from '../middleware/logger.js';
 import { auditLog } from '../middleware/auditLog.js';
+import { requireIdempotency } from '../middleware/idempotency.js';
 const router = express.Router();
 router.use(userLimiter);
 const hosStatusSchema = z.object({
   status: z.enum(['off_duty', 'on_duty', 'driving', 'resting'])
+});
+
+// ============================================================================
+// ACTIVE DRIVERS (B2B, consumed by the n8n document-integrity workflow)
+// ============================================================================
+/**
+ * @openapi
+ * /api/driver/active:
+ *   get:
+ *     tags: [Driver]
+ *     summary: List active drivers with their documents
+ *     description: Returns drivers currently online (driver_details.is_online = true) with their KYC documents. Auth-gated for backend-to-backend callers (x-api-key / VALID_API_KEYS); the n8n document-integrity workflow polls this daily.
+ *     security:
+ *       - ApiKeyAuth: []
+ *     responses:
+ *       200:
+ *         description: Array of active drivers with documents
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: string
+ *                     format: uuid
+ *                   driver_id:
+ *                     type: string
+ *                     format: uuid
+ *                   name:
+ *                     type: string
+ *                     nullable: true
+ *                   documents:
+ *                     type: array
+ *                     items:
+ *                       type: object
+ *                       properties:
+ *                         type:
+ *                           type: string
+ *                         status:
+ *                           type: string
+ *                         expiry_date:
+ *                           type: string
+ *                           format: date
+ *                           nullable: true
+ *       401:
+ *         description: Missing or invalid API key
+ *       502:
+ *         description: Supabase query failed
+ */
+router.get('/active', requireApiKey, userLimiter, async (req, res) => {
+  try {
+    const client = supabaseAdmin || supabase;
+    if (!client) {
+      return res.status(503).json({ error: 'Supabase is not configured.' });
+    }
+
+    const { data: activeDrivers, error: driversError } = await client
+      .from('driver_details')
+      .select('user_id')
+      .eq('is_online', true);
+
+    if (driversError) {
+      return res.status(502).json({ error: 'Failed to fetch active drivers.', details: driversError.message });
+    }
+
+    const driverIds = (activeDrivers || []).map((d) => d.user_id);
+    if (driverIds.length === 0) {
+      return res.json([]);
+    }
+
+    const [profilesRes, docsRes] = await Promise.all([
+      client.from('profiles').select('id, full_name').in('id', driverIds),
+      client.from('driver_documents').select('driver_id, document_type, status').in('driver_id', driverIds),
+    ]);
+
+    if (profilesRes.error || docsRes.error) {
+      return res.status(502).json({ error: 'Failed to fetch active driver details.' });
+    }
+
+    const nameById = Object.fromEntries((profilesRes.data || []).map((p) => [p.id, p.full_name]));
+    const docsByDriver = {};
+    for (const doc of docsRes.data || []) {
+      (docsByDriver[doc.driver_id] = docsByDriver[doc.driver_id] || []).push({
+        type: doc.document_type,
+        status: doc.status,
+        // driver_documents has no expiry column; documents expire via the
+        // `documents` table consumed by documentExpiryService.
+        expiry_date: null,
+      });
+    }
+
+    const drivers = (activeDrivers || []).map((d) => ({
+      id: d.user_id,
+      driver_id: d.user_id,
+      name: nameById[d.user_id] || null,
+      documents: docsByDriver[d.user_id] || [],
+    }));
+
+    return res.json(drivers);
+  } catch (err) {
+    logger.error({ requestId: req.requestId }, 'Active drivers fetch error:', err);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
 // Driver role authorization guard middleware
@@ -243,7 +363,7 @@ router.get('/stats', authenticate, userLimiter, requirePolicy('driver:view-stats
     });
 
   } catch (err) {
-    logger.error('Driver stats fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver stats fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -300,7 +420,7 @@ router.put('/online', authenticate, userLimiter, requirePolicy('driver:toggle-on
     });
 
   } catch (err) {
-    logger.error('Driver online status update error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver online status update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -337,7 +457,7 @@ router.put('/hos/status', authenticate, userLimiter, requirePolicy('driver:updat
       shift_start_time: details.shift_start_time
     });
   } catch (err) {
-    logger.error('Driver HoS status update error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver HoS status update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -426,7 +546,7 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
     });
 
   } catch (err) {
-    logger.error('Wallet history fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Wallet history fetch error:', err);
 
     res.status(500).json({
       error: 'Internal Server Error'
@@ -443,7 +563,7 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
  *   get:
  *     tags: [Driver]
  *     summary: Get earnings summary for charts
- *     description: Returns aggregated daily earnings data for the specified number of days (max 365).
+ *     description: Returns aggregated daily earnings data for the specified number of days (max 365) or for an explicit start_date/end_date window.
  *     security:
  *       - BearerAuth: []
  *     parameters:
@@ -454,7 +574,19 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
  *           default: 30
  *           minimum: 1
  *           maximum: 365
- *         description: Number of days to include
+ *         description: Number of trailing days to include (ignored when start_date/end_date are provided)
+ *       - in: query
+ *         name: start_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Inclusive start of the earnings window (YYYY-MM-DD)
+ *       - in: query
+ *         name: end_date
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Inclusive end of the earnings window (YYYY-MM-DD)
  *     responses:
  *       200:
  *         description: Earnings data array
@@ -466,25 +598,58 @@ router.get('/wallet/history', authenticate, userLimiter, requirePolicy('driver:v
  *         description: Invalid days parameter
  */
 router.get('/earnings/summary', authenticate, userLimiter, requirePolicy('driver:view-earnings'), async (req, res) => {
-  const daysParam = req.query.days ?? '30';
-  const limitDays = typeof daysParam === 'string' ? Number(daysParam) : NaN;
-
-  if (!Number.isInteger(limitDays) || limitDays < 1 || limitDays > 365) {
-    return res.status(400).json({
-      error: 'days must be an integer between 1 and 365'
-    });
-  }
+  const { start_date: startDate, end_date: endDate } = req.query;
 
   try {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - (limitDays - 1));
+    let windowFilter;
 
-    const { data: summary, error } = await supabase
+    if (startDate !== undefined || endDate !== undefined) {
+      if (!startDate || !endDate) {
+        return res.status(400).json({
+          error: 'start_date and end_date must both be provided'
+        });
+      }
+      if (Number.isNaN(Date.parse(startDate)) || Number.isNaN(Date.parse(endDate))) {
+        return res.status(400).json({
+          error: 'start_date and end_date must be valid dates'
+        });
+      }
+      if (startDate > endDate) {
+        return res.status(400).json({
+          error: 'start_date must not be after end_date'
+        });
+      }
+      windowFilter = { start: startDate, end: endDate };
+    } else {
+      const daysParam = req.query.days ?? '30';
+      const limitDays = typeof daysParam === 'string' ? Number(daysParam) : NaN;
+
+      if (!Number.isInteger(limitDays) || limitDays < 1 || limitDays > 365) {
+        return res.status(400).json({
+          error: 'days must be an integer between 1 and 365'
+        });
+      }
+
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - (limitDays - 1));
+      windowFilter = { start: cutoff.toISOString().split('T')[0] };
+    }
+
+    let query = supabase
       .from('earnings_daily')
       .select('day_date, amount, trip_count, hours_driven')
-      .eq('driver_id', req.user.id)
-      .gte('day_date', cutoff.toISOString().split('T')[0])
-      .order('day_date', { ascending: true });
+      .eq('driver_id', req.user.id);
+
+    if (windowFilter.start) {
+      query = query.gte('day_date', windowFilter.start);
+    }
+    // Inclusive start, exclusive end — matches the driver app's client-side
+    // window filter (`!date.isBefore(start) && date.isBefore(end)`).
+    if (windowFilter.end) {
+      query = query.lt('day_date', windowFilter.end);
+    }
+
+    const { data: summary, error } = await query.order('day_date', { ascending: true });
 
     if (error) {
       return res.status(500).json({ error: 'Failed to fetch earnings summary.', details: error.message });
@@ -493,7 +658,7 @@ router.get('/earnings/summary', authenticate, userLimiter, requirePolicy('driver
     res.json(summary || []);
 
   } catch (err) {
-    logger.error('Driver earnings summary fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver earnings summary fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -567,20 +732,24 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
 
     if (error) return res.status(500).json({ error: 'Failed to fetch trips.', details: error.message });
 
-    // Enrich trips with escrow_status from orders and stars from ratings
-    const tripDisplayIds = (trips || []).map(t => t.trip_display_id).filter(Boolean);
+    // Enrich trips with escrow_status from orders and stars from ratings.
+    // trip_display_id is stored as 'TX-' || orders.order_display_id, so strip
+    // the prefix before matching against the unprefixed order_display_id column.
+    const orderDisplayIds = (trips || [])
+      .map(t => (t.trip_display_id || '').startsWith('TX-') ? t.trip_display_id.slice(3) : t.trip_display_id)
+      .filter(Boolean);
     let escrowMap = {};
     let ratingsMap = {};
-    if (tripDisplayIds.length > 0) {
+    if (orderDisplayIds.length > 0) {
       const [ordersRes, ratingsRes] = await Promise.all([
         supabase
           .from('orders')
           .select('order_display_id, escrow_status')
-          .in('order_display_id', tripDisplayIds),
+          .in('order_display_id', orderDisplayIds),
         supabase
           .from('ratings')
           .select('order_display_id, stars')
-          .in('order_display_id', tripDisplayIds)
+          .in('order_display_id', orderDisplayIds)
       ]);
 
       if (ordersRes.data) {
@@ -591,11 +760,14 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
       }
     }
 
-    const enrichedTrips = (trips || []).map(t => ({
-      ...t,
-      escrow_status: escrowMap[t.trip_display_id] || 'pending',
-      stars: ratingsMap[t.trip_display_id] || null
-    }));
+    const enrichedTrips = (trips || []).map(t => {
+      const orderDisplayId = (t.trip_display_id || '').startsWith('TX-') ? t.trip_display_id.slice(3) : t.trip_display_id;
+      return {
+        ...t,
+        escrow_status: escrowMap[orderDisplayId] || 'pending',
+        stars: ratingsMap[orderDisplayId] || null
+      };
+    });
 
     res.json({
       page,
@@ -605,7 +777,7 @@ router.get('/trips', authenticate, userLimiter, requirePolicy('driver:view-trips
       trips: enrichedTrips
     });
   } catch (err) {
-    logger.error('Driver trips fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver trips fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -655,7 +827,7 @@ router.get('/trips/:tripDisplayId', authenticate, userLimiter, requirePolicy('dr
 
     res.json(trip);
   } catch (err) {
-    logger.error('Driver single trip fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver single trip fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -695,15 +867,16 @@ router.get('/trips/:tripDisplayId/items', authenticate, userLimiter, requirePoli
   const { tripDisplayId } = req.params;
 
   try {
-    const { data: trip } = await supabase.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
+    const userClient = createUserClient(req.token);
+    const { data: trip } = await userClient.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
     if (!trip) return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
 
-    const { data: items, error } = await supabase.from('trip_items').select('*').eq('trip_display_id', tripDisplayId);
+    const { data: items, error } = await userClient.from('trip_items').select('*').eq('trip_display_id', tripDisplayId);
 
     if (error) return res.status(500).json({ error: 'Failed to fetch trip items.', details: error.message });
     res.json(items || []);
   } catch (err) {
-    logger.error('Driver trip items fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver trip items fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -737,15 +910,16 @@ router.get('/trips/:tripDisplayId/stops', authenticate, userLimiter, requirePoli
   const { tripDisplayId } = req.params;
 
   try {
-    const { data: trip } = await supabase.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
+    const userClient = createUserClient(req.token);
+    const { data: trip } = await userClient.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
     if (!trip) return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
 
-    const { data: stops, error } = await supabase.from('trip_stops').select('*').eq('trip_display_id', tripDisplayId).order('sort_order', { ascending: true });
+    const { data: stops, error } = await userClient.from('trip_stops').select('*').eq('trip_display_id', tripDisplayId).order('sort_order', { ascending: true });
 
     if (error) return res.status(500).json({ error: 'Failed to fetch trip stops.', details: error.message });
     res.json(stops || []);
   } catch (err) {
-    logger.error('Driver trip stops fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver trip stops fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -779,15 +953,16 @@ router.get('/trips/:tripDisplayId/route-points', authenticate, userLimiter, requ
   const { tripDisplayId } = req.params;
 
   try {
-    const { data: trip } = await supabase.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
+    const userClient = createUserClient(req.token);
+    const { data: trip } = await userClient.from('trips').select('id').eq('trip_display_id', tripDisplayId).eq('driver_id', req.user.id).maybeSingle();
     if (!trip) return res.status(403).json({ error: 'Access Denied: Trip does not belong to you.' });
 
-    const { data: points, error } = await supabase.from('route_map_points').select('*').eq('trip_display_id', tripDisplayId).order('sort_order', { ascending: true });
+    const { data: points, error } = await userClient.from('route_map_points').select('*').eq('trip_display_id', tripDisplayId).order('sort_order', { ascending: true });
 
     if (error) return res.status(500).json({ error: 'Failed to fetch route points.', details: error.message });
     res.json(points || []);
   } catch (err) {
-    logger.error('Driver route points fetch error:', err);
+    logger.error({ requestId: req.requestId }, 'Driver route points fetch error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -952,7 +1127,7 @@ router.get('/bids', authenticate, userLimiter, requirePolicy('driver:view-bids')
  *       400:
  *         description: Insufficient balance or validation error
  */
-router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver:withdraw'), auditLog({ action: 'driver:withdraw', resourceType: 'wallet_withdrawal' }), validateBody(withdrawSchema), async (req, res) => {
+router.post('/wallet/withdraw', authenticate, userLimiter, requirePolicy('driver:withdraw'), auditLog({ action: 'driver:withdraw', resourceType: 'wallet_withdrawal' }), requireIdempotency(86400), validateBody(withdrawSchema), async (req, res) => {
   const { amount } = req.body; // in paisa
 
   try {
@@ -1019,6 +1194,7 @@ const predictProfitLimiter = rateLimit({
   message: { error: 'Too many prediction requests. Please try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
+  store: createStore('rl:predict-profit:'),
 });
 
 router.post(
@@ -1184,26 +1360,42 @@ async function handleDriverEarningsAndStatement(req, res, filename, errorLabel) 
   const { start_date, end_date, sort_by, format } = req.query;
 
   try {
-    let query = supabase
-      .from('orders')
-      .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, base_freight, toll_estimate, platform_fee')
-      .eq('driver_id', userId)
-      .in('status', ['delivered', 'payment_released'])
-      .limit(1000);
+    // PostgREST caps a single response at 1000 rows, so page through the
+    // whole history instead of silently truncating the statement.
+    const pageSize = 1000;
+    const trips = [];
 
-    if (start_date) {
-      query = query.gte('pickup_date', start_date);
-    }
-    if (end_date) {
-      query = query.lte('pickup_date', end_date);
+    while (true) {
+      let pageQuery = supabase
+        .from('orders')
+        .select('id, order_display_id, status, pickup_address, drop_address, pickup_date, base_freight, toll_estimate, platform_fee')
+        .eq('driver_id', userId)
+        .in('status', ['delivered', 'payment_released'])
+        .order('pickup_date', { ascending: true })
+        .range(trips.length, trips.length + pageSize - 1);
+
+      if (start_date) {
+        pageQuery = pageQuery.gte('pickup_date', start_date);
+      }
+      if (end_date) {
+        pageQuery = pageQuery.lte('pickup_date', end_date);
+      }
+
+      const { data: pageRows, error } = await pageQuery;
+
+      if (error) {
+        logger.error({ err: error }, errorLabel);
+        return res.status(500).json({ error: 'Failed to fetch statement records.' });
+      }
+
+      trips.push(...(pageRows || []));
+      if (!pageRows || pageRows.length < pageSize) {
+        break;
+      }
     }
 
-    const { data: trips, error } = await query.order('pickup_date', { ascending: false });
-
-    if (error) {
-      logger.error({ err: error }, errorLabel);
-      return res.status(500).json({ error: 'Failed to fetch statement records.' });
-    }
+    // Pages were fetched oldest-first; restore newest-first ordering.
+    trips.reverse();
 
     // Compute totals
     let totalBaseFreight = 0;
@@ -1377,9 +1569,77 @@ router.get('/weigh-stations/bypass-status', authenticate, requireDriverRole, asy
     }
 
     const status = await checkBypassEligibility(driverId, lat, lng);
+    // Fail closed: without a real WIM provider the result is explicitly
+    // unsupported — never present a fabricated BYPASS/PULL_IN verdict as
+    // authoritative.
+    if (status.supported === false || status.action === 'UNSUPPORTED') {
+      return res.status(503).json(status);
+    }
     return res.status(200).json(status);
   } catch (err) {
     logger.error(`[weigh-station] Error getting bypass status for driver ${req.user.id}: ${err.message}`);
+    return res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+/**
+ * @openapi
+ * /api/driver/weigh-stations/sync-weight:
+ *   post:
+ *     tags: [Driver, WIM]
+ *     summary: Sync internal air suspension weights
+ *     description: Syncs internal highly accurate axle weights to the DOT enforcement software for bypassing weigh stations.
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - truck_id
+ *               - axles
+ *             properties:
+ *               truck_id:
+ *                 type: string
+ *                 format: uuid
+ *               axles:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     position:
+ *                       type: string
+ *                     pressure_psi:
+ *                       type: number
+ *     responses:
+ *       200:
+ *         description: Bypass status and calculation details
+ *       400:
+ *         description: Invalid payload
+ */
+router.post('/weigh-stations/sync-weight', validateBody(syncWeightSchema), authenticate, requirePolicy('driver:view-stats'), userLimiter, validateBody(syncWeightSchema), async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const { truck_id, axles } = req.body;
+
+    // Optional: verify the truck belongs to the driver
+    const { data: truck, error: truckErr } = await supabase
+      .from('trucks')
+      .select('id')
+      .eq('id', truck_id)
+      .eq('driver_id', driverId)
+      .single();
+
+    if (truckErr || !truck) {
+      return res.status(403).json({ error: 'Forbidden: Truck does not belong to you or does not exist' });
+    }
+
+    const status = await syncAndTransmitInternalWeights(driverId, truck_id, axles);
+    return res.status(200).json(status);
+  } catch (err) {
+    logger.error(`[weigh-station] Error syncing internal weight for driver ${req.user.id}: ${err.message}`);
     return res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -1477,108 +1737,68 @@ router.get('/:id/earnings', authenticate, userLimiter, requirePolicy('driver:vie
   }
 
   try {
-    let cutoff = new Date();
-    if (period === 'day') {
-      cutoff.setHours(0, 0, 0, 0);
-    } else if (period === 'week') {
-      cutoff.setDate(cutoff.getDate() - 7);
-    } else if (period === 'month') {
-      cutoff.setDate(cutoff.getDate() - 30);
-    } else {
+    const cutoff = getEarningsCutoff(period);
+    if (!cutoff) {
       return res.status(400).json({ error: 'Invalid period. Must be day, week, or month.' });
     }
 
-    const { data: trips, error: tripsError } = await supabase
-      .from('trips')
-      .select('*')
-      .eq('driver_id', id)
-      .eq('status', 'completed')
-      .gte('trip_date', cutoff.toISOString().split('T')[0])
-      .order('trip_date', { ascending: false });
+    // The deadhead scan only compares a trip to its immediate predecessor
+    // within DEADHEAD_MAX_GAP_DAYS, so it needs the reporting window extended
+    // backwards by that gap — not the driver's entire trip history.
+    const deadheadCutoff = getDeadheadCutoff(cutoff);
 
+    // None of these three queries depends on another's result, so they run
+    // concurrently rather than stacking three round trips of latency.
+    const [tripsResult, lifetimeResult, adjacentResult] = await Promise.all([
+      supabase
+        .from('trips')
+        .select(EARNINGS_TRIP_COLUMNS)
+        .eq('driver_id', id)
+        .eq('status', 'completed')
+        .gte('trip_date', toDateKey(cutoff))
+        .order('trip_date', { ascending: false })
+        .limit(EARNINGS_MAX_ROWS),
+      supabase
+        .from('trips')
+        .select('*', { count: 'exact', head: true })
+        .eq('driver_id', id)
+        .eq('status', 'completed'),
+      supabase
+        .from('trips')
+        .select(DEADHEAD_COLUMNS)
+        .eq('driver_id', id)
+        .eq('status', 'completed')
+        .gte('trip_date', toDateKey(deadheadCutoff))
+        .order('trip_date', { ascending: true })
+        .limit(DEADHEAD_MAX_ROWS),
+    ]);
+
+    const { data: trips, error: tripsError } = tripsResult;
     if (tripsError) {
       return res.status(500).json({ error: 'Failed to fetch trips.', details: tripsError.message });
     }
 
-    const { count: lifetimeTrips, error: countError } = await supabase
-      .from('trips')
-      .select('*', { count: 'exact', head: true })
-      .eq('driver_id', id)
-      .eq('status', 'completed');
-
+    const { count: lifetimeTrips, error: countError } = lifetimeResult;
     if (countError) {
       logger.warn('Failed to fetch lifetime trips count:', countError.message);
     }
 
-    // Weekly Chart Aggregation (always shows past 7 days)
-    const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const weeklyChartMap = {};
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      const dayLabel = daysOfWeek[d.getDay()];
-      weeklyChartMap[dayLabel] = 0;
+    // Non-fatal: the deadhead figure degrades to 0 rather than failing the
+    // whole report, matching how the lifetime count is treated above.
+    const { data: adjacentTrips, error: adjacentError } = adjacentResult;
+    if (adjacentError) {
+      logger.warn('Failed to fetch trips for deadhead analysis:', adjacentError.message);
     }
 
-    trips.forEach(trip => {
-      const tripDate = new Date(trip.trip_date);
-      const dayLabel = daysOfWeek[tripDate.getDay()];
-      if (weeklyChartMap[dayLabel] !== undefined) {
-        weeklyChartMap[dayLabel] += trip.total_earnings;
-      }
-    });
+    const weeklyChart = buildWeeklyChart(trips, { period });
+    const totalKm = sumDistanceKm(trips);
+    const deadheadTripsSaved = countDeadheadTripsSaved(adjacentTrips);
 
-    const weeklyChart = Object.entries(weeklyChartMap).map(([day, earnings]) => ({
-      day,
-      earnings
-    }));
-
-    let totalKm = 0;
-    trips.forEach(trip => {
-      if (trip.distance) {
-        const distanceNum = parseInt(String(trip.distance, 10).replace(/[^0-9]/g, '')) || 0;
-        totalKm += distanceNum;
-      }
-    });
-
-    // Deadhead Trips Saved logic
-    const { data: allCompletedTrips, error: allTripsError } = await supabase
-      .from('trips')
-      .select('route_label, trip_date')
-      .eq('driver_id', id)
-      .eq('status', 'completed')
-      .order('trip_date', { ascending: true });
-
-    let deadheadTripsSaved = 0;
-    if (allCompletedTrips && allCompletedTrips.length > 1) {
-      for (let i = 1; i < allCompletedTrips.length; i++) {
-        const prevTrip = allCompletedTrips[i - 1];
-        const currTrip = allCompletedTrips[i];
-        
-        const prevRoute = (prevTrip.route_label || '').split(' → ');
-        const currRoute = (currTrip.route_label || '').split(' → ');
-        
-        if (prevRoute.length === 2 && currRoute.length === 2) {
-          const prevDrop = prevRoute[1].trim().toLowerCase();
-          const currPickup = currRoute[0].trim().toLowerCase();
-          
-          if (prevDrop === currPickup) {
-            const prevDate = new Date(prevTrip.trip_date);
-            const currDate = new Date(currTrip.trip_date);
-            const diffDays = Math.abs(currDate - prevDate) / (1000 * 60 * 60 * 24);
-            if (diffDays <= 3) {
-              deadheadTripsSaved++;
-            }
-          }
-        }
-      }
-    }
-
-    const totalNetEarnings = trips.reduce((sum, t) => sum + t.net_earnings, 0);
+    const { gross: grossEarnings, net: totalNetEarnings } = sumEarnings(trips);
 
     res.json({
       period,
-      gross_earnings: trips.reduce((sum, t) => sum + t.total_earnings, 0),
+      gross_earnings: grossEarnings,
       net_earnings: totalNetEarnings,
       trips_completed: trips.length,
       weekly_chart: weeklyChart,
@@ -1594,7 +1814,7 @@ router.get('/:id/earnings', authenticate, userLimiter, requirePolicy('driver:vie
       })),
       cumulative_stats: {
         total_km: totalKm,
-        avg_earning_per_km: totalKm > 0 ? (totalNetEarnings / 100.0) / totalKm : 0,
+        avg_earning_per_km: totalKm > 0 ? totalNetEarnings / totalKm : 0,
         lifetime_trips: lifetimeTrips || 0
       },
       deadhead_trips_saved: deadheadTripsSaved
@@ -1602,6 +1822,189 @@ router.get('/:id/earnings', authenticate, userLimiter, requirePolicy('driver:vie
 
   } catch (err) {
     logger.error('Driver analytics fetch error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// Driver Profile & Availability & Truck endpoints
+// ============================================================================
+
+router.get('/profile', authenticate, userLimiter, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Read through the caller's authenticated client so RLS lets the driver
+    // see their own profile, driver_details (including kyc_status), truck
+    // and documents. The shared anon client is denied on all of these.
+    const db = createUserClient(req.token);
+
+    // 1. Fetch base profile
+    const { data: profile, error: profileErr } = await db
+      .from('profiles')
+      .select('id, full_name, phone, email')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (profileErr || !profile) {
+      return res.status(404).json({ error: 'Driver profile not found.' });
+    }
+
+    // 2. Fetch driver details
+    const { data: details, error: detailsErr } = await db
+      .from('driver_details')
+      .select('rating, total_trips, completion_rate, is_online, kyc_status, truck_id')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    // 3. Fetch truck details if assigned
+    let truck = null;
+    if (details && details.truck_id) {
+      const { data: truckData } = await db
+        .from('trucks')
+        .select('*')
+        .eq('id', details.truck_id)
+        .maybeSingle();
+      truck = truckData;
+    }
+
+    // 4. Fetch documents and map their status
+    const { data: docs } = await db
+      .from('driver_documents')
+      .select('document_type, status, is_govt_verified')
+      .eq('driver_id', userId);
+
+    const docMap = {
+      rc_book: 'Missing',
+      driving_licence: 'Missing',
+      insurance: 'Missing'
+    };
+
+    if (docs && docs.length > 0) {
+      for (const d of docs) {
+        if (d.is_govt_verified) {
+          docMap[d.document_type] = 'Verified (Digilocker)';
+        } else if (d.status === 'approved' || d.status === 'pending_review') {
+          docMap[d.document_type] = 'Uploaded';
+        }
+      }
+    }
+
+    res.json({
+      profile,
+      driverDetails: details || { rating: 0, total_trips: 0, is_online: false, kyc_status: 'Unverified' },
+      truck,
+      documents: docMap
+    });
+  } catch (err) {
+    logger.error('Driver profile fetch error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+router.patch('/availability', authenticate, userLimiter, async (req, res) => {
+  try {
+    const { available } = req.body;
+    if (typeof available !== 'boolean') {
+      return res.status(400).json({ error: 'available field must be a boolean.' });
+    }
+
+    const { data: details, error } = await supabase
+      .from('driver_details')
+      .update({ is_online: available, updated_at: new Date().toISOString() })
+      .eq('user_id', req.user.id)
+      .select('is_online')
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: 'Failed to update availability.', details: error.message });
+    }
+
+    res.json({
+      success: true,
+      isOnline: details?.is_online || false
+    });
+  } catch (err) {
+    logger.error('Driver availability update error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+router.put('/truck', authenticate, userLimiter, requireDriverRole, async (req, res) => {
+  try {
+    const { type, capacityWeight, capacityVolume, registrationNumber } = req.body;
+
+    const VALID_TRUCK_TYPES = ['Open Body', 'Closed Body', 'Container', 'Refrigerated'];
+
+    if (!type || !registrationNumber) {
+      return res.status(400).json({ error: 'type and registrationNumber are required.' });
+    }
+
+    if (!VALID_TRUCK_TYPES.includes(type)) {
+      return res.status(400).json({ error: 'type must be one of: Open Body, Closed Body, Container, Refrigerated.' });
+    }
+
+    // Check if driver has an existing truck assigned
+    const { data: details, error: detailsErr } = await supabase
+      .from('driver_details')
+      .select('truck_id')
+      .eq('user_id', req.user.id)
+      .maybeSingle();
+
+    if (detailsErr) {
+      return res.status(500).json({ error: 'Failed to retrieve driver details.' });
+    }
+
+    let truckId = details?.truck_id;
+    let truckData;
+
+    if (truckId) {
+      // Update existing truck
+      const { data, error } = await supabase
+        .from('trucks')
+        .update({
+          truck_type: type,
+          max_capacity_tons: capacityWeight || 0,
+          number_plate: registrationNumber,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', truckId)
+        .select('*')
+        .single();
+
+      if (error) return res.status(500).json({ error: 'Failed to update truck.' });
+      truckData = data;
+    } else {
+      // Create new truck
+      const { data, error } = await supabase
+        .from('trucks')
+        .insert({
+          driver_id: req.user.id,
+          name: type,
+          truck_type: type,
+          max_capacity_tons: capacityWeight || 0,
+          number_plate: registrationNumber
+        })
+        .select('*')
+        .single();
+
+      if (error) return res.status(500).json({ error: 'Failed to create truck.' });
+      truckData = data;
+      truckId = data.id;
+
+      // Update driver details with new truck ID
+      await supabase
+        .from('driver_details')
+        .update({ truck_id: truckId, updated_at: new Date().toISOString() })
+        .eq('user_id', req.user.id);
+    }
+
+    res.json({
+      success: true,
+      truck: truckData
+    });
+  } catch (err) {
+    logger.error('Driver truck update error:', err);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

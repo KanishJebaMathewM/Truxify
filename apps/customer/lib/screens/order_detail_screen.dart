@@ -43,6 +43,57 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
   bool _isGeneratingInvoice = false;
   bool _isSubmittingRating = false;
   bool _ratingSubmitted = false;
+  String _mlEta = 'Calculating…';
+
+  String _formatEta(double etaMinutes) {
+    if (etaMinutes <= 0) return '0 mins';
+    final hrs = etaMinutes ~/ 60;
+    final mins = (etaMinutes % 60).round();
+    if (hrs > 0) {
+      if (mins > 0) {
+        return '$hrs hrs $mins mins';
+      } else {
+        return '$hrs hrs';
+      }
+    } else {
+      return '$mins mins';
+    }
+  }
+
+  Future<void> _fetchMlEta(String orderId) async {
+    try {
+      final locData = await _orderService.fetchDriverLocation(orderId);
+      final data = locData['data'] ?? locData;
+      final lat = (data['lat'] as num?)?.toDouble();
+      final lng = (data['lng'] as num?)?.toDouble();
+      if (lat != null && lng != null) {
+        final res = await _orderService.fetchMlEta(
+          tripId: orderId,
+          lat: lat,
+          lng: lng,
+        );
+        final etaMinutes = (res['eta_minutes'] as num?)?.toDouble();
+        if (etaMinutes != null && mounted) {
+          setState(() {
+            _mlEta = _formatEta(etaMinutes);
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _mlEta = 'TBD';
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching ML ETA in OrderDetailScreen: $e');
+      if (mounted) {
+        setState(() {
+          _mlEta = 'TBD';
+        });
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -157,6 +208,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                     ? orderMap['profiles']['phone']?.toString()
                     : null),
             escrowStatus: orderMap['escrow_status']?.toString(),
+            pickupLat: (orderMap['pickup_lat'] as num?)?.toDouble(),
+            pickupLng: (orderMap['pickup_lng'] as num?)?.toDouble(),
+            dropLat: (orderMap['drop_lat'] as num?)?.toDouble(),
+            dropLng: (orderMap['drop_lng'] as num?)?.toDouble(),
           );
           // Trigger rating flow if status becomes completed and rating dialog hasn't been shown yet
           final orderStatus = orderMap['status']?.toString() ?? '';
@@ -164,6 +219,7 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
             _checkAndShowRatingDialog();
           }
         });
+        _fetchMlEta(_currentOrder.orderId);
       }
     } catch (e) {
       debugPrint('Error loading order detail: $e');
@@ -497,6 +553,8 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 const SizedBox(height: 8),
                 Text('Date: ${_currentOrder.date}', style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 8),
+                Text('ETA: $_mlEta', style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
                 if (_currentOrder.requiresRefrigeration ?? false) ...[
                   Row(
                     children: [
@@ -600,6 +658,10 @@ class _OrderDetailScreenState extends State<OrderDetailScreen> {
                 draft: RouteDraft(
                   pickup: pickup,
                   drop: drop,
+                  pickupLat: _currentOrder.pickupLat,
+                  pickupLng: _currentOrder.pickupLng,
+                  dropLat: _currentOrder.dropLat,
+                  dropLng: _currentOrder.dropLng,
                   dateLabel: _currentOrder.date,
                   goodsType: _currentOrder.goodsType ?? 'General',
                   weightTonnes: _currentOrder.weightTonnes ?? '0',

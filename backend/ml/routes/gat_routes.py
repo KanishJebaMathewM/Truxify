@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/gat", tags=["Graph Attention Networks"])
 
 # Initialize model
-in_features = 64
+in_features = 5
 hidden_features = 128
 out_features = 32
 num_heads = 8
@@ -65,7 +65,7 @@ async def build_graph(request: GraphRequest):
             'data': {
                 'nodes': len(graph.nodes),
                 'edges': len(graph.edges),
-                'features': data.x.shape,
+                'features': list(data.x.shape),
                 'is_connected': nx.is_connected(graph)
             },
             'timestamp': datetime.now().isoformat()
@@ -88,7 +88,9 @@ async def predict_traffic(request: GraphRequest):
         data = builder.get_pytorch_data()
         
         # Generate synthetic node features for time steps
-        node_features = data.x.unsqueeze(0).unsqueeze(0)  # (1, 1, nodes, features)
+        # Model expects (batch_size, num_nodes, time_steps, features); build
+        # (1, num_nodes, 1, features) so batch_size == 1 and time_steps == 1.
+        node_features = data.x.unsqueeze(0).unsqueeze(2).contiguous()
         
         # Predict
         predictions = trainer.model.predict_traffic(node_features, data.edge_index)
@@ -119,12 +121,15 @@ async def train_model(request: GraphRequest):
             [edge.dict() for edge in request.edges]
         )
         data = builder.get_pytorch_data()
+        x_4d = data.x.unsqueeze(0).unsqueeze(2)  # (1, N, 1, 5)
+        data_4d = Data(x=x_4d, edge_index=data.edge_index)
+
         
-        # Generate synthetic targets
+        # Generate synthetic targetstargets = torch.randn(1, data.x.shape[0], trainer.model.prediction_horizon)
         targets = torch.randn(data.x.shape[0], trainer.model.prediction_horizon)
         
         # Train
-        results = trainer.train(data, targets, epochs=50)
+        results = trainer.train(data_4d, targets, epochs=50)
         
         return {
             'success': True,

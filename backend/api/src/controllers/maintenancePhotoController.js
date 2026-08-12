@@ -1,4 +1,5 @@
-import { supabase } from '../config/db.js';
+import { randomUUID } from 'node:crypto';
+import { createUserClient } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import {
   validateDocumentBuffer,
@@ -32,12 +33,23 @@ function extensionForMime(mime) {
 
 export async function uploadMaintenancePhotos(req, res) {
   const uploadedPaths = [];
+  let userClient = null;
 
   try {
     const driverId = req.user?.id;
     if (!driverId) {
       return res.status(401).json({ error: 'User not authenticated' });
     }
+
+    // The caller's JWT must be attached for every statement in this handler:
+    // the append_maintenance_photos RPC is SECURITY DEFINER and calls
+    // auth.uid(), and truck_maintenance_tickets / maintenance-photos storage
+    // are RLS-protected, so the shared anon client would be denied on all of
+    // them (anon privileges are revoked).
+    if (!req.token) {
+      return res.status(401).json({ error: 'User not authenticated' });
+    }
+    userClient = createUserClient(req.token);
 
     const { ticketId } = req.params;
     if (!ticketId) {
@@ -55,7 +67,7 @@ export async function uploadMaintenancePhotos(req, res) {
     }
 
     // Verify ticket exists and belongs to this driver
-    const { data: ticket, error: ticketError } = await supabase
+    const { data: ticket, error: ticketError } = await userClient
       .from('truck_maintenance_tickets')
       .select('id, driver_id, photo_urls')
       .eq('id', ticketId)
@@ -90,7 +102,7 @@ export async function uploadMaintenancePhotos(req, res) {
         verifiedMimeType = validateDocumentBuffer(file.buffer, file.mimetype);
       } catch (validationError) {
         // Clean up any files already uploaded in this request
-        await cleanupStorage(uploadedPaths);
+        await cleanupStorage(uploadedPaths, userClient);
         if (validationError instanceof DocumentValidationError) {
           const allowed = ALLOWED_PHOTO_MIME_TYPES.join(', ');
           return res.status(422).json({
@@ -101,7 +113,7 @@ export async function uploadMaintenancePhotos(req, res) {
       }
 
       if (!ALLOWED_PHOTO_MIME_TYPES.includes(verifiedMimeType)) {
-        await cleanupStorage(uploadedPaths);
+        await cleanupStorage(uploadedPaths, userClient);
         return res.status(422).json({
           error: `Photo ${i + 1}: Unsupported image type (${verifiedMimeType}). Only JPEG and PNG are accepted.`,
         });
@@ -110,13 +122,13 @@ export async function uploadMaintenancePhotos(req, res) {
       try {
         const scanResult = await scanDocument(file.buffer);
         if (!scanResult.clean) {
-          await cleanupStorage(uploadedPaths);
+          await cleanupStorage(uploadedPaths, userClient);
           return res.status(422).json({
             error: `Photo ${i + 1}: Uploaded file failed malware scanning.`,
           });
         }
       } catch (scanError) {
-        await cleanupStorage(uploadedPaths);
+        await cleanupStorage(uploadedPaths, userClient);
         if (scanError instanceof MalwareScanError) {
           logger.warn(
             { driverId, ticketId, photoIndex: i, reason: scanError.message },
@@ -130,9 +142,9 @@ export async function uploadMaintenancePhotos(req, res) {
       }
 
       const ext = extensionForMime(verifiedMimeType);
-      const storagePath = `${driverId}/${ticketId}/${Date.now()}-${i}.${ext}`;
+      const storagePath = `${driverId}/${ticketId}/${Date.now()}-${randomUUID()}.${ext}`;
 
-      const { error: storageError } = await supabase.storage
+      const { error: storageError } = await userClient.storage
         .from('maintenance-photos')
         .upload(storagePath, file.buffer, {
           contentType: verifiedMimeType,
@@ -141,7 +153,7 @@ export async function uploadMaintenancePhotos(req, res) {
 
       if (storageError) {
         logger.error('[MaintenancePhotoController] Storage upload failed:', storageError.message);
-        await cleanupStorage(uploadedPaths);
+        await cleanupStorage(uploadedPaths, userClient);
         return res.status(500).json({ error: 'Failed to store photo' });
       }
 
@@ -151,48 +163,55 @@ export async function uploadMaintenancePhotos(req, res) {
     // Generate signed URLs for the uploaded files
     const photoUrls = [];
     for (const path of uploadedPaths) {
-      const { data: urlData, error: urlError } = await supabase.storage
+      const { data: urlData, error: urlError } = await userClient.storage
         .from('maintenance-photos')
         .createSignedUrl(path, 60 * 60 * 24 * 7); // 7-day expiry
 
       if (urlError) {
         logger.error('[MaintenancePhotoController] Failed to create signed URL:', urlError.message);
-        await cleanupStorage(uploadedPaths);
+        await cleanupStorage(uploadedPaths, userClient);
         return res.status(500).json({ error: 'Failed to generate photo URL' });
       }
 
       photoUrls.push(urlData.signedUrl);
     }
 
-    // Update the ticket with the new photo PATHS (not ephemeral URLs)
-    const allPaths = [...existingUrls, ...uploadedPaths];
-    const { error: updateError } = await supabase
-      .from('truck_maintenance_tickets')
-      .update({ photo_urls: allPaths })
-      .eq('id', ticketId);
+    // Atomically append new paths via PostgreSQL RPC to enforce MAX_PHOTOS and prevent race conditions
+    const { error: updateError } = await userClient.rpc('append_maintenance_photos', {
+      p_ticket_id: ticketId,
+      p_new_paths: uploadedPaths,
+      p_max_photos: MAX_PHOTOS,
+    });
 
     if (updateError) {
-      logger.error('[MaintenancePhotoController] Failed to update ticket:', updateError.message);
-      await cleanupStorage(uploadedPaths);
+      logger.error('[MaintenancePhotoController] Failed to update ticket photos atomically:', updateError.message);
+      await cleanupStorage(uploadedPaths, userClient);
+
+      if (updateError.message.includes('MAX_PHOTOS_EXCEEDED')) {
+        return res.status(400).json({
+          error: `Cannot add ${uploadedPaths.length} photo(s). Maximum ${MAX_PHOTOS} photos allowed per ticket.`,
+        });
+      }
+
       return res.status(500).json({ error: 'Failed to save photo references' });
     }
 
     return res.status(200).json({
       success: true,
-      photo_urls: [...existingUrls, ...photoUrls], // Return signed URLs to the client for immediate rendering
+      photo_urls: [...existingUrls, ...photoUrls],
       uploaded_count: photoUrls.length,
     });
   } catch (err) {
     logger.error('[MaintenancePhotoController] Unexpected error:', err.message);
-    await cleanupStorage(uploadedPaths);
+    await cleanupStorage(uploadedPaths, userClient);
     return res.status(500).json({ error: 'An unexpected error occurred' });
   }
 }
 
-async function cleanupStorage(paths) {
+async function cleanupStorage(paths, userClient) {
   if (paths.length === 0) return;
   try {
-    await supabase.storage.from('maintenance-photos').remove(paths);
+    await userClient.storage.from('maintenance-photos').remove(paths);
   } catch (err) {
     logger.error('[MaintenancePhotoController] Storage cleanup failed:', err.message);
   }

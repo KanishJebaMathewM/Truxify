@@ -1,14 +1,3 @@
-/**
- * Unit tests for backend/api/src/lib/escapeLike.js
- *
- * Coverage:
- *   - Returns non-string inputs unchanged
- *   - Escapes backslashes, percent signs, and underscores
- *   - Escapes all three special chars in combination
- *   - Returns a string for a string input
- *
- * Run with:  npm run test:unit -- test/unit/escapeLike.test.js
- */
 import { describe, it, expect } from 'vitest';
 import { escapeLike } from '../../src/lib/escapeLike.js';
 
@@ -17,6 +6,7 @@ describe('escapeLike', () => {
     expect(escapeLike(null)).toBe(null);
     expect(escapeLike(undefined)).toBe(undefined);
     expect(escapeLike(42)).toBe(42);
+    expect(escapeLike(true)).toBe(true);
     expect(escapeLike({ foo: 'bar' })).toEqual({ foo: 'bar' });
   });
 
@@ -33,7 +23,15 @@ describe('escapeLike', () => {
   });
 
   it('escapes all three special characters together', () => {
-    expect(escapeLike('50%_test\\value')).toBe('50\\%\\\_test\\\\value');
+    expect(escapeLike('50%_test\\value')).toBe('50\\%\\_test\\\\value');
+  });
+
+  it('handles empty strings', () => {
+    expect(escapeLike('')).toBe('');
+  });
+
+  it('handles consecutive wildcards and backslashes', () => {
+    expect(escapeLike('%%%___\\\\')).toBe('\\%\\%\\%\\_\\_\\_\\\\\\\\');
   });
 
   it('returns the same string when no special chars are present', () => {

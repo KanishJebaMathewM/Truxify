@@ -90,7 +90,7 @@ export async function publishInvalidation(namespace, eventOpts = {}) {
   if (!ns.enablePubSub) return;
 
   const channel = CacheKeyBuilder.pubSubChannel(namespace);
-  const event = createCacheEvent(eventOpts.type || CacheEventType.INVALIDATE_KEY, {
+  const event = createCacheEvent(eventOpts.type ?? CacheEventType.INVALIDATE_KEY, {
     namespace,
     originInstanceId: instanceId,
     ...eventOpts,

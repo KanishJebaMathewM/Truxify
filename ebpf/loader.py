@@ -150,7 +150,52 @@ class eBPFLoader:
             except (struct.error, TypeError):
                 return None
         return None
-    
+
+    def _extract_last_seen_ns(self, value: Any) -> Optional[int]:
+        """Extract last_seen from a network_monitor rate_limit entry value.
+        With BTF the value is a dict; without it the value is a raw little-
+        endian byte array where last_seen (u64) sits at offset 8 after the
+        leading __u32 lock field and its 4 bytes of padding."""
+        if isinstance(value, dict):
+            return value.get("last_seen")
+        if isinstance(value, list):
+            try:
+                raw = bytes(value)
+                if len(raw) < 16:
+                    return None
+                return struct.unpack_from("<Q", raw, 8)[0]
+            except (struct.error, TypeError):
+                return None
+        return None
+
+    def _prune_bpftool_map(self, map_name: str, extract_ts, idle_ns: int, now_ns: int) -> int:
+        """Delete every entry of *map_name* idle past idle_ns. Returns the
+        number of entries pruned. Shared by the telemetry and network-monitor
+        rate-limit maps so both are bounded by a time window."""
+        pruned = 0
+        try:
+            dump = subprocess.run(
+                ["sudo", "bpftool", "map", "dump", "name", map_name],
+                check=True, capture_output=True, text=True
+            )
+            for entry in json.loads(dump.stdout):
+                key = entry.get("key")
+                last_ts = extract_ts(entry.get("value"))
+                if key is None or last_ts is None:
+                    continue
+                if now_ns - last_ts <= idle_ns:
+                    continue
+                key_hex = bytes(key).hex()
+                subprocess.run(
+                    ["sudo", "bpftool", "map", "delete", "name", map_name,
+                     "key", key_hex],
+                    check=True, capture_output=True, text=True
+                )
+                pruned += 1
+        except Exception as e:
+            logger.warning(f"Rate-limit map '{map_name}' prune failed: {e}")
+        return pruned
+
     def prune_rate_limit_entries(self, idle_window_seconds: int = 60) -> int:
         """Delete telemetry_rate_map entries idle past the rate-limit window.
         Called periodically so the per-IP map never fills with stale sources
@@ -183,6 +228,18 @@ class eBPFLoader:
         except Exception as e:
             logger.warning(f"Rate-limit map prune failed: {e}")
         return pruned
+
+    def prune_network_rate_limit_entries(self, idle_window_seconds: int = 60) -> int:
+        """Delete network_monitor rate_limit entries (keyed on daddr:dport)
+        idle past the rate-limit window. Same windowed decay as the telemetry
+        map, so per-destination counters reset instead of saturating."""
+        if idle_window_seconds <= 0:
+            raise ValueError("idle_window_seconds must be positive")
+        idle_ns = idle_window_seconds * 1_000_000_000
+        now_ns = time.time_ns()
+        return self._prune_bpftool_map(
+            "rate_limit", self._extract_last_seen_ns, idle_ns, now_ns
+        )
     
     def start_rate_limit_pruner(self, interval_seconds: int = 60, idle_window_seconds: int = 60):
         """Start a periodic userspace sweep of telemetry_rate_map. Entries idle
@@ -209,6 +266,7 @@ class eBPFLoader:
     def _rate_limit_pruner_loop(self, interval_seconds: int, idle_window_seconds: int):
         while not self._pruner_stop.wait(interval_seconds):
             self.prune_rate_limit_entries(idle_window_seconds)
+            self.prune_network_rate_limit_entries(idle_window_seconds)
     
     def load_all_programs(self) -> Dict:
         """Load all eBPF programs"""

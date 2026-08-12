@@ -4,7 +4,7 @@ const mockAcquireLock = vi.fn();
 const mockReleaseLock = vi.fn();
 const mockFrom = vi.fn();
 const mockOrderRepository = {
-  findOrderByIdOrDisplayId: vi.fn(),
+  findOrderById: vi.fn(),
   updateOrderWithFilter: vi.fn(),
 };
 
@@ -38,7 +38,7 @@ describe('BidAcceptanceService', () => {
   describe('acceptBid', () => {
     it('rejects bid when order is already funded', async () => {
       mockAcquireLock.mockResolvedValue('lock-value');
-      mockOrderRepository.findOrderByIdOrDisplayId.mockResolvedValue({
+      mockOrderRepository.findOrderById.mockResolvedValue({
         id: 'order-1',
         escrow_status: 'funded',
         status: 'in_transit',
@@ -71,7 +71,7 @@ describe('BidAcceptanceService', () => {
 
     it('throws when order is in terminal state', async () => {
       mockAcquireLock.mockResolvedValue('lock-value');
-      mockOrderRepository.findOrderByIdOrDisplayId.mockResolvedValue({
+      mockOrderRepository.findOrderById.mockResolvedValue({
         id: 'order-1',
         escrow_status: 'pending',
         status: 'delivered',

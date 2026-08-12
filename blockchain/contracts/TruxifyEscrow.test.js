@@ -1,5 +1,5 @@
-const { expect } = require("chai");
-const { ethers } = require("hardhat");
+import { expect } from "chai";
+import { ethers } from "hardhat";
 
 const AMOUNT = ethers.parseEther("1");
 const DISPUTE_TIMEOUT_SECS = 7 * 24 * 3600;

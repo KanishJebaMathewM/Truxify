@@ -3,10 +3,6 @@ import logger from './logger.js';
 const DEFAULT_LIMIT = 8192; // 8 KB
 
 export default function headerSizeMonitor(req, res, next) {
-  if (process.env.NODE_ENV === 'production') {
-    return next();
-  }
-
   const rawLimit = process.env.HEADER_SIZE_LIMIT;
   const parsedLimit = Number(rawLimit);
   const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : DEFAULT_LIMIT;
@@ -35,6 +31,10 @@ export default function headerSizeMonitor(req, res, next) {
       },
       'Request headers exceed configured size threshold'
     );
+    return res.status(431).json({
+      success: false,
+      error: 'Request header fields too large',
+    });
   }
 
   next();

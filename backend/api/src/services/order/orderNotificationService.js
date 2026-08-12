@@ -15,9 +15,52 @@ export const DELIVERY_OTP_READY_STATUSES = new Set(['arriving']);
 
 const inMemoryOtpFailedAttempts = new Map();
 
+/**
+ * Folds any attempts accumulated in the in-memory fallback back into Redis
+ * when Redis is reachable again. Without this, a Redis outage would split the
+ * brute-force budget across two stores: failures counted in memory during the
+ * outage were never reflected in Redis after recovery, so an attacker who
+ * exhausted the in-memory budget could start fresh against Redis (and vice
+ * versa — a Redis-side lock could be shadowed by a stale in-memory record).
+ *
+ * Safe to call on every path: it is a no-op when there is no pending fallback
+ * record, and if Redis is still unreachable it keeps the in-memory record so
+ * the fallback remains authoritative until Redis truly recovers.
+ */
+async function reconcileInMemoryIntoRedis(orderId) {
+  const record = inMemoryOtpFailedAttempts.get(orderId);
+  if (!record) return;
+  if (record.count <= 0 && !record.lockedUntil) {
+    inMemoryOtpFailedAttempts.delete(orderId);
+    return;
+  }
+  try {
+    const countKey = `otp_failed_count:${orderId}`;
+    const lockKey = `otp_lockout:${orderId}`;
+    if (record.count > 0) {
+      const merged = await redisClient.incrby(countKey, record.count);
+      await redisClient.expire(countKey, OTP_LOCKOUT_MINUTES * 60);
+      if (merged >= OTP_MAX_FAILED_ATTEMPTS) {
+        await redisClient.set(lockKey, '1', 'EX', OTP_LOCKOUT_MINUTES * 60);
+      }
+    }
+    if (record.lockedUntil) {
+      const remainingSec = Math.max(1, Math.ceil((record.lockedUntil - Date.now()) / 1000));
+      await redisClient.set(lockKey, '1', 'EX', remainingSec);
+    }
+  } catch (err) {
+    logger.error('[OTP] Redis error during in-memory reconciliation, keeping memory fallback:', err.message);
+    return;
+  }
+  inMemoryOtpFailedAttempts.delete(orderId);
+}
+
 export async function checkOtpLockout(orderId) {
   if (redisClient) {
     try {
+      // Fold any offline attempts back into Redis now that it is reachable, so
+      // the authoritative (Redis) state is not skewed by the fallback.
+      await reconcileInMemoryIntoRedis(orderId);
       const lockKey = `otp_lockout:${orderId}`;
       const isLocked = await redisClient.get(lockKey);
       return !!isLocked;
@@ -37,6 +80,9 @@ export async function checkOtpLockout(orderId) {
 export async function recordOtpFailure(orderId) {
   if (redisClient) {
     try {
+      // Fold offline attempts back into Redis before recording the new one so
+      // the brute-force budget stays contiguous across a Redis resync.
+      await reconcileInMemoryIntoRedis(orderId);
       const countKey = `otp_failed_count:${orderId}`;
       const lockKey = `otp_lockout:${orderId}`;
 
@@ -76,6 +122,9 @@ export async function clearOtpState(orderId) {
       // TTL, and clearing it here would let resend/regenerate paths reset the
       // anti-brute-force guard on demand.
       await redisClient.del(countKey);
+      // Drop the in-memory fallback so it cannot drift from the cleared Redis
+      // state after a resync.
+      inMemoryOtpFailedAttempts.delete(orderId);
       return;
     } catch (err) {
       logger.error('[OTP] Redis error in clearOtpState, falling back to memory:', err.message);

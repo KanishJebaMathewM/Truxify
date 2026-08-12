@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "backend/api/**"
+      - "blockchain/**"
       - ".github/workflows/backend-ci.yml"
   push:
     branches:
       - main
     paths:
       - "backend/api/**"
+      - "blockchain/**"
       - ".github/workflows/backend-ci.yml"
 
 concurrency:
@@ -29,12 +31,15 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
+
+      - name: Verify monitored blockchain events exist in contract sources
+        run: node backend/api/scripts/check-blockchain-events.js
 
       - name: Install dependencies
         working-directory: backend/api
@@ -81,10 +86,10 @@ jobs:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/truxify_test
       REDIS_URL: redis://localhost:6379
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Node.js 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
 

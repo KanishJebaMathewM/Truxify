@@ -3,6 +3,24 @@ import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
 
+/**
+ * Derives the exact 32-byte preimage that is revealed on-chain.
+ *
+ * releaseDepositPrivate re-hashes the revealed bytes32 as
+ * `keccak256(abi.encodePacked(bytes32))`, so the secretHash committed via
+ * createProtectedDeposit must be `keccak256(preimage)` for exactly those 32
+ * bytes. Hashing the caller-supplied secret down to a fixed 32-byte value keeps
+ * creation and release consistent for secrets of any length/content (a plain
+ * string passed straight into the bytes32 slot would be zero-padded on-chain,
+ * producing a digest that can never match the commitment).
+ */
+export function toPreimageBytes32(secret) {
+    if (typeof secret === 'string' && secret.startsWith('0x') && secret.length === 66) {
+        return secret;
+    }
+    return ethers.keccak256(ethers.toUtf8Bytes(String(secret)));
+}
+
 class MEVService {
     constructor() {
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
@@ -36,11 +54,11 @@ class MEVService {
 
     async createCommitment(secret, userId) {
         try {
-            // Hash secret (the exact bytes revealed at release time, so the
-            // on-chain keccak(preimage) == secretHash check can pass)
-            const secretHash = ethers.keccak256(
-                ethers.toUtf8Bytes(secret)
-            );
+            // Hash the fixed 32-byte preimage revealed at release time, so the
+            // on-chain keccak256(abi.encodePacked(preimage)) == secretHash check
+            // can pass.
+            const preimage = toPreimageBytes32(secret);
+            const secretHash = ethers.keccak256(preimage);
             
             // Store commitment. The contract does not expose a commitment
             // function; the secretHash is embedded in the deposit via
@@ -70,10 +88,9 @@ class MEVService {
             // Create commitment first
             const commitment = await this.createCommitment(secret, userId);
             
-            // Hash secret for escrow (same bytes as release reveals: plain secret)
-            const secretHash = ethers.keccak256(
-                ethers.toUtf8Bytes(secret)
-            );
+            // Same preimage bytes the release reveals; must match the digest
+            // committed on-chain by createProtectedDeposit.
+            const secretHash = ethers.keccak256(toPreimageBytes32(secret));
             
             // Create MEV-protected deposit. The contract exposes
             // createProtectedDeposit(address payable driver, bytes32 secretHash);
@@ -133,9 +150,13 @@ class MEVService {
 
     async releaseEscrow(escrowId, secret) {
         try {
+            // Reveal the same 32-byte preimage the commitment was created from.
+            // Passing the raw string into the bytes32 slot zero-pads it on-chain
+            // and the digest would never match the committed secretHash.
+            const preimage = toPreimageBytes32(secret);
             const tx = await this.escrow.releaseDepositPrivate(
                 escrowId,
-                secret,
+                preimage,
                 { gasLimit: 150000 }
             );
             const receipt = await tx.wait();

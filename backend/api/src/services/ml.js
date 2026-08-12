@@ -98,7 +98,7 @@ async function handleResponse(response) {
     try {
         return JSON.parse(text);
     } catch (err) {
-    logger.error({ status: response ? response.status : undefined, url }, 'ML service request failed');
+        logger.error({ status: response ? response.status : undefined, bodyPreview: text.slice(0, 200) }, 'ML service request failed');
         throw new Error(`[ML] Invalid JSON response from ML engine: ${err.message}`, { cause: err });
     }
 }

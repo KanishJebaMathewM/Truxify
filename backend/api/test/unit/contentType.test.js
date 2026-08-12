@@ -198,4 +198,38 @@ describe('requireJsonContent', () => {
       expect(res.status).not.toHaveBeenCalled();
     });
   });
+
+  describe('array-valued content-type header', () => {
+    it('accepts the first value when the header is a repeated array', () => {
+      const { req, res, next } = createMocks({
+        req: { method: 'POST', headers: { 'content-type': ['application/json', 'text/plain'] } },
+      });
+      requireJsonContent(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
+    it('returns 415 when the array holds an unsupported media type', () => {
+      const { req, res, next } = createMocks({
+        req: { method: 'POST', headers: { 'content-type': ['text/plain'] } },
+      });
+      requireJsonContent(req, res, next);
+
+      expect(res.status).toHaveBeenCalledWith(415);
+      expect(res._jsonMock).toHaveBeenCalledWith(
+        expect.objectContaining({ error: 'Unsupported Media Type.', received: 'text/plain' }),
+      );
+      expect(next).not.toHaveBeenCalled();
+    });
+
+    it('returns 415 without throwing when the array is empty', () => {
+      const { req, res, next } = createMocks({
+        req: { method: 'POST', headers: { 'content-type': [] } },
+      });
+      expect(() => requireJsonContent(req, res, next)).not.toThrow();
+      expect(res.status).toHaveBeenCalledWith(415);
+      expect(next).not.toHaveBeenCalled();
+    });
+  });
 });

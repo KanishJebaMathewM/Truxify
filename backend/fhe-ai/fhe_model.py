@@ -331,20 +331,24 @@ class FHEService:
             return {'success': False, 'error': str(e)}
     
     def secure_aggregation(self, encrypted_updates: List[ts.ckks_vector]) -> ts.ckks_vector:
-        """Secure aggregation of encrypted updates"""
-        try:
-            # Sum all encrypted updates
-            aggregated = encrypted_updates[0]
-            for update in encrypted_updates[1:]:
-                aggregated = aggregated + update
-            
-            # Average
-            aggregated = aggregated / len(encrypted_updates)
-            
-            return aggregated
-        except Exception as e:
-            logger.error(f"Secure aggregation failed: {e}")
-            return None
+        """Secure aggregation of encrypted updates.
+
+        Fails closed: raises on empty input or any failed merge instead of
+        returning None, so callers can never mistake a failed aggregation for
+        a successful one.
+        """
+        if not encrypted_updates:
+            raise ValueError("Secure aggregation requires at least one encrypted update")
+
+        # Sum all encrypted updates
+        aggregated = encrypted_updates[0]
+        for update in encrypted_updates[1:]:
+            aggregated = aggregated + update
+
+        # Average
+        aggregated = aggregated / len(encrypted_updates)
+
+        return aggregated
     
     def get_stats(self) -> Dict:
         """Get FHE-AI statistics"""

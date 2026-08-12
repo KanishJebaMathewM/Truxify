@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import numpy as np
+import tenseal as ts
 import json
 from datetime import datetime
 import logging
@@ -86,20 +87,40 @@ async def encrypt_model():
 
 @router.post("/aggregate")
 async def secure_aggregation(encrypted_updates: List[str]):
-    """Secure aggregation of encrypted updates"""
+    """Secure aggregation of encrypted updates.
+
+    Deserializes each update and merges them under CKKS. Fails closed: an
+    empty/undeserializable payload or a failed aggregation is an explicit
+    error, never a fabricated 'aggregated: true'.
+    """
     try:
-        # In production: deserialize encrypted updates
+        if not encrypted_updates:
+            raise HTTPException(status_code=400, detail="No encrypted updates provided")
+
         updates = []
         for update in encrypted_updates:
-            # Placeholder
-            updates.append(None)
-        
+            if not isinstance(update, str) or not update:
+                raise HTTPException(status_code=400, detail="Invalid encrypted update payload")
+            try:
+                raw = bytes.fromhex(update)
+                updates.append(ts.ckks_vector_from(fhe_service.context, raw))
+            except (ValueError, TypeError) as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Could not deserialize encrypted update: {e}",
+                )
+
         result = fhe_service.secure_aggregation(updates)
+        if result is None:
+            raise HTTPException(status_code=500, detail="Secure aggregation failed")
+
         return {
             'success': True,
             'data': {'aggregated': True},
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Aggregation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

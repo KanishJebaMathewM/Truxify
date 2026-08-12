@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -75,4 +76,32 @@ func TestSweepDriversEvictsStaleRetainsFresh(t *testing.T) {
 	activeDrivers.Delete("fresh-driver")
 	pingRateLimit.Delete("stale-ping")
 	pingRateLimit.Delete("fresh-ping")
+}
+
+func TestSweepDriversPrunesStaleGeofenceEntries(t *testing.T) {
+	now := time.Now()
+
+	staleEntry := &rateEntry{driverID: "geo-stale", stamps: []time.Time{now.Add(-2 * time.Second)}}
+	freshEntry := &rateEntry{driverID: "geo-fresh", stamps: []time.Time{now}}
+	geofenceRateLimit.Store("geo-stale", staleEntry)
+	geofenceRateLimit.Store("geo-fresh", freshEntry)
+	atomic.AddUint64(&geofenceRateTracked, 2)
+
+	before := atomic.LoadUint64(&geofenceRateTracked)
+
+	sweepDrivers()
+
+	if _, ok := geofenceRateLimit.Load("geo-stale"); ok {
+		t.Error("expected stale geofence rate-limit entry (all stamps older than 1s) to be pruned")
+	}
+	if _, ok := geofenceRateLimit.Load("geo-fresh"); !ok {
+		t.Error("expected fresh geofence rate-limit entry to be retained")
+	}
+	if after := atomic.LoadUint64(&geofenceRateTracked); after != before-1 {
+		t.Errorf("expected geofenceRateTracked to decrement by 1 (from %d), got %d", before, after)
+	}
+
+	geofenceRateLimit.Delete("geo-stale")
+	geofenceRateLimit.Delete("geo-fresh")
+	atomic.AddUint64(&geofenceRateTracked, ^uint64(0))
 }

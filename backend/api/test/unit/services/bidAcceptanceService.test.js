@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 import { createSupabaseMock } from '../../helpers/supabaseMock.js';
 import { OrderRepository } from '../../../src/repositories/orderRepository.js';
 import { BidAcceptanceService, DomainError } from '../../../src/services/order/bidAcceptanceService.js';
+import { acquireLock, releaseLock } from '../../../src/lib/redisLock.js';
 
 vi.mock('../../../src/services/escrow.js', async (importOriginal) => {
   const actual = await importOriginal();
@@ -37,9 +38,11 @@ describe('BidAcceptanceService', () => {
     escrowDeposit.mockClear();
     submitEscrowRefund.mockClear();
 
-    const { acquireLock, releaseLock } = await import('../../../src/lib/redisLock.js');
-    acquireLock.mockResolvedValue('lock-token');
-    releaseLock.mockResolvedValue(true);
+    // Set up redisLock mocks: resolve with a mock token by default
+    acquireLock.mockResolvedValue('mock-lock-token');
+    releaseLock.mockResolvedValue(undefined);
+    acquireLock.mockClear();
+    releaseLock.mockClear();
 
     orderRepository = new OrderRepository(supabaseMock.supabase);
 

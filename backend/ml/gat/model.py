@@ -104,6 +104,11 @@ class SpatialTemporalGAT(nn.Module):
         time_features: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         # x shape: (batch_size, num_nodes, time_steps, features)
+        if x.dim() != 4:
+            raise ValueError(
+                f"SpatialTemporalGAT.forward expects 4-D input "
+                f"(batch, nodes, time_steps, features), got {tuple(x.shape)}"
+            )
         batch_size, num_nodes, time_steps, features = x.shape
         
         # Reshape for spatial processing
@@ -237,15 +242,27 @@ class GATTrainer:
         logger.info(f"✅ GAT Trainer initialized on {self.device}")
     
     def train_step(self, data: Data, targets: torch.Tensor) -> float:
-        """Single training step"""
         self.model.train()
         self.optimizer.zero_grad()
-        
-        # Forward pass
+
         data = data.to(self.device)
+
+        # data.x must be 4-D: (batch, nodes, time_steps, features)
+        if data.x.dim() != 4:
+            raise ValueError(
+                f"data.x must be 4-D (batch, nodes, time_steps, features), "
+                f"got shape {tuple(data.x.shape)}"
+            )
+
         predictions = self.model(data.x, data.edge_index)
-        
-        # Loss
+
+        # targets must match predictions shape: (batch, nodes, horizon)
+        if predictions.shape != targets.shape:
+            raise ValueError(
+                f"predictions shape {tuple(predictions.shape)} does not match "
+                f"targets shape {tuple(targets.shape)}"
+            )
+
         loss = self.criterion(predictions, targets.to(self.device))
         
         # Backward pass

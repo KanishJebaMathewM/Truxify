@@ -3,7 +3,9 @@ import subprocess
 import json
 import redis
 import logging
-from typing import Dict, List, Any
+import struct
+import threading
+from typing import Dict, List, Any, Optional
 from datetime import datetime
 import time
 
@@ -17,6 +19,8 @@ class eBPFLoader:
         self.programs_dir = os.path.dirname(__file__) + "/programs"
         self.loaded_programs = []
         self.stats = {}
+        self._pruner_thread = None
+        self._pruner_stop = threading.Event()
         
         logger.info("✅ eBPF Loader initialized")
     
@@ -129,6 +133,82 @@ class eBPFLoader:
         # In production: read from BPF maps
         
         return stats
+    
+    def _extract_last_time_ns(self, value: Any) -> Optional[int]:
+        """Extract last_time_ns from a telemetry_rate_map entry value.
+        With BTF the value is a dict; without it the value is a raw little-
+        endian byte array where last_time_ns (u64) sits at offset 4 after the
+        leading __u32 lock field."""
+        if isinstance(value, dict):
+            return value.get("last_time_ns")
+        if isinstance(value, list):
+            try:
+                raw = bytes(value)
+                if len(raw) < 12:
+                    return None
+                return struct.unpack_from("<Q", raw, 4)[0]
+            except (struct.error, TypeError):
+                return None
+        return None
+    
+    def prune_rate_limit_entries(self, idle_window_seconds: int = 60) -> int:
+        """Delete telemetry_rate_map entries idle past the rate-limit window.
+        Called periodically so the per-IP map never fills with stale sources
+        (LRU_HASH bounds memory as a backstop, this keeps it healthy in
+        normal operation). Returns the number of entries pruned."""
+        if idle_window_seconds <= 0:
+            raise ValueError("idle_window_seconds must be positive")
+        idle_ns = idle_window_seconds * 1_000_000_000
+        now_ns = time.time_ns()
+        pruned = 0
+        try:
+            dump = subprocess.run(
+                ["sudo", "bpftool", "map", "dump", "name", "telemetry_rate_map"],
+                check=True, capture_output=True, text=True
+            )
+            for entry in json.loads(dump.stdout):
+                key = entry.get("key")
+                last_time_ns = self._extract_last_time_ns(entry.get("value"))
+                if key is None or last_time_ns is None:
+                    continue
+                if now_ns - last_time_ns <= idle_ns:
+                    continue
+                key_hex = bytes(key).hex()
+                subprocess.run(
+                    ["sudo", "bpftool", "map", "delete", "name", "telemetry_rate_map",
+                     "key", key_hex],
+                    check=True, capture_output=True, text=True
+                )
+                pruned += 1
+        except Exception as e:
+            logger.warning(f"Rate-limit map prune failed: {e}")
+        return pruned
+    
+    def start_rate_limit_pruner(self, interval_seconds: int = 60, idle_window_seconds: int = 60):
+        """Start a periodic userspace sweep of telemetry_rate_map. Entries idle
+        past idle_window_seconds are deleted every interval_seconds."""
+        if self._pruner_thread and self._pruner_thread.is_alive():
+            return
+        self._pruner_stop.clear()
+        self._pruner_thread = threading.Thread(
+            target=self._rate_limit_pruner_loop,
+            args=(interval_seconds, idle_window_seconds),
+            daemon=True
+        )
+        self._pruner_thread.start()
+        logger.info("✅ Rate-limit map pruner started")
+    
+    def stop_rate_limit_pruner(self):
+        """Stop the periodic telemetry_rate_map sweep."""
+        self._pruner_stop.set()
+        if self._pruner_thread:
+            self._pruner_thread.join(timeout=5)
+            self._pruner_thread = None
+        logger.info("✅ Rate-limit map pruner stopped")
+    
+    def _rate_limit_pruner_loop(self, interval_seconds: int, idle_window_seconds: int):
+        while not self._pruner_stop.wait(interval_seconds):
+            self.prune_rate_limit_entries(idle_window_seconds)
     
     def load_all_programs(self) -> Dict:
         """Load all eBPF programs"""

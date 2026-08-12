@@ -186,7 +186,6 @@ class KafkaConfig {
         messages: [
           {
             key: key || event.aggregateId || event.orderId || event.order_id || null,
-            key: key || event.eventId || event.orderId,
             value: JSON.stringify({
               ...event,
               timestamp: event.timestamp || new Date().toISOString(),

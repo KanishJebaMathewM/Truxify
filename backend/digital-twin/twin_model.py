@@ -6,8 +6,19 @@ import logging
 import json
 from dataclasses import dataclass, field
 import random
+from math import radians, cos, sin, atan2, sqrt
 
 logger = logging.getLogger(__name__)
+
+
+def haversine_km(a: Dict, b: Dict) -> float:
+    """Great-circle distance in kilometres between two lat/lng points."""
+    lat1, lng1 = radians(a['lat']), radians(a['lng'])
+    lat2, lng2 = radians(b['lat']), radians(b['lng'])
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    h = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlng / 2) ** 2
+    return 6371.0 * 2 * atan2(sqrt(h), sqrt(1 - h))
 
 @dataclass
 class LogisticsAsset:
@@ -302,18 +313,53 @@ class PredictiveAnalytics:
             }
     
     def predict_demand(self, location: Dict, hours: int = 24) -> Dict:
-        """Predict demand at location"""
-        base_demand = random.uniform(10, 100)
-        time_factor = 1.0 + 0.5 * np.sin(np.pi * datetime.now().hour / 12)
+        """Forecast demand at location from historical event/demand data.
+
+        Uses the digital twin's stored event history: events within a radius of
+        the requested location define the historical demand baseline, and the
+        forecast extrapolates that observed rate over the requested horizon.
+        Fails closed with an explicit no-data result when there is no relevant
+        history instead of sampling a uniform distribution.
+        """
+        radius_km = 50.0
+        now = datetime.now()
+        horizon_start = now - timedelta(hours=hours)
         
-        predicted_demand = base_demand * time_factor
+        location_events = []
+        for event in self.twin.events:
+            if haversine_km(event.location, location) <= radius_km and event.timestamp >= horizon_start:
+                location_events.append(event)
+        
+        if not location_events:
+            return {
+                'prediction': 'insufficient_data',
+                'confidence': 0.0,
+                'message': 'No historical demand data at this location within the forecast horizon'
+            }
+        
+        # Demand baseline: observed events per hour within the lookback window
+        hours_observed = max(1.0, (now - min(e.timestamp for e in location_events)).total_seconds() / 3600)
+        hourly_rate = len(location_events) / hours_observed
+        
+        # Peak hour from the hour with the most historical events
+        hour_counts = {}
+        for event in location_events:
+            hour_counts[event.timestamp.hour] = hour_counts.get(event.timestamp.hour, 0) + 1
+        peak_hour = max(hour_counts, key=hour_counts.get)
+        peak_time = 'evening' if peak_hour >= 12 else 'morning'
+        
+        predicted_demand = hourly_rate * hours
+        confidence = min(1.0, len(location_events) / 50)
         
         return {
             'location': location,
-            'predicted_demand': predicted_demand,
-            'confidence': 0.75,
-            'peak_time': 'evening' if datetime.now().hour > 12 else 'morning',
-            'forecast_hours': hours
+            'predicted_demand': round(predicted_demand, 2),
+            'confidence': confidence,
+            'peak_time': peak_time,
+            'peak_hour': peak_hour,
+            'forecast_hours': hours,
+            'source': 'event_history',
+            'observed_events': len(location_events)
         }
 
 class DigitalTwinOptimizer:

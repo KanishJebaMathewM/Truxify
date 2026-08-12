@@ -232,7 +232,14 @@ contract ZKPrivacy is Ownable, ReentrancyGuard, Pausable {
         });
 
         nullifiers[nullifier] = true;
-        spentCommitments[commitment] = true;
+
+        // A partial withdrawal must only reduce the spendable balance. The
+        // commitment is marked spent only once it is fully drained, otherwise
+        // the residual escrow would be locked forever (issue #10794).
+        commitmentAmounts[commitment] -= amount;
+        if (commitmentAmounts[commitment] == 0) {
+            spentCommitments[commitment] = true;
+        }
 
         emit TransactionProcessed(nullifier, recipient, amount);
     }

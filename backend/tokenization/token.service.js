@@ -71,7 +71,7 @@ class TokenizationService {
             }
             const totalCost = parseFloat(asset.tokenPrice) * amount;
 
-            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer);
+            const userContract = new ethers.Contract(this.tokenAddress, this.tokenABI, signer || this.wallet);
             const tx = await userContract.purchaseFraction(
                 assetId,
                 ethers.parseEther(amount.toString()),

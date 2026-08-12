@@ -85,7 +85,16 @@ class OracleService {
   }
 
   async _verifyGPS(orderId, gpsCoordinates) {
-    const hasValidCoords = gpsCoordinates &&
+    if (!gpsCoordinates) {
+      return {
+        confirmed: false,
+        provider: 'GPSVerifier',
+        reason: 'No GPS coordinates provided',
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    const hasValidCoords =
       typeof gpsCoordinates.lat === 'number' &&
       typeof gpsCoordinates.lng === 'number' &&
       gpsCoordinates.lat >= -90 && gpsCoordinates.lat <= 90 &&

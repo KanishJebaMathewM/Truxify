@@ -94,31 +94,7 @@ describe('validateBody middleware', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-describe('formatValidationIssues', () => {
-  it('formats a single field error', () => {
-    const error = { issues: [{ path: ['email'], message: 'Invalid email' }] };
-    const result = formatValidationIssues(error);
-    expect(result).toEqual([{ field: 'email', message: 'Invalid email' }]);
-  });
 
-  it('formats a nested field error path', () => {
-    const error = { issues: [{ path: ['address', 'city'], message: 'Required' }] };
-    const result = formatValidationIssues(error);
-    expect(result).toEqual([{ field: 'address.city', message: 'Required' }]);
-  });
-
-  it('formats an empty path as "body"', () => {
-    const error = { issues: [{ path: [], message: 'Body is required' }] };
-    const result = formatValidationIssues(error);
-    expect(result).toEqual([{ field: 'body', message: 'Body is required' }]);
-  });
-
-  it('returns empty array for empty issues', () => {
-    const error = { issues: [] };
-    const result = formatValidationIssues(error);
-    expect(result).toEqual([]);
-  });
-});
 
 });
 
@@ -211,30 +187,6 @@ describe('validateQuery middleware', () => {
     expect(res.status).not.toHaveBeenCalled();
   });
 
-describe('formatValidationIssues', () => {
-  it('formats a single field error', () => {
-    const error = { issues: [{ path: ['email'], message: 'Invalid email' }] };
-    const result = formatValidationIssues(error);
-    expect(result).toEqual([{ field: 'email', message: 'Invalid email' }]);
-  });
 
-  it('formats a nested field error path', () => {
-    const error = { issues: [{ path: ['address', 'city'], message: 'Required' }] };
-    const result = formatValidationIssues(error);
-    expect(result).toEqual([{ field: 'address.city', message: 'Required' }]);
-  });
-
-  it('formats an empty path as "body"', () => {
-    const error = { issues: [{ path: [], message: 'Body is required' }] };
-    const result = formatValidationIssues(error);
-    expect(result).toEqual([{ field: 'body', message: 'Body is required' }]);
-  });
-
-  it('returns empty array for empty issues', () => {
-    const error = { issues: [] };
-    const result = formatValidationIssues(error);
-    expect(result).toEqual([]);
-  });
-});
 
 });

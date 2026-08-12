@@ -1,4 +1,4 @@
-import { redisClient, supabaseAdmin } from '../config/db.js';
+﻿import { redisClient, supabaseAdmin } from '../config/db.js';
 import logger from '../middleware/logger.js';
 import { submitEscrowRefund, getEscrowBooking } from './escrow.js';
 import { acquireLock, releaseLock } from '../lib/redisLock.js';
@@ -14,6 +14,11 @@ const MAX_ATTEMPTS = 10;
 const BASE_BACKOFF_MS = 60_000;
 const LOCK_KEY = 'escrow:funding:reconciliation:lock';
 const LOCK_TTL_SECONDS = 120;
+// PostgREST caps a single response at 1000 rows; page through the stale set
+// deterministically so a large stuck funding queue is drained rather than
+// only ever processing the leading slice (#9219).
+const STALE_FUNDING_PAGE_SIZE = 1000;
+const STALE_FUNDING_MAX_PAGES = 10;
 
 let fundingTimer = null;
 let fundingRunning = false;
@@ -54,21 +59,63 @@ async function finalizeOrRevert(order, orderRepository) {
 
     if (bookingFunded && !mismatchReason && order.status === 'cancelled') {
       logger.info(`[escrow-funding] Order ${order.order_display_id} is cancelled but deposit landed on-chain. Triggering refund.`);
+      // Mirror the careful revert path below: submitEscrowRefund resolves with
+      // { txHash: null, error } / missing txHash on chain failures instead of
+      // throwing, so only clear the funding as refunded once the refund
+      // actually submitted AND confirmed on-chain.
+      let refundResult;
       try {
-        await submitEscrowRefund(order.order_display_id);
-        await orderRepository.updateOrder(order.id, {
-          escrow_status: 'refunded',
-          escrow_refund_error: null,
-          updated_at: new Date().toISOString(),
-        });
+        refundResult = await submitEscrowRefund(order.order_display_id);
       } catch (err) {
-        logger.error(`[escrow-funding] Failed to refund cancelled order ${order.order_display_id}: ${err.message}`);
-        await orderRepository.updateOrder(order.id, {
-          escrow_status: 'refund_failed',
-          escrow_refund_error: err.message,
-          updated_at: new Date().toISOString(),
-        });
+        refundResult = { txHash: null, error: err.message };
+        logger.error(`[escrow-funding] Refund failed for cancelled order ${order.order_display_id}: ${err.message}`);
       }
+
+      if (refundResult?.error || !refundResult?.txHash) {
+        const refundError = refundResult?.error || 'escrow refund was not submitted';
+        logger.error(
+          `[escrow-funding] Skipping refunded clear for ${order.order_display_id}: refund not confirmed (${refundError})`
+        );
+        await orderRepository.updateOrderWithFilter(order.id, {
+          escrow_status: 'refund_failed',
+          escrow_refund_error: refundError,
+          updated_at: new Date().toISOString(),
+        }, [
+          { op: 'eq', column: 'escrow_status', value: 'funding' },
+          { op: 'eq', column: 'id', value: order.id },
+        ], 'id').catch((err) => {
+          logger.error(`[escrow-funding] Failed to record refund failure for ${order.order_display_id}: ${err.message}`);
+        });
+        return;
+      }
+
+      try {
+        await refundResult.waitForConfirmation();
+      } catch (err) {
+        logger.error(`[escrow-funding] Refund confirmation failed for cancelled order ${order.order_display_id}: ${err.message}`);
+        await orderRepository.updateOrderWithFilter(order.id, {
+          escrow_status: 'refund_failed',
+          escrow_refund_error: `refund confirmation failed: ${err.message}`,
+          updated_at: new Date().toISOString(),
+        }, [
+          { op: 'eq', column: 'escrow_status', value: 'funding' },
+          { op: 'eq', column: 'id', value: order.id },
+        ], 'id').catch((err) => {
+          logger.error(`[escrow-funding] Failed to record confirmation failure for ${order.order_display_id}: ${err.message}`);
+        });
+        return;
+      }
+
+      await orderRepository.updateOrderWithFilter(order.id, {
+        escrow_status: 'refunded',
+        escrow_refund_error: null,
+        updated_at: new Date().toISOString(),
+      }, [
+        { op: 'eq', column: 'escrow_status', value: 'funding' },
+        { op: 'eq', column: 'id', value: order.id },
+      ], 'id').catch((err) => {
+        logger.error(`[escrow-funding] Failed to mark cancelled order ${order.order_display_id} as refunded: ${err.message}`);
+      });
       return;
     }
 
@@ -241,26 +288,34 @@ export async function reconcileStaleFunding(orderRepository) {
     const fundingTtlMs = (Number.isFinite(ttlMinutes) && ttlMinutes > 0 ? ttlMinutes : DEFAULT_FUNDING_TTL_MINUTES) * 60 * 1000;
     const cutoff = new Date(Date.now() - fundingTtlMs).toISOString();
 
-    const { data: staleOrders, error } = await orderRepository.findStaleFundingOrders(cutoff);
-    if (error) {
-      logger.error('[escrow-funding] Failed to load stale funding orders:', error.message);
-      return;
-    }
+    for (let page = 0; page < STALE_FUNDING_MAX_PAGES; page += 1) {
+      const { data: staleOrders, error } = await orderRepository.findStaleFundingOrders(cutoff, {
+        offset: page * STALE_FUNDING_PAGE_SIZE,
+        limit: STALE_FUNDING_PAGE_SIZE,
+      });
+      if (error) {
+        logger.error('[escrow-funding] Failed to load stale funding orders:', error.message);
+        return;
+      }
+      if (!staleOrders || staleOrders.length === 0) break;
 
-    for (const order of staleOrders ?? []) {
-      const attempts = order.escrow_funding_attempts ?? 0;
-      if (attempts >= MAX_ATTEMPTS) {
-        continue;
-      }
-      if (!dueForRetry(order)) continue;
-      if (globalLockAcquired && redisClient) {
-        try {
-          await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
-        } catch (err) {
-          logger.warn('[escrow-funding] Failed to refresh lock:', err.message);
+      for (const order of staleOrders) {
+        const attempts = order.escrow_funding_attempts ?? 0;
+        if (attempts >= MAX_ATTEMPTS) {
+          continue;
         }
+        if (!dueForRetry(order)) continue;
+        if (globalLockAcquired && redisClient) {
+          try {
+            await redisClient.expire(LOCK_KEY, LOCK_TTL_SECONDS);
+          } catch (err) {
+            logger.warn('[escrow-funding] Failed to refresh lock:', err.message);
+          }
+        }
+        await finalizeOrRevert(order, orderRepository);
       }
-      await finalizeOrRevert(order, orderRepository);
+
+      if (staleOrders.length < STALE_FUNDING_PAGE_SIZE) break;
     }
   } finally {
     if (globalLockAcquired && redisClient) {

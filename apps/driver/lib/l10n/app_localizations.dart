@@ -619,6 +619,18 @@ abstract class AppLocalizations {
 
   /// Label for the button that resends the OTP to the driver's phone.
   String get resendOtp;
+
+  /// Language selection setting
+  String get language;
+
+  /// English language name
+  String get english;
+
+  /// Hindi language name
+  String get hindi;
+
+  /// Tamil language name
+  String get tamil;
 }
 
 class _AppLocalizationsDelegate

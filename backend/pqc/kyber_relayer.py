@@ -1,6 +1,17 @@
-import os
-import secrets
-import hashlib
+"""
+Real ML-KEM-1024 (CRYSTALS-Kyber) key-encapsulation relayer service.
+
+Implemented on top of the standards-compliant ``mlkem`` package. Unlike the
+previous hash-based construction — where the public key was a pure function of
+the secret seed and the ciphertext XORed a keystream derived from the *public*
+key, so anyone holding the public key could decrypt the message and derive the
+shared secret — this module performs genuine ML-KEM-1024 key encapsulation:
+only the holder of the secret key can decapsulate the shared secret.
+"""
+
+from mlkem.ml_kem import ML_KEM
+from mlkem.parameter_set import ML_KEM_1024
+
 
 class Kyber1024Relayer:
     """
@@ -13,21 +24,23 @@ class Kyber1024Relayer:
         self.secret_key_len = 3168
         self.ciphertext_len = 1568
         self.shared_secret_len = 32
+        self._kem = ML_KEM(ML_KEM_1024)
 
     def generate_keypair(self):
-        """Generates a Kyber1024 public/private keypair."""
-        seed = os.urandom(64)
-        pk = hashlib.sha3_512(seed + b"KYBER_PK_TAG").digest() * (self.public_key_len // 64)
-        sk = hashlib.sha3_512(seed + b"KYBER_SK_TAG").digest() * (self.secret_key_len // 64)
-        return pk, sk
+        """Generates an ML-KEM-1024 public/private keypair from a CSPRNG seed."""
+        return self._kem.key_gen()
 
     def encapsulate(self, public_key: bytes):
-        """Encapsulates a random 256-bit shared secret using the recipient's Kyber public key."""
+        """Encapsulates a random 256-bit shared secret using the recipient's Kyber public key.
+
+        Returns ``(ciphertext, shared_secret)``. The shared secret is only
+        recoverable by the holder of the corresponding secret key; a party
+        that knows only the public key and the ciphertext cannot derive it.
+        """
         if len(public_key) != self.public_key_len:
             raise ValueError(f"Invalid Kyber1024 public key length: {len(public_key)} bytes required.")
-        
-        shared_secret = os.urandom(self.shared_secret_len)
-        ciphertext = hashlib.sha3_512(shared_secret + public_key[:64]).digest() * (self.ciphertext_len // 64)
+
+        shared_secret, ciphertext = self._kem.encaps(public_key)
         return ciphertext, shared_secret
 
     def decapsulate(self, ciphertext: bytes, secret_key: bytes):
@@ -36,9 +49,8 @@ class Kyber1024Relayer:
             raise ValueError(f"Invalid ciphertext length: {len(ciphertext)} bytes required.")
         if len(secret_key) != self.secret_key_len:
             raise ValueError(f"Invalid secret key length: {len(secret_key)} bytes required.")
-        
-        # Derive shared secret deterministically from ciphertext and secret key
-        derived_ss = hashlib.sha256(ciphertext[:32] + secret_key[:32]).digest()
-        return derived_ss
+
+        return self._kem.decaps(secret_key, ciphertext)
+
 
 relayer_service = Kyber1024Relayer()

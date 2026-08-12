@@ -23,7 +23,6 @@ import { getRouteEstimate, __testing } from '../../src/services/osrm.js';
 
 const { buildRouteUrl, buildCacheKey, DEFAULT_OSRM_BASE_URL, DEFAULT_TIMEOUT_MS } = __testing;
 
-
 describe('osrm - buildRouteUrl', () => {
   it('builds correct URL with coordinates', () => {
     const url = buildRouteUrl({
@@ -63,14 +62,14 @@ describe('osrm - buildRouteUrl', () => {
 });
 
 describe('osrm - buildCacheKey', ()=> {
-  it('rounds coordinates to 6 decimal places with v2 prefix', () => {
+  it('rounds coordinates to 8 decimal places with v2 prefix', () => {
     const key = buildCacheKey({
       pickupLat: 12.9715987,
       pickupLng: 77.5945627,
       dropLat: 13.0827,
       dropLng: 80.2707,
     });
-    expect(key).toBe('osrm:route:v2:12.971599:77.594563:13.0827:80.2707');
+    expect(key).toBe('osrm:route:v2:12.9715987:77.5945627:13.0827:80.2707');
   });
 
   it('produces same key for coordinates that round to same values', () => {
@@ -145,6 +144,19 @@ describe('osrm - getRouteEstimate', () => {
     fetch.mockResolvedValue({
       ok: true,
       json: async () => ({ routes: [{ distance: -1, duration: 3600 }] }),
+    });
+
+    const result = await getRouteEstimate({
+      pickupLat: 12.9, pickupLng: 77.5, dropLat: 13.0, dropLng: 80.2,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it('returns null when route distance is zero', async () => {
+    fetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ routes: [{ distance: 0, duration: 0 }] }),
     });
 
     const result = await getRouteEstimate({
@@ -234,7 +246,7 @@ describe('osrm - getRouteEstimate', () => {
       pickupLat: 12.9715987, pickupLng: 77.5945627, dropLat: 13.0827, dropLng: 80.2707,
     });
 
-    expect(mockRedis.get).toHaveBeenCalledWith('osrm:route:v2:12.971599:77.594563:13.0827:80.2707');
+    expect(mockRedis.get).toHaveBeenCalledWith('osrm:route:v2:12.9715987:77.5945627:13.0827:80.2707');
   });
 
   it('calls OSRM and stores result in Redis on cache miss', async () => {
@@ -270,7 +282,10 @@ describe('osrm - getRouteEstimate', () => {
 
     expect(result).toEqual({ distanceKm: 20, durationSeconds: 900 });
     expect(fetch).toHaveBeenCalledOnce();
-    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Redis get error:', 'Redis connection refused');
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      { event: 'OSRM_REDIS_GET_ERROR', error: 'Redis connection refused' },
+      '[osrm] Redis get error'
+    );
   });
 
   it('returns result even when Redis set throws after successful OSRM response', async () => {
@@ -285,7 +300,10 @@ describe('osrm - getRouteEstimate', () => {
     });
 
     expect(result).toEqual({ distanceKm: 10, durationSeconds: 600 });
-    expect(mockLogger.error).toHaveBeenCalledWith('[osrm] Redis set error:', 'Redis write failed');
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      { event: 'OSRM_REDIS_SET_ERROR', error: 'Redis write failed' },
+      '[osrm] Redis set error'
+    );
   });
 
   it('does not cache null when OSRM returns a non-ok response', async () => {
@@ -314,7 +332,19 @@ describe('osrm - getRouteEstimate', () => {
 
 describe('osrm - getRouteEstimate edge cases', () => {
   beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+    mockRedis.get.mockResolvedValue(null);
+    mockRedis.set.mockResolvedValue('OK');
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
     vi.clearAllMocks();
+    vi.stubGlobal('fetch', vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('returns null for null input', async () => {
@@ -378,5 +408,21 @@ describe('osrm - getRouteEstimate edge cases', () => {
 
     // Redis get failed (invalid JSON), fetch was called as fallback
     expect(fetch).toHaveBeenCalled();
+  });
+});
+
+describe('osrm - retryDelayMs backoff clamp', () => {
+  const { retryDelayMs, MAX_RETRY_DELAY_MS } = __testing;
+
+  it('doubles the delay per attempt', () => {
+    expect(retryDelayMs(500, 0)).toBe(500);
+    expect(retryDelayMs(500, 1)).toBe(1000);
+    expect(retryDelayMs(500, 2)).toBe(2000);
+  });
+
+  it('clamps the delay at MAX_RETRY_DELAY_MS', () => {
+    expect(retryDelayMs(500, 10)).toBe(MAX_RETRY_DELAY_MS);
+    expect(retryDelayMs(10000, 3)).toBe(MAX_RETRY_DELAY_MS);
+    expect(MAX_RETRY_DELAY_MS).toBeLessThanOrEqual(10_000);
   });
 });

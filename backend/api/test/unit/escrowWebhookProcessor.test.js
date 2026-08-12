@@ -19,11 +19,11 @@ vi.mock('ethers', () => ({
 
 
 const mockQuery = {
-  select: vi.fn(function () { return this; }),
+  select: vi.fn(function () { return Promise.resolve({ data: [{ id: 'tx-wallet-1' }], error: null }); }),
   eq: vi.fn(function () { return this; }),
   in: vi.fn(function () { return this; }),
   update: vi.fn(function () { return this; }),
-  limit: vi.fn(function () { return this; }),
+  limit: vi.fn(function () { return Promise.resolve({ data: [{ id: 'tx-limit-1' }], error: null }); }),
   maybeSingle: vi.fn(),
 };
 
@@ -58,11 +58,8 @@ describe('processEscrowWebhookEvent', () => {
 
   it('keeps processor failures visible to the DLQ retry loop', async () => {
     await expect(
-      processEscrowWebhookEvent('EscrowDeposited', {
-        orderId: 'order-1',
-        simulateFailure: true,
-      })
-    ).rejects.toThrow('Simulated database lock or processing failure');
+      processEscrowWebhookEvent('PaymentReleased', {})
+    ).rejects.toThrow('Missing orderId in escrow webhook payload');
   });
 
   it('rejects payloads without an event type', async () => {

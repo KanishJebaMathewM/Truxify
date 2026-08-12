@@ -27,10 +27,23 @@ export const ORDER_DISPLAY_ID_MAX_RETRIES = 5;
  */
 export function generateOrderDisplayId() {
   const now = new Date();
-  const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+  let dateStr;
+  try {
+    dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
+  } catch (err) {
+    // An invalid Date (e.g. a system clock that produced an out-of-range
+    // value) makes toISOString throw; fall back to the Unix epoch day so the
+    // id format stays stable and unique per day.
+    dateStr = '19700101';
+  }
   const random = Array.from(
     { length: DISPLAY_ID_RANDOM_LENGTH },
     () => DISPLAY_ID_RANDOM_ALPHABET[crypto.randomInt(DISPLAY_ID_RANDOM_ALPHABET.length)],
   ).join('');
   return `${DISPLAY_ID_PREFIX}${dateStr}${random}`;
+}
+
+export function isValidOrderDisplayId(displayId) {
+  if (typeof displayId !== 'string') return false;
+  return /^#FF\d{8}[A-Z0-9]{12}$/.test(displayId);
 }

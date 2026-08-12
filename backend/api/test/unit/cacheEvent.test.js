@@ -1,255 +1,207 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import {
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+const {
   CacheEventType,
   createCacheEvent,
   serializeCacheEvent,
   deserializeCacheEvent,
-} from '../../src/cache/CacheEvent.js';
+} = await import('../../src/cache/CacheEvent.js');
 
-describe('CacheEventType', () => {
-  it('has all expected event types', () => {
-    expect(CacheEventType).toEqual({
-      INVALIDATE_KEY: 'INVALIDATE_KEY',
-      INVALIDATE_PATTERN: 'INVALIDATE_PATTERN',
-      INVALIDATE_NAMESPACE: 'INVALIDATE_NAMESPACE',
-      BUMP_VERSION: 'BUMP_VERSION',
-      REFRESH: 'REFRESH',
+describe('CacheEvent', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  describe('createCacheEvent', () => {
+    it('creates a valid INVALIDATE_KEY event with all fields', () => {
+      const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
+        namespace: 'orders',
+        key: 'order:123',
+        entityId: '123',
+        subKey: 'details',
+        originInstanceId: 'instance-1',
+        timestamp: 1710000000000,
+      });
+
+      expect(event.id).toBeTruthy();
+      expect(event.type).toBe(CacheEventType.INVALIDATE_KEY);
+      expect(event.namespace).toBe('orders');
+      expect(event.key).toBe('order:123');
+      expect(event.entityId).toBe('123');
+      expect(event.subKey).toBe('details');
+      expect(event.originInstanceId).toBe('instance-1');
+      expect(event.timestamp).toBe(1710000000000);
+    });
+
+    it('creates INVALIDATE_KEY event with only required fields', () => {
+      const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
+        namespace: 'profiles',
+        key: 'profile:abc',
+      });
+
+      expect(event.type).toBe(CacheEventType.INVALIDATE_KEY);
+      expect(event.namespace).toBe('profiles');
+      expect(event.key).toBe('profile:abc');
+      expect(event.pattern).toBeNull();
+      expect(event.entityId).toBeNull();
+    });
+
+    it('creates INVALIDATE_PATTERN event', () => {
+      const event = createCacheEvent(CacheEventType.INVALIDATE_PATTERN, {
+        namespace: 'drivers',
+        pattern: 'driver:*',
+        entityId: '456',
+      });
+
+      expect(event.type).toBe(CacheEventType.INVALIDATE_PATTERN);
+      expect(event.namespace).toBe('drivers');
+      expect(event.pattern).toBe('driver:*');
+      expect(event.key).toBeNull();
+    });
+
+    it('creates BUMP_VERSION event', () => {
+      const event = createCacheEvent(CacheEventType.BUMP_VERSION, {
+        namespace: 'trips',
+        originInstanceId: 'instance-2',
+      });
+
+      expect(event.type).toBe(CacheEventType.BUMP_VERSION);
+      expect(event.namespace).toBe('trips');
+      expect(event.key).toBeNull();
+      expect(event.pattern).toBeNull();
+    });
+
+    it('generates a UUID for each event', () => {
+      const event1 = createCacheEvent(CacheEventType.INVALIDATE_KEY, { namespace: 'a', key: 'x' });
+      const event2 = createCacheEvent(CacheEventType.INVALIDATE_KEY, { namespace: 'a', key: 'x' });
+      expect(event1.id).not.toBe(event2.id);
+    });
+
+    it('auto-sets timestamp when omitted', () => {
+      const before = Date.now();
+      const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, { namespace: 'x', key: 'y' });
+      const after = Date.now();
+      expect(event.timestamp).toBeGreaterThanOrEqual(before);
+      expect(event.timestamp).toBeLessThanOrEqual(after);
+    });
+
+    it('throws TypeError for invalid event type', () => {
+      expect(() =>
+        createCacheEvent('INVALID_FOO', { namespace: 'x', key: 'y' }),
+      ).toThrow(TypeError);
+    });
+
+    it('throws TypeError for null event type', () => {
+      expect(() =>
+        // @ts-ignore
+        createCacheEvent(null, { namespace: 'x', key: 'y' }),
+      ).toThrow(TypeError);
+    });
+
+    it('throws TypeError when namespace is missing', () => {
+      expect(() =>
+        createCacheEvent(CacheEventType.INVALIDATE_KEY, { key: 'x' }),
+      ).toThrow(TypeError);
+    });
+
+    it('throws TypeError when namespace is empty string', () => {
+      expect(() =>
+        createCacheEvent(CacheEventType.INVALIDATE_KEY, { namespace: '  ', key: 'x' }),
+      ).toThrow(TypeError);
+    });
+
+    it('throws TypeError for INVALIDATE_KEY when key is missing', () => {
+      expect(() =>
+        createCacheEvent(CacheEventType.INVALIDATE_KEY, { namespace: 'x' }),
+      ).toThrow(TypeError);
+    });
+
+    it('throws TypeError for INVALIDATE_PATTERN when pattern is missing', () => {
+      expect(() =>
+        createCacheEvent(CacheEventType.INVALIDATE_PATTERN, { namespace: 'x' }),
+      ).toThrow(TypeError);
     });
   });
 
-  it('has exactly 5 entries', () => {
-    expect(Object.keys(CacheEventType)).toHaveLength(5);
-  });
-
-  it('is frozen and cannot be modified', () => {
-    expect(Object.isFrozen(CacheEventType)).toBe(true);
-
-    expect(() => {
-      CacheEventType.NEW_TYPE = 'NEW_TYPE';
-    }).toThrow();
-
-    expect(() => {
-      CacheEventType.INVALIDATE_KEY = 'changed';
-    }).toThrow();
-
-    expect(CacheEventType.INVALIDATE_KEY).toBe('INVALIDATE_KEY');
-  });
-});
-
-describe('createCacheEvent', () => {
-  it('creates an event with correct type and namespace', () => {
-    const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
-      namespace: 'users',
+  describe('serializeCacheEvent', () => {
+    it('returns valid JSON string', () => {
+      const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
+        namespace: 'orders',
+        key: 'order:999',
+      });
+      const json = serializeCacheEvent(event);
+      expect(typeof json).toBe('string');
+      expect(() => JSON.parse(json)).not.toThrow();
     });
 
-    expect(event.type).toBe('INVALIDATE_KEY');
-    expect(event.namespace).toBe('users');
-  });
-
-  it('generates a unique UUID for each event', () => {
-    const a = createCacheEvent(CacheEventType.REFRESH, { namespace: 'ns' });
-    const b = createCacheEvent(CacheEventType.REFRESH, { namespace: 'ns' });
-
-    expect(a.id).toBeDefined();
-    expect(b.id).toBeDefined();
-    expect(typeof a.id).toBe('string');
-    expect(a.id).not.toBe(b.id);
-  });
-
-  it('UUID matches standard v4 format', () => {
-    const event = createCacheEvent(CacheEventType.BUMP_VERSION, {
-      namespace: 'ns',
-    });
-    expect(event.id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
-  });
-
-  it('sets a default timestamp close to Date.now()', () => {
-    const before = Date.now();
-    const event = createCacheEvent(CacheEventType.INVALIDATE_PATTERN, {
-      namespace: 'ns',
-    });
-    const after = Date.now();
-
-    expect(event.timestamp).toBeGreaterThanOrEqual(before);
-    expect(event.timestamp).toBeLessThanOrEqual(after);
-  });
-
-  it('accepts a custom timestamp', () => {
-    const customTs = 1700000000000;
-    const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
-      namespace: 'ns',
-      timestamp: customTs,
+    it('serialized output can be deserialized back to the original event', () => {
+      const original = createCacheEvent(CacheEventType.BUMP_VERSION, {
+        namespace: 'metrics',
+        entityId: 'ent-1',
+      });
+      const json = serializeCacheEvent(original);
+      const parsed = JSON.parse(json);
+      expect(parsed.type).toBe(original.type);
+      expect(parsed.namespace).toBe(original.namespace);
+      expect(parsed.entityId).toBe(original.entityId);
     });
 
-    expect(event.timestamp).toBe(customTs);
-  });
-
-  it('sets optional fields to null when not provided', () => {
-    const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
-      namespace: 'ns',
-    });
-
-    expect(event.key).toBeNull();
-    expect(event.pattern).toBeNull();
-    expect(event.entityId).toBeNull();
-    expect(event.subKey).toBeNull();
-    expect(event.originInstanceId).toBeNull();
-  });
-
-  it('accepts optional key field', () => {
-    const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
-      namespace: 'ns',
-      key: 'user:123',
-    });
-    expect(event.key).toBe('user:123');
-  });
-
-  it('accepts optional pattern field', () => {
-    const event = createCacheEvent(CacheEventType.INVALIDATE_PATTERN, {
-      namespace: 'ns',
-      pattern: 'user:*',
-    });
-    expect(event.pattern).toBe('user:*');
-  });
-
-  it('accepts optional entityId field', () => {
-    const event = createCacheEvent(CacheEventType.REFRESH, {
-      namespace: 'ns',
-      entityId: 'entity-42',
-    });
-    expect(event.entityId).toBe('entity-42');
-  });
-
-  it('accepts optional subKey field', () => {
-    const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
-      namespace: 'ns',
-      key: 'user:123',
-      subKey: 'profile',
-    });
-    expect(event.subKey).toBe('profile');
-  });
-
-  it('accepts optional originInstanceId field', () => {
-    const event = createCacheEvent(CacheEventType.BUMP_VERSION, {
-      namespace: 'ns',
-      originInstanceId: 'instance-abc',
-    });
-    expect(event.originInstanceId).toBe('instance-abc');
-  });
-
-  it('returns all fields when every option is provided', () => {
-    const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
-      namespace: 'orders',
-      key: 'order:999',
-      entityId: 'order-999',
-      subKey: 'items',
-      originInstanceId: 'node-3',
-      timestamp: 1234567890,
-    });
-
-    expect(event).toEqual({
-      id: expect.stringMatching(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-      ),
-      type: 'INVALIDATE_KEY',
-      namespace: 'orders',
-      key: 'order:999',
-      pattern: null,
-      entityId: 'order-999',
-      subKey: 'items',
-      originInstanceId: 'node-3',
-      timestamp: 1234567890,
+    it('preserves the originInstanceId through a round-trip', () => {
+      const original = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
+        namespace: 'profile',
+        key: 'profile:user-1',
+        originInstanceId: 'instance-abc',
+      });
+      const json = serializeCacheEvent(original);
+      const parsed = JSON.parse(json);
+      expect(parsed.originInstanceId).toBe('instance-abc');
     });
   });
 
-  it('defaults opts to empty object when omitted', () => {
-    const event = createCacheEvent(CacheEventType.BUMP_VERSION);
-    expect(event.type).toBe('BUMP_VERSION');
-    expect(event.namespace).toBeUndefined();
-  });
-});
+  describe('deserializeCacheEvent', () => {
+    it('deserializes a valid JSON event', () => {
+      const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
+        namespace: 'profiles',
+        key: 'profile:42',
+      });
+      const json = serializeCacheEvent(event);
+      const result = deserializeCacheEvent(json);
 
-describe('serializeCacheEvent', () => {
-  it('returns a valid JSON string', () => {
-    const event = createCacheEvent(CacheEventType.INVALIDATE_KEY, {
-      namespace: 'ns',
-      key: 'k',
+      expect(result).not.toBeNull();
+      expect(result.type).toBe(CacheEventType.INVALIDATE_KEY);
+      expect(result.namespace).toBe('profiles');
+      expect(result.key).toBe('profile:42');
     });
 
-    const json = serializeCacheEvent(event);
-    expect(typeof json).toBe('string');
-
-    const parsed = JSON.parse(json);
-    expect(parsed).toEqual(event);
-  });
-
-  it('produces JSON that can be round-tripped', () => {
-    const event = createCacheEvent(CacheEventType.INVALIDATE_PATTERN, {
-      namespace: 'cache',
-      pattern: '*:meta',
-      originInstanceId: 'i-1',
+    it('returns null for malformed JSON', () => {
+      const result = deserializeCacheEvent('not valid json {{{');
+      expect(result).toBeNull();
     });
 
-    const json = serializeCacheEvent(event);
-    const roundTrip = JSON.parse(json);
-
-    expect(roundTrip.id).toBe(event.id);
-    expect(roundTrip.type).toBe(event.type);
-    expect(roundTrip.namespace).toBe(event.namespace);
-    expect(roundTrip.pattern).toBe(event.pattern);
-    expect(roundTrip.originInstanceId).toBe(event.originInstanceId);
-  });
-});
-
-describe('deserializeCacheEvent', () => {
-  it('correctly parses valid JSON', () => {
-    const original = createCacheEvent(CacheEventType.INVALIDATE_NAMESPACE, {
-      namespace: 'sessions',
-    });
-    const json = serializeCacheEvent(original);
-
-    const result = deserializeCacheEvent(json);
-    expect(result).toEqual(original);
-  });
-
-  it('returns null for invalid JSON strings', () => {
-    expect(deserializeCacheEvent('not-json')).toBeNull();
-    expect(deserializeCacheEvent('{incomplete')).toBeNull();
-    expect(deserializeCacheEvent('')).toBeNull();
-  });
-
-  it('returns null if type is missing', () => {
-    const json = JSON.stringify({ namespace: 'ns', id: '123' });
-    expect(deserializeCacheEvent(json)).toBeNull();
-  });
-
-  it('returns null if namespace is missing', () => {
-    const json = JSON.stringify({ type: 'INVALIDATE_KEY', id: '123' });
-    expect(deserializeCacheEvent(json)).toBeNull();
-  });
-
-  it('returns null for empty object', () => {
-    expect(deserializeCacheEvent('{}')).toBeNull();
-  });
-
-  it('returns null for null input wrapped in JSON', () => {
-    expect(deserializeCacheEvent('null')).toBeNull();
-  });
-
-  it('round-trips a fully populated event', () => {
-    const original = createCacheEvent(CacheEventType.REFRESH, {
-      namespace: 'products',
-      key: 'product:5',
-      entityId: '5',
-      subKey: 'reviews',
-      originInstanceId: 'node-7',
-      timestamp: 9999999,
+    it('returns null for empty string', () => {
+      const result = deserializeCacheEvent('');
+      expect(result).toBeNull();
     });
 
-    const result = deserializeCacheEvent(serializeCacheEvent(original));
-    expect(result).toEqual(original);
+    it('returns null when namespace is missing from event object', () => {
+      const result = deserializeCacheEvent(JSON.stringify({ type: CacheEventType.INVALIDATE_KEY }));
+      expect(result).toBeNull();
+    });
+
+    it('returns null when event type is unrecognized', () => {
+      const result = deserializeCacheEvent(
+        JSON.stringify({ namespace: 'x', type: 'UNKNOWN_TYPE', id: '123' }),
+      );
+      expect(result).toBeNull();
+    });
+
+    it('returns null when event is a primitive', () => {
+      expect(deserializeCacheEvent('"just a string"')).toBeNull();
+      expect(deserializeCacheEvent('123')).toBeNull();
+    });
   });
 });

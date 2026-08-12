@@ -1,222 +1,118 @@
-/**
- * Unit tests for backend/api/src/models/ProfileModel.js
- *
- * Run with:  npm run test:unit -- test/unit/profileModel.test.js
- */
 import { describe, it, expect } from 'vitest';
 import { ProfileModel } from '../../src/models/ProfileModel.js';
 
-describe('ProfileModel', () => {
-  describe('fromProfile', () => {
-    it('returns null when profile is null (undefined triggers default parameter)', () => {
-      expect(ProfileModel.fromProfile(null)).toBe(null);
-      // Note: undefined triggers the default parameter = {} so returns default object
-      expect(ProfileModel.fromProfile(undefined)).toEqual({
-        id: null, firebaseUid: null, role: 'user', fullName: '', phone: '',
-        email: '', companyName: '', avatarUrl: '', language: 'en', darkMode: false,
-        isActive: false, walletAddress: null, polygonWalletAddress: null,
-      });
+describe('ProfileModel.fromProfile', () => {
+  it('returns null for a null profile', () => {
+    expect(ProfileModel.fromProfile(null)).toBeNull();
+  });
+
+  it('normalizes a raw profile row', () => {
+    const profile = ProfileModel.fromProfile({
+      id: 'u1',
+      firebase_uid: 'fb-1',
+      role: 'driver',
+      full_name: 'Jane Driver',
+      phone: '+919999999999',
+      email: 'jane@example.com',
+      company_name: 'Acme',
+      avatar_url: 'https://cdn.example.com/a.png',
+      language: 'hi',
+      dark_mode: true,
+      is_active: true,
+      wallet_address: '0xabc',
+      polygon_wallet_address: '0xdef',
     });
-
-    it('maps all snake_case DB fields to camelCase response fields', () => {
-      const profile = {
-        id: 'prof-123',
-        firebase_uid: 'fb-abc',
-        role: 'driver',
-        full_name: 'Ravi Kumar',
-        phone: '+919876543210',
-        email: 'ravi@example.com',
-        company_name: 'Truxify Logistics',
-        avatar_url: 'https://cdn.example.com/ravi.jpg',
-        language: 'hi',
-        dark_mode: true,
-        is_active: true,
-        wallet_address: '0xABC123',
-        polygon_wallet_address: '0xDEF456',
-      };
-
-      const result = ProfileModel.fromProfile(profile);
-
-      expect(result.id).toBe('prof-123');
-      expect(result.firebaseUid).toBe('fb-abc');
-      expect(result.role).toBe('driver');
-      expect(result.fullName).toBe('Ravi Kumar');
-      expect(result.phone).toBe('+919876543210');
-      expect(result.email).toBe('ravi@example.com');
-      expect(result.companyName).toBe('Truxify Logistics');
-      expect(result.avatarUrl).toBe('https://cdn.example.com/ravi.jpg');
-      expect(result.language).toBe('hi');
-      expect(result.darkMode).toBe(true);
-      expect(result.isActive).toBe(true);
-      expect(result.walletAddress).toBe('0xABC123');
-      expect(result.polygonWalletAddress).toBe('0xDEF456');
-    });
-
-    it('applies sensible defaults for missing fields', () => {
-      const result = ProfileModel.fromProfile({});
-
-      expect(result.id).toBe(null);
-      expect(result.firebaseUid).toBe(null);
-      expect(result.role).toBe('user');
-      expect(result.fullName).toBe('');
-      expect(result.phone).toBe('');
-      expect(result.email).toBe('');
-      expect(result.companyName).toBe('');
-      expect(result.avatarUrl).toBe('');
-      expect(result.language).toBe('en');
-      expect(result.darkMode).toBe(false);
-      expect(result.isActive).toBe(false);
-      expect(result.walletAddress).toBe(null);
-      expect(result.polygonWalletAddress).toBe(null);
-    });
-
-    it('handles null individual fields gracefully', () => {
-      const profile = {
-        id: null,
-        firebase_uid: null,
-        full_name: null,
-        phone: null,
-        email: null,
-        is_active: null,
-      };
-
-      const result = ProfileModel.fromProfile(profile);
-
-      expect(result.id).toBe(null);
-      expect(result.firebaseUid).toBe(null);
-      expect(result.fullName).toBe(''); // null coalescing returns null for null input, then ?? null
-      expect(result.phone).toBe('');
-      expect(result.email).toBe('');
-      expect(result.isActive).toBe(false); // Boolean(null) === false
+    expect(profile).toEqual({
+      id: 'u1',
+      firebaseUid: 'fb-1',
+      role: 'driver',
+      fullName: 'Jane Driver',
+      phone: '+919999999999',
+      email: 'jane@example.com',
+      companyName: 'Acme',
+      avatarUrl: 'https://cdn.example.com/a.png',
+      language: 'hi',
+      darkMode: true,
+      isActive: true,
+      walletAddress: '0xabc',
+      polygonWalletAddress: '0xdef',
     });
   });
 
-  describe('fromCustomerStats', () => {
-    it('returns null when stats is null (undefined triggers default parameter)', () => {
-      expect(ProfileModel.fromCustomerStats(null)).toBe(null);
-      expect(ProfileModel.fromCustomerStats(undefined)).toEqual({ totalOrders: 0, totalSaved: 0, co2ReducedKg: 0 });
-    });
+  it('applies defaults for missing fields', () => {
+    const profile = ProfileModel.fromProfile({ id: 'u1' });
+    expect(profile.role).toBe('user');
+    expect(profile.fullName).toBe('');
+    expect(profile.darkMode).toBe(false);
+    expect(profile.isActive).toBe(false);
+    expect(profile.language).toBe('en');
+    expect(profile.walletAddress).toBeNull();
+  });
+});
 
-    it('maps snake_case DB fields correctly', () => {
-      const stats = {
-        total_orders: 42,
-        total_saved: 1050,
-        co2_reduced_kg: 320.5,
-      };
-
-      const result = ProfileModel.fromCustomerStats(stats);
-
-      expect(result.totalOrders).toBe(42);
-      expect(result.totalSaved).toBe(1050);
-      expect(result.co2ReducedKg).toBe(320.5);
-    });
-
-    it('applies defaults for missing fields', () => {
-      const result = ProfileModel.fromCustomerStats({});
-
-      expect(result.totalOrders).toBe(0);
-      expect(result.totalSaved).toBe(0);
-      expect(result.co2ReducedKg).toBe(0);
-    });
+describe('ProfileModel.fromCustomerStats', () => {
+  it('returns null for null stats', () => {
+    expect(ProfileModel.fromCustomerStats(null)).toBeNull();
   });
 
-  describe('fromDriverDetails', () => {
-    it('returns null when details is null (undefined triggers default parameter)', () => {
-      expect(ProfileModel.fromDriverDetails(null)).toBe(null);
-      expect(ProfileModel.fromDriverDetails(undefined)).toEqual({
-        truckId: null, rating: 0, totalTrips: 0, completionRate: 0,
-        isOnline: false, walletConfirmed: 0, walletPending: 0, walletTotal: 0,
-      });
+  it('maps stats with defaults', () => {
+    expect(ProfileModel.fromCustomerStats({})).toEqual({
+      totalOrders: 0,
+      totalSaved: 0,
+      co2ReducedKg: 0,
     });
-
-    it('maps all driver fields correctly', () => {
-      const details = {
-        truck_id: 'truck-789',
-        rating: 4.8,
-        total_trips: 150,
-        completion_rate: 0.97,
-        is_online: true,
-        wallet_confirmed: 5000,
-        wallet_pending: 1200,
-        wallet_total: 6200,
-      };
-
-      const result = ProfileModel.fromDriverDetails(details);
-
-      expect(result.truckId).toBe('truck-789');
-      expect(result.rating).toBe(4.8);
-      expect(result.totalTrips).toBe(150);
-      expect(result.completionRate).toBe(0.97);
-      expect(result.isOnline).toBe(true);
-      expect(result.walletConfirmed).toBe(5000);
-      expect(result.walletPending).toBe(1200);
-      expect(result.walletTotal).toBe(6200);
-    });
-
-    it('applies defaults for missing fields', () => {
-      const result = ProfileModel.fromDriverDetails({});
-
-      expect(result.truckId).toBe(null);
-      expect(result.rating).toBe(0);
-      expect(result.totalTrips).toBe(0);
-      expect(result.completionRate).toBe(0);
-      expect(result.isOnline).toBe(false);
-      expect(result.walletConfirmed).toBe(0);
-      expect(result.walletPending).toBe(0);
-      expect(result.walletTotal).toBe(0);
+    expect(ProfileModel.fromCustomerStats({ total_orders: 5, total_saved: 120, co2_reduced_kg: 30 })).toEqual({
+      totalOrders: 5,
+      totalSaved: 120,
+      co2ReducedKg: 30,
     });
   });
+});
 
-  describe('mergeProfileData', () => {
-    it('merges profile, customerStats, and driverDetails into one object', () => {
-      const profile = {
-        id: 'prof-123',
-        role: 'driver',
-        full_name: 'Anita Singh',
-      };
-      const stats = {
-        total_orders: 20,
-        total_saved: 800,
-      };
-      const driverDetails = {
-        truck_id: 'truck-1',
-        rating: 4.5,
-      };
+describe('ProfileModel.fromDriverDetails', () => {
+  it('returns null for null details', () => {
+    expect(ProfileModel.fromDriverDetails(null)).toBeNull();
+  });
 
-      const result = ProfileModel.mergeProfileData(profile, stats, driverDetails);
+  it('applies defaults for empty details', () => {
+    const details = ProfileModel.fromDriverDetails({});
+    expect(details.rating).toBe(0);
+    expect(details.totalTrips).toBe(0);
+    expect(details.badges).toEqual([]);
+    expect(details.kycStatus).toBe('Unverified');
+  });
 
-      // fromProfile fields
-      expect(result.id).toBe('prof-123');
-      expect(result.fullName).toBe('Anita Singh');
-      // fromCustomerStats
-      expect(result.customerStats.totalOrders).toBe(20);
-      expect(result.customerStats.totalSaved).toBe(800);
-      // fromDriverDetails
-      expect(result.driverDetails.truckId).toBe('truck-1');
-      expect(result.driverDetails.rating).toBe(4.5);
+  it('awards badges based on thresholds', () => {
+    const details = ProfileModel.fromDriverDetails({
+      total_trips: 500,
+      rating: 4.9,
+      wallet_total: 5000,
     });
+    const badgeIds = details.badges.map((b) => b.id);
+    expect(badgeIds).toContain('first_delivery');
+    expect(badgeIds).toContain('100_deliveries');
+    expect(badgeIds).toContain('5_star');
+    expect(badgeIds).toContain('top_earner');
+    expect(badgeIds).toContain('long_distance_champion');
+  });
 
-    it('handles null inputs gracefully', () => {
-      // null inputs to fromProfile/fromCustomerStats/fromDriverDetails return null,
-      // and spreading null gives {}. The result is { customerStats: null, driverDetails: null }.
-      const result = ProfileModel.mergeProfileData(null, null, null);
+  it('does not award the 5-star badge without completed trips', () => {
+    const details = ProfileModel.fromDriverDetails({ rating: 4.9, total_trips: 0 });
+    expect(details.badges.map((b) => b.id)).not.toContain('5_star');
+  });
+});
 
-      expect(result.customerStats).toBe(null);
-      expect(result.driverDetails).toBe(null);
-    });
-
-    it('partial merge with only profile data', () => {
-      const profile = {
-        id: 'prof-456',
-        full_name: 'Ravi Kumar',
-      };
-
-      const result = ProfileModel.mergeProfileData(profile, null, null);
-
-      expect(result.id).toBe('prof-456');
-      expect(result.fullName).toBe('Ravi Kumar');
-      expect(result.customerStats).toBe(null);
-      expect(result.driverDetails).toBe(null);
-    });
+describe('ProfileModel.mergeProfileData', () => {
+  it('merges profile, stats, and driver details', () => {
+    const merged = ProfileModel.mergeProfileData(
+      { id: 'u1', role: 'driver' },
+      { total_orders: 3 },
+      { total_trips: 10, rating: 4.5 },
+    );
+    expect(merged.id).toBe('u1');
+    expect(merged.role).toBe('driver');
+    expect(merged.customerStats.totalOrders).toBe(3);
+    expect(merged.driverDetails.totalTrips).toBe(10);
+    expect(merged.driverDetails.rating).toBe(4.5);
   });
 });

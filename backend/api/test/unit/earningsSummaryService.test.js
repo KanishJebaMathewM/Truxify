@@ -39,6 +39,37 @@ describe('earningsSummaryService', () => {
       expect(result.brokerSavingsAmount).toBe(3500); // 35% of 10000
       expect(result.brokerSavingsPercent).toBe(35);
     });
+
+    it('serialises each trip into the response shape', () => {
+      const trips = [
+        {
+          trip_display_id: 'T-1',
+          trip_date: '2026-08-10',
+          distance: '420 km',
+          total_earnings: '10000',
+          fuel_deducted: '2000',
+        },
+      ];
+      const result = buildEarningsSummary(trips, 'weekly', 'driver-1');
+      expect(result.trips).toEqual([
+        {
+          id: 'T-1',
+          date: '2026-08-10',
+          distance: '420 km',
+          gross: 10000,
+          deductions: 2000,
+          net: 8000,
+        },
+      ]);
+    });
+
+    it('coerces null earnings to zero in the trip serialisation', () => {
+      const trips = [
+        { trip_display_id: 'T-2', total_earnings: null, fuel_deducted: null },
+      ];
+      const result = buildEarningsSummary(trips, 'monthly', 'driver-1');
+      expect(result.trips[0]).toMatchObject({ gross: 0, deductions: 0, net: 0 });
+    });
   });
 
   describe('getPeriodStart', () => {

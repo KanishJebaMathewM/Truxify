@@ -1,52 +1,104 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../src/middleware/logger.js', () => ({
-  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+const mockLogger = vi.hoisted(() => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
 }));
 
-let logger;
+vi.mock('../../src/middleware/logger.js', () => ({
+  default: mockLogger,
+}));
 
-beforeEach(async () => {
-  logger = (await import('../../src/middleware/logger.js')).default;
-  vi.clearAllMocks();
-  process.env.NODE_ENV = 'test';
-});
+const { default: securityHeadersVerifier } = await import('../../src/middleware/securityHeadersVerifier.js');
 
-function makeReq(overrides = {}) {
-  return { method: 'GET', originalUrl: '/api/test', ...overrides };
-}
-
-function makeRes() {
-  const hdrs = {};
-  return {
-    getHeader: vi.fn(n => hdrs[n]),
-    setHeader: vi.fn((n, v) => { hdrs[n] = v; }),
-    on: vi.fn(),
+function makeMocks({ env = 'development', headers = {} } = {}) {
+  let finishHandler = null;
+  const req = { method: 'GET', originalUrl: '/api/test' };
+  const res = {
+    getHeader: vi.fn((name) => headers[String(name).toLowerCase()]),
+    on: vi.fn((event, handler) => {
+      if (event === 'finish') finishHandler = handler;
+    }),
+    _finish() {
+      if (finishHandler) finishHandler();
+    },
   };
+  const next = vi.fn();
+  return { req, res, next };
 }
 
 describe('securityHeadersVerifier', () => {
-  let sv;
+  const originalEnv = process.env.NODE_ENV;
 
-  beforeEach(async () => {
-    const mod = await import('../../src/middleware/securityHeadersVerifier.js');
-    sv = mod.default;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.NODE_ENV = 'development';
   });
 
-  it('skips logging in production', async () => {
+  afterEach(() => {
+    process.env.NODE_ENV = originalEnv;
+  });
+
+  it('warns when expected security headers are missing', () => {
+    const { req, res, next } = makeMocks();
+    securityHeadersVerifier(req, res, next);
+    res._finish();
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'GET',
+        path: '/api/test',
+        missingHeaders: expect.arrayContaining([
+          'x-content-type-options',
+          'referrer-policy',
+          'permissions-policy',
+          'cross-origin-resource-policy',
+        ]),
+      }),
+      'Missing expected security headers'
+    );
+  });
+
+  it('does not warn when all required headers are present', () => {
+    const { req, res, next } = makeMocks({
+      headers: {
+        'x-content-type-options': 'nosniff',
+        'referrer-policy': 'strict-origin-when-cross-origin',
+        'permissions-policy': 'geolocation=(self)',
+        'cross-origin-resource-policy': 'same-origin',
+      },
+    });
+    securityHeadersVerifier(req, res, next);
+    res._finish();
+    expect(mockLogger.warn).not.toHaveBeenCalled();
+  });
+
+  it('reports only the headers that are missing', () => {
+    const { req, res, next } = makeMocks({
+      headers: { 'x-content-type-options': 'nosniff' },
+    });
+    securityHeadersVerifier(req, res, next);
+    res._finish();
+    const payload = mockLogger.warn.mock.calls[0][0];
+    expect(payload.missingHeaders).not.toContain('x-content-type-options');
+    expect(payload.missingHeaders).toContain('referrer-policy');
+    expect(payload.missingHeaders).toContain('permissions-policy');
+  });
+
+  it('skips verification entirely in production', () => {
     process.env.NODE_ENV = 'production';
-    const req = makeReq(), res = makeRes(), next = vi.fn();
-    sv(req, res, next);
+    const { req, res, next } = makeMocks();
+    securityHeadersVerifier(req, res, next);
+    res._finish();
+    expect(mockLogger.warn).not.toHaveBeenCalled();
     expect(next).toHaveBeenCalled();
-    expect(res.on).not.toHaveBeenCalled();
-    process.env.NODE_ENV = 'test';
   });
 
-  it('calls next in non-production', async () => {
-    process.env.NODE_ENV = 'test';
-    const req = makeReq(), res = makeRes(), next = vi.fn();
-    sv(req, res, next);
-    expect(next).toHaveBeenCalled();
-    expect(res.on).toHaveBeenCalledWith('finish', expect.any(Function));
+  it('calls next() to continue the chain', () => {
+    const { req, res, next } = makeMocks();
+    securityHeadersVerifier(req, res, next);
+    expect(next).toHaveBeenCalledOnce();
   });
 });
+

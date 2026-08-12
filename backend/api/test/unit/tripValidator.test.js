@@ -98,4 +98,32 @@ describe('tripValidator Middleware', () => {
     tripValidator.validate(req, res, next);
     expect(res.status).toHaveBeenCalledWith(400);
   });
+
+  it('accepts the camelCase odometerKm alias', () => {
+    const req = {
+      params: { id: 'trip-1' },
+      body: { odometerKm: 120 },
+      headers: {},
+    };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+
+    tripValidator.validate(req, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('rejects a regression against the camelCase lastOdometerKm field', () => {
+    const req = {
+      params: { id: 'trip-1' },
+      body: { odometerKm: 100, lastOdometerKm: 110 },
+      headers: {},
+    };
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+
+    tripValidator.validate(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(next).not.toHaveBeenCalled();
+  });
 });

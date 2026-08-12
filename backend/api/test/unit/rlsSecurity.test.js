@@ -53,6 +53,16 @@ const MAIN_RLS_TABLES = ALL_TABLES.filter(
   (t) => !['user_devices', 'driver_documents', 'webhook_failures', 'tracking_tokens', 'behavioral_profiles', 'fraud_risk_scores', 'fraud_review_queue'].includes(t)
 );
 
+// Tables that revoke_anon_privileges.sql intentionally exempts: their RLS
+// policies grant SELECT to anon so GET /api/v1/vehicle-types and
+// GET /api/v1/regions work for unauthenticated clients. They must still be
+// covered by the "enables RLS" checks (hence staying in ALL_TABLES) but must
+// not be required to appear in the revoke migration.
+const ANON_REVOKE_EXEMPT_TABLES = ['vehicle_types', 'regions'];
+const ANON_REVOKE_TABLES = ALL_TABLES.filter(
+  (t) => !ANON_REVOKE_EXEMPT_TABLES.includes(t)
+);
+
 describe('RLS Migration (20240101000000_rls.sql)', () => {
   let rlsContent;
 
@@ -180,8 +190,13 @@ describe('Revoke anon privileges (revoke_anon_privileges.sql)', () => {
     revokeContent = await fs.readFile(revokePath, 'utf8');
   });
 
-  it.each(ALL_TABLES)('revokes anon privileges on table: %s', (table) => {
+  it.each(ANON_REVOKE_TABLES)('revokes anon privileges on table: %s', (table) => {
     expect(revokeContent).toContain(`REVOKE ALL ON TABLE public.${table} FROM anon`);
+  });
+
+  it.each(ANON_REVOKE_EXEMPT_TABLES)('pins the documented anon exemption for public reference table: %s', (table) => {
+    expect(revokeContent).not.toContain(`REVOKE ALL ON TABLE public.${table} FROM anon`);
+    expect(revokeContent).toMatch(/intentionally public reference tables/);
   });
 });
 

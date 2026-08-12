@@ -169,6 +169,7 @@ import {
 } from '../validation/requestSchemas.js';
 import { awardReputationPoints } from '../services/reputation.js';
 import { expireDeliveryOtps, sendPushNotification } from '../services/notificationService.js';
+import { invalidateDriverOrderCache } from '../sockets/tracker.js';
 import { DomainError } from '../services/order/domainError.js';
 import { predictDemand, predictPrice, matchEnRouteLoads } from '../services/ml.js';
 import { requireIdempotency } from '../middleware/idempotency.js';
@@ -186,7 +187,6 @@ import {
   recordDepositTx,
   confirmEscrowRefund,
 } from '../core/container.js';
-import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei } from '../services/escrow.js';
 import { getEscrowBookingId, resolveExpectedDepositAmount, paisaToMaticWei, submitEscrowRefund } from '../services/escrow.js';
 
 import { getRouteEstimate, getRouteGeometry, buildStraightLineGeometry } from '../services/osrm.js';
@@ -204,7 +204,6 @@ const getOrderResource = async (req) => {
 router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), async (req, res) => {
   const { id } = req.params;
   const { driver_lat, driver_lng, geofence_radius_m } = req.body;
-  const { id } = req.params;
 
   const lat = parseFloat(driver_lat);
   const lng = parseFloat(driver_lng);
@@ -213,10 +212,6 @@ router.post('/:id/geofence-confirm', authenticate, requireRole(['driver']), asyn
     return res.status(400).json({ error: 'Invalid driver_lat or driver_lng' });
   }
 
-  const geofenceRadiusM = geofence_radius_m !== undefined ? parseFloat(geofence_radius_m) : undefined;
-  if (geofenceRadiusM !== undefined && (!Number.isFinite(geofenceRadiusM) || geofenceRadiusM <= 0)) {
-    return res.status(400).json({ error: 'Invalid geofence_radius_m' });
-  if (!id || !id.trim()) {
   if (!req.params.id || !req.params.id.trim()) {
     return res.status(400).json({ error: 'Invalid order id' });
   }
@@ -740,6 +735,10 @@ router.post('/:id/confirm-deposit', authenticate, userLimiter, requirePolicy('or
           details: acceptErr.message,
         });
       }
+      // Driver assignment confirmed — drop any stale cached mapping so the
+      // tracker resolves the newly assigned driver on the next ping
+      // (issue #10676).
+      await invalidateDriverOrderCache(pending.driver_id);
       sendPushNotification(
         pending.driver_id,
         'Bid Accepted!',

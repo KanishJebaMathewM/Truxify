@@ -440,6 +440,16 @@ describe('scrubPii', () => {
     expect(scrubPii(input).card).toBe('my card is [REDACTED] and expires soon');
   });
 
+  it('redacts full 10-digit phone numbers embedded in strings', () => {
+    const input = { note: 'contact 9876543210 for delivery updates' };
+    expect(scrubPii(input).note).toBe('contact [REDACTED] for delivery updates');
+  });
+
+  it('leaves partial phone numbers untouched', () => {
+    const input = { note: 'last four digits are 3210' };
+    expect(scrubPii(input).note).toBe('last four digits are 3210');
+  });
+
   it('matches case-insensitively', () => {
     const input = { Password: 'x', API_KEY: 'y', 'Otp': 'z' };
     expect(scrubPii(input)).toEqual({

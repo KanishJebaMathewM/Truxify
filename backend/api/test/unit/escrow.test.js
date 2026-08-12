@@ -20,6 +20,9 @@ import {
   confirmEscrowRefund,
   ESCROW_MATIC_PER_PAISA,
   paisaToMaticWei,
+  maticWeiToPaisa,
+  weiWithinTolerance,
+  resolveExpectedDepositAmount,
   validateEscrowSetup,
   isEscrowEnabled,
   submitEscrowRaiseDispute,
@@ -174,6 +177,71 @@ describe('escrow service — paisaToMaticWei', () => {
       delete process.env.ESCROW_MATIC_PER_PAISA;
     }
     vi.resetModules();
+  });
+});
+
+describe('escrow service — maticWeiToPaisa', () => {
+  it('converts wei back to paisa with the canonical scale', () => {
+    // 1 MATIC = 250000 paisa at 0.000004 MATIC/paisa.
+    expect(maticWeiToPaisa(ethers.parseEther('1'))).toBe(250000n);
+  });
+
+  it('floors fractional paisa', () => {
+    // 1 wei converts to 0 paisa (floored).
+    expect(maticWeiToPaisa(1n)).toBe(0n);
+  });
+
+  it('accepts a numeric string input', () => {
+    expect(maticWeiToPaisa('1000000000000000000')).toBe(250000n);
+  });
+});
+
+describe('escrow service — weiWithinTolerance', () => {
+  it('returns true for equal amounts', () => {
+    expect(weiWithinTolerance('1000', '1000')).toBe(true);
+  });
+
+  it('returns true for amounts within the tolerance', () => {
+    // 1000 + 500 wei stays well within the 1 gwei default tolerance.
+    expect(weiWithinTolerance('1000', '1500')).toBe(true);
+  });
+
+  it('returns false for amounts beyond the tolerance', () => {
+    // 2 gwei exceeds the 1 gwei default tolerance.
+    expect(weiWithinTolerance(1_000_000_000n, 3_000_000_000n)).toBe(false);
+  });
+
+  it('honours a custom tolerance', () => {
+    expect(weiWithinTolerance(100n, 150n, 100n)).toBe(true);
+    expect(weiWithinTolerance(100n, 250n, 100n)).toBe(false);
+  });
+});
+
+describe('escrow service — resolveExpectedDepositAmount', () => {
+  it('uses the stored wei amount when it is consistent with the bid', () => {
+    const order = {
+      escrow_amount_wei: paisaToMaticWei(100).toString(),
+      pending_bid_acceptance: { bid_amount: 100 },
+    };
+    const result = resolveExpectedDepositAmount(order);
+    expect(result.error).toBeUndefined();
+    expect(result.expectedAmountWei).toBe(paisaToMaticWei(100));
+  });
+
+  it('rejects an inconsistent stored amount with a specific code', () => {
+    const order = {
+      escrow_amount_wei: paisaToMaticWei(200).toString(),
+      pending_bid_acceptance: { bid_amount: 100 },
+    };
+    const result = resolveExpectedDepositAmount(order);
+    expect(result.error).toBeDefined();
+    expect(result.code).toBe('ESCROW_AMOUNT_INCONSISTENT');
+  });
+
+  it('returns an error when no escrow amount is recorded', () => {
+    const result = resolveExpectedDepositAmount({});
+    expect(result.error).toBeDefined();
+    expect(result.code).toBe('ESCROW_AMOUNT_MISSING');
   });
 });
 

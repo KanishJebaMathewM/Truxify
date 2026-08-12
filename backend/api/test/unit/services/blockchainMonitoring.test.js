@@ -27,10 +27,10 @@ describe('Blockchain Monitoring Suite', () => {
 
     it('routes CRITICAL alerts to Slack, Email, and SMS', async () => {
       const alert = {
-        type: 'SMART_CONTRACT_REVERT',
+        type: 'EMERGENCY_RECOVERED',
         severity: SEVERITY_LEVELS.CRITICAL,
-        reason: 'Out of gas',
-        txHash: '0x123',
+        recipient: '0xRecipient',
+        amount: '1000',
       };
 
       await router.route(alert);
@@ -42,10 +42,10 @@ describe('Blockchain Monitoring Suite', () => {
 
     it('routes HIGH alerts to Slack and Email', async () => {
       const alert = {
-        type: 'GEOFENCE_BREACH',
+        type: 'BOOKING_DISPUTED',
         severity: SEVERITY_LEVELS.HIGH,
-        shipmentId: '101',
-        driver: '0xDriver',
+        bookingId: '101',
+        raisedBy: '0xCustomer',
       };
 
       await router.route(alert);
@@ -57,7 +57,7 @@ describe('Blockchain Monitoring Suite', () => {
 
     it('routes MEDIUM alerts to Slack only', async () => {
       const alert = {
-        type: 'PAYMENT_RECEIVED',
+        type: 'PAYMENT_RELEASED',
         severity: SEVERITY_LEVELS.MEDIUM,
         amount: '1000',
       };
@@ -81,9 +81,10 @@ describe('Blockchain Monitoring Suite', () => {
 
     it('starts tracking and resolves alert', async () => {
       const alert = {
-        type: 'BALANCE_UPDATE_FAILED',
-        severity: 'CRITICAL',
-        wallet: '0xWallet',
+        type: 'BOOKING_DISPUTED',
+        severity: 'HIGH',
+        bookingId: '42',
+        raisedBy: '0xCustomer',
       };
 
       await escalation.escalate(alert);
@@ -100,9 +101,10 @@ describe('Blockchain Monitoring Suite', () => {
 
     it('performs escalation steps correctly', async () => {
       const alert = {
-        type: 'SMART_CONTRACT_REVERT',
+        type: 'EMERGENCY_RECOVERED',
         severity: 'CRITICAL',
-        txHash: '0x456',
+        recipient: '0xRecipient',
+        amount: '1000',
       };
 
       await escalation.escalate(alert);
@@ -164,30 +166,44 @@ describe('Blockchain Monitoring Suite', () => {
       });
     });
 
-    it('handles payment received event', async () => {
-      const args = ['0xDriver', 1000n, 1700000000n];
+    it('handles payment released event', async () => {
+      const args = [42n, '0xDriver', 1000n];
       const log = { transactionHash: '0xTx', blockNumber: 12345 };
 
-      await monitor.handlePaymentReceived(args, log);
+      await monitor.handlePaymentReleased(args, log);
 
       expect(mockAlertRouter.route).toHaveBeenCalledWith(expect.objectContaining({
-        type: 'PAYMENT_RECEIVED',
+        type: 'PAYMENT_RELEASED',
         severity: 'MEDIUM',
         driver: '0xDriver',
       }));
       expect(mockMetrics.recordPaymentEvent).toHaveBeenCalledWith('success');
     });
 
-    it('handles smart contract revert event', async () => {
-      const args = ['0x1234567890abcdef', 'Out of gas'];
-      const log = { blockNumber: 12346 };
+    it('handles booking disputed event with escalation', async () => {
+      const args = [7n, '0xCustomer'];
+      const log = { transactionHash: '0xTx', blockNumber: 12346 };
 
-      await monitor.handleSmartContractRevert(args, log);
+      await monitor.handleBookingDisputed(args, log);
 
       expect(mockAlertRouter.route).toHaveBeenCalledWith(expect.objectContaining({
-        type: 'SMART_CONTRACT_REVERT',
+        type: 'BOOKING_DISPUTED',
+        severity: 'HIGH',
+        bookingId: '7',
+      }));
+      expect(mockEscalation.escalate).toHaveBeenCalled();
+    });
+
+    it('handles emergency recovered event', async () => {
+      const args = ['0xAdmin', 500n];
+      const log = { transactionHash: '0xTx', blockNumber: 12347 };
+
+      await monitor.handleEmergencyRecovered(args, log);
+
+      expect(mockAlertRouter.route).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'EMERGENCY_RECOVERED',
         severity: 'CRITICAL',
-        reason: 'Out of gas',
+        recipient: '0xAdmin',
       }));
       expect(mockEscalation.escalate).toHaveBeenCalled();
       expect(mockMetrics.recordContractRevert).toHaveBeenCalled();

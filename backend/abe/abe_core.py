@@ -2,6 +2,7 @@ import hashlib
 import json
 import base64
 import os
+import re
 from typing import Dict, List, Tuple, Any, Optional
 from dataclasses import dataclass
 import numpy as np
@@ -21,6 +22,71 @@ def _derive_attribute_mask(attributes: List[str]) -> bytes:
         attr_hash = hashlib.sha256(attr.encode()).digest()
         combined = hashlib.sha256(combined + attr_hash).digest()
     return combined
+
+def _extract_policy_attributes(policy: str) -> List[str]:
+    """Extract attribute tokens from a CP-ABE boolean policy expression.
+
+    Operates on the attribute tokens that carry a 'Label: value' form. The
+    extraction is conservative: if an attribute cannot be recognised it is
+    skipped, and callers that depend on a fully verified policy will fail
+    closed rather than grant access.
+    """
+    if not policy or not isinstance(policy, str):
+        return []
+
+    normalized = policy.replace('(', ' ').replace(')', ' ')
+    parts = re.split(r'\s+(?:AND|OR)\s+', normalized)
+    return [p.strip() for p in parts if p.strip() and ':' in p]
+
+
+def _tokenize_policy(policy: str) -> List[str]:
+    """Tokenize a CP-ABE boolean policy into attributes, AND/OR and parens."""
+    return [t for t in (p.strip() for p in re.split(r'(\(|\)|\bAND\b|\bOR\b)', policy)) if t]
+
+
+def _eval_policy_or(tokens: List[str], pos: int, attrs: set):
+    left, pos = _eval_policy_and(tokens, pos, attrs)
+    while pos < len(tokens) and tokens[pos] == 'OR':
+        right, pos = _eval_policy_and(tokens, pos + 1, attrs)
+        left = left or right
+    return left, pos
+
+
+def _eval_policy_and(tokens: List[str], pos: int, attrs: set):
+    left, pos = _eval_policy_primary(tokens, pos, attrs)
+    while pos < len(tokens) and tokens[pos] == 'AND':
+        right, pos = _eval_policy_primary(tokens, pos + 1, attrs)
+        left = left and right
+    return left, pos
+
+
+def _eval_policy_primary(tokens: List[str], pos: int, attrs: set):
+    if pos >= len(tokens):
+        raise ValueError('Unexpected end of policy')
+    token = tokens[pos]
+    if token == '(':
+        value, pos = _eval_policy_or(tokens, pos + 1, attrs)
+        if pos >= len(tokens) or tokens[pos] != ')':
+            raise ValueError('Mismatched parentheses')
+        return value, pos + 1
+    if token in ('AND', 'OR', ')'):
+        raise ValueError(f'Unexpected token: {token}')
+    return token in attrs, pos + 1
+
+
+def _evaluate_policy(policy: str, attrs: set) -> bool:
+    """Evaluate a CP-ABE boolean policy against an attribute set.
+
+    Fails closed: returns False for any malformed or unparseable policy.
+    """
+    try:
+        tokens = _tokenize_policy(policy)
+        if not tokens:
+            return False
+        result, pos = _eval_policy_or(tokens, 0, attrs)
+        return bool(result) and pos == len(tokens)
+    except (ValueError, IndexError, TypeError):
+        return False
 
 @dataclass
 class Attribute:
@@ -429,6 +495,29 @@ class DecentralizedABE:
         return bytes([k ^ m for k, m in zip(key_bytes, mask)])
     
     def _check_multi_authority_attributes(self, user_attributes: Dict, policy: str) -> bool:
-        """Check if user has required attributes from all authorities"""
-        # In production: implement proper policy checking
-        return True
+        """Check if user has required attributes from all authorities.
+
+        Evaluates the boolean policy expression against every attribute issued
+        to the user across all authorities. Fails closed: returns False for an
+        empty or malformed policy, for a user with no issued attributes, or for
+        any policy branch the user does not satisfy.
+        """
+        if not user_attributes:
+            return False
+
+        # Collect every attribute issued to this user across all authorities
+        issued = set()
+        for attr in user_attributes.values():
+            if isinstance(attr, dict):
+                if 'attribute' in attr:
+                    issued.add(attr['attribute'])
+                if 'attributes' in attr:
+                    for a in attr['attributes']:
+                        issued.add(a)
+            elif isinstance(attr, (list, tuple, set)):
+                for a in attr:
+                    issued.add(a)
+            elif attr is not None:
+                issued.add(attr)
+
+        return _evaluate_policy(policy, issued)

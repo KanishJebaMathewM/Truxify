@@ -101,6 +101,19 @@ describe('requireJsonContent', () => {
       expect(res.status).not.toHaveBeenCalled();
     });
 
+    it('accepts an uppercase media type (case-insensitive)', () => {
+      const { req, res, next } = createMocks({
+        req: {
+          method: 'POST',
+          headers: { 'content-type': 'APPLICATION/JSON' },
+        },
+      });
+      requireJsonContent(req, res, next);
+
+      expect(next).toHaveBeenCalled();
+      expect(res.status).not.toHaveBeenCalled();
+    });
+
     it('calls next() for application/json with charset', () => {
       const { req, res, next } = createMocks({
         req: {

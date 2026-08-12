@@ -218,8 +218,16 @@ export async function getCachedProfile(firebaseUid) {
   try {
     const raw = await redisClient.get(firebaseProfileKey(firebaseUid));
     if (raw) {
+      const parsed = JSON.parse(raw);
+      // A corrupted payload that parses to a non-object (e.g. "42", "null",
+      // "some string") must not be treated as a valid cached profile.
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        cacheMisses++;
+        await redisClient.del(firebaseProfileKey(firebaseUid)).catch(() => {});
+        return null;
+      }
       cacheHits++;
-      return JSON.parse(raw);
+      return parsed;
     }
     cacheMisses++;
     return null;

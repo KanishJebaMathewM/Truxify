@@ -440,6 +440,26 @@ describe('scrubPii', () => {
     expect(scrubPii(input).card).toBe('my card is [REDACTED] and expires soon');
   });
 
+  it('redacts cvv and pin keys', () => {
+    const input = { cvv: '123', pin: '4321' };
+    expect(scrubPii(input)).toEqual({ cvv: '[REDACTED]', pin: '[REDACTED]' });
+  });
+
+  it('redacts secrets nested inside arrays of objects', () => {
+    const input = {
+      attempts: [
+        { apiKey: 'k1' },
+        { clientSecret: 's1' },
+      ],
+    };
+    expect(scrubPii(input)).toEqual({
+      attempts: [
+        { apiKey: '[REDACTED]' },
+        { clientSecret: '[REDACTED]' },
+      ],
+    });
+  });
+
   it('matches case-insensitively', () => {
     const input = { Password: 'x', API_KEY: 'y', 'Otp': 'z' };
     expect(scrubPii(input)).toEqual({

@@ -28,6 +28,18 @@ vi.mock('../../src/services/kedaService.js', () => ({
   default: kedaServiceMock,
 }));
 
+vi.mock('../../src/middleware/auth.js', () => ({
+  authenticate: (_req, _res, next) => next(),
+}));
+
+vi.mock('../../src/middleware/requirePolicy.js', () => ({
+  requirePolicy: () => (_req, _res, next) => next(),
+}));
+
+vi.mock('../../src/middleware/rateLimiter.js', () => ({
+  healthLimiter: (_req, _res, next) => next(),
+}));
+
 const { default: kedaRouter } = await import('../../src/routes/kedaRoutes.js');
 
 function makeApp() {

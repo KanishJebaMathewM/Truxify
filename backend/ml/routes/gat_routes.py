@@ -12,7 +12,9 @@ import os
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/gat", tags=["Graph Attention Networks"])
 
-# Initialize model
+# Initialize model. The graph builder emits exactly five node features
+# (traffic, speed, road_type, lat, lng), so the model must be built with
+# in_features=5 to match the edge/node feature matrix.
 in_features = 5
 hidden_features = 128
 out_features = 32
@@ -125,8 +127,9 @@ async def train_model(request: GraphRequest):
         data_4d = Data(x=x_4d, edge_index=data.edge_index)
 
         
-        # Generate synthetic targetstargets = torch.randn(1, data.x.shape[0], trainer.model.prediction_horizon)
-        targets = torch.randn(data.x.shape[0], trainer.model.prediction_horizon)
+        # Generate synthetic targets aligned with the model output shape
+        # (batch, num_nodes, prediction_horizon).
+        targets = torch.randn(1, data.x.shape[0], trainer.model.prediction_horizon)
         
         # Train
         results = trainer.train(data_4d, targets, epochs=50)

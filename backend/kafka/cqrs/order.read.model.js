@@ -1,6 +1,12 @@
 import { supabase } from '../../api/src/config/db.js';
 import logger from '../../api/src/middleware/logger.js';
 import eventRepository from '../repositories/event.repository.js';
+import {
+  ORDER_READ_MODEL_TABLE,
+  assertOrderReadModelRow,
+  deriveOrderStatus,
+  deriveEventTypeFromTimeline,
+} from '../../api/src/core/orders/read-model-schema.js';
 
 class OrderReadModel {
   constructor() {
@@ -30,13 +36,13 @@ class OrderReadModel {
     try {
       // Get snapshot from events
       const snapshot = await eventRepository.getSnapshot(orderId);
-      
+
       if (snapshot) {
         // Update read model in database
         await this.updateReadModel(orderId, snapshot);
         return snapshot;
       }
-      
+
       return null;
     } catch (error) {
       logger.error('Failed to build read model:', error);
@@ -46,16 +52,27 @@ class OrderReadModel {
 
   async updateReadModel(orderId, snapshot) {
     try {
+      // The snapshot's `data` / `status` / `timeline` shape maps onto the
+      // canonical orders_read_model columns (payload / status / timeline).
+      // event_type and version are derived from the timeline because the
+      // snapshot carries no explicit version. The row is validated against
+      // the canonical schema before the upsert so projection/schema drift
+      // fails loudly instead of writing nonexistent columns.
+      const timeline = Array.isArray(snapshot.timeline) ? snapshot.timeline : [];
+      const row = assertOrderReadModelRow({
+        order_id: orderId,
+        payload: snapshot.data ?? {},
+        event_type: deriveEventTypeFromTimeline(timeline),
+        version: timeline.length > 0 ? timeline.length : null,
+        status: snapshot.status ?? deriveOrderStatus(snapshot.data),
+        timeline,
+        updated_at: new Date().toISOString(),
+      });
+
       // Upsert read model
       const { data, error } = await supabase
-        .from('order_read_models')
-        .upsert([{
-          order_id: orderId,
-          status: snapshot.status,
-          data: snapshot.data,
-          timeline: snapshot.timeline,
-          updated_at: new Date().toISOString(),
-        }], {
+        .from(ORDER_READ_MODEL_TABLE)
+        .upsert([row], {
           onConflict: 'order_id',
           ignoreDuplicates: false,
         })
@@ -63,13 +80,13 @@ class OrderReadModel {
         .single();
 
       if (error) throw error;
-      
+
       // Update cache
       this.cache.set(orderId, {
         data: data,
         timestamp: Date.now(),
       });
-      
+
       return data;
     } catch (error) {
       logger.error('Failed to update read model:', error);
@@ -87,11 +104,11 @@ class OrderReadModel {
         this.cache.delete(orderId);
       }
     }
-    
+
     try {
       // Get from database
       const { data, error } = await supabase
-        .from('order_read_models')
+        .from(ORDER_READ_MODEL_TABLE)
         .select('*')
         .eq('order_id', orderId)
         .single();
@@ -100,13 +117,13 @@ class OrderReadModel {
         // If not found, build from events
         return await this.buildReadModel(orderId);
       }
-      
+
       // Cache it
       this.cache.set(orderId, {
         data: data,
         timestamp: Date.now(),
       });
-      
+
       return data;
     } catch (error) {
       logger.error('Failed to get read model:', error);
@@ -117,18 +134,18 @@ class OrderReadModel {
   async getAllOrdersReadModel(filters = {}) {
     try {
       let query = supabase
-        .from('order_read_models')
+        .from(ORDER_READ_MODEL_TABLE)
         .select('*');
-      
+
       // Apply filters
       if (filters.status) {
         query = query.eq('status', filters.status);
       }
       if (filters.customerId) {
-        query = query.eq('data->customer_id', filters.customerId);
+        query = query.eq('payload->customer_id', filters.customerId);
       }
       if (filters.driverId) {
-        query = query.eq('data->driver_id', filters.driverId);
+        query = query.eq('payload->driver_id', filters.driverId);
       }
       if (filters.fromDate) {
         query = query.gte('updated_at', filters.fromDate);
@@ -136,9 +153,9 @@ class OrderReadModel {
       if (filters.toDate) {
         query = query.lte('updated_at', filters.toDate);
       }
-      
+
       query = query.order('updated_at', { ascending: false });
-      
+
       const limit = this.parsePaginationValue(filters.limit, {
         field: 'limit',
         min: 1,
@@ -156,7 +173,7 @@ class OrderReadModel {
       if (offset !== null) {
         query = query.offset(offset);
       }
-      
+
       const { data, error } = await query;
       if (error) throw error;
       return data;
@@ -175,7 +192,7 @@ class OrderReadModel {
 
     for (const status of statuses) {
       const { count, error } = await supabase
-        .from('order_read_models')
+        .from(ORDER_READ_MODEL_TABLE)
         .select('*', { count: 'exact', head: true })
         .eq('status', status);
 

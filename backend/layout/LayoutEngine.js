@@ -76,6 +76,11 @@ class LayoutEngine {
 
                 const startTime = Date.now();
 
+                // Snapshot the count before the loop: removeDirtyNode() empties
+                // the set as each node is processed, so reading dirtyNodes.size
+                // after the loop always reports 0.
+                const processedCount = this.dirtyNodes.size;
+
                 // Process all dirty nodes
                 for (const nodeId of this.dirtyNodes) {
                     const node = this.root ? this.root.findNodeById(nodeId) : null;
@@ -94,7 +99,7 @@ class LayoutEngine {
                 this.metrics.averageLayoutTime =
                     (this.metrics.averageLayoutTime * (count - 1) + duration) / count;
 
-                logger.info(`[LayoutEngine] Layout completed in ${duration}ms, processed ${this.dirtyNodes.size} dirty nodes`);
+                logger.info(`[LayoutEngine] Layout completed in ${duration}ms, processed ${processedCount} dirty nodes`);
             } catch (err) {
                 logger.error('[LayoutEngine] Layout scheduling error:', err.message);
             } finally {

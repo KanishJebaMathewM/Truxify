@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 import numpy as np
 
-from services.traffic_pipeline import TrafficPipeline
+from services.traffic_pipeline import TrafficPipeline, eta_seconds_from_speed
 from app.execution import run_inference
 
 logger = logging.getLogger(__name__)
@@ -103,18 +103,35 @@ async def predict_eta(request: ETARequest, _auth=Depends(verify_api_key)):
 
             # TensorFlow LSTM inference is CPU-bound; run off the event loop so
             # an ETA request cannot stall other endpoints or /health.
-            eta_seconds = await run_inference(traffic_pipeline.predict_eta, features)
+            # The LSTM is trained on traffic_speed (m/s) (see train_model), so
+            # its raw output is a predicted speed, not a duration. Keep the
+            # dimension explicit and convert it to seconds below.
+            predicted_speed_mps = await run_inference(traffic_pipeline.predict_eta, features)
 
-            if eta_seconds:
-                return ETAResponse(
-                    order_id=request.order_id,
-                    eta_seconds=eta_seconds,
-                    eta_minutes=eta_seconds / 60,
-                    eta_string=str(timedelta(seconds=int(eta_seconds))),
-                    traffic_speed=traffic_data.traffic_speed,
-                    congestion_level=traffic_data.congestion_level,
-                    timestamp=utc_now.isoformat()
+            if predicted_speed_mps:
+                # Fetch the actual route distance (metres) from the routing
+                # engine, then convert predicted speed -> travel time.
+                osrm_data = await traffic_pipeline._fetch_osrm_data(
+                    {'lat': request.source_lat, 'lng': request.source_lng},
+                    {'lat': request.dest_lat, 'lng': request.dest_lng}
                 )
+                route_distance_m = float(osrm_data.get('distance') or 0)
+                eta_seconds = eta_seconds_from_speed(route_distance_m, predicted_speed_mps)
+                if eta_seconds is None:
+                    # No route distance available; fall back to the routing
+                    # engine's own duration estimate.
+                    eta_seconds = float(osrm_data.get('duration') or 0)
+
+                if eta_seconds > 0:
+                    return ETAResponse(
+                        order_id=request.order_id,
+                        eta_seconds=eta_seconds,
+                        eta_minutes=eta_seconds / 60,
+                        eta_string=str(timedelta(seconds=int(eta_seconds))),
+                        traffic_speed=traffic_data.traffic_speed,
+                        congestion_level=traffic_data.congestion_level,
+                        timestamp=utc_now.isoformat()
+                    )
 
         raise HTTPException(status_code=500, detail="ETA prediction failed")
 

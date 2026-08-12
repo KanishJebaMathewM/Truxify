@@ -46,6 +46,16 @@ describe('reverseGeocode', () => {
     expect(result).toBeNull();
   });
 
+  it('returns null for out-of-bounds lat (< -90 or > 90)', async () => {
+    expect(await reverseGeocode(95.0, 72.5)).toBeNull();
+    expect(await reverseGeocode(-95.0, 72.5)).toBeNull();
+  });
+
+  it('returns null for out-of-bounds lon (< -180 or > 180)', async () => {
+    expect(await reverseGeocode(23.0, 185.0)).toBeNull();
+    expect(await reverseGeocode(23.0, -185.0)).toBeNull();
+  });
+
   it('returns cached value from Redis when available', async () => {
     mockRedisGet.mockResolvedValue('MG Road, Mumbai');
     const result = await reverseGeocode(19.076, 72.8777);

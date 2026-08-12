@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+import { getMevRelayer } from './flashbots_relayer.js';
 
 /**
  * Derives the exact 32-byte preimage that is revealed on-chain.
@@ -310,6 +311,52 @@ class MEVService {
             totalBundles: bundles?.length || 0,
             timestamp: new Date().toISOString()
         };
+    }
+
+    /**
+     * Submits a Flashbots bundle for an escrow.
+     * Assembles signed transactions targeting the escrow contract and sends
+     * them via the Flashbots relayer for front-running protection.
+     *
+     * @param {string} escrowId - The deposit ID on the escrow contract
+     * @param {string[]} transactions - Array of signed raw transaction hex strings
+     * @returns {Promise<{success: boolean, bundleHash?: string, targetBlock?: number}>}
+     */
+    async submitFlashbotsBundle(escrowId, transactions) {
+        try {
+            if (!Array.isArray(transactions) || transactions.length === 0) {
+                throw new Error('transactions must be a non-empty array of signed transaction hex strings');
+            }
+
+            const relayer = getMevRelayer();
+            const targetBlock = (await this.provider.getBlockNumber()) + 2;
+
+            const bundle = await relayer.assemblePrivateBundle(
+                this.escrowAddress,
+                this.escrowABI,
+                'releaseDepositPrivate',
+                [escrowId, '0x' + '00'.repeat(32)],
+                targetBlock
+            );
+
+            const result = await relayer.sendPrivateBundle(bundle);
+
+            logger.info({
+                event: 'FLASHBOTS_BUNDLE_SUBMITTED',
+                escrowId,
+                bundleHash: result.bundleHash,
+                targetBlock: result.targetBlock
+            }, 'Flashbots bundle submitted successfully');
+
+            return {
+                success: true,
+                bundleHash: result.bundleHash,
+                targetBlock: result.targetBlock
+            };
+        } catch (err) {
+            logger.error({ event: 'FLASHBOTS_BUNDLE_ERROR', escrowId, error: err.message }, 'Failed to submit Flashbots bundle');
+            throw err;
+        }
     }
 }
 

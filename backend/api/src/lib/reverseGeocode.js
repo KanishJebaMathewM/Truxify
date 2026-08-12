@@ -18,9 +18,14 @@ function getTimeoutMs() {
  * @returns {Promise<string|null>} Formatted location string or null if failed
  */
 export async function reverseGeocode(lat, lon) {
-  if (lat == null || lon == null || Number.isNaN(Number(lat)) || Number.isNaN(Number(lon))) return null;
+  if (lat == null || lon == null) return null;
   const numLat = Number(lat);
   const numLon = Number(lon);
+  // Reject NaN/Infinity and hex-like strings ('0x10' -> 16) that Number()
+  // would otherwise coerce into a bogus coordinate.
+  if (!Number.isFinite(numLat) || !Number.isFinite(numLon)) return null;
+  if (typeof lat === 'string' && !/^-?\d*\.?\d+$/.test(lat.trim())) return null;
+  if (typeof lon === 'string' && !/^-?\d*\.?\d+$/.test(lon.trim())) return null;
   if (numLat < -90 || numLat > 90 || numLon < -180 || numLon > 180) return null;
 
   // Round coordinates to ~100m precision (3 decimal places) to maximize cache hits

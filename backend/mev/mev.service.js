@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import axios from 'axios';
 import logger from '../api/src/middleware/logger.js';
 import { supabase } from '../api/src/config/db.js';
+import { getMevRelayer } from './flashbots_relayer.js';
 
 /**
  * Derives the exact 32-byte preimage that is revealed on-chain.
@@ -181,6 +182,44 @@ class MEVService {
             logger.error('Escrow release failed:', error);
             throw error;
         }
+    }
+
+    /**
+     * Releases an escrow deposit via a Flashbots private bundle.
+     * Submits the releaseDepositPrivate transaction privately so it cannot
+     * be front-run by MEV bots.
+     *
+     * @param {string|number} escrowId - The deposit ID
+     * @param {string} preimage - The 32-byte preimage that unlocks the deposit
+     * @returns {Promise<{success: boolean, txHash: string, bundleHash?: string, targetBlock?: number}>}
+     */
+    async releaseEscrowPrivate(escrowId, preimage) {
+        const relayer = getMevRelayer();
+        const targetBlock = (await this.provider.getBlockNumber()) + 2;
+
+        const bundle = await relayer.assemblePrivateBundle(
+            this.escrowAddress,
+            this.escrowABI,
+            'releaseDepositPrivate',
+            [escrowId, preimage],
+            targetBlock
+        );
+
+        const result = await relayer.sendPrivateBundle(bundle);
+
+        logger.info({
+            event: 'ESCROW_RELEASED_PRIVATE',
+            escrowId,
+            bundleHash: result.bundleHash,
+            targetBlock: result.targetBlock
+        }, 'Escrow released via Flashbots private bundle');
+
+        return {
+            success: true,
+            txHash: result.bundleHash,
+            bundleHash: result.bundleHash,
+            targetBlock: result.targetBlock
+        };
     }
 
     async signTransactions(transactions) {

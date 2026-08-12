@@ -1935,12 +1935,19 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
       vi.resetModules();
     });
 
-    it('uses cached order mapping on cache hit, skipping DB query', async () => {
+    it('uses cached order mapping on cache hit after re-verifying it in DB', async () => {
       const redisGet = vi.fn().mockResolvedValue(
         JSON.stringify({ orderId: 'uuid-123', orderDisplayId: 'ORDER-789' })
       );
       const redisSet = vi.fn().mockResolvedValue('OK');
-      const supabaseFrom = vi.fn();
+      const repoFrom = vi.fn().mockReturnValue({
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({
+          data: { id: 'uuid-123', order_display_id: 'ORDER-789', driver_id: 'driver-cached', status: 'in_transit' },
+          error: null,
+        }),
+      });
       const mockChannel = { subscribe: vi.fn(), send: vi.fn().mockResolvedValue(undefined) };
 
       vi.doMock('../../src/config/db.js', () => ({
@@ -1948,21 +1955,12 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         redisClient: { get: redisGet, set: redisSet, del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
         firebaseAdmin: null,
         supabaseAdmin: null,
-        supabase: { from: supabaseFrom, channel: vi.fn().mockReturnValue(mockChannel) },
+        supabase: { from: vi.fn(), channel: vi.fn().mockReturnValue(mockChannel) },
       }));
 
       const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
       const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
-      t.setOrderRepository(new OR({
-        from: vi.fn().mockReturnValue({
-          select: vi.fn().mockReturnThis(),
-          eq: vi.fn().mockReturnThis(),
-          maybeSingle: vi.fn().mockResolvedValue({
-            data: { id: 'uuid-123', order_display_id: 'ORDER-789', driver_id: 'driver-cached' },
-            error: null,
-          }),
-        }),
-      }));
+      t.setOrderRepository(new OR({ from: repoFrom }));
 
       const ws = { driverId: 'driver-cached', user: { id: 'driver-cached', role: 'driver' }, send: vi.fn() };
 
@@ -1975,6 +1973,8 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
 
       // Cache was checked
       expect(redisGet).toHaveBeenCalledWith('driver:active-order:driver-cached');
+      // Cached mapping was re-verified against the DB (issue #10676)
+      expect(repoFrom).toHaveBeenCalled();
       // No error sent
       expect(ws.send).not.toHaveBeenCalled();
     });
@@ -2118,16 +2118,29 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         JSON.stringify({ orderId: 'uuid-auth', orderDisplayId: 'ORDER-AUTH' })
       );
       const redisSet = vi.fn().mockResolvedValue('OK');
+      const redisDel = vi.fn().mockResolvedValue(1);
 
       vi.doMock('../../src/config/db.js', () => ({
         mongoDb: null,
-        redisClient: { get: redisGet, set: redisSet, del: vi.fn(), publish: vi.fn().mockResolvedValue(0) },
+        redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
         firebaseAdmin: null,
         supabaseAdmin: null,
         supabase: null,
       }));
 
-      const { handleLocationPing: hlp } = await import('../../src/sockets/tracker.js');
+      const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      t.setOrderRepository(new OR({
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: 'uuid-auth', order_display_id: 'ORDER-AUTH', driver_id: 'driver-owner', status: 'in_transit' },
+            error: null,
+          }),
+        }),
+      }));
+
       const ws = { driverId: 'driver-unauth', user: { id: 'driver-unauth', role: 'driver' }, send: vi.fn() };
 
       await hlp(ws, {
@@ -2137,10 +2150,140 @@ describe('handleLocationPing - broadcast to order subscribers', () => {
         longitude: 77.5,
       });
 
-      // Cache hit uses the cached values directly — no driver_id check on cache hit.
-      // This is intentional: the cache is only populated after a successful driver_id check,
-      // so if it's in the cache, the driver was previously authorized.
-      // Verify no error sent
+      // The cached mapping was re-verified and failed the driver_id check,
+      // so the ping is rejected and the stale cache entry is dropped
+      // (issue #10676).
+      expect(ws.send).toHaveBeenCalled();
+      expect(ws.send.mock.calls[0][0]).toContain('Not authorized');
+      expect(redisDel).toHaveBeenCalledWith('driver:active-order:driver-unauth');
+    });
+
+    it('invalidates a cached mapping whose order is terminal (delivered)', async () => {
+      const redisGet = vi.fn().mockResolvedValue(
+        JSON.stringify({ orderId: 'uuid-done', orderDisplayId: 'ORDER-DONE' })
+      );
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const redisDel = vi.fn().mockResolvedValue(1);
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
+        firebaseAdmin: null,
+        supabaseAdmin: null,
+        supabase: null,
+      }));
+
+      const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      t.setOrderRepository(new OR({
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: 'uuid-done', order_display_id: 'ORDER-DONE', driver_id: 'driver-terminal', status: 'payment_released' },
+            error: null,
+          }),
+        }),
+      }));
+
+      const ws = { driverId: 'driver-terminal', user: { id: 'driver-terminal', role: 'driver' }, send: vi.fn() };
+
+      await hlp(ws, {
+        driver_id: 'driver-terminal',
+        order_id: 'uuid-done',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      // Stale terminal mapping dropped and never trusted as the active order
+      // (issue #10676).
+      expect(redisDel).toHaveBeenCalledWith('driver:active-order:driver-terminal');
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it('invalidates a cached mapping whose order no longer exists', async () => {
+      const redisGet = vi.fn().mockResolvedValue(
+        JSON.stringify({ orderId: 'uuid-gone', orderDisplayId: 'ORDER-GONE' })
+      );
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const redisDel = vi.fn().mockResolvedValue(1);
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
+        firebaseAdmin: null,
+        supabaseAdmin: null,
+        supabase: null,
+      }));
+
+      const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      t.setOrderRepository(new OR({
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        }),
+      }));
+
+      const ws = { driverId: 'driver-gone', user: { id: 'driver-gone', role: 'driver' }, send: vi.fn() };
+
+      await hlp(ws, {
+        driver_id: 'driver-gone',
+        order_id: 'uuid-gone',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      // Stale mapping dropped (issue #10676).
+      expect(redisDel).toHaveBeenCalledWith('driver:active-order:driver-gone');
+      expect(ws.send).not.toHaveBeenCalled();
+    });
+
+    it('does not re-cache a freshly resolved terminal order', async () => {
+      const redisGet = vi.fn().mockResolvedValue(null);
+      const redisSet = vi.fn().mockResolvedValue('OK');
+      const redisDel = vi.fn().mockResolvedValue(1);
+
+      vi.doMock('../../src/config/db.js', () => ({
+        mongoDb: null,
+        redisClient: { get: redisGet, set: redisSet, del: redisDel, publish: vi.fn().mockResolvedValue(0) },
+        firebaseAdmin: null,
+        supabaseAdmin: null,
+        supabase: null,
+      }));
+
+      const { OrderRepository: OR } = await import('../../src/repositories/orderRepository.js');
+      const { handleLocationPing: hlp, __testing: t } = await import('../../src/sockets/tracker.js');
+      t.setOrderRepository(new OR({
+        from: vi.fn().mockReturnValue({
+          select: vi.fn().mockReturnThis(),
+          eq: vi.fn().mockReturnThis(),
+          maybeSingle: vi.fn().mockResolvedValue({
+            data: { id: 'uuid-fresh', order_display_id: 'ORDER-FRESH', driver_id: 'driver-fresh', status: 'cancelled' },
+            error: null,
+          }),
+        }),
+      }));
+
+      const ws = { driverId: 'driver-fresh', user: { id: 'driver-fresh', role: 'driver' }, send: vi.fn() };
+
+      await hlp(ws, {
+        driver_id: 'driver-fresh',
+        order_display_id: 'ORDER-FRESH',
+        latitude: 12.9,
+        longitude: 77.5,
+      });
+
+      // No fresh cache entry is written for a finished order; any pre-existing
+      // entry is dropped instead (issue #10676).
+      expect(redisSet).not.toHaveBeenCalledWith(
+        'driver:active-order:driver-fresh',
+        expect.any(String),
+        'EX',
+        expect.any(Number),
+      );
+      expect(redisDel).toHaveBeenCalledWith('driver:active-order:driver-fresh');
       expect(ws.send).not.toHaveBeenCalled();
     });
   });

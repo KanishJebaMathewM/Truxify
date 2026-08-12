@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeUploadFilename } from '../../../src/lib/uploadFilename.js';
+import { sanitizeUploadFilename } from '../../src/lib/uploadFilename.js';
 
 describe('sanitizeUploadFilename', () => {
   it('returns original name when safe', () => {
@@ -7,11 +7,13 @@ describe('sanitizeUploadFilename', () => {
   });
 
   it('strips directory traversal sequences', () => {
-    expect(sanitizeUploadFilename('../../../etc/passwd', 'default')).toBe('etc.passwd');
+    // Only the basename survives directory stripping; traversal segments are
+    // removed entirely.
+    expect(sanitizeUploadFilename('../../../etc/passwd', 'default')).toBe('passwd');
   });
 
   it('strips backslash traversal on POSIX', () => {
-    expect(sanitizeUploadFilename('..\\..\\etc\\passwd', 'default')).toBe('etc.passwd');
+    expect(sanitizeUploadFilename('..\\..\\etc\\passwd', 'default')).toBe('passwd');
   });
 
   it('strips control characters', () => {
@@ -23,6 +25,16 @@ describe('sanitizeUploadFilename', () => {
     const result = sanitizeUploadFilename(longName, 'default');
     expect(result.length).toBeLessThanOrEqual(120);
     expect(result.endsWith('.pdf')).toBe(true);
+  });
+
+  it('re-normalizes a truncated filename that ends in dots', () => {
+    // The truncated extension slice can reintroduce a run of dots; the
+    // result must not contain a traversal segment or a leading dot.
+    const result = sanitizeUploadFilename('a'.repeat(140) + '....', 'default');
+    expect(result).not.toContain('..');
+    expect(result).not.toMatch(/^\./);
+    expect(result.length).toBeLessThanOrEqual(120);
+    expect(result.length).toBeGreaterThan(0);
   });
 
   it('returns fallback for empty string', () => {

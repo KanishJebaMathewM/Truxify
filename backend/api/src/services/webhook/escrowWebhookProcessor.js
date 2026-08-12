@@ -76,6 +76,23 @@ async function reconcileWalletLedger(order, txHash) {
   }
 }
 
+// Idempotent duplicate-delivery path: the order-level escrow_status effect
+// already happened on the first delivery, so a missing/errored wallet-ledger
+// reconcile must not throw here — otherwise the DLQ redelivers forever,
+// re-entering this same branch and failing identically each time (permanent
+// poison message). Log and swallow so the webhook can be acknowledged; a later
+// redelivery retries the (idempotent) reconcile again.
+async function tryReconcileWalletLedger(order, txHash) {
+  try {
+    await reconcileWalletLedger(order, txHash);
+  } catch (err) {
+    logger.warn(
+      { err: err.message, orderDisplayId: order.order_display_id, driverId: order.driver_id },
+      '[Webhook] Duplicate delivery: wallet ledger reconcile failed (best-effort) — order-level effect already applied, acknowledging delivery.'
+    );
+  }
+}
+
 async function getPolygonProvider() {
   const rpcUrl = process.env.POLYGON_RPC_URL;
   if (!rpcUrl) {
@@ -126,7 +143,7 @@ async function handlePaymentReleased(payload) {
   // the (idempotent) wallet ledger so a crash between the order update and the
   // wallet update is healed, then short-circuit without re-applying effects.
   if (order.escrow_status === 'released') {
-    await reconcileWalletLedger(order, payload.txHash || order.release_tx_hash);
+    await tryReconcileWalletLedger(order, payload.txHash || order.release_tx_hash);
     logger.info(`[Webhook] Order ${order.order_display_id} already released — duplicate delivery ignored.`);
     return;
   }
@@ -218,7 +235,7 @@ async function handleWithdrawalSettled(payload) {
       }
     }
     if (!isRefund) {
-      await reconcileWalletLedger(order, txHash);
+      await tryReconcileWalletLedger(order, txHash);
     }
     logger.info(`[Webhook] Order ${order.order_display_id} already ${targetStatus} — duplicate delivery ignored.`);
     return;

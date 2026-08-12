@@ -31,6 +31,9 @@ function base58btc(input) {
 
 class DIDService {
     constructor() {
+        if (!process.env.DID_PROOF_SECRET) {
+            throw new Error('DID_PROOF_SECRET environment variable is required and must not be empty');
+        }
         this.provider = new ethers.JsonRpcProvider(process.env.POLYGON_RPC_URL);
         this.wallet = new ethers.Wallet(process.env.PRIVATE_KEY, this.provider);
         this.didRegistryAddress = process.env.DID_REGISTRY_ADDRESS;
@@ -133,8 +136,9 @@ class DIDService {
 
     async issueCredential(subject, credentialType, schema, validUntil) {
         try {
+            const issuedAtMs = Date.now();
             const schemaHash = ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(schema)));
-            const proof = this.generateProof(subject, credentialType, schema);
+            const proof = this.generateProof(subject, credentialType, schema, issuedAtMs);
             const proofHash = ethers.keccak256(ethers.toUtf8Bytes(proof));
 
             const validUntilTimestamp = validUntil || Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60;
@@ -182,7 +186,7 @@ class DIDService {
                 subject,
                 credentialType,
                 schema,
-                issuedAt: new Date().toISOString(),
+                issuedAt: new Date(issuedAtMs).toISOString(),
                 validUntil: new Date(validUntilTimestamp * 1000).toISOString(),
                 txHash: receipt.hash,
                 proof
@@ -235,11 +239,13 @@ class DIDService {
         }
     }
 
-    generateProof(subject, credentialType, schema) {
-        const secret = process.env.DID_PROOF_SECRET || 'default-proof-secret';
-        const payload = JSON.stringify({ subject, credentialType, schema, timestamp: Date.now() });
-        const proof = crypto.createHmac('sha256', secret).update(payload).digest('hex');
-        return proof;
+    generateProof(subject, credentialType, schema, issuedAtMs) {
+        const secret = process.env.DID_PROOF_SECRET;
+        if (!secret) {
+            throw new Error('DID_PROOF_SECRET is not configured; refusing to generate proof');
+        }
+        const payload = JSON.stringify({ subject, credentialType, schema, timestamp: issuedAtMs });
+        return crypto.createHmac('sha256', secret).update(payload).digest('hex');
     }
 
     async getDID(did) {

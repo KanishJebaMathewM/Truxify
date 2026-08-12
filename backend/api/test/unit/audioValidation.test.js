@@ -107,6 +107,13 @@ describe('detectAudioMimeType', () => {
     // ISO box length present but truncated before "ftyp".
     expect(detectAudioMimeType(Buffer.from([0x00, 0x00, 0x00, 0x20, 0x66]))).toBeNull();
   });
+
+  it('requires two bytes for an MPEG frame sync', () => {
+    // A single 0xFF byte is not long enough for the frame-sync check.
+    expect(detectAudioMimeType(Buffer.from([0xff]))).toBeNull();
+    // 0xFF followed by a byte without the 11-bit sync pattern is not MPEG.
+    expect(detectAudioMimeType(Buffer.from([0xff, 0x10]))).toBeNull();
+  });
 });
 
 describe('validateAudioBuffer', () => {

@@ -19,6 +19,7 @@ const publicTrackingLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: safeIpKeyGenerator,
+  validate: { keyGeneratorIpFallback: false },
   store: createStore('rl:public-tracking:'),
 });
 
@@ -46,10 +47,11 @@ router.post(
       const orderDisplayId = req.params.id;
       const userId = req.user.id;
 
-      // Run the ownership pre-check and token writes through a per-request
-      // client carrying the caller's identity so RLS resolves correctly.
+      // Run reads/writes through the caller's user-scoped client. orders has no
+      // anon RLS policy (and anon privileges are revoked), so the shared anon
+      // client could never return the row and every request 404'd.
       const userClient = createUserClient(req.token);
-      const trackingTokenService = new TrackingTokenService({ supabase: userClient, logger });
+      const tokenService = new TrackingTokenService({ supabase: userClient, logger });
 
       // Verify the order exists and belongs to the requesting customer
       const { data: order, error: orderError } = await userClient
@@ -72,7 +74,7 @@ router.post(
         return res.status(400).json({ error: 'Cannot share tracking for completed or cancelled orders' });
       }
 
-      const tokenData = await trackingTokenService.createToken({
+      const tokenData = await tokenService.createToken({
         orderDisplayId,
         createdBy: userId,
       });
@@ -110,7 +112,7 @@ router.post(
       const userId = req.user.id;
 
       const userClient = createUserClient(req.token);
-      const trackingTokenService = new TrackingTokenService({ supabase: userClient, logger });
+      const tokenService = new TrackingTokenService({ supabase: userClient, logger });
 
       const { data: order, error: orderError } = await userClient
         .from('orders')
@@ -126,7 +128,7 @@ router.post(
         return res.status(403).json({ error: 'You can only revoke tracking for your own orders' });
       }
 
-      await trackingTokenService.revokeAllForOrder(orderDisplayId);
+      await tokenService.revokeAllForOrder(orderDisplayId);
 
       return res.json({ success: true, message: 'All tracking links revoked' });
     } catch (err) {

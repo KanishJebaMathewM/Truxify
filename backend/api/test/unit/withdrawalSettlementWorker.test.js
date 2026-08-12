@@ -34,8 +34,19 @@ function mockPendingWithdrawals(rows) {
     limit: vi.fn().mockResolvedValue({ data: rows, error: null }),
     update: vi.fn().mockReturnThis(),
   };
-  admin.from.mockReturnValue(query);
+  admin.from.mockReturnValueOnce(query);
   return query;
+}
+
+function mockClaimWithdrawal() {
+  const claimQuery = {
+    update: vi.fn().mockReturnThis(),
+    eq: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
+    select: vi.fn().mockResolvedValue({ data: [{ id: 'claimed' }], error: null }),
+  };
+  admin.from.mockReturnValue(claimQuery);
+  return claimQuery;
 }
 
 describe('Withdrawal Settlement Worker', () => {
@@ -64,6 +75,7 @@ describe('Withdrawal Settlement Worker', () => {
       { id: 'w1', driver_id: 'd1', amount: 1000, payout_attempted_at: null },
       { id: 'w2', driver_id: 'd2', amount: 500, payout_attempted_at: null },
     ]);
+    mockClaimWithdrawal();
     dispatchPayoutMock
       .mockResolvedValueOnce({ success: true, settlementRef: 'ref-1' })
       .mockResolvedValueOnce({ success: true, settlementRef: 'ref-2' });
@@ -84,6 +96,7 @@ describe('Withdrawal Settlement Worker', () => {
 
   it('marks a withdrawal failed and restores funds when the payout dispatch fails', async () => {
     mockPendingWithdrawals([{ id: 'w1', driver_id: 'd1', amount: 1000, payout_attempted_at: null }]);
+    mockClaimWithdrawal();
     dispatchPayoutMock.mockRejectedValue(new Error('bank rejected'));
 
     await settlePendingWithdrawals();
@@ -98,6 +111,7 @@ describe('Withdrawal Settlement Worker', () => {
   it('does not restore funds when settle fails after a successful dispatch', async () => {
     vi.useFakeTimers();
     mockPendingWithdrawals([{ id: 'w1', driver_id: 'd1', amount: 1000, payout_attempted_at: null }]);
+    mockClaimWithdrawal();
     dispatchPayoutMock.mockResolvedValue({ success: true, settlementRef: 'ref-1' });
     admin.rpc.mockImplementation((name) =>
       name === 'settle_withdrawal_tx'

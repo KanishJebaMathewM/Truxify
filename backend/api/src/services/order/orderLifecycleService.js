@@ -579,7 +579,6 @@ export class OrderLifecycleService {
         // total_amount using the same canonical paisa→wei conversion the rest
         // of the escrow pipeline uses.
         const newAmountWei = paisaToMaticWei(pricing.totalAmount);
-        const newAmountWei = BigInt(paisaToMaticWei(pricing.totalAmount));
 
         const updates = {
           drop_address,
@@ -651,7 +650,10 @@ export class OrderLifecycleService {
       if (order.customer_id !== customerId) throw new DomainError(403, { error: 'Access Denied: You do not own this order.' });
 
       const lockKey = `escrow_lock:${order.id}`;
-      const lockValue = await acquireLock(lockKey, 30000);
+      // Blockchain refund submission + confirmation can take 30-60s, so the
+      // lock TTL must cover the full cancellation window to prevent a
+      // concurrent attempt from double-processing the order (issue #11191).
+      const lockValue = await acquireLock(lockKey, 180000);
       if (!lockValue) {
         throw new DomainError(409, { error: 'Cancellation is currently being processed. Please try again later.' });
       }

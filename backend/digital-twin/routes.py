@@ -226,11 +226,22 @@ async def optimize_resources(resources: Dict):
     try:
         result = optimizer.resource_allocation(resources)
         
+        if not result.get('success'):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    'message': 'Resource allocation failed for one or more resources',
+                    'errors': result.get('errors', {})
+                }
+            )
+        
         return {
             'success': True,
             'data': result,
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Optimize resources failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))

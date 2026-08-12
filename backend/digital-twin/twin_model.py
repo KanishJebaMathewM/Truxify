@@ -354,15 +354,62 @@ class DigitalTwinOptimizer:
         }
     
     def resource_allocation(self, resources: Dict) -> Dict:
-        """Allocate resources optimally"""
+        """Allocate resources based on declared capacity and demand.
+
+        Reads the resource capacity/availability from `resource_info` and marks
+        a resource allocated only when demand fits within capacity. Efficiency
+        and utilization are derived from the declared numbers rather than
+        sampled randomly. Fails closed with a clear message for resources that
+        lack capacity data or exceed available capacity.
+        """
         allocation = {}
+        errors = {}
         
         for resource_id, resource_info in resources.items():
+            capacity = resource_info.get('capacity')
+            demand = resource_info.get('demand')
+            
+            if capacity is None:
+                errors[resource_id] = 'missing capacity'
+                allocation[resource_id] = {
+                    'allocated': False,
+                    'reason': 'No capacity information provided for resource',
+                    'timestamp': datetime.now().isoformat()
+                }
+                continue
+            
+            if capacity <= 0:
+                errors[resource_id] = 'invalid capacity'
+                allocation[resource_id] = {
+                    'allocated': False,
+                    'reason': 'Capacity must be greater than zero',
+                    'capacity': capacity,
+                    'timestamp': datetime.now().isoformat()
+                }
+                continue
+            
+            if demand is None:
+                demand = 0
+            
+            allocated = demand <= capacity
+            utilization = min(1.0, demand / capacity)
+            efficiency = demand / capacity if allocated else 0.0
+            
+            if not allocated:
+                errors[resource_id] = f'demand {demand} exceeds capacity {capacity}'
+            
             allocation[resource_id] = {
-                'allocated': True,
-                'efficiency': random.uniform(0.7, 0.95),
-                'utilization': random.uniform(0.5, 0.9),
+                'allocated': allocated,
+                'capacity': capacity,
+                'demand': demand,
+                'efficiency': round(efficiency, 4),
+                'utilization': round(utilization, 4),
                 'timestamp': datetime.now().isoformat()
             }
         
-        return allocation
+        return {
+            'success': not errors,
+            'allocations': allocation,
+            'errors': errors,
+            'timestamp': datetime.now().isoformat()
+        }

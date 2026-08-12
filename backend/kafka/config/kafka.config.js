@@ -174,7 +174,7 @@ class KafkaConfig {
         topic,
         messages: [
           {
-            key: key || event.eventId,
+            key: key || event.eventId || event.orderId,
             value: JSON.stringify({
               ...event,
               timestamp: event.timestamp || new Date().toISOString(),

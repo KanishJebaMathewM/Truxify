@@ -153,6 +153,11 @@ type RaftNode struct {
 	heartbeatInterval  time.Duration
 	nextIndex          map[string]uint64
 	matchIndex         map[string]uint64
+	// liveAck records which peers have acknowledged at least one successful
+	// AppendEntries round in the current leadership term. It is reset whenever
+	// a new leader is elected and drives the /commit admission gate so a leader
+	// never accepts new entries without evidence of a reachable quorum.
+	liveAck            map[string]bool
 	httpClient         *http.Client
 }
 
@@ -182,6 +187,7 @@ func NewRaftNode(id string, peers []string, peerURLs []string) *RaftNode {
 		electionTimeout:    time.Duration(electionMinMs) * time.Millisecond,
 		nextIndex:          make(map[string]uint64),
 		matchIndex:         make(map[string]uint64),
+		liveAck:            make(map[string]bool),
 		httpClient:         &http.Client{Timeout: 500 * time.Millisecond},
 	}
 }
@@ -266,18 +272,17 @@ func (rn *RaftNode) startElection() {
 	if votes >= rn.quorum() {
 		rn.Role = Leader
 		rn.LeaderID = rn.NodeID
-		// Per-follower replication state (Raft §5.3): the leader assumes each
-		// follower's log matches its own and works backward from the end.
+		// Per-follower replication state (Raft §5.3): the leader seeds
+		// nextIndex = lastLogIndex+1 and learns each follower's true match
+		// index from AppendEntries acknowledgements, backing off on rejection.
+		// matchIndex and liveAck are never seeded optimistically: a leader
+		// without a reachable quorum must not accept new entries.
 		rn.nextIndex = make(map[string]uint64, len(rn.PeerURLs))
 		rn.matchIndex = make(map[string]uint64, len(rn.PeerURLs))
+		rn.liveAck = make(map[string]bool, len(rn.PeerURLs))
 		for _, url := range rn.PeerURLs {
 			rn.nextIndex[url] = rn.lastLogIndex() + 1
-			// Optimistically assume each follower has replicated the leader's
-			// full log (consistent with nextIndex). This keeps the admission
-			// gate passable immediately after election when all followers are
-			// up, instead of until the first heartbeat succeeds; actual
-			// replication is still required to commit new entries.
-			rn.matchIndex[url] = rn.lastLogIndex()
+			rn.matchIndex[url] = 0
 		}
 		log.Printf("🌐 node [%s] elected leader for term %d", rn.NodeID, rn.CurrentTerm)
 	}
@@ -431,6 +436,7 @@ func (rn *RaftNode) sendHeartbeats() {
 			return
 		}
 		if res.resp.Success {
+			rn.liveAck[res.url] = true
 			// Follower accepted the prefix; monotonically record highest matching index.
 			newMatch := res.request.PrevLogIndex + uint64(len(res.request.Entries))
 			if newMatch > rn.matchIndex[res.url] {
@@ -481,16 +487,16 @@ func (rn *RaftNode) advanceCommitIndexLocked() {
 	}
 }
 
-// leaderHasQuorumLocked reports whether a majority of the cluster acknowledges
-// the current leadership, based on the durable matchIndex (the last index each
-// follower has acknowledged replicating) rather than the ephemeral per-round
-// heartbeat cache. Right after an election matchIndex is seeded optimistically,
-// so healthy clusters do not spuriously reject commits before the first
-// heartbeat completes.
-func (rn *RaftNode) leaderHasQuorumLocked() bool {
+// leaderHasLiveQuorumLocked reports whether a majority of the cluster is
+// reachable and acknowledging AppendEntries in the current term. Unlike a
+// matchIndex-based check it does not trust an optimistically-seeded matchIndex:
+// it counts only peers that have completed at least one successful AppendEntries
+// round since this node became leader, so a partitioned leader fails fast
+// instead of accepting /commit entries it cannot replicate.
+func (rn *RaftNode) leaderHasLiveQuorumLocked() bool {
 	acked := 1 // self
-	for _, m := range rn.matchIndex {
-		if m >= rn.CommitIndex {
+	for _, url := range rn.PeerURLs {
+		if rn.liveAck[url] {
 			acked++
 		}
 	}
@@ -500,7 +506,7 @@ func (rn *RaftNode) leaderHasQuorumLocked() bool {
 func (rn *RaftNode) clusterStatusLocked() string {
 	switch rn.Role {
 	case Leader:
-		if rn.leaderHasQuorumLocked() {
+		if rn.leaderHasLiveQuorumLocked() {
 			return "HEALTHY_CLUSTER"
 		}
 		return "UNHEALTHY_CLUSTER"
@@ -748,7 +754,7 @@ func (rn *RaftNode) HandleCommitOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !rn.leaderHasQuorumLocked() {
+	if !rn.leaderHasLiveQuorumLocked() {
 		rn.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)

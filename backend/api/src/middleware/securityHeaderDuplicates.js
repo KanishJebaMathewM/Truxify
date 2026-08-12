@@ -17,6 +17,11 @@ export default function securityHeaderDuplicates(req, res, next) {
   const originalSetHeader = res.setHeader.bind(res);
 
   res.setHeader = (name, value) => {
+    // A proxy layer (e.g. nginx) can pass an undefined header name; guard so
+    // the monitor never throws on a malformed assignment.
+    if (name === undefined || name === null) {
+      return originalSetHeader(name, value);
+    }
     const header = String(name).toLowerCase();
 
     if (MONITORED_HEADERS.has(header)) {

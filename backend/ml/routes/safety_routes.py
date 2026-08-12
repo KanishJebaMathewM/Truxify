@@ -170,6 +170,38 @@ async def analyze_safety(
         if sensor_data is None:
             sensor_data = {}
         
+        # Check if any modality has actual data (fail closed on zero data)
+        has_vision = bool(vision_data)
+        has_audio = bool(audio_data)
+        has_sensor = bool(sensor_data)
+        
+        if not (has_vision or has_audio or has_sensor):
+            # No data from any modality - fail closed to UNKNOWN
+            return {
+                'success': True,
+                'data': {
+                    'fusion_risk': 0.0,
+                    'vision_risk': 0.0,
+                    'audio_risk': 0.0,
+                    'sensor_risk': 0.0,
+                    'alert_level': 'UNKNOWN',
+                    'alert_message': 'No sensor data available.',
+                    'components': {
+                        'vision': {},
+                        'audio': {},
+                        'sensors': {}
+                    },
+                    'actions': [
+                        '📊 Waiting for sensor data',
+                        '📡 Check device connectivity',
+                        '📝 No safety assessment possible without data'
+                    ],
+                    'timestamp': datetime.now().isoformat(),
+                    'data_available': False
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+        
         # Fuse data
         result = sensor_fusion.fuse_data(vision_data, audio_data, sensor_data)
         

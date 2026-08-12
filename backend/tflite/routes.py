@@ -109,23 +109,30 @@ async def quantize_model(request: ConvertRequest):
     """Quantize model for edge deployment"""
     try:
         import tensorflow as tf
-        
+
         model = tf.keras.Sequential([
             tf.keras.layers.Dense(128, activation='relu', input_shape=(784,)),
             tf.keras.layers.Dense(10, activation='softmax')
         ])
-        
-        quantized_model = optimizer.quantize_weights(model, request.quantization)
-        
+
+        result = optimizer.quantize_weights(model, request.quantization, request.name)
+
+        if not result.get('success'):
+            raise HTTPException(status_code=500, detail=result.get('error', 'Quantization failed'))
+
         return {
             'success': True,
             'data': {
                 'quantization': request.quantization,
                 'model_quantized': True,
+                'model_path': result.get('model_path'),
+                'size_bytes': result.get('size_bytes'),
                 'timestamp': datetime.now().isoformat()
             },
             'timestamp': datetime.now().isoformat()
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Quantization error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

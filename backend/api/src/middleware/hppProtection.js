@@ -8,8 +8,14 @@ export default function hppProtection(req, res, next) {
       duplicateParams.push(key);
 
       // Preserve backward compatibility by consistently selecting
-      // the first value.
-      req.query[key] = value[0];
+      // the first value. A nested array (e.g. `?a=1&a=2&a=3` parsed as
+      // `[['1','2'],'3']` by some middleware) is flattened so the query
+      // value can never remain an array after this middleware runs.
+      let first = value[0];
+      while (Array.isArray(first)) {
+        first = first[0];
+      }
+      req.query[key] = first;
     }
   }
 

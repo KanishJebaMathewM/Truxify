@@ -96,4 +96,17 @@ describe('hppProtection', () => {
     expect(next).toHaveBeenCalledOnce();
     expect(logger.warn).not.toHaveBeenCalled();
   });
+
+  it('flattens a nested array query value to a single scalar', () => {
+    const req = makeReq({ page: [['2', '3'], '4'] });
+    const res = makeRes();
+    const next = vi.fn();
+    hppProtection(req, res, next);
+    expect(req.query.page).toBe('2');
+    expect(Array.isArray(req.query.page)).toBe(false);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ duplicateParams: ['page'] }),
+      'Potential HTTP Parameter Pollution detected'
+    );
+  });
 });

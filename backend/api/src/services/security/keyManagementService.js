@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import logger from '../../middleware/logger.js';
 import * as Sentry from '@sentry/node';
-import { supabase } from '../../config/db.js';
+import { supabase, supabaseAdmin } from '../../config/db.js';
 import { measureExecution } from '../../core/performanceMetrics.js';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -14,7 +14,7 @@ class KeyManagementService {
     this.encryptionKeyCache = new Map();
   }
 
-  async deriveDeviceEncryptionKey(deviceId, masterSecret, salt) {
+  async deriveDeviceEncryptionKey(deviceId, masterSecret, salt = null) {
     return measureExecution('KeyManagementService.deriveDeviceEncryptionKey', async () => {
       const saltHex = salt || '';
       const secretHash = crypto.createHash('sha256').update(masterSecret).digest('hex');
@@ -24,12 +24,15 @@ class KeyManagementService {
         return this.encryptionKeyCache.get(cacheKey);
       }
 
+      const saltBuffer = salt
+        ? Buffer.from(salt, 'hex')
+        : Buffer.from('truxify-wallet-key-derivation');
       const derivedKey = crypto.pbkdf2Sync(
         Buffer.concat([
           Buffer.from(deviceId),
           Buffer.from(masterSecret),
         ]),
-        Buffer.from(saltHex || 'truxify-wallet-key-derivation'),
+        saltBuffer,
         100000,
         32,
         'sha256'
@@ -109,7 +112,7 @@ class KeyManagementService {
         // Deactivate any previously active row for this user/wallet scope so
         // exactly one active row exists and retrieveEncryptedKey's
         // .eq('active', true).single() never 406s on multiple rows.
-        const { error: deactivateError } = await supabase
+        const { error: deactivateError } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .update({ active: false })
           .eq('user_id', userId)
@@ -124,7 +127,7 @@ class KeyManagementService {
         const keyId = crypto.randomUUID();
 
         // Deactivate any previously active key for this user+wallet
-        await supabase
+        await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .update({
             active: false,
@@ -135,7 +138,7 @@ class KeyManagementService {
           .eq('wallet_address', walletAddress)
           .eq('active', true);
 
-        const { data, error } = await supabase
+        const { data, error } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .insert([{
             key_id: keyId,
@@ -167,7 +170,7 @@ class KeyManagementService {
   async retrieveEncryptedKey(userId, walletAddress) {
     return measureExecution('KeyManagementService.retrieveEncryptedKey', async () => {
       try {
-        const { data: keys, error } = await supabase
+        const { data: keys, error } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .select('*')
           .eq('user_id', userId)
@@ -182,7 +185,7 @@ class KeyManagementService {
           return null;
         }
 
-        await supabase
+        await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .update({ last_used_at: new Date().toISOString() })
           .eq('key_id', keys.key_id);
@@ -199,7 +202,7 @@ class KeyManagementService {
   async archiveKey(keyId, reason = 'unknown') {
     return measureExecution('KeyManagementService.archiveKey', async () => {
       try {
-        const { error } = await supabase
+        const { error } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .update({
             active: false,
@@ -226,7 +229,7 @@ class KeyManagementService {
   async getKeyRotationHistory(userId, walletAddress, limit = 10) {
     return measureExecution('KeyManagementService.getKeyRotationHistory', async () => {
       try {
-        const { data: history, error } = await supabase
+        const { data: history, error } = await (supabaseAdmin || supabase)
           .from('encrypted_wallet_keys')
           .select('*')
           .eq('user_id', userId)
